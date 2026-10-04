@@ -504,8 +504,73 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 | `cpu_period` | int (microseconds) | `0` (no limit) | CPU CFS period |
 | `cpu_quota` | int (microseconds) | `0` (no limit) | CPU CFS quota |
 | `blkio_weight` | int | `0` (no limit) | Block I/O weight |
+| `benchmark` | object (`{primitive: int}`) | omitted (no requirement) | Minimum **per-core** benchmark scores, see below |
 
 > A value of `0` means **no limit** for that resource.
+
+##### `benchmark`
+
+`cpu_quota`/`cpu_period` say how many cores a service needs, not how fast one has to be: the
+same admitted core is native silicon on one node and software emulation on another.
+`benchmark` states the second half, as an object from a named primitive to the least the
+service needs of it **on one core, per second**. It composes with the quota rather than
+competing with it — "2 cores, each at least 500k integer ops/s" is
+`cpu_quota / cpu_period = 2.0` plus `"int_ops_per_sec": 500000`, never a total across cores.
+
+| Key | Unit (per core, per second) | What it stands for |
+|-----|-----------------------------|--------------------|
+| `int_ops_per_sec` | operations | Integer / branch-heavy throughput |
+| `flt_ops_per_sec` | operations | Floating-point throughput |
+| `mem_bandwidth_64mib_bytes_per_sec` | bytes | Memory bandwidth over a 64 MiB working set |
+| `mem_bandwidth_256mib_bytes_per_sec` | bytes | Memory bandwidth over a 256 MiB working set |
+| `mem_bandwidth_1gib_bytes_per_sec` | bytes | Memory bandwidth over a 1 GiB working set |
+| `sha256_hashes_per_sec` | digests | SHA-256 hashing |
+
+- **Only under `at_init`.** `benchmark` is a minimum, and a minimum is what `at_init`
+  states; that is the half admission enforces. Under `at_most` it would mean nothing, so the
+  packer refuses it — and refuses the field's old name, `min_benchmark`, and the old
+  memory-bandwidth keys `mem_bandwidth_bytes_per_sec` and `mem_bandwidth_working_set_bytes`,
+  naming the new ones.
+- The key set is `BENCHMARK_KEYS` in `src/utils/benchmark.py`. It is keyed so that a
+  new primitive is a new key, never a change to the wire format. On the wire it is a
+  list of key/value entries sorted by key (see [`protos/README.md`](../protos/README.md)).
+- An **omitted key is no requirement** on that primitive; an omitted `benchmark` is no
+  requirement at all, and a service that never mentions it packs to the same bytes as before.
+- Values must be **non-negative integers** (JSON numbers, not strings or booleans, at most
+  2^64-1). Anything else is a packing error, raised before the image is built.
+- A key outside the table is **kept as written**, with a line in the log, never refused: a
+  node may know a primitive the packer does not.
+- **Memory bandwidth is only comparable over the same amount of memory** — 5 KiB lives in
+  cache, 2 GiB does not. So the working set is part of the key: a requirement is held
+  against the node's score under the same key, i.e. over the same amount of memory. The
+  keys above are the sizes a node measures, but a service may require **any** size as
+  `mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec` (say `mem_bandwidth_300mib_bytes_per_sec`):
+  a larger working set can only lower a bandwidth, so it is held against the node's score
+  over the **smallest larger working set it measured**. With none that large it is only
+  logged, not enforced.
+
+**Enforced per architecture.** A node holds the requirement against its own measured
+scores for the service's architecture (`benchmark.BY_ARCH` in its `config.yaml`, see
+[CONFIG.md](CONFIG.md#benchmark--this-nodes-per-core-scores)) and refuses the service, with
+the reason, when a measured score is lower. A primitive the node has not measured (`-1`) is
+logged and not enforced. A node also announces its scores to its peers (`Peer.resources`),
+so a peer never asks it to run a service it could not admit. The requirement is carried
+intact to every peer the service is delegated to.
+
+```json
+{
+    "resources": {
+        "at_init": {
+            "cpu_period": 100000,
+            "cpu_quota": 200000,
+            "benchmark": {
+                "int_ops_per_sec": 500000,
+                "mem_bandwidth_1gib_bytes_per_sec": 5000000000
+            }
+        }
+    }
+}
+```
 
 **Example — Constrained service:**
 ```json
@@ -666,7 +731,7 @@ node would refuse.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `count` | int | `1` | Number of concurrent descendant instances in this group |
-| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit) |
+| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit — plus an optional [`benchmark`](#benchmark)) |
 | `dependency` | object or `null` | omitted | Optional identity, embedded specification, and availability information for the descendant service |
 
 ##### `workloads[].dependency`
@@ -693,7 +758,9 @@ service is refused if any group has nowhere that could take it. Every limit the 
 is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
 `cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
 time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
-10–1000 range cgroups accept.
+10–1000 range cgroups accept. A group's `benchmark` is checked too, as the minimum it is:
+against the scores of whichever node is asked, for the group's architecture — the embedded
+dependency service's, or the node's native one for a resource-only group.
 
 This is an existence check, not a capacity reservation: it does not prove `count` concurrent
 instances of a group could all run at once, locally or spread across peers, and it does not

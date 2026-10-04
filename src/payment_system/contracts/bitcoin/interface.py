@@ -42,6 +42,7 @@ from time import sleep
 from typing import Optional, Tuple
 
 from protos import celaut_pb2
+from src.utils.ledger_descriptors import bitcoin_payment_ledger as _bitcoin_ledger
 from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
 from src.payment_system.contracts.bitcoin import backend as core_backend
@@ -71,18 +72,9 @@ CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 LEDGER = "bitcoin"
 NATIVE_ASSET = "BTC"
 
-# The TAG is this ledger's identity: it is what a `contract_instance` row is keyed by,
-# what `MethodKey` carries and what the check in `payment_process_validator` compares.
-# `PROSE` and `FORMAL` are description -- they travel to peers in the advertised
-# `Contract.Ledger` and nothing on this side reads them back, which is exactly why they
-# must not be part of how a ledger is identified.
-PROSE = (
-    "Bitcoin: PoW blockchain with a UTXO model, script-based spending conditions, "
-    "a fixed supply schedule, and settlement finality measured in confirmations."
-)
-# No formal specification is published for the chain itself, so this is empty rather
-# than a placeholder that would claim one exists.
-FORMAL = b""
+# The ledger tag: what a `contract_instance` row is keyed by and what `MethodKey`
+# carries. The full declaration peers receive is `ledger()`
+# (src/utils/ledger_descriptors.py).
 
 # The proof of an incoming payment is a *confirmed transaction*, not an unspent output,
 # so nothing here breaks if the receiving outputs are spent. That is what keeps this
@@ -162,12 +154,12 @@ RECEIVE_ADDRESS_CACHE_FILE = "bitcoind_receive_address"
 ADDRESS_CACHE_REWRITE_EVERY = 20
 _address_reads = 0
 _address_on_disk: Optional[str] = None
-# How this node reaches Bitcoin. `core` is a bitcoind you trust with your wallet: it
-# signs, so it can pay as well as be paid. `explorer` is any public HTTP API: it holds no
-# key, so the node can only be *paid* -- which is the side that matters to a node
-# earning money, and it needs no infrastructure at all. `service` is a bitcoind the node
-# runs itself as a core service, with the wallet derived from a mnemonic it holds: it
-# signs like `core` and needs no infrastructure like `explorer`. See docs/BITCOIN.md.
+# How this node reaches Bitcoin. `explorer` is any public HTTP API, with the key derived
+# from the mnemonic in config.yaml and every transaction signed here: Ergo's posture, and
+# it needs no infrastructure at all. `core` is a bitcoind you trust with your wallet,
+# which signs. `service` is a bitcoind the node runs itself as a core service, with the
+# wallet derived from the same mnemonic. All three can pay as well as be paid. See
+# docs/BITCOIN.md.
 BACKENDS = {
     "core": core_backend,
     "explorer": explorer_backend,
@@ -196,19 +188,12 @@ def backend():
     return _backend_module().backend()
 
 
-def _signs() -> bool:
-    """Whether this node's Bitcoin backend holds a key, from config alone.
-
-    Distinct from `can_pay`, which builds the backend and so answers False for a
-    signing backend that is merely unreachable. This one has to be decided without a
-    socket, because it decides *which address this node is paid at* -- and that must
-    not change because bitcoind happened to be down.
-    """
-    return bool(getattr(_backend_module(), "CAN_SIGN", True))
-
-
 def _address_cache_path() -> Optional[str]:
-    """``CACHE/bitcoind_receive_address``, or None where no cache is configured."""
+    """``CACHE/bitcoind_receive_address``, or None where no cache is configured.
+
+    Named for the backend that needs it most: a derived address (`explorer`) is the same
+    on every call, while one a bitcoind minted is only known to it.
+    """
     cache = str(env_manager.get("CACHE") or "").strip()
     return os.path.join(cache, RECEIVE_ADDRESS_CACHE_FILE) if cache else None
 
@@ -253,18 +238,18 @@ def _remember_address(address: str) -> None:
 
 
 def _address_from_core() -> str:
-    """What Core says this node is paid at, or the last thing it said. ``""`` if neither.
+    """What the backend says this node is paid at, or the last thing it said. ``""`` if neither.
 
-    Core first, because it is the only thing that knows which addresses its wallet is
-    watching -- and an address it does not watch is one whose payments it will not
-    report and whose output it cannot spend. The cache second, because a bitcoind that
-    is down must not stop this node checking a payment against the script it already
-    advertised.
+    The backend first. For Core it is the only thing that knows which addresses its
+    wallet is watching -- and an address it does not watch is one whose payments it will
+    not report and whose output it cannot spend; for `explorer` it is the address derived
+    from the mnemonic. The cache second, because a bitcoind that is down must not stop
+    this node checking a payment against the script it already advertised.
     """
     try:
         address = backend().receive_address()
     except BackendUnavailable as exc:
-        LOGGER(f"Could not ask bitcoind for this node's receiving address: {exc}")
+        LOGGER(f"Could not get this node's Bitcoin receiving address: {exc}")
         return _read_cached_address()
     if address:
         _remember_address(address)
@@ -295,18 +280,17 @@ def _prepare_backend() -> None:
 def can_pay() -> bool:
     """Whether this node can *send* BTC, as opposed to only being paid in it.
 
-    False for a read-only backend, which holds no key. The payer walks the payment
-    systems it shares with a peer and settles through the first it can fund, so a
-    system that cannot sign simply has no funding and the walk moves on -- nothing is
-    broadcast, and nothing raises in the middle of a payment.
+    False when the backend cannot be built or reached to sign -- a bitcoind that is down,
+    a mnemonic that is not valid. The payer walks the payment systems it shares with a
+    peer and settles through the first it can fund, so a system that cannot sign simply
+    has no funding and the walk moves on -- nothing is broadcast, and nothing raises in
+    the middle of a payment.
     """
     try:
         return bool(getattr(_backend_module(), "backend")().can_pay)
     except Exception:
         return False
 
-
-bitcoin_ledger = celaut_pb2.Contract.Ledger(tags=[LEDGER], prose=PROSE, formal=FORMAL)
 
 _transaction_url_reporter: ContextVar = ContextVar("bitcoin_transaction_url_reporter", default=None)
 _transaction_id_reporter: ContextVar = ContextVar("bitcoin_transaction_id_reporter", default=None)
@@ -364,11 +348,16 @@ def unavailable_reason() -> Optional[str]:
 
 def ledger() -> celaut_pb2.Contract.Ledger:
     """The ledger message this contract settles on, as peers receive it."""
-    return bitcoin_ledger
+    return _bitcoin_ledger()
+
+
+def mu_per_base_unit() -> int:
+    """MU per satoshi: what travels to peers as ``ContractRate.mu_per_unit``."""
+    return rate.advertised_mu_per_satoshi()
 
 
 def mu_per_unit() -> int:
-    """MU bought by one whole BTC. What peers are told as ``ContractRate.mu_per_unit``."""
+    """MU bought by one whole BTC, for a person (``nodo pay`` amounts in BTC)."""
     return rate.mu_per_unit()
 
 
@@ -431,9 +420,9 @@ def get_wallet_address() -> str:
     `scriptPubKey` for a payer to build against, and rotating it would strand payments
     aimed at the old one.
 
-    Where it comes from is what the backend decides. One that signs is paid into its
-    own wallet, so Core is asked which address that is; one that cannot sign holds no
-    wallet at all and is paid at the cold wallet.
+    The node is paid into its own wallet, and the backend says which address that is:
+    Core is asked, `explorer` derives it from the mnemonic. The cold wallet is where the
+    excess is swept to, never where payers are sent.
 
     Minting belongs to `ensure_receiving_address`, which `init()` calls, and this must
     not do it -- it is reached from `payment_process_validator`, on the receiving path.
@@ -441,24 +430,14 @@ def get_wallet_address() -> str:
     would check an incoming payment against the wrong script and reject a payment that
     is already on-chain.
     """
-    if not _signs():
-        address = str(COLD_WALLET()).strip()
-        if not address:
-            raise ValueError(
-                f"{COLD_WALLET_KEY} is not set, so this node has no Bitcoin address to "
-                "be paid at. A read-only backend holds no key, so it is paid into the "
-                "cold wallet directly -- set it to the address you want to be paid at."
-            )
-    else:
-        address = _address_from_core()
-        if not address:
-            raise ValueError(
-                "this node has no Bitcoin receiving address: bitcoind holds none under "
-                f"the {core_backend.RECEIVE_LABEL!r} label, and none is cached in "
-                f"{RECEIVE_ADDRESS_CACHE_FILE}. One is minted when the payment "
-                "interfaces are initialised; check the node log for why that did not "
-                "happen."
-            )
+    address = _address_from_core()
+    if not address:
+        raise ValueError(
+            "this node has no Bitcoin receiving address: the backend gave none (with "
+            f"bitcoind, none under the {core_backend.RECEIVE_LABEL!r} label), and none is "
+            f"cached in {RECEIVE_ADDRESS_CACHE_FILE}. One is minted when the payment "
+            "interfaces are initialised; check the node log for why that did not happen."
+        )
     if not is_valid_bitcoin_address(address, network=NETWORK()):
         raise ValueError(
             f"{address!r} is not a valid {NETWORK()} address, and it is what this node "
@@ -476,9 +455,8 @@ def ensure_receiving_address() -> str:
     the label Core files it under, which is how every later call finds the same address
     again -- so nothing about it has to be written into `config.yaml`.
 
-    Nothing is minted on a read-only backend: it is paid at the cold wallet the
-    operator already configured, and an unset one is an error rather than something to
-    invent an answer for.
+    `explorer` mints nothing: its one address is derived, so asking again gives the same
+    one.
     """
     try:
         return get_wallet_address()
@@ -486,7 +464,7 @@ def ensure_receiving_address() -> str:
         # An address on the wrong network is a misconfiguration, not an absence:
         # minting against the same wallet would only produce another address nobody
         # on this chain can pay to.
-        if not _signs() or "is not a valid" in str(exc):
+        if "is not a valid" in str(exc):
             raise
 
     address = backend().new_address()
@@ -572,7 +550,7 @@ def init():
     if script is None:
         raise ValueError(f"{address} is not a segwit address, so it has no scriptPubKey")
 
-    contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
+    contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
     set_token_id(contract, NATIVE_ASSET)
     # Canonical value: the raw scriptPubKey a payer builds its output against.
     set_script(contract, script)
@@ -586,13 +564,13 @@ def init():
 def check_sender_balance(amount: int) -> bool:
     """Whether this wallet can pay ``amount`` MU plus what the transaction costs.
 
-    ``False`` outright on a read-only backend: it cannot sign, so it has no funding,
-    and the payer's walk moves to the next payment system without broadcasting.
+    ``False`` outright when the backend cannot sign right now, so there is no funding and
+    the payer's walk moves to the next payment system without broadcasting.
     """
     if not can_pay():
         LOGGER(
-            "The Bitcoin backend is read-only, so this node can be paid in BTC but "
-            "cannot pay in it. Trying another payment system."
+            "The Bitcoin backend cannot sign right now, so this node cannot pay in "
+            "BTC. Trying another payment system."
         )
         return False
     try:
@@ -678,7 +656,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
                 )
             if confirmations >= wanted:
                 LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
-                contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
+                contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
                 set_token_id(contract, NATIVE_ASSET)
                 set_script(contract, script)
                 set_contract_type(contract, CONTRACT.encode("utf-8"))
@@ -882,9 +860,9 @@ def _pay_accrued_donations():
 def _sweep_to_cold_wallet():
     """Move the wallet's excess to cold storage when both thresholds are met.
 
-    The fee is left to Core to take out of the swept output rather than reserved here
-    against a guessed transaction size. A sweep is the one transaction whose size cannot
-    be guessed: it moves most of a balance, so Core spends however many UTXOs that
+    The fee is left to the backend to take out of the swept output rather than reserved
+    here against a guessed transaction size. A sweep is the one transaction whose size
+    cannot be guessed: it moves most of a balance, so the backend spends however many UTXOs that
     balance happens to be split across, and a fee reserved for one input is a fee the
     retained hot balance ends up paying. Subtracted from the output, the difference
     lands on the amount that leaves -- money already being parted with -- and the hot
@@ -892,11 +870,6 @@ def _sweep_to_cold_wallet():
     """
     LOGGER("Exec bitcoin interface manager (cold sweep).")
     try:
-        if not _signs():
-            # A read-only backend is paid at the cold wallet, so there is no hot
-            # balance to move and no key that could move one.
-            LOGGER("BTC payments land in the cold wallet already; nothing to sweep.")
-            return
         cold_wallet = COLD_WALLET()
         if not cold_wallet:
             LOGGER("No BTC cold wallet configured; skipping sweep.")

@@ -7,8 +7,9 @@ integer MU, everywhere, so no amount ever goes through a float. MU has no intrin
 value: it is the node's own accounting unit.
 
 **What an MU is worth** is a property of each *payment contract*, and is deliberately
-**not in this module**. A contract declares how many MU one of its units buys — that is
-exactly what ``ContractRate.mu_per_unit`` carries on the wire, so a peer reading a price
+**not in this module**. A contract declares how many MU one base unit of its asset buys
+(a nanoERG, a satoshi) — that is exactly what ``ContractRate.mu_per_unit`` carries on the
+wire, so a peer reading a price
 can convert it to real money. Ergo's answer lives with Ergo, in
 ``src/payment_system/contracts/ergo/rate.py``; another ledger declares its own beside it.
 Nothing here names a ledger, reads a ledger's config section, or knows a conversion into

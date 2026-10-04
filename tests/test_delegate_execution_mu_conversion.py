@@ -43,9 +43,7 @@ class DelegateExecutionMuConversionTests(unittest.TestCase):
         ), patch.object(
             delegate_mod.utils, "generate_uris_by_peer_id", return_value=iter(["peer:5000"])
         ), patch.object(delegate_mod, "peer_channel"), patch.object(
-            delegate_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
-            delegate_mod.bee, "client_grpc", return_value=iter([instance])
+            delegate_mod.BeeClient, "start_service", return_value=instance
         ), patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(delegate_mod, "SQLConnection") as sql_connection:

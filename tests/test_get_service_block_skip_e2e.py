@@ -18,6 +18,7 @@ import shutil
 import tempfile
 import unittest
 from concurrent import futures
+from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
@@ -101,6 +102,16 @@ class GetServiceBlockSkipEndToEndTests(unittest.TestCase):
 
         self.hash_id = get_configured_hash_id()
 
+        # GetService now requires a client_id unless the caller is a local instance
+        # (issue #428); this test dials its own server, i.e. is that instance, but the
+        # fixture carries no `local_instances` row to prove it with a real lookup, so
+        # the lookup itself is stood in for instead.
+        local_instance_patcher = patch(
+            "src.gateway.client_gate.get_internal_service_id_by_uri", return_value="self"
+        )
+        local_instance_patcher.start()
+        self.addCleanup(local_instance_patcher.stop)
+
         self.grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
         celaut_pb2_grpc.add_GatewayServicer_to_server(Gateway(), self.grpc_server)
         gateway_port = self.grpc_server.add_secure_port("127.0.0.1:0", server_credentials())
@@ -139,11 +150,19 @@ class GetServiceBlockSkipEndToEndTests(unittest.TestCase):
     def _fetch(self, service_hash: str, *, block_skip: bool, interceptor=None) -> list:
         stub = celaut_pb2_grpc.GatewayStub(self._channel(interceptor))
         _hash = celaut.Metadata.HashTag.Hash(type=self.hash_id, value=bytes.fromhex(service_hash))
+        # GetServiceIterable now waits for both a Client and a resolving Hash (in
+        # whichever order) before it stops reading the request, falling back to
+        # whatever it has after simple_rpc_timeout_seconds() -- so a real Client
+        # has to be on the wire here (this test's setUp exempts it from
+        # require_caller by IP regardless of client_id's value) or every fetch
+        # would eat that whole timeout instead of resolving immediately. An empty
+        # client_id would not do: protobuf serializes an all-default Client to zero
+        # bytes, which bee_rpc's framing cannot tell apart from no message at all.
         return list(
             client_grpc(
                 method=stub.GetService,
-                indices_serializer=celaut.Metadata.HashTag.Hash,
-                input=_hash,
+                indices_serializer={1: celaut.Metadata.HashTag.Hash, 2: celaut.Client},
+                input=[celaut.Client(client_id="test-fixture"), _hash],
                 indices_parser=StartService_input_indices,
                 partitions_message_mode_parser=StartService_input_message_mode,
                 block_skip=block_skip,

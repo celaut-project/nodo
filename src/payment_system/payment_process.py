@@ -6,13 +6,13 @@ from threading import Lock
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from contextlib import nullcontext
-from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
-from protos import celaut_pb2_grpc, celaut_pb2
+from protos import celaut_pb2
 
 from src.database.sql_connection import SQLConnection
+from src.utils.bee_client import BeeClient
 
 from src.utils import logger as _l
 from src.identity.grpc_transport import peer_channel
@@ -134,14 +134,26 @@ def _donation_accrual():
 
 
 def _ledger_tag(ledger) -> Optional[str]:
-    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire.
+    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire, if it is ours.
 
     Only for the incoming side, where a peer sends the whole advertised message. The
     payer's own side already works in tags: that is what a `contract_instance` row
     holds and what `get_peer_contract_instances` yields.
+
+    None unless the message declares the same ledger this node settles on
+    (``ledger_descriptors.payment_ledger``, compared on a non-empty `formal` by
+    ``node_identity.same_declaration``): a payer that means another network, other
+    units or another way to bind a deposit token -- or that does not say -- is not
+    paying into this node's ledger, whatever its tag says.
     """
+    from src.identity.node_identity import same_declaration
+    from src.utils.ledger_descriptors import payment_ledger
+
     tags = getattr(ledger, "tags", None)
-    return tags[0] if tags else None
+    if not tags:
+        return None
+    ours = payment_ledger(tags[0])
+    return tags[0] if ours is not None and same_declaration(ledger, ours) else None
 
 
 def _address_of(script) -> Optional[str]:
@@ -168,14 +180,14 @@ def generate_deposit_token(client_id: str) -> str:
     return deposit_token
 
 
-# Helper function to create the gRPC stub and get URIs
-def __get_grpc_stub(peer_id):
+# Helper function to obtain a verified channel to a peer
+def __get_channel(peer_id):
     try:
-        return celaut_pb2_grpc.GatewayStub(peer_channel(peer_id=peer_id))
+        return peer_channel(peer_id=peer_id)
     except (ConnectionError, CertificateError) as e:
         # Same contract as before -- callers treat None as "cannot reach this peer" --
-        # but a certificate that does not prove `peer_id` now lands here too: this stub
-        # is what `pay` sends money over, so an unverified answer is not a peer.
+        # but a certificate that does not prove `peer_id` now lands here too: this
+        # channel is what `pay` sends money over, so an unverified answer is not a peer.
         _l.LOGGER(f"No verified channel to peer {peer_id}: {e}")
         return None
 
@@ -188,19 +200,13 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
 
     _l.LOGGER(f"Generate deposit token on the peer {peer_id} with client {client_id}")
 
-    # Generate the deposit token
-    grpc_stub = __get_grpc_stub(peer_id)
-    if not grpc_stub:
+    channel = __get_channel(peer_id)
+    if not channel:
         _l.LOGGER("Failed to generate gRPC stub.")
         return
 
     try:
-        return next(bee.client_grpc(
-            method=grpc_stub.GenerateDepositToken,
-            partitions_message_mode_parser=True,
-            input=celaut_pb2.Client(client_id=client_id),  # type: ignore
-            indices_parser=celaut_pb2.TokenMessage  # type: ignore
-        ), None).token  # type: ignore
+        return BeeClient.generate_deposit_token(channel, client_id=client_id).token  # type: ignore
     except Exception as e:
         _l.LOGGER(f"Error generating deposit token: {str(e)}")
         return
@@ -392,20 +398,23 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
     attempt = 0
     while attempt < COMMUNICATION_ATTEMPTS:
         try:
-            grpc_stub = __get_grpc_stub(peer_id)
-            if not grpc_stub:
+            channel = __get_channel(peer_id)
+            if not channel:
                 _l.LOGGER(f"Failed to get gRPC stub for peer {peer_id}")
                 return False
 
-            next(bee.client_grpc(
-                method=grpc_stub.Payable,
-                partitions_message_mode_parser=True,
-                input=celaut_pb2.Payment(
-                    amount=to_amount(peer_amount),
-                    deposit_token=deposit_token,
-                    contract=contract_ledger,
-                )
-            ), None)
+            # The same client the deposit token was issued to (__obtain_deposit_token):
+            # stored by then, so this reads it back rather than minting another.
+            client_id = _manager_module().get_client_id_on_other_peer(peer_id=peer_id)
+            if not client_id:
+                _l.LOGGER(f"No client_id at peer {peer_id} to communicate the payment with.")
+                return False
+
+            BeeClient.payable(channel, celaut_pb2.Payment(
+                amount=to_amount(peer_amount),
+                deposit_token=deposit_token,
+                contract=contract_ledger,
+            ), client_id=client_id)
 
             _l.LOGGER(f"Payment of {peer_amount} (peer MU) to {peer_id} communicated successfully.")
             return True
@@ -677,9 +686,9 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
     """
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
-    # The wire carries the whole `Contract.Ledger` a peer advertises; the tag is the
-    # only part of it anything reads, so it is taken here, once, and everything below
-    # this line works in tags. `prose` and `formal` are description and are dropped.
+    # The wire carries the whole `Contract.Ledger` a peer advertises. It is checked
+    # against this node's own declaration of that ledger and reduced to its tag here,
+    # once; everything below this line works in tags.
     ledger_tag: str = _ledger_tag(ledger) or ""
     # Resolved once, up front, because the payment record needs it whichever way the
     # validation goes -- a deposit we refused is exactly the one a client will ask about.

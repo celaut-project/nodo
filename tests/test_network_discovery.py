@@ -41,14 +41,23 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 def _load_discovery_module():
     """``src/manager/network_discovery.py`` with its outbound seams replaced."""
-    stubbed = ("bee_rpc", "bee_rpc.client", "src.database.sql_connection",
-               "src.identity.grpc_transport")
+    stubbed = ("bee_rpc", "bee_rpc.client", "bee_rpc.buffer_pb2", "bee_rpc.control",
+               "src.database.sql_connection", "src.identity.grpc_transport")
     saved = {name: sys.modules.get(name) for name in stubbed}
 
     bee_pkg = types.ModuleType("bee_rpc")
     bee_client = types.ModuleType("bee_rpc.client")
     bee_client.client_grpc = lambda **kwargs: iter(())
+    # BeeClient (src/utils/bee_client.py), which network_discovery.py now goes
+    # through instead of bee_rpc directly, reads these off the package at import
+    # time regardless of whether this test ever calls them -- a bare Dir/Buffer/
+    # StreamControl stand-in is enough for the module to import.
+    bee_client.Dir = type("Dir", (), {})
     bee_pkg.client = bee_client
+    buffer_pb2_stub = types.ModuleType("bee_rpc.buffer_pb2")
+    buffer_pb2_stub.Buffer = type("Buffer", (), {})
+    control_stub = types.ModuleType("bee_rpc.control")
+    control_stub.StreamControl = type("StreamControl", (), {})
     sql_stub = types.ModuleType("src.database.sql_connection")
     sql_stub.SQLConnection = type("SQLConnection", (), {"get_peers_id": lambda self: []})
     transport_stub = types.ModuleType("src.identity.grpc_transport")
@@ -56,6 +65,8 @@ def _load_discovery_module():
 
     sys.modules["bee_rpc"] = bee_pkg
     sys.modules["bee_rpc.client"] = bee_client
+    sys.modules["bee_rpc.buffer_pb2"] = buffer_pb2_stub
+    sys.modules["bee_rpc.control"] = control_stub
     sys.modules["src.database.sql_connection"] = sql_stub
     sys.modules["src.identity.grpc_transport"] = transport_stub
     try:
@@ -74,13 +85,21 @@ def _load_discovery_module():
                 sys.modules[name] = previous
 
 
-def _instance(*addresses):
-    """One peer instance, at however many addresses."""
+def _instance(*addresses, tags=None):
+    """One peer instance, at however many addresses, all in one untagged slot.
+
+    ``tags``, when given, is the ``Api.Slot.protocol_stack`` tags of that one slot --
+    what a caller reads back per address as the third element of the triple.
+    """
+    slot = [celaut.Service.Api.Slot(port=1, protocol_stack=[
+        celaut.Service.Api.Protocol(tags=list(tags))
+    ])] if tags else []
     return celaut.Instance(
+        api=celaut.Service.Api(slot=slot),
         uri_slot=[celaut.Instance.Uri_Slot(
             internal_port=1,
             uri=[celaut.Instance.Uri(ip=ip, port=port) for ip, port in addresses],
-        )]
+        )],
     )
 
 
@@ -128,9 +147,9 @@ class AskPeerTests(unittest.TestCase):
         self.network = celaut.Service.Network(tags=["pow:ergo"], formal=b"chain=ergo")
 
     def _ask(self, answer):
-        with patch.object(self.nd.bee, "client_grpc", return_value=iter([answer] if answer else [])), \
-             patch.object(self.nd, "celaut_pb2_grpc", MagicMock()), \
-             patch.object(self.nd, "peer_channel", return_value=None):
+        with patch.object(self.nd.BeeClient, "call_one", return_value=answer), \
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch("src.manager.manager.get_client_id_on_other_peer", return_value="client-1"):
             return self.nd.ask_peer("peer-1", self.network)
 
     def test_every_address_of_every_instance_is_taken_and_flattened(self):
@@ -143,7 +162,11 @@ class AskPeerTests(unittest.TestCase):
 
         self.assertEqual(
             self._ask(answer),
-            [("203.0.113.10", 9053), ("203.0.113.11", 9053), ("203.0.113.12", 9053)],
+            [
+                ("203.0.113.10", 9053, ()),
+                ("203.0.113.11", 9053, ()),
+                ("203.0.113.12", 9053, ()),
+            ],
         )
 
     def test_an_answer_is_capped_at_what_this_node_is_willing_to_try(self):
@@ -154,15 +177,31 @@ class AskPeerTests(unittest.TestCase):
     def test_an_address_with_no_ip_or_no_port_is_dropped(self):
         answer = _resolution(_instance(("", 9053), ("203.0.113.10", 0), ("203.0.113.11", 9053)))
 
-        self.assertEqual(self._ask(answer), [("203.0.113.11", 9053)])
+        self.assertEqual(self._ask(answer), [("203.0.113.11", 9053, ())])
+
+    def test_the_tags_of_the_addresss_own_slot_are_read_back(self):
+        """What lets a caller tell a peer's REST slot from its P2P one (issue #78):
+        the tag travels with the one address it actually describes, read off the
+        `Api.Slot` whose `port` matches that address's own `Uri_Slot.internal_port` --
+        never the whole instance's, and never guessed at by the caller."""
+        answer = _resolution(_instance(("203.0.113.10", 9053), tags=["ergo-rest"]))
+
+        self.assertEqual(self._ask(answer), [("203.0.113.10", 9053, ("ergo-rest",))])
+
+    def test_a_slot_with_no_matching_api_slot_contributes_no_tags(self):
+        """A peer that never built one (an older nodo) is not failed for it -- the
+        address is still offered, just as untagged as it always was."""
+        answer = _resolution(_instance(("203.0.113.10", 9053)))
+
+        self.assertEqual(self._ask(answer), [("203.0.113.10", 9053, ())])
 
     def test_a_peer_that_answers_nothing_is_not_an_error(self):
         self.assertEqual(self._ask(None), [])
 
     def test_peer_requests_have_a_finite_deadline(self):
-        with patch.object(self.nd.bee, "client_grpc", return_value=iter(())) as rpc, \
-             patch.object(self.nd, "celaut_pb2_grpc", MagicMock()), \
-             patch.object(self.nd, "peer_channel", return_value=None):
+        with patch.object(self.nd.BeeClient, "call_one", return_value=None) as rpc, \
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch("src.manager.manager.get_client_id_on_other_peer", return_value="client-1"):
             self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
         self.assertEqual(rpc.call_args.kwargs["timeout"], 10)
 
@@ -170,9 +209,20 @@ class AskPeerTests(unittest.TestCase):
         def _raise(**kwargs):
             raise RuntimeError("unreachable")
 
-        with patch.object(self.nd.bee, "client_grpc", side_effect=_raise), \
-             patch.object(self.nd, "celaut_pb2_grpc", MagicMock()), \
-             patch.object(self.nd, "peer_channel", return_value=None):
+        with patch.object(self.nd.BeeClient, "call_one", side_effect=_raise), \
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch("src.manager.manager.get_client_id_on_other_peer", return_value="client-1"):
+            self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
+
+    def test_a_peer_client_id_cannot_be_minted_is_one_fewer_source_too(self):
+        """Minting/reusing our client_id on that peer is itself a round trip that can
+        fail (an unavailable peer, a PoW mint gone wrong) -- the same "one fewer
+        source" outcome as the RPC itself failing, not a launch-aborting exception."""
+        with patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch(
+                 "src.manager.manager.get_client_id_on_other_peer",
+                 side_effect=Exception("Peer not available."),
+             ):
             self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
 
 
@@ -192,23 +242,33 @@ class AskPeersTests(unittest.TestCase):
 
     def test_answers_are_pooled_in_ask_order(self):
         found = self._ask_peers({
-            "p1": [("203.0.113.10", 9053)],
-            "p2": [("203.0.113.11", 9053)],
+            "p1": [("203.0.113.10", 9053, ())],
+            "p2": [("203.0.113.11", 9053, ())],
         })
 
-        self.assertEqual(found, [("203.0.113.10", 9053), ("203.0.113.11", 9053)])
+        self.assertEqual(found, [("203.0.113.10", 9053, ()), ("203.0.113.11", 9053, ())])
 
     def test_two_peers_naming_the_same_address_have_confirmed_nothing(self):
         """It is asked once, and agreement buys it no better place: they may well
         have read it off the same list, and treating that as evidence would be a
         trust decision this has no business making."""
         found = self._ask_peers({
-            "p1": [("203.0.113.10", 9053), ("203.0.113.11", 9053)],
-            "p2": [("203.0.113.11", 9053)],
-            "p3": [("203.0.113.11", 9053)],
+            "p1": [("203.0.113.10", 9053, ()), ("203.0.113.11", 9053, ())],
+            "p2": [("203.0.113.11", 9053, ())],
+            "p3": [("203.0.113.11", 9053, ())],
         })
 
-        self.assertEqual(found, [("203.0.113.10", 9053), ("203.0.113.11", 9053)])
+        self.assertEqual(found, [("203.0.113.10", 9053, ()), ("203.0.113.11", 9053, ())])
+
+    def test_the_first_peer_to_name_an_address_decides_its_tags(self):
+        """Ask order is a ranking; the address is the same address whatever a later
+        peer tags it, so a second, differently-tagged sighting changes nothing."""
+        found = self._ask_peers({
+            "p1": [("203.0.113.10", 9053, ("ergo-rest",))],
+            "p2": [("203.0.113.10", 9053, ())],
+        })
+
+        self.assertEqual(found, [("203.0.113.10", 9053, ("ergo-rest",))])
 
     def test_only_as_many_peers_as_the_budget_allows_are_asked(self):
         asked = []

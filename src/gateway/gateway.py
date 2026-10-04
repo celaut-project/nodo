@@ -1,8 +1,7 @@
-from bee_rpc import client as bee
 import grpc
 
 from protos import celaut_pb2_grpc, celaut_pb2
-from protos.gateway_bee import GenerateClient_output_indices
+from protos.gateway_bee import rpc_input, rpc_output
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
@@ -11,12 +10,15 @@ from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
+from src.gateway.client_gate import parse_with_client, require_caller, simple_rpc_timeout_seconds
 from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
-    hotplug, get_sysresources
+    hotplug, get_sysresources, associate_client_with_peer
+from src.manager.chat import ChatError, receive_chat_message
 from src.manager.metrics import get_metrics
 from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
+from src.utils.bee_client import BeeClient
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 from src.utils.config import ConfigManager
 from src.utils.network_policy import NetworkPolicyRejection
@@ -28,8 +30,6 @@ env_manager = ConfigManager()
 class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
-        print("DEBUG. GET SERVICE ESTIMATED COST")
-        log.LOGGER("DEBUG. GET SERVICE ESTIMATED COST")
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
     def GetResourceAvailability(self, request_iterator, context, **kwargs):
@@ -41,17 +41,16 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def StopService(self, request_iterator, context, **kwargs):
         try:
             log.LOGGER('Stopping instance.')
-            token = next(bee.parse_from_buffer(
-                                request_iterator=request_iterator,
-                                indices=celaut_pb2.TokenMessage,
-                                partitions_message_mode=True
-                            ), 0).token
+            token = BeeClient.parse_one(
+                request_iterator, indices=rpc_input("StopService"), default=celaut_pb2.TokenMessage(),
+                timeout=simple_rpc_timeout_seconds(),
+            ).token
             log.LOGGER(f'    with id {token}')
             refunded_amount = stop_instance(token=token)
             if not refunded_amount: refunded_amount = 0
-            
+
             log.LOGGER(f'Stopped instance {token}.')
-            yield from bee.serialize_to_buffer(
+            yield from BeeClient.respond(
                     message_iterator=celaut_pb2.Refund(
                         amount=to_amount(refunded_amount)
                     )
@@ -63,11 +62,11 @@ class Gateway(celaut_pb2_grpc.Gateway):
         try:
             log.LOGGER('Modifying deposit on service.')
 
-            _input = next(bee.parse_from_buffer(
-                                request_iterator=request_iterator,
-                                indices=celaut_pb2.ModifyDepositInput,
-                                partitions_message_mode=True
-                            ), 0)
+            _input = BeeClient.parse_one(
+                request_iterator, indices=rpc_input("ModifyDeposit"),
+                default=celaut_pb2.ModifyDepositInput(),
+                timeout=simple_rpc_timeout_seconds(),
+            )
 
             success, message = modify_deposit(
                         amount_mu=from_amount(_input.difference),
@@ -76,7 +75,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
             log.LOGGER(f"Message on modify deposit: {message}")
 
-            yield from bee.serialize_to_buffer(
+            yield from BeeClient.respond(
                     message_iterator=celaut_pb2.ModifyDepositOutput(
                         success=success,
                         message=message
@@ -86,9 +85,13 @@ class Gateway(celaut_pb2_grpc.Gateway):
             raise Exception('Was imposible stop the service. ' + str(e))
 
     def GetPeerInfo(self, request_iterator, context, **kwargs):
+        client_id = BeeClient.parse_one(
+            request_iterator, indices=rpc_input("GetPeerInfo"), timeout=simple_rpc_timeout_seconds(),
+        )
+        require_caller(context, client_id.client_id if client_id else "")
         log.LOGGER(f'Request for instance by {context.peer()}')
         gateway_instance = generate_full_node_peer_info()
-        yield from bee.serialize_to_buffer(gateway_instance)
+        yield from BeeClient.respond(gateway_instance)
 
     def ResolveNetwork(self, request_iterator, context, **kwargs):
         """Answer with the peers this node knows in the communication domain asked for.
@@ -129,14 +132,15 @@ class Gateway(celaut_pb2_grpc.Gateway):
         gRPC plumbing around them, and a decision buried in a handler is a decision
         nobody can test.
         """
-        network = next(bee.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices=celaut_pb2.Service.Network,
-            partitions_message_mode=True
-        ), None)
+        network, client_id = parse_with_client(request_iterator, method="ResolveNetwork")
 
         if network is None:
             raise Exception("ResolveNetwork needs a Service.Network to resolve.")
+
+        # Gated the same way ModifyServiceSystemResources is: a local instance is
+        # exempt (it is measured against its own declaration a few lines below
+        # instead), anyone else needs a client_id.
+        require_caller(context, client_id)
 
         log.LOGGER(
             f"Resolve network request by {context.peer()} for tags {list(network.tags)}"
@@ -160,18 +164,19 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 f"That request does not fit what the asking instance declared. {e}"
             )
 
-        yield from bee.serialize_to_buffer(resolution)
+        yield from BeeClient.respond(resolution)
 
     def IntroducePeer(self, request_iterator, context, **kwargs):
-        # TODO DDOS protection.   ¿?
+        # DDOS protection (issue #428): the signature check below already stops a
+        # forged announcement, but minting a fresh Ed25519 keypair is free, so it
+        # never stopped a flood of new, validly-signed ones, each still worth a DB
+        # write. A client_id is what makes that expensive to repeat -- see
+        # client_gate.require_caller.
+        peer, client_id = parse_with_client(request_iterator, method="IntroducePeer")
+        require_caller(context, client_id)
+
         log.LOGGER('Introduce peer method.')
-        peer_id = add_peer_instance(
-                peer=next(bee.parse_from_buffer(
-                request_iterator=request_iterator,
-                indices=celaut_pb2.Peer,
-                partitions_message_mode=True
-            ), None)
-        )
+        peer_id = add_peer_instance(peer=peer)
 
         # Answer with the id the peer was stored under, or REFUSED when it was not.
         # Refusal is a normal outcome now that an unverifiable announcement is turned
@@ -179,7 +184,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # succeeded, which is why "OK" was unconditional. A blanket "OK" would now tell a
         # node self-announcing through connect's SELF_ANNOUNCE_TO_CONNECTING_PEERS that it
         # is registered here while nothing was stored.
-        yield from bee.serialize_to_buffer(celaut_pb2.RecursionGuard(token=peer_id or "REFUSED"))  # Recursion guard shouldn't be used here, another message should be used. TODO
+        yield from BeeClient.respond(celaut_pb2.RecursionGuard(token=peer_id or "REFUSED"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # The DoS protection this used to only have a TODO for (issue #361): the first
@@ -187,22 +192,47 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # it in Blake2b. The request is optional -- absent, or a bare Client with no
         # challenge, is the first attempt, and on a node still below the free limit that
         # is the whole exchange, exactly as before.
-        request = next(bee.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices=celaut_pb2.Client,
-            partitions_message_mode=True
-        ), None)
+        request = BeeClient.parse_one(
+            request_iterator, indices=rpc_input("GenerateClient"), timeout=simple_rpc_timeout_seconds(),
+        )
 
-        yield from bee.serialize_to_buffer(
+        yield from BeeClient.respond(
                 message_iterator=generate_client_or_pow_required(
                     client_id=request.client_id if request else "",
                     challenge=request.challenge if request else "",
                     solution=request.pow_solution if request else "",
+                    peer_id=request.peer_id if request and request.HasField("peer_id") else "",
+                    signature=request.signature if request and request.HasField("signature") else "",
                 ),
                 # A copy: bee-rpc adds its own `0: bytes` entry to whatever it is
                 # handed, and this one is a module-level constant shared with the
                 # calling side.
-                indices=dict(GenerateClient_output_indices)
+                indices=rpc_output("GenerateClient")
+        )
+
+    def AssociateClient(self, request_iterator, context, **kwargs):
+        # The deferred half of the binding GenerateClient itself already attempts
+        # opportunistically (issue #428): that one only succeeds if peer_id was
+        # already known *at mint time*, which a peer introducing itself for the first
+        # time cannot be -- IntroducePeer now requires a client_id too, so minting has
+        # to happen before it, not after. This RPC is what lets that same client_id
+        # get bound once IntroducePeer has actually registered the caller.
+        request = BeeClient.parse_one(
+            request_iterator, indices=rpc_input("AssociateClient"), timeout=simple_rpc_timeout_seconds(),
+        )
+        client_id = request.client_id if request else ""
+        # The client_id being associated is itself the caller's identity here -- the
+        # same one client_gate's rate limiter keys on for every other gated RPC -- so
+        # there is nothing else to wrap it in.
+        require_caller(context, client_id)
+
+        bound, reason = associate_client_with_peer(
+            client_id=client_id,
+            peer_id=request.peer_id if request and request.HasField("peer_id") else "",
+            signature=request.signature if request and request.HasField("signature") else "",
+        )
+        yield from BeeClient.respond(
+            celaut_pb2.AssociateClientOutput(bound=bound, reason=reason)
         )
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
@@ -228,11 +258,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
         ): raise Exception('Error charging for the resource change of ' + context.peer())
         if not hotplug(
                 vmachine_id=token,
-                system_requeriments_range=next(bee.parse_from_buffer(
-                    request_iterator=request_iterator,
-                    indices=celaut_pb2.ModifyServiceSystemResourcesInput,
-                    partitions_message_mode=True
-                ), None)
+                system_requeriments_range=BeeClient.parse_one(
+                    request_iterator, indices=rpc_input("ModifyServiceSystemResources"),
+                    timeout=simple_rpc_timeout_seconds(),
+                )
         ):
             try:
                 refund_container.pop()()
@@ -240,7 +269,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 pass
             raise Exception('Exception on service modify method.')
 
-        yield from bee.serialize_to_buffer(
+        yield from BeeClient.respond(
                 message_iterator=get_sysresources(id=token)
         )
 
@@ -248,25 +277,21 @@ class Gateway(celaut_pb2_grpc.Gateway):
         yield from GetServiceIterable(request_iterator, context)
 
     def GenerateDepositToken(self, request_iterator, context, *kwargs):
-        yield from bee.serialize_to_buffer(
+        request = BeeClient.parse_one(
+            request_iterator, indices=rpc_input("GenerateDepositToken"), timeout=simple_rpc_timeout_seconds(),
+        )
+        client_id = request.client_id if request else ""
+        require_caller(context, client_id)
+        yield from BeeClient.respond(
                 message_iterator=celaut_pb2.TokenMessage(
-                    token=generate_deposit_token(
-                        client_id=next(bee.parse_from_buffer(
-                            request_iterator=request_iterator,
-                            indices=celaut_pb2.Client,
-                            partitions_message_mode=True
-                        ), 0).client_id
-                    )
+                    token=generate_deposit_token(client_id=client_id)
                 )
         )
 
     def Payable(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for payment.')
-        payment = next(bee.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices=celaut_pb2.Payment,
-            partitions_message_mode=True
-        ), None)
+        payment, client_id = parse_with_client(request_iterator, method="Payable")
+        require_caller(context, client_id)
         raw_script = get_script(payment.contract)
         # Select the payment validator by the stable, wallet-independent contract_type; the
         # raw ErgoTree/propositionBytes travels as ``script`` (never a textual address).
@@ -285,18 +310,18 @@ class Gateway(celaut_pb2_grpc.Gateway):
         ):
             raise Exception('Error: payment not valid.')
         log.LOGGER('Payment is valid.')
-        for b in bee.serialize_to_buffer(): yield b
+        yield from BeeClient.respond()
 
     def GetMetrics(self, request_iterator, context, **kwargs):
-        yield from bee.serialize_to_buffer(
+        yield from BeeClient.respond(
                 message_iterator=get_metrics(
-                    token=next(bee.parse_from_buffer(
-                        request_iterator=request_iterator,
-                        indices=celaut_pb2.TokenMessage,
-                        partitions_message_mode=True
-                    ), None).token
+                    token=BeeClient.parse_one(
+                        request_iterator, indices=rpc_input("GetMetrics"),
+                        default=celaut_pb2.TokenMessage(),
+                        timeout=simple_rpc_timeout_seconds(),
+                    ).token
                 ),
-                indices=celaut_pb2.Metrics,
+                indices=rpc_output("GetMetrics"),
         )
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):
@@ -306,12 +331,13 @@ class Gateway(celaut_pb2_grpc.Gateway):
             # in memory — `partitions_message_mode=False` would spill every
             # payload chunk to a temporary file, which no byte pipe can afford.
             conn, relay = service_tunnel(
-                iterator=bee.parse_from_buffer(
-                    request_iterator=request_iterator,
-                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
-                    partitions_message_mode={1: True, 0: True}
+                iterator=BeeClient.parse(
+                    request_iterator,
+                    indices=rpc_input("ServiceTunnel"),
+                    partitions_message_mode={1: True, 0: True},
                 ),
                 is_active=context.is_active,
+                caller=context.peer(),
             )
         except TunnelError as e:
             log.LOGGER(f'Tunnel refused: {e}')
@@ -319,14 +345,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
             return
 
         try:
-            yield from bee.serialize_to_buffer(
+            yield from BeeClient.respond(
                     message_iterator=relay,
-                    # Mirrors the input map. Declaring a second index also keeps
-                    # bee_rpc from inferring the index off the first message, which
-                    # it does by calling next() unguarded — a service that closes
-                    # without replying would surface as a RuntimeError instead of an
-                    # empty stream.
-                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
+                    indices=rpc_output("ServiceTunnel"),
             )
         finally:
             # The socket is opened eagerly inside service_tunnel; guarantee it is
@@ -340,3 +361,25 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)
+
+    def Chat(self, request_iterator, context, **kwargs):
+        message = BeeClient.parse_one(
+            request_iterator, indices=rpc_input("Chat"), timeout=simple_rpc_timeout_seconds(),
+        )
+        if message is None:
+            raise Exception("Chat needs a ChatMessage.")
+        try:
+            peer_id = receive_chat_message(message)
+        except ChatError as e:
+            # Refused, not raised: the sender learns *why* it was not stored --
+            # unknown/unassociated client_id, empty or oversize body -- the same
+            # way it would by reading its own sent history, only immediately.
+            # An exception here is reserved for what ChatAck cannot explain: a
+            # malformed request, not a message this RPC understood and rejected.
+            log.LOGGER(f"Chat message from {context.peer()} refused: {e}")
+            yield from BeeClient.respond(
+                celaut_pb2.ChatAck(stored=False, reason=str(e))
+            )
+            return
+        log.LOGGER(f"Chat message accepted from peer {peer_id}.")
+        yield from BeeClient.respond(celaut_pb2.ChatAck(stored=True))

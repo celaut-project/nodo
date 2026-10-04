@@ -67,7 +67,7 @@ class FixedPriceSource:
         if price < 0:
             price = 0.0
         self._price = price
-        self._currency = (currency or "EUR").strip() or "EUR"
+        self._currency = (currency or "USD").strip() or "USD"
 
     def current(self) -> Tariff:
         return Tariff(

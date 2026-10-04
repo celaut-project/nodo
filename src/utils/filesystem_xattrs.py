@@ -4,7 +4,9 @@ import os
 import stat
 import tarfile
 from dataclasses import dataclass
-from typing import Any, List, Mapping, MutableMapping, Optional
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional
+
+from src.utils import keyvalue
 
 MODE_KEY = "mode"
 UID_KEY = "uid"
@@ -24,7 +26,7 @@ FILESYSTEM_METADATA_KEYS = (
     DEVICE_IS_BLOCK_KEY,
 )
 
-# `Filesystem.xattrs` -- the map on the tree itself, not on one of its entries.
+# `Filesystem.xattrs` -- the entry list on the tree itself, not on one of its entries.
 # Only the Filesystem referenced directly by `Container.filesystem` is read: a
 # nested one (a subdirectory, reached through `ItemBranch.item.filesystem`) is
 # not separately mounted, so nothing there could be honoured.
@@ -171,19 +173,24 @@ def implicit_directory_metadata() -> FilesystemNodeMetadata:
     )
 
 
+def filesystem_metadata_xattrs(metadata: FilesystemNodeMetadata) -> Dict[str, bytes]:
+    """The xattrs that carry ``metadata``, ready for ``keyvalue.update``/``from_dict``."""
+    return {
+        MODE_KEY: str(metadata.mode).encode("utf-8"),
+        UID_KEY: str(metadata.uid).encode("utf-8"),
+        GID_KEY: str(metadata.gid).encode("utf-8"),
+        MTIME_NS_KEY: str(metadata.mtime_ns).encode("utf-8"),
+        DEVICE_MAJOR_KEY: str(metadata.device_major).encode("utf-8"),
+        DEVICE_MINOR_KEY: str(metadata.device_minor).encode("utf-8"),
+        DEVICE_IS_BLOCK_KEY: b"1" if metadata.device_is_block else b"0",
+    }
+
+
 def encode_filesystem_metadata_xattrs(
     xattrs: MutableMapping[str, bytes],
     metadata: FilesystemNodeMetadata,
 ) -> None:
-    xattrs[MODE_KEY] = str(metadata.mode).encode("utf-8")
-    xattrs[UID_KEY] = str(metadata.uid).encode("utf-8")
-    xattrs[GID_KEY] = str(metadata.gid).encode("utf-8")
-    xattrs[MTIME_NS_KEY] = str(metadata.mtime_ns).encode("utf-8")
-    xattrs[DEVICE_MAJOR_KEY] = str(metadata.device_major).encode("utf-8")
-    xattrs[DEVICE_MINOR_KEY] = str(metadata.device_minor).encode("utf-8")
-    xattrs[DEVICE_IS_BLOCK_KEY] = (
-        b"1" if metadata.device_is_block else b"0"
-    )
+    xattrs.update(filesystem_metadata_xattrs(metadata))
 
 
 def parse_filesystem_metadata_xattrs(
@@ -262,7 +269,7 @@ def read_mode(filesystem: Any) -> str:
     Read only from the tree's own ``xattrs``; pass the Filesystem that
     ``Container.filesystem`` points at, not one of its subdirectories.
     """
-    xattrs = getattr(filesystem, "xattrs", None) or {}
+    xattrs = keyvalue.to_dict(getattr(filesystem, "xattrs", None) or [])
     if READ_MODE_KEY not in xattrs:
         return READ_MODE_RW
 
@@ -315,7 +322,7 @@ def assert_complete_filesystem_metadata(
             f"{parent_rel_path.rstrip('/')}/{name}" if name else parent_rel_path
         )
 
-        missing = missing_metadata_keys(getattr(branch, "xattrs", None) or {})
+        missing = missing_metadata_keys(keyvalue.to_dict(getattr(branch, "xattrs", None) or []))
         if missing:
             raise ValueError(
                 f"incomplete filesystem metadata at '{rel_path}': missing "

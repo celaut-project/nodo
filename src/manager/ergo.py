@@ -6,14 +6,44 @@ from src.utils.logger import LOGGER as logger
 from concurrent.futures import ThreadPoolExecutor
 
 from src.utils.network import internet_available
+from src.utils.ergo_node_url import ergo_node_url_problem, is_valid_ergo_node_url
 
 env_manager = ConfigManager()
+
+#: Ergo mainnet's conventional P2P port. Not a setting: a node's own P2P address is
+#: never reported by anything this node can ask directly (see ``_p2p_address``
+#: below, fed from the ``/peers/connected`` crawl -- the only place it is genuinely
+#: *observed*), so this is the last-resort guess ``pow_networks._p2p_uri_for`` makes
+#: for a candidate nobody's crawl ever saw on the wire: ``ledgers.ergo.NODE_URL``,
+#: ``service_networks.default_instances``, or a peer's own ``ResolveNetwork``
+#: answer. 9030 is what the reference node ships with, and observation bears that
+#: out without making it a rule -- of 58 peers on one live mainnet node, 53 were on
+#: 9030 and five were not (9020, 9029, 9031, 1540). Those five are exactly why an
+#: observed port always wins over this one, and why guessing wrong for them is an
+#: accepted cost rather than something an operator is asked to tune away: nothing
+#: here can tell which five nodes exist to bias the guess towards.
+MAINNET_P2P_PORT = 9030
+
+#: Ergo mainnet's conventional REST API port. Used the same way as
+#: :data:`MAINNET_P2P_PORT`: a peer suggested over ``Gateway.ResolveNetwork``
+#: (``pow_networks._peer_suggested_endpoints``) is only ever known by its **P2P**
+#: address -- that is the only uri this node (or any other following the same
+#: convention) ever emits for a ``pow:ergo`` candidate, to a peer or to a guest alike
+#: (see :data:`MAINNET_P2P_PORT`'s own docstring). Verifying a PoW requirement needs
+#: the REST API, which that suggestion never carries, so the same host is tried on
+#: this default instead -- one more guess, no better founded than the P2P one, and
+#: dropped by the same verification like any other candidate if it is wrong.
+MAINNET_REST_PORT = 9053
 
 
 def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
     ergo_node_url = env_manager.get("ledgers.ergo.NODE_URL") if not url else url
+    problem = ergo_node_url_problem(ergo_node_url)
+    if problem:
+        logger(f"Cannot check the Ergo node: {problem}")
+        return None
     try:
-        info_url = f"{ergo_node_url}/info"
+        info_url = f"{str(ergo_node_url).strip().rstrip('/')}/info"
         response = requests.get(info_url)
         response.raise_for_status() 
 
@@ -74,7 +104,7 @@ def get_refresh_peers() -> Dict[str, Dict]:
         peers = json.load(f)
         
     current_node = env_manager.get("ledgers.ergo.NODE_URL")
-    if current_node not in peers:
+    if is_valid_ergo_node_url(current_node) and current_node not in peers:
         peers[current_node] = {}
     
     available_peers = {}
@@ -108,8 +138,11 @@ def get_refresh_peers() -> Dict[str, Dict]:
     with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(fetch_peers, peers.keys())
     
-    with open(http_peers_file, 'w') as f:
-        json.dump(available_peers, f)
+    # A crawl that reached nobody learned nothing, so it must not erase what the last
+    # one found: those entries are the only seeds the next attempt has.
+    if available_peers:
+        with open(http_peers_file, 'w') as f:
+            json.dump(available_peers, f)
         
     return available_peers
     
@@ -121,8 +154,9 @@ def check_ergo_node_availability():
     - Retrieves the current Ergo node URL from the environment.
     - Checks if the current Ergo node is available.
     - If not available, logs the unavailability and fetches a list of refreshed available peers.
-    - If no available peers are found and the current node URL has not been manually changed,
-      logs the absence of available nodes and clears the "ledgers.ergo.NODE_URL" environment variable.
+    - If no available peers are found, keeps the current value: an unreachable node
+      may come back, while an empty one never does (it used to be cleared here, which
+      left every later Ergo request aimed at the relative URL "/info" -- #441).
     - If available peers are found, updates the "ledgers.ergo.NODE_URL" environment variable with the
       first available peer and logs the update.
     Note: Check for equality in case it has been manually changed.
@@ -138,10 +172,11 @@ def check_ergo_node_availability():
     logger(f"Ergo node {current_ergo_node} is not available.")
     availables = get_refresh_peers()  # New refreshed available peers.
     
-    if not availables and current_ergo_node == env_manager.get("ledgers.ergo.NODE_URL"): 
-        logger("No available Ergo nodes found.")
-        env_manager.set("ledgers.ergo.NODE_URL", "")
+    if not availables:
+        logger("No available Ergo nodes found; keeping ledgers.ergo.NODE_URL as it is.")
         return
+    if current_ergo_node != env_manager.get("ledgers.ergo.NODE_URL"):
+        return  # Changed by hand while we were crawling; that choice wins.
     
     new_ergo_node_url = next(iter(availables))
     env_manager.set("ledgers.ergo.NODE_URL", new_ergo_node_url)

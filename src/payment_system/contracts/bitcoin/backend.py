@@ -1,14 +1,11 @@
 """Bitcoin Core over JSON-RPC. The only thing in this package that touches a network.
 
-An operator who wants to be paid in Bitcoin runs a Bitcoin node -- the same posture the
-project takes everywhere else, and the reason this needs **no new heavyweight
-dependency and no JVM**. Core signs, broadcasts, counts confirmations and keeps the
-watch-only view of the receiving address; nothing here holds a key or builds a script.
+Core signs, broadcasts, counts confirmations and keeps the watch-only view of the
+receiving address; nothing here holds a key or builds a script. That is the `core` and
+`service` backends -- `explorer` signs in this process instead (see ``signer.py``).
 
 The surface is deliberately narrow, and named for what the payment flow asks rather than
-for Core's method names, so a read-only HTTP backend (`explorer`) can be put behind the
-same calls later for a node that only wants to *receive*. That is not implemented here;
-the door is just left open.
+for Core's method names, which is what let ``explorer`` answer the same calls over HTTP.
 
 Two rules this module keeps:
 
@@ -68,7 +65,7 @@ class ChainBackend:
     ``receive_address``, ``new_address``, ``send_to``, ``send_many`` -- is what the
     payment flow asks for. A different
     implementation of it is a different way to reach Bitcoin, not a different contract:
-    see ``explorer.py``, which implements the read half and refuses the rest.
+    see ``explorer.py``, which answers the same calls over HTTP and signs locally.
     """
 
     #: This backend holds a wallet, so it can sign and broadcast.

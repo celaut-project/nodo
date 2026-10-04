@@ -30,12 +30,30 @@ def connect_to_database(db_file):
 # carrying what a peer declares node-wide (payment contracts and rates). Its
 # addresses live in the `uri` table, one row each, since they are queried by
 # ip/port rather than read back as a whole.
+#
+# `remote_client_id` and `local_client_id` are the two ends of the *same* client
+# relationship, read from opposite sides. `remote_client_id` is the client_id THIS
+# node was handed when it registered as a client of that peer's own gateway
+# (get_client_id_on_other_peer) -- this node is the caller there. `local_client_id`
+# is the reverse: the client_id THIS node handed out, on some earlier
+# `GenerateClient`, to whichever caller that peer turned out to be -- this node is
+# the callee there. `local_client_id` is set at that exact moment, not discovered
+# later: a peer that wants to be recognised signs its own identity over the
+# client_id it is requesting (`Client.peer_id`/`signature`,
+# `node_identity.client_binding_payload`, verified in `manager._created_client`)
+# in the very call that mints it, since that is the one place the id and a
+# verifiable claimant exist together and nothing has to be taken on trust
+# afterwards. A peer that never asserts its identity there -- most callers never
+# do; see docs/CONCEPTS.md's "Peers and clients" -- simply stays unassociated,
+# same as `remote_client_id` stays unset for a peer this node has never needed to
+# call.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
             id TEXT PRIMARY KEY,
             advertisement BLOB,
             remote_client_id TEXT,
+            local_client_id TEXT,
             balance_mu TEXT,
             balance_last_update DATETIME DEFAULT NULL,
             reputation_score INTEGER,
@@ -457,6 +475,50 @@ TABLES = {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (ledger, subject_id, proof_id)
         )
+    ''',
+    # One row per Chat message, either side (`from_us` tells which). `body` is
+    # capped in code before this ever runs (chat.MAX_MESSAGE_BYTES), and
+    # `add_chat_message` prunes a peer's own oldest rows past
+    # chat.MAX_STORED_MESSAGES_PER_PEER on every insert -- both bounds exist
+    # because a message here came from a peer this node did not choose, same as
+    # `guest_env`'s MAX_VALUE_BYTES caps a value the guest did not choose. Without
+    # them, either a single long message or a peer that never stops sending would
+    # grow this table without limit.
+    "peer_chat_messages": '''
+        CREATE TABLE IF NOT EXISTS peer_chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            from_us INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            conversation_id TEXT DEFAULT NULL,
+            service_id TEXT DEFAULT NULL,
+            service_metadata BLOB DEFAULT NULL,
+            FOREIGN KEY (peer_id) REFERENCES peer (id),
+            FOREIGN KEY (conversation_id) REFERENCES peer_chat_conversations (id)
+        )
+    ''',
+    # One row per conversation (issue #431), keyed by the `conversation_id` its
+    # messages carry. `opened_by_us` is what tells the two TUI pages apart: this
+    # node picked the id (a thread we started) versus a peer picked it and this
+    # node only learned of it on the first message that named it (a thread one of
+    # our clients started with us) -- `receive_chat_message` creates the row in the
+    # latter case, `chat.open_conversation` in the former. `topic` is free text set
+    # once, at open, purely a label for the TUI's conversation list; it is never
+    # compared or enforced. Closing is a local bookkeeping act with no message of
+    # its own on the wire: nothing here requires the other side's agreement to stop
+    # showing a thread as open, the same way archiving an email thread does not.
+    "peer_chat_conversations": '''
+        CREATE TABLE IF NOT EXISTS peer_chat_conversations (
+            id TEXT PRIMARY KEY,
+            peer_id TEXT NOT NULL,
+            opened_by_us INTEGER NOT NULL,
+            topic TEXT,
+            opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            closed_at DATETIME DEFAULT NULL,
+            FOREIGN KEY (peer_id) REFERENCES peer (id)
+        )
     '''
 }
 
@@ -478,6 +540,17 @@ INDEXES = (
     # and the indexer replaces one subject's rows at a time.
     "CREATE INDEX IF NOT EXISTS idx_onchain_opinions_subject "
     "ON onchain_opinions (ledger, subject_id)",
+    # A conversation is always read for one peer, newest last (get_chat_messages);
+    # the prune on insert is the same query with the direction reversed.
+    "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_peer "
+    "ON peer_chat_messages (peer_id, id)",
+    # get_conversation_messages reads one conversation_id, oldest first.
+    "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_conversation "
+    "ON peer_chat_messages (conversation_id, id)",
+    # list_conversations reads one peer's threads, and filters by who opened them
+    # (the two TUI pages: ours, and our clients').
+    "CREATE INDEX IF NOT EXISTS idx_peer_chat_conversations_peer "
+    "ON peer_chat_conversations (peer_id, opened_by_us, opened_at)",
 )
 
 
@@ -549,6 +622,15 @@ def create_tables(cursor):
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
         "advertisement": "BLOB DEFAULT NULL",
+        "local_client_id": "TEXT DEFAULT NULL",
+    })
+    # A service shared in the message (issue #438, `ChatMessage.service`): its
+    # serialized Metadata, and the registry id this node derived from it (NULL when
+    # the Metadata has no hash of this node's type). NULL on every ordinary message.
+    ensure_columns(cursor, "peer_chat_messages", {
+        "conversation_id": "TEXT DEFAULT NULL",
+        "service_id": "TEXT DEFAULT NULL",
+        "service_metadata": "BLOB DEFAULT NULL",
     })
     # What a payment was *for*, as opposed to how far it got. A donation this node
     # paid out of its own earnings is not a payment to a peer, and `status` cannot say
@@ -567,6 +649,7 @@ def create_tables(cursor):
     })
     retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
+    forget_peer_rates_per_whole_unit(cursor)
 
 
 def retire_slot_table(cursor) -> None:
@@ -623,6 +706,42 @@ def ensure_peer_address_uniqueness(cursor) -> None:
         )
     except sqlite3.Error as e:
         print(f"Error enforcing peer address uniqueness: {e}")
+
+
+def forget_peer_rates_per_whole_unit(cursor) -> None:
+    """Clear every peer's stored ``contract_instance.mu_per_unit``, once.
+
+    ``ContractRate.mu_per_unit`` used to be MU per whole unit (1e9 per ERG by default)
+    and is now MU per base unit (nanoERG, satoshi, a token's smallest unit). Nothing on
+    the wire marked the change, so a stored peer rate cannot be told apart from a new
+    one: read as per base unit, an old one is wrong by 10^9 (10^8 on Bitcoin). They are
+    set to NULL -- "no rate known", which every reader already handles -- and each peer's
+    next announcement stores its rate again; one from a node that still announces per
+    whole unit is refused, as it declares no ledger (``manager._accept_contract``).
+
+    This node's own rows (``peer_id = 'LOCAL'``) are not touched: they are written from
+    its own config at startup. Run once, recorded in ``applied_migrations``: after it, a
+    stored rate is per base unit and must survive a restart.
+    """
+    name = "peer_mu_per_unit_is_per_base_unit"
+    try:
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS applied_migrations "
+            "(name TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+        )
+        cursor.execute("SELECT 1 FROM applied_migrations WHERE name = ?", (name,))
+        if cursor.fetchone():
+            return
+        cursor.execute(
+            "UPDATE contract_instance SET mu_per_unit = NULL WHERE peer_id != 'LOCAL'"
+        )
+        cleared = cursor.rowcount
+        cursor.execute("INSERT INTO applied_migrations (name) VALUES (?)", (name,))
+        if cleared:
+            print(f"Cleared {cleared} peer rate(s) stored per whole unit; "
+                  "peers announce them again per base unit.")
+    except sqlite3.Error as e:
+        print(f"Error clearing peer rates stored per whole unit: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:

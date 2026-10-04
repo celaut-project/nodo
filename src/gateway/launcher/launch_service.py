@@ -21,6 +21,13 @@ from src.utils.shared_filesystems import service_requires_parent_colocation
 
 sc = SQLConnection()
 
+# The forced-peer hint that pins a launch to THIS node instead of a peer: the balancer's
+# own name for the local candidate. A peer id is a public key in hex, so no peer can be
+# called this. Set by a measurement that is only meaningful here -- the benchmark core
+# service (src/core_services/benchmark.py) scores the node that runs it, and a peer that
+# won the cost comparison would hand back that peer's numbers as ours.
+FORCED_LOCAL = 'local'
+
 
 def _detect_local_preflight_failure(
         service: celaut.Service,
@@ -38,7 +45,9 @@ def _detect_local_preflight_failure(
         if estimated_cost:
             return None
 
-        availability = get_resource_availability(service.container.resources)
+        availability = get_resource_availability(
+            service.container.resources, arch=get_arch_tag(service=service, metadata=metadata)
+        )
         return availability.get("reason") or "Local execution was rejected due to insufficient resources."
     except UnsupportedArchitectureException as exc:
         return str(exc)
@@ -150,11 +159,13 @@ def launch_service(
         service_id: str = None,
         configuration: Optional[celaut_pb2.Configuration] = None,
         recursion_guard_token: str = None,
+        recursion_guard_hops: Optional[int] = None,
 ) -> celaut_pb2.ServiceInstance:
 
     with RecursionGuard(
             token=recursion_guard_token,
-            generate=bool(father_id)  # Use only if is from outside.
+            generate=bool(father_id),  # Use only if is from outside.
+            remaining_hops=recursion_guard_hops,
     ) as recursion_guard_token:
 
         # Check father id.
@@ -253,7 +264,10 @@ def launch_service(
         # one launch. No fallback to the balancer if this fails: forced means
         # forced.
         forced_peer = sc.pop_forced_execution_peer(recursion_guard_token) if recursion_guard_token else None
-        if forced_peer:
+        pin_local = forced_peer == FORCED_LOCAL
+        if pin_local:
+            log.LOGGER(f"Service {service_id} is pinned to the local node (no delegation).")
+        elif forced_peer:
             return _force_delegate(
                 forced_peer=forced_peer,
                 service=service,
@@ -307,6 +321,9 @@ def launch_service(
                     log.LOGGER(
                         f"Skipping peer {peer}: service must be co-located with its parent."
                     )
+                    continue
+                if pin_local and peer != 'local':
+                    log.LOGGER(f"Skipping peer {peer}: this launch is pinned to the local node.")
                     continue
 
                 log.LOGGER(f'Service balancer select peer {peer}')

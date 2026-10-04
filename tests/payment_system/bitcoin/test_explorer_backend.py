@@ -1,67 +1,255 @@
-"""Being paid in BTC without running anything, and never pretending it can pay.
+"""Reaching Bitcoin over a public API while signing locally, like Ergo.
 
-Ergo's posture is a remote public node plus a local key, so an operator runs no Ergo
-infrastructure. Bitcoin Core over RPC is the opposite -- Core signs, so it has to be a
-node you would hand your wallet to -- and requiring that of anyone who merely wants to
-*receive* BTC is a heavier ask than this project makes anywhere else.
-
-This backend closes that gap for the receiving side only, and the tests that matter are
-the refusals: a backend that cannot sign must say so where the payer can act on it,
-not somewhere in the middle of a payment.
+The explorer answers questions about the chain and relays what it is handed; the key is
+derived from the mnemonic and every transaction is built and signed here. So the tests
+that matter are the ones about what crosses that boundary: the transaction that is posted,
+the outputs it is allowed to spend, and what is believed about the answer.
 """
 import unittest
 from unittest import mock
 
 IMPORT_ERROR = None
 try:
-    from src.payment_system.contracts.bitcoin import explorer
+    from src.payment_system.contracts.bitcoin import explorer, signer
     from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
+    from src.utils.bitcoin_units import script_pubkey_from_address
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     explorer = None  # type: ignore[assignment]
 
 ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+OTHER = "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"
+MNEMONIC = (
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon "
+    "abandon about"
+)
+# The first BIP-84 address for MNEMONIC.
+OWN = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu"
 
 
-def _backend(responses):
-    """An explorer backend whose HTTP reads are answered from ``responses``."""
-    chain = explorer.ExplorerBackend("https://example.invalid/api")
+def _wallet(network="mainnet"):
+    return signer.derive_wallet_key(MNEMONIC, "", network)
+
+
+def _backend(responses, posts=None, post_answer=None):
+    """An explorer backend whose HTTP is answered from ``responses``.
+
+    Reads come from the dict by path; writes are appended to ``posts`` and answered with
+    ``post_answer`` (the txid of what was posted, when it is not given).
+    """
+    chain = explorer.ExplorerBackend("https://example.invalid/api", wallet=_wallet())
     chain._get = lambda path: responses.get(path)  # type: ignore[assignment]
+
+    def _post(path, body):
+        if posts is not None:
+            posts.append((path, body))
+        return post_answer if post_answer is not None else _txid_of(body)
+
+    chain._post = _post  # type: ignore[assignment]
     return chain
 
 
+def _txid_of(raw_hex):
+    import hashlib
+
+    raw = bytes.fromhex(raw_hex)
+    # Strip marker, flag and witnesses to the legacy serialisation the txid hashes.
+    from tests.payment_system.bitcoin.test_signer import parse
+
+    inputs, outputs, witnesses = parse(raw_hex)
+    body = raw[:4] + raw[6:-4 - sum(
+        1 + sum(len(signer._varint(len(i))) + len(i) for i in stack) for stack in witnesses
+    )] + raw[-4:]
+    return hashlib.sha256(hashlib.sha256(body).digest()).digest()[::-1].hex()
+
+
+def _utxo(txid_byte, value, height=900_000, vout=0):
+    return {
+        "txid": f"{txid_byte:02x}" * 32, "vout": vout, "value": value,
+        "status": {"confirmed": height is not None, **(
+            {"block_height": height} if height is not None else {}
+        )},
+    }
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class ReadOnlyTests(unittest.TestCase):
+class WalletTests(unittest.TestCase):
 
-    def test_it_declares_that_it_cannot_pay(self):
-        # The payer reads this, not an exception: funding is the selection, so a system
-        # that cannot sign has no funding and the walk moves on.
-        self.assertFalse(explorer.ExplorerBackend("x").can_pay)
+    def test_it_can_pay_because_it_holds_a_key(self):
+        self.assertTrue(_backend({}).can_pay)
 
-    def test_every_write_refuses_with_the_reason_and_the_fix(self):
-        chain = explorer.ExplorerBackend("x")
-        for call in (
-            lambda: chain.new_address(),
-            lambda: chain.send_to(ADDRESS, 1_000),
-            lambda: chain.send_many([(ADDRESS, 1_000)]),
-        ):
-            with self.subTest(call=call):
-                with self.assertRaises(BackendUnavailable) as raised:
-                    call()
-                self.assertIn("read-only", str(raised.exception))
-                self.assertIn("BACKEND: core", str(raised.exception))
+    def test_the_address_is_derived_and_never_minted(self):
+        chain = _backend({})
+        self.assertEqual(chain.receive_address(), OWN)
+        # Asking to mint is asking for the same address: the advertised script is one
+        # fixed scriptPubKey, and another index would strand payments aimed at the first.
+        self.assertEqual(chain.new_address(), OWN)
 
-    def test_the_balance_is_the_addresss_confirmed_funds(self):
+    def test_the_balance_is_the_wallets_confirmed_outputs(self):
         chain = _backend({
-            f"/address/{ADDRESS}": {
-                "chain_stats": {"funded_txo_sum": 150_000, "spent_txo_sum": 50_000},
-                # Unconfirmed money is not a balance: `chain_stats` excludes it, and
-                # this must not start adding it in.
-                "mempool_stats": {"funded_txo_sum": 999_999, "spent_txo_sum": 0},
-            }
+            "/blocks/tip/height": 900_010,
+            f"/address/{OWN}/utxo": [
+                _utxo(1, 100_000), _utxo(2, 50_000, height=900_005),
+                # Unconfirmed money is not a balance, and must not start being one.
+                _utxo(3, 999_999, height=None),
+            ],
         })
-        with mock.patch.object(explorer, "_receiving_address", return_value=ADDRESS):
-            self.assertEqual(chain.get_balance(), 100_000)
+        self.assertEqual(chain.get_balance(), 150_000)
+
+    def test_a_deeper_threshold_than_confirmed_is_honoured(self):
+        chain = _backend({
+            "/blocks/tip/height": 900_010,
+            f"/address/{OWN}/utxo": [_utxo(1, 100_000, height=900_000),
+                                     _utxo(2, 50_000, height=900_009)],
+        })
+        self.assertEqual(chain.get_balance(min_conf=3), 100_000)
+
+    def test_a_tip_it_could_not_read_leaves_nothing_spendable(self):
+        # "I could not tell" must never read as "deep enough".
+        chain = _backend({
+            "/blocks/tip/height": None,
+            f"/address/{OWN}/utxo": [_utxo(1, 100_000)],
+        })
+        self.assertEqual(chain.get_balance(), 0)
+
+    def test_an_empty_wallet_has_no_balance(self):
+        self.assertEqual(_backend({"/blocks/tip/height": 900_010}).get_balance(), 0)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class SendTests(unittest.TestCase):
+
+    def _funded(self, *utxos, **kwargs):
+        posts = []
+        chain = _backend({
+            "/blocks/tip/height": 900_010,
+            f"/address/{OWN}/utxo": list(utxos) or [_utxo(1, 200_000)],
+        }, posts, **kwargs)
+        return chain, posts
+
+    def test_it_signs_locally_and_relays_the_raw_transaction(self):
+        chain, posts = self._funded()
+        txid = chain.send_to(ADDRESS, 30_000, fee_rate_sat_vb=5.0, op_return=b"token-1")
+        [(path, body)] = posts
+        self.assertEqual(path, "/tx")
+        self.assertEqual(txid, _txid_of(body))
+        from tests.payment_system.bitcoin.test_signer import parse
+        inputs, outputs, [witness] = parse(body)
+        self.assertEqual(inputs, [("01" * 32, 0)])
+        self.assertEqual(outputs[0], (30_000, script_pubkey_from_address(ADDRESS)))
+        self.assertEqual(outputs[1], (0, b"\x6a\x07token-1"))
+        self.assertEqual(outputs[2][1], _wallet().script_pubkey)  # change, to itself
+        self.assertEqual(witness[1], _wallet().public_key)
+
+    def test_unconfirmed_outputs_are_never_spent(self):
+        chain, posts = self._funded(_utxo(1, 999_999, height=None), _utxo(2, 100_000))
+        chain.send_to(ADDRESS, 30_000, fee_rate_sat_vb=5.0)
+        from tests.payment_system.bitcoin.test_signer import parse
+        inputs, _, _ = parse(posts[0][1])
+        self.assertEqual(inputs, [("02" * 32, 0)])
+
+    def test_one_transaction_pays_every_wallet_in_a_split(self):
+        chain, posts = self._funded()
+        chain.send_many([(ADDRESS, 30_000), (OTHER, 20_000)], fee_rate_sat_vb=5.0)
+        self.assertEqual(len(posts), 1)
+
+    def test_a_sweep_subtracts_the_fee_from_the_amount(self):
+        chain, posts = self._funded(_utxo(1, 1_000_000))
+        chain.send_to(OTHER, 600_000, fee_rate_sat_vb=5.0, subtract_fee_from_amount=True)
+        from tests.payment_system.bitcoin.test_signer import parse
+        _, outputs, _ = parse(posts[0][1])
+        self.assertLess(outputs[0][0], 600_000)
+        self.assertEqual(outputs[1], (400_000, _wallet().script_pubkey))
+
+    def test_insufficient_funds_sends_nothing_and_says_so(self):
+        chain, posts = self._funded(_utxo(1, 10_000))
+        with self.assertRaises(BackendUnavailable) as raised:
+            chain.send_to(ADDRESS, 30_000, fee_rate_sat_vb=5.0)
+        self.assertIn("insufficient funds", str(raised.exception))
+        self.assertEqual(posts, [])
+
+    def test_an_address_for_another_network_sends_nothing(self):
+        chain, posts = self._funded()
+        with self.assertRaises(BackendUnavailable) as raised:
+            chain.send_to("tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx", 30_000,
+                          fee_rate_sat_vb=5.0)
+        self.assertIn("not a valid mainnet address", str(raised.exception))
+        self.assertEqual(posts, [])
+
+    def test_a_refused_broadcast_is_an_error_carrying_the_reason(self):
+        chain, _ = self._funded()
+
+        def refuse(path, body):
+            raise BackendUnavailable("explorer /tx: HTTP 400 min relay fee not met")
+
+        chain._post = refuse  # type: ignore[assignment]
+        with self.assertRaisesRegex(BackendUnavailable, "min relay fee"):
+            chain.send_to(ADDRESS, 30_000, fee_rate_sat_vb=5.0)
+
+    def test_a_txid_the_explorer_disagrees_about_is_not_a_success(self):
+        """What was recorded must be what the explorer says, or it is not recorded."""
+        chain, _ = self._funded(post_answer="ab" * 32)
+        with self.assertRaisesRegex(BackendUnavailable, "answered"):
+            chain.send_to(ADDRESS, 30_000, fee_rate_sat_vb=5.0)
+
+    def test_the_post_error_repeats_a_bounded_excerpt_of_the_servers_prose(self):
+        class Response:
+            status_code = 400
+            text = "x" * 5_000
+
+        chain = explorer.ExplorerBackend("https://example.invalid/api", wallet=_wallet())
+        with mock.patch.object(explorer.requests, "post", return_value=Response()):
+            with self.assertRaises(BackendUnavailable) as raised:
+                chain._post("/tx", "00")
+        self.assertLess(len(str(raised.exception)), explorer.ERROR_EXCERPT + 100)
+
+    def test_nothing_to_send_is_refused(self):
+        with self.assertRaises(BackendUnavailable):
+            self._funded()[0].send_many([], fee_rate_sat_vb=5.0)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class HistoryTests(unittest.TestCase):
+
+    def _history(self, transactions):
+        chain = _backend({
+            "/blocks/tip/height": 900_010,
+            f"/address/{OWN}/txs": transactions,
+        })
+        return chain.list_transactions(10)
+
+    def test_a_payment_to_the_wallet_is_a_receive(self):
+        [row] = self._history([{
+            "txid": "in", "status": {"confirmed": True, "block_height": 900_000,
+                                      "block_time": 1_700_000_000},
+            "vin": [{"prevout": {"scriptpubkey_address": ADDRESS, "value": 90_000}}],
+            "vout": [{"scriptpubkey_address": OWN, "value": 60_000},
+                     {"scriptpubkey_address": ADDRESS, "value": 29_000}],
+        }])
+        self.assertEqual(row["category"], "receive")
+        self.assertEqual(row["amount"], 0.0006)
+        self.assertEqual(row["confirmations"], 11)
+
+    def test_a_payment_the_wallet_made_is_a_send_for_what_left_it(self):
+        [row] = self._history([{
+            "txid": "out", "status": {"confirmed": False},
+            "vin": [{"prevout": {"scriptpubkey_address": OWN, "value": 200_000}}],
+            "vout": [{"scriptpubkey_address": ADDRESS, "value": 30_000},
+                     {"scriptpubkey_type": "op_return", "value": 0},
+                     {"scriptpubkey_address": OWN, "value": 169_000}],
+        }])
+        # What went to somebody else: not the fee, not the change, not the OP_RETURN.
+        self.assertEqual(row["category"], "send")
+        self.assertEqual(row["amount"], -0.0003)
+        self.assertEqual(row["address"], ADDRESS)
+        self.assertEqual(row["confirmations"], 0)
+
+    def test_a_consolidation_that_pays_nobody_else_is_not_a_payment(self):
+        self.assertEqual(self._history([{
+            "txid": "self", "status": {"confirmed": True, "block_height": 1},
+            "vin": [{"prevout": {"scriptpubkey_address": OWN, "value": 100_000}}],
+            "vout": [{"scriptpubkey_address": OWN, "value": 99_000}],
+        }]), [])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -168,59 +356,58 @@ class FeeEstimateTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ConfigurationTests(unittest.TestCase):
 
-    def _reason(self, url="https://example.invalid/api", address=ADDRESS,
-                network="mainnet"):
+    def _values(self, **overrides):
         values = {
-            "ledgers.bitcoin.EXPLORER_URL": url,
-            "ledgers.bitcoin.NETWORK": network,
-            "ledgers.bitcoin.payments.COLD_WALLET": address,
+            "ledgers.bitcoin.EXPLORER_URL": "https://example.invalid/api",
+            "ledgers.bitcoin.NETWORK": "mainnet",
+            "ledgers.bitcoin.WALLET_MNEMONIC": MNEMONIC,
+            "ledgers.bitcoin.WALLET_PASSPHRASE": "",
         }
-        with mock.patch.object(
+        values.update(overrides)
+        return values
+
+    def _patched(self, values):
+        return mock.patch.object(
             explorer.ConfigManager(), "get",
             side_effect=lambda key, default=None: values.get(key, default),
-        ):
+        )
+
+    def _reason(self, **overrides):
+        with self._patched(self._values(**overrides)):
             return explorer.configuration_reason()
 
     def test_a_configured_backend_is_usable(self):
         self.assertIsNone(self._reason())
 
     def test_no_url_is_named(self):
-        self.assertIn("EXPLORER_URL", self._reason(url=""))
+        self.assertIn("EXPLORER_URL", self._reason(**{"ledgers.bitcoin.EXPLORER_URL": ""}))
 
-    def test_a_read_only_backend_is_paid_at_the_cold_wallet(self):
-        """The cold wallet is the address, so it is the one the reason names.
+    def test_no_cold_wallet_is_needed_to_be_offered(self):
+        # Payers are sent to the node's own wallet; the cold wallet is only a sweep target.
+        self.assertIsNone(self._reason(**{"ledgers.bitcoin.payments.COLD_WALLET": ""}))
 
-        Nothing here can mint an address, and there is nothing to mint *into*: with no
-        key there is no hot wallet holding a working balance, and no sweep to cold
-        later. So payers are sent to the cold wallet, and an unset one is what stops
-        the contract being offered.
-        """
-        reason = self._reason(address="")
-        self.assertIn("COLD_WALLET", reason)
-        self.assertIn("read-only", reason)
+    def test_an_empty_mnemonic_is_named(self):
+        self.assertIn("WALLET_MNEMONIC", self._reason(**{"ledgers.bitcoin.WALLET_MNEMONIC": ""}))
 
-    def test_a_non_segwit_cold_wallet_is_refused_with_the_reason(self):
-        # Its scriptPubKey is what peers are advertised, and this node builds P2WPKH.
-        reason = self._reason(address="1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")
-        self.assertIn("segwit", reason)
+    def test_an_invalid_mnemonic_is_named_without_repeating_it(self):
+        reason = self._reason(**{"ledgers.bitcoin.WALLET_MNEMONIC": "twelve words that are not real words ok"})
+        self.assertIn("WALLET_MNEMONIC", reason)
+        self.assertNotIn("twelve", reason)
 
-    def test_a_cold_wallet_for_another_network_is_refused(self):
-        # Being paid at an address this chain cannot pay to is the same mistake as
-        # sweeping savings to one, and it is caught in the same place.
-        self.assertIn("segwit", self._reason(network="testnet"))
+    def test_the_network_decides_the_address(self):
+        with self._patched(self._values(**{"ledgers.bitcoin.NETWORK": "testnet"})):
+            self.assertTrue(explorer.backend().address.startswith("tb1"))
+        with self._patched(self._values()):
+            self.assertEqual(explorer.backend().address, OWN)
 
-    def test_the_receiving_address_is_read_every_call(self):
-        # Nothing is stored, so a corrected cold wallet takes effect without a restart.
-        values = {"ledgers.bitcoin.payments.COLD_WALLET": ADDRESS}
-        with mock.patch.object(
-            explorer.ConfigManager(), "get",
-            side_effect=lambda key, default=None: values.get(key, default),
-        ):
-            self.assertEqual(explorer.receiving_address(), ADDRESS)
-            values["ledgers.bitcoin.payments.COLD_WALLET"] = ""
-            with self.assertRaises(BackendUnavailable) as raised:
-                explorer._receiving_address()
-        self.assertIn("COLD_WALLET", str(raised.exception))
+    def test_the_passphrase_is_part_of_the_wallet(self):
+        with self._patched(self._values(**{"ledgers.bitcoin.WALLET_PASSPHRASE": "hunter2"})):
+            self.assertNotEqual(explorer.backend().address, OWN)
+
+    def test_a_backend_cannot_be_built_without_a_url(self):
+        with self._patched(self._values(**{"ledgers.bitcoin.EXPLORER_URL": ""})):
+            with self.assertRaises(BackendUnavailable):
+                explorer.backend()
 
 
 if __name__ == "__main__":

@@ -107,6 +107,27 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 
 `doctor` also checks/repairs the `nodo.service` systemd unit; run it with `sudo`.
 
+## arm64: `CreateVgic` / `No such device (os error 19)`
+
+**Symptom:** every native arm64 launch dies at once with
+`Fatal error: VmBoot(... CreateInterruptController(CreateGic(CreateVgic(... No such device (os error 19)))))`;
+`nodo doctor` reports `[FAIL] KVM cannot create a GICv3`.
+
+**Why:** on arm64 Cloud Hypervisor only emulates a GICv3 with an ITS; it has no
+GICv2 support. KVM can only offer the vGIC its host has, so on a host whose
+interrupt controller is a GICv2 — the GIC-400 of a Raspberry Pi 4/5 and many other
+SoCs — or a nested/cloud VM that does not expose a vGICv3, the device does not
+exist. It is a host limitation: no service, config or nodo change boots a CH guest
+there. The node detects it at start and stops advertising `linux/arm64`, so peers
+route those services elsewhere instead of failing on it; QEMU-emulated foreign
+architectures are unaffected.
+
+**Fix:** run the node on an arm64 host with a GICv3 (Ampere, Graviton bare-metal,
+Apple Silicon under Asahi, ...). `dmesg | grep -i gic` shows which GIC a host has.
+The `Failed to mark pages as THP eligible (os error 22)` warning printed just before
+is unrelated and harmless: it only means the host kernel has no transparent
+hugepages.
+
 ## Guest kernel missing or rejected by Cloud Hypervisor
 
 **Symptom:** the installer fails downloading the guest kernel, initramfs or
@@ -260,7 +281,7 @@ control) — `mkdir -p /nodo/storage && touch /nodo/storage/.acceptedkya`. See
 
 ## Payment / reputation features error out
 
-**Symptom:** `nodo info` or payment/reputation actions report a Java dependency
+**Symptom:** bare `nodo` or payment/reputation actions report a Java dependency
 missing.
 
 **Why:** Java is **optional** and only required for Ergo-backed payment and

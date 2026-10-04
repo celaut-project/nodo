@@ -3,17 +3,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
 import secrets
 
-from bee_rpc import client as bee
-
 from src.manager.resources import IOBigData
-from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
-from protos.gateway_bee import GenerateClient_output_indices
+from protos import celaut_pb2
 
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.tunneling import delegated_endpoints
 
 from src.utils import logger as log
 from src.utils import utils
+from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 from src.utils.instance_names import normalize_instance_name, random_instance_name
 from src.identity.grpc_transport import node_channel, peer_channel
@@ -64,9 +62,7 @@ MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
 
 DEV_CLIENT_PREFIX = "dev-"
-EXTERNAL_DEV_CLIENT_PREFIX = "dev-external-"
 STANDARD_DEV_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_CLIENT_POOL_SIZE", 1))
-DEV_EXTERNAL_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_EXTERNAL_CLIENT_POOL_SIZE", 1))
 
 sc = SQLConnection()
 _INSTANCE_NAME_RANDOM = secrets.SystemRandom()
@@ -95,13 +91,9 @@ def reserve_instance_name(requested_name: Optional[str] = None) -> str:
     raise RuntimeError("Unable to generate a unique random instance name.")
 
 
-def is_external_execute_client(client_id: str) -> bool:
-    return str(client_id).startswith(EXTERNAL_DEV_CLIENT_PREFIX)
-
-
 def _get_dev_clients_by_prefix(prefix: str) -> List[str]:
-    if prefix == DEV_CLIENT_PREFIX:
-        return [client_id for client_id in sc.get_dev_clients() if not is_external_execute_client(client_id)]
+    # A `dev-external-<uuid>` row left over from the removed `execute --remote` pool
+    # still starts with `dev-`, so it is simply reused as an ordinary dev client.
     return [client_id for client_id in sc.get_dev_clients() if str(client_id).startswith(prefix)]
 
 
@@ -166,7 +158,6 @@ def _ensure_dev_client_pool(prefix: str, pool_size: int) -> List[str]:
 
 def ensure_dev_client_pools() -> None:
     _ensure_dev_client_pool(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE)
-    _ensure_dev_client_pool(EXTERNAL_DEV_CLIENT_PREFIX, DEV_EXTERNAL_CLIENT_POOL_SIZE)
 
 
 def _acquire_dev_client(prefix: str, pool_size: int, amount_mu: int) -> str:
@@ -199,19 +190,16 @@ def get_dev_clients(amount_mu: int) -> Generator[str, None, None]:
             yield client_id
 
 
-def get_execute_client(amount_mu: int, external: bool = False) -> str:
-    prefix = EXTERNAL_DEV_CLIENT_PREFIX if external else DEV_CLIENT_PREFIX
-    pool_size = DEV_EXTERNAL_CLIENT_POOL_SIZE if external else STANDARD_DEV_CLIENT_POOL_SIZE
-    return _acquire_dev_client(prefix, pool_size, amount_mu)
+def get_execute_client(amount_mu: int) -> str:
+    return _acquire_dev_client(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE, amount_mu)
             
 def is_dev_client_id(client_id: Optional[str]) -> bool:
     """Whether ``client_id`` names one of this node's own dev clients.
 
-    Covers both pools, since `dev-external-` is drawn from `dev-`. Existence in the
-    clients table is checked, not just the prefix: a client id arrives verbatim in the
-    request (see `AbstractInputServiceIterable`), so anything that grants a privilege on
-    the strength of one has to be sure this node issued it. The uuid4 in a real dev
-    client id is not guessable from outside.
+    Existence in the clients table is checked, not just the `dev-` prefix: a client id
+    arrives verbatim in the request (see `AbstractInputServiceIterable`), so anything
+    that grants a privilege on the strength of one has to be sure this node issued it.
+    The uuid4 in a real dev client id is not guessable from outside.
     """
     if not client_id:
         return False
@@ -365,14 +353,22 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
             # then fail in the handshake, with nothing in the error saying why, so the
             # address is skipped here and the reason logged from what the peer itself
             # declared. Only `formal` and the tags are read: prose is the same protocol
-            # worded differently (node_identity.same_component_stack).
-            declared = "; ".join(
-                " ".join(c.tags) + (f" formal={bytes(c.formal).hex()}" if c.formal else "")
-                for c in uri.protocol_stack
-            )
+            # worded differently (transport_stack.compatible_layer_stacks).
+            # The layers by name and which of them differ; the keys that differ are what
+            # `nodo protocol <peer>` prints -- a formal carries the whole schema, far too
+            # much for a log line.
+            from src.identity.transport_stack import compare_layer_stacks, node_transport_stack
+            differing = [
+                "/".join(layer["tags"]) + f":{layer['status']}"
+                for layer in compare_layer_stacks(
+                    node_transport_stack(prose=False), uri.protocol_stack
+                )
+                if layer["status"] not in ("match", "compatible")
+            ]
             log.LOGGER(
-                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks [{declared}], "
-                "which this node does not. Skipping."
+                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks another protocol "
+                f"({', '.join(differing) or 'nothing declared'}). Skipping; "
+                f"'nodo protocol {peer_id}' shows the differences."
             )
             continue
         sc.add_peer_uri(uri=uri, peer_id=peer_id, transport=protocol.value)
@@ -513,7 +509,9 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     # Contracts
     for rate in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
+        if not _accept_contract(rate.contract, peer_id):
+            continue
+        log.LOGGER(f"Adding contract {rate.contract.ledger.tags} for peer {peer_id}")
         try:
             sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
@@ -534,6 +532,30 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     return peer_id
 
+def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
+    """Whether a payment contract a peer advertises is on a ledger this node settles on.
+
+    The ledger is compared on its whole declaration (``node_identity.same_declaration``
+    against ``ledger_descriptors.payment_ledger``), not on its tag: a contract that says
+    "ergo" but declares another network, other units or another deposit binding cannot
+    be paid by this node, and storing it would make the payer try. A contract with only
+    a tag (a node from before ledgers were declared) is refused too: its rate is per
+    whole unit, and it would be read here as per base unit.
+    """
+    from src.identity.node_identity import same_declaration
+    from src.utils.ledger_descriptors import payment_ledger
+
+    tags = list(contract.ledger.tags)
+    ours = payment_ledger(tags[0]) if tags else None
+    if ours is not None and same_declaration(contract.ledger, ours):
+        return True
+    log.LOGGER(
+        f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags or '(none)'}: "
+        "it does not declare a ledger this node settles on."
+    )
+    return False
+
+
 def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int]]:
     """Refresh a known peer; returns the addresses actually stored (see
     :func:`_store_peer_uris`), which is what a caller may then prune down to."""
@@ -550,7 +572,9 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
     if not peer.payment_contracts:
         log.LOGGER(f"Peer {peer_id} advertises no payment contract; it cannot be paid.")
     for rate in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
+        if not _accept_contract(rate.contract, peer_id):
+            continue
+        log.LOGGER(f"Adding contract {rate.contract.ledger.tags} for peer {peer_id}")
         try:
             sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
@@ -569,6 +593,27 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
     return stored
 
 
+def fetch_peer_info(channel, peer_id: str) -> Optional[celaut_pb2.Peer]:
+    """``GetPeerInfo`` from a known peer over ``channel``, under our client_id there.
+
+    GetPeerInfo is gated like every RPC but GenerateClient (issue #428), so asking a
+    known peer without a client_id is asking to be refused. The client this node already
+    holds at that peer is reused; when there is none yet it is minted over the channel
+    the caller already opened -- not through ``get_client_id_on_other_peer``, which
+    refuses a peer that is not currently "available", and a refresh exists precisely
+    for peers whose availability is in doubt.
+    """
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if not client_id:
+        proposed_id = uuid4().hex
+        client_id = _mint_client_over_channel(
+            channel, proposed_id=proposed_id, binding=_peer_identity_binding(proposed_id)
+        )
+        if client_id:
+            sc.add_external_client(peer_id=peer_id, client_id=client_id)
+    return BeeClient.get_peer_info(channel, client_id=client_id or "")
+
+
 def refresh_peer_instance(peer_id: str) -> bool:
     """Re-fetch a known peer's instance over ``GetPeerInfo`` and re-register it.
 
@@ -581,13 +626,7 @@ def refresh_peer_instance(peer_id: str) -> bool:
         log.LOGGER(f"No known URI for peer {peer_id}; cannot refresh.")
         return False
     try:
-        peer = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                node_channel(uri, expected_peer_id=peer_id)
-            ).GetPeerInfo,
-            indices_parser=celaut_pb2.Peer,
-            partitions_message_mode_parser=True
-        ), None)
+        peer = fetch_peer_info(node_channel(uri, expected_peer_id=peer_id), peer_id)
     except Exception as e:
         log.LOGGER(f"Could not fetch info for peer {peer_id}: {e}")
         return False
@@ -786,8 +825,32 @@ def max_work_free_clients_per_difficulty() -> int:
     return value if value > 0 else DEFAULT_MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY
 
 
+def _created_client(client_id: str, peer_id: str = "", signature: str = "") -> celaut_pb2.Client:
+    """Create ``client_id`` and, when the request proved it, opportunistically bind it
+    to a peer.
+
+    An attempt, not the only chance: a ``peer_id``/``signature`` that does not verify,
+    or that names a peer this node does not know *yet*, is not an error -- the client
+    is still created, just as it always was, simply left for ``AssociateClient`` to
+    bind later instead (issue #428) -- which is the common case now that
+    ``IntroducePeer`` itself requires a client_id, so a peer introducing itself for the
+    first time mints before it is known here, not after (see ``ChatMessage`` in
+    celaut.proto for the other reason binding can be legitimately absent: a client is
+    the common case, a peer is the exception).
+    """
+    created = generate_client(client_id=client_id)
+    if peer_id and signature:
+        bound, reason = associate_client_with_peer(client_id, peer_id, signature)
+        if bound:
+            log.LOGGER(f'Bound new client {client_id} to peer {peer_id}.')
+        else:
+            log.LOGGER(f'GenerateClient: peer binding for {client_id} did not bind: {reason}')
+    return created
+
+
 def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
-                                    solution: str = ""):
+                                    solution: str = "", peer_id: str = "",
+                                    signature: str = ""):
     """Answer a ``GenerateClient`` with either the new client or the work it costs.
 
     The order of the checks is the point (issue #361 §8), and it is deliberately the
@@ -795,6 +858,11 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
     says the id is still free, and only then is a hash computed. Validating the proof of
     work first would mean an attacker could make this node hash for a ``client_id`` that
     was never going to be created.
+
+    ``peer_id``/``signature`` are the caller proving it is also a known peer, over
+    whichever ``client_id`` this call actually creates (see ``_created_client``). Both
+    are optional and ignored (not merely unverified -- never even read) on the
+    ``PoWRequired`` branch: nothing is created there yet to bind.
 
     Returns a ``celaut_pb2.Client`` when a client was created, or a
     ``celaut_pb2.PoWRequired`` carrying the challenge to solve. Raises on a request that
@@ -816,7 +884,7 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
             challenge=challenge, solution=solution, difficulty=authenticated_difficulty
         ):
             raise PoWError("Invalid proof of work solution.")
-        return generate_client(client_id=authenticated_id)
+        return _created_client(authenticated_id, peer_id=peer_id, signature=signature)
 
     difficulty = current_difficulty(
         existing_clients=sc.count_clients(),
@@ -825,14 +893,15 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
 
     if difficulty == 0:
         # Free, and a caller that sent no id at all still gets one -- which is every
-        # caller written before this existed.
+        # caller written before this existed. There is nothing to bind a peer_id to in
+        # that case: the id did not exist yet for the caller to have signed over it.
         if not client_id:
             return generate_client()
         if not is_uuid4_hex(client_id):
             raise PoWError("client_id must be the 32 hex characters of a UUID4.")
         if sc.client_exists(client_id=client_id):
             raise PoWError("Client already exists.")
-        return generate_client(client_id=client_id)
+        return _created_client(client_id, peer_id=peer_id, signature=signature)
 
     # Not free. The id has to be the caller's, because it is what the challenge binds to
     # and what stops a solution being spent twice.
@@ -856,6 +925,147 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
     )
 
 
+def _peer_identity_binding(client_id: str) -> dict:
+    """Our own (peer_id, signature) proving we hold ``client_id``, or ``{}``.
+
+    Signs over ``client_id`` with this node's own identity key, the same key a
+    ``Peer`` announcement is signed with -- so whoever receives it can bind
+    ``client_id`` to us the way ``associate_client_with_peer`` does. Empty when this
+    node has no identity key configured yet, exactly as before this was its own
+    function: a client minted or associated with no binding at all, unassociated.
+    """
+    from src.identity.node_identity import client_binding_payload, get_node_public_key_hex, sign_peer_payload
+    candidate_id = get_node_public_key_hex()
+    if not candidate_id:
+        return {}
+    signature = sign_peer_payload(client_binding_payload(candidate_id, client_id))
+    if not signature:
+        return {}
+    return {"peer_id": candidate_id, "signature": signature}
+
+
+def associate_client_with_peer(client_id: str, peer_id: str, signature: str) -> Tuple[bool, str]:
+    """Bind ``client_id`` (already minted) to ``peer_id``, once its identity verifies.
+
+    Shared by ``_created_client`` (an opportunistic attempt at ``GenerateClient``
+    time, which can only succeed if ``peer_id`` was already a known peer then) and
+    the ``AssociateClient`` RPC (issue #428's deferred half: called explicitly, once
+    ``IntroducePeer`` has actually registered the caller -- which it could not have
+    been yet at mint time, since ``IntroducePeer`` itself now requires a client_id,
+    so a peer announcing itself for the first time has to mint before it can
+    introduce itself, not after).
+
+    Returns ``(True, "")`` once bound, or ``(False, reason)`` -- never raises: an
+    unverifiable or not-yet-known peer_id is a normal outcome here, the same as it
+    always was at ``_created_client`` time, not a caller error.
+    """
+    if not client_id or not sc.client_exists(client_id=client_id):
+        return False, "no such client_id"
+    if not peer_id or not signature:
+        return False, "peer_id and signature are both required"
+
+    from src.identity.node_identity import (
+        client_binding_payload,
+        normalize_public_key_hex,
+        verify_peer_payload,
+    )
+
+    normalized = normalize_public_key_hex(peer_id)
+    if not normalized:
+        return False, "peer_id is not a valid public key"
+    # Cheap check before the signature verification, same ordering GenerateClient's
+    # own proof of work uses (issue #361 Sec8): no reason to verify a signature for a
+    # peer that could not be bound anyway.
+    if not sc.peer_exists(peer_id=normalized):
+        return False, "this node does not know that peer yet"
+    if not verify_peer_payload(normalized, client_binding_payload(normalized, client_id), signature):
+        return False, "signature did not verify"
+    if not sc.set_peer_local_client(peer_id=normalized, client_id=client_id):
+        return False, "failed to store the association"
+    return True, ""
+
+
+def _mint_client_over_channel(
+        channel, proposed_id: str, binding: Optional[dict] = None
+) -> Optional[str]:
+    """Mint a client_id at whatever peer ``channel`` reaches, solving PoW if asked.
+
+    ``proposed_id`` is the caller's to choose (a UUID4) precisely because a caller
+    that also wants to sign a peer-identity binding over it (`get_client_id_on_other_peer`)
+    has to know it before asking -- the signature covers this exact id, so it cannot be
+    computed after the fact. It is reused across the PoW retry -- a second UUID4 on the
+    retry would not match the challenge and the work would be wasted.
+
+    The shared machinery behind both ``get_client_id_on_other_peer`` (a peer already
+    known well enough to have its own address in `sc`, and so its own channel) and
+    ``mint_client_id_on_channel`` (issue #428: a peer this node is dialling for the
+    very first time, before anything about it is stored, which is exactly the case
+    ``get_client_id_on_other_peer`` cannot handle -- `peer_channel` needs a stored
+    address to open its channel from).
+    """
+    binding = binding or {}
+
+    client_msg = BeeClient.generate_client(channel, client_id=proposed_id, **binding)
+
+    if isinstance(client_msg, celaut_pb2.PoWRequired):
+        # The peer has given away its free clients. Its `difficulty` field only says what
+        # to solve for; what it will actually check is sealed inside the challenge, so
+        # there is nothing to gain by disbelieving it.
+        log.LOGGER(
+            f'Peer requires a proof of work of difficulty '
+            f'{client_msg.difficulty} for a new client.'
+        )
+        client_msg = BeeClient.generate_client(
+            channel,
+            client_id=proposed_id,
+            challenge=client_msg.challenge,
+            pow_solution=solve_pow(
+                challenge=client_msg.challenge, difficulty=client_msg.difficulty
+            ),
+            **binding,
+        )
+
+    if not client_msg or not isinstance(client_msg, celaut_pb2.Client):
+        return None
+    return str(client_msg.client_id)
+
+
+def mint_client_id_on_channel(channel) -> Optional[str]:
+    """Mint a client_id at whatever peer ``channel`` reaches, for a peer this node has
+    not registered yet (issue #428).
+
+    Every gateway RPC but ``GenerateClient`` now requires a client_id
+    (``src/gateway/client_gate.py``), including ``GetPeerInfo`` -- which is exactly the
+    first RPC ``connect()`` calls on a peer it is dialling for the first time, before
+    that peer's identity or address is stored anywhere. `get_client_id_on_other_peer`
+    cannot help there (it opens its own channel from a stored address via
+    `peer_channel`); this mints straight over the channel the caller already has open,
+    with no peer_id binding attempted -- nothing is confirmed about who is on the other
+    end until `GetPeerInfo`'s answer is verified, a step later.
+    """
+    return _mint_client_over_channel(channel, proposed_id=uuid4().hex)
+
+
+def associate_client_id_on_channel(channel, client_id: str) -> bool:
+    """Ask whatever peer ``channel`` reaches to bind ``client_id`` to our identity.
+
+    The outbound half of ``AssociateClient`` (issue #428): unlike minting, this is a
+    single RPC with no proof of work, so it is cheap enough to call defensively --
+    right after a successful ``IntroducePeer``, say -- even when the caller cannot
+    tell whether an earlier bind attempt (``Client.peer_id``/``signature`` at the
+    ``GenerateClient`` that minted ``client_id``) already succeeded. Reapplying the
+    same binding is harmless (``associate_client_with_peer`` just re-verifies it).
+
+    Returns whether the peer confirmed the bind; ``False`` (never raises) covers "no
+    identity key configured to sign with" the same as any refusal the peer sends back.
+    """
+    binding = _peer_identity_binding(client_id)
+    if not binding:
+        return False
+    response = BeeClient.associate_client(channel, client_id=client_id, **binding)
+    return bool(response and response.bound)
+
+
 def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     """
     Retrieves or generates a client ID for a given peer. If the peer already has an associated client ID for our client,
@@ -870,18 +1080,6 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 
     Raises:
         Exception: If the peer is not available (i.e., it does not have the minimum required open slots).
-
-    Detailed Steps:
-        1. Check if the peer already has an associated client ID for our client using `sc.get_peer_client`.
-        2. If a client ID is found, return it.
-        3. If no client ID is found, check if the peer is available using `is_peer_available`.
-        4. If the peer is not available, log the unavailability and raise an exception.
-        5. If the peer is available, propose a UUID4 and ask the peer to create it.
-        6. If the peer answers with a PoWRequired, solve it and ask again (issue #361).
-        7. Log the generation of the new client ID.
-        8. Attempt to associate the new client ID with the peer using `sc.add_external_client`.
-        9. If the association is successful, return the new client ID.
-        10. If the association fails, return None.
     """
     client_id = sc.get_peer_client(peer_id=peer_id)
     if client_id: return client_id
@@ -890,45 +1088,22 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 
     log.LOGGER('Generate new client for peer ' + peer_id)
 
-    # The id is ours to choose now, and it is what the peer's challenge binds to, so it
-    # is minted once here and reused across the retry -- a second UUID4 on the retry
-    # would not match the challenge and the work would be wasted.
     proposed_id = uuid4().hex
 
-    def _ask(message) -> Optional[object]:
-        return next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                peer_channel(peer_id=peer_id)
-            ).GenerateClient,
-            input=message,
-            indices_parser=dict(GenerateClient_output_indices),
-            indices_serializer=celaut_pb2.Client,
-            partitions_message_mode_parser=True
-        ), None)
-
-    client_msg = _ask(celaut_pb2.Client(client_id=proposed_id))
-
-    if isinstance(client_msg, celaut_pb2.PoWRequired):
-        # The peer has given away its free clients. Its `difficulty` field only says what
-        # to solve for; what it will actually check is sealed inside the challenge, so
-        # there is nothing to gain by disbelieving it.
-        log.LOGGER(
-            f'Peer {peer_id} requires a proof of work of difficulty '
-            f'{client_msg.difficulty} for a new client.'
-        )
-        client_msg = _ask(celaut_pb2.Client(
-            client_id=proposed_id,
-            challenge=client_msg.challenge,
-            pow_solution=solve_pow(
-                challenge=client_msg.challenge, difficulty=client_msg.difficulty
-            ),
-        ))
-
-    if not client_msg or not isinstance(client_msg, celaut_pb2.Client):
+    new_client_id = _mint_client_over_channel(
+        peer_channel(peer_id=peer_id),
+        proposed_id=proposed_id,
+        binding=_peer_identity_binding(proposed_id),
+    )
+    if not new_client_id:
+        # Preserved from before this shared the minting code with
+        # mint_client_id_on_channel: existing callers of this function (delegate
+        # execution, the balancer, chat, metrics) treat this as a hard failure, not a
+        # None to check for -- unlike mint_client_id_on_channel, a new call site added
+        # for issue #428 that always does check.
         raise Exception("No client msg returned.")
-    new_client_id = str(client_msg.client_id)
     if not sc.add_external_client(peer_id=peer_id, client_id=new_client_id):
-        return  # If fails return None.
+        return None  # If fails return None.
 
     return new_client_id
 
@@ -1061,6 +1236,10 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
     separate account -- this node's wholesale deposit there, in the peer's MU -- and
     settles on the peer, not with the father.
 
+    ``token`` is the instance token, exactly: the StopService RPC calls this, and an
+    RPC takes a token, never a name (a name is guessable). ``nodo kill`` resolves a
+    name to the token before it calls this.
+
     ``credit=False`` stops the instance and reads the leftover without crediting
     anybody: the returned figure is then a debt the caller has taken on, and the
     money exists nowhere else once the row is purged. Only a caller that stops a
@@ -1069,7 +1248,6 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
     is already gone by then. Every other caller stops one instance whose father is
     still there, and wants the default.
     """
-    token = resolve_instance_token(token) or token
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
     reserved_mem_limit = 0
@@ -1153,17 +1331,9 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
                 return None
             
             peer_refund = utils.from_amount(
-                next(bee.client_grpc(
-                    method=celaut_pb2_grpc.GatewayStub(
-                        node_channel(peer_uri, expected_peer_id=peer_id)
-                    ).StopService,
-                        partitions_message_mode_parser=True,
-                        # StopService answers with a Refund, whose field is `amount`.
-                        # This parsed it as a deposit-modification output, which has no
-                        # such field -- pre-existing, surfaced by the rename.
-                        indices_parser=celaut_pb2.Refund,
-                        input=celaut_pb2.TokenMessage(token=external_token)
-                )).amount
+                BeeClient.stop_service(
+                    node_channel(peer_uri, expected_peer_id=peer_id), token=external_token
+                ).amount
             )
             # The peer's figure, in the peer's MU, and it settles on the peer: it is
             # credited to the client row this node holds there, which is this node's
@@ -1246,11 +1416,24 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
 
 # Modify an instance's deposit, in MU.
 def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
-    service_token = resolve_instance_token(service_token) or service_token
+    """Move ``amount_mu`` between an instance and its father: a positive figure tops the
+    instance up out of the father's balance, a negative one gives it back.
 
+    ``service_token`` is the instance token, exactly: the ModifyDeposit RPC calls this,
+    and an RPC takes a token, never a name (a name is guessable). ``nodo
+    modify_deposit`` resolves a name to the token before it calls this.
+
+    No MU moves before the instance is known to keep a balance of 0 or more. On a
+    delegated instance the father is credited only after the peer has moved its side,
+    and a top-up the peer refuses is given back to the father.
+    """
     log.LOGGER(f"Modify deposit of {service_token} by {format_mu(abs(amount_mu))}")
 
+    if amount_mu == 0:
+        return True, 'Nothing to modify'
+
     is_internal = sc.internal_instance_exists(id=service_token)
+    external_token = None
 
     if is_internal:
         father_id = sc.get_internal_father_id(id=service_token)
@@ -1266,6 +1449,14 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         log.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
 
+    # Before any MU moves: crediting the father first and finding afterwards that the
+    # instance had less than asked for made MU out of nothing.
+    current = sc.get_instance_balance(id=service_token) if is_internal \
+        else sc.get_delegated_balance(token=external_token)
+    desired_amount = current + amount_mu
+    if desired_amount < 0:
+        return False, "The instance does not have that balance"
+
     if amount_mu > 0:
         log.LOGGER(f"Charge father {father_id}")
         if not spend_mu(
@@ -1275,89 +1466,75 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         ):
             return False, 'Error charging the father'
 
-    elif amount_mu < 0:
-        # The reverse of spend_mu(): what the instance gives back goes to its father.
-        log.LOGGER(f"Credit father {father_id}")
+    if is_internal:
+        if amount_mu < 0:
+            # The reverse of spend_mu(): what the instance gives back goes to its father.
+            log.LOGGER(f"Credit father {father_id}")
+            if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
+                return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
+        sc.update_instance_balance(id=service_token, balance_mu=desired_amount)
+        return True, "Deposit modified correctly"
 
+    def give_back_top_up() -> None:
+        # The father paid for a top-up the peer never received.
+        if amount_mu > 0 and not credit_father(father_id=father_id, amount_mu=amount_mu):
+            log.LOGGER(f"Could not give {format_mu(amount_mu)} back to {father_id}.")
+
+    try:
+        peer_id = sc.get_peer_id_by_external_service(token=external_token)
+        if not peer_id:
+            log.LOGGER(f"No peer for the token {external_token}")
+            give_back_top_up()
+            return False, "No peer found for the external service."
+
+        # The peer prices the instance in its own MU, so what travels is the
+        # translated figure -- the same crossing `configuration_for_peer` makes
+        # for the initial deposit. Rounding goes the direction that cannot pay
+        # the client's costs out of this node's pocket: a top-up hands the peer
+        # no more than the value moved, a withdrawal takes back no less than
+        # what was credited here.
+        payment_system = matching_payment_system(peer_id)
+        peer_amount = convert_mu(
+            abs(amount_mu),
+            from_mu_per_unit=payment_system.local_mu_per_unit,
+            to_mu_per_unit=payment_system.peer_mu_per_unit,
+            round_up=amount_mu < 0,
+        )
+        _output = BeeClient.modify_deposit(
+            peer_channel(peer_id),
+            difference=utils.to_amount(
+                -peer_amount if amount_mu < 0 else peer_amount
+            ),
+            service_token=external_token,
+        )
+    except Exception as e:
+        log.LOGGER(f"Exception on modify_deposit for external service: {e}")
+        give_back_top_up()
+        return False, "Node error."
+
+    if not _output.success:
+        give_back_top_up()
+        return False, _output.message
+
+    # Only once the peer has actually moved its side. A local row raised for a top-up
+    # the peer never received would refund the father at the stop for runtime that was
+    # never bought, out of this node's own pocket; a father credited for a withdrawal
+    # the peer refused would hold MU that exists nowhere.
+    if amount_mu < 0:
+        log.LOGGER(f"Credit father {father_id}")
         if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
             return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
-
-    else:
-        return True, 'Nothing to modify'
-
-    if is_internal:
-        desired_amount = sc.get_instance_balance(id=service_token) + amount_mu
-
-        if desired_amount < 0:
-            return False, "Negative amount have no sense"
-        sc.update_instance_balance(id=service_token, balance_mu=desired_amount)
-
-    else:
-        try:
-            external_token = sc.get_delegated_token_by_id(id=service_token)
-            if not external_token:
-                log.LOGGER(f"No external token for the token {external_token}")
-                return False, "No external token found."
-
-            peer_id = sc.get_peer_id_by_external_service(token=external_token)
-            if not peer_id:
-                log.LOGGER(f"No peer for the token {external_token}")
-                return False, "No peer found for the external service."
-
-            # The father has already been charged (or credited) in our MU, so the
-            # row that holds his deposit has to move by the same figure -- the same
-            # bookkeeping an internal instance gets a few lines above.
-            desired_amount = sc.get_delegated_balance(token=external_token) + amount_mu
-            if desired_amount < 0:
-                return False, "Negative amount have no sense"
-
-            # The peer prices the instance in its own MU, so what travels is the
-            # translated figure -- the same crossing `configuration_for_peer` makes
-            # for the initial deposit. Rounding goes the direction that cannot pay
-            # the client's costs out of this node's pocket: a top-up hands the peer
-            # no more than the value moved, a withdrawal takes back no less than
-            # what was credited here.
-            payment_system = matching_payment_system(peer_id)
-            peer_amount = convert_mu(
-                abs(amount_mu),
-                from_mu_per_unit=payment_system.local_mu_per_unit,
-                to_mu_per_unit=payment_system.peer_mu_per_unit,
-                round_up=amount_mu < 0,
-            )
-            _output = next(bee.client_grpc(
-                method=celaut_pb2_grpc.GatewayStub(
-                    peer_channel(peer_id)
-                ).ModifyDeposit,
-                partitions_message_mode_parser=True,
-                indices_parser=celaut_pb2.ModifyDepositOutput,
-                input=celaut_pb2.ModifyDepositInput(
-                    difference=utils.to_amount(
-                        -peer_amount if amount_mu < 0 else peer_amount
-                    ),
-                    service_token=external_token
-                )
-            ))
-            # Only once the peer has actually moved its side. A local row raised for
-            # a top-up the peer never received would refund the father at the stop
-            # for runtime that was never bought, out of this node's own pocket.
-            if _output.success:
-                # Both sides together. The maintenance tick charges the fall in the
-                # peer's own figure for this instance, so a deposit change has to move
-                # the mark it measures against by the same amount: left behind, a
-                # top-up reads as an instance that consumed nothing and hides a whole
-                # interval's usage.
-                sc.update_delegated_deposit(
-                    token=external_token,
-                    balance_mu=desired_amount,
-                    peer_balance_mu=max(
-                        0,
-                        sc.get_delegated_peer_balance(token=external_token)
-                        + (-peer_amount if amount_mu < 0 else peer_amount),
-                    ),
-                )
-            return _output.success, _output.message
-        except Exception as e:
-            log.LOGGER(f"Exception on modify_deposit for external service: {e}")
-            return False, "Node error."
-
-    return True, "Deposit modified correctly"
+    # Both sides together. The maintenance tick charges the fall in the peer's own
+    # figure for this instance, so a deposit change has to move the mark it measures
+    # against by the same amount: left behind, a top-up reads as an instance that
+    # consumed nothing and hides a whole interval's usage.
+    sc.update_delegated_deposit(
+        token=external_token,
+        balance_mu=desired_amount,
+        peer_balance_mu=max(
+            0,
+            sc.get_delegated_peer_balance(token=external_token)
+            + (-peer_amount if amount_mu < 0 else peer_amount),
+        ),
+    )
+    return True, _output.message or "Deposit modified correctly"

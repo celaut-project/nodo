@@ -8,7 +8,10 @@ edition = "2021"
 [dependencies]
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 futures = "0.3.30"
-ratatui = "0.26.0"
+# `unstable-rendered-line-info` is `Paragraph::line_count`: the CHAT pane stacks
+# wrapped text and service cards (issue #438), and a card's buttons are only
+# clickable if the pane knows how many rows the text above it wrapped to.
+ratatui = { version = "0.26.0", features = ["unstable-rendered-line-info"] }
 tokio = { version = "1.35.1", features = ["full"] }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 sysinfo = "0.30.7"
@@ -31,6 +34,17 @@ libc = "0.2"
 # catalogue column. Not a security use — but hand-rolling the digest would risk
 # silently producing a wrong name, which reads as "no traffic".
 sha1 = "0.10"
+# OSC 52 clipboard escape sequences (click-to-copy on the Peers/Clients/Chat
+# pages) need their payload base64-encoded; no clipboard crate is used, since
+# OSC 52 reaches the operator's terminal clipboard the same way over SSH.
+base64 = "0.22"
+# The DOCS page renders the installation's own `docs/*.md`. Parser only: the
+# default features are the `pulldown-cmark` binary's argument parsing and the HTML
+# writer, and this crate draws terminal lines instead.
+pulldown-cmark = { version = "0.13", default-features = false }
+# Column widths for wrapping those pages (an em dash is one cell, a CJK character
+# two). Already in the tree through ratatui; named here because docs.rs calls it.
+unicode-width = "0.1"
 
 [build-dependencies]
 prost-build = "0.11"

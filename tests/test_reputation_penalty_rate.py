@@ -46,12 +46,12 @@ class UnreachablePeerPenaltyTests(unittest.TestCase):
                                side_effect=lambda key, default=None: settings.get(key, default)), \
                 mock.patch.object(maintain_module, "SQLConnection", return_value=connection), \
                 mock.patch.object(maintain_module, "is_peer_available", return_value=reachable), \
-                mock.patch.object(maintain_module, "beerpc") as beerpc, \
+                mock.patch.object(maintain_module, "BeeClient") as bee_client, \
                 mock.patch.object(maintain_module, "accept_peer_refresh", return_value=True), \
                 mock.patch.object(maintain_module, "_reputation_interface",
                                   return_value=self.reputation):
             # Unreachable: the refresh call is what fails.
-            beerpc.client_grpc.side_effect = (
+            bee_client.call_one.side_effect = (
                 Exception("no route to peer") if not reachable else None
             )
             maintain_module.peer_deposits()

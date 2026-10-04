@@ -352,8 +352,8 @@ def print_payment_info() -> str:
         block = f"{contract.LEDGER}: Wallet: {address}, Amount: {balance} {unit}".rstrip() + " \n"
         cold = getattr(contract, "COLD_WALLET", None)
         cold_address = cold() if callable(cold) else None
-        # Not repeated when it *is* the wallet: a read-only Bitcoin backend is paid at
-        # its cold wallet, and printing one address on two lines reads as two wallets.
+        # Not repeated when it *is* the wallet: one address on two lines reads as two
+        # wallets, and an operator counting their money would look for a second balance.
         if cold_address and cold_address != address:
             block += f"{contract.LEDGER}: Cold Wallet: {cold_address} \n"
         blocks.append(block)

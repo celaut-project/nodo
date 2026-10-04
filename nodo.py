@@ -6,7 +6,7 @@ from src.utils import logger as log
 import src.manager.resources as iobd
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing
-from src.utils.network import get_local_ip
+from src.utils.network import get_local_ip, resolve_public_host, resolve_public_port
 
 env_manager = ConfigManager(log=log.LOGGER)
 
@@ -182,7 +182,114 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         from src.commands.help import print_quick_start
         print_quick_start()
-        warn_if_not_serving()
+
+        # Reused by the alert block below, so the firewall notice can say
+        # whether the node is down or up-and-unreachable without asking the
+        # same question a second time.
+        serving = None
+        try:
+            serving = is_serving()
+            status = "running" if serving else "not running"
+            print(f"Nodo service is currently {status}.", flush=True)
+        except Exception as e:
+            print(f"Error checking nodo.service status: {e}", flush=True)
+
+        print(f"Nodo version: {get_git_commit()}", flush=True)
+
+        # The node's identity key, printed here because this is where an
+        # operator looks for "who am I on the network". It is not cosmetic:
+        # the reputation system keys every opinion this node publishes and
+        # every opinion published *about* it by exactly this hex string
+        # (`node_id` in src/reputation_system/interface.py), so an operator
+        # asking a peer to vouch for them, or reading a proof that names
+        # them, has no other way to find the string to compare against.
+        # Wrapped like its neighbours: identity lives behind a mnemonic that
+        # may not exist yet, and bare `nodo` must still print the rest.
+        try:
+            from src.identity.node_identity import get_node_public_key_hex
+            node_id = get_node_public_key_hex()
+            # None is a real, ordinary state -- a node that has not been
+            # given an identity mnemonic yet -- and it is worth naming as
+            # such rather than printing an empty value that reads like a bug.
+            print(
+                f"Node id: {node_id}" if node_id
+                else "Node id: unavailable (no identity mnemonic yet)",
+                flush=True
+            )
+        except Exception as e:
+            log.LOGGER(f"Error getting node identity: {e}.")
+            print(f"Node id: unavailable ({e})", flush=True)
+
+        port = gateway_port()
+        if port:
+            # The same address GetPeerInfo/IntroducePeer actually announce to peers
+            # (src/gateway/utils.py:_uris_for_all_interfaces): the configured public
+            # IP/DNS name with its NAT port when set, or the outbound-interface IP
+            # with the internal port when this node has no public address to give.
+            # Printing anything else here would tell the operator a different
+            # address than the one the network actually uses to reach them.
+            try:
+                outbound_ip = get_local_ip()
+            except Exception as e:
+                log.LOGGER(f"Error getting local IP: {e}.")
+                outbound_ip = None
+            public_host = resolve_public_host(
+                configured=str(env_manager.get("network.PUBLIC_IP", "") or ""),
+                outbound_ip=outbound_ip,
+            )
+            if public_host:
+                public_port = resolve_public_port(
+                    env_manager.get("network.PUBLIC_TCP_PORT", ""), port
+                )
+                print(f"Nodo address: {public_host}:{public_port} (public)", flush=True)
+            elif outbound_ip:
+                print(f"Nodo address: {outbound_ip}:{port} (local network)", flush=True)
+            else:
+                print("Nodo address: unavailable -- could not determine an address.", flush=True)
+        else:
+            print(
+                "Nodo address: unavailable -- network.GATEWAY_PORT is not "
+                "assigned yet. Start the node once as root ('sudo nodo serve') "
+                "so it can pick a port and open it, then run 'nodo doctor'.",
+                flush=True
+            )
+
+        reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
+
+        try:
+            from src.payment_system.contracts.envs import print_payment_info
+            payment_info = print_payment_info()
+        except JavaDependencyMissing as e:
+            log.LOGGER(f"Payment info unavailable without Java: {e}.")
+            payment_info = str(e)
+        except Exception as e:
+            log.LOGGER(f"Error getting payment info and reputation proof {e}.")
+            payment_info = "N/A"
+
+        print(f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}", flush=True)
+
+        # What the operator has to *do*, last and separated, because in a
+        # terminal the last thing printed is the first thing read. Both of
+        # these conditions were previously announced only to app.log and to
+        # the tail of a `nodo serve` that systemd swallowed, so a node whose
+        # gateway port is shut or whose Java is missing looked, from here,
+        # exactly like a healthy one.
+        try:
+            from src.utils.operator_alerts import collect as collect_alerts
+            alerts = collect_alerts(serving=serving)
+            if alerts:
+                print(flush=True)
+                for alert in alerts:
+                    print(alert.as_line(), flush=True)
+                print(
+                    "\nRun `sudo nodo daemon restart` to restart it in the background.",
+                    flush=True
+                )
+        except Exception as e:
+            # Never the thing that breaks bare `nodo`: this block exists to
+            # add a warning, and a warning system that can take down the
+            # command it warns through is worse than no warning.
+            log.LOGGER(f"Error collecting operator alerts: {e}.")
 
     else:
         match sys.argv[1]:
@@ -192,95 +299,28 @@ if __name__ == '__main__':
                 print_help()
                 warn_if_not_serving()
 
-            case "info":
-                # Reused by the alert block at the end of this command, so the
-                # firewall notice can say whether the node is down or up-and-
-                # unreachable without asking the same question a second time.
-                serving = None
-                try:
-                    serving = is_serving()
-                    status = "running" if serving else "not running"
-                    print(f"Nodo service is currently {status}.", flush=True)
-                except Exception as e:
-                    print(f"Error checking nodo.service status: {e}", flush=True)
-
-                print(f"Nodo version: {get_git_commit()}", flush=True)
-
-                # The node's identity key, printed here because this is where an
-                # operator looks for "who am I on the network". It is not cosmetic:
-                # the reputation system keys every opinion this node publishes and
-                # every opinion published *about* it by exactly this hex string
-                # (`node_id` in src/reputation_system/interface.py), so an operator
-                # asking a peer to vouch for them, or reading a proof that names
-                # them, has no other way to find the string to compare against.
-                # Wrapped like its neighbours: identity lives behind a mnemonic that
-                # may not exist yet, and `nodo info` must still print the rest.
-                try:
-                    from src.identity.node_identity import get_node_public_key_hex
-                    node_id = get_node_public_key_hex()
-                    # None is a real, ordinary state -- a node that has not been
-                    # given an identity mnemonic yet -- and it is worth naming as
-                    # such rather than printing an empty value that reads like a bug.
-                    print(
-                        f"Node id: {node_id}" if node_id
-                        else "Node id: unavailable (no identity mnemonic yet)",
-                        flush=True
-                    )
-                except Exception as e:
-                    log.LOGGER(f"Error getting node identity: {e}.")
-                    print(f"Node id: unavailable ({e})", flush=True)
-
-                port = gateway_port()
-                if port:
-                    print(f"Nodo address: {get_local_ip()}:{port}", flush=True)
-                else:
-                    print(
-                        "Nodo address: unavailable -- network.GATEWAY_PORT is not "
-                        "assigned yet. Start the node once as root ('sudo nodo serve') "
-                        "so it can pick a port and open it, then run 'nodo doctor'.",
-                        flush=True
-                    )
-
-                reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
-                
-                try:
-                    from src.payment_system.contracts.envs import print_payment_info
-                    payment_info = print_payment_info()
-                except JavaDependencyMissing as e:
-                    log.LOGGER(f"Payment info unavailable without Java: {e}.")
-                    payment_info = str(e)
-                except Exception as e:
-                    log.LOGGER(f"Error getting payment info and reputation proof {e}.")
-                    payment_info = "N/A"
-                
-                print(f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}", flush=True)
-
-                # What the operator has to *do*, last and separated, because in a
-                # terminal the last thing printed is the first thing read. Both of
-                # these conditions were previously announced only to app.log and to
-                # the tail of a `nodo serve` that systemd swallowed, so a node whose
-                # gateway port is shut or whose Java is missing looked, from here,
-                # exactly like a healthy one.
-                try:
-                    from src.utils.operator_alerts import collect as collect_alerts
-                    alerts = collect_alerts(serving=serving)
-                    if alerts:
-                        print(flush=True)
-                        for alert in alerts:
-                            print(alert.as_line(), flush=True)
-                except Exception as e:
-                    # Never the thing that breaks `nodo info`: this block exists to
-                    # add a warning, and a warning system that can take down the
-                    # command it warns through is worse than no warning.
-                    log.LOGGER(f"Error collecting operator alerts: {e}.")
-
-                # dev_client = SQLConnection().get_dev_clients()[0]
-                # print(f"Dev client for dev purposes: {dev_client}")
-
-                os._exit(0)
-
             case "logs":
-                os.system(f"tail -f {MAIN_DIR}/storage/app.log")
+                # Bare: follow forever. `-n <lines>` / `--json`: a bounded tail that exits.
+                from src.commands.logs import logs
+                ok = logs(main_dir=MAIN_DIR, argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "status":
+                # OVERVIEW as one report (`--json` for one object); bare `nodo` in prose.
+                from src.commands.status import status
+                ok = status(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "config":
+                # get/set/append/remove/profile -- the TUI's config transaction, scriptable.
+                from src.commands.config_edit import config_command
+                ok = config_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "docs":
+                from src.commands.docs import docs
+                ok = docs(main_dir=MAIN_DIR, argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
 
             case "export":
                 if len(sys.argv) < 4:
@@ -399,12 +439,11 @@ if __name__ == '__main__':
                 integrity_command(service_ref=service_ref, fix=fix)
                 
             case "execute":
-                from src.commands.execute import execute
+                from src.commands.execute import execute, reject_removed_remote_flag
                 import sys
 
                 args = sys.argv[2:]
-                external = "--remote" in args or env_manager.get("network.DEFAULT_EXECUTE_REMOTE", False)
-                args = [arg for arg in args if arg != "--remote"]
+                reject_removed_remote_flag(args)
 
                 envs = {}
                 if "-e" in args:
@@ -432,7 +471,7 @@ if __name__ == '__main__':
                         sys.exit(1)
 
                 if len(args) != 1:
-                    print("Usage: nodo execute [--remote] [--name instance-name] [-e key value] <service id|service tag|'.celaut' file path>", flush=True)
+                    print("Usage: nodo execute [--name instance-name] [-e key value] <service id|service tag|'.celaut' file path>", flush=True)
                     sys.exit(1)
 
                 try:
@@ -441,7 +480,7 @@ if __name__ == '__main__':
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                execute(service=arg, external=external, envs=envs, instance_name=instance_name)
+                execute(service=arg, envs=envs, instance_name=instance_name)
 
             case "force_execution":
                 # Testing/dev only: bypasses execution_balancer and delegates
@@ -511,8 +550,13 @@ if __name__ == '__main__':
                     os.system(f"/bin/bash {MAIN_DIR}/install.sh")
 
             case "kill":
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                if len(args) != 1:
+                    print("Usage: nodo kill <instance id> [--json]", flush=True)
+                    os._exit(1)
                 from src.commands.kill import kill
-                kill(instance=sys.argv[2])
+                os._exit(0 if kill(instance=args[0], as_json=as_json) else 1)
 
             case "burnall":
                 from src.commands.burnall import burnall
@@ -547,15 +591,17 @@ if __name__ == '__main__':
                 observe(instance_id=instance_id, save_path=save_path)
 
             case "tunnel":
-                from src.commands.tunnel import tunnel
+                from src.commands.tunnel import detach, tunnel
 
                 args = sys.argv[2:]
                 usage = (
                     "Usage: nodo tunnel <instance id> <slot> [--udp] "
                     "[--listen <port>] [--host <addr>] [--peer <host:port>] "
-                    "[--idle <seconds>]"
+                    "[--idle <seconds>] [--detach] [--json]"
                 )
 
+                as_json = "--json" in args and not args.remove("--json")
+                detached = "--detach" in args and not args.remove("--detach")
                 udp = "--udp" in args
                 if udp:
                     args.remove("--udp")
@@ -587,6 +633,12 @@ if __name__ == '__main__':
                     )
                     sys.exit(1)
 
+                if detached:
+                    # The same arguments, minus --detach/--json, for the background
+                    # process; it registers itself and this one reports it.
+                    child_args = [a for a in sys.argv[2:] if a not in ("--detach", "--json")]
+                    os._exit(0 if detach(child_args, as_json=as_json) else 1)
+
                 tunnel_kwargs = {
                     "instance": args[0],
                     "slot": slot,
@@ -594,11 +646,51 @@ if __name__ == '__main__':
                     "listen_host": valued_flags["--host"] or "127.0.0.1",
                     "peer": valued_flags["--peer"],
                     "udp": udp,
+                    "as_json": as_json,
                 }
                 if idle_timeout is not None:
                     tunnel_kwargs["idle_timeout"] = idle_timeout
 
-                tunnel(**tunnel_kwargs)
+                os._exit(0 if tunnel(**tunnel_kwargs) else 1)
+
+            case "tunnels":
+                from src.commands.tunnels import list_tunnels
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                usage = (
+                    "Usage: nodo tunnels [<tunnel id> | --instance <instance> | --inbound] "
+                    "[--json]"
+                )
+                if "--inbound" in args:
+                    args.remove("--inbound")
+                    if args:
+                        print(usage, flush=True)
+                        sys.exit(1)
+                    from src.commands.tunnels import list_inbound
+                    os._exit(0 if list_inbound(as_json=as_json) else 1)
+                instance = ""
+                if "--instance" in args:
+                    index = args.index("--instance")
+                    if index + 1 >= len(args):
+                        print(usage, flush=True)
+                        sys.exit(1)
+                    instance = args[index + 1]
+                    args = args[:index] + args[index + 2:]
+                if len(args) > 1 or (instance and args):
+                    print(usage, flush=True)
+                    sys.exit(1)
+                ok = list_tunnels(
+                    reference=args[0] if args else "", as_json=as_json, instance=instance,
+                )
+                os._exit(0 if ok else 1)
+
+            case "tunnel_close":
+                from src.commands.tunnels import close_tunnels
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                close_all = "--all" in args and not args.remove("--all")
+                ok = close_tunnels(args, close_all=close_all, as_json=as_json)
+                os._exit(0 if ok else 1)
 
             case "increase_deposit":
                 from src.commands.modify_deposit import modify_instance_deposit
@@ -624,8 +716,9 @@ if __name__ == '__main__':
                     pass
 
             case "services":
-                from src.commands.services import list_services
-                list_services()
+                from src.commands.services import services_command
+                ok = services_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
             
             case "tag":
                 from src.commands.services import modify_tag
@@ -633,19 +726,41 @@ if __name__ == '__main__':
                 modify_tag(service=sys.argv[2], tag=tag)
                 
             case 'clients':
-                from src.commands.clients import list_clients
-                list_clients()
+                from src.commands.clients import clients_command
+                ok = clients_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
                 
             case "peers":
-                from src.commands.peers import list_peers
-                list_peers()
+                from src.commands.peers import peers_command
+                ok = peers_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "protocol":
+                from src.commands.protocol import protocol_command
+                ok = protocol_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "peer_reputation":
+                # The TUI's `+`/`-` on PEERS: move our local score of a peer, with an event.
+                peer_reputation_args = [a for a in sys.argv[2:] if a != "--json"]
+                if len(peer_reputation_args) != 2:
+                    print("Usage: nodo peer_reputation <peer_id> <+N|-N> [--json]", flush=True)
+                    os._exit(1)
+                from src.commands.peers import adjust_peer_reputation
+                ok = adjust_peer_reputation(
+                    peer_id=peer_reputation_args[0], delta=peer_reputation_args[1],
+                    as_json="--json" in sys.argv[2:],
+                )
+                os._exit(0 if ok else 1)
 
             case "instances":
                 from src.commands.instances import list_instances
                 args = sys.argv[2:]
                 groupable = "--grouped" in args and not args.remove("--grouped")
+                as_json = "--json" in args and not args.remove("--json")
                 search = " ".join(args)
-                list_instances(groupable=groupable, search=search)
+                ok = list_instances(groupable=groupable, search=search, as_json=as_json)
+                os._exit(0 if ok is not False else 1)
 
             case 'connect':
                 from src.commands.connect import connect
@@ -726,45 +841,34 @@ if __name__ == '__main__':
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
 
             case 'pack':
-                from src.commands.packer.zip_with_dockerfile.pack import pack
+                # A project directory (relative to the shell it was typed in) or an
+                # https git URL. Every pack is recorded under <main.STORAGE>/packs, so
+                # `nodo packs` and the TUI's PACKS page see it; --detach runs it in
+                # the background (src/commands/packs.py).
+                from src.commands.packs import pack_command
+                code = pack_command(sys.argv[2:])
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os._exit(code)
 
-                import os
-                import sys
-
-                # --fast: inline the whole rootfs into a single filesystem
-                # block, skipping per-large-file blocking (packer.local only).
-                # --optimize: the opposite -- force the normal per-file-block
-                # behaviour for this pack even when packer.fast defaults it on.
+            case "packs":
+                from src.commands.packs import list_packs
                 args = sys.argv[2:]
-                fast_flag = "--fast" in args
-                optimize_flag = "--optimize" in args
-                args = [a for a in args if a not in ("--fast", "--optimize")]
-
-                if fast_flag and optimize_flag:
-                    print("Error: --fast and --optimize are mutually exclusive.", flush=True)
+                as_json = "--json" in args and not args.remove("--json")
+                active_only = "--active" in args and not args.remove("--active")
+                if len(args) > 1 or (args and args[0].startswith("--")):
+                    print("Usage: nodo packs [<pack id>] [--active] [--json]", flush=True)
                     sys.exit(1)
+                ok = list_packs(reference=args[0] if args else "", as_json=as_json,
+                                active_only=active_only)
+                os._exit(0 if ok else 1)
 
-                if not args:
-                    print("Usage: nodo pack <project directory> [--fast | --optimize]", flush=True)
-                    sys.exit(1)
-
-                # Get the path provided by the user
-                user_path = args[0]
-
-                if "http" not in user_path[:4]:
-                    absolute_path = resolve_user_path(user_path)
-
-                    # Check if the directory exists
-                    if not os.path.exists(absolute_path):
-                        print(f"Error: The directory {absolute_path} does not exist")
-                        sys.exit(1)
-
-                else:
-                    absolute_path = user_path  # In case it's an external git repository
-
-                fast = fast_flag or (bool(env_manager.get("packer.fast", False)) and not optimize_flag)
-
-                pack(directory=absolute_path, fast=fast)
+            case "pack_cancel":
+                from src.commands.packs import cancel_packs
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                ok = cancel_packs(args, as_json=as_json)
+                os._exit(0 if ok else 1)
 
             case "tui":
                 # A binary built by CI for this host's target, when there was a
@@ -854,9 +958,29 @@ if __name__ == '__main__':
                 ok = reputation(argv=sys.argv[2:])
                 os._exit(0 if ok else 1)
 
+            case "earnings":
+                from src.commands.history import earnings
+                ok = earnings(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "energy":
+                from src.commands.history import energy
+                ok = energy(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "schedule":
+                from src.commands.history import schedule
+                ok = schedule(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
             case "donations":
                 from src.commands.donations import donations
                 ok = donations(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "resources":
+                from src.commands.resources import resources
+                ok = resources(argv=sys.argv[2:])
                 os._exit(0 if ok else 1)
 
             case "verify_reputation":
@@ -907,6 +1031,105 @@ if __name__ == '__main__':
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
                     os._exit(1)
+                os._exit(0 if ok else 1)
+
+            case "chat":
+                # `nodo chat <peer_id> <message...>` sends; `nodo chat <peer_id>`
+                # with no message prints the stored conversation instead, so
+                # reading and sending share the one positional shape. Flat,
+                # un-threaded history -- see chat_open/chat_reply/chat_threads
+                # for conversations (issue #431).
+                # `--service <id|tag>` attaches a local service as a card (#438).
+                chat_as_json = "--json" in sys.argv[2:]
+                chat_args, chat_service = take_option(
+                    [a for a in sys.argv[2:] if a != "--json"], "--service")
+                if not chat_args:
+                    print("Usage: nodo chat <peer_id> [message...] [--service <id|tag>]", flush=True)
+                    os._exit(1)
+                chat_peer_id, chat_words = chat_args[0], chat_args[1:]
+                if chat_words or chat_service:
+                    from src.commands.chat import send_chat
+                    ok = send_chat(
+                        peer_id=chat_peer_id, body=" ".join(chat_words), service=chat_service,
+                    )
+                else:
+                    from src.commands.chat import show_chat
+                    ok = show_chat(peer_id=chat_peer_id, as_json=chat_as_json)
+                os._exit(0 if ok else 1)
+
+            case "chat_open":
+                # `--message` sends a real first message distinct from the topic
+                # label (TUI peer/topic/body wizard); omitting it keeps sending
+                # `topic` itself, exactly as before that wizard existed.
+                chat_open_args, chat_open_opts = take_options(
+                    [a for a in sys.argv[2:] if a != "--json"], "--message", "--service")
+                if len(chat_open_args) < 2:
+                    print(
+                        "Usage: nodo chat_open <peer_id> <topic...> [--message body] "
+                        "[--service <id|tag>]",
+                        flush=True,
+                    )
+                    os._exit(1)
+                from src.commands.chat import open_thread
+                ok = open_thread(
+                    peer_id=chat_open_args[0],
+                    topic=" ".join(chat_open_args[1:]),
+                    body=chat_open_opts.get("--message"),
+                    service=chat_open_opts.get("--service"),
+                    as_json="--json" in sys.argv[2:],
+                )
+                os._exit(0 if ok else 1)
+
+            case "chat_reply":
+                chat_reply_args, chat_reply_service = take_option(sys.argv[2:], "--service")
+                if len(chat_reply_args) < (1 if chat_reply_service else 2):
+                    print(
+                        "Usage: nodo chat_reply <conversation_id> <message...> [--service <id|tag>]",
+                        flush=True,
+                    )
+                    os._exit(1)
+                from src.commands.chat import reply_in_thread
+                ok = reply_in_thread(
+                    conversation_id=chat_reply_args[0],
+                    body=" ".join(chat_reply_args[1:]),
+                    service=chat_reply_service,
+                )
+                os._exit(0 if ok else 1)
+
+            case "chat_threads":
+                # `nodo chat_threads` lists every conversation; `nodo chat_threads
+                # <peer_id>` narrows to one peer's.
+                chat_threads_args = [a for a in sys.argv[2:] if a != "--json"]
+                from src.commands.chat import list_threads
+                ok = list_threads(
+                    peer_id=chat_threads_args[0] if chat_threads_args else None,
+                    as_json="--json" in sys.argv[2:],
+                )
+                os._exit(0 if ok else 1)
+
+            case "chat_thread":
+                # Singular: one conversation's own messages, not the list.
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_thread <conversation_id>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import show_thread
+                ok = show_thread(conversation_id=sys.argv[2], as_json="--json" in sys.argv[3:])
+                os._exit(0 if ok else 1)
+
+            case "chat_close":
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_close <conversation_id>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import close_thread
+                ok = close_thread(conversation_id=sys.argv[2])
+                os._exit(0 if ok else 1)
+
+            case "chat_reopen":
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_reopen <conversation_id>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import reopen_thread
+                ok = reopen_thread(conversation_id=sys.argv[2])
                 os._exit(0 if ok else 1)
 
             case "local_builder":

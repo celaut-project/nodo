@@ -10,6 +10,12 @@ class GatewayStub(object):
     GATEWAY SERVICE DEFINITION
     -----------------------
 
+    Every RPC below but GenerateClient itself requires a Client -- mint one there first
+    (issue #428). A local instance of this node is exempt, identified the way
+    ModifyServiceSystemResources identifies one (by its address); everyone else is
+    refused outright without a client_id this node already knows, and is then subject
+    to a shared per-client_id rate limit across every one of these RPCs together. See
+    src/gateway/client_gate.py.
     """
 
     def __init__(self, channel):
@@ -50,6 +56,11 @@ class GatewayStub(object):
                 )
         self.GenerateClient = channel.stream_stream(
                 '/celaut.Gateway/GenerateClient',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
+        self.AssociateClient = channel.stream_stream(
+                '/celaut.Gateway/AssociateClient',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
@@ -98,6 +109,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.Chat = channel.stream_stream(
+                '/celaut.Gateway/Chat',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
 
 
 class GatewayServicer(object):
@@ -105,6 +121,12 @@ class GatewayServicer(object):
     GATEWAY SERVICE DEFINITION
     -----------------------
 
+    Every RPC below but GenerateClient itself requires a Client -- mint one there first
+    (issue #428). A local instance of this node is exempt, identified the way
+    ModifyServiceSystemResources identifies one (by its address); everyone else is
+    refused outright without a client_id this node already knows, and is then subject
+    to a shared per-client_id rate limit across every one of these RPCs together. See
+    src/gateway/client_gate.py.
     """
 
     def StartService(self, request_iterator, context):
@@ -158,6 +180,17 @@ class GatewayServicer(object):
 
     def GenerateClient(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AssociateClient(self, request_iterator, context):
+        """Bind an already-minted client_id to this caller's peer identity, once that peer
+        is actually known here -- the deferred half of Client.peer_id/signature, for
+        when GenerateClient's own attempt at mint time could not have succeeded yet
+        (see AssociateClientOutput). Not gated behind a separate client_id envelope:
+        the Client in the request already carries the one being associated.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -216,6 +249,12 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Chat(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GatewayServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -251,6 +290,11 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'GenerateClient': grpc.stream_stream_rpc_method_handler(
                     servicer.GenerateClient,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'AssociateClient': grpc.stream_stream_rpc_method_handler(
+                    servicer.AssociateClient,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -299,6 +343,11 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
+            'Chat': grpc.stream_stream_rpc_method_handler(
+                    servicer.Chat,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'celaut.Gateway', rpc_method_handlers)
@@ -311,6 +360,12 @@ class Gateway(object):
     GATEWAY SERVICE DEFINITION
     -----------------------
 
+    Every RPC below but GenerateClient itself requires a Client -- mint one there first
+    (issue #428). A local instance of this node is exempt, identified the way
+    ModifyServiceSystemResources identifies one (by its address); everyone else is
+    refused outright without a client_id this node already knows, and is then subject
+    to a shared per-client_id rate limit across every one of these RPCs together. See
+    src/gateway/client_gate.py.
     """
 
     @staticmethod
@@ -427,6 +482,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GenerateClient',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def AssociateClient(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/AssociateClient',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,
@@ -580,6 +652,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Observe',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def Chat(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Chat',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

@@ -28,6 +28,7 @@ import time
 from typing import Optional
 
 from src.utils import logger as log
+from src.utils import pack_registry
 from src.utils.config import ConfigManager
 from src.utils.builder_dependency import (
     ensure_builder_installed,
@@ -63,14 +64,29 @@ def _pack_lock_path() -> str:
     return os.path.join(cache, "nodo_pack_command.lock")
 
 
-def _acquire_pack_lock():
-    """Non-blocking exclusive lock. Returns the open file, or None if held."""
+def _acquire_pack_lock(wait: bool = False):
+    """Exclusive lock. Returns the open file, or None if held.
+
+    ``wait``: block until the pack holding it finishes instead of giving up -- what a
+    detached pack does (``nodo pack --detach``, the TUI), recorded as ``queued`` while
+    it waits. One typed in a terminal still fails at once, as it always has.
+    """
     lock_file = open(_pack_lock_path(), "w")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except (OSError, BlockingIOError):
-        lock_file.close()
-        return None
+        if not wait:
+            lock_file.close()
+            return None
+        print("Another `nodo pack` is using the local builder; queued until it finishes.",
+              flush=True)
+        pack_registry.queued(True)
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        except BaseException:
+            lock_file.close()
+            raise
+        pack_registry.queued(False)
     return lock_file
 
 
@@ -98,6 +114,12 @@ def __spinner(event):
     idx = 0
     msg_idx = 0
     start_time = time.time()
+
+    if not sys.stdout.isatty():
+        # Detached (or piped): a spinner redrawn ten times a second would be one
+        # endless line in the log. Just wait for the build.
+        event.wait()
+        return
 
     while not event.is_set():
         sys.stdout.write(f'\r{messages[msg_idx]} {spinner[idx]}')
@@ -156,6 +178,7 @@ def _pack_and_register(service_zip_dir: str, fast: bool = False) -> Optional[str
                 # b is the ServiceWithMeta grpc-bb cache directory.
                 os.system(f"mv {b.dir} {REGISTRY}{_id}")
             elif type(b) == pack_pb2.PackOutputError:
+                pack_registry.note_error(f"Error in the compilation process: {b.message}")
                 print(f"\nError in the compilation process: \n{b.message}")
                 return None
             else:
@@ -227,8 +250,9 @@ def pack_local(directory: str, fast: bool = False) -> Optional[str]:
     # inside that same guarded context.
     lock_file = None
     if not nested:
-        lock_file = _acquire_pack_lock()
+        lock_file = _acquire_pack_lock(wait=bool(os.environ.get(pack_registry.ID_ENV)))
         if lock_file is None:
+            pack_registry.note_error("Another `nodo pack` is already running.")
             print(
                 "\nAnother `nodo pack` is already running. Only one local pack can run "
                 "at a time (nodo's rootless builder is shared). Wait for it to "
@@ -245,19 +269,24 @@ def pack_local(directory: str, fast: bool = False) -> Optional[str]:
             # Provision the rootless BuildKit toolchain on demand, then start the
             # builder. It is started before generate_service_zip so nested
             # dependency packs build against the already-running builder.
+            pack_registry.stage("starting the builder")
             ensure_builder_installed()
             start_builder()
             daemon_started = True
 
+        pack_registry.stage("cloning" if directory.startswith("http") else "copying the project")
         is_remote, directory = prepare_directory(directory)
+        pack_registry.stage("zipping the project")
         service_zip_dir: str = generate_service_zip(project_directory=directory, fast=fast)
 
+        pack_registry.stage("building (fast: single block)" if fast else "building")
         _id = _pack_and_register(service_zip_dir, fast=fast)
 
         if not _id:
             print(f"Packing produced no service id for {directory}.")
 
     except Exception as e:
+        pack_registry.note_error(f"Exception packing {directory}: {e}")
         print(f"Exception packing {directory}: {e}")
         log.LOGGER(f"Local pack exception for {directory}: {e}")
     finally:

@@ -22,6 +22,7 @@ except Exception as exc:  # pragma: no cover - environment-dependent
 SERIALIZE_IMPORT_ERROR = None
 try:
     from protos import celaut_pb2
+    from src.utils import keyvalue
     from src.gateway.launcher.local_execution.local_execution import _serialize_envs
 except Exception as exc:  # pragma: no cover - environment-dependent
     SERIALIZE_IMPORT_ERROR = exc
@@ -102,8 +103,8 @@ class SerializeEnvsTests(unittest.TestCase):
 
     def test_serializes_env_map_sorted_json(self):
         cfg = celaut_pb2.Configuration()
-        cfg.environment_variables["SOURCE_SIGNER_MODE"] = b"seed"
-        cfg.environment_variables["INSTANCE_LABEL"] = b"packer-3"
+        keyvalue.set_value(cfg.environment_variables, "SOURCE_SIGNER_MODE", b"seed")
+        keyvalue.set_value(cfg.environment_variables, "INSTANCE_LABEL", b"packer-3")
         out = _serialize_envs(cfg)
         # sort_keys keeps output deterministic regardless of insertion order.
         self.assertEqual(
@@ -124,11 +125,11 @@ class SerializeEnvsTests(unittest.TestCase):
         (``manager.shares.instance_env_values``), never a key.
         """
         cfg = celaut_pb2.Configuration()
-        cfg.environment_variables["SOURCE_SIGNER_MODE"] = b"seed"
-        cfg.environment_variables["SOURCE_MNEMONIC"] = b"word word word"
-        cfg.environment_variables["BITCOIN_MNEMONIC"] = b"twelve other words"
-        cfg.environment_variables["BITCOIN_RPC_PASSWORD"] = b"hunter2"
-        cfg.environment_variables["BITCOIN_MNEMONIC_PASSPHRASE"] = b"a second secret"
+        keyvalue.set_value(cfg.environment_variables, "SOURCE_SIGNER_MODE", b"seed")
+        keyvalue.set_value(cfg.environment_variables, "SOURCE_MNEMONIC", b"word word word")
+        keyvalue.set_value(cfg.environment_variables, "BITCOIN_MNEMONIC", b"twelve other words")
+        keyvalue.set_value(cfg.environment_variables, "BITCOIN_RPC_PASSWORD", b"hunter2")
+        keyvalue.set_value(cfg.environment_variables, "BITCOIN_MNEMONIC_PASSPHRASE", b"a second secret")
         out = _serialize_envs(cfg)
 
         for secret in (b"word word word", b"twelve other words", b"hunter2",
@@ -145,7 +146,7 @@ class SerializeEnvsTests(unittest.TestCase):
         # one is a wallet in a database, and the cost of over-matching is a setting
         # shown as "<redacted>" in a record nothing reads for settings.
         cfg = celaut_pb2.Configuration()
-        cfg.environment_variables["SOME_FUTURE_SERVICE_MNEMONIC_WORDS"] = b"leak me"
+        keyvalue.set_value(cfg.environment_variables, "SOME_FUTURE_SERVICE_MNEMONIC_WORDS", b"leak me")
         self.assertNotIn("leak me", _serialize_envs(cfg))
 
 

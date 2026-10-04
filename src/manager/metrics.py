@@ -1,13 +1,12 @@
-from bee_rpc import client as bee
-
 import datetime
 
-from protos import celaut_pb2, celaut_pb2_grpc
+from protos import celaut_pb2
 
 from src.manager.manager import get_client_id_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 
 from src.identity.grpc_transport import peer_channel
+from src.utils.bee_client import BeeClient
 from src.utils.utils import from_amount, get_network_name, to_amount
 from src.utils.logger import LOGGER as logger
 from src.utils.config import ConfigManager
@@ -66,16 +65,7 @@ def __get_metrics_external(peer_id: str, token: str) -> celaut_pb2.Metrics:
     :return: A protobuf object containing the external metrics retrieved.
     :rtype: celaut_pb2.Metrics
     """
-    return next(bee.client_grpc(
-        method=celaut_pb2_grpc.GatewayStub(
-            peer_channel(peer_id=peer_id)
-        ).GetMetrics,
-        input=celaut_pb2.TokenMessage(
-            token=token
-        ),
-        indices_parser=celaut_pb2.Metrics,
-        partitions_message_mode_parser=True
-    ))
+    return BeeClient.get_metrics(peer_channel(peer_id=peer_id), token=token)
 
 
 def _in_local_mu(peer_id: str, peer_balance_mu: int) -> int:
@@ -182,14 +172,17 @@ def get_metrics(token: str) -> celaut_pb2.Metrics:
 
     elif sc.internal_instance_exists(id=token):
         return __get_metrics_internal(id=token)
-    
-    elif '##' not in token:
-        raise Exception(f'Invalid token, it should be a client_id or a token with ##.  token: {token}')
 
     else:
-        token = sc.get_delegated_token_by_id(id=token)
-        if not token:
-            raise Exception(f'Invalid token: {token}')
+        # A delegated instance is known by the alias `delegate_execution` handed out
+        # -- the sha256 hex of the peer's token -- which never contains '##'. Gating
+        # this lookup on that old token format rejected every one of them, so a node
+        # that re-delegated a child answered its father's metrics read with "Invalid
+        # token", and the father took that for the child being gone (#442).
+        delegated_token = sc.get_delegated_token_by_id(id=token)
+        if not delegated_token:
+            raise Exception(f'Invalid token, it should be a client_id or an instance token.  token: {token}')
+        token = delegated_token
 
         # Our own books, not the peer's. A delegated instance's deposit is held
         # here, in our MU, and spent down by the maintenance tick at the rate the

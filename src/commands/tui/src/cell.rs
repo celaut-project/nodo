@@ -1,12 +1,12 @@
-//! The CELL page's catalogue: the policies an operator actually chooses between,
+//! The POLICIES page's catalogue: the policies an operator actually chooses between,
 //! and what each choice writes into `config.yaml`.
 //!
-//! The Config page edits the YAML tree, ordered by where a key lives. That helps
+//! The All page edits the YAML tree, ordered by where a key lives. That helps
 //! someone who already knows which key they want. This is the other half: a closed
 //! catalogue of *decisions*, each named by the question it answers.
 //!
 //! One primitive at three scales -- a **lever state** is a small set of writes, a
-//! **profile** a whole posture of twenty-odd keys, and the Config page the same
+//! **profile** a whole posture of twenty-odd keys, and the All page the same
 //! thing at one key.
 //!
 //! Nothing records which state or profile is active: it is **derived** by asking
@@ -60,35 +60,51 @@ impl Organelle {
 
     pub fn title(self) -> &'static str {
         match self {
-            Organelle::Channels => "CHANNELS",
-            Organelle::Ribosomes => "RIBOSOMES",
-            Organelle::Vesicles => "VESICLES",
-            Organelle::Nucleus => "NUCLEUS",
-            Organelle::Immune => "IMMUNE",
-            Organelle::Wall => "WALL",
-            Organelle::Mitochondria => "MITOCHONDRIA",
-            Organelle::Vacuole => "VACUOLE",
+            Organelle::Channels => "NETWORK",
+            Organelle::Ribosomes => "WORKLOAD",
+            Organelle::Vesicles => "PUBLISHING",
+            Organelle::Nucleus => "IDENTITY",
+            Organelle::Immune => "SECURITY",
+            Organelle::Wall => "RESOURCES",
+            Organelle::Mitochondria => "PAYMENTS",
+            Organelle::Vacuole => "STORAGE",
         }
     }
 
     /// What the organelle governs, in the operator's words. Rendered beside the
-    /// title, because "CHANNELS" alone tells nobody anything.
+    /// title, because "NETWORK" alone tells nobody anything.
     pub fn subtitle(self) -> &'static str {
         match self {
             Organelle::Channels => "reach",
-            Organelle::Ribosomes => "work",
-            Organelle::Vesicles => "voice",
-            Organelle::Nucleus => "identity & wallet",
+            Organelle::Ribosomes => "services offered",
+            Organelle::Vesicles => "announcements",
+            Organelle::Nucleus => "keys & wallets",
             Organelle::Immune => "trust",
             Organelle::Wall => "footprint & hours",
-            Organelle::Mitochondria => "money",
-            Organelle::Vacuole => "upkeep",
+            Organelle::Mitochondria => "pricing & earnings",
+            Organelle::Vacuole => "disk & upkeep",
         }
     }
 
     /// The levers in this organelle, in catalogue order.
     pub fn levers(self) -> Vec<&'static Lever> {
         LEVERS.iter().filter(|lever| lever.organelle == self).collect()
+    }
+
+    /// What is drawn in this organelle's box, top to bottom: its levers in catalogue
+    /// order, with a heading before each run that has a [`Group`].
+    pub fn rows(self) -> Vec<CellRow> {
+        let mut rows = Vec::new();
+        let mut current = None;
+        for (index, lever) in self.levers().into_iter().enumerate() {
+            let group = lever.group();
+            if group.is_some() && group != current {
+                rows.push(CellRow::Heading(group.unwrap()));
+            }
+            current = group;
+            rows.push(CellRow::Lever(index));
+        }
+        rows
     }
 }
 
@@ -120,6 +136,10 @@ pub enum LeverKind {
     /// without first being sent somewhere else is a row that failed to be a setting
     /// (issue #414).
     Link(Page, &'static [&'static str]),
+    /// A list of tokens a ledger accepts besides its native coin, edited in a modal of
+    /// its own: each entry is five fields that mean nothing apart, so neither the
+    /// scalar editor nor a cycle can set one.
+    Assets { path: &'static str },
 }
 
 /// One decision, named by the question it answers.
@@ -159,10 +179,66 @@ impl Lever {
                 }
             }
             LeverKind::Scalar { path, .. } => paths.push(path),
+            LeverKind::Assets { path } => paths.push(path),
             LeverKind::Link(_, keys) => paths.extend(keys.iter().copied()),
         }
         paths
     }
+
+    /// The titled run of its organelle this lever sits in, if that organelle has any.
+    ///
+    /// Only the nucleus does: it holds a node's whole financial identity, and one list
+    /// of eight rows made "wallet" mean two different chains' keys depending on which
+    /// row you were looking at. Read off the id's prefix; the test in this file holds
+    /// the catalogue to it (every nucleus lever resolves, and each run is contiguous).
+    pub fn group(&self) -> Option<Group> {
+        if self.organelle != Organelle::Nucleus {
+            return None;
+        }
+        Some(if self.id.starts_with("ergo-") {
+            Group::Ergo
+        } else if self.id.starts_with("bitcoin-") {
+            Group::Bitcoin
+        } else {
+            Group::General
+        })
+    }
+}
+
+/// A titled run of levers inside one organelle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// Identity, and whether payments are real: what is true whatever chain is paid on.
+    General,
+    Ergo,
+    Bitcoin,
+}
+
+impl Group {
+    pub fn title(self) -> &'static str {
+        match self {
+            Group::General => "GENERAL",
+            Group::Ergo => "ERGO",
+            Group::Bitcoin => "BITCOIN",
+        }
+    }
+
+    pub fn subtitle(self) -> &'static str {
+        match self {
+            Group::General => "identity & payments",
+            Group::Ergo => "wallet",
+            Group::Bitcoin => "wallet",
+        }
+    }
+}
+
+/// One drawn row of an organelle's box: a heading, or a lever by its index in
+/// [`Organelle::levers`]. Selection, clicks and keys all keep using that index, so a
+/// heading is never something the cursor can land on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellRow {
+    Heading(Group),
+    Lever(usize),
 }
 
 /// What `config.yaml` currently says a lever is set to.
@@ -331,6 +407,19 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
+    Lever {
+        id: "public-nat-port",
+        organelle: Organelle::Channels,
+        label: "public port",
+        question: "Does the router forward a different port than the one this node listens on?",
+        consequence: "Empty advertises the internal gateway port itself, right when the router forwards the same number. Set it only when the router's forwarded (NAT) port differs.",
+        kind: LeverKind::Scalar {
+            path: "network.PUBLIC_TCP_PORT",
+            unit: "",
+        },
+        warning: None,
+        secret: false,
+    },
     // --- RIBOSOMES · work --------------------------------------------------
     Lever {
         id: "outside-work",
@@ -465,6 +554,25 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
+    Lever {
+        id: "dev-on-host",
+        organelle: Organelle::Ribosomes,
+        label: "publish on host",
+        question: "Should what I launch myself also be published on this host's own interface?",
+        consequence: "For a node whose operator's tools run outside the network it lives in, e.g. inside a VM. `execute` then prints a host address instead of the internal one; never loopback, and nothing beyond this host -- that is still `nodo tunnel`.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "internal only",
+                writes: &[("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false")],
+            },
+            LeverState {
+                label: "on host too",
+                writes: &[("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
     // --- VESICLES · voice --------------------------------------------------
     Lever {
         id: "delegate",
@@ -573,6 +681,8 @@ static LEVERS: &[Lever] = &[
         secret: false,
     },
     // --- NUCLEUS · identity & wallet ---------------------------------------
+    // Three runs, in this order, and an id's prefix is what says which: `ergo-` and
+    // `bitcoin-` are those ledgers', anything else is general (see `Lever::group`).
     Lever {
         id: "identity-mnemonic",
         organelle: Organelle::Nucleus,
@@ -585,45 +695,6 @@ static LEVERS: &[Lever] = &[
         },
         warning: Some("irreplaceable"),
         secret: true,
-    },
-    Lever {
-        id: "wallet-mnemonic",
-        organelle: Organelle::Nucleus,
-        label: "ergo wallet",
-        question: "The wallet this node is paid into and publishes its proofs from.",
-        consequence: "BACK IT UP. Losing it means losing the funds and the on-chain history. It is not the node's identity, so replacing it leaves the node's name and peers intact.",
-        kind: LeverKind::Scalar {
-            path: "ledgers.ergo.WALLET_MNEMONIC",
-            unit: "",
-        },
-        warning: Some("holds funds"),
-        secret: true,
-    },
-    Lever {
-        id: "cold-wallet",
-        organelle: Organelle::Nucleus,
-        label: "cold wallet",
-        question: "Where should earnings above the hot-wallet limit be swept?",
-        consequence: "A public address, never a mnemonic. Empty disables sweeping, leaving everything in the wallet the node signs with.",
-        kind: LeverKind::Scalar {
-            path: "ledgers.ergo.payments.COLD_WALLET",
-            unit: "",
-        },
-        warning: None,
-        secret: false,
-    },
-    Lever {
-        id: "hot-limit",
-        organelle: Organelle::Nucleus,
-        label: "keep hot",
-        question: "How much ERG stays in the operational wallet?",
-        consequence: "Everything above this is swept to the cold wallet, once the minimum transfer is also met.",
-        kind: LeverKind::Scalar {
-            path: "ledgers.ergo.payments.HOT_WALLET_LIMITS",
-            unit: " ERG",
-        },
-        warning: None,
-        secret: false,
     },
     Lever {
         id: "simulate-payments",
@@ -642,6 +713,122 @@ static LEVERS: &[Lever] = &[
             },
         ]),
         warning: Some("earns nothing when simulated"),
+        secret: false,
+    },
+    Lever {
+        id: "ergo-wallet-mnemonic",
+        organelle: Organelle::Nucleus,
+        label: "wallet",
+        question: "The wallet this node is paid into and publishes its proofs from.",
+        consequence: "BACK IT UP. Losing it means losing the funds and the on-chain history. It is not the node's identity, so replacing it leaves the node's name and peers intact. Replacing it asks first: the old wallet may hold funds, and peers may already have been told its address.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.ergo.WALLET_MNEMONIC",
+            unit: "",
+        },
+        warning: Some("holds funds"),
+        secret: true,
+    },
+    Lever {
+        id: "ergo-cold-wallet",
+        organelle: Organelle::Nucleus,
+        label: "cold wallet",
+        question: "Where should earnings above the hot-wallet limit be swept?",
+        consequence: "A public address, never a mnemonic. Empty disables sweeping, leaving everything in the wallet the node signs with.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.ergo.payments.COLD_WALLET",
+            unit: "",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "ergo-hot-limit",
+        organelle: Organelle::Nucleus,
+        label: "keep hot",
+        question: "How much ERG stays in the operational wallet?",
+        consequence: "Everything above this is swept to the cold wallet, once the minimum transfer is also met.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.ergo.payments.HOT_WALLET_LIMITS",
+            unit: " ERG",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "ergo-rate",
+        organelle: Organelle::Nucleus,
+        label: "price rate",
+        question: "How many MU is one nanoERG worth?",
+        consequence: "MU is the node's unit of account; this fixes what ERG buys. Raise it and every service costs more nanoERG, lower it and the node sells compute for less. Keep it in step with MU per satoshi: their ratio is what makes the two chains charge the same real price.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.ergo.payments.MU_PER_NANOERG",
+            unit: " MU/nanoERG",
+        },
+        warning: Some("sets the price"),
+        secret: false,
+    },
+    Lever {
+        id: "ergo-assets",
+        organelle: Organelle::Nucleus,
+        label: "assets",
+        question: "Which tokens besides ERG does this node accept?",
+        consequence: "Each token is a payment method of its own, advertised to peers with its own rate, paid into the same wallet. Being paid in one needs no ERG; paying one, or sweeping it, does. Adding or removing one writes config.yaml and restarts the node.",
+        kind: LeverKind::Assets {
+            path: "ledgers.ergo.payments.ASSETS",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "bitcoin-wallet-mnemonic",
+        organelle: Organelle::Nucleus,
+        label: "wallet",
+        question: "The mnemonic this node's Bitcoin wallet is derived from.",
+        consequence: "BACK IT UP. The `explorer` and `service` backends derive this chain's wallet from it (BIP-84); `core` keeps the keys in bitcoind's own wallet, so this stays empty there. Losing it loses the funds, not the node's identity. Replacing it asks first: the old wallet may hold funds, and peers may already have been told its address.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.bitcoin.WALLET_MNEMONIC",
+            unit: "",
+        },
+        warning: Some("holds funds"),
+        secret: true,
+    },
+    Lever {
+        id: "bitcoin-cold-wallet",
+        organelle: Organelle::Nucleus,
+        label: "cold wallet",
+        question: "Where should Bitcoin earnings above the hot-wallet limit be swept?",
+        consequence: "A public Bitcoin address, never a mnemonic. Earnings above the hot-wallet limit are swept here; payers are sent to the node's own wallet, not to this address.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.bitcoin.payments.COLD_WALLET",
+            unit: "",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "bitcoin-hot-limit",
+        organelle: Organelle::Nucleus,
+        label: "keep hot",
+        question: "How much BTC stays in the operational wallet?",
+        consequence: "Everything above this is swept to the cold wallet, once the minimum transfer is also met.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.bitcoin.payments.HOT_WALLET_LIMITS",
+            unit: " BTC",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "bitcoin-rate",
+        organelle: Organelle::Nucleus,
+        label: "price rate",
+        question: "How many MU is one satoshi worth?",
+        consequence: "No default, on purpose: empty means the node does not offer Bitcoin. A satoshi is worth about 2.5 million nanoERG at today's prices, so MU per satoshi = MU per nanoERG × (value of a nanoERG / value of a satoshi). Copying the Ergo rate would sell compute for a millionth of its price.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.bitcoin.payments.MU_PER_SATOSHI",
+            unit: " MU/sat",
+        },
+        warning: Some("sets the price"),
         secret: false,
     },
     // --- IMMUNE · trust ----------------------------------------------------
@@ -775,7 +962,7 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
-    // --- WALL · footprint & hours ------------------------------------------
+    // --- RESOURCES · footprint & hours ------------------------------------------
     //
     // Nothing else on this page can say "not with my whole machine". Scarcity pricing
     // makes a busy host expensive and `spare capacity` gates only the opportunistic
@@ -801,7 +988,7 @@ static LEVERS: &[Lever] = &[
     },
     // The three shares are cycles rather than typed numbers because the decision is
     // "roughly how much of my PC", not a figure anyone measures. Any other value set on
-    // the Config page still applies -- the row simply reads `custom`, which is the whole
+    // the All page still applies -- the row simply reads `custom`, which is the whole
     // point of deriving the state instead of storing it.
     Lever {
         id: "cpu-ceiling",
@@ -1211,6 +1398,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "false"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
@@ -1249,6 +1437,7 @@ static PROFILES: &[Profile] = &[
             // and the router needs one forward rather than a range of them.
             ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
@@ -1290,6 +1479,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "true"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "false"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "true"),
@@ -1328,6 +1518,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "true"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "false"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "false"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "true"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "false"),
@@ -1361,6 +1552,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "false"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.CONSIDER_DEV_AS_INTERNAL", "true"),
             ("network.DELEGATE_EXECUTION", "false"),
@@ -1463,6 +1655,26 @@ fn satisfied(writes: &[(&str, &str)], document: Option<&Value>) -> bool {
 pub fn status(lever: &Lever, document: Option<&Value>) -> LeverStatus {
     match lever.kind {
         LeverKind::Link(..) => LeverStatus::Link,
+        LeverKind::Assets { path } => match value_at(document, path) {
+            Some(Value::Sequence(entries)) if entries.is_empty() => {
+                LeverStatus::Value("ERG only".to_string())
+            }
+            Some(Value::Sequence(entries)) => LeverStatus::Value(format!(
+                "ERG + {}",
+                entries
+                    .iter()
+                    .map(|entry| {
+                        entry
+                            .get("SYMBOL")
+                            .and_then(Value::as_str)
+                            .unwrap_or("?")
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+            _ => LeverStatus::Unset,
+        },
         LeverKind::Scalar { path, .. } => match value_at(document, path) {
             Some(value) => LeverStatus::Value(rendered(value)),
             None => LeverStatus::Unset,
@@ -1585,6 +1797,112 @@ mod tests {
     mod catalogue {
         use super::*;
 
+        /// The nucleus is three runs -- general, Ergo, Bitcoin -- and each is drawn
+        /// under one heading, so a run split in two would be headed twice.
+        #[test]
+        fn the_nucleus_is_three_contiguous_runs_in_a_fixed_order() {
+            let groups: Vec<Group> = Organelle::Nucleus
+                .levers()
+                .iter()
+                .map(|lever| lever.group().expect("every nucleus lever is in a run"))
+                .collect();
+            let mut order: Vec<Group> = Vec::new();
+            for group in &groups {
+                if order.last() != Some(group) {
+                    order.push(*group);
+                }
+            }
+            assert_eq!(order, vec![Group::General, Group::Ergo, Group::Bitcoin], "{groups:?}");
+        }
+
+        #[test]
+        fn identity_and_payments_are_general_and_each_ledger_owns_its_wallet() {
+            let in_run = |group: Group| -> Vec<&'static str> {
+                Organelle::Nucleus
+                    .levers()
+                    .iter()
+                    .filter(|lever| lever.group() == Some(group))
+                    .map(|lever| lever.id)
+                    .collect()
+            };
+            assert_eq!(in_run(Group::General), vec!["identity-mnemonic", "simulate-payments"]);
+            assert_eq!(
+                in_run(Group::Ergo),
+                vec![
+                    "ergo-wallet-mnemonic",
+                    "ergo-cold-wallet",
+                    "ergo-hot-limit",
+                    "ergo-rate",
+                    "ergo-assets"
+                ]
+            );
+            assert_eq!(
+                in_run(Group::Bitcoin),
+                vec![
+                    "bitcoin-wallet-mnemonic",
+                    "bitcoin-cold-wallet",
+                    "bitcoin-hot-limit",
+                    "bitcoin-rate"
+                ]
+            );
+        }
+
+        /// The assets row says what the node accepts without opening the modal.
+        #[test]
+        fn the_assets_lever_reads_the_list_off_the_document() {
+            let lever = Organelle::Nucleus
+                .levers()
+                .into_iter()
+                .find(|lever| lever.id == "ergo-assets")
+                .unwrap();
+            let label = |yaml: &str| status(lever, Some(&document(yaml))).label(lever);
+            let at = |list: &str| format!("ledgers:\n  ergo:\n    payments:\n      ASSETS: {list}\n");
+            assert_eq!(label(&at("[]")), "ERG only");
+            assert_eq!(
+                label(&at("[{TOKEN_ID: a, SYMBOL: SigUSD}, {TOKEN_ID: b, SYMBOL: SigRSV}]")),
+                "ERG + SigUSD, SigRSV"
+            );
+            assert_eq!(label("ledgers: {}\n"), "not set");
+        }
+
+        #[test]
+        fn a_heading_precedes_each_run_and_no_other_organelle_has_one() {
+            let headings: Vec<Group> = Organelle::Nucleus
+                .rows()
+                .into_iter()
+                .filter_map(|row| match row {
+                    CellRow::Heading(group) => Some(group),
+                    CellRow::Lever(_) => None,
+                })
+                .collect();
+            assert_eq!(headings, vec![Group::General, Group::Ergo, Group::Bitcoin]);
+            for organelle in Organelle::ALL {
+                if organelle != Organelle::Nucleus {
+                    assert!(
+                        organelle.rows().iter().all(|row| matches!(row, CellRow::Lever(_))),
+                        "{} grew a heading",
+                        organelle.title()
+                    );
+                }
+            }
+        }
+
+        /// A row refers to a lever by its place in `levers()`, which is what the
+        /// cursor, a click and the keys all use. Headings must not shift it.
+        #[test]
+        fn rows_index_levers_by_their_catalogue_position() {
+            let lever_rows: Vec<usize> = Organelle::Nucleus
+                .rows()
+                .into_iter()
+                .filter_map(|row| match row {
+                    CellRow::Lever(index) => Some(index),
+                    CellRow::Heading(_) => None,
+                })
+                .collect();
+            let expected: Vec<usize> = (0..Organelle::Nucleus.levers().len()).collect();
+            assert_eq!(lever_rows, expected);
+        }
+
         /// A lever that writes a key the node does not read is a lever that does
         /// nothing, and looks like it worked. The example config is the reference
         /// because it is what the node ships and what an install starts from.
@@ -1659,6 +1977,23 @@ mod tests {
             assert_eq!(run_locally.paths(), vec!["network.EXECUTE_LOCALLY"]);
             let delegate = lever("delegate").unwrap();
             assert!(!delegate.paths().contains(&"network.EXECUTE_LOCALLY"));
+        }
+
+        /// Publishing a node's own launches on the host interface is an operator's
+        /// call about their host (an installer may make it), never a posture: every
+        /// profile leaves it off, and one lever owns the key.
+        #[test]
+        fn every_profile_keeps_local_launches_off_the_host_interface() {
+            let key = "network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE";
+            assert_eq!(lever("dev-on-host").unwrap().paths(), vec![key]);
+            assert_eq!(profiles().len(), 5);
+            for profile in profiles() {
+                assert!(
+                    profile.writes.contains(&(key, "false")),
+                    "profile {} must write {key}: false",
+                    profile.id
+                );
+            }
         }
 
         /// Both off is a node that refuses every launch. Coherent to ask for, and
@@ -1868,7 +2203,7 @@ mod tests {
 
         /// The two decisions the WALL organelle exists for, read back off a document.
         /// Both write more than one key, which is the reason they are levers rather
-        /// than something to find on the Config page: an operator who set
+        /// than something to find on the All page: an operator who set
         /// `activity_window.ENABLED` and left `ON_CLOSE` alone would have a window
         /// whose closing behaviour they never chose.
         #[test]
@@ -1901,7 +2236,7 @@ mod tests {
             assert_eq!(status(lever, Some(&uncapped)).label(lever), "no cap");
             let half = document("host_limits:\n  MAX_RAM_SHARE: 0.5\n");
             assert_eq!(status(lever, Some(&half)).label(lever), "half");
-            // A figure typed on the Config page is reported as unnamed rather than
+            // A figure typed on the All page is reported as unnamed rather than
             // rounded to the nearest position.
             let typed = document("host_limits:\n  MAX_RAM_SHARE: 0.6\n");
             assert_eq!(status(lever, Some(&typed)), LeverStatus::Custom);

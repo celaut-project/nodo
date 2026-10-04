@@ -25,6 +25,7 @@ from typing import Dict, List, NamedTuple, Optional
 from protos import celaut_pb2 as celaut
 from src.manager.shares import authorize_shares, rundev_host_dirs
 from src.utils import logger as log
+from src.utils import keyvalue
 from src.utils.config import ConfigManager
 from src.virtualizers.microvm.errors import MicroVMError
 from src.utils.shared_filesystems import exported_refs
@@ -88,7 +89,7 @@ def materialize_shares(
     :class:`rootfs.GuestMetadata`.
     """
     base_dir = str(shared_fs_base_dir(paths.cache_root()))
-    env_values = dict(config.environment_variables) if config else {}
+    env_values = keyvalue.to_dict(config.environment_variables) if config else {}
 
     exports = exported_refs(service, vmachine_id, env_values)
     inherited = authorize_shares(service=service, father_id=father_id, config=config)

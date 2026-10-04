@@ -27,7 +27,7 @@ class SQLConnectionClientBalanceTests(unittest.TestCase):
             "_execute",
             return_value=_FakeCursor({"balance_mu": "1e+6", "last_usage": None}),
         ):
-            gas_data = conn.get_client_balance("dev-external-1")
+            gas_data = conn.get_client_balance("dev-1")
 
         self.assertIsNotNone(gas_data)
         self.assertEqual(gas_data[0], 10**6)

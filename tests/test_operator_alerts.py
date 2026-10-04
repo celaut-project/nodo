@@ -9,7 +9,7 @@ and to the tail of a ``nodo serve`` nobody is watching:
   node advertising no payment method looks exactly like one configured without
   any.
 
-``src/utils/operator_alerts.py`` is where they are asked about, so ``nodo info``
+``src/utils/operator_alerts.py`` is where they are asked about, so bare ``nodo``
 and the TUI can say the same thing in the same words. These tests pin the three
 properties that make that worth anything: the alert appears when the condition
 holds, it *disappears* when it is fixed, and asking costs nothing (no subprocess,
@@ -370,6 +370,38 @@ class PlaintextGatewayPortAlertTests(unittest.TestCase):
         )
         self.assertNotIn(self._notice_path(), alert.summary)
 
+    def _write_port(self, port):
+        from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_PORT_FILE
+
+        with open(os.path.join(self._dir.name, GATEWAY_PLAINTEXT_NOTICE_PORT_FILE), "w") as handle:
+            handle.write(str(port))
+
+    def test_a_notice_about_the_port_auto_used_to_resolve_to_is_not_reported(self):
+        """Issue #438: the TLS port moved from 52285 to 60000, so `auto` is now 60001.
+
+        The notice and its command were written about 52286. Reported against the
+        new port, the operator was told to open 52286 -- which they did, restarted,
+        and were then told to open 60001, the port the node had been using all
+        along. A notice about another port is no question about this one.
+        """
+        self._write_notice()
+        self._write_command()
+        self._write_port(52286)
+        manager = _FakePlaintextConfigManager(self.config_path, 60001)
+
+        self.assertIsNone(operator_alerts.plaintext_gateway_port_alert(manager))
+
+    def test_a_notice_about_the_port_in_force_is_still_reported(self):
+        self._write_notice()
+        self._write_command()
+        self._write_port(52286)
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        alert = operator_alerts.plaintext_gateway_port_alert(manager)
+
+        self.assertIsNotNone(alert)
+        self.assertIn("52286", alert.summary)
+
     def test_the_port_turned_off_raises_nothing_even_with_a_stray_notice(self):
         """0 is the operator's own choice (services fall back to the TLS port).
 
@@ -540,12 +572,12 @@ class CollectTests(unittest.TestCase):
 
 
 class NodoInfoWiringTests(unittest.TestCase):
-    """`nodo info` actually asks.
+    """Bare `nodo` actually asks.
 
     Read off the source rather than by running the command, which starts a JVM,
     reads the chain and calls `os._exit`. The point is only that the call is still
-    in the `info` arm at all -- a check that exists and is never invoked is the
-    state this whole change is fixing.
+    in the no-arguments branch at all -- a check that exists and is never invoked
+    is the state this whole change is fixing.
     """
 
     def test_info_collects_operator_alerts(self):
@@ -553,7 +585,7 @@ class NodoInfoWiringTests(unittest.TestCase):
         with open(os.path.join(root, "nodo.py"), "r") as handle:
             source = handle.read()
 
-        info_arm = source.split('case "info":', 1)[1].split('case "logs":', 1)[0]
+        info_arm = source.split("if len(sys.argv) == 1:", 1)[1].split("\n    else:", 1)[0]
 
         self.assertIn("operator_alerts", info_arm)
         self.assertIn("collect_alerts(serving=serving)", info_arm)
@@ -562,15 +594,16 @@ class NodoInfoWiringTests(unittest.TestCase):
     def test_info_reuses_the_serving_check_it_already_made(self):
         """The alert says whether the node is down or up-and-unreachable.
 
-        `nodo info` prints that status on its first line, so the answer is already
-        in hand: asking `is_serving()` a second time would put another socket
-        connect on a command whose alert block is meant to cost two `stat` calls.
+        Bare `nodo` prints that status on its first line, so the answer is
+        already in hand: asking `is_serving()` a second time would put another
+        socket connect on a command whose alert block is meant to cost two
+        `stat` calls.
         """
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "nodo.py"), "r") as handle:
             source = handle.read()
 
-        info_arm = source.split('case "info":', 1)[1].split('case "logs":', 1)[0]
+        info_arm = source.split("if len(sys.argv) == 1:", 1)[1].split("\n    else:", 1)[0]
 
         self.assertEqual(info_arm.count("is_serving()"), 1)
         self.assertLess(

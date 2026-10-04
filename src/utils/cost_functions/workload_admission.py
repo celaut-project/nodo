@@ -42,7 +42,7 @@ from typing import Final, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.utils import logger as log
-from src.utils.cost_functions.resource_availability import get_resource_availability
+from src.utils.cost_functions.resource_availability import get_architecture_availability
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -125,52 +125,80 @@ def _timeout() -> Optional[int]:
 
 def check_resource_availability_on_peer(
         peer_id: str,
-        resources: celaut.Service.Container.Resources,
+        request: celaut.ArchitectureResources,
 ) -> Optional[bool]:
-    """Ask exactly one peer whether it could run an instance shaped like
-    `resources` right now. None means the peer could not be asked (unreachable,
-    timed out, running a version without the RPC, or holding an address that
-    turns out not to prove its identity) -- not a "no".
+    """Ask exactly one peer whether it could run an instance of this architecture
+    shaped like `request` right now. None means the peer could not be asked
+    (unreachable, timed out, running a version without the RPC, or holding an
+    address that turns out not to prove its identity) -- not a "no".
+
+    An answer already obtained for this very question is reused for
+    `network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS` (#456), so probes for the same shape
+    do not ask the same peer again. The question carries no recursion token: the peer
+    answers from its own machine and never passes it on, and what it remembers is keyed
+    by content (`src/utils/tools/query_cache.py`).
     """
     # Imported lazily: this is the only place in the module that talks to a
     # peer, and keeping the rest importable without bee_rpc/grpc installed is
     # what lets evaluate_possible_environment_workloads' own logic be unit
     # tested on a host that has neither (see tests/test_workload_admission.py).
-    from bee_rpc import client as bee
-    from protos import celaut_pb2_grpc
+    # BeeClient itself imports bee_rpc at module scope, so it has to stay out of
+    # this file's own top-level imports for the same reason.
     from src.identity.grpc_transport import peer_channel
+    from src.manager.manager import get_client_id_on_other_peer
+    from src.utils.bee_client import BeeClient
+    from src.utils.tools.query_cache import HIT, QueryCache, availability_ttl, canonical_key
 
     try:
-        response = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                peer_channel(peer_id=peer_id)
-            ).GetResourceAvailability,
-            timeout=_timeout(),
-            partitions_message_mode_parser=True,
-            indices_parser=celaut.ResourceAvailability,
-            input=resources,
-        ))
+        ttl = availability_ttl()
+        key = canonical_key("peer-availability", peer_id, request) if ttl > 0 else None
+        if key is not None:
+            status, remembered = QueryCache().recall(key)
+            if status == HIT:
+                return remembered
+        response = BeeClient.get_resource_availability(
+            peer_channel(peer_id=peer_id), request, timeout=_timeout(),
+            client_id=get_client_id_on_other_peer(peer_id=peer_id),
+        )
+        if key is not None:
+            QueryCache().remember(key, response.can_execute, ttl)
         return response.can_execute
     except Exception as e:
         log.LOGGER(f"Could not check resource availability on peer {peer_id}: {e}")
         return None
 
 
-def _local_resource_availability(resources: celaut.Service.Container.Resources) -> dict:
-    """Whether this host could take one instance shaped like ``resources``.
+def group_request(workload: celaut.Service.PossibleEnvironmentWorkload.Workload) -> celaut.ArchitectureResources:
+    """What one descendant workload group asks of whoever would run it.
+
+    The group's ``resources`` already is the shape asked about: its limits are what each
+    descendant may grow to, and its ``benchmark`` is a minimum (see
+    Sysresources.benchmark). The architecture is the embedded dependency service's when
+    there is one, and otherwise left empty -- "whatever you natively run" -- because a
+    resource-only group does not say.
+    """
+    request = celaut.ArchitectureResources()
+    if workload.HasField("dependency") and workload.dependency.HasField("service"):
+        request.architecture.CopyFrom(workload.dependency.service.container.architecture)
+    request.resources.CopyFrom(workload.resources)
+    return request
+
+
+def _local_resource_availability(request: celaut.ArchitectureResources) -> dict:
+    """Whether this host could take one instance of ``request``'s architecture and shape.
 
     Its own function rather than a call inlined into
     :func:`_workload_group_is_satisfiable` so a test can replace exactly this step and
     drive the peer half of the decision on its own.
     """
-    return get_resource_availability(resources)
+    return get_architecture_availability(request)
 
 
 def _workload_group_is_satisfiable(
-        resources: celaut.Service.Container.Resources,
+        request: celaut.ArchitectureResources,
         ignore_network: Optional[str],
 ) -> bool:
-    if _local_resource_availability(resources)["can_execute"]:
+    if _local_resource_availability(request)["can_execute"]:
         return True
 
     if not env_manager.get("network.DELEGATE_EXECUTION", True):
@@ -178,8 +206,15 @@ def _workload_group_is_satisfiable(
 
     from src.utils.utils import peers_id_iterator  # see check_resource_availability_on_peer
 
+    from src.utils.arch_guard import arch_from_tags
+    from src.utils.cost_functions.architecture_resources import should_skip_peer
+
+    arch = arch_from_tags(request.architecture.tags)
     for peer_id in peers_id_iterator(ignore_network=ignore_network):
-        if check_resource_availability_on_peer(peer_id, resources) is True:
+        # Skipped when the peer's own announcement already rules it out (#454, #459).
+        if should_skip_peer(peer_id, arch, request.resources, "GetResourceAvailability"):
+            continue
+        if check_resource_availability_on_peer(peer_id, request) is True:
             return True
     return False
 
@@ -219,8 +254,7 @@ def _unsatisfiable_groups(
             if workload.count == 0 or not workload.HasField("resources"):
                 continue  # No resource requirement declared; trivially satisfiable.
 
-            resources = celaut.Service.Container.Resources(at_most=workload.resources)
-            if _workload_group_is_satisfiable(resources, ignore_network):
+            if _workload_group_is_satisfiable(group_request(workload), ignore_network):
                 continue
 
             failures.append(

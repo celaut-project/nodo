@@ -1,6 +1,6 @@
-"""`nodo info` names the node's identity key (issue #395).
+"""Bare `nodo` names the node's identity key (issue #395).
 
-Why this is worth a test at all: the hex `nodo info` prints here is not decoration
+Why this is worth a test at all: the hex bare `nodo` prints here is not decoration
 and not a second version string. It is the *same* string the reputation system keys
 by (`node_id` in ``src/reputation_system/interface.py``), so it is what an operator
 compares against when a peer says it vouched for them, and what they paste when
@@ -8,10 +8,10 @@ asking one to. Printed wrong -- or printed as an empty value because the identit
 mnemonic is not there yet -- it sends somebody looking for a bug in the chain.
 
 The block is read out of ``nodo.py`` and executed, rather than imported: importing
-the dispatcher runs the whole node's import graph, and `nodo info` is a `match` arm
-with no function to call. Executing the real source is what keeps this a test of the
-code that ships and not of a copy of it. The same trick `tests/test_payment_method_selector.py`
-uses on ``take_options``.
+the dispatcher runs the whole node's import graph, and this is part of the
+no-arguments branch with no function to call. Executing the real source is what
+keeps this a test of the code that ships and not of a copy of it. The same trick
+`tests/test_payment_method_selector.py` uses on ``take_options``.
 """
 import io
 import textwrap
@@ -21,15 +21,15 @@ from unittest import mock
 
 
 def _identity_block() -> str:
-    """The `Node id:` lines of `nodo info`, dedented into something executable.
+    """The `Node id:` lines bare `nodo` prints, dedented into something executable.
 
     Delimited by the comment that opens the block and the `port = gateway_port()`
     that follows it, so a change to either end of the block is a failing test rather
     than a silently skipped one.
     """
     source = open("nodo.py", encoding="utf-8").read()
-    start = source.index("                # The node's identity key, printed here")
-    end = source.index("                port = gateway_port()")
+    start = source.index("        # The node's identity key, printed here")
+    end = source.index("        port = gateway_port()")
     return textwrap.dedent(source[start:end])
 
 
@@ -74,7 +74,7 @@ class InfoNodeIdTests(unittest.TestCase):
         self.assertEqual(logged, [])
 
     def test_identity_that_cannot_be_read_does_not_stop_the_rest_of_info(self):
-        """Wrapped like every neighbouring block: `nodo info` prints what it can.
+        """Wrapped like every neighbouring block: bare `nodo` prints what it can.
 
         Identity lives behind config that may be unreadable on a half-installed node,
         and the address and the wallets underneath it are exactly what somebody

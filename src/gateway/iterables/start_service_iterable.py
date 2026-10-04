@@ -1,11 +1,12 @@
 import os
 from typing import Generator
 
-from bee_rpc import client as bee, buffer_pb2
-
+from src.gateway.client_gate import require_caller
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as log
+from protos.gateway_bee import rpc_output
+from src.utils.bee_client import BeeClient, Buffer
 from src.utils.config import ConfigManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
 from src.utils.config import ConfigManager
@@ -23,7 +24,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
     def start(self):
         log.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')
 
-    def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
+    def generate(self) -> Generator[Buffer, None, None]:
         if CONFIGURATION_REQUIRED and not self.configuration:
             raise Exception("Client or configuration ")
         
@@ -44,8 +45,8 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
             raise Exception(f"Corrupt metadata for the service {self.service_hash}")
 
-        yield from bee.serialize_to_buffer(
-            indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
+        yield from BeeClient.respond(
+            indices=rpc_output("StartService"),
             message_iterator=launch_service(
                 service_id=self.service_hash,
                 service=service,
@@ -53,7 +54,8 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 configuration=self.configuration,
                 father_ip=get_only_the_ip_from_context(context_peer=self.context.peer()),
                 father_id=self.client_id,  # Only client, not set the internal_service_id because depends of the recursion guard.
-                recursion_guard_token=self.recursion_guard_token
+                recursion_guard_token=self.recursion_guard_token,
+                recursion_guard_hops=self.recursion_guard_hops,
             )
         )
 
@@ -67,3 +69,10 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 f"This is on registry -> {[h for h in os.listdir(REGISTRY)]} \n"
                 f"\n"
             )
+        elif not self._caller_checked:
+            # The service was ready but no client_id ever arrived: the gate in the base
+            # class deferred, waiting for one, and the stream ended first. Its final()
+            # makes that refusal definitive; overriding it without doing the same left
+            # such a caller with an empty response instead of an error. A caller
+            # already checked is not checked again, also when generate() failed.
+            require_caller(self.context, self.client_id or "")

@@ -35,6 +35,7 @@ SERVICE_COMMANDS = [
     "export",
     "integrity",
     "get",
+    "services",
 ]
 
 # Commands whose first positional argument is an instance id.
@@ -48,10 +49,22 @@ PEER_COMMANDS = [
     "verify_reputation",
     "pay",
     "force_execution",
+    "chat",
+    "chat_open",
+    "chat_threads",
+    "peers",
+    "peer_reputation",
+    "protocol",
 ]
 
 # Commands whose first positional argument is a client id.
-CLIENT_COMMANDS = ["credit_client", "debit_client"]
+CLIENT_COMMANDS = ["credit_client", "debit_client", "clients"]
+
+# Commands whose first positional argument is a running tunnel's id.
+TUNNEL_COMMANDS = ["tunnels", "tunnel_close"]
+
+# Commands whose first positional argument is a pack's id (`<storage>/packs`).
+PACK_COMMANDS = ["packs", "pack_cancel"]
 
 # Commands whose first positional argument is a filesystem path (a project dir,
 # a .bee file, a config dir, …). These get file/dir completion, not an id list.
@@ -67,8 +80,14 @@ DAEMON_SUBCOMMANDS = ["start", "status", "stop", "restart"]
 COMMANDS = sorted(
     {
         "help",
-        "info",
         "logs",
+        "status",
+        "config",
+        "docs",
+        "earnings",
+        "energy",
+        "schedule",
+        "peer_reputation",
         "export",
         "import",
         "publish",
@@ -83,6 +102,8 @@ COMMANDS = sorted(
         "burnall",
         "observe",
         "tunnel",
+        "tunnels",
+        "tunnel_close",
         "increase_deposit",
         "decrease_deposit",
         "remove",
@@ -92,11 +113,13 @@ COMMANDS = sorted(
         "tag",
         "clients",
         "peers",
+        "protocol",
         "instances",
         "connect",
         "disconnect",
         "reputation",
         "donations",
+        "resources",
         "submit_reputation",
         "sync_reputation_proof",
         "refresh_ergo_nodes",
@@ -106,6 +129,8 @@ COMMANDS = sorted(
         "storage:prune_blocks",
         "test",
         "pack",
+        "packs",
+        "pack_cancel",
         "tui",
         "ggconf",
         "nat-guide",
@@ -122,6 +147,13 @@ COMMANDS = sorted(
         "daemon",
         "doctor",
         "completion",
+        "chat",
+        "chat_open",
+        "chat_reply",
+        "chat_threads",
+        "chat_thread",
+        "chat_close",
+        "chat_reopen",
     }
 )
 
@@ -149,6 +181,7 @@ def config_paths() -> Dict[str, Optional[str]]:
         "registry": env.get("REGISTRY"),
         "metadata": env.get("METADATA_REGISTRY"),
         "database": env.get("DATABASE_FILE"),
+        "storage": env.get("main.STORAGE"),
     }
 
 
@@ -234,6 +267,37 @@ def client_candidates(database: Optional[str]) -> List[str]:
     return _sqlite_column(database, "SELECT id FROM clients")
 
 
+def tunnel_candidates(storage: Optional[str]) -> List[str]:
+    """Ids of the tunnels registered under ``<storage>/tunnels`` (see
+    ``src/utils/tunnel_registry.py``). File names only: completion has no time to
+    check each pid, and ``nodo tunnels`` sweeps the dead ones anyway."""
+    directory = os.environ.get("NODO_TUNNELS_DIR") or (
+        os.path.join(storage, "tunnels") if storage else None
+    )
+    if not directory:
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    return [name[: -len(".json")] for name in names if name.endswith(".json")]
+
+
+def pack_candidates(storage: Optional[str]) -> List[str]:
+    """Ids of the packs recorded under ``<storage>/packs`` (see
+    ``src/utils/pack_registry.py``)."""
+    directory = os.environ.get("NODO_PACKS_DIR") or (
+        os.path.join(storage, "packs") if storage else None
+    )
+    if not directory:
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    return [name[: -len(".json")] for name in names if name.endswith(".json")]
+
+
 def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> List[str]:
     """Return completion candidates for a ``kind`` requested by the shell."""
     if kind == "commands":
@@ -253,6 +317,10 @@ def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> L
         return peer_candidates(paths.get("database"))
     if kind == "clients":
         return client_candidates(paths.get("database"))
+    if kind == "tunnels":
+        return tunnel_candidates(paths.get("storage"))
+    if kind == "packs":
+        return pack_candidates(paths.get("storage"))
     if kind == "refs":
         return (
             service_candidates(paths.get("registry"), paths.get("metadata"))
@@ -305,6 +373,8 @@ _nodo_completion() {{
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
+            {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
+            {"|".join(PACK_COMMANDS)}) kind="packs" ;;
             {"|".join(PATH_COMMANDS)}) _nodo_paths; return 0 ;;
             daemon)
                 COMPREPLY=( $(compgen -W "{_quote_words(DAEMON_SUBCOMMANDS)}" -- "$cur") )
@@ -363,6 +433,8 @@ _nodo() {{
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
+            {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
+            {"|".join(PACK_COMMANDS)}) kind="packs" ;;
             {"|".join(PATH_COMMANDS)}) _files; return ;;
             daemon)
                 items=({_quote_words(DAEMON_SUBCOMMANDS)})

@@ -225,6 +225,7 @@ def plaintext_gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]
     from src.utils.config import (
         GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE,
         GATEWAY_PLAINTEXT_NOTICE_FILE,
+        GATEWAY_PLAINTEXT_NOTICE_PORT_FILE,
         ConfigManager,
     )
 
@@ -247,11 +248,21 @@ def plaintext_gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]
         notice_path = os.path.join(notice_dir, GATEWAY_PLAINTEXT_NOTICE_FILE)
         pending = _read_text(notice_path)
         command = _read_text(os.path.join(notice_dir, GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE))
+        about = _read_text(os.path.join(notice_dir, GATEWAY_PLAINTEXT_NOTICE_PORT_FILE))
     except Exception:
         pending = None
         command = None
+        about = None
 
     if not pending:
+        return None
+
+    # A notice about another port is not a question about this one (issue #438).
+    # `auto` moves this port whenever GATEWAY_PORT moves, and reporting the old
+    # notice under the new number handed the operator a rule for the port the node
+    # had just left -- which, once applied and restarted, was followed by a second
+    # alert for the port it actually uses. The next start probes the right one.
+    if about and about.strip() != str(port):
         return None
 
     lead = (

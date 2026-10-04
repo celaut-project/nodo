@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Optional, Tuple
 from protos import celaut_pb2
+from src.utils.ledger_descriptors import ergo_payment_ledger as _ergo_ledger
 import requests
 from hashlib import sha3_256
 from src.database import sql_connection
@@ -10,6 +11,7 @@ from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import set_address, set_script, set_token_id, set_contract_type
 from src.utils.ergo_units import erg_to_nanoerg, is_valid_ergo_address, nanoerg_to_erg_str
+from src.utils.ergo_node_url import require_ergo_node_url
 # This ledger's MU rate and its conversions. A separate, light module on purpose: it is
 # also what `monetary.display_unit` resolves ERG through, and that runs on log lines, so
 # it must not pull in everything below.
@@ -40,24 +42,12 @@ env_manager = ConfigManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 # Technical minimum box value the node must always retain / be able to build an output with.
 SAFE_MIN_BOX_VALUE = 1_000_000
-# This contract's ledger identity, declared here rather than imported from another
-# subsystem's constants. The TAG is the identity: it is what a `contract_instance` row
-# is keyed by, what `MethodKey` carries and what the check below compares. `PROSE` and
-# `FORMAL` are description -- they travel to peers in the advertised `Contract.Ledger`
-# and nothing on this side reads them back, which is precisely why they must not be
-# part of how a ledger is identified.
-LEDGER = "ergo"  # or "ergo-testnet" for Ergo testnet.
-PROSE = (
-    "Ergo system: PoW blockchain using Autolykos with verifiable eUTXO model, "
-    "non-Turing-complete Sigma scripts, finite emission with linear reduction, "
-    "on-chain miner-signaled governance, and cryptographic security via Merkle trees, "
-    "proof-of-work, and zero-knowledge proofs."
-)
-# No formal specification is published for the chain itself, so this is empty rather
-# than a placeholder that would claim one exists.
-FORMAL = b""
+# This contract's ledger tag: what a `contract_instance` row is keyed by and what
+# `MethodKey` carries. The full declaration peers receive -- chain, units, attributes,
+# how a payment is bound to its deposit token -- is `ledger()`, shared with the
+# reputation proofs (src/utils/ledger_descriptors.py).
+LEDGER = "ergo"
 
-ergo_ledger = celaut_pb2.Contract.Ledger(tags=[LEDGER], prose=PROSE, formal=FORMAL)
 # Stable, wallet-independent identity of the Ergo P2PK payment contract TYPE. Its sha3 is
 # the contract_hash used to match this kind of contract across nodes; the specific wallet
 # ErgoTree travels per-instance as the raw ``script`` xattr (propositionBytes).
@@ -158,8 +148,9 @@ def __mu_to_nanoerg(amount: int) -> int:
 
     The rate lives in ``ledgers.ergo.payments.MU_PER_NANOERG`` (1 by default, which makes
     the conversion the identity). It is the single point where the node's unit of account
-    meets real money, and it is the same number peers are told as
-    ``ContractRate.mu_per_unit``, so payer and receiver compute the same figure.
+    meets real money, and it is the same number peers are told, per nanoERG, as
+    ``ContractRate.mu_per_unit`` (:func:`mu_per_base_unit`), so payer and receiver
+    compute the same figure.
 
     The old `GAS_PER_ERG` did this with a float reciprocal set to 1e58, which silently
     turned every real charge into zero nanoERG.
@@ -206,13 +197,16 @@ def unavailable_reason() -> Optional[str]:
     return None
 
 
+def mu_per_base_unit() -> int:
+    """MU per nanoERG: what travels to peers as ``ContractRate.mu_per_unit``."""
+    return rate.advertised_mu_per_nanoerg()
+
+
 def mu_per_unit() -> int:
     """MU bought by one **whole** unit of this ledger -- one ERG, not one nanoERG.
 
-    What travels to peers as ``ContractRate.mu_per_unit``, and the only thing that makes
-    a price quoted in MU actionable to whoever reads it. Whole units rather than base
-    units because both sides convert through the same figure (``mu_conversion``): the
-    convention only has to be *shared*, and a whole unit is the one a person can check.
+    For a person to read and type amounts in (``nodo pay`` takes ERG). Not what a peer
+    is told: ``ContractRate.mu_per_unit`` is per base unit (:func:`mu_per_base_unit`).
     """
     return rate.mu_per_erg()
 
@@ -220,10 +214,10 @@ def mu_per_unit() -> int:
 def ledger() -> celaut_pb2.Contract.Ledger:
     """The ledger message this contract settles on, as peers receive it.
 
-    A function rather than the module-level object it returns, so the registry can ask
-    every contract the same question without importing each one's constants.
+    The Ergo network as every place declares it, plus how a payment is made on it
+    (``ledger_descriptors.ergo_payment_ledger``).
     """
-    return ergo_ledger
+    return _ergo_ledger()
 
 
 def mu_to_native(amount: int) -> Decimal:
@@ -255,10 +249,10 @@ def __nanoerg_to_erg(amount: int) -> float:
 
 
 def __init_ergo():
+    # Validated before the JVM starts: an empty value would otherwise surface much
+    # later as requests' "Invalid URL '/info'" (#441).
+    node_url = require_ergo_node_url(ERGO_NODE_URL()) + '/'
     appkit, _, _, _ = _ergo_runtime()
-    node_url = ERGO_NODE_URL()
-    if not node_url.endswith('/'):
-        node_url += '/'
     return appkit.ErgoAppKit(node_url=node_url)
 
 
@@ -338,7 +332,7 @@ def init():
         _warn_if_tokens_cannot_be_moved(assets)
     sql = sql_connection.SQLConnection()
     for asset in (NATIVE_ASSET, *(a.token_id for a in assets)):
-        contract = celaut_pb2.Contract(ledger=ergo_ledger)
+        contract = celaut_pb2.Contract(ledger=_ergo_ledger())
         set_token_id(contract, asset)
         # Canonical value: raw ErgoTree/propositionBytes of the wallet's P2PK payment boxes.
         set_script(contract, proposition_bytes)
@@ -393,7 +387,7 @@ def check_sender_balance(amount: int) -> bool:
             LOGGER(f"Insufficient balance for the wallet. Required: {required}, Available: {available}")
         return check
     except Exception as e:
-        LOGGER(f"Error checking wallet balance: {str(e)}")
+        LOGGER(f"Error checking wallet balance: {type(e).__name__}: {e}")
         return False
 
 
@@ -881,7 +875,7 @@ def _settle(amount: int, deposit_token: str, ledger: str,
                 obj = response.json()
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
-                    contract = celaut_pb2.Contract(ledger=ergo_ledger)
+                    contract = celaut_pb2.Contract(ledger=_ergo_ledger())
                     # Which asset was paid, so the peer files the credit against the
                     # method it advertised rather than against this contract's default.
                     set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
@@ -1065,7 +1059,7 @@ def _token_check_sender_balance(amount: int, asset) -> bool:
             return False
         return True
     except Exception as e:
-        LOGGER(f"Error checking wallet balance: {str(e)}")
+        LOGGER(f"Error checking wallet balance: {type(e).__name__}: {e}")
         return False
 
 
@@ -1098,6 +1092,7 @@ def methods():
                                    symbol=asset.symbol, unit_name=asset.unit_name,
                                    calls={
             "mu_per_unit": partial(rate.mu_per_whole_unit, asset),
+            "mu_per_base_unit": partial(rate.advertised_mu_per_base_unit, asset),
             "settlement_floors_mu": partial(_token_settlement_floors_mu, asset),
             "mu_to_native": partial(rate.mu_to_base_units_exact, asset=asset),
             "check_sender_balance": partial(_token_check_sender_balance, asset=asset),

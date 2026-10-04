@@ -115,6 +115,74 @@ class PackResolutionOrderTests(unittest.TestCase):
         self.assertNotIn("PACKER_SERVICE_ID", guidance)
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class OfferLocalPackerTests(unittest.TestCase):
+    """If the packer service is not available, `nodo pack` offers the local packer."""
+
+    def _pack_without_service(self, tty, answer=""):
+        stdin = mock.Mock()
+        stdin.isatty.return_value = tty
+        with patch.object(pack_mod, "_local_packer_enabled", return_value=False), \
+             patch.object(pack_mod, "_resolve_packer_endpoint", return_value=None), \
+             patch.object(pack_mod.sys, "stdin", stdin), \
+             patch("builtins.input", return_value=answer) as ask, \
+             patch.object(pack_mod.env_manager, "set") as set_config, \
+             patch.object(pack_mod, "_pack_local", return_value="localid") as local:
+            with redirect_stdout(io.StringIO()):
+                result = pack_mod.pack("/some/project")
+        return result, ask, set_config, local
+
+    def test_yes_enables_local_and_continues(self):
+        result, ask, set_config, local = self._pack_without_service(tty=True, answer="y")
+        self.assertEqual(result, "localid")
+        ask.assert_called_once()
+        set_config.assert_called_once_with("packer.local", True)
+        local.assert_called_once_with("/some/project", fast=False)
+
+    def test_no_keeps_config_and_fails(self):
+        result, _, set_config, local = self._pack_without_service(tty=True, answer="n")
+        self.assertIsNone(result)
+        set_config.assert_not_called()
+        local.assert_not_called()
+
+    def test_no_terminal_does_not_ask(self):
+        result, ask, set_config, local = self._pack_without_service(tty=False)
+        self.assertIsNone(result)
+        ask.assert_not_called()
+        set_config.assert_not_called()
+        local.assert_not_called()
+
+    def test_local_flag_skips_service_and_keeps_config(self):
+        with patch.object(pack_mod, "_local_for_this_run", False), \
+             patch.object(pack_mod.env_manager, "get", return_value=False), \
+             patch.object(pack_mod, "_resolve_packer_endpoint") as resolve, \
+             patch.object(pack_mod.env_manager, "set") as set_config, \
+             patch.object(pack_mod, "_pack_local", return_value="localid") as local:
+            result = pack_mod.pack("/some/project", local=True)
+            # Nested dependency packs of the same run also build locally.
+            self.assertTrue(pack_mod._local_packer_enabled())
+        self.assertEqual(result, "localid")
+        local.assert_called_once_with("/some/project", fast=False)
+        resolve.assert_not_called()
+        set_config.assert_not_called()
+
+    def test_unhealthy_packer_offers_local(self):
+        stdin = mock.Mock()
+        stdin.isatty.return_value = True
+        with patch.object(pack_mod, "_local_packer_enabled", return_value=False), \
+             patch.object(pack_mod, "_resolve_packer_endpoint", return_value="http://p:8080"), \
+             patch.object(pack_mod, "prepare_directory", return_value=(False, "/some/project")), \
+             patch.object(pack_mod, "_wait_for_packer_health", return_value=False), \
+             patch.object(pack_mod.sys, "stdin", stdin), \
+             patch("builtins.input", return_value="yes"), \
+             patch.object(pack_mod.env_manager, "set"), \
+             patch.object(pack_mod, "_pack_local", return_value="localid") as local:
+            with redirect_stdout(io.StringIO()):
+                result = pack_mod.pack("/some/project")
+        self.assertEqual(result, "localid")
+        local.assert_called_once_with("/some/project", fast=False)
+
+
 class _Clock:
     """A deterministic stand-in for ``time.monotonic``.
 

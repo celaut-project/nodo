@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
 from typing import Callable, Dict, Generator, Iterable, List, Sequence, Tuple, Optional
-from google.protobuf.json_format import MessageToJson
+from src.utils.keyvalue import message_to_json
 
 from protos import celaut_pb2
 from src.utils import logger as log, logger
@@ -69,6 +69,14 @@ TRACEABILITY_TABLES = (
     # direction, but silently: the node would route as though nobody had ever vouched
     # for anybody.
     "onchain_opinions",
+    # A peer's chat history with this node. Without it, Chat would still answer, but
+    # every message would vanish on the next restart with no error to say so.
+    "peer_chat_messages",
+    # One row per conversation a chat message groups into (issue #431). Without it,
+    # a message naming a fresh conversation_id would still be stored -- the FK is
+    # not enforced by default -- but `chat.list_conversations` would have nothing
+    # to read, and neither TUI page (ours / our clients') could show it.
+    "peer_chat_conversations",
 )
 
 # Columns on an existing table that a database created before them will not have.
@@ -77,7 +85,37 @@ TRACEABILITY_TABLES = (
 # this an in-place upgrade would fail to record every donation it pays.
 TRACEABILITY_COLUMNS = {
     "payments": {"purpose": "TEXT DEFAULT NULL"},
+    # `peer` is a base table every install already has, so unlike a wholly new table
+    # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
+    # upgraded in place would raise "no such column: local_client_id" on the first
+    # Chat message a peer sends that names its client_id (see gateway.Chat).
+    "peer": {"local_client_id": "TEXT DEFAULT NULL"},
+    # A node that already deployed peer_chat_messages before conversations existed
+    # has the table but not this column -- an ADD COLUMN, not ensure_tables, for the
+    # same reason as `peer.local_client_id` above.
+    "peer_chat_messages": {
+        "conversation_id": "TEXT DEFAULT NULL",
+        # A service shared in chat (issue #438): same upgrade path again.
+        "service_id": "TEXT DEFAULT NULL",
+        "service_metadata": "BLOB DEFAULT NULL",
+    },
 }
+
+
+def _chat_service(row) -> Optional[dict]:
+    """A chat row's shared service (issue #438), or None for an ordinary message.
+
+    ``id`` is the registry id stored with it (None when its Metadata had no hash of
+    this node's type), ``tags`` its Metadata's tags.
+    """
+    if row['service_metadata'] is None:
+        return None
+    metadata = celaut_pb2.Metadata()
+    try:
+        metadata.ParseFromString(row['service_metadata'])
+    except Exception:
+        pass
+    return {'id': row['service_id'], 'tags': list(metadata.hashtag.tag)}
 
 
 def _as_int(value) -> int:
@@ -168,17 +206,30 @@ def _plain(value: Decimal) -> str:
 
 def _ensure_traceability_tables(connection) -> None:
     try:
-        from src.database.migrate import ensure_columns, ensure_tables
+        from src.database.migrate import (
+            ensure_columns,
+            ensure_tables,
+            forget_peer_rates_per_whole_unit,
+        )
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
         for table, columns in TRACEABILITY_COLUMNS.items():
             ensure_columns(cursor, table, columns)
+        # The restart after pulling new code is the only upgrade path (see above), so
+        # the one-shot rate migration runs here too, not only from `migrate`.
+        forget_peer_rates_per_whole_unit(cursor)
         connection.commit()
     except Exception as e:
         # A read-only or otherwise unusable database is the node's problem to report
         # elsewhere; it must not stop this constructor, which runs at import time.
         logger.LOGGER(f'Could not ensure the traceability tables exist: {e}')
+
+
+def _local_capacity_changed() -> None:
+    """A local instance started, stopped or was resized: the room this node reported is stale."""
+    from src.utils.tools.query_cache import QueryCache
+    QueryCache().invalidate("GetResourceAvailability")
 
 
 class SQLConnection(metaclass=Singleton):
@@ -523,6 +574,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
               serialized_instance, service_id, virtualizer, envs, arch))
+        _local_capacity_changed()
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def set_local_instance_definition(self, id: str, serialized_instance) -> bool:
@@ -609,6 +661,7 @@ class SQLConnection(metaclass=Singleton):
                 f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ?",
                 tuple(params),
             )
+            _local_capacity_changed()
             return True
         except:
             return False
@@ -941,6 +994,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM local_instances WHERE id = ?
         ''', (id,))
+        _local_capacity_changed()
         # Drop the burn-rate row and its in-memory window together with the instance,
         # so a later instance that reuses this id never inherits a stale rate.
         self._execute('''
@@ -1265,7 +1319,7 @@ class SQLConnection(metaclass=Singleton):
                     # silently dropped every peer whose proof we had never validated --
                     # publishing an opinion set narrower than the one we actually held.
                     instance_json = (
-                        MessageToJson(data['peer']) if data['publish_announcement'] else ""
+                        message_to_json(data['peer']) if data['publish_announcement'] else ""
                     )
 
                     # Calculate the percentage of the total reputation token amount
@@ -2259,6 +2313,253 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
             pass
 
+    def set_peer_local_client(self, peer_id: str, client_id: str) -> bool:
+        """Record that ``client_id`` (one of THIS node's own clients) belongs to ``peer_id``.
+
+        The mirror of :meth:`add_external_client`: that one remembers a client_id
+        this node holds on a peer, this one remembers a client_id a peer holds on
+        this node. ``client_id`` must already exist in ``clients`` -- this only
+        attaches a peer identity to a client relationship that some earlier
+        ``GenerateClient`` already created, never invents one.
+        """
+        if not self.peer_exists(peer_id=peer_id):
+            logger.LOGGER(f'Cannot associate local client {client_id}: peer {peer_id} does not exist')
+            return False
+        if not self.client_exists(client_id=client_id):
+            logger.LOGGER(f'Cannot associate local client {client_id} with peer {peer_id}: no such client')
+            return False
+        try:
+            self._execute('''
+                UPDATE peer SET local_client_id = ? WHERE id = ?
+            ''', (client_id, peer_id))
+            logger.LOGGER(f'Associated local client {client_id} with peer {peer_id}')
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to associate local client {client_id} with peer {peer_id}: {e}')
+            return False
+
+    def get_peer_local_client_id(self, peer_id: str) -> Optional[str]:
+        """The client_id ``peer_id`` holds on this node, or None if unset/unknown."""
+        result = self._execute('''
+            SELECT local_client_id FROM peer WHERE id = ?
+        ''', (peer_id,))
+        row = result.fetchone()
+        return row['local_client_id'] if row else None
+
+    def get_peer_id_by_local_client(self, client_id: str) -> Optional[str]:
+        """Which peer ``client_id`` belongs to, or None if it belongs to none.
+
+        The reverse of :meth:`get_peer_local_client_id` -- for attributing a call
+        that already identified itself by client_id (e.g. a metered RPC) back to
+        the peer operating it, when that association happens to be known.
+        """
+        result = self._execute('''
+            SELECT id FROM peer WHERE local_client_id = ?
+        ''', (client_id,))
+        row = result.fetchone()
+        return row['id'] if row else None
+
+    def add_chat_message(self, peer_id: str, from_us: bool, body: str, ts: int,
+                         keep_per_peer: int, conversation_id: Optional[str] = None,
+                         service: Optional[celaut_pb2.Metadata] = None) -> None:
+        """Store one Chat message and prune ``peer_id``'s history down to ``keep_per_peer``.
+
+        The prune runs on every insert rather than on a schedule of its own, the
+        same reasoning as :meth:`prune_demand_history`: on insert is the one moment
+        this node is certainly touching the row, and a peer that never chats again
+        after flooding this node would otherwise never trigger a cleanup at all.
+        Scoped to one peer at a time, so one abusive peer's history cannot crowd
+        another's out of its own share of the ceiling.
+
+        ``conversation_id`` is deliberately **not** its own scope for the prune: a
+        peer's ceiling is on its whole history, not per thread, or an operator
+        opening many small conversations would buy itself a much larger effective
+        allowance than one who does not -- the ceiling exists to bound one peer's
+        total footprint, not to be multiplied by however many threads it opens.
+
+        ``service`` is the Metadata of a service shared in the message (issue #438),
+        stored serialized for the TUI to render, next to the registry id this node
+        derives from it (``registry_service_id``) -- the id its Get/Execute take.
+        """
+        from src.utils.verify import registry_service_id
+
+        self._execute('''
+            INSERT INTO peer_chat_messages
+                (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            peer_id, int(bool(from_us)), body, int(ts), conversation_id,
+            registry_service_id(service) if service is not None else None,
+            service.SerializeToString() if service is not None else None,
+        ))
+        self._execute('''
+            DELETE FROM peer_chat_messages
+            WHERE peer_id = ? AND id NOT IN (
+                SELECT id FROM peer_chat_messages
+                WHERE peer_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            )
+        ''', (peer_id, peer_id, max(0, int(keep_per_peer))))
+
+    def get_chat_messages(self, peer_id: str, limit: int = 100) -> List[dict]:
+        """The stored conversation with ``peer_id``, oldest first, capped at ``limit``.
+
+        Every message with this peer, threaded or not -- the flat view. See
+        :meth:`get_conversation_messages` for one thread alone.
+        """
+        result = self._execute('''
+            SELECT from_us, body, ts, received_at, conversation_id, service_id, service_metadata
+            FROM peer_chat_messages
+            WHERE peer_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (peer_id, max(0, int(limit))))
+        return [
+            {
+                'from_us': bool(row['from_us']),
+                'body': row['body'],
+                'ts': int(row['ts']),
+                'received_at': row['received_at'],
+                'conversation_id': row['conversation_id'],
+                'service': _chat_service(row),
+            }
+            for row in reversed(result.fetchall())
+        ]
+
+    def get_conversation_messages(self, conversation_id: str, limit: int = 200) -> List[dict]:
+        """Every message in one thread, oldest first, capped at ``limit``."""
+        result = self._execute('''
+            SELECT from_us, body, ts, received_at, service_id, service_metadata
+            FROM peer_chat_messages
+            WHERE conversation_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (conversation_id, max(0, int(limit))))
+        return [
+            {
+                'from_us': bool(row['from_us']),
+                'body': row['body'],
+                'ts': int(row['ts']),
+                'received_at': row['received_at'],
+                'service': _chat_service(row),
+            }
+            for row in reversed(result.fetchall())
+        ]
+
+    def create_conversation(self, conversation_id: str, peer_id: str, opened_by_us: bool,
+                            topic: str = "") -> bool:
+        """Open a new thread, or silently do nothing if ``conversation_id`` exists.
+
+        The silent no-op (``INSERT OR IGNORE``) is what lets
+        :func:`chat.receive_chat_message` call this unconditionally on every
+        message: the first message of a peer-opened thread creates the row, and
+        every one after it is the same statement finding nothing to do.
+        """
+        if not self.peer_exists(peer_id=peer_id):
+            logger.LOGGER(f'Cannot open a conversation: peer {peer_id} does not exist')
+            return False
+        try:
+            self._execute('''
+                INSERT OR IGNORE INTO peer_chat_conversations
+                    (id, peer_id, opened_by_us, topic)
+                VALUES (?, ?, ?, ?)
+            ''', (conversation_id, peer_id, int(bool(opened_by_us)), topic or None))
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to open conversation {conversation_id}: {e}')
+            return False
+
+    def close_conversation(self, conversation_id: str) -> bool:
+        """Mark a thread closed. Local bookkeeping only -- nothing travels to the peer."""
+        try:
+            self._execute('''
+                UPDATE peer_chat_conversations
+                SET closed_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND closed_at IS NULL
+            ''', (conversation_id,))
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to close conversation {conversation_id}: {e}')
+            return False
+
+    def reopen_conversation(self, conversation_id: str) -> bool:
+        """Undo :meth:`close_conversation`. Also local-only, same as closing."""
+        try:
+            self._execute('''
+                UPDATE peer_chat_conversations
+                SET closed_at = NULL
+                WHERE id = ?
+            ''', (conversation_id,))
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to reopen conversation {conversation_id}: {e}')
+            return False
+
+    def conversation_exists(self, conversation_id: str) -> bool:
+        result = self._execute('''
+            SELECT 1 FROM peer_chat_conversations WHERE id = ?
+        ''', (conversation_id,))
+        return result.fetchone() is not None
+
+    def get_conversation(self, conversation_id: str) -> Optional[dict]:
+        """One thread's own row (who opened it, its topic, when it opened/closed)."""
+        result = self._execute('''
+            SELECT id, peer_id, opened_by_us, topic, opened_at, closed_at
+            FROM peer_chat_conversations
+            WHERE id = ?
+        ''', (conversation_id,))
+        row = result.fetchone()
+        if row is None:
+            return None
+        return {
+            'id': row['id'],
+            'peer_id': row['peer_id'],
+            'opened_by_us': bool(row['opened_by_us']),
+            'topic': row['topic'],
+            'opened_at': row['opened_at'],
+            'closed_at': row['closed_at'],
+        }
+
+    def list_conversations(self, peer_id: Optional[str] = None,
+                           opened_by_us: Optional[bool] = None,
+                           include_closed: bool = True) -> List[dict]:
+        """Threads, most recently opened first -- the two TUI pages read this.
+
+        ``opened_by_us=True`` is "what's open, per peer" (issue #431); ``False`` is
+        the reverse page, conversations opened *by our clients* -- peers who
+        reached out to us. ``peer_id`` narrows to one peer's threads on either page;
+        left unset, every peer's.
+        """
+        clauses = []
+        params: list = []
+        if peer_id is not None:
+            clauses.append('peer_id = ?')
+            params.append(peer_id)
+        if opened_by_us is not None:
+            clauses.append('opened_by_us = ?')
+            params.append(int(bool(opened_by_us)))
+        if not include_closed:
+            clauses.append('closed_at IS NULL')
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
+        result = self._execute(f'''
+            SELECT id, peer_id, opened_by_us, topic, opened_at, closed_at
+            FROM peer_chat_conversations
+            {where}
+            ORDER BY opened_at DESC
+        ''', tuple(params))
+        return [
+            {
+                'id': row['id'],
+                'peer_id': row['peer_id'],
+                'opened_by_us': bool(row['opened_by_us']),
+                'topic': row['topic'],
+                'opened_at': row['opened_at'],
+                'closed_at': row['closed_at'],
+            }
+            for row in result.fetchall()
+        ]
+
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str,
                                peer_id: str, serialized_instance: str, service_id: str,
                                balance_mu: int = 0, peer_balance_mu: int = 0):
@@ -3208,6 +3509,20 @@ class SQLConnection(metaclass=Singleton):
             )
         else:
             self._execute("DELETE FROM instance_energy")
+
+    def prune_energy_consumption(self, keep_days: int) -> None:
+        """Drop samples older than ``keep_days``, so this table has a ceiling.
+
+        Sampled every ``energy.SAMPLE_INTERVAL_SECONDS`` (60s by default) with no
+        rollup, unlike ``demand_history``'s one row per hour: left unpruned this is
+        1,440 rows a day forever. Called from the energy tick itself (see
+        ``src/manager/energy/monitor.py``), the same way ``demand_history`` prunes
+        itself on its own rollover rather than needing a scheduler of its own.
+        """
+        self._execute(
+            "DELETE FROM energy_consumption WHERE timestamp < datetime('now', ?)",
+            (f"-{max(1, int(keep_days))} days",),
+        )
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     # Slot concept here refers to the number of urls. Slot should be renamed on all the code because is incorrectly used.

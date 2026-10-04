@@ -60,7 +60,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 Windows users should download and run the official installer:
 
-[Nodo Windows Installer (.exe)](https://github.com/celaut-project/nodo/releases/download/v1/Nodo-Setup.exe)
+[Nodo Windows Installer (.exe)](https://github.com/celaut-project/nodo/releases/download/wsl-exe/Nodo-Setup.exe)
 
 <details>
 <summary>Windows installation details</summary>
@@ -111,6 +111,9 @@ Below is a breakdown of **Nodo** feature support across different operating syst
 ## Usage
 
 For detailed usage instructions, please refer to the [User Guide](docs/USAGE.md).
+Scripts and AI agents should use the CLI rather than `nodo tui`: every TUI page and
+action has a non-interactive command, most with `--json` — see
+[Scripting and AI agents](docs/USAGE.md#scripting-and-ai-agents-).
 
 To package your own project into a Celaut service, see the [Packing Guide](docs/PACKING.md).
 To remove Nodo, see the [Uninstallation Guide](docs/UNINSTALL.md).
@@ -127,3 +130,4 @@ document to ensure you are fully aware of your responsibilities and the limitati
 All payments, reputation submissions, and service remunerations are handled decentralized on the Ergo blockchain.
 Check how and why Nodo uses [Ergo](docs/ERGO.md).
 How a peer's score is computed when work is delegated: [Reputation](docs/REPUTATION.md).
+How a request delegated from node to node is kept from looping back or growing without bound, and why a peer would honour that: [Recursion guard](docs/RECURSION_GUARD.md). Design documents and studies for specific issues are indexed in [docs/proposals](docs/proposals/README.md).

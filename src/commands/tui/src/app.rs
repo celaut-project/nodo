@@ -1,17 +1,24 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
+use crate::chat::{
+    get_conversation_messages, get_untopiced_messages, ChatCardAction, ChatCompose, ChatEntry,
+    ChatEntryKind, ChatService,
+    ChatMessageRow,
+};
+use crate::clients::{get_client_detail, get_clients, Client, ClientDetail};
 use crate::energy::{self, EnergyEntry};
+use crate::peers::{get_peer_detail, get_peers, Peer, PeerDetail};
 use crate::schedule::{self};
+use base64::Engine;
 use prost::Message;
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::TableState;
-use regex::Regex;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde_yaml::Value;
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::error;
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -37,9 +44,22 @@ const REPUTATION_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// rows the node's own hourly indexing tick wrote, plus config, so refreshing it
 /// faster than the tick that fills it in would only re-read the same numbers.
 const DONATIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(600);
+/// How often this node's own announced resources are re-read (`nodo resources
+/// --json`, issue #455). Ceilings, not headroom: they move when the machine, its
+/// `host_limits` caps or its benchmark scores do, so there is no point asking often.
+const OWN_RESOURCES_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// How much demand history the SCHEDULE page reads back. A month shows the weekly shape
 /// without letting one unusual day set the scale of the whole chart.
 const DEMAND_HISTORY_DAYS: u16 = 30;
+/// How much `energy_consumption` history the ENERGY page and the OVERVIEW card read
+/// back (issue #442). 30 days, matching `RETENTION_DAYS` in
+/// `src/manager/energy/monitor.py` -- so the ENERGY page's monthly median always
+/// covers the whole month it claims to, rather than whatever fraction of it a
+/// shorter fetch window would leave. At the default 60s sample interval this is
+/// still only 720 hourly buckets: the chart itself only ever draws as many of the
+/// most recent of them as the terminal is wide, and it is the medians underneath it
+/// that need the rest.
+const ENERGY_HISTORY_HOURS: u16 = 24 * 30;
 /// Shortest gap between two counter samples that yields a meaningful rate. The
 /// ordinary sweep is `DATA_REFRESH_INTERVAL` apart, but a forced refresh (after a
 /// kill, or an `r` keypress) can land immediately after one; dividing a counter
@@ -58,11 +78,22 @@ pub trait Identifiable {
 pub enum Page {
     Overview,
     Instances,
+    /// The `nodo tunnel` processes running on this host: where each listens and
+    /// what it reaches. Opened here or with `t` on INSTANCES; see `tunnels.rs`.
+    Tunnels,
     Services,
+    /// The `nodo pack` runs on this host, current and recent: what each packs, where
+    /// it is, and the service id it produced. Launched here or with `p` on SERVICES;
+    /// see `packs.rs`.
+    Packs,
     /// Peers we talk to, and what we have paid them.
     Peers,
     /// Clients that talk to us, and what they have paid.
     Clients,
+    /// Free-text conversations with peer operators (issue #431): every thread this
+    /// node opened or one of its clients opened with it, plus each peer's topic-less
+    /// history, merged into one sidebar sorted by recency.
+    Chat,
     /// What this node has been paid, and what the network stakes on it — the two
     /// things it earns by being up.
     Earnings,
@@ -75,13 +106,16 @@ pub enum Page {
     /// two separate fields cannot say so.
     Schedule,
     /// What the machine costs to run, as watts and as money (`energy:`). Its own page
-    /// rather than a branch of Config because the block is a dozen keys spread over
+    /// rather than a branch of All because the block is a dozen keys spread over
     /// five mutually exclusive measurement sources, and the comments that say which
     /// one applies to a given machine are the whole difference between a reading and
     /// a number somebody invented (issue #395).
     Energy,
     Config,
     Logs,
+    /// The installation's own `docs/` folder: an index of every page, and the
+    /// selected one rendered to read in place.
+    Docs,
 }
 
 /// Which band of the tab bar a page belongs to.
@@ -105,6 +139,8 @@ pub enum PageGroup {
     Record,
     /// The pages that change the node rather than describe it.
     Settings,
+    /// How the node works, as its own documentation says.
+    Reference,
 }
 
 impl PageGroup {
@@ -114,12 +150,13 @@ impl PageGroup {
     /// a test — but written out, because the top row's order is a fact about the top
     /// row and a reader should be able to see it without folding twelve pages down
     /// into five.
-    pub const ALL: [PageGroup; 5] = [
+    pub const ALL: [PageGroup; 6] = [
         PageGroup::Status,
         PageGroup::Activity,
         PageGroup::Money,
         PageGroup::Record,
         PageGroup::Settings,
+        PageGroup::Reference,
     ];
 
     /// The short name on the group row.
@@ -135,6 +172,20 @@ impl PageGroup {
             PageGroup::Money => "EARNINGS",
             PageGroup::Record => "LOGS",
             PageGroup::Settings => "SETTINGS",
+            PageGroup::Reference => "DOCS",
+        }
+    }
+
+    /// The name on the group row when the full ones do not fit (issue #453). Four
+    /// letters or fewer, so all six fit a 40-column terminal.
+    pub fn short_title(self) -> &'static str {
+        match self {
+            PageGroup::Status => "OVER",
+            PageGroup::Activity => "WORK",
+            PageGroup::Money => "EARN",
+            PageGroup::Record => "LOGS",
+            PageGroup::Settings => "SET",
+            PageGroup::Reference => "DOCS",
         }
     }
 
@@ -170,15 +221,22 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 12] = [
+    pub const ALL: [Page; 16] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
         // network this node is part of and the services are what it brings to it.
         Page::Instances,
+        // Beside Instances: a tunnel is a way into one of them.
+        Page::Tunnels,
         Page::Peers,
         Page::Services,
+        // Beside Services: a pack is how a service gets into the registry.
+        Page::Packs,
         Page::Clients,
+        // Beside Clients: both are "who is on the other end", and Chat is often
+        // reached from noticing something worth telling that operator about.
+        Page::Chat,
         // After the pages that name who we deal with, because it is the sum of
         // what dealing with them came to.
         Page::Earnings,
@@ -193,22 +251,52 @@ impl Page {
         Page::Schedule,
         Page::Energy,
         Page::Config,
+        // Last, and a group of its own: it describes the node rather than being
+        // part of it, and it is where an operator goes from any page above.
+        Page::Docs,
     ];
 
     pub fn title(self) -> &'static str {
         match self {
             Page::Overview => "OVERVIEW",
             Page::Instances => "INSTANCES",
+            Page::Tunnels => "TUNNELS",
             Page::Services => "SERVICES",
+            Page::Packs => "PACKS",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
+            Page::Chat => "CHAT",
             Page::Earnings => "EARNINGS",
-            Page::Cell => "CELL",
+            Page::Cell => "POLICIES",
             Page::Pricing => "PRICING",
             Page::Schedule => "SCHEDULE",
             Page::Energy => "ENERGY",
-            Page::Config => "CONFIG",
+            Page::Config => "ALL",
             Page::Logs => "LOGS",
+            Page::Docs => "DOCS",
+        }
+    }
+
+    /// The name on the page row when the full ones do not fit (issue #453): short
+    /// enough that the widest group's six pages fit a 40-column terminal (unpadded).
+    pub fn short_title(self) -> &'static str {
+        match self {
+            Page::Overview => "OVER",
+            Page::Instances => "INST",
+            Page::Tunnels => "TUNL",
+            Page::Services => "SERV",
+            Page::Packs => "PACK",
+            Page::Peers => "PEERS",
+            Page::Clients => "CLNT",
+            Page::Chat => "CHAT",
+            Page::Earnings => "EARN",
+            Page::Cell => "POLICY",
+            Page::Pricing => "PRICE",
+            Page::Schedule => "SCHED",
+            Page::Energy => "ENERGY",
+            Page::Config => "ALL",
+            Page::Logs => "LOGS",
+            Page::Docs => "DOCS",
         }
     }
 
@@ -218,14 +306,75 @@ impl Page {
     pub fn group(self) -> PageGroup {
         match self {
             Page::Overview => PageGroup::Status,
-            Page::Instances | Page::Peers | Page::Services | Page::Clients => {
-                PageGroup::Activity
-            }
+            Page::Instances
+            | Page::Tunnels
+            | Page::Peers
+            | Page::Services
+            | Page::Packs
+            | Page::Clients
+            | Page::Chat => PageGroup::Activity,
             Page::Earnings => PageGroup::Money,
             Page::Logs => PageGroup::Record,
             Page::Cell | Page::Pricing | Page::Schedule | Page::Energy | Page::Config => {
                 PageGroup::Settings
             }
+            Page::Docs => PageGroup::Reference,
+        }
+    }
+}
+
+/// What a tab row draws at a given width: its titles, and the padding either side
+/// of each.
+///
+/// The full titles with one space of padding when they fit; the short ones
+/// ([`Page::short_title`]) when they do not; the short ones unpadded when even that
+/// is too wide (issue #453). Chosen here, once, for both the drawing and the hit
+/// test, so a click lands on the tab drawn under it whichever form was drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabRow {
+    pub titles: Vec<&'static str>,
+    pub padding: u16,
+}
+
+impl TabRow {
+    fn fit(full: Vec<&'static str>, short: Vec<&'static str>, available: u16) -> Self {
+        let needed = |titles: &[&str], padding: u16| -> usize {
+            titles.iter().map(|title| title.chars().count() + 2 * padding as usize).sum::<usize>()
+                + TAB_DIVIDER.chars().count() * titles.len().saturating_sub(1)
+        };
+        for (titles, padding) in [(&full, 1), (&short, 1)] {
+            if needed(titles, padding) <= available as usize {
+                return Self { titles: titles.clone(), padding };
+            }
+        }
+        Self { titles: short, padding: 0 }
+    }
+
+    /// The bordered group row drawn `width` columns wide.
+    pub fn groups(width: u16) -> Self {
+        Self::fit(
+            PageGroup::ALL.iter().map(|group| group.title()).collect(),
+            PageGroup::ALL.iter().map(|group| group.short_title()).collect(),
+            width.saturating_sub(2),
+        )
+    }
+
+    /// `group`'s borderless page row drawn `width` columns wide.
+    pub fn pages(group: PageGroup, width: u16) -> Self {
+        let pages = group.pages();
+        Self::fit(
+            pages.iter().map(|page| page.title()).collect(),
+            pages.iter().map(|page| page.short_title()).collect(),
+            width,
+        )
+    }
+
+    /// The padding as the string `Tabs::padding` takes.
+    pub fn pad(&self) -> &'static str {
+        if self.padding > 0 {
+            " "
+        } else {
+            ""
         }
     }
 }
@@ -239,22 +388,30 @@ pub const TAB_DIVIDER: &str = "│";
 /// Which of a row of `titles` covers column `x`, given the row's own `Rect`.
 ///
 /// Retraces what `Tabs` lays out rather than asking it — the widget keeps no hit
-/// map. Each title sits in one space of padding, the title, one space of padding,
-/// and tabs are joined by [`TAB_DIVIDER`]. Measured in characters, not bytes.
+/// map. Each title sits in `padding` spaces either side, and tabs are joined by
+/// [`TAB_DIVIDER`]. Measured in characters, not bytes.
 ///
 /// One function for both rows so the group row and the page row cannot drift into
 /// two slightly different pieces of arithmetic, which is the kind of bug that shows
 /// up as a click landing on the neighbouring tab and gets worked around rather than
 /// reported. `x_offset` is where the titles begin: the bordered group row starts one
 /// column in, the borderless page row starts at its own left edge.
-fn title_row_at(x: u16, area: Rect, titles: &[&str], x_offset: u16) -> Option<usize> {
-    let divider_width = TAB_DIVIDER.chars().count() as u16;
-    let mut cursor = area.x + x_offset;
-    for (index, title) in titles.iter().enumerate() {
+///
+/// A title the row was too narrow to draw is not clickable: `Tabs` stops at the
+/// row's inner edge, and so does this.
+fn title_row_at(x: u16, area: Rect, row: &TabRow, x_offset: u16) -> Option<usize> {
+    let divider_width = TAB_DIVIDER.chars().count() as u32;
+    let right = area.x as u32 + area.width.saturating_sub(x_offset) as u32;
+    let x = x as u32;
+    if x >= right {
+        return None;
+    }
+    let mut cursor = area.x as u32 + x_offset as u32;
+    for (index, title) in row.titles.iter().enumerate() {
         if index > 0 {
             cursor += divider_width;
         }
-        let width = title.chars().count() as u16 + 2;
+        let width = title.chars().count() as u32 + 2 * row.padding as u32;
         if x >= cursor && x < cursor + width {
             return Some(index);
         }
@@ -265,8 +422,7 @@ fn title_row_at(x: u16, area: Rect, titles: &[&str], x_offset: u16) -> Option<us
 
 /// Which group the click at column `x` on the group row landed on.
 pub fn group_at(x: u16, area: Rect) -> Option<PageGroup> {
-    let titles: Vec<&str> = PageGroup::ALL.iter().map(|group| group.title()).collect();
-    title_row_at(x, area, &titles, 1).map(|index| PageGroup::ALL[index])
+    title_row_at(x, area, &TabRow::groups(area.width), 1).map(|index| PageGroup::ALL[index])
 }
 
 /// Which page of `group` the click at column `x` on the page row landed on.
@@ -279,8 +435,7 @@ pub fn page_at(x: u16, area: Rect, group: PageGroup) -> Option<Page> {
     if pages.len() <= 1 {
         return None;
     }
-    let titles: Vec<&str> = pages.iter().map(|page| page.title()).collect();
-    title_row_at(x, area, &titles, 0).map(|index| pages[index])
+    title_row_at(x, area, &TabRow::pages(group, area.width), 0).map(|index| pages[index])
 }
 
 /// How many rows below the first visible one a click at terminal row `y` lands, for a
@@ -312,6 +467,8 @@ fn visible_row_at(position: Position, area: Rect) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    /// The DOCS page's `/`: text to find on the open page.
+    SearchDocs,
     /// The Know-your-Assumptions gate, shown once, before anything else is reachable
     /// (issue #395).
     ///
@@ -326,7 +483,7 @@ pub enum InputMode {
     AcceptKya,
     Connect,
     EditConfig,
-    /// A new element for the list the Config page's selection points at.
+    /// A new element for the list the All page's selection points at.
     AddConfigItem,
     FilterConfig,
     /// Amount entry for crediting/debiting the selected client's balance.
@@ -335,18 +492,61 @@ pub enum InputMode {
     Confirm,
     /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
     Details,
-    /// Profile picker on the CELL page: choose a posture, then confirm its diff.
+    /// Profile picker on the POLICIES page: choose a posture, then confirm its diff.
     PickProfile,
-    /// Which of the config keys behind one CELL lever to edit (issue #414).
+    /// Which of the config keys behind one POLICIES lever to edit (issue #414).
     ///
     /// A lever stands for several keys, and used to answer `e` with a read-only
-    /// list that ended by sending the operator to the Config page. This is that
+    /// list that ended by sending the operator to the All page. This is that
     /// list made actionable, over exactly the same keys.
     PickLeverKey,
     /// Confirmation showing every key a lever or profile would change, before any
     /// of them is written. A posture is a dozen keys, and writing them without
     /// showing them is the failure this page exists to prevent.
     ConfirmWrites,
+    /// Naming a new `ui.DISPLAY_UNIT`, reached by picking `custom…` off its picker.
+    ///
+    /// A display unit outside the built-in ones is only real once it has a rate
+    /// (`src/utils/monetary.py::display_unit` refuses one with none), so this does
+    /// not just set `ui.DISPLAY_UNIT` -- it takes a name and a MU-per-unit ratio
+    /// together and writes both `ui.DISPLAY_UNIT` and `ui.UNITS.<name>.MU_PER_UNIT`
+    /// in the one transaction, the same way a POLICIES profile writes a dozen keys
+    /// rather than leaving the node to run on a partial edit.
+    AddCustomUnit,
+    /// The tokens this node accepts besides ERG, reached from the POLICIES page's
+    /// `assets` lever: the list, with `a` to add one and `d` to remove the selected.
+    EditAssets,
+    /// The form for one new asset, inside the assets modal (see [`AssetForm`]).
+    AddAsset,
+    /// CHAT page, new-chat wizard step 1: pick which peer to start a chat with,
+    /// narrowed by typing (issue: TUI chat/peers/clients redesign).
+    PickChatPeer,
+    /// CHAT page, new-chat wizard step 2: pick one of that peer's existing topics, or
+    /// "+ New topic…" to type one (`NewChatTopic`).
+    PickChatTopic,
+    /// CHAT page, new-chat wizard step 2b: typing a topic that was not already
+    /// offered by `PickChatTopic`.
+    NewChatTopic,
+    /// CHAT page, the final step either wizard leads to: a real, possibly multi-line
+    /// message, docked in the conversation pane rather than a centered popup --
+    /// `Enter` inserts a newline here instead of submitting (see `handler.rs`).
+    ComposeChatMessage,
+    /// SERVICES page: the hash of a service this node does not hold, to ask the
+    /// network for with `nodo get` (issue #438).
+    GetService,
+    /// A new tunnel: `<slot> [flags]` from INSTANCES (`t`, to the selected
+    /// instance) or `<instance> <slot> [flags]` from TUNNELS (`n`).
+    NewTunnel,
+    /// PACKS page (`n`) or SERVICES (`p`): a folder or an https git URL to pack. Tab
+    /// completes folder names.
+    NewPack,
+    /// CHAT page, a step of `ComposeChatMessage`: which of this node's services to
+    /// attach to the message as a card (issue #438). Esc goes back to the message
+    /// rather than dropping it.
+    PickChatService,
+    /// A right-click menu of the clicked row's actions (issue #438). Choosing an
+    /// entry presses its key, in Normal mode, as if it had been typed.
+    ContextMenu,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -385,6 +585,79 @@ pub fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+/// Picking this off the `ui.DISPLAY_UNIT` picker does not set the unit to a value
+/// literally named "custom" -- it opens [`InputMode::AddCustomUnit`], which asks for
+/// a real name and a rate instead. Not a valid YAML scalar on its own (the ellipsis),
+/// so it can never be saved by mistake as if it were an ordinary option.
+pub const CUSTOM_UNIT_OPTION: &str = "custom…";
+
+/// What `ui.DISPLAY_UNIT` can be set to right now: `mu`, `erg`, `btc` once
+/// `ledgers.bitcoin.payments.MU_PER_SATOSHI` is a positive rate, and whatever the
+/// operator already declared under `ui.UNITS`, in that order, with
+/// [`CUSTOM_UNIT_OPTION`] last.
+///
+/// Unlike `known_enum_values`, this reads `document`: which units exist depends on
+/// what is configured, not on a fixed list the binary ships with. A name already on
+/// this list will not be offered twice.
+fn display_unit_options(document: Option<&Value>) -> Vec<String> {
+    let mut options = vec!["mu".to_string(), "erg".to_string()];
+    let bitcoin_configured = yaml_scalar(
+        document,
+        &["ledgers", "bitcoin", "payments", "MU_PER_SATOSHI"],
+    )
+    .and_then(|value| value.parse::<f64>().ok())
+    .is_some_and(|value| value > 0.0);
+    if bitcoin_configured {
+        options.push("btc".to_string());
+    }
+    let declared = document
+        .and_then(|document| document.get("ui"))
+        .and_then(|ui| ui.get("UNITS"))
+        .and_then(|units| units.as_mapping());
+    if let Some(declared) = declared {
+        for key in declared.keys() {
+            if let Some(name) = key.as_str() {
+                if !options.iter().any(|existing| existing == name) {
+                    options.push(name.to_string());
+                }
+            }
+        }
+    }
+    options.push(CUSTOM_UNIT_OPTION.to_string());
+    options
+}
+
+/// Parse and validate `"<name> <rate>"`, typed into [`InputMode::AddCustomUnit`],
+/// against `existing` (a [`display_unit_options`] list, so the sentinel and every
+/// unit already on offer are covered by the same check). `Ok` gives the two writes
+/// `save_custom_unit` applies together: the unit's own name, lower-cased, and its
+/// `MU_PER_UNIT` rate exactly as typed (a decimal literal, kept as a string so it
+/// reaches `yq` unrounded).
+fn parse_custom_unit(input: &str, existing: &[String]) -> Result<(String, String), String> {
+    let Some((name, rate)) = input.trim().split_once(char::is_whitespace) else {
+        return Err("Type a name and a MU-per-unit rate, separated by a space".to_string());
+    };
+    let name = name.trim().to_lowercase();
+    let rate = rate.trim();
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err("Unit name must be letters, digits or underscore".to_string());
+    }
+    if existing.iter().any(|option| option == &name) || name == "custom" {
+        return Err(format!("\"{name}\" is already a unit; pick another name"));
+    }
+    let Ok(rate_value) = rate.parse::<f64>() else {
+        return Err("MU per unit must be a positive number".to_string());
+    };
+    if !(rate_value.is_finite() && rate_value > 0.0) {
+        return Err("MU per unit must be a positive number".to_string());
+    }
+    Ok((name, rate.to_string()))
+}
+
 /// A destructive action awaiting user confirmation.
 #[derive(Debug, Clone)]
 pub enum PendingAction {
@@ -395,6 +668,15 @@ pub enum PendingAction {
     /// moment it launches, and goes on burning MU until something stops it.
     ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Stop a running tunnel. Confirmed because whatever is connected through it is
+    /// cut off, and reopening it may not get the same local port back.
+    CloseTunnel { id: String, label: String },
+    /// Open a tunnel (`t` on INSTANCES, `n` on TUNNELS). Confirmed because every
+    /// connection through it spends `pricing.TUNNEL_OPEN_MU` of the instance's balance;
+    /// the question says how much.
+    OpenTunnel { label: String, args: Vec<String> },
+    /// Stop a running pack. Confirmed because the build so far is thrown away.
+    CancelPack { id: String, label: String },
     /// Remove one element from a list in config.yaml. Confirmed like the others
     /// because dropping an entry from, say, a network policy loosens it silently.
     DeleteConfigItem {
@@ -407,6 +689,12 @@ pub enum PendingAction {
         label: String,
         writes: Vec<(String, String)>,
     },
+    /// Open the value editor on a lever's key once the operator has read what
+    /// replacing it costs. Nothing is written by this: it only lets the editor open.
+    EditLever {
+        lever: &'static Lever,
+        path: &'static str,
+    },
 }
 
 /// The `nodo` invocation a confirmed [`PendingAction`] turns into, and the label its
@@ -415,7 +703,7 @@ pub enum PendingAction {
 ///
 /// `None` where there is no equivalent: no `nodo` subcommand edits a single config
 /// key, which is why the config editor writes through `yq`.
-fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
+pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
     match action {
         PendingAction::DeleteService { id, label } => Some((
             format!("Delete service {label}"),
@@ -432,8 +720,18 @@ fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
         )),
+        PendingAction::CloseTunnel { id, label } => Some((
+            format!("Close tunnel {label}"),
+            vec!["tunnel_close".to_string(), id, "--json".to_string()],
+        )),
         PendingAction::DeleteConfigItem { .. } => None,
         PendingAction::ApplyWrites { .. } => None,
+        PendingAction::OpenTunnel { label, args } => Some((label, args)),
+        PendingAction::CancelPack { id, label } => Some((
+            format!("Cancel pack {label}"),
+            vec!["pack_cancel".to_string(), id, "--json".to_string()],
+        )),
+        PendingAction::EditLever { .. } => None,
     }
 }
 
@@ -600,20 +898,9 @@ async fn apply_config_change(
         Err(error) => return fail(format!("Could not run {}: {error}", yq.display())),
     }
 
-    let port_after = read_gateway_port(&config);
-    if port_after != port_before {
-        let _ = fs::remove_file(cache.join("gateway_port_passed"));
-        // GATEWAY_PLAINTEXT_PORT's `auto` resolves as GATEWAY_PORT + 1 (see
-        // ConfigManager.get_plaintext_gateway_port), so a changed TLS port changes
-        // what the plaintext one *is* even when GATEWAY_PLAINTEXT_PORT itself was
-        // never touched by this write.
-        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
-    }
-
-    let plaintext_after = read_gateway_plaintext_port_raw(&config);
-    if plaintext_after != plaintext_before {
-        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
-    }
+    let tls_moved = read_gateway_port(&config) != port_before;
+    let plaintext_moved = read_gateway_plaintext_port_raw(&config) != plaintext_before;
+    forget_gateway_verdicts(&config, &cache, tls_moved, plaintext_moved);
 
     if !was_serving {
         return ConfigTransaction {
@@ -651,6 +938,35 @@ async fn apply_config_change(
     ConfigTransaction {
         label,
         result: Ok(Applied::Restarted),
+    }
+}
+
+/// Drop what is known about a gateway port an edit just moved: the "proven
+/// reachable" marker the node would skip its probe on, and the pending notice --
+/// with its command and port companions -- that `nodo` and the TUI report from.
+///
+/// Both halves, as `ConfigManager.set` does on the Python side. Dropping only the
+/// marker (issue #438) left the notice about the old port on disk: the alert then
+/// named the new port and the old port's firewall command, the operator opened the
+/// old one, restarted, and only then heard about the port the node actually used.
+///
+/// A moved TLS port moves the plaintext one too: `auto` is GATEWAY_PORT + 1 (see
+/// ConfigManager.get_plaintext_gateway_port), even when GATEWAY_PLAINTEXT_PORT
+/// itself was never touched by this write.
+fn forget_gateway_verdicts(config: &Path, cache: &Path, tls_moved: bool, plaintext_moved: bool) {
+    if tls_moved {
+        let _ = fs::remove_file(cache.join("gateway_port_passed"));
+        for path in crate::alerts::notice_files(config, crate::alerts::GATEWAY_NOTICE_FILE) {
+            let _ = fs::remove_file(path);
+        }
+    }
+    if tls_moved || plaintext_moved {
+        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
+        for path in
+            crate::alerts::notice_files(config, crate::alerts::GATEWAY_PLAINTEXT_NOTICE_FILE)
+        {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
@@ -780,16 +1096,27 @@ fn failure_reason(output: &std::process::Output) -> String {
 
 /// What to do with a background command's output once it finishes.
 #[derive(Debug, Clone)]
-enum CommandKind {
+pub(crate) enum CommandKind {
     /// Append output to the action log and report status.
     Generic,
     /// Render stdout in the Details overlay (carries the service id for the title).
     Inspect(String),
+    /// Report the command's own last line of stdout as the status. For commands
+    /// that print their outcome rather than exit non-zero on it: `nodo get` says
+    /// "not a valid service hash" and "queued" alike with a zero exit, so
+    /// `Generic`'s "completed" would read the same for both.
+    Report,
+    /// `nodo tunnel --detach --json` / `nodo tunnel_close --json`: the status comes
+    /// from the one JSON object, whose `error` is on stdout (`tunnels::outcome_status`).
+    Tunnel,
+    /// `nodo pack --detach --json` / `nodo pack_cancel --json`, read the same way
+    /// (`packs::outcome_status`).
+    Pack,
 }
 
 /// Result of a background `nodo` invocation.
 #[derive(Debug)]
-struct CommandOutcome {
+pub(crate) struct CommandOutcome {
     kind: CommandKind,
     label: String,
     stdout: String,
@@ -803,74 +1130,6 @@ pub struct DetailsView {
     pub title: String,
     pub lines: Vec<String>,
     pub scroll: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct Peer {
-    pub id: String,
-    pub uris: String,
-    /// Our balance on this peer, in raw MU as stored. Rendered in the operator's
-    /// display unit at draw time (see `Money`), never at read time, so changing the
-    /// unit does not need a data refresh. Source of truth is the `balance_mu` column on the
-    /// `peer` table itself — NOT the local `clients` table. `peer.remote_client_id`
-    /// identifies our client *inside the remote peer*, so it can never be joined
-    /// against our local `clients` table (see issue #178).
-    pub balance: String,
-    /// Our client id *inside this peer*, as it assigned it to us — what `nodo peers`
-    /// prints as "Remote Client ID". Empty when we have never registered there.
-    /// Never a key into our own `clients` table (see the balance note above).
-    pub remote_client_id: String,
-    /// Every reputation proof this peer announced. These are the peer's *own*
-    /// opinions about other nodes, published on-chain — not a credential we hold on
-    /// it, and not one value: a single identity key can hold several proofs, so the
-    /// list comes from its signed advertisement rather than a column (issue #281).
-    pub proof_ids: Vec<String>,
-    /// Local reputation score (nodo-managed, independent of the on-chain proof).
-    pub reputation_score: String,
-    /// Every payment contract this peer has registered. Rendered in the peer
-    /// detail card rather than the table: a peer can hold several instances,
-    /// and each carries more than a row can show (see issue #231).
-    pub contracts: Vec<PeerContract>,
-}
-
-/// One `contract_instance` row: the ledger a peer settles on, the contract it
-/// charges through, the address it gets paid at, and what one of its units is worth.
-#[derive(Debug, Clone)]
-pub struct PeerContract {
-    /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
-    /// ledger row can't be resolved or carries no tag.
-    pub ledger: String,
-    pub contract_hash: String,
-    /// The asset this method settles in: a reserved native symbol ("ERG", "BTC") or a
-    /// token's 64-hex id. Part of the identity, not decoration -- on Ergo one contract
-    /// is paid in ERG and in every token at the same address, so two rows can differ in
-    /// nothing else, and each carries its own `mu_per_unit`.
-    pub asset: String,
-    pub address: String,
-    pub mu_per_unit: String,
-}
-
-impl Identifiable for Peer {
-    fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Client {
-    pub id: String,
-    pub balance: String,
-    pub last_usage: String,
-    /// A client this node never charges — its own dev clients. Stored on the row
-    /// since before this page existed, and shown nowhere until it did: an operator
-    /// wondering why a balance never moves is owed this word.
-    pub unmetered: bool,
-}
-
-impl Identifiable for Client {
-    fn id(&self) -> &str {
-        &self.id
-    }
 }
 
 /// One `payments` row, as the detail cards show it. The amount stays in raw MU and is
@@ -896,32 +1155,6 @@ pub struct ReputationEvent {
     pub score_after: Option<i64>,
 }
 
-/// A deposit token issued to a client, with what became of it.
-#[derive(Debug, Clone)]
-pub struct DepositToken {
-    pub id: String,
-    pub status: String,
-    pub created_at: String,
-}
-
-/// An instance a client started on this node (`local_instances.father_id`).
-#[derive(Debug, Clone)]
-pub struct ClientInstance {
-    pub id: String,
-    pub name: String,
-}
-
-/// Everything the Peers page shows about the selected peer beyond its table row.
-///
-/// Loaded for the selection rather than for every peer: this is three queries, and
-/// the list refreshes every couple of seconds whether or not anyone is reading it.
-#[derive(Debug, Clone, Default)]
-pub struct PeerDetail {
-    pub peer_id: String,
-    pub payments: Vec<PaymentRow>,
-    pub events: Vec<ReputationEvent>,
-}
-
 /// A service's reputation: the score every instance of it contributed to, and the
 /// events that got it there.
 #[derive(Debug, Clone, Default)]
@@ -931,19 +1164,6 @@ pub struct ServiceDetail {
     /// which is a service that earned and lost in equal measure.
     pub score: Option<i64>,
     pub events: Vec<ReputationEvent>,
-}
-
-/// Everything the Clients page shows about the selected client beyond its table row.
-///
-/// A client is not a peer and cannot be resolved to one: `peer.remote_client_id` is
-/// our client id *inside* a remote peer, not a key into our `clients` table (#178).
-/// So this shows what the client itself did here — nothing is inferred about who it is.
-#[derive(Debug, Clone, Default)]
-pub struct ClientDetail {
-    pub client_id: String,
-    pub deposits: Vec<DepositToken>,
-    pub instances: Vec<ClientInstance>,
-    pub payments: Vec<PaymentRow>,
 }
 
 /// One wallet of a donation list, as `nodo donations --json` reports it.
@@ -1284,6 +1504,133 @@ pub struct NodeEnergy {
     pub is_floor: bool,
 }
 
+/// Joules in a kilowatt-hour. Mirrors `price.JOULES_PER_KWH` on the Python side,
+/// which the `energy_consumption` table's `energy_joules` column is written in.
+const JOULES_PER_KWH: f64 = 3.6e6;
+
+/// One local hour of `energy_consumption`, folded from however many samples landed
+/// in it (issue #442).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EnergyBucket {
+    /// The peak instantaneous reading within the hour -- the number a "picos" chart
+    /// exists to show, which an average across the hour would sand off.
+    pub peak_watts: f64,
+    /// What the hour actually cost, summed from each sample's own tariff
+    /// (`energy_joules / 3.6e6 * price_per_kwh`) rather than the hour's *current*
+    /// price, so a tariff change never rewrites a bucket already drawn.
+    pub cost: f64,
+    /// Energy for the hour, in joules; kept alongside `cost` so kWh can be read back
+    /// without re-deriving it from watts and a sample interval nobody here knows.
+    pub joules: f64,
+}
+
+/// `energy_consumption` folded into local hours, oldest first (issue #442).
+///
+/// `hours[i]` is `keys[i]`'s bucket; kept as two parallel vectors rather than a map
+/// so the chart can walk them in the chronological order the query already produced,
+/// without a sort a `HashMap` would force.
+#[derive(Debug, Clone, Default)]
+pub struct EnergySeries {
+    /// Local hour keys, `YYYY-MM-DDTHH`, ascending -- oldest first, same format
+    /// `demand_history.hour_key` uses, so the two read the same at a glance.
+    pub keys: Vec<String>,
+    pub buckets: Vec<EnergyBucket>,
+}
+
+impl EnergySeries {
+    pub fn is_empty(&self) -> bool {
+        self.buckets.is_empty()
+    }
+
+    /// The worst hour in the whole series -- what "picos" asks for, not a mean.
+    pub fn peak_watts(&self) -> f64 {
+        self.buckets
+            .iter()
+            .map(|bucket| bucket.peak_watts)
+            .fold(0.0_f64, f64::max)
+    }
+
+    pub fn total_kwh(&self) -> f64 {
+        self.buckets.iter().map(|bucket| bucket.joules).sum::<f64>() / JOULES_PER_KWH
+    }
+
+    pub fn total_cost(&self) -> f64 {
+        self.buckets.iter().map(|bucket| bucket.cost).sum()
+    }
+
+    /// The buckets sharing the most recent bucket's calendar date -- "today" without
+    /// asking the host clock, since the series is already sorted and local: the last
+    /// key's own date prefix *is* today, as of the sample the series was built from.
+    fn today_buckets(&self) -> impl Iterator<Item = &EnergyBucket> {
+        let today = self.keys.last().map(|key| &key[..10]);
+        self.keys
+            .iter()
+            .zip(self.buckets.iter())
+            .filter(move |(key, _)| today == Some(&key[..10]))
+            .map(|(_, bucket)| bucket)
+    }
+
+    pub fn today_kwh(&self) -> f64 {
+        self.today_buckets().map(|bucket| bucket.joules).sum::<f64>() / JOULES_PER_KWH
+    }
+
+    pub fn today_cost(&self) -> f64 {
+        self.today_buckets().map(|bucket| bucket.cost).sum()
+    }
+
+    /// The trailing `hours` of buckets, oldest first -- clamped to what the series
+    /// actually holds rather than panicking on a window wider than the history a
+    /// freshly-started node has had time to collect.
+    fn trailing(&self, hours: usize) -> &[EnergyBucket] {
+        let start = self.buckets.len().saturating_sub(hours);
+        &self.buckets[start..]
+    }
+
+    /// The worst hour within the trailing `hours` (issue #442) -- a bounded window
+    /// for a caller that wants a stable "peak of the last N hours" (the OVERVIEW
+    /// card) independent of how far back `energy_history_hours` actually reaches.
+    pub fn peak_watts_over(&self, hours: u16) -> f64 {
+        self.trailing(hours as usize)
+            .iter()
+            .map(|bucket| bucket.peak_watts)
+            .fold(0.0_f64, f64::max)
+    }
+
+    /// The middle hour's cost among today's (issue #453). `today_cost` is a sum, and
+    /// a sum answers "what did today cost"; this answers "what does a typical hour
+    /// cost", which a handful of spike hours must not be allowed to stand in for.
+    pub fn median_cost_today(&self) -> f64 {
+        median(self.today_buckets().map(|bucket| bucket.cost).collect())
+    }
+
+    /// The middle hour's cost among the trailing `days` days -- the same "typical
+    /// hour" question as `median_cost_today`, asked over a week or a month instead.
+    pub fn median_cost_over(&self, days: u16) -> f64 {
+        median(
+            self.trailing(days as usize * 24)
+                .iter()
+                .map(|bucket| bucket.cost)
+                .collect(),
+        )
+    }
+}
+
+/// The middle value of `values`, averaging the two middle ones on an even count.
+/// Empty reads as zero, the same "nothing happened" default every other energy
+/// figure here uses rather than `Option`.
+fn median(mut values: Vec<f64>) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    }
+}
+
 /// Who an instance is running for.
 ///
 /// Resolved against the lists the page already holds rather than stored: a column
@@ -1475,6 +1822,248 @@ pub struct DashboardStats {
     pub instance_memory_current: u64,
     pub instance_memory_reserved: u64,
     pub instance_disk_reserved: u64,
+    /// The node daemon's own cgroup `memory.current` -- what `nodo.service` itself
+    /// holds, as opposed to anything it has spun up. Read straight from cgroupfs the
+    /// same way an instance's is, since the daemon is just another leaf of the same
+    /// unified hierarchy (`daemon_cgroup_dir`).
+    pub daemon_memory_used: u64,
+    /// Logical cores on the host (`sys.cpus().len()`), the denominator that turns a
+    /// core-normalised CPU reading -- 200% meaning two cores pinned, the same scale
+    /// `Instance::usage.cpu_percent` uses -- into a share of `cpu_percent`, which is
+    /// already averaged across every core.
+    pub cpu_cores: u64,
+    /// The daemon's own cgroup CPU rate, core-normalised like an instance's
+    /// `usage.cpu_percent` (100.0 = one core fully busy), derived from `cpu.stat`
+    /// `usage_usec` across ticks (`daemon_cpu_counter`).
+    pub daemon_cpu_percent: f64,
+    /// Running instances' CPU rates summed, same core-normalised scale as
+    /// `daemon_cpu_percent`.
+    pub instance_cpu_percent: f64,
+}
+
+/// The three groups OVERVIEW's RAM bar splits host memory into.
+///
+/// `instances_reserved` is what running instances have committed (`memory_limit`,
+/// summed as `instance_memory_reserved`), not what they happen to be using inside
+/// that limit right now (`instance_memory_current`) -- a limit is memory nothing
+/// else on the host can be handed, whether or not the instance is currently touching
+/// all of it. `host_other` is everything `memory_used` accounts for once the daemon
+/// and those reservations are set aside: no reading anywhere samples "every other
+/// process", so it is a subtraction rather than its own measurement.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MemoryBreakdown {
+    pub daemon: u64,
+    pub instances_reserved: u64,
+    pub host_other: u64,
+    pub total: u64,
+}
+
+impl MemoryBreakdown {
+    pub fn daemon_percent(&self) -> u64 {
+        percent(self.daemon, self.total)
+    }
+    pub fn instances_percent(&self) -> u64 {
+        percent(self.instances_reserved, self.total)
+    }
+    pub fn host_other_percent(&self) -> u64 {
+        percent(self.host_other, self.total)
+    }
+}
+
+/// `saturating_sub` rather than a signed difference: the daemon, the instance
+/// reservations and `memory_used` are three independent readings taken a moment
+/// apart, so one can momentarily overshoot another. Reporting zero for "other" then
+/// is a smaller lie than reporting a negative amount of memory.
+pub fn memory_breakdown(stats: &DashboardStats) -> MemoryBreakdown {
+    let host_other = stats
+        .memory_used
+        .saturating_sub(stats.daemon_memory_used)
+        .saturating_sub(stats.instance_memory_reserved);
+    MemoryBreakdown {
+        daemon: stats.daemon_memory_used,
+        instances_reserved: stats.instance_memory_reserved,
+        host_other,
+        total: stats.memory_total,
+    }
+}
+
+/// The three groups OVERVIEW's CPU bar splits host CPU into, mirroring
+/// `MemoryBreakdown`: the daemon's own cgroup, what running instances are using, and
+/// everything else on the host. Percentage points of `cpu_percent` (already averaged
+/// across every core), not core-normalised readings -- `total` is always 100, so a
+/// group's field *is* its percentage of the host, and `percent()` on it is a no-op
+/// kept only so both breakdowns share the same shape.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CpuBreakdown {
+    pub daemon: u64,
+    pub instances: u64,
+    pub host_other: u64,
+    pub total: u64,
+}
+
+impl CpuBreakdown {
+    pub fn daemon_percent(&self) -> u64 {
+        percent(self.daemon, self.total)
+    }
+    pub fn instances_percent(&self) -> u64 {
+        percent(self.instances, self.total)
+    }
+    pub fn host_other_percent(&self) -> u64 {
+        percent(self.host_other, self.total)
+    }
+}
+
+/// `daemon_cpu_percent` and `instance_cpu_percent` are core-normalised (100.0 = one
+/// core), the scale `usage.cpu_percent` already uses per instance, so both are
+/// divided by `cpu_cores` to land on the same 0-100 scale `cpu_percent` reads on.
+/// `saturating_sub` for the same reason `memory_breakdown` uses it: three independent
+/// readings taken a moment apart can momentarily disagree, and zero is a smaller lie
+/// than negative CPU.
+pub fn cpu_breakdown(stats: &DashboardStats) -> CpuBreakdown {
+    let cores = (stats.cpu_cores.max(1)) as f64;
+    let daemon = (stats.daemon_cpu_percent / cores).round().max(0.0) as u64;
+    let instances = (stats.instance_cpu_percent / cores).round().max(0.0) as u64;
+    let host_other = stats
+        .cpu_percent
+        .saturating_sub(daemon)
+        .saturating_sub(instances);
+    CpuBreakdown {
+        daemon,
+        instances,
+        host_other,
+        total: 100,
+    }
+}
+
+/// The RAM bar's three-way split of host memory, and the clamp that keeps a
+/// momentary disagreement between readings from reporting negative usage.
+#[cfg(test)]
+mod memory_breakdown_tests {
+    use super::{memory_breakdown, DashboardStats};
+
+    fn stats(memory_used: u64, memory_total: u64, daemon: u64, reserved: u64) -> DashboardStats {
+        DashboardStats {
+            memory_used,
+            memory_total,
+            daemon_memory_used: daemon,
+            instance_memory_reserved: reserved,
+            ..Default::default()
+        }
+    }
+
+    /// The ordinary case: a daemon, some reserved instances, and whatever is left of
+    /// `memory_used` is everyone else on the host.
+    #[test]
+    fn the_third_group_is_what_is_left_of_used_memory() {
+        let breakdown = memory_breakdown(&stats(8_000, 10_000, 200, 3_000));
+
+        assert_eq!(breakdown.daemon, 200);
+        assert_eq!(breakdown.instances_reserved, 3_000);
+        assert_eq!(breakdown.host_other, 8_000 - 200 - 3_000);
+        assert_eq!(breakdown.total, 10_000);
+    }
+
+    /// Percentages read off `memory_total`, the same denominator the single RAM gauge
+    /// this replaced already used, so the three groups compare directly against the
+    /// figure an operator remembers from before.
+    #[test]
+    fn percentages_are_taken_against_the_host_total() {
+        let breakdown = memory_breakdown(&stats(8_000, 10_000, 500, 2_500));
+
+        assert_eq!(breakdown.daemon_percent(), 5);
+        assert_eq!(breakdown.instances_percent(), 25);
+        assert_eq!(breakdown.host_other_percent(), 50);
+    }
+
+    /// Instances can reserve more than `memory_used` currently reflects (a limit set
+    /// the moment before a sweep samples usage, say), and the daemon's own reading is
+    /// independent of both. Neither should ever hand back a host group that reads as
+    /// more memory freed up than the host had -- zero, not an underflow panic or a
+    /// number that reads as "negative usage".
+    #[test]
+    fn a_reservation_that_outgrows_used_memory_floors_the_host_group_at_zero() {
+        let breakdown = memory_breakdown(&stats(1_000, 10_000, 200, 5_000));
+
+        assert_eq!(breakdown.host_other, 0);
+        assert_eq!(breakdown.host_other_percent(), 0);
+    }
+
+    /// A daemon reading taken from an unreadable or missing cgroup defaults to zero
+    /// (`refresh`'s `unwrap_or(0)`), which this function must treat as "none of it is
+    /// the daemon's" rather than propagate as a sentinel.
+    #[test]
+    fn a_zeroed_daemon_reading_attributes_nothing_to_the_daemon() {
+        let breakdown = memory_breakdown(&stats(5_000, 10_000, 0, 1_000));
+
+        assert_eq!(breakdown.daemon, 0);
+        assert_eq!(breakdown.daemon_percent(), 0);
+        assert_eq!(breakdown.host_other, 4_000);
+    }
+}
+
+/// The CPU bar's three-way split of host CPU, the same shape `memory_breakdown_tests`
+/// covers for RAM: the ordinary case, the shared percentage denominator, and the
+/// clamp against a momentary disagreement between readings.
+#[cfg(test)]
+mod cpu_breakdown_tests {
+    use super::{cpu_breakdown, DashboardStats};
+
+    fn stats(cpu_percent: u64, cores: u64, daemon: f64, instances: f64) -> DashboardStats {
+        DashboardStats {
+            cpu_percent,
+            cpu_cores: cores,
+            daemon_cpu_percent: daemon,
+            instance_cpu_percent: instances,
+            ..Default::default()
+        }
+    }
+
+    /// A daemon barely ticking over, an instance pinning most of a core, and whatever
+    /// is left of the host-wide reading is everyone else -- all normalised by the
+    /// core count, the way a per-instance `cpu_percent` already is.
+    #[test]
+    fn groups_are_normalised_by_core_count() {
+        // 4 cores: 100% host average is 400 core-normalised percentage points.
+        // Daemon uses 4 points (1% of a core), instances 200 (half of one core).
+        let breakdown = cpu_breakdown(&stats(52, 4, 4.0, 200.0));
+
+        assert_eq!(breakdown.daemon, 1);
+        assert_eq!(breakdown.instances, 50);
+        assert_eq!(breakdown.host_other, 52 - 1 - 50);
+        assert_eq!(breakdown.total, 100);
+    }
+
+    /// The three groups read directly as percentages, since `total` is fixed at 100 --
+    /// no separate scaling step the way `memory_breakdown`'s bytes need.
+    #[test]
+    fn percentages_match_the_groups_directly() {
+        let breakdown = cpu_breakdown(&stats(80, 2, 40.0, 80.0));
+
+        assert_eq!(breakdown.daemon_percent(), 20);
+        assert_eq!(breakdown.instances_percent(), 40);
+        assert_eq!(breakdown.host_other_percent(), 20);
+    }
+
+    /// Daemon and instance rates are sampled independently of the host-wide reading,
+    /// so together they can momentarily outrun it. The host group floors at zero
+    /// rather than underflowing.
+    #[test]
+    fn groups_that_outgrow_the_host_reading_floor_the_host_group_at_zero() {
+        let breakdown = cpu_breakdown(&stats(10, 1, 6.0, 8.0));
+
+        assert_eq!(breakdown.host_other, 0);
+        assert_eq!(breakdown.host_other_percent(), 0);
+    }
+
+    /// No cores reported (an `App` built before the first `sys.refresh_cpu()`, say)
+    /// must not divide by zero.
+    #[test]
+    fn zero_cores_does_not_panic() {
+        let breakdown = cpu_breakdown(&stats(0, 0, 0.0, 0.0));
+
+        assert_eq!(breakdown.daemon, 0);
+        assert_eq!(breakdown.instances, 0);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1641,6 +2230,28 @@ impl Money {
                     mu_per_unit_pow10: exact_pow10(mu_per_unit),
                     mu_per_unit,
                     decimals: 9,
+                    mu_per_nanoerg,
+                }
+            }
+            // Bitcoin's own rate key, the same way `MU_PER_NANOERG` is Ergo's --
+            // never `ui.UNITS.btc`, which is for units nobody's ledger contributes.
+            // Mirrors `src/payment_system/contracts/bitcoin/rate.py`: `UNIT_SYMBOL`,
+            // `UNIT_DECIMALS`, and one whole BTC being `SATOSHI_PER_BTC` (1e8) satoshi.
+            "btc" => {
+                let mu_per_satoshi = yaml_scalar(
+                    document.as_ref(),
+                    &["ledgers", "bitcoin", "payments", "MU_PER_SATOSHI"],
+                )
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| *value > 0.0)
+                .unwrap_or(1.0);
+                let mu_per_unit = mu_per_satoshi * 1e8;
+                Self {
+                    unit_name: name,
+                    symbol: "BTC".to_string(),
+                    mu_per_unit_pow10: exact_pow10(mu_per_unit),
+                    mu_per_unit,
+                    decimals: 8,
                     mu_per_nanoerg,
                 }
             }
@@ -1896,7 +2507,7 @@ impl Default for Scarcity {
     }
 }
 
-fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
+pub(crate) fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
     let document = read_yaml(config).ok();
     let read = |key: &str| -> u64 {
         yaml_scalar(document.as_ref(), &["pricing", key])
@@ -2310,7 +2921,7 @@ impl<T: Identifiable> StatefulList<T> {
     }
 }
 
-/// Where the cursor is on the CELL page, and where the page last drew things so a
+/// Where the cursor is on the POLICIES page, and where the page last drew things so a
 /// click can be resolved back to them.
 ///
 /// (organelle, lever) rather than a flat index: ←/→ move between boxes while ↑/↓
@@ -2352,6 +2963,20 @@ pub struct App {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
+    /// The TUNNELS page: running `nodo tunnel` processes, read from the registry.
+    pub tunnels: StatefulList<crate::tunnels::Tunnel>,
+    /// The TUNNELS page's second table: the `ServiceTunnel` streams this node relays
+    /// for others, from the daemon's snapshot. Listed only, never selected.
+    pub inbound_tunnels: Vec<crate::tunnels::InboundStream>,
+    /// The instance a `t` on INSTANCES opened the new-tunnel prompt for; `None` when
+    /// the prompt came from TUNNELS and the instance is typed.
+    pub tunnel_instance: Option<String>,
+    /// The PACKS page: `nodo pack` runs, newest first, read from the registry.
+    pub packs: StatefulList<crate::packs::Pack>,
+    /// The CHAT sidebar (issue #431): every conversation, both directions, plus each
+    /// peer's topic-less bucket, merged and sorted by recency -- see `chat::ChatEntry`.
+    pub conversations: StatefulList<ChatEntry>,
+    pub conversations_error: Option<String>,
     pub instances: StatefulList<Instance>,
     pub services: StatefulList<Service>,
     pub config_all: Vec<ConfigEntry>,
@@ -2361,7 +2986,7 @@ pub struct App {
     /// or `["servers", "[1]", "id"]` for a sequence element), which lets the tree
     /// keep its expanded sections and selection stable across refreshes and edits.
     pub config_tree_state: TreeState<String>,
-    /// Cursor and hit-test geometry for the CELL page.
+    /// Cursor and hit-test geometry for the POLICIES page.
     pub cell: CellState,
     /// config.yaml as a parsed document, from which every cell lever's position is
     /// derived. Cached and refreshed with the rest of the data rather than read per
@@ -2423,6 +3048,10 @@ pub struct App {
     /// selected. Empty whenever the picker is closed.
     pub lever_keys: Vec<&'static str>,
     pub lever_key_index: usize,
+    /// Which asset the `EditAssets` modal has highlighted.
+    pub assets_index: usize,
+    /// The new-asset form, while `AddAsset` is open.
+    pub asset_form: AssetForm,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -2454,6 +3083,9 @@ pub struct App {
     pub reputation: NodeReputation,
     /// What this node donates and what it counts, from `nodo donations --json`.
     pub donations: NodeDonations,
+    /// What this node itself announces it can run, from `nodo resources --json`
+    /// (issue #455): its own row of the Overview's total, and a card of its own.
+    pub own_resources: crate::peer_resources::OwnResources,
     pub payment_report: serde_json::Value,
     pub payment_error: String,
     pub payment_rate_areas: Vec<(String, Rect)>,
@@ -2468,6 +3100,8 @@ pub struct App {
     pub peer_detail: Option<PeerDetail>,
     pub client_detail: Option<ClientDetail>,
     pub service_detail: Option<ServiceDetail>,
+    /// The selected CHAT conversation's own messages, oldest first.
+    pub conversation_messages: Vec<ChatMessageRow>,
     pub instances_grouped: bool,
     pub app_logs: Vec<String>,
     pub node_logs: Vec<String>,
@@ -2475,6 +3109,14 @@ pub struct App {
     pub node_info: NodeInfo,
     /// Latest energy sample (issue #258). Missing until the node has written a row.
     pub node_energy: NodeEnergy,
+    /// `energy_consumption` folded into hourly buckets over `energy_history_hours`,
+    /// oldest first, for the ENERGY page's chart and the OVERVIEW card's totals
+    /// (issue #442). Chronological, not folded by hour-of-day like `demand`: the
+    /// question this answers is "when did this actually spike", which folding
+    /// identical clock hours across days would erase.
+    pub energy_series: EnergySeries,
+    /// How many hours of history `energy_series` covers.
+    pub energy_history_hours: u16,
     /// Whether [`Self::refresh`] should re-answer the operator alerts from disk.
     ///
     /// Off by default, so building an `App` does not consult the filesystem and a
@@ -2509,24 +3151,67 @@ pub struct App {
     /// Client id and direction (true = debit) for the open `CreditClient` amount modal.
     pub credit_client_id: Option<String>,
     pub credit_client_decrement: bool,
+    /// The new-chat wizard's state (issue: TUI chat/peers/clients redesign): typed
+    /// filter and highlighted index for `PickChatPeer`, the peer it settled on, the
+    /// topics offered by `PickChatTopic`, and its own highlighted index.
+    pub chat_wizard_peer_filter: String,
+    pub chat_wizard_peer_index: usize,
+    pub chat_wizard_peer_id: Option<String>,
+    pub chat_wizard_topics: Vec<String>,
+    pub chat_wizard_topic_index: usize,
+    /// What the open `ComposeChatMessage` box will do with its body once sent --
+    /// which `nodo` subcommand, and with what -- set by whichever of the new-chat
+    /// wizard or `open_reply_prompt` opened it.
+    pub chat_compose: Option<ChatCompose>,
+    /// The service the open compose box will share as a card, and the attach
+    /// picker's highlighted row (0 is "no attachment") -- issue #438.
+    pub chat_attachment: Option<ChatService>,
+    pub chat_service_index: usize,
+    /// Where each service card's buttons, and the compose box's Attach button,
+    /// were drawn this frame -- the same lifecycle as `id_copy_areas`.
+    pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
+    pub chat_attach_area: Rect,
+    pub chat_send_area: Rect,
+    /// The open right-click menu, while `input_mode` is `ContextMenu`.
+    pub context_menu: Option<crate::context_menu::ContextMenu>,
+    /// The DOCS page: its index, the page open in it, and where both were drawn.
+    pub docs: crate::docs::DocsState,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
     /// Where the tab bar and the current page's selectable table were last drawn, so a
     /// click can be mapped back to a tab or a row. Written by the draw path each frame;
-    /// `list_area` stays empty on pages with no table (Overview, Logs, Config — the
+    /// `list_area` stays empty on pages with no table (Overview, Logs, All — the
     /// config tree tracks its own rendered area).
     pub tabs_area: Rect,
     /// Where the second row — the pages inside the open group — was last drawn, so a
     /// click on a page title can be mapped back to it. `Rect::ZERO` for a group with
     /// one page, which draws no second row at all.
     pub page_tabs_area: Rect,
+    /// Whether the last frame was the "terminal too small" notice instead of a page
+    /// (issue #453). The mouse is ignored while it is: every hit-test area a page
+    /// recorded describes something not on screen.
+    pub too_small: bool,
     pub list_area: Rect,
+    /// The clickable id column's `[start, end)` on whichever table `list_area` names
+    /// this frame (Peers/Clients/Chat all have one; every other page leaves this
+    /// `None`) -- a click inside it copies that row's id instead of only selecting
+    /// the row (issue: click-to-copy full IDs).
+    pub id_column_x: Option<(u16, u16)>,
+    /// Every precise "clicking here copies this id" hotspot drawn this frame --
+    /// detail-card headers, mostly, where the id is already shown in full. Cleared
+    /// and repopulated every draw, the same lifecycle as `list_area`.
+    pub id_copy_areas: Vec<(String, Rect)>,
     pub sys: System,
     /// Previous sweep's per-instance counters, keyed by instance id, so CPU and
     /// network *rates* can be derived across refresh ticks. Rebuilt every sweep, so
     /// an instance that disappears takes its entry with it.
     instance_counters: HashMap<String, InstanceCounters>,
+    /// The daemon's own cgroup `cpu.stat` `usage_usec`, and when it was read, so its
+    /// CPU *rate* can be derived across ticks the same way `instance_counters` derives
+    /// one per instance. A single reading rather than a map, since there is only ever
+    /// one daemon.
+    daemon_cpu_counter: Option<(Instant, u64)>,
     last_data_refresh: Instant,
     last_storage_refresh: Instant,
     last_wallet_refresh: Instant,
@@ -2535,8 +3220,10 @@ pub struct App {
     reputation_task: Option<JoinHandle<Result<NodeReputation, String>>>,
     last_donations_refresh: Instant,
     donations_task: Option<JoinHandle<Result<NodeDonations, String>>>,
+    last_own_resources_refresh: Instant,
+    own_resources_task: Option<JoinHandle<Result<crate::peer_resources::Announced, String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
-    command_task: Option<JoinHandle<CommandOutcome>>,
+    pub(crate) command_task: Option<JoinHandle<CommandOutcome>>,
     /// In-flight configuration transaction: write, restart, and revert on failure.
     /// Separate from `command_task` because it holds config.yaml's backup for its
     /// whole duration, and only one may do that at a time.
@@ -2557,6 +3244,18 @@ impl Default for App {
             running: true,
             peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
+            tunnels: StatefulList::with_items(crate::tunnels::read_tunnels(
+                &crate::tunnels::tunnels_dir(&paths.storage),
+            )),
+            inbound_tunnels: crate::tunnels::read_inbound(&crate::tunnels::tunnels_dir(&paths.storage)),
+            tunnel_instance: None,
+            packs: StatefulList::with_items(crate::packs::read_packs(&crate::packs::packs_dir(
+                &paths.storage,
+            ))),
+            conversations: StatefulList::with_items(
+                crate::chat::load_entries(&paths.database).unwrap_or_default(),
+            ),
+            conversations_error: None,
             instances: StatefulList::with_items(Vec::new()),
             services: StatefulList::with_items(Vec::new()),
             config_all,
@@ -2581,6 +3280,8 @@ impl Default for App {
             price_bar_areas: Vec::new(),
             lever_keys: Vec::new(),
             lever_key_index: 0,
+            assets_index: 0,
+            asset_form: AssetForm::default(),
             now_minute: local_minute_of_day(),
             last_clock_refresh: now,
             demand: DemandByHour::default(),
@@ -2590,6 +3291,7 @@ impl Default for App {
             earnings: Vec::new(),
             reputation: NodeReputation::default(),
             donations: NodeDonations::default(),
+            own_resources: Default::default(),
             payment_report: serde_json::Value::Null,
             payment_error: String::new(),
             payment_rate_areas: Vec::new(),
@@ -2599,6 +3301,7 @@ impl Default for App {
             peer_detail: None,
             client_detail: None,
             service_detail: None,
+            conversation_messages: Vec::new(),
             instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
             node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
@@ -2608,6 +3311,8 @@ impl Default for App {
                 ..NodeInfo::default()
             },
             node_energy: NodeEnergy::default(),
+            energy_series: EnergySeries::default(),
+            energy_history_hours: ENERGY_HISTORY_HOURS,
             poll_alerts: false,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
@@ -2621,13 +3326,30 @@ impl Default for App {
             pending_action: None,
             credit_client_id: None,
             credit_client_decrement: false,
+            chat_wizard_peer_filter: String::new(),
+            chat_wizard_peer_index: 0,
+            chat_wizard_peer_id: None,
+            chat_wizard_topics: Vec::new(),
+            chat_wizard_topic_index: 0,
+            chat_compose: None,
+            chat_attachment: None,
+            chat_service_index: 0,
+            chat_card_buttons: Vec::new(),
+            chat_attach_area: Rect::ZERO,
+            chat_send_area: Rect::ZERO,
+            context_menu: None,
+            docs: crate::docs::DocsState::default(),
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
             page_tabs_area: Rect::ZERO,
+            too_small: false,
             list_area: Rect::ZERO,
+            id_column_x: None,
+            id_copy_areas: Vec::new(),
             sys: System::new_all(),
             instance_counters: HashMap::new(),
+            daemon_cpu_counter: None,
             last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
             last_storage_refresh: now.checked_sub(Duration::from_secs(30)).unwrap_or(now),
             last_wallet_refresh: now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now),
@@ -2640,6 +3362,10 @@ impl Default for App {
                 .checked_sub(DONATIONS_REFRESH_INTERVAL)
                 .unwrap_or(now),
             donations_task: None,
+            last_own_resources_refresh: now
+                .checked_sub(OWN_RESOURCES_REFRESH_INTERVAL)
+                .unwrap_or(now),
+            own_resources_task: None,
             command_task: None,
             config_task: None,
             config_follow_up: ConfigFollowUp::None,
@@ -2783,7 +3509,7 @@ impl App {
         self.tabs.cycle_group(-1);
     }
 
-    /// `1`..`5`: jump straight to a group.
+    /// `1`..`6`: jump straight to a group.
     ///
     /// One-based, matching the labels as counted on screen rather than as indexed in
     /// an array — nobody reading a row of five looks for a zeroth.
@@ -2806,6 +3532,8 @@ impl App {
                 let next = (self.cell.organelle + 1) % Organelle::ALL.len();
                 self.cell.go_to_organelle(next);
             }
+            // Two panes side by side: → reads the page, ← goes back to the index.
+            Page::Docs => self.docs_focus(crate::docs::Focus::Page),
             _ => {}
         }
     }
@@ -2823,6 +3551,7 @@ impl App {
                 let previous = (self.cell.organelle + count - 1) % count;
                 self.cell.go_to_organelle(previous);
             }
+            Page::Docs => self.docs_focus(crate::docs::Focus::Index),
             _ => {}
         }
     }
@@ -2834,6 +3563,8 @@ impl App {
             // than up/down adjusting and ←/← selecting.
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
+            Page::Tunnels => self.tunnels.previous(),
+            Page::Packs => self.packs.previous(),
             Page::Services => {
                 self.services.previous();
                 self.load_selection_details();
@@ -2844,6 +3575,10 @@ impl App {
             }
             Page::Clients => {
                 self.clients.previous();
+                self.load_selection_details();
+            }
+            Page::Chat => {
+                self.conversations.previous();
                 self.load_selection_details();
             }
             Page::Earnings => self.opinions.previous(),
@@ -2858,6 +3593,7 @@ impl App {
             Page::Config => {
                 self.config_tree_state.key_up();
             }
+            Page::Docs => self.docs_up_down(-1),
             _ => {}
         }
     }
@@ -2866,6 +3602,8 @@ impl App {
         match self.page() {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
+            Page::Tunnels => self.tunnels.next(),
+            Page::Packs => self.packs.next(),
             Page::Services => {
                 self.services.next();
                 self.load_selection_details();
@@ -2876,6 +3614,10 @@ impl App {
             }
             Page::Clients => {
                 self.clients.next();
+                self.load_selection_details();
+            }
+            Page::Chat => {
+                self.conversations.next();
                 self.load_selection_details();
             }
             Page::Earnings => self.opinions.next(),
@@ -2890,6 +3632,7 @@ impl App {
             Page::Config => {
                 self.config_tree_state.key_down();
             }
+            Page::Docs => self.docs_up_down(1),
             _ => {}
         }
     }
@@ -2914,6 +3657,18 @@ impl App {
             }
             return;
         }
+        // A precise "this id, right here" hotspot -- a detail card's own id line,
+        // mostly -- takes priority over every page's own click handling below, the
+        // same way the tab rows above do (issue: click-to-copy full IDs).
+        if let Some((id, _)) = self
+            .id_copy_areas
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .cloned()
+        {
+            self.copy_to_clipboard(&id);
+            return;
+        }
         // The config tree remembers where it drew each node, so it can resolve the
         // click itself — including collapsing a section that was already selected.
         if self.page() == Page::Config {
@@ -2936,9 +3691,65 @@ impl App {
             self.click_pricing(position);
             return;
         }
-        if let Some(visible) = visible_row_at(position, self.list_area) {
-            self.select_visible_row(visible);
+        if self.page() == Page::Docs {
+            self.click_docs(position);
+            return;
         }
+        // A service card's Get/Execute (issue #438).
+        if let Some((action, _)) = self
+            .chat_card_buttons
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .cloned()
+        {
+            self.run_chat_card_action(action);
+            return;
+        }
+        // A click landing in the table's own id column copies that row's id in
+        // addition to selecting it, since that column is exactly where an
+        // operator would click to read an id the table truncated.
+        let in_id_column = self
+            .id_column_x
+            .map(|(start, end)| column >= start && column < end)
+            .unwrap_or(false);
+        if self.select_row_at(position) && in_id_column {
+            if let Some(id) = self.selected_row_id() {
+                self.copy_to_clipboard(&id);
+            }
+        }
+    }
+
+    /// Select the table row drawn at `position`, if there is one there. What a left
+    /// click and a right click (`open_context_menu`) have in common.
+    pub(crate) fn select_row_at(&mut self, position: Position) -> bool {
+        let Some(visible) = visible_row_at(position, self.list_area) else {
+            return false;
+        };
+        self.select_visible_row(visible);
+        true
+    }
+
+    /// The id of whatever `select_visible_row` just selected, for the pages whose
+    /// table has an id column worth click-to-copying.
+    fn selected_row_id(&self) -> Option<String> {
+        match self.page() {
+            Page::Peers => self.peers.selected().map(|peer| peer.id.clone()),
+            Page::Clients => self.clients.selected().map(|client| client.id.clone()),
+            Page::Chat => self.conversations.selected().map(|entry| entry.peer_id.clone()),
+            _ => None,
+        }
+    }
+
+    /// Copy `text` to the operator's terminal clipboard via OSC 52, which reaches a
+    /// real clipboard even over SSH/mosh and needs no platform clipboard crate --
+    /// unlike a native one, it only requires the terminal itself to support it (most
+    /// modern ones do). Written straight to stdout: harmless alongside ratatui's own
+    /// buffered backend, since the escape sequence has no visible effect of its own.
+    pub fn copy_to_clipboard(&mut self, text: &str) {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+        let _ = write!(io::stdout(), "\x1b]52;c;{encoded}\x07");
+        let _ = io::stdout().flush();
+        self.status = format!("Copied {} to clipboard", shorten(text, 32));
     }
 
     /// Route a click on the PRICING page: a bar, or a row of the table beside it.
@@ -3101,6 +3912,8 @@ impl App {
     fn select_visible_row(&mut self, visible: usize) {
         match self.page() {
             Page::Instances => self.instances.select_visible(visible),
+            Page::Tunnels => self.tunnels.select_visible(visible),
+            Page::Packs => self.packs.select_visible(visible),
             Page::Services => {
                 self.services.select_visible(visible);
                 self.load_selection_details();
@@ -3113,26 +3926,13 @@ impl App {
                 self.clients.select_visible(visible);
                 self.load_selection_details();
             }
+            Page::Chat => {
+                self.conversations.select_visible(visible);
+                self.load_selection_details();
+            }
             Page::Earnings => self.opinions.select_visible(visible),
             Page::Pricing => self.prices.select_visible(visible),
             _ => {}
-        }
-    }
-
-    /// Reload the peer list, keeping the reason when there is nothing to show.
-    ///
-    /// The one place `get_peers` reaches the page, so a query that fails cannot be
-    /// swallowed at one call site and reported at another. A failure leaves the last
-    /// good list on screen rather than blanking it: a peer this node knew a second
-    /// ago is still a peer, and replacing the table with nothing would hide the very
-    /// rows the error is about.
-    fn refresh_peers(&mut self) {
-        match get_peers(&self.paths.database) {
-            Ok(peers) => {
-                self.peers_error = None;
-                self.peers.refresh(peers);
-            }
-            Err(error) => self.peers_error = Some(error.to_string()),
         }
     }
 
@@ -3157,10 +3957,23 @@ impl App {
             .selected()
             .map(|service| service.id.clone())
             .and_then(|service_id| get_service_detail(&database, &service_id).ok());
+        self.conversation_messages = self
+            .conversations
+            .selected()
+            .map(|entry| entry.kind.clone())
+            .map(|kind| match kind {
+                ChatEntryKind::Conversation { conversation_id, .. } => {
+                    get_conversation_messages(&database, &conversation_id).unwrap_or_default()
+                }
+                ChatEntryKind::Untopiced { peer_id } => {
+                    get_untopiced_messages(&database, &peer_id).unwrap_or_default()
+                }
+            })
+            .unwrap_or_default();
     }
 
     /// Expand or collapse the selected configuration section (Enter/Space on the
-    /// Config page). A no-op on a scalar leaf, which has nothing to expand.
+    /// All page). A no-op on a scalar leaf, which has nothing to expand.
     pub fn toggle_selected_config_node(&mut self) {
         self.config_tree_state.toggle_selected();
     }
@@ -3175,31 +3988,6 @@ impl App {
             } else {
                 "Instances: flat list (g toggles)".to_string()
             };
-        }
-    }
-
-    /// Increase or decrease the selected peer's local reputation score.
-    pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
-        if self.page() != Page::Peers {
-            return;
-        }
-        let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first".to_string();
-            return;
-        };
-        match adjust_peer_reputation(&self.paths.database, &peer.id, delta) {
-            Ok(()) => {
-                self.status = format!(
-                    "Reputation {:+} on peer {}",
-                    delta,
-                    shorten(&peer.id, 16)
-                );
-                self.refresh_peers();
-                // The adjustment is an event like any other; show it without waiting
-                // for the next refresh.
-                self.load_selection_details();
-            }
-            Err(error) => self.status = format!("Reputation update failed: {error}"),
         }
     }
 
@@ -3218,18 +4006,21 @@ impl App {
         self.credit_client_id = None;
         self.lever_keys.clear();
         self.lever_key_index = 0;
+        self.assets_index = 0;
+        self.asset_form = AssetForm::default();
+        self.chat_wizard_peer_filter.clear();
+        self.chat_wizard_peer_index = 0;
+        self.chat_wizard_peer_id = None;
+        self.chat_wizard_topics.clear();
+        self.chat_wizard_topic_index = 0;
+        self.chat_compose = None;
+        self.chat_attachment = None;
+        self.chat_service_index = 0;
     }
 
     /// True while a background `nodo` command is still running.
     pub fn command_running(&self) -> bool {
         self.command_task.is_some()
-    }
-
-    pub fn open_connect(&mut self) {
-        self.input_mode = InputMode::Connect;
-        self.input.clear();
-        self.input_title = "Connect peer (host:port)".to_string();
-        self.edit_kind = EditKind::Text;
     }
 
     pub fn open_config_filter(&mut self) {
@@ -3423,6 +4214,10 @@ impl App {
             // `self.input` above); a checkbox/stepper/picker would have nothing to
             // show without briefly displaying the value it exists to hide.
             EditKind::Text
+        } else if entry.path == "ui.DISPLAY_UNIT" {
+            // Which units exist depends on what is configured, so this cannot be one
+            // of `known_enum_values`'s fixed lists -- it is computed instead.
+            EditKind::Enum(display_unit_options(self.config_document.as_ref()))
         } else {
             infer_edit_kind(&entry.path, &entry.value_type)
         };
@@ -3548,6 +4343,17 @@ impl App {
             }
             InputMode::PickProfile => self.submit_profile_selection(),
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
+            InputMode::AddCustomUnit => self.save_custom_unit(),
+            InputMode::AddAsset => self.save_new_asset(),
+            InputMode::PickChatPeer => self.submit_chat_peer_pick(),
+            InputMode::PickChatTopic => self.submit_chat_topic_pick(),
+            InputMode::NewChatTopic => self.submit_new_chat_topic(),
+            InputMode::ComposeChatMessage => self.submit_chat_compose(),
+            InputMode::GetService => self.submit_get_service(),
+            InputMode::NewTunnel => self.submit_new_tunnel(),
+            InputMode::NewPack => self.submit_new_pack(),
+            InputMode::PickChatService => self.submit_chat_service_pick(),
+            InputMode::SearchDocs => self.submit_docs_search(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -3557,94 +4363,10 @@ impl App {
             | InputMode::AcceptKya
             | InputMode::Confirm
             | InputMode::ConfirmWrites
-            | InputMode::Details => {}
+            | InputMode::EditAssets
+            | InputMode::Details
+            | InputMode::ContextMenu => {}
         }
-    }
-
-    fn connect(&mut self) {
-        let target = self.input.trim().to_string();
-        let valid_shape = Regex::new(r"^(\[[0-9a-fA-F:]+\]|[^:\s]+):\d{1,5}$")
-            .expect("valid peer regex")
-            .is_match(&target);
-        let valid_port = target
-            .rsplit_once(':')
-            .and_then(|(_, port)| port.parse::<u16>().ok())
-            .map(|port| port > 0)
-            .unwrap_or(false);
-        let valid = valid_shape && valid_port;
-        if !valid {
-            self.status = "Peer must be host:port (IPv6 may use [address]:port)".to_string();
-            return;
-        }
-        self.close_input();
-        self.spawn_command(
-            CommandKind::Generic,
-            "Connect peer".to_string(),
-            vec!["connect".to_string(), target],
-        );
-    }
-
-    // --- Clients ------------------------------------------------------------
-
-    /// Open an amount-entry modal to credit or debit the selected client's balance.
-    ///
-    /// The amount is typed in `ui.DISPLAY_UNIT` -- the same unit the balance column
-    /// already shows -- and, on submit, handed to `nodo credit_client`/`debit_client`
-    /// (see `src/commands/credit_client.py`). Delegating to the CLI rather than
-    /// writing `balance_mu` directly means the same MU conversion and client-existence
-    /// check the operator gets from a shell apply here too, with one code path to keep
-    /// correct instead of two.
-    pub fn open_credit_client(&mut self, decrement: bool) {
-        if self.page() != Page::Clients {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        let Some(client) = self.clients.selected().cloned() else {
-            self.status = "Select a client first".to_string();
-            return;
-        };
-        self.input_mode = InputMode::CreditClient;
-        self.input.clear();
-        self.input_title = format!(
-            "{} client {} (amount, {})",
-            if decrement { "Debit" } else { "Credit" },
-            shorten(&client.id, 18),
-            self.money.symbol
-        );
-        self.credit_client_id = Some(client.id);
-        self.credit_client_decrement = decrement;
-        self.edit_kind = EditKind::Text;
-    }
-
-    /// Validate the typed amount and run the credit/debit as a background `nodo`
-    /// command, the same way a confirmed [`PendingAction`] does.
-    fn submit_credit_client(&mut self) {
-        let Some(client_id) = self.credit_client_id.clone() else {
-            self.close_input();
-            return;
-        };
-        let decrement = self.credit_client_decrement;
-        let amount = self.input.trim().to_string();
-        let valid = amount.parse::<f64>().map(|value| value > 0.0).unwrap_or(false);
-        if !valid {
-            self.status = "Amount must be a positive number".to_string();
-            return;
-        }
-        self.close_input();
-        let label = format!(
-            "{} client {}",
-            if decrement { "Debit" } else { "Credit" },
-            shorten(&client_id, 18)
-        );
-        let command = if decrement { "debit_client" } else { "credit_client" };
-        self.spawn_command(
-            CommandKind::Generic,
-            label,
-            vec![command.to_string(), client_id, amount],
-        );
     }
 
     fn save_config_edit(&mut self) {
@@ -3658,12 +4380,22 @@ impl App {
             self.close_input();
             return;
         }
+        let label_path = config_path_display(&path);
+        if label_path == "ui.DISPLAY_UNIT" && self.input.trim() == CUSTOM_UNIT_OPTION {
+            self.open_custom_unit_prompt();
+            return;
+        }
         if let Err(error) = serde_yaml::from_str::<Value>(&self.input) {
             self.status = format!("Invalid YAML value: {error}");
             return;
         }
+        if is_mnemonic_path(&label_path) {
+            if let Err(message) = check_mnemonic_shape(&self.input) {
+                self.status = message;
+                return;
+            }
+        }
 
-        let label_path = config_path_display(&path);
         if label_path.ends_with("MU_PER_NANOERG") || label_path.ends_with("MU_PER_SATOSHI") {
             let value = self.input.trim().parse::<f64>().unwrap_or(f64::NAN);
             let scale = if label_path.ends_with("MU_PER_NANOERG") { 1e9 } else { 1e8 };
@@ -3676,6 +4408,41 @@ impl App {
         let label = format!("Set {}", config_path_display(&path));
         self.close_input();
         self.write_config_value(label, &path, &value, ConfigFollowUp::None);
+    }
+
+    /// Reached by picking [`CUSTOM_UNIT_OPTION`] off the `ui.DISPLAY_UNIT` picker:
+    /// name the unit and give it a rate, since neither means anything alone.
+    fn open_custom_unit_prompt(&mut self) {
+        self.input_mode = InputMode::AddCustomUnit;
+        self.input.clear();
+        self.input_title = "New display unit: name and MU per unit".to_string();
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
+        self.status = "e.g. \"usd 500000000\" -- work the rate out against your own market, \
+                        as for a ledger (see docs/PRICING.md)"
+            .to_string();
+    }
+
+    /// Declare a new `ui.DISPLAY_UNIT` and its `ui.UNITS.<name>.MU_PER_UNIT` rate
+    /// together, in the one transaction: a name with no rate is exactly the state
+    /// `src/utils/monetary.py::display_unit` refuses to start against, so the two are
+    /// never written apart.
+    fn save_custom_unit(&mut self) {
+        let existing = display_unit_options(self.config_document.as_ref());
+        match parse_custom_unit(&self.input, &existing) {
+            Ok((name, rate)) => {
+                self.close_input();
+                self.write_config_values(
+                    format!("Set ui.DISPLAY_UNIT to {name}"),
+                    &[
+                        (format!("ui.UNITS.{name}.MU_PER_UNIT"), rate),
+                        ("ui.DISPLAY_UNIT".to_string(), name),
+                    ],
+                    ConfigFollowUp::None,
+                );
+            }
+            Err(message) => self.status = message,
+        }
     }
 
     /// Write one value into config.yaml through `yq`, keeping a timestamped backup.
@@ -3744,7 +4511,7 @@ impl App {
         self.config_follow_up = write.follow_up.clone();
         // Said once, here, on the way in: this is the single funnel every config
         // write in the interface passes through, so one line covers the ENERGY
-        // page's kWh price, a cell profile, a price nudge and a raw Config row
+        // page's kWh price, a cell profile, a price nudge and a raw All row
         // alike. It was previously learned by watching a value be written and then
         // silently put back.
         if let Some(hint) = self.config_write_root_hint() {
@@ -3784,7 +4551,7 @@ impl App {
     ///
     /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
     /// by the same `write_config_value` as every price, every cell lever and every
-    /// raw Config row; there is one writer and one transaction. It is a property of
+    /// raw All row; there is one writer and one transaction. It is a property of
     /// **whether something is serving**, which is why the same edit succeeds
     /// silently on a stopped node and is refused on a running one -- and why it
     /// looked arbitrary.
@@ -3879,7 +4646,7 @@ impl App {
         cell::closest_profile(self.config_document.as_ref())
     }
 
-    /// Route a click on the CELL page: a lever row selects it, anywhere else in an
+    /// Route a click on the POLICIES page: a lever row selects it, anywhere else in an
     /// organelle's box moves the cursor into that box.
     fn click_cell(&mut self, position: Position) {
         if let Some((organelle, lever, _)) = self
@@ -3923,10 +4690,11 @@ impl App {
                 if let Some(index) = Page::ALL.iter().position(|candidate| *candidate == page) {
                     self.tabs.index = index;
                     self.status =
-                        format!("{} is edited here — or `e` on the CELL row for one key", lever.label);
+                        format!("{} is edited here — or `e` on the POLICIES row for one key", lever.label);
                 }
             }
             LeverKind::Scalar { .. } => self.open_lever_editor(),
+            LeverKind::Assets { .. } => self.open_assets_modal(),
             LeverKind::Cycle(states) => {
                 let document = self.config_document.clone();
                 let current = cell::status(lever, document.as_ref());
@@ -3961,7 +4729,7 @@ impl App {
     ///
     /// A cycle lever has no single key to edit, so `e` there lists the keys it owns
     /// instead: the operator gets to see exactly which settings one named position
-    /// stands for, and the Config page remains the place to break them apart.
+    /// stands for, and the All page remains the place to break them apart.
     /// `e` on the selected lever: edit one of the keys behind it, here.
     ///
     /// A scalar lever is one key, so it opens straight into the editor. Anything
@@ -3983,12 +4751,45 @@ impl App {
         };
         match lever.kind {
             LeverKind::Scalar { path, .. } => self.edit_lever_key(lever, path),
+            LeverKind::Assets { .. } => self.open_assets_modal(),
             _ => self.open_lever_key_picker(lever),
         }
     }
 
-    /// Open the value editor on one config key of `lever`.
+    /// Edit one config key of `lever`.
+    ///
+    /// A wallet mnemonic is not an ordinary value: what it opens may hold money, and
+    /// its address may already be in other nodes' hands. Replacing one first shows
+    /// both, and the editor only opens on `y`.
     fn edit_lever_key(&mut self, lever: &'static Lever, path: &'static str) {
+        if let Some(ledger) = wallet_mnemonic_ledger(path) {
+            self.confirm_wallet_replacement(lever, path, ledger);
+            return;
+        }
+        self.open_lever_value_editor(lever, path);
+    }
+
+    /// Show what replacing a ledger's wallet mnemonic leaves behind, and hold the
+    /// editor until the operator has read it.
+    fn confirm_wallet_replacement(
+        &mut self,
+        lever: &'static Lever,
+        path: &'static str,
+        ledger: &str,
+    ) {
+        let lines = wallet_replacement_lines(ledger, &self.node_info.wallets);
+        self.details = Some(DetailsView {
+            title: format!("Replace the {} wallet? (y/N)", capitalised(ledger)),
+            lines,
+            scroll: 0,
+        });
+        self.input_mode = InputMode::ConfirmWrites;
+        self.status = "y opens the editor • n cancels • nothing is written yet".to_string();
+        self.pending_action = Some(PendingAction::EditLever { lever, path });
+    }
+
+    /// Open the value editor on one config key of `lever`.
+    fn open_lever_value_editor(&mut self, lever: &'static Lever, path: &'static str) {
         let document = self.config_document.clone();
         let current = yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>())
             .unwrap_or_default();
@@ -3999,6 +4800,8 @@ impl App {
         self.edit_config_secret = lever.secret;
         self.edit_kind = if lever.secret {
             EditKind::Text
+        } else if path == "ui.DISPLAY_UNIT" {
+            EditKind::Enum(display_unit_options(document.as_ref()))
         } else {
             let value_type = document
                 .as_ref()
@@ -4013,9 +4816,139 @@ impl App {
             infer_edit_kind(path, value_type)
         };
         // A secret opens empty, so the plaintext is never on screen -- the same rule
-        // the Config editor follows.
+        // the All editor follows.
         self.input = if lever.secret { String::new() } else { current };
-        self.status = lever.question.to_string();
+        self.status = if wallet_mnemonic_ledger(path).is_some() {
+            "12 or 24 words • \"\" has the node generate a fresh one • Esc cancels".to_string()
+        } else {
+            lever.question.to_string()
+        };
+    }
+
+    /// The tokens this node accepts besides ERG, with the keys to add and remove one.
+    ///
+    /// Add and remove only: an asset is five fields that price a payment method, and
+    /// changing one in place is the same decision as replacing it -- the rate peers
+    /// were told is the old one until the node restarts either way.
+    pub fn open_assets_modal(&mut self) {
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        self.input_mode = InputMode::EditAssets;
+        self.input_title = "Ergo assets".to_string();
+        self.assets_index = 0;
+        self.status = "a add • d remove • ↑/↓ choose • Esc close".to_string();
+    }
+
+    pub fn move_assets_selection(&mut self, delta: i32) {
+        let count = configured_assets(self.config_document.as_ref()).len();
+        if count == 0 {
+            return;
+        }
+        self.assets_index =
+            (self.assets_index as i32 + delta).rem_euclid(count as i32) as usize;
+    }
+
+    /// Open the form for a new asset, over the list.
+    pub fn open_add_asset_prompt(&mut self) {
+        self.input_mode = InputMode::AddAsset;
+        self.input.clear();
+        self.input_title = "New Ergo asset".to_string();
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
+        self.asset_form = AssetForm::default();
+        self.status = "Tab/↑/↓ move • Enter next, and saves on the last field • Esc back".to_string();
+    }
+
+    /// Back to the list without adding anything.
+    pub fn cancel_asset_form(&mut self) {
+        self.asset_form = AssetForm::default();
+        self.input_mode = InputMode::EditAssets;
+        self.input_title = "Ergo assets".to_string();
+        self.status = "a add • d remove • ↑/↓ choose • Esc close".to_string();
+    }
+
+    pub fn asset_form_move(&mut self, delta: i32) {
+        let count = ASSET_FIELDS.len() as i32;
+        self.asset_form.focus = (self.asset_form.focus as i32 + delta).rem_euclid(count) as usize;
+    }
+
+    pub fn asset_form_type(&mut self, character: char) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].push(character);
+    }
+
+    pub fn asset_form_backspace(&mut self) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].pop();
+    }
+
+    pub fn asset_form_clear_field(&mut self) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].clear();
+    }
+
+    /// Enter: on to the next field, and on the last one, save.
+    pub fn asset_form_enter(&mut self) {
+        if self.asset_form.focus + 1 < ASSET_FIELDS.len() {
+            self.asset_form_move(1);
+        } else {
+            self.save_new_asset();
+        }
+    }
+
+    fn save_new_asset(&mut self) {
+        let document = self.config_document.clone();
+        let existing = configured_assets(document.as_ref());
+        let declared_units: Vec<String> = document
+            .as_ref()
+            .and_then(|document| document.get("ui")?.get("UNITS")?.as_mapping())
+            .map(|units| {
+                units
+                    .keys()
+                    .filter_map(|key| key.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let entry = match parse_asset_fields(&self.asset_form.values, &existing, &declared_units) {
+            Ok(entry) => entry,
+            Err((field, message)) => {
+                // The form stays open on the field that is wrong: a message about
+                // "field 3" the operator has to go and find is half an answer.
+                self.asset_form.focus = field;
+                self.asset_form.error = Some(message);
+                return;
+            }
+        };
+        let symbol = entry.symbol.clone();
+        let path = config_path_segments(ASSETS_PATH);
+        self.close_input();
+        self.start_config_write(ConfigWrite {
+            label: format!("Add asset {symbol}"),
+            expression: format!("{} += [env(NODO_TUI_V0)]", yq_path_expression(&path)),
+            values: vec![("NODO_TUI_V0".to_string(), entry.flow_yaml())],
+            follow_up: ConfigFollowUp::None,
+        });
+    }
+
+    /// Confirm removing the highlighted asset.
+    pub fn open_remove_asset_confirm(&mut self) {
+        let assets = configured_assets(self.config_document.as_ref());
+        let Some(asset) = assets.get(self.assets_index) else {
+            self.status = "No asset to remove".to_string();
+            return;
+        };
+        let mut path = config_path_segments(ASSETS_PATH);
+        path.push(ConfigPathSegment::Index(self.assets_index));
+        let label = format!("{} ({})", asset.symbol, short_token_id(&asset.token_id));
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Remove {label}? (y/N)");
+        self.status = "The node stops advertising it and restarts onto the new list".to_string();
+        self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
     }
 
     /// Offer the keys one lever stands for, so any of them can be edited from here.
@@ -4249,7 +5182,7 @@ impl App {
     ///
     /// Wraps because the catalogue is short and fully visible: with fourteen rows on
     /// screen at once, stopping at the end is a keypress that does nothing for no
-    /// reason the operator can see. Same behaviour the CELL page's lever cursor has.
+    /// reason the operator can see. Same behaviour the POLICIES page's lever cursor has.
     pub fn move_energy_selection(&mut self, delta: i32) {
         let count = energy::entries().len();
         if count == 0 {
@@ -4274,7 +5207,7 @@ impl App {
 
     /// Open the ordinary config editor on the selected energy key (issue #395).
     ///
-    /// The same popup, path and transaction the Config page uses. This page
+    /// The same popup, path and transaction the All page uses. This page
     /// contributes the catalogue and the explanation beside it, and nothing else: a
     /// second way to write YAML would be a second set of quoting rules.
     ///
@@ -4619,6 +5552,7 @@ impl App {
 
     fn reload_after_config_write(&mut self) {
         self.config_document = read_yaml(&self.paths.config).ok();
+        crate::theme::refresh_from_document(self.config_document.as_ref());
         self.reload_money();
         self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
         self.apply_config_filter();
@@ -4703,12 +5637,15 @@ impl App {
         } else {
             service.tag.clone()
         };
+        self.confirm_execute_service(service.id, label);
+    }
+
+    /// The one spend confirmation both `e` on SERVICES and a chat card's Execute
+    /// button go through.
+    pub(crate) fn confirm_execute_service(&mut self, id: String, label: String) {
         self.input_mode = InputMode::Confirm;
         self.input_title = format!("Run {label}? It is funded now and burns until killed. (y/N)");
-        self.pending_action = Some(PendingAction::ExecuteService {
-            id: service.id.clone(),
-            label,
-        });
+        self.pending_action = Some(PendingAction::ExecuteService { id, label });
     }
 
     /// Open the read-only Details overlay for the selected service by running
@@ -4727,6 +5664,34 @@ impl App {
             "Inspect service".to_string(),
             vec!["inspect".to_string(), id],
         );
+    }
+
+    /// Ask for the hash of a service to fetch from the network (`g` on SERVICES).
+    ///
+    /// A popup rather than the selected row: the services this action is for are
+    /// exactly the ones this table does not list.
+    pub fn open_get_service(&mut self) {
+        if self.page() != Page::Services {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        self.input_mode = InputMode::GetService;
+        self.input.clear();
+        self.input_title = "Get service (hash)".to_string();
+        self.edit_kind = EditKind::Text;
+    }
+
+    pub(crate) fn submit_get_service(&mut self) {
+        match get_service_command(&self.input) {
+            Ok((label, args)) => {
+                self.close_input();
+                self.spawn_command(CommandKind::Report, label, args);
+            }
+            Err(message) => self.status = message,
+        }
     }
 
     /// Ask for confirmation before deleting the selected service.
@@ -4773,41 +5738,17 @@ impl App {
         } else {
             instance.name.clone()
         };
+        // `nodo kill` closes the tunnels this host opened to it, so say so here.
+        let tunnels = crate::tunnels::reaching(&self.tunnels.items, &instance.id, &instance.name).len();
+        let also = match tunnels {
+            0 => String::new(),
+            1 => " Its tunnel is closed too.".to_string(),
+            count => format!(" Its {count} tunnels are closed too."),
+        };
         self.input_mode = InputMode::Confirm;
-        self.input_title = format!("Kill instance {label}? (y/N)");
+        self.input_title = format!("Kill instance {label}?{also} (y/N)");
         self.pending_action = Some(PendingAction::KillInstance {
             id: instance.id.clone(),
-            label,
-        });
-    }
-
-    /// Ask for confirmation before dropping the selected peer.
-    ///
-    /// `nodo disconnect` does the work, which deletes the peer row along with its
-    /// addresses and contract instances — the same thing the operator would type. The
-    /// peer is *forgotten*, not banned: it can re-introduce itself, or be reconnected
-    /// with `c`. That is exactly what makes this useful — a peer whose addresses went
-    /// stale (say another node claimed one, see `claim_uri`) is cleared out here.
-    pub fn open_disconnect_peer_confirm(&mut self) {
-        // Peers only. A client is not forgotten by hand -- it is ours, and expires on
-        // its own -- and since the two now have a page each, `d` on Clients is simply
-        // not bound rather than answered with an explanation.
-        if self.page() != Page::Peers {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first".to_string();
-            return;
-        };
-        let label = shorten(&peer.id, 18);
-        self.input_mode = InputMode::Confirm;
-        self.input_title = format!("Forget peer {label}? (y/N)");
-        self.pending_action = Some(PendingAction::DisconnectPeer {
-            id: peer.id.clone(),
             label,
         });
     }
@@ -4826,6 +5767,23 @@ impl App {
             PendingAction::ApplyWrites { label, writes } => {
                 self.details = None;
                 self.write_config_values(label, &writes, ConfigFollowUp::None);
+            }
+            PendingAction::EditLever { lever, path } => {
+                self.details = None;
+                self.open_lever_value_editor(lever, path);
+            }
+            PendingAction::CloseTunnel { id, label } => {
+                if let Some((label, args)) = pending_command(PendingAction::CloseTunnel { id, label }) {
+                    self.spawn_command(CommandKind::Tunnel, label, args);
+                }
+            }
+            PendingAction::OpenTunnel { label, args } => {
+                self.spawn_command(CommandKind::Tunnel, label, args);
+            }
+            PendingAction::CancelPack { id, label } => {
+                if let Some((label, args)) = pending_command(PendingAction::CancelPack { id, label }) {
+                    self.spawn_command(CommandKind::Pack, label, args);
+                }
             }
             other => {
                 if let Some((label, args)) = pending_command(other) {
@@ -4858,7 +5816,7 @@ impl App {
 
     /// Spawn a `nodo` command in the background so the UI stays responsive.
     /// Only one command runs at a time; new requests are rejected while busy.
-    fn spawn_command(&mut self, kind: CommandKind, label: String, args: Vec<String>) {
+    pub(crate) fn spawn_command(&mut self, kind: CommandKind, label: String, args: Vec<String>) {
         if self.command_task.is_some() {
             self.status = "Busy: a command is already running".to_string();
             return;
@@ -4910,6 +5868,34 @@ impl App {
                     self.status = format!("nodo inspect failed: {}", first_line(&outcome.stderr));
                 }
             }
+            CommandKind::Report => {
+                self.status = if outcome.success {
+                    let report = last_line(&outcome.stdout);
+                    if report.is_empty() {
+                        format!("{} completed", outcome.label)
+                    } else {
+                        report
+                    }
+                } else {
+                    format!("{} failed: {}", outcome.label, first_line(&outcome.stderr))
+                };
+            }
+            CommandKind::Pack => {
+                self.status = crate::packs::outcome_status(
+                    &outcome.label,
+                    outcome.success,
+                    &outcome.stdout,
+                    &outcome.stderr,
+                );
+            }
+            CommandKind::Tunnel => {
+                self.status = crate::tunnels::outcome_status(
+                    &outcome.label,
+                    outcome.success,
+                    &outcome.stdout,
+                    &outcome.stderr,
+                );
+            }
             CommandKind::Generic => {
                 self.status = if outcome.success {
                     format!("{} completed", outcome.label)
@@ -4942,6 +5928,15 @@ impl App {
                 serde_json::from_str(report_line(&stdout).ok_or("No payment report returned")?).map_err(|e| e.to_string())
             }));
         }
+        // DOCS: `r` re-reads the folder; otherwise only the open page, and only
+        // when it changed on disk -- one stat per tick, and only on this page.
+        if self.page() == Page::Docs {
+            if force {
+                self.reload_docs();
+            } else {
+                self.docs.reload_if_changed(false);
+            }
+        }
         self.refresh_clock();
         self.refresh_local(force);
         self.poll_config_task().await;
@@ -4967,6 +5962,13 @@ impl App {
             self.last_donations_refresh = Instant::now();
             self.donations_task = Some(tokio::spawn(fetch_node_donations()));
         }
+        self.poll_own_resources_task().await;
+        if self.own_resources_task.is_none()
+            && (force || self.last_own_resources_refresh.elapsed() >= OWN_RESOURCES_REFRESH_INTERVAL)
+        {
+            self.last_own_resources_refresh = Instant::now();
+            self.own_resources_task = Some(tokio::spawn(fetch_own_resources()));
+        }
     }
 
     /// Update the schedule marker on its own timer.
@@ -4986,7 +5988,7 @@ impl App {
         self.demand = get_demand_by_hour(&self.paths.database, DEMAND_HISTORY_DAYS)
             .unwrap_or_default();
         self.paths = Paths::discover();
-        // Picks up an edit made on the Config page, or in a shell, so the cell's
+        // Picks up an edit made on the All page, or in a shell, so the cell's
         // levers describe the file as it is rather than as it was at start-up.
         self.config_document = read_yaml(&self.paths.config).ok();
 
@@ -5002,8 +6004,13 @@ impl App {
         self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.refresh_tunnels();
+        self.refresh_packs();
+        self.refresh_chat();
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
+        self.energy_series = get_energy_series(&self.paths.database, ENERGY_HISTORY_HOURS)
+            .unwrap_or_default();
         // Re-answered from disk every tick rather than remembered, so an alert
         // cannot outlive its condition. Uses the `config_document` re-read above,
         // so this costs two `stat` calls.
@@ -5037,6 +6044,7 @@ impl App {
         self.sys.refresh_cpu();
         self.sys.refresh_memory();
         self.stats.cpu_percent = self.sys.global_cpu_info().cpu_usage().round() as u64;
+        self.stats.cpu_cores = self.sys.cpus().len() as u64;
         self.stats.memory_used = self.sys.used_memory();
         self.stats.memory_total = self.sys.total_memory();
         (self.stats.disk_used, self.stats.disk_total) = disk_usage(&self.paths.storage);
@@ -5062,6 +6070,38 @@ impl App {
             .iter()
             .map(|instance| instance.disk_limit)
             .sum();
+        self.stats.instance_cpu_percent = self
+            .instances
+            .items
+            .iter()
+            .filter_map(|instance| instance.usage.cpu_percent)
+            .sum();
+        self.stats.daemon_memory_used =
+            read_u64(&daemon_cgroup_dir(&self.paths).join("memory.current")).unwrap_or(0);
+        self.stats.daemon_cpu_percent = self.derive_daemon_cpu_rate(Instant::now());
+    }
+
+    /// The daemon's own CPU rate since the previous sweep, core-normalised like an
+    /// instance's `usage.cpu_percent` (`derive_instance_rates`'s sibling, for the one
+    /// cgroup that isn't an instance). No reading yet, or the cgroup gone backwards
+    /// (the service restarted), keeps the last known rate rather than reporting zero
+    /// -- a momentary read failure should not flash the daemon's slice of the CPU bar
+    /// to empty.
+    fn derive_daemon_cpu_rate(&mut self, now: Instant) -> f64 {
+        let usage_usec = read_cgroup_keyed_u64(&daemon_cgroup_dir(&self.paths).join("cpu.stat"), "usage_usec");
+        let Some(current) = usage_usec else {
+            return self.stats.daemon_cpu_percent;
+        };
+        let rate = match self.daemon_cpu_counter {
+            Some((previous_time, previous_usec)) => {
+                let elapsed = now.duration_since(previous_time).as_secs_f64();
+                counter_rate(Some(previous_usec), Some(current), elapsed)
+                    .map(|usec_per_sec| usec_per_sec / 10_000.0)
+            }
+            None => None,
+        };
+        self.daemon_cpu_counter = Some((now, current));
+        rate.unwrap_or(self.stats.daemon_cpu_percent)
     }
 
     /// Turn the cumulative counters just read into rates, using the previous sweep's
@@ -5158,6 +6198,28 @@ impl App {
         }
     }
 
+    /// Collect this node's announced resources. A failed read keeps the last
+    /// announcement on screen with the failure beside it, as reputation does.
+    async fn poll_own_resources_task(&mut self) {
+        if !self
+            .own_resources_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.own_resources_task.take().unwrap();
+        match task.await {
+            Ok(Ok(announced)) => {
+                self.own_resources.announced = Some(announced);
+                self.own_resources.error.clear();
+            }
+            Ok(Err(error)) => self.own_resources.error = error,
+            Err(error) => self.own_resources.error = format!("Resources read failed: {error}"),
+        }
+    }
+
     async fn poll_donations_task(&mut self) {
         if !self
             .donations_task
@@ -5231,6 +6293,40 @@ fn first_line(text: &str) -> String {
         .to_string()
 }
 
+/// Last non-blank line of `text`, trimmed: where a command that narrates its
+/// progress (`Asking known peers…`) puts its verdict.
+fn last_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .last()
+        .unwrap_or("")
+        .to_string()
+}
+
+/// The `nodo get` a typed service hash turns into, or why it does not.
+///
+/// Queued, not `--now`: the running node retries a wanted service across every
+/// peer on its own schedule (`src/commands/get_service.py`), whereas `--now` would
+/// hold the TUI's one command slot for as long as a download from a slow peer
+/// takes. The service shows up in the table once it lands.
+///
+/// Checked here only for shape -- hex -- so a typo is answered in the popup rather
+/// than by a round trip; whether any peer has it is the CLI's question.
+pub(crate) fn get_service_command(input: &str) -> Result<(String, Vec<String>), String> {
+    let hash = input.trim();
+    if hash.is_empty() {
+        return Err("Type a service hash first".to_string());
+    }
+    if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("A service hash is hexadecimal".to_string());
+    }
+    Ok((
+        format!("Get service {}", shorten(hash, 18)),
+        vec!["get".to_string(), hash.to_lowercase()],
+    ))
+}
+
 /// Run `nodo reputation --json` off the UI thread.
 ///
 /// Generously timed against the wallet's twenty seconds: the report walks the whole
@@ -5248,6 +6344,29 @@ async fn fetch_node_reputation() -> Result<NodeReputation, String> {
     match report_line(&stdout) {
         Some(line) => parse_node_reputation(line),
         None => Err(nonblank_error(&String::from_utf8_lossy(&output.stderr))),
+    }
+}
+
+/// Run `nodo resources --json` off the UI thread: this node's own `Peer.resources`.
+async fn fetch_own_resources() -> Result<crate::peer_resources::Announced, String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("nodo").args(["resources", "--json"]).output(),
+    )
+    .await
+    .map_err(|_| "nodo resources timed out after 30 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo resources: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match report_line(&stdout) {
+        Some(line) => crate::peer_resources::parse_own_resources(line),
+        None => {
+            let stderr = first_line(&String::from_utf8_lossy(&output.stderr));
+            Err(if stderr.is_empty() {
+                "nodo resources produced no output".to_string()
+            } else {
+                stderr
+            })
+        }
     }
 }
 
@@ -5298,17 +6417,302 @@ fn nonblank_error(stderr: &str) -> String {
 }
 
 async fn fetch_node_info() -> Result<NodeInfo, String> {
+    // `nodo info` was folded into the bare `nodo` invocation: the fields this
+    // parses are printed under the quick-start banner now, not by a separate
+    // subcommand. `parse_node_info` matches on line prefixes, so the banner
+    // lines ahead of them are simply ignored.
     let output = tokio::time::timeout(
         Duration::from_secs(20),
-        Command::new("nodo").arg("info").output(),
+        Command::new("nodo").output(),
     )
     .await
-    .map_err(|_| "nodo info timed out after 20 seconds".to_string())?
-    .map_err(|error| format!("Unable to run nodo info: {error}"))?;
+    .map_err(|_| "nodo timed out after 20 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo: {error}"))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     Ok(parse_node_info(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Where the Ergo tokens live in config.yaml.
+pub const ASSETS_PATH: &str = "ledgers.ergo.payments.ASSETS";
+
+fn config_path_segments(path: &str) -> Vec<ConfigPathSegment> {
+    path.split('.')
+        .map(|key| ConfigPathSegment::Key(key.to_string()))
+        .collect()
+}
+
+/// One entry of `ledgers.ergo.payments.ASSETS`, as the modal lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetRow {
+    pub token_id: String,
+    pub symbol: String,
+    pub unit_name: String,
+    pub decimals: String,
+    pub mu_per_unit: String,
+}
+
+impl AssetRow {
+    /// The entry as a one-line YAML flow mapping, for `yq`'s `env()` to parse.
+    ///
+    /// Strings go in as JSON, which is valid YAML and cannot be read as anything but a
+    /// string; the two numbers go in bare so they stay numbers.
+    fn flow_yaml(&self) -> String {
+        let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
+        format!(
+            "{{TOKEN_ID: {}, SYMBOL: {}, UNIT_NAME: {}, DECIMALS: {}, MU_PER_UNIT: {}}}",
+            quoted(&self.token_id),
+            quoted(&self.symbol),
+            quoted(&self.unit_name),
+            self.decimals,
+            self.mu_per_unit
+        )
+    }
+}
+
+/// `003bd19d…85d0`: enough of a 64-hex id to tell two apart on one row.
+pub fn short_token_id(token_id: &str) -> String {
+    if token_id.chars().count() <= 12 {
+        return token_id.to_string();
+    }
+    let head: String = token_id.chars().take(8).collect();
+    let tail: String = token_id.chars().skip(token_id.chars().count() - 4).collect();
+    format!("{head}…{tail}")
+}
+
+/// The assets config.yaml declares now, in order.
+pub fn configured_assets(document: Option<&Value>) -> Vec<AssetRow> {
+    let text = |entry: &Value, key: &str| match entry.get(key) {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    };
+    let Some(Value::Sequence(entries)) = document
+        .and_then(|document| document.get("ledgers")?.get("ergo")?.get("payments")?.get("ASSETS"))
+    else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .map(|entry| AssetRow {
+            token_id: text(entry, "TOKEN_ID"),
+            symbol: text(entry, "SYMBOL"),
+            unit_name: text(entry, "UNIT_NAME"),
+            decimals: text(entry, "DECIMALS"),
+            mu_per_unit: text(entry, "MU_PER_UNIT"),
+        })
+        .collect()
+}
+
+/// The fields of the new-asset form, in the order they are asked.
+pub struct AssetFieldInfo {
+    pub name: &'static str,
+    /// One line under the form while the field is focused.
+    pub help: &'static str,
+}
+
+pub const ASSET_FIELDS: [AssetFieldInfo; 5] = [
+    AssetFieldInfo {
+        name: "TOKEN_ID",
+        help: "The token's 64-hex id, never its name: anyone can mint a token called SigUSD.",
+    },
+    AssetFieldInfo {
+        name: "SYMBOL",
+        help: "Shown to people (SigUSD). Never used to match a box.",
+    },
+    AssetFieldInfo {
+        name: "UNIT_NAME",
+        help: "The display unit's name (sigusd): unique, and not erg or one in ui.UNITS.",
+    },
+    AssetFieldInfo {
+        name: "DECIMALS",
+        help: "Stated here, not read from the minter (SigUSD: 2). A wrong one misprices by 10^n.",
+    },
+    AssetFieldInfo {
+        name: "MU_PER_UNIT",
+        help: "MU per BASE unit, as MU_PER_NANOERG is for ERG: one cent of a 2-decimal token.",
+    },
+];
+
+/// What the operator has typed into the new-asset form.
+#[derive(Debug, Clone, Default)]
+pub struct AssetForm {
+    pub values: [String; 5],
+    pub focus: usize,
+    /// Why the last save was refused; cleared by the next keystroke.
+    pub error: Option<String>,
+}
+
+/// Validate the form: the asset, or the field that is wrong and why.
+///
+/// The same rules the node enforces at startup (`parse_assets` in
+/// `contracts/ergo/rate.py`), checked here so a mistake is reported at the form rather
+/// than as a restart that does not come back. A rate out of scale with `MU_PER_NANOERG`
+/// is not caught here -- that is a warning the node prints at start.
+pub fn parse_asset_fields(
+    values: &[String; 5],
+    existing: &[AssetRow],
+    declared_units: &[String],
+) -> Result<AssetRow, (usize, String)> {
+    let [token_id, symbol, unit_name, decimals, rate] = values.each_ref().map(|v| v.trim());
+
+    let token_id = token_id.to_lowercase();
+    if token_id.len() != 64 || !token_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err((0, "TOKEN_ID is the token's 64-hex id, never its name".to_string()));
+    }
+    if existing.iter().any(|asset| asset.token_id == token_id) {
+        return Err((
+            0,
+            "That token is already accepted; one asset cannot have two rates".to_string(),
+        ));
+    }
+    if symbol.is_empty() {
+        return Err((1, "SYMBOL is required: an amount has to say what it is".to_string()));
+    }
+    if symbol.chars().any(|c| c.is_control()) {
+        return Err((1, "SYMBOL has a control character in it".to_string()));
+    }
+    let unit_name = unit_name.to_lowercase();
+    if unit_name.is_empty() {
+        return Err((2, "UNIT_NAME is required".to_string()));
+    }
+    if !unit_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err((2, "UNIT_NAME is letters, digits or underscore".to_string()));
+    }
+    if unit_name == "erg"
+        || existing.iter().any(|asset| asset.unit_name == unit_name)
+        || declared_units.iter().any(|unit| unit == &unit_name)
+    {
+        return Err((
+            2,
+            format!("\"{unit_name}\" is already a unit name (ERG, another asset or ui.UNITS)"),
+        ));
+    }
+    if decimals.parse::<u32>().is_err() {
+        return Err((3, "DECIMALS is a whole number, 0 or more".to_string()));
+    }
+    let positive = rate.parse::<f64>().map(|rate| rate.is_finite() && rate > 0.0);
+    if positive != Ok(true) {
+        return Err((4, "MU_PER_UNIT is MU per BASE unit, a positive number".to_string()));
+    }
+    Ok(AssetRow {
+        token_id,
+        symbol: symbol.to_string(),
+        unit_name,
+        decimals: decimals.to_string(),
+        mu_per_unit: rate.to_string(),
+    })
+}
+
+/// `ledgers.<ledger>.WALLET_MNEMONIC` -> `<ledger>`.
+fn wallet_mnemonic_ledger(path: &str) -> Option<&str> {
+    path.strip_prefix("ledgers.")?
+        .strip_suffix(".WALLET_MNEMONIC")
+        .filter(|ledger| !ledger.is_empty() && !ledger.contains('.'))
+}
+
+/// A key that holds a BIP-39 phrase: a wallet's, or the node's identity.
+fn is_mnemonic_path(path: &str) -> bool {
+    path == "identity.MNEMONIC" || wallet_mnemonic_ledger(path).is_some()
+}
+
+fn capitalised(word: &str) -> String {
+    let mut letters = word.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
+}
+
+/// Whether `input` looks like a mnemonic, or like the explicit ask for a fresh one.
+///
+/// A shape check, not a BIP-39 one: the checksum needs the 2048-word list, which lives
+/// on the Python side and is what the node checks at the restart. This catches the
+/// mistakes that are made at a keyboard -- a pasted sentence, a missing word, a stray
+/// capital -- before they are written, restarted on, and rolled back.
+fn check_mnemonic_shape(input: &str) -> Result<(), String> {
+    let trimmed = input.trim();
+    // `""` is how a secret is cleared on purpose, and a cleared mnemonic is one the
+    // node generates on its next load.
+    if matches!(trimmed, "\"\"" | "''" | "auto") {
+        return Ok(());
+    }
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if ![12, 15, 18, 21, 24].contains(&words.len()) {
+        return Err(format!(
+            "A mnemonic is 12, 15, 18, 21 or 24 words; this has {}. \"\" has the node generate one.",
+            words.len()
+        ));
+    }
+    if let Some(word) = words
+        .iter()
+        .find(|word| !word.chars().all(|c| c.is_ascii_lowercase()))
+    {
+        return Err(format!(
+            "Mnemonic words are lowercase letters only; \"{}\" is not.",
+            word.chars().take(1).collect::<String>() + "…"
+        ));
+    }
+    Ok(())
+}
+
+/// What to tell an operator before they replace a ledger's wallet mnemonic.
+///
+/// Two things the editor cannot show them and that cannot be undone from it: whether
+/// the wallet they are about to stop using holds money, and that other nodes may
+/// already know its address. The balance is the one `nodo info` last reported; a
+/// wallet it did not report is treated as funded, because "I could not read it" is not
+/// "it is empty".
+fn wallet_replacement_lines(ledger: &str, wallets: &[LedgerWallet]) -> Vec<String> {
+    let name = capitalised(ledger);
+    let wallet = wallets.iter().find(|wallet| wallet.ledger == ledger);
+    let mut lines = vec![
+        format!("!! This replaces the {name} wallet the node is using now."),
+        "   Nothing on-chain is deleted, but only the old words can ever move what it holds."
+            .to_string(),
+        String::new(),
+        "FUNDS".to_string(),
+    ];
+    let whose = wallet
+        .map(|wallet| wallet.address.as_str())
+        .filter(|address| !address.is_empty())
+        .map(|address| format!("{address} "))
+        .unwrap_or_default();
+    match wallet.and_then(|wallet| wallet.balance.map(|balance| (balance, wallet.unit.as_str()))) {
+        Some((balance, unit)) if balance > 0.0 => {
+            lines.push(format!("  !! {whose}holds {balance} {unit}.").trim_end().to_string());
+            lines.push(
+                "     Back up the old words, or sweep it to your cold wallet, before going on."
+                    .to_string(),
+            );
+        }
+        Some(_) => {
+            lines.push(format!("  {whose}holds nothing that node info can see."));
+            lines.push("     Unconfirmed payments are not counted.".to_string());
+        }
+        None => {
+            lines.push(format!("  !! The balance of {whose}could not be read."));
+            lines.push("     Treat it as holding funds.".to_string());
+        }
+    }
+    lines.push(String::new());
+    lines.push("ANNOUNCED TO PEERS".to_string());
+    lines.push("  The wallet's address is part of the payment contract this node advertises,".to_string());
+    lines.push("  so peers may already hold it — and may have paid to it. After the restart".to_string());
+    lines.push("  the node advertises the new address; a deposit still on its way to the old".to_string());
+    lines.push("  one is rejected, and its money stays at the old address.".to_string());
+    if ledger == "ergo" {
+        lines.push(String::new());
+        lines.push("  Reputation proofs published from the old wallet stay on-chain under it;".to_string());
+        lines.push("  the new wallet starts with none.".to_string());
+    }
+    lines.push(String::new());
+    lines.push("y opens the editor. Nothing is written until you save there.".to_string());
+    lines
 }
 
 pub fn parse_node_info(output: &str) -> NodeInfo {
@@ -5758,183 +7162,9 @@ fn json_u128(value: Option<&serde_json::Value>) -> u128 {
         .unwrap_or(0)
 }
 
-fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
-    // A node that has never been migrated has no database, or one with no `peer`
-    // table in it, and neither is a failure to report -- it is a node with no peers
-    // yet, which is exactly what an empty list says. `list_peers()` draws the same
-    // line ("the 'peer' table does not exist"). Anything past this point is a query
-    // that disagrees with a schema that *is* there, which is the case worth raising.
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !table_exists(&connection, "peer") {
-        return Ok(Vec::new());
-    }
-    // Our balance on a peer lives on the `peer` table's own `balance_mu` column. The old
-    // `LEFT JOIN clients c ON p.client_id = c.id` was wrong: `peer.remote_client_id`
-    // is our client id *inside the remote peer*, never a key into our local
-    // `clients` table, so that join surfaced a bogus balance (issue #178).
-    let mut statement = connection.prepare(
-        "SELECT p.id,
-                COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
-                p.balance_mu,
-                p.advertisement,
-                p.reputation_score,
-                COALESCE(p.remote_client_id, '')
-         FROM peer p
-         LEFT JOIN uri u ON p.id = u.peer_id
-         GROUP BY p.id",
-    )?;
-    let peers = statement
-        .query_map([], |row| {
-            let reputation_score = row
-                .get::<_, Option<i64>>(4)?
-                .map(|score| score.to_string())
-                .unwrap_or_else(|| "0".to_string());
-            // Straight out of the advertisement the peer signed, which we store
-            // verbatim: it carries every proof the peer holds, where a column of our
-            // own could only ever keep the last one announced (issue #281).
-            let proof_ids = row
-                .get::<_, Option<Vec<u8>>>(3)?
-                .and_then(|bytes| protos::Peer::decode(&*bytes).ok())
-                .map(|announced| {
-                    announced
-                        .reputation_proofs
-                        .into_iter()
-                        .filter_map(|contract| {
-                            contract
-                                .xattrs
-                                .get("token_id")
-                                .and_then(|value| String::from_utf8(value.clone()).ok())
-                        })
-                        .filter(|token_id| !token_id.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
-            let id: String = row.get(0)?;
-            Ok(Peer {
-                uris: row.get(1)?,
-                balance: row.get::<_, String>(2)?,
-                proof_ids,
-                reputation_score,
-                remote_client_id: row.get(5)?,
-                // `contract_instance` isn't touched by the join above (it isn't
-                // keyed by uri), so its rows are fetched per peer below.
-                contracts: Vec::new(),
-                id,
-            })
-        })?
-        .collect::<SqlResult<Vec<_>>>()?;
-
-    peers
-        .into_iter()
-        .map(|mut peer| {
-            peer.contracts = get_peer_contracts(&connection, &peer.id)?;
-            Ok(peer)
-        })
-        .collect()
-}
-
-/// Every payment *method* a peer has registered. A peer's `contract_instance` rows
-/// aren't reachable from the uri join `get_peers` already runs, and before this the TUI
-/// surfaced none of it at all (issue #231). A method is ledger + contract + asset, so
-/// `token_id` comes back with the rest: without it two methods of one Ergo contract
-/// render as the same row twice, at two different rates.
-///
-/// `contract_instance.ledger` **is** the chain's tag. It used to be `ledger_hash`, a
-/// sha3 of a serialized description joined against `ledger(hash, content)` to get the
-/// tag back; `refactor(db): a ledger is its tag, so stop storing one` dropped both the
-/// column and the table's content, and this query kept asking for them. SQLite rejects
-/// the statement at `prepare`, so every peer on the page disappeared rather than every
-/// peer's contracts -- see `get_peers`.
-fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
-    let mut statement = connection.prepare(
-        "SELECT ci.contract_hash, ci.ledger, ci.address, ci.mu_per_unit, ci.token_id
-         FROM contract_instance ci
-         WHERE ci.peer_id = ?1",
-    )?;
-    let contracts = statement
-        .query_map([peer_id], |row| {
-            Ok(PeerContract {
-                ledger: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                contract_hash: row.get(0)?,
-                asset: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                address: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                // Not ERG-formatted: this is a rate (MU per unit of the contract),
-                // not a balance. For ERG the rate is the peg itself, 1e9.
-                mu_per_unit: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            })
-        })?
-        .collect();
-    contracts
-}
-
-/// Adjust a peer's local reputation score by `delta`, mirroring
-/// `sql_connection.update_reputation_peer`: add `delta` to the score, increment the
-/// index, and record the event that explains it. Works when `reputation_proof_id` is
-/// NULL (score-only), so no on-chain proof is required.
-///
-/// The event matters as much as the score here. Every other mover of a score writes
-/// one, so a hand adjustment that did not would be the single unexplained step in a
-/// peer's history — and the one an operator is most likely to have to justify later.
-fn adjust_peer_reputation(database: &Path, peer_id: &str, delta: i64) -> SqlResult<()> {
-    let mut connection = Connection::open(database)?;
-    let transaction = connection.transaction()?;
-    let (score, index): (i64, i64) = transaction.query_row(
-        "SELECT COALESCE(reputation_score, 0), COALESCE(reputation_index, 0)
-         FROM peer WHERE id = ?1",
-        [peer_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    transaction.execute(
-        "UPDATE peer SET reputation_score = ?1, reputation_index = ?2 WHERE id = ?3",
-        rusqlite::params![score + delta, index + 1, peer_id],
-    )?;
-    // Same string as `reasons.Reason.OPERATOR_ADJUSTMENT` on the Python side.
-    transaction.execute(
-        "INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after)
-         VALUES ('peer', ?1, ?2, 'operator_adjustment', ?3)",
-        rusqlite::params![peer_id, delta, score + delta],
-    )?;
-    transaction.commit()?;
-    Ok(())
-}
-
-fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
-    let connection = Connection::open(database)?;
-    let mut statement =
-        connection.prepare("SELECT id, balance_mu, last_usage, unmetered FROM clients")?;
-    let clients = statement
-        .query_map([], |row| {
-            let last_usage = row
-                .get::<_, Option<f64>>(2)?
-                .map(|value| format!("{value:.0}"))
-                .unwrap_or_else(|| "—".to_string());
-            Ok(Client {
-                id: row.get(0)?,
-                balance: row.get::<_, String>(1)?,
-                last_usage,
-                unmetered: row.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
-            })
-        })?
-        .collect();
-    clients
-}
-
 /// How many rows of history a detail card asks for. Enough to read a pattern, few
 /// enough that the card cannot push the table it belongs to off a short terminal.
-const DETAIL_ROWS: usize = 8;
-
-/// What we paid a peer and why its score is where it is.
-fn get_peer_detail(database: &Path, peer_id: &str) -> SqlResult<PeerDetail> {
-    let connection = Connection::open(database)?;
-    Ok(PeerDetail {
-        peer_id: peer_id.to_string(),
-        payments: get_payments(&connection, "peer_id", peer_id)?,
-        events: get_reputation_events(&connection, "peer", peer_id)?,
-    })
-}
+pub(crate) const DETAIL_ROWS: usize = 8;
 
 /// A service's score and the events behind it. Scored by `service_id`, so this is the
 /// history of every instance of it that ever ran here, not of the one running now.
@@ -5954,22 +7184,11 @@ fn get_service_detail(database: &Path, service_id: &str) -> SqlResult<ServiceDet
     })
 }
 
-/// What a client paid us, what it was given a token for, and what it is running here.
-fn get_client_detail(database: &Path, client_id: &str) -> SqlResult<ClientDetail> {
-    let connection = Connection::open(database)?;
-    Ok(ClientDetail {
-        client_id: client_id.to_string(),
-        deposits: get_deposit_tokens(&connection, client_id)?,
-        instances: get_client_instances(&connection, client_id)?,
-        payments: get_payments(&connection, "client_id", client_id)?,
-    })
-}
-
 /// Payment rows for one counterparty, newest first.
 ///
 /// `column` is the caller's choice of `peer_id` or `client_id` and is interpolated,
 /// which is safe only because both are literals in this file — the *value* is bound.
-fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Vec<PaymentRow>> {
+pub(crate) fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Vec<PaymentRow>> {
     let mut statement = connection.prepare(&format!(
         "SELECT created_at, amount_mu, status, COALESCE(tx_id, ''), COALESCE(deposit_token, '')
          FROM payments WHERE {column} = ?1 ORDER BY created_at DESC, id DESC LIMIT {DETAIL_ROWS}"
@@ -5989,7 +7208,7 @@ fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Ve
 }
 
 /// Reputation events for one subject, newest first.
-fn get_reputation_events(
+pub(crate) fn get_reputation_events(
     connection: &Connection,
     kind: &str,
     id: &str,
@@ -6011,45 +7230,6 @@ fn get_reputation_events(
         })?
         .collect();
     events
-}
-
-fn get_deposit_tokens(connection: &Connection, client_id: &str) -> SqlResult<Vec<DepositToken>> {
-    let mut statement = connection.prepare(
-        "SELECT id, status, created_at FROM deposit_tokens
-         WHERE client_id = ?1 ORDER BY created_at DESC LIMIT ?2",
-    )?;
-    let tokens = statement
-        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
-            Ok(DepositToken {
-                id: row.get(0)?,
-                status: row.get(1)?,
-                created_at: row.get(2)?,
-            })
-        })?
-        .collect();
-    tokens
-}
-
-/// The instances a client started here. `local_instances.father_id` holds the client
-/// id for a top-level instance (see `start_service_iterable`), which is the only link
-/// between a client and anything it runs.
-fn get_client_instances(
-    connection: &Connection,
-    client_id: &str,
-) -> SqlResult<Vec<ClientInstance>> {
-    let mut statement = connection.prepare(
-        "SELECT id, COALESCE(name, '') FROM local_instances
-         WHERE father_id = ?1 ORDER BY name LIMIT ?2",
-    )?;
-    let instances = statement
-        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
-            Ok(ClientInstance {
-                id: row.get(0)?,
-                name: row.get(1)?,
-            })
-        })?
-        .collect();
-    instances
 }
 
 fn get_instances(
@@ -6206,7 +7386,7 @@ fn resolve_instance_clients(connection: &Connection, instances: &mut [Instance])
 
 /// Whether an id names one of this node's own dev clients.
 ///
-/// Both pools, since `dev-external-` is drawn from `dev-`. Prefix only: the Python
+/// Prefix only: the Python
 /// side also checks the clients table, because there it is deciding whether to grant
 /// a privilege on the strength of an id that arrived over the wire. This decides
 /// what word to print, and a dev client that has expired out of the table is still
@@ -6334,9 +7514,56 @@ fn get_node_energy(paths: &Paths) -> NodeEnergy {
         .unwrap_or_default()
 }
 
+/// `energy_consumption` folded into local hours over the last `hours` (issue #442).
+///
+/// Grouped by local hour rather than read raw: at the default 60s sample interval a
+/// raw read would be a row per minute, which is both far more than a terminal's
+/// width can show and finer than "when did this spike" needs. `timestamp` is stored
+/// as SQLite's `CURRENT_TIMESTAMP` (UTC), so the bucket key and the window bound
+/// convert or compare in UTC deliberately -- comparing a UTC column against a
+/// `'localtime'`-shifted bound the way `get_demand_by_hour` compares
+/// `demand_history.hour` (already local text) would silently miss or double-count
+/// samples near a UTC offset boundary.
+fn get_energy_series(database: &Path, hours: u16) -> SqlResult<EnergySeries> {
+    let connection = Connection::open(database)?;
+    if !table_exists(&connection, "energy_consumption") {
+        return Ok(EnergySeries::default());
+    }
+    let mut statement = connection.prepare(
+        "SELECT strftime('%Y-%m-%dT%H', timestamp, 'localtime'),
+                MAX(watts),
+                SUM(energy_joules),
+                SUM(energy_joules / 3.6e6 * price_per_kwh)
+         FROM energy_consumption
+         WHERE timestamp >= datetime('now', ?1)
+         GROUP BY 1
+         ORDER BY 1 ASC",
+    )?;
+    let rows = statement.query_map([format!("-{hours} hours")], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+            row.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+            row.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
+        ))
+    })?;
+
+    let mut series = EnergySeries::default();
+    for row in rows {
+        let (key, peak_watts, joules, cost) = row?;
+        series.keys.push(key);
+        series.buckets.push(EnergyBucket {
+            peak_watts,
+            joules,
+            cost,
+        });
+    }
+    Ok(series)
+}
+
 /// Whether a table exists, so a query can degrade gracefully against a database the
 /// node has not migrated yet (e.g. a brand-new install the TUI opens first).
-fn table_exists(connection: &Connection, name: &str) -> bool {
+pub(crate) fn table_exists(connection: &Connection, name: &str) -> bool {
     connection
         .query_row(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -6355,7 +7582,7 @@ fn table_exists(connection: &Connection, name: &str) -> bool {
 ///
 /// `PRAGMA table_info` cannot be parameterised, so the name is interpolated -- every
 /// caller passes a literal from this file.
-fn column_exists(connection: &Connection, table: &str, column: &str) -> bool {
+pub(crate) fn column_exists(connection: &Connection, table: &str, column: &str) -> bool {
     let Ok(mut statement) = connection.prepare(&format!("PRAGMA table_info({table})")) else {
         return false;
     };
@@ -6396,7 +7623,7 @@ fn read_service_tag(path: &Path) -> Option<String> {
     metadata.hashtag?.tag.first().cloned()
 }
 
-fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
+pub(crate) fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
     let document = read_yaml(path)?;
     let mut entries = Vec::new();
     flatten_yaml(&document, &mut Vec::new(), &mut entries);
@@ -6460,7 +7687,7 @@ fn yaml_edit_value(value: &Value) -> String {
 }
 
 /// Which editor widget a key gets: the closed value set some keys document, else
-/// the widget for its YAML type. Shared by the Config page and the cell levers, so
+/// the widget for its YAML type. Shared by the All page and the cell levers, so
 /// one key is edited the same way whichever page opened it.
 fn infer_edit_kind(path: &str, value_type: &str) -> EditKind {
     if let Some(options) = known_enum_values(path) {
@@ -6575,14 +7802,6 @@ fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
     Ok(lines.into_iter().collect())
 }
 
-/// The 36-byte pointer header every block file carries, which is not content.
-///
-/// Mirrors `BLOCK_LENGTH` in `bee_rpc.utils`, whose `get_pruned_block_length`
-/// subtracts it for exactly this figure. Restated rather than shelled out to: the
-/// TUI would otherwise spawn a Python interpreter per service per refresh, and this
-/// page can hold dozens of them.
-const BLOCK_POINTER_LENGTH: u64 = 36;
-
 /// The name of the manifest inside a service's registry directory.
 /// `METADATA_FILE_NAME` in `bee_rpc.utils`.
 const SERVICE_MANIFEST: &str = "_.json";
@@ -6600,20 +7819,35 @@ const SERVICE_MANIFEST: &str = "_.json";
 /// figure it shows. A Python helper would mean an interpreter spawn per service on
 /// every refresh, four times a second, to re-read files the TUI has open anyway.
 ///
-/// Mirrors `bee_rpc.utils.getsize`: an integer entry is a local part, a list entry
-/// is `[block_id, ...]` and contributes the block file's size less its pointer
-/// header. `None` rather than a partial total when the manifest is unreadable or a
-/// block it names is missing -- a total quietly short by a 2 GiB layer is worse than
-/// no total, because it reads as a real measurement.
+/// Mirrors `bee_rpc.utils.getsize` as pinned (bee-rpc-over-grpc-py v0.0.1), which is
+/// what `nodo services` prints (issue #438): an integer entry is a local part, a
+/// list entry is `[block_id, ...]` and contributes the block's whole expansion
+/// (`get_expanded_block_length`) -- a block file's full length, or for a multiblock
+/// *directory* its own manifest measured the same way, to any depth. This used to
+/// mirror an older `getsize` instead: it took 36 bytes of pointer off every block,
+/// and read a directory block as the size of its directory entry, a few hundred
+/// bytes standing in for however much the block holds.
+///
+/// `None` rather than a partial total when the manifest is unreadable, a block it
+/// names is missing or a block contains itself -- a total quietly short by a 2 GiB
+/// layer is worse than no total, because it reads as a real measurement.
 fn service_total_size(service_dir: &Path, blocks: &Path) -> Option<u64> {
-    let manifest = fs::read_to_string(service_dir.join(SERVICE_MANIFEST)).ok()?;
+    manifest_size(service_dir, blocks, &mut Vec::new())
+}
+
+/// The expansion of the object whose `_.json` is in `dir`. `stack` is the chain of
+/// directory blocks being measured, so one that names itself is a loop, not a hang;
+/// a block referenced twice from one object is not a loop, and counts twice, as
+/// `getsize` counts it.
+fn manifest_size(dir: &Path, blocks: &Path, stack: &mut Vec<String>) -> Option<u64> {
+    let manifest = fs::read_to_string(dir.join(SERVICE_MANIFEST)).ok()?;
     let entries: Vec<serde_json::Value> = serde_json::from_str(&manifest).ok()?;
     let mut total: u64 = 0;
     for entry in entries {
         match entry {
             // A local part, named by its index in this directory.
             serde_json::Value::Number(index) => {
-                let part = service_dir.join(index.to_string());
+                let part = dir.join(index.to_string());
                 total = total.checked_add(fs::metadata(part).ok()?.len())?;
             }
             // `[block_id, ...]`: content that lives in the shared block store.
@@ -6625,8 +7859,19 @@ fn service_total_size(service_dir: &Path, blocks: &Path) -> Option<u64> {
                 if block_id.is_empty() || block_id.contains('/') || block_id.contains('\\') {
                     return None;
                 }
-                let length = fs::metadata(blocks.join(block_id)).ok()?.len();
-                total = total.checked_add(length.saturating_sub(BLOCK_POINTER_LENGTH))?;
+                let block = blocks.join(block_id);
+                let length = if fs::metadata(&block).ok()?.is_dir() {
+                    if stack.iter().any(|seen| seen == block_id) {
+                        return None;
+                    }
+                    stack.push(block_id.to_string());
+                    let length = manifest_size(&block, blocks, stack);
+                    stack.pop();
+                    length?
+                } else {
+                    fs::metadata(&block).ok()?.len()
+                };
+                total = total.checked_add(length)?;
             }
             _ => return None,
         }
@@ -6671,6 +7916,14 @@ fn read_u64(path: &Path) -> Option<u64> {
 /// moves it keeps working readings.
 fn instance_cgroup_dir(paths: &Paths, instance_id: &str) -> PathBuf {
     paths.cgroups.join("nodo-ch").join(instance_id)
+}
+
+/// Where systemd puts `nodo.service`'s own cgroup: `<CGROUPS_BASE_DIR>/system.slice/
+/// nodo.service`. The unit template (`bash/nodo.service.template`) sets no `Slice=`,
+/// so a system-level unit lands under `system.slice` by systemd's own default --
+/// nothing here needs a config key the way `nodo-ch` needed `CGROUPS_BASE_DIR`.
+fn daemon_cgroup_dir(paths: &Paths) -> PathBuf {
+    paths.cgroups.join("system.slice").join("nodo.service")
 }
 
 /// One sweep of an instance's live counters, read straight from cgroupfs and sysfs.
@@ -6835,6 +8088,9 @@ pub fn percent(used: u64, total: u64) -> u64 {
     }
 }
 
+/// A byte count in binary units, one decimal. `format_bytes` in
+/// src/commands/services.py is the same function, so `nodo services` and the
+/// SERVICES table say the same size the same way (issue #438).
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -6992,6 +8248,23 @@ fn utc_stamp(time: SystemTime) -> String {
     )
 }
 
+/// Format a Chat message's stored `ts` (Unix seconds) as `YYYY-MM-DD HH:MM:SS` UTC --
+/// readable, unlike `utc_stamp`'s compact filename shape. A negative or otherwise
+/// unreadable value (never written by this node, but this reads whatever a peer's
+/// clock produced) falls back to the epoch rather than panicking.
+pub(crate) fn format_unix_timestamp(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    let days = seconds.div_euclid(86_400);
+    let tod = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+        tod / 3_600,
+        (tod % 3_600) / 60,
+        tod % 60,
+    )
+}
+
 /// Days-since-epoch to (year, month, day), UTC. Howard Hinnant's `civil_from_days`
 /// -- the same arithmetic every date library uses, small enough to inline rather
 /// than take a dependency for six filename characters.
@@ -7111,9 +8384,12 @@ mod tests {
                 vec![
                     Page::Overview,
                     Page::Instances,
+                    Page::Tunnels,
                     Page::Peers,
                     Page::Services,
+                    Page::Packs,
                     Page::Clients,
+                    Page::Chat,
                     Page::Earnings,
                     Page::Logs,
                     Page::Cell,
@@ -7121,6 +8397,7 @@ mod tests {
                     Page::Schedule,
                     Page::Energy,
                     Page::Config,
+                    Page::Docs,
                 ]
             );
         }
@@ -7198,7 +8475,11 @@ mod tests {
     /// The cursor is two-dimensional: ←/→ walk the organelles, ↑/↓ the levers inside
     /// the one in focus. Getting that wrong makes a lever unreachable by keyboard.
     mod cell_navigation {
-        use crate::app::{App, InputMode, Page};
+        use crate::app::{
+            check_mnemonic_shape, config_path_display, configured_assets, is_mnemonic_path,
+            parse_asset_fields, wallet_mnemonic_ledger, AssetRow, ConfigPathSegment, ASSET_FIELDS,
+            wallet_replacement_lines, App, InputMode, LedgerWallet, Page, PendingAction,
+        };
         use crate::cell::{LeverKind, LeverStatus, Organelle};
 
         fn on_cell_page() -> App {
@@ -7448,6 +8729,419 @@ mod tests {
             assert!(body.contains("[\"*\"]"), "{body}");
         }
 
+        fn nucleus_lever(app: &mut App, id: &str) {
+            app.cell.organelle = Organelle::ALL
+                .iter()
+                .position(|organelle| *organelle == Organelle::Nucleus)
+                .unwrap();
+            app.cell.lever = Organelle::Nucleus
+                .levers()
+                .iter()
+                .position(|lever| lever.id == id)
+                .unwrap();
+        }
+
+        fn funded(ledger: &str, balance: Option<f64>, unit: &str) -> LedgerWallet {
+            LedgerWallet {
+                ledger: ledger.to_string(),
+                address: format!("{ledger}-address"),
+                balance,
+                unit: unit.to_string(),
+                cold_address: String::new(),
+            }
+        }
+
+        /// Enter on a wallet mnemonic does not open the editor: it shows what
+        /// replacing it leaves behind, and only `y` goes on.
+        #[test]
+        fn replacing_a_wallet_mnemonic_asks_before_the_editor_opens() {
+            for (id, ledger) in [
+                ("ergo-wallet-mnemonic", "ergo"),
+                ("bitcoin-wallet-mnemonic", "bitcoin"),
+            ] {
+                let mut app = on_cell_page();
+                app.config_document =
+                    Some(serde_yaml::from_str("ledgers:\n  ergo: {}\n  bitcoin: {}\n").unwrap());
+                nucleus_lever(&mut app, id);
+                app.toggle_selected_lever();
+
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{id}");
+                let details = app.details.as_ref().expect("the alert is shown");
+                assert!(details.title.contains("wallet"), "{}", details.title);
+                assert!(
+                    matches!(app.pending_action, Some(PendingAction::EditLever { .. })),
+                    "{id}: nothing may be written by this"
+                );
+                assert!(app.edit_config_path.is_none(), "{id}: the editor opened early");
+                let _ = ledger;
+            }
+        }
+
+        #[tokio::test]
+        async fn confirming_opens_the_secret_editor_empty_and_cancelling_does_not() {
+            let mut app = on_cell_page();
+            app.config_document =
+                Some(serde_yaml::from_str("ledgers:\n  ergo:\n    WALLET_MNEMONIC: old words\n").unwrap());
+            nucleus_lever(&mut app, "ergo-wallet-mnemonic");
+            app.toggle_selected_lever();
+            app.cancel_pending_writes();
+            assert!(app.edit_config_path.is_none());
+            assert_eq!(app.input_mode, InputMode::Normal);
+
+            app.toggle_selected_lever();
+            app.confirm_pending().await;
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert!(app.edit_config_secret);
+            assert!(app.input.is_empty(), "the old mnemonic must not be on screen");
+            assert_eq!(
+                app.edit_config_path.as_ref().map(|path| config_path_display(path)),
+                Some("ledgers.ergo.WALLET_MNEMONIC".to_string())
+            );
+        }
+
+        /// Only the wallet mnemonics are held back. The cold wallet and the hot limit
+        /// open straight into their editor, as before.
+        #[test]
+        fn other_nucleus_levers_still_open_their_editor_directly() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str("ledgers:\n  bitcoin:\n    payments:\n      COLD_WALLET: ''\n")
+                    .unwrap(),
+            );
+            nucleus_lever(&mut app, "bitcoin-cold-wallet");
+            app.toggle_selected_lever();
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert!(app.pending_action.is_none());
+        }
+
+        #[test]
+        fn the_alert_says_what_the_wallet_holds() {
+            let text = |wallets: &[LedgerWallet]| wallet_replacement_lines("ergo", wallets).join("\n");
+
+            let funded_text = text(&[funded("ergo", Some(12.5), "ERG")]);
+            assert!(funded_text.contains("holds 12.5 ERG"), "{funded_text}");
+            assert!(funded_text.contains("ergo-address"), "{funded_text}");
+
+            let empty_text = text(&[funded("ergo", Some(0.0), "ERG")]);
+            assert!(empty_text.contains("holds nothing"), "{empty_text}");
+            assert!(!empty_text.contains("holding funds"), "{empty_text}");
+
+            // "I could not read it" is not "it is empty": both a wallet with no
+            // balance and one `nodo info` did not report at all read as funded.
+            for unreadable in [text(&[funded("ergo", None, "")]), text(&[])] {
+                assert!(unreadable.contains("could not be read"), "{unreadable}");
+                assert!(unreadable.contains("holding funds"), "{unreadable}");
+            }
+        }
+
+        #[test]
+        fn the_alert_reads_the_wallet_of_the_ledger_being_replaced() {
+            let wallets = [funded("ergo", Some(3.0), "ERG"), funded("bitcoin", Some(0.5), "BTC")];
+            let bitcoin = wallet_replacement_lines("bitcoin", &wallets).join("\n");
+            assert!(bitcoin.contains("holds 0.5 BTC"), "{bitcoin}");
+            assert!(!bitcoin.contains("ERG"), "{bitcoin}");
+        }
+
+        #[test]
+        fn the_alert_warns_that_peers_may_already_know_the_address() {
+            for ledger in ["ergo", "bitcoin"] {
+                let body = wallet_replacement_lines(ledger, &[]).join("\n");
+                assert!(body.contains("ANNOUNCED TO PEERS"), "{ledger}:\n{body}");
+                assert!(body.contains("may already hold it"), "{ledger}:\n{body}");
+            }
+        }
+
+        #[test]
+        fn only_ergo_has_reputation_proofs_to_leave_behind() {
+            assert!(wallet_replacement_lines("ergo", &[]).join("\n").contains("Reputation proofs"));
+            assert!(!wallet_replacement_lines("bitcoin", &[]).join("\n").contains("Reputation"));
+        }
+
+        #[test]
+        fn the_ledger_is_read_off_the_key_and_nothing_else_is_a_wallet() {
+            assert_eq!(wallet_mnemonic_ledger("ledgers.ergo.WALLET_MNEMONIC"), Some("ergo"));
+            assert_eq!(wallet_mnemonic_ledger("ledgers.bitcoin.WALLET_MNEMONIC"), Some("bitcoin"));
+            for path in [
+                "identity.MNEMONIC",
+                "ledgers.bitcoin.payments.COLD_WALLET",
+                "ledgers.ergo.payments.WALLET_MNEMONIC",
+                "ledgers..WALLET_MNEMONIC",
+            ] {
+                assert_eq!(wallet_mnemonic_ledger(path), None, "{path}");
+            }
+        }
+
+        #[test]
+        fn a_mnemonic_is_checked_for_its_shape_before_it_is_written() {
+            let twelve = "abandon ".repeat(11) + "about";
+            assert!(check_mnemonic_shape(&twelve).is_ok());
+            assert!(check_mnemonic_shape(&("abandon ".repeat(23) + "art")).is_ok());
+            // Clearing it on purpose is how a fresh one is asked for.
+            for clear in ["\"\"", "''", "auto"] {
+                assert!(check_mnemonic_shape(clear).is_ok(), "{clear}");
+            }
+            assert!(check_mnemonic_shape(&"abandon ".repeat(11)).unwrap_err().contains("has 11"));
+            assert!(check_mnemonic_shape("").is_err());
+            let capital = twelve.replacen("abandon", "Abandon", 1);
+            let message = check_mnemonic_shape(&capital).unwrap_err();
+            assert!(message.contains("lowercase"), "{message}");
+            // The offending word is not repeated whole: it is part of a secret.
+            assert!(!message.contains("Abandon"), "{message}");
+        }
+
+        const TOKEN: &str = "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0";
+
+        fn sigusd() -> AssetRow {
+            AssetRow {
+                token_id: TOKEN.to_string(),
+                symbol: "SigUSD".to_string(),
+                unit_name: "sigusd".to_string(),
+                decimals: "2".to_string(),
+                mu_per_unit: "20000000".to_string(),
+            }
+        }
+
+        fn fields(token_id: &str, symbol: &str, unit: &str, decimals: &str, rate: &str) -> [String; 5] {
+            [token_id, symbol, unit, decimals, rate].map(str::to_string)
+        }
+
+        #[test]
+        fn a_filled_form_becomes_an_asset() {
+            let asset =
+                parse_asset_fields(&fields(TOKEN, "SigUSD", "sigusd", "2", "20000000"), &[], &[])
+                    .unwrap();
+            assert_eq!(asset, sigusd());
+            // Upper-case hex and unit names are folded, as the node folds them, and
+            // the padding a person leaves around a pasted value is not kept.
+            let asset = parse_asset_fields(
+                &fields(&format!("  {}  ", TOKEN.to_uppercase()), " SigUSD ", "SIGUSD", "2", " 20000000 "),
+                &[],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(asset, sigusd());
+        }
+
+        /// Each rule the node enforces at startup is refused at the form, and the
+        /// refusal names the field it is about so the focus can go there.
+        #[test]
+        fn each_rule_the_node_enforces_is_refused_on_the_field_it_concerns() {
+            let existing = [sigusd()];
+            let units = vec!["usd".to_string()];
+            let other = "1".repeat(64);
+            let refused = |values: [String; 5], field: usize, why: &str| {
+                let (at, message) = parse_asset_fields(&values, &existing, &units)
+                    .expect_err(&format!("{values:?} should be refused"));
+                assert_eq!(at, field, "{values:?}: {message}");
+                assert!(message.contains(why), "{values:?}: {message}");
+            };
+            refused(fields("", "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields("SigUSD", "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields(&"z".repeat(64), "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields(TOKEN, "A", "a", "0", "1"), 0, "already accepted");
+            refused(fields(&other, "", "a", "0", "1"), 1, "SYMBOL is required");
+            refused(fields(&other, "A", "", "0", "1"), 2, "UNIT_NAME is required");
+            refused(fields(&other, "A", "erg", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "sigusd", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "usd", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "bad-name", "0", "1"), 2, "letters, digits");
+            refused(fields(&other, "A", "a", "", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "-1", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "two", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "2", ""), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "0"), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "-5"), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "lots"), 4, "MU_PER_UNIT");
+        }
+
+        /// A symbol may have a space in it now that it is its own field.
+        #[test]
+        fn a_symbol_with_a_space_is_one_symbol() {
+            let asset = parse_asset_fields(
+                &fields(&"2".repeat(64), "Sigma USD", "sigmausd", "2", "5"),
+                &[],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(asset.symbol, "Sigma USD");
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&asset.flow_yaml()).unwrap();
+            assert_eq!(parsed["SYMBOL"], serde_yaml::Value::String("Sigma USD".to_string()));
+        }
+
+        /// What `yq`'s `env()` is handed has to read back as the same entry, with the
+        /// two numbers still numbers and every string still a string.
+        #[test]
+        fn the_entry_is_written_as_yaml_that_reads_back_unchanged() {
+            let asset = sigusd();
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&asset.flow_yaml()).unwrap();
+            let expected: serde_yaml::Value = serde_yaml::from_str(&format!(
+                "TOKEN_ID: \"{TOKEN}\"\nSYMBOL: SigUSD\nUNIT_NAME: sigusd\nDECIMALS: 2\nMU_PER_UNIT: 20000000\n"
+            ))
+            .unwrap();
+            assert_eq!(parsed, expected);
+            assert!(parsed["DECIMALS"].is_number() && parsed["MU_PER_UNIT"].is_number());
+            // A symbol that YAML would read as something else stays a string.
+            let tricky = AssetRow { symbol: "true".to_string(), ..asset };
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&tricky.flow_yaml()).unwrap();
+            assert_eq!(parsed["SYMBOL"], serde_yaml::Value::String("true".to_string()));
+        }
+
+        #[test]
+        fn the_configured_assets_are_read_in_order() {
+            let document: serde_yaml::Value = serde_yaml::from_str(&format!(
+                "ledgers:\n  ergo:\n    payments:\n      ASSETS:\n        - {}\n        - {{TOKEN_ID: x, SYMBOL: Two, UNIT_NAME: two, DECIMALS: 0, MU_PER_UNIT: 5}}\n",
+                sigusd().flow_yaml()
+            ))
+            .unwrap();
+            let assets = configured_assets(Some(&document));
+            assert_eq!(assets.len(), 2);
+            assert_eq!(assets[0], sigusd());
+            assert_eq!(assets[1].symbol, "Two");
+            assert!(configured_assets(None).is_empty());
+            let empty: serde_yaml::Value = serde_yaml::from_str("ledgers: {}\n").unwrap();
+            assert!(configured_assets(Some(&empty)).is_empty());
+        }
+
+        fn on_assets(list: &str) -> App {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(&format!(
+                    "ledgers:\n  ergo:\n    payments:\n      ASSETS: {list}\n"
+                ))
+                .unwrap(),
+            );
+            nucleus_lever(&mut app, "ergo-assets");
+            app
+        }
+
+        #[test]
+        fn enter_on_the_assets_lever_opens_the_modal_without_writing() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.pending_action.is_none());
+
+            // `e` is the same gesture on this row: there is no scalar behind it.
+            let mut app = on_assets("[]");
+            app.open_lever_editor();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+        }
+
+        fn type_into_form(app: &mut App, text: &str) {
+            for character in text.chars() {
+                app.asset_form_type(character);
+            }
+        }
+
+        #[test]
+        fn the_form_takes_a_field_at_a_time_and_enter_walks_forward() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            assert_eq!(app.input_mode, InputMode::AddAsset);
+            assert_eq!(app.asset_form.focus, 0);
+
+            type_into_form(&mut app, TOKEN);
+            app.asset_form_enter();
+            assert_eq!(app.asset_form.focus, 1);
+            type_into_form(&mut app, "SigUSD");
+            app.asset_form_backspace();
+            assert_eq!(app.asset_form.values[1], "SigUS");
+            assert_eq!(app.asset_form.values[0], TOKEN, "typing must not touch another field");
+
+            app.asset_form_move(-1);
+            assert_eq!(app.asset_form.focus, 0);
+            app.asset_form_move(-1);
+            assert_eq!(app.asset_form.focus, ASSET_FIELDS.len() - 1, "focus wraps");
+            app.asset_form_clear_field();
+            assert!(app.asset_form.values[4].is_empty());
+        }
+
+        /// Saving with a field wrong keeps the form open, puts the focus on that
+        /// field, and writes nothing -- the error is cleared by the next keystroke.
+        #[test]
+        fn saving_a_bad_form_jumps_to_the_field_and_writes_nothing() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            type_into_form(&mut app, TOKEN);
+            app.asset_form_move(1);
+            type_into_form(&mut app, "SigUSD");
+            app.asset_form_move(1);
+            type_into_form(&mut app, "sigusd");
+            // DECIMALS and MU_PER_UNIT are still empty: save from the last field.
+            app.asset_form.focus = ASSET_FIELDS.len() - 1;
+            app.asset_form_enter();
+
+            assert_eq!(app.input_mode, InputMode::AddAsset, "the form must stay open");
+            assert_eq!(app.asset_form.focus, 3, "DECIMALS is the first one that is wrong");
+            let error = app.asset_form.error.clone().expect("the reason is shown");
+            assert!(error.contains("DECIMALS"), "{error}");
+            assert!(app.config_task.is_none(), "nothing may be written");
+
+            app.asset_form_type('2');
+            assert!(app.asset_form.error.is_none(), "typing dismisses the error");
+            assert_eq!(app.asset_form.values[0], TOKEN, "what was typed is kept");
+        }
+
+        #[test]
+        fn escape_goes_back_to_the_list_and_drops_the_form() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            type_into_form(&mut app, "abc");
+            app.cancel_asset_form();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.asset_form.values.iter().all(String::is_empty));
+            assert_eq!(app.asset_form.focus, 0);
+        }
+
+        #[test]
+        fn removing_asks_first_and_names_the_entry_by_its_index() {
+            let mut app = on_assets(&format!("[{}]", sigusd().flow_yaml()));
+            app.toggle_selected_lever();
+            app.open_remove_asset_confirm();
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.input_title.contains("SigUSD"), "{}", app.input_title);
+            match &app.pending_action {
+                Some(PendingAction::DeleteConfigItem { path, .. }) => {
+                    assert_eq!(
+                        config_path_display(path),
+                        "ledgers.ergo.payments.ASSETS[0]"
+                    );
+                    assert!(matches!(path.last(), Some(ConfigPathSegment::Index(0))));
+                }
+                other => panic!("expected a delete confirmation, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn there_is_nothing_to_remove_from_an_empty_list() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_remove_asset_confirm();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.pending_action.is_none());
+        }
+
+        #[test]
+        fn the_selection_wraps_over_the_assets() {
+            let two = format!("[{}, {}]", sigusd().flow_yaml(), sigusd().flow_yaml());
+            let mut app = on_assets(&two);
+            app.toggle_selected_lever();
+            app.move_assets_selection(-1);
+            assert_eq!(app.assets_index, 1);
+            app.move_assets_selection(1);
+            assert_eq!(app.assets_index, 0);
+        }
+
+        #[test]
+        fn mnemonic_paths_are_the_identity_and_the_wallets() {
+            assert!(is_mnemonic_path("identity.MNEMONIC"));
+            assert!(is_mnemonic_path("ledgers.bitcoin.WALLET_MNEMONIC"));
+            assert!(!is_mnemonic_path("ledgers.bitcoin.WALLET_PASSPHRASE"));
+        }
+
         /// A lever already in the position asked for writes nothing, so Enter on it
         /// cannot cost the operator a restart for no change.
         #[test]
@@ -7663,6 +9357,59 @@ mod tests {
             fs::write(&config, "network:\n  GATEWAY_PORT: 52285\n").unwrap();
 
             assert_eq!(super::super::read_gateway_plaintext_port_raw(&config), None);
+        }
+
+        /// Issue #438. Moving the TLS port through this editor used to drop only
+        /// the `*_passed` markers, so `.gateway_plaintext_notice` and its command,
+        /// written about the old `auto` port, survived the restart and were read
+        /// back under the new one.
+        #[test]
+        fn moving_the_tls_port_forgets_both_ports_notices_and_markers() {
+            use crate::alerts::{GATEWAY_NOTICE_FILE, GATEWAY_PLAINTEXT_NOTICE_FILE};
+
+            let dir = TempDir::new("forget-verdicts");
+            let config = dir.file("config.yaml");
+            let cache = dir.file("cache");
+            fs::create_dir_all(&cache).unwrap();
+            let mut files = vec![
+                cache.join("gateway_port_passed"),
+                cache.join("gateway_plaintext_port_passed"),
+            ];
+            files.extend(crate::alerts::notice_files(&config, GATEWAY_NOTICE_FILE));
+            files.extend(crate::alerts::notice_files(&config, GATEWAY_PLAINTEXT_NOTICE_FILE));
+            for file in &files {
+                fs::write(file, "52286").unwrap();
+            }
+
+            super::super::forget_gateway_verdicts(&config, &cache, true, false);
+
+            for file in &files {
+                assert!(!file.exists(), "{} survived the port change", file.display());
+            }
+        }
+
+        /// The plaintext key alone moving says nothing about the TLS port.
+        #[test]
+        fn moving_only_the_plaintext_port_keeps_the_tls_ports_verdict() {
+            use crate::alerts::{GATEWAY_NOTICE_FILE, GATEWAY_PLAINTEXT_NOTICE_FILE};
+
+            let dir = TempDir::new("forget-plaintext");
+            let config = dir.file("config.yaml");
+            let cache = dir.file("cache");
+            fs::create_dir_all(&cache).unwrap();
+            let tls_marker = cache.join("gateway_port_passed");
+            let tls_notice = crate::alerts::notice_files(&config, GATEWAY_NOTICE_FILE)[0].clone();
+            let plaintext_notice =
+                crate::alerts::notice_files(&config, GATEWAY_PLAINTEXT_NOTICE_FILE)[0].clone();
+            for file in [&tls_marker, &tls_notice, &plaintext_notice] {
+                fs::write(file, "x").unwrap();
+            }
+
+            super::super::forget_gateway_verdicts(&config, &cache, false, true);
+
+            assert!(tls_marker.exists());
+            assert!(tls_notice.exists());
+            assert!(!plaintext_notice.exists());
         }
     }
 
@@ -8143,6 +9890,7 @@ mod tests {
     /// operator sees a different number in the TUI than in the CLI.
     mod money {
         use super::super::Money;
+        use std::fs;
 
         fn erg(mu_per_nanoerg: f64) -> Money {
             let mu_per_unit = mu_per_nanoerg * 1e9;
@@ -8211,6 +9959,74 @@ mod tests {
         fn negative_balances_keep_their_sign() {
             // Reachable: costs.ALLOW_DEBT lets an instance run past zero.
             assert_eq!(erg(1.0).format_raw("-2500000000"), "-2.5 ERG");
+        }
+
+        fn btc(mu_per_satoshi: f64) -> Money {
+            let mu_per_unit = mu_per_satoshi * 1e8;
+            Money {
+                unit_name: "btc".to_string(),
+                symbol: "BTC".to_string(),
+                mu_per_unit_pow10: super::super::exact_pow10(mu_per_unit),
+                mu_per_unit,
+                decimals: 8,
+                mu_per_nanoerg: 1.0,
+            }
+        }
+
+        /// One BTC is `SATOSHI_PER_BTC` (1e8) satoshi, not `nanoERG`'s 1e9 -- the
+        /// exact digit shift `bitcoin/rate.py::UNIT_DECIMALS` documents.
+        #[test]
+        fn btc_shifts_by_satoshi_not_by_nanoerg() {
+            let money = btc(1.0);
+            assert_eq!(money.format_raw("100000000"), "1 BTC");
+            assert_eq!(money.format_raw("1"), "0.00000001 BTC");
+        }
+
+        #[test]
+        fn the_satoshi_rate_rescales_what_an_mu_is_worth_in_btc() {
+            assert_eq!(btc(0.001).format_raw("100000"), "1 BTC");
+        }
+
+        /// `Money::load` reading `ui.DISPLAY_UNIT: btc` off a real file -- the
+        /// resolution this feature adds, not just the arithmetic `btc()` covers above.
+        #[test]
+        fn load_resolves_btc_through_its_own_ledger_rate() {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-money-btc-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("config.yaml");
+            fs::write(
+                &config,
+                "ui:\n  DISPLAY_UNIT: btc\nledgers:\n  bitcoin:\n    payments:\n      MU_PER_SATOSHI: 2000000\n",
+            )
+            .unwrap();
+
+            let money = super::super::Money::load(&config);
+            let _ = fs::remove_dir_all(&dir);
+
+            assert_eq!(money.unit_name, "btc");
+            assert_eq!(money.symbol, "BTC");
+            assert_eq!(money.decimals, 8);
+            assert_eq!(money.mu_per_unit, 2000000.0 * 1e8);
+        }
+
+        /// An unset `MU_PER_SATOSHI` falls back rather than dividing by zero -- the
+        /// same leniency `erg`'s branch has always had for `MU_PER_NANOERG`. The
+        /// picker keeps `btc` off the menu until the rate is real (see
+        /// `display_unit_picker::bitcoin_is_offered_only_once_its_rate_is_set`); this
+        /// is what happens if the file is edited by hand around that anyway.
+        #[test]
+        fn load_falls_back_rather_than_dividing_by_zero() {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-money-btc-unset-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("config.yaml");
+            fs::write(&config, "ui:\n  DISPLAY_UNIT: btc\n").unwrap();
+
+            let money = super::super::Money::load(&config);
+            let _ = fs::remove_dir_all(&dir);
+
+            assert_eq!(money.mu_per_unit, 1e8);
         }
     }
 
@@ -8425,169 +10241,6 @@ mod tests {
 
     use super::*;
 
-    /// The `CREATE TABLE` the node's own migration would run for `name`.
-    ///
-    /// Lifted out of `src/database/migrate.py` rather than restated, because a
-    /// hand-written copy of a schema is exactly what let this query fall a rename
-    /// behind the node and render every peer away (issue #414). A test database that
-    /// does not fail when the real one would is a test that proves nothing.
-    fn migration_table(name: &str) -> String {
-        let python = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../src/database/migrate.py"
-        ))
-        .expect("src/database/migrate.py ships with the repository");
-        let marker = format!("CREATE TABLE IF NOT EXISTS {name} (");
-        let start = python
-            .find(&marker)
-            .unwrap_or_else(|| panic!("migrate.py no longer creates a '{name}' table"));
-        let rest = &python[start..];
-        let end = rest
-            .find("'''")
-            .unwrap_or_else(|| panic!("the '{name}' table's SQL is unterminated"));
-        rest[..end].to_string()
-    }
-
-    /// A database built from the node's *own* schema, holding one peer and whatever
-    /// contract instances the caller asks for.
-    fn peer_database(dir: &Path, instances: &[(&str, &str, &str)]) -> PathBuf {
-        let path = dir.join("database.sqlite");
-        let connection = Connection::open(&path).unwrap();
-        for table in ["peer", "uri", "ledger", "contract_instance"] {
-            connection.execute_batch(&migration_table(table)).unwrap();
-        }
-        connection
-            .execute_batch(
-                "INSERT INTO peer (id, advertisement, remote_client_id, balance_mu,
-                                   reputation_score)
-                 VALUES ('peer-1', NULL, 'cli-7f3a', '1000', 7);",
-            )
-            .unwrap();
-        for (contract_hash, ledger, address) in instances {
-            connection
-                .execute(
-                    "INSERT INTO contract_instance (address, ledger, contract_hash,
-                                                    token_id, peer_id, mu_per_unit)
-                     VALUES (?1, ?2, ?3, 'ERG', 'peer-1', '500')",
-                    rusqlite::params![address, ledger, contract_hash],
-                )
-                .unwrap();
-        }
-        path
-    }
-
-    /// The regression: against the schema the node actually creates, the page lists
-    /// the peers that are in it.
-    ///
-    /// `get_peers` was reaching for `contract_instance.ledger_hash` and a
-    /// `ledger(hash, content)` join, both of which `refactor(db): a ledger is its tag`
-    /// removed. SQLite rejects that at `prepare`, the whole call returns `Err`, and
-    /// `unwrap_or_default()` turned it into an empty list -- so the page said "0
-    /// connected" about a node with peers, which is what `nodo peers` was listing all
-    /// along (issue #414).
-    #[test]
-    fn peers_are_listed_against_the_schema_the_node_actually_creates() {
-        let dir = std::env::temp_dir().join("nodo-tui-test-real-schema");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(&dir, &[("contract-hash-1", "ergo", "addr-1")]);
-
-        let peers = get_peers(&database).expect("the query must survive the real schema");
-
-        assert_eq!(peers.len(), 1, "a peer in the database is a peer on the page");
-        assert_eq!(peers[0].id, "peer-1");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn peer_contracts_name_the_ledger_by_its_tag() {
-        // Peers only ever name a ledger by tag, and the column now *is* the tag --
-        // there is no hash left to resolve it from.
-        let dir = std::env::temp_dir().join("nodo-tui-test-ledger-tag");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(&dir, &[("contract-hash-1", "ergo", "addr-1")]);
-
-        let peers = get_peers(&database).unwrap();
-        assert_eq!(peers.len(), 1);
-        assert_eq!(peers[0].contracts.len(), 1);
-        let contract = &peers[0].contracts[0];
-        assert_eq!(contract.ledger, "ergo");
-        assert_eq!(contract.contract_hash, "contract-hash-1");
-        assert_eq!(contract.address, "addr-1");
-        assert_eq!(contract.mu_per_unit, "500");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn every_contract_instance_of_a_peer_is_returned() {
-        // The pre-#231 lookup could only ever surface a single instance.
-        let dir = std::env::temp_dir().join("nodo-tui-test-multi-contract");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(
-            &dir,
-            &[
-                ("contract-a", "ergo", "addr-a"),
-                ("contract-b", "bitcoin", "addr-b"),
-            ],
-        );
-
-        let peers = get_peers(&database).unwrap();
-        let hashes: Vec<&str> = peers[0]
-            .contracts
-            .iter()
-            .map(|contract| contract.contract_hash.as_str())
-            .collect();
-        assert_eq!(hashes, vec!["contract-a", "contract-b"]);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_peer_without_contracts_still_loads() {
-        let dir = std::env::temp_dir().join("nodo-tui-test-no-contract");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(&dir, &[]);
-
-        let peers = get_peers(&database).unwrap();
-        assert_eq!(peers.len(), 1);
-        assert!(peers[0].contracts.is_empty());
-        // Read off the `peer` row itself, never joined against our own `clients`
-        // table -- that join is the bug #178 fixed.
-        assert_eq!(peers[0].remote_client_id, "cli-7f3a");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// A failure must leave a reason behind, or the page is back to claiming a node
-    /// with peers has none.
-    #[test]
-    fn a_query_that_fails_is_recorded_rather_than_rendered_as_an_empty_network() {
-        let dir = std::env::temp_dir().join("nodo-tui-test-peers-error");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        // A `peer` table with none of the columns the query reads: the same shape of
-        // failure a schema change produces.
-        let database = dir.join("database.sqlite");
-        Connection::open(&database)
-            .unwrap()
-            .execute_batch("CREATE TABLE peer (id TEXT PRIMARY KEY);")
-            .unwrap();
-
-        let mut app = App {
-            peers_error: None,
-            ..Default::default()
-        };
-        app.paths.database = database;
-        app.refresh_peers();
-
-        assert!(
-            app.peers_error.is_some(),
-            "a failed peer query must say so rather than render as zero peers"
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn parses_the_older_single_wallet_output() {
         // No ledger named, because there was only ever one. Kept working so a TUI does
@@ -8778,7 +10431,7 @@ ergo: Cold Wallet: 9cold\n";
         app.config_all = vec![entry];
     }
 
-    /// An app on the Config page whose tree is the real `flatten_yaml` reading of
+    /// An app on the All page whose tree is the real `flatten_yaml` reading of
     /// `yaml`, so a list is a leaf or a section here for exactly the reason it is one
     /// on screen.
     fn on_config_page(yaml: &str) -> App {
@@ -9016,6 +10669,160 @@ ergo: Cold Wallet: 9cold\n";
         assert!(app.input.is_empty());
     }
 
+    /// The change this feature is about: `ui.DISPLAY_UNIT` used to be freeform text
+    /// (any string was a "valid" YAML value, whether or not the node could resolve
+    /// it) and is a picker now, same as `ui.THEME`.
+    mod display_unit_picker {
+        use super::*;
+
+        #[test]
+        fn with_nothing_configured_only_the_built_ins_and_custom_are_offered() {
+            assert_eq!(
+                display_unit_options(None),
+                vec!["mu", "erg", CUSTOM_UNIT_OPTION]
+            );
+        }
+
+        /// `btc` mirrors the node's own rule (`bitcoin/rate.py::display_units`):
+        /// nothing at all until the ledger's rate is a positive number, because an
+        /// invented rate would misprice every balance shown in it.
+        #[test]
+        fn bitcoin_is_offered_only_once_its_rate_is_set() {
+            let unset = serde_yaml::from_str("ledgers:\n  bitcoin: {}\n").unwrap();
+            assert_eq!(
+                display_unit_options(Some(&unset)),
+                vec!["mu", "erg", CUSTOM_UNIT_OPTION]
+            );
+
+            let zero = serde_yaml::from_str(
+                "ledgers:\n  bitcoin:\n    payments:\n      MU_PER_SATOSHI: 0\n",
+            )
+            .unwrap();
+            assert_eq!(
+                display_unit_options(Some(&zero)),
+                vec!["mu", "erg", CUSTOM_UNIT_OPTION]
+            );
+
+            let set = serde_yaml::from_str(
+                "ledgers:\n  bitcoin:\n    payments:\n      MU_PER_SATOSHI: 2000000\n",
+            )
+            .unwrap();
+            assert_eq!(
+                display_unit_options(Some(&set)),
+                vec!["mu", "erg", "btc", CUSTOM_UNIT_OPTION]
+            );
+        }
+
+        #[test]
+        fn units_already_declared_under_ui_units_are_offered_without_duplicates() {
+            let document = serde_yaml::from_str(
+                "ui:\n  UNITS:\n    usd: { MU_PER_UNIT: 500000000 }\n    mu: { MU_PER_UNIT: 1 }\n",
+            )
+            .unwrap();
+            // `mu` is already built in, so it is not repeated even though it is also
+            // (redundantly) declared under `ui.UNITS`.
+            assert_eq!(
+                display_unit_options(Some(&document)),
+                vec!["mu", "erg", "usd", CUSTOM_UNIT_OPTION]
+            );
+        }
+
+        #[test]
+        fn the_config_page_offers_it_as_a_picker() {
+            let mut app = App::default();
+            select_config_entry(
+                &mut app,
+                config_entry("ui.DISPLAY_UNIT", "erg", "erg", "string", false),
+            );
+            app.open_config_editor();
+            assert_eq!(
+                app.edit_kind,
+                EditKind::Enum(vec!["mu".to_string(), "erg".to_string(), CUSTOM_UNIT_OPTION.to_string()])
+            );
+        }
+
+        /// Picking `custom…` must not write a unit literally named "custom" -- it has
+        /// no rate, so `monetary.py::display_unit` would refuse the node on it.
+        #[test]
+        fn picking_custom_opens_the_new_unit_prompt_instead_of_writing_it() {
+            let mut app = App::default();
+            select_config_entry(
+                &mut app,
+                config_entry("ui.DISPLAY_UNIT", "erg", "erg", "string", false),
+            );
+            app.open_config_editor();
+            app.input = CUSTOM_UNIT_OPTION.to_string();
+
+            app.save_config_edit();
+
+            assert_eq!(app.input_mode, InputMode::AddCustomUnit);
+            assert!(app.input.is_empty(), "the name/rate prompt starts blank");
+        }
+
+        #[test]
+        fn a_name_with_no_rate_is_rejected() {
+            let existing = vec!["mu".to_string(), "erg".to_string()];
+            assert!(parse_custom_unit("usd", &existing).is_err());
+            assert!(parse_custom_unit("   ", &existing).is_err());
+        }
+
+        #[test]
+        fn a_name_outside_letters_digits_and_underscore_is_rejected() {
+            let existing = vec!["mu".to_string(), "erg".to_string()];
+            assert!(parse_custom_unit("us-d 500000000", &existing).is_err());
+            assert!(parse_custom_unit("$ 500000000", &existing).is_err());
+        }
+
+        #[test]
+        fn a_zero_or_negative_or_unparseable_rate_is_rejected() {
+            let existing = vec!["mu".to_string(), "erg".to_string()];
+            assert!(parse_custom_unit("usd 0", &existing).is_err());
+            assert!(parse_custom_unit("usd -5", &existing).is_err());
+            assert!(parse_custom_unit("usd not-a-number", &existing).is_err());
+        }
+
+        /// Reusing a name already on offer -- built in, ledger-contributed or already
+        /// declared -- would silently repoint an existing unit at a different rate.
+        #[test]
+        fn a_name_already_on_offer_is_rejected() {
+            let existing = vec![
+                "mu".to_string(),
+                "erg".to_string(),
+                "btc".to_string(),
+                "usd".to_string(),
+                CUSTOM_UNIT_OPTION.to_string(),
+            ];
+            assert!(parse_custom_unit("erg 500000000", &existing).is_err());
+            assert!(parse_custom_unit("usd 500000000", &existing).is_err());
+            assert!(parse_custom_unit("custom 500000000", &existing).is_err());
+        }
+
+        /// The happy path: a new name, lower-cased, with its rate carried through
+        /// untouched -- `save_custom_unit` writes it exactly as typed, in MU.
+        #[test]
+        fn a_fresh_name_and_a_positive_rate_are_accepted() {
+            let existing = vec!["mu".to_string(), "erg".to_string(), CUSTOM_UNIT_OPTION.to_string()];
+            assert_eq!(
+                parse_custom_unit("  USD   500000000  ", &existing),
+                Ok(("usd".to_string(), "500000000".to_string()))
+            );
+        }
+
+        /// An invalid submission leaves the prompt open with a reason, rather than
+        /// silently discarding what was typed or closing on a value that was refused.
+        #[test]
+        fn an_invalid_submission_leaves_the_prompt_open() {
+            let mut app = App::default();
+            app.open_custom_unit_prompt();
+            app.input = "not valid at all".to_string();
+
+            app.save_custom_unit();
+
+            assert_eq!(app.input_mode, InputMode::AddCustomUnit);
+            assert!(!app.status.is_empty());
+        }
+    }
+
     #[test]
     fn arrow_keys_toggle_a_checkbox_both_ways() {
         let mut app = App::default();
@@ -9190,7 +10997,7 @@ ergo: Cold Wallet: 9cold\n";
         assert_eq!(percent(1, 0), 0);
     }
 
-    /// ←/→ walk the Config tree; pages are cycled with Tab/Shift+Tab only.
+    /// ←/→ walk the All tree; pages are cycled with Tab/Shift+Tab only.
     /// Editing the working day: what the keys move, and what reaches config.yaml.
     ///
     /// The arithmetic of a window lives in `crate::schedule` and is tested there. What
@@ -9667,7 +11474,7 @@ ergo: Cold Wallet: 9cold\n";
 
         #[test]
         fn the_arrows_never_change_page() {
-            // They used to be page navigation; a stray ← on Config must no longer
+            // They used to be page navigation; a stray ← on All must no longer
             // throw the operator onto another page mid-edit.
             let mut app = on_config_page();
             app.config_tree_state.select(vec!["network".to_string()]);
@@ -9734,11 +11541,26 @@ ergo: Cold Wallet: 9cold\n";
                 dir
             }
 
-            /// A block file of `content` bytes, plus the pointer header every one
-            /// carries on disk.
+            /// A block file of `content` bytes.
             fn block(&self, id: &str, content: usize) {
-                let bytes = vec![0u8; content + BLOCK_POINTER_LENGTH as usize];
-                fs::write(self.blocks.join(id), bytes).unwrap();
+                fs::write(self.blocks.join(id), vec![0u8; content]).unwrap();
+            }
+
+            /// A multiblock directory: `parts` of its own and sub-`blocks`, in the
+            /// same `_.json` shape as a service.
+            fn directory_block(&self, id: &str, parts: &[usize], blocks: &[&str]) {
+                let dir = self.blocks.join(id);
+                fs::create_dir_all(&dir).unwrap();
+                let mut manifest = Vec::new();
+                for (index, size) in parts.iter().enumerate() {
+                    fs::write(dir.join(index.to_string()), vec![0u8; *size]).unwrap();
+                    manifest.push(serde_json::json!(index));
+                }
+                for block in blocks {
+                    manifest.push(serde_json::json!([block, 0]));
+                }
+                fs::write(dir.join(SERVICE_MANIFEST), serde_json::to_string(&manifest).unwrap())
+                    .unwrap();
             }
         }
 
@@ -9760,16 +11582,43 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(total, Some(100 + 200 + 4096 + 1024));
         }
 
-        /// The pointer header is not content. `bee_rpc`'s own
-        /// `get_pruned_block_length` subtracts it for exactly this figure, and
-        /// counting it would inflate every total by 36 bytes per block.
+        /// Issue #438: a block counts its whole length, as the pinned `getsize` --
+        /// and so `nodo services` -- counts it. This used to take a 36-byte pointer
+        /// header off each one, after an older `getsize`.
         #[test]
-        fn a_blocks_pointer_header_is_not_counted_as_content() {
-            let registry = Registry::new("header");
-            registry.block("block-a", 0);
+        fn a_block_counts_its_whole_length_as_nodo_services_does() {
+            let registry = Registry::new("whole-block");
+            registry.block("block-a", 100);
             let service = registry.service("svc", &[], &["block-a"]);
 
-            assert_eq!(service_total_size(&service, &registry.blocks), Some(0));
+            assert_eq!(service_total_size(&service, &registry.blocks), Some(100));
+        }
+
+        /// A multiblock directory is measured by its own manifest, to any depth --
+        /// not as the size of its directory entry.
+        #[test]
+        fn a_directory_block_is_its_expansion_not_its_dirent() {
+            let registry = Registry::new("directory-block");
+            registry.block("leaf", 3000);
+            registry.directory_block("inner", &[200], &["leaf"]);
+            registry.directory_block("outer", &[10], &["inner", "leaf"]);
+            let service = registry.service("svc", &[1], &["outer"]);
+
+            assert_eq!(
+                service_total_size(&service, &registry.blocks),
+                Some(1 + 10 + (200 + 3000) + 3000)
+            );
+        }
+
+        /// A block that names itself is refused, as `getsize` refuses it, rather than
+        /// measured forever.
+        #[test]
+        fn a_block_that_contains_itself_has_no_total() {
+            let registry = Registry::new("loop");
+            registry.directory_block("ouroboros", &[1], &["ouroboros"]);
+            let service = registry.service("svc", &[], &["ouroboros"]);
+
+            assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
         /// The case the column exists for: a service that stores almost nothing of
@@ -9798,6 +11647,23 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
+        /// Issue #438: the same cases as tests/test_services_sizes.py, so the CLI's
+        /// `format_bytes` and this one cannot come to say one size two ways again.
+        #[test]
+        fn sizes_read_as_nodo_services_prints_them() {
+            for (bytes, text) in [
+                (0, "0 B"),
+                (394, "394 B"),
+                (1023, "1023 B"),
+                (1024, "1.0 KiB"),
+                (1536, "1.5 KiB"),
+                (41_628_467, "39.7 MiB"),
+                (5 * 1024 * 1024 * 1024, "5.0 GiB"),
+            ] {
+                assert_eq!(format_bytes(bytes), text, "{bytes} bytes");
+            }
+        }
+
         #[test]
         fn a_service_with_no_manifest_has_no_total() {
             let registry = Registry::new("no-manifest");
@@ -9817,12 +11683,12 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
-        /// The two constants are `bee_rpc`'s, restated here so the TUI need not
+        /// The manifest name is `bee_rpc`'s, restated here so the TUI need not
         /// spawn an interpreter per service per refresh. Read rather than run: a
         /// Rust test suite has no interpreter to hand, and the two drifting apart
         /// would show as every total being quietly wrong.
         #[test]
-        fn the_block_constants_match_bee_rpc() {
+        fn the_manifest_name_matches_bee_rpc() {
             let Ok(utils) = std::fs::read_to_string(
                 "/opt/homebrew/lib/python3.11/site-packages/bee_rpc/utils.py",
             )
@@ -9835,11 +11701,6 @@ ergo: Cold Wallet: 9cold\n";
                 return;
             };
 
-            assert!(
-                utils.contains(&format!("BLOCK_LENGTH = {BLOCK_POINTER_LENGTH}")),
-                "bee_rpc's BLOCK_LENGTH is no longer {BLOCK_POINTER_LENGTH}, so every \
-                 service total this page shows is off by it per block"
-            );
             assert!(
                 utils.contains(&format!("METADATA_FILE_NAME = '{SERVICE_MANIFEST}'")),
                 "bee_rpc no longer names its manifest {SERVICE_MANIFEST}"
@@ -10044,6 +11905,78 @@ ergo: Cold Wallet: 9cold\n";
         }
     }
 
+    /// `g` on the Services page: fetch a service this node does not hold (#438).
+    mod getting_a_service {
+        use super::*;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        fn on_services_page() -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Services)
+                .unwrap();
+            app
+        }
+
+        #[test]
+        fn g_opens_a_popup_asking_for_the_hash() {
+            let mut app = on_services_page();
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(crate::handler::handle_key_events(
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+                &mut app,
+            ))
+            .unwrap();
+
+            assert_eq!(app.input_mode, InputMode::GetService);
+            assert!(app.input.is_empty());
+            assert!(app.command_task.is_none(), "nothing runs before a hash is given");
+        }
+
+        #[test]
+        fn g_means_nothing_on_other_pages_it_is_not_bound_on() {
+            let mut app = on_services_page();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Peers)
+                .unwrap();
+            app.open_get_service();
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
+        #[test]
+        fn a_hash_becomes_the_same_nodo_get_the_operator_would_type() {
+            let hash = "AB".repeat(32);
+            let (label, args) = get_service_command(&format!("  {hash} ")).unwrap();
+            assert_eq!(args, vec!["get".to_string(), hash.to_lowercase()]);
+            assert!(label.starts_with("Get service"), "{label}");
+        }
+
+        #[test]
+        fn a_typo_is_answered_in_the_popup_rather_than_run() {
+            let mut app = on_services_page();
+            app.open_get_service();
+            app.input = "not-a-hash".to_string();
+
+            app.submit_get_service();
+
+            assert_eq!(app.input_mode, InputMode::GetService, "still open to fix it");
+            assert!(app.command_task.is_none());
+            assert!(app.status.contains("hexadecimal"), "{}", app.status);
+            assert!(get_service_command("   ").is_err());
+        }
+
+        #[test]
+        fn the_verdict_is_the_commands_last_line() {
+            assert_eq!(
+                last_line("Asking known peers for ab...\nService ab retrieved.\n\n"),
+                "Service ab retrieved."
+            );
+            assert_eq!(last_line(""), "");
+        }
+    }
+
     /// `e` on the Services page. The other key in this interface that spends.
     mod running_a_service {
         use super::*;
@@ -10136,542 +12069,6 @@ ergo: Cold Wallet: 9cold\n";
         }
     }
 
-    mod forgetting_a_peer {
-        use super::*;
-
-        fn peer(id: &str) -> Peer {
-            Peer {
-                id: id.to_string(),
-                uris: "10.0.0.1:8080".to_string(),
-                balance: "0".to_string(),
-                remote_client_id: String::new(),
-                proof_ids: Vec::new(),
-                reputation_score: "0".to_string(),
-                contracts: Vec::new(),
-            }
-        }
-
-        fn on_peers_page(peers: Vec<Peer>) -> App {
-            let mut app = App::default();
-            app.tabs.index = Page::ALL
-                .iter()
-                .position(|page| *page == Page::Peers)
-                .unwrap();
-            app.peers = StatefulList::with_items(peers);
-            app.peers.next();
-            app
-        }
-
-        #[test]
-        fn it_asks_before_doing_anything() {
-            let mut app = on_peers_page(vec![peer("peer-abc")]);
-            app.open_disconnect_peer_confirm();
-
-            assert_eq!(app.input_mode, InputMode::Confirm);
-            assert!(app.input_title.contains("peer-abc"), "{}", app.input_title);
-            assert!(matches!(
-                app.pending_action,
-                Some(PendingAction::DisconnectPeer { ref id, .. }) if id == "peer-abc"
-            ));
-        }
-
-        #[test]
-        fn confirming_runs_nodo_disconnect_on_the_selected_peer() {
-            // The whole point: the same command the operator would type, so the peer
-            // row, its addresses and its contract instances all go together.
-            let (label, args) = pending_command(PendingAction::DisconnectPeer {
-                id: "peer-abc".to_string(),
-                label: "peer-abc".to_string(),
-            })
-            .expect("a peer disconnect is a `nodo` invocation");
-            assert_eq!(args, vec!["disconnect".to_string(), "peer-abc".to_string()]);
-            assert_eq!(label, "Forget peer peer-abc");
-        }
-
-        #[test]
-        fn with_nothing_selected_it_says_so_instead_of_asking() {
-            let mut app = on_peers_page(Vec::new());
-            app.open_disconnect_peer_confirm();
-            assert_eq!(app.input_mode, InputMode::Normal);
-            assert!(app.pending_action.is_none());
-            assert!(app.status.contains("Select a peer"), "{}", app.status);
-        }
-
-        #[test]
-        fn clients_have_no_such_action() {
-            // A client is ours and expires on its own; there is nothing to forget.
-            // The page split is what enforces it now -- `d` is not bound on Clients --
-            // so the guard here is the second line of defence, not the first.
-            let mut app = on_peers_page(vec![peer("peer-abc")]);
-            app.tabs.index = Page::ALL
-                .iter()
-                .position(|page| *page == Page::Clients)
-                .unwrap();
-            app.open_disconnect_peer_confirm();
-            assert_eq!(app.input_mode, InputMode::Normal);
-            assert!(app.pending_action.is_none());
-        }
-    }
-
-    /// The history behind a peer and a client, read straight out of SQLite.
-    ///
-    /// A card that silently renders nothing looks exactly like a peer with no
-    /// history -- the confusion issue #231 was about, one table over -- so these are
-    /// exercised against a real database rather than through the widgets.
-    /// What the EARNINGS page reads: money out of the catalogue, reputation out of
-    /// `nodo reputation --json`. The tests are about the ways a figure can be wrong.
-    mod earnings {
-        use super::*;
-
-        fn temp_dir(name: &str) -> PathBuf {
-            let dir = std::env::temp_dir()
-                .join(format!("nodo-tui-earnings-{name}-{}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
-            dir
-        }
-
-        /// A catalogue with one payment per window, plus the rows that must not count.
-        ///
-        /// Dated relative to `now` by SQLite itself, because that is what
-        /// `get_earnings` compares against: a fixture with literal dates would start
-        /// failing the day it aged out of the year.
-        fn paid_database(dir: &Path) -> PathBuf {
-            let path = dir.join("earnings.sqlite");
-            let connection = Connection::open(&path).unwrap();
-            connection
-                .execute_batch(
-                    "CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
-                                        direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
-                                        deposit_token TEXT, ledger TEXT, contract_hash TEXT,
-                                        address TEXT, amount_mu TEXT NOT NULL,
-                                        created_at DATETIME);
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '1', datetime('now', '-1 hour'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '10', datetime('now', '-3 days'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '100', datetime('now', '-20 days'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '1000', datetime('now', '-200 days'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '10000', datetime('now', '-800 days'));
-                     -- A deposit we could not validate: no balance was credited for it.
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'rejected', 'ergo', '7', datetime('now', '-1 hour'));
-                     -- Money we paid out. Not earnings, whatever its status.
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('out', 'communicated', 'ergo', '5000', datetime('now', '-1 hour'));
-                     -- Taken over a network the row does not name.
-                     INSERT INTO payments (direction, status, amount_mu, created_at)
-                        VALUES ('in', 'accepted', '3', datetime('now', '-1 hour'));
-                     -- Undated: in no window, but still money this node took.
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '100000', NULL);",
-                )
-                .unwrap();
-            path
-        }
-
-        #[test]
-        fn each_window_holds_what_came_in_inside_it() {
-            let dir = temp_dir("windows");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            let ergo = earnings.iter().find(|entry| entry.ledger == "ergo").unwrap();
-            assert_eq!(ergo.day, 1);
-            assert_eq!(ergo.week, 11);
-            assert_eq!(ergo.month, 111);
-            assert_eq!(ergo.year, 1111);
-            // All time reaches past the year, which is the point of having the column
-            // — and holds the undated payment, which is in no window at all.
-            assert_eq!(ergo.total, 111_111);
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_refused_deposit_is_counted_apart_from_what_was_earned() {
-            // It never became balance, so adding it to the earnings would report
-            // income that did not arrive — and dropping it would hide a client whose
-            // payments keep failing.
-            let dir = temp_dir("refused");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            let ergo = earnings.iter().find(|entry| entry.ledger == "ergo").unwrap();
-            assert_eq!(ergo.refused, 7);
-            assert_eq!(ergo.day, 1, "the refused deposit leaked into the day");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn what_we_paid_out_is_not_earnings() {
-            let dir = temp_dir("outgoing");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            // Everything accepted and incoming, and nothing else: the 5000 we sent
-            // and the 7 we refused are both outside this sum.
-            let taken: u128 = earnings.iter().map(|entry| entry.total).sum();
-            assert_eq!(taken, 111_114, "{earnings:?}");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_payment_over_an_unnamed_network_is_still_money() {
-            // `ledger` is nullable on the row, and a payment with no tag is money the
-            // node took: silently discarding it would understate what it earned.
-            let dir = temp_dir("unnamed");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            let unknown = earnings
-                .iter()
-                .find(|entry| entry.ledger == "unknown")
-                .expect("the untagged payment vanished");
-            assert_eq!(unknown.day, 3);
-            // Biggest earner first, so the rows do not reorder between refreshes.
-            assert_eq!(earnings[0].ledger, "ergo");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_node_with_no_payments_table_reads_as_no_earnings() {
-            let dir = temp_dir("empty");
-            let path = dir.join("empty.sqlite");
-            Connection::open(&path).unwrap();
-
-            assert!(get_earnings(&path).unwrap().is_empty());
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        const REPORT: &str = r#"{
-            "node_id": "ed6d", "own_proof_ids": ["aa11"], "read_at": 1800000000,
-            "errors": {},
-            "standing": {"positive": 0.5, "negative": 0.125, "net": 0.375,
-                         "positive_proofs": 1, "negative_proofs": 1},
-            "opinions": [{"ledger": "ergo", "proof_id": "f3b6", "owner": "0008cd",
-                          "amount": 1, "assigned_amount": 95,
-                          "weight": 0.010526315789473684, "positive": true,
-                          "published_at": 1799000000, "box_id": "box-1",
-                          "burned_nanoerg": 96000000, "backed_nanoerg": 1010526.3}],
-            "own": [{"ledger": "ergo", "proof_id": "aa11", "owner": "0008cd",
-                     "amount": 1, "assigned_amount": 1,
-                     "weight": 1.0, "positive": true,
-                     "published_at": 1798000000, "box_id": "box-own",
-                     "burned_nanoerg": 1000000, "backed_nanoerg": 1000000}]
-        }"#;
-
-        #[test]
-        fn a_report_is_read_whole() {
-            let reputation = parse_node_reputation(REPORT).unwrap();
-
-            assert_eq!(reputation.node_id, "ed6d");
-            assert_eq!(reputation.own_proof_ids, vec!["aa11".to_string()]);
-            assert_eq!(reputation.standing.positive, 0.5);
-            assert_eq!(reputation.standing.negative, 0.125);
-            assert_eq!(reputation.standing.proofs(), 2);
-            assert_eq!(reputation.read_at, Some(1_800_000_000));
-            assert!(reputation.is_read());
-            assert!(reputation.error.is_empty());
-
-            assert_eq!(reputation.opinions.len(), 1);
-            let opinion = &reputation.opinions[0];
-            assert_eq!(opinion.box_id, "box-1");
-            assert_eq!(opinion.proof_id, "f3b6");
-            // One token out of the ninety-five that proof has assigned: ~1.05%, not
-            // the 0.000001% the minted supply would have made of it.
-            assert_eq!((opinion.amount, opinion.assigned_amount), (1, 95));
-            assert!((opinion.weight - 0.010_526_3).abs() < 1e-6);
-            assert_eq!(opinion.burned_nanoerg, 96_000_000.0);
-            assert!(opinion.positive);
-            assert_eq!(opinion.published_at, Some(1_799_000_000));
-
-            // Our own proof's stake arrives separately, so it can be shown without
-            // being counted.
-            assert_eq!(reputation.own.len(), 1);
-            assert_eq!(reputation.own[0].proof_id, "aa11");
-        }
-
-        #[test]
-        fn a_report_carries_no_windows_to_read_reputation_over() {
-            // Deliberately absent rather than missed: the chain cannot date what it
-            // holds (a proof re-dates every opinion when it republishes), so a window
-            // would report the publisher's submission cadence. Only money is windowed,
-            // and that comes from the catalogue.
-            let reputation = parse_node_reputation(REPORT).unwrap();
-            assert_eq!(reputation.standing.positive, 0.5);
-            assert!(!REPORT.contains("periods"), "the report grew windows again");
-        }
-
-        #[test]
-        fn a_ledger_that_could_not_be_read_is_named_beside_the_figures() {
-            let reputation = parse_node_reputation(
-                r#"{"node_id": "ed6d", "own_proof_ids": [], "read_at": 1,
-                     "errors": {"ergo": "explorer unreachable"},
-                     "standing": {"positive": 0.0, "negative": 0.0,
-                                  "positive_proofs": 0, "negative_proofs": 0},
-                     "opinions": [], "own": []}"#,
-            )
-            .unwrap();
-            assert_eq!(reputation.error, "ergo: explorer unreachable");
-        }
-
-        #[test]
-        fn a_line_printed_ahead_of_the_report_does_not_swallow_it() {
-            // A node loading a fresh config generates its identity and says so on
-            // stdout. Parsing the whole stream would fail, and the page would report
-            // an unreadable chain on a node whose chain is perfectly readable.
-            // One line, as `nodo reputation --json` prints it.
-            let report = r#"{"node_id": "ed6d", "read_at": 1, "own_proof_ids": [], "standing": {}, "opinions": [], "own": []}"#;
-            let noisy = format!("Generated new node identity mnemonic\n{report}\n");
-            let reputation = parse_node_reputation(report_line(&noisy).unwrap()).unwrap();
-            assert_eq!(reputation.node_id, "ed6d");
-            assert_eq!(report_line("nothing json here\n"), None);
-        }
-
-        #[test]
-        fn a_failed_command_is_an_error_and_never_an_empty_verdict() {
-            // `{"error": …}` is what the command prints when it could not read the
-            // chain at all. Read as a report it would say "nobody stakes anything on
-            // this node", which is a claim about the network.
-            let error = parse_node_reputation(r#"{"error": "no node identity", "read_at": 1}"#)
-                .unwrap_err();
-            assert_eq!(error, "no node identity");
-            assert!(parse_node_reputation("not json at all").is_err());
-        }
-    }
-
-    mod donation_report {
-        use super::*;
-
-        const REPORT: &str = r#"{
-            "read_at": 1800000000, "donation_weight": 0.3,
-            "ledgers": [{"ledger": "ergo", "percentage": "0.02",
-                         "min_transfer": "0.1", "min_confirmations": 10,
-                         "owed_native": {"ERG": "1200000.5"},
-                         "paid_mu": 41000000, "paid_count": 2, "scan_tip": 1500,
-                         "pay_wallets": [{"address": "9gGZ", "weight": "70",
-                                          "normalised": "0.7", "in_other_list": true},
-                                         {"address": "9fXX", "weight": "30",
-                                          "normalised": "0.3", "in_other_list": false}],
-                         "credit_wallets": [{"address": "9gGZ", "weight": "1",
-                                             "normalised": "1", "in_other_list": true}]}],
-            "peers": [{"peer_id": "peer-a", "bonus": 0.5, "score_term": 0.15}],
-            "unattributed_donors": ["9zzz"],
-            "warnings": ["ledgers.ergo: you fund 9fXX but do not count it."]
-        }"#;
-
-        #[test]
-        fn a_report_is_read_whole() {
-            let donations = parse_node_donations(REPORT).unwrap();
-
-            assert_eq!(donations.donation_weight, 0.3);
-            assert_eq!(donations.read_at, Some(1_800_000_000));
-            assert!(donations.is_read());
-            assert!(donations.error.is_empty());
-
-            let ergo = &donations.ledgers[0];
-            assert_eq!(ergo.ledger, "ergo");
-            assert_eq!(ergo.percentage, "0.02");
-            assert_eq!(ergo.paid_mu, 41_000_000);
-            assert_eq!(ergo.paid_count, 2);
-            // The fraction survives the round trip: it is a real part of the debt, and
-            // it is the difference between donating the configured share and slightly
-            // less than it.
-            assert_eq!(ergo.owed, vec![("ERG".to_string(), "1200000.5".to_string())]);
-            assert_eq!(ergo.pay_wallets.len(), 2);
-            // The weight as written and the share it actually pays are both carried:
-            // 70 and 30 pay what 0.7 and 0.3 pay, and only the share says so.
-            assert_eq!(ergo.pay_wallets[0].weight, "70");
-            assert_eq!(ergo.pay_wallets[0].share, "0.7");
-            assert!(ergo.pay_wallets[0].in_other_list);
-            assert!(!ergo.pay_wallets[1].in_other_list);
-        }
-
-        #[test]
-        fn a_peer_bonus_is_found_by_id_and_missing_means_none() {
-            let donations = parse_node_donations(REPORT).unwrap();
-
-            assert_eq!(donations.for_peer("peer-a"), Some((0.5, 0.15)));
-            // Not zero-with-credit: a peer nobody counted has no entry, and the card
-            // says "none counted" rather than drawing a bonus of 0.0000.
-            assert_eq!(donations.for_peer("peer-b"), None);
-        }
-
-        #[test]
-        fn a_failed_command_is_an_error_and_never_an_empty_verdict() {
-            // Read as a report, `{"error": …}` would say this node donates nothing and
-            // counts nobody -- a claim about the operator's configuration.
-            let error = parse_node_donations(r#"{"error": "no database", "read_at": 1}"#)
-                .unwrap_err();
-            assert_eq!(error, "no database");
-            assert!(parse_node_donations("not json at all").is_err());
-        }
-
-        #[test]
-        fn an_unread_report_is_not_a_node_that_donates_nothing() {
-            let pending = NodeDonations::default();
-            assert!(!pending.is_read());
-
-            let read = parse_node_donations(
-                r#"{"read_at": 1, "donation_weight": 0.0, "ledgers": [], "peers": []}"#,
-            )
-            .unwrap();
-            assert!(read.is_read(), "a report that came back empty has still come back");
-        }
-    }
-
-    mod payment_and_reputation_history {
-        use super::*;
-
-        fn history_database(dir: &Path) -> PathBuf {
-            let path = dir.join("history.sqlite");
-            let connection = Connection::open(&path).unwrap();
-            connection
-                .execute_batch(
-                    "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT,
-                                        advertisement BLOB, reputation_score INTEGER,
-                                        reputation_index INTEGER);
-                     CREATE TABLE clients (id TEXT PRIMARY KEY, balance_mu TEXT,
-                                        last_usage FLOAT, unmetered INTEGER NOT NULL DEFAULT 0);
-                     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
-                                        direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
-                                        deposit_token TEXT, ledger TEXT, contract_hash TEXT,
-                                        address TEXT, amount_mu TEXT NOT NULL,
-                                        created_at DATETIME);
-                     CREATE TABLE reputation_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                        subject_kind TEXT, subject_id TEXT, amount INTEGER,
-                                        reason TEXT, score_after INTEGER, created_at DATETIME);
-                     CREATE TABLE deposit_tokens (id TEXT PRIMARY KEY, client_id TEXT,
-                                        status TEXT, created_at DATETIME);
-                     CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, father_id TEXT);
-                     INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 3);
-                     INSERT INTO clients VALUES ('client-1', '500', NULL, 1);
-                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
-                        VALUES ('tx-old', 'out', 'communicated', 'peer-1', '1000', '2026-01-01 10:00:00');
-                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
-                        VALUES ('tx-new', 'out', 'unacknowledged', 'peer-1', '2000', '2026-01-02 10:00:00');
-                     INSERT INTO payments (direction, status, client_id, deposit_token, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'client-1', 'token-1', '750', '2026-01-03 10:00:00');
-                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
-                        VALUES ('peer', 'peer-1', -100, 'payment_unacknowledged', -93, '2026-01-02 10:00:01');
-                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
-                        VALUES ('service', 'peer-1', -100, 'instance_lost', -100, '2026-01-02 10:00:02');
-                     INSERT INTO deposit_tokens VALUES ('token-1', 'client-1', 'payed', '2026-01-03 09:59:00');
-                     INSERT INTO local_instances VALUES ('instance-1', 'demo', 'client-1');
-                     INSERT INTO local_instances VALUES ('instance-2', 'other', 'someone-else');",
-                )
-                .unwrap();
-            path
-        }
-
-        fn temp_dir(name: &str) -> PathBuf {
-            let dir = std::env::temp_dir()
-                .join(format!("nodo-tui-history-{name}-{}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
-            dir
-        }
-
-        #[test]
-        fn a_peer_carries_its_payments_and_the_events_behind_its_score() {
-            let dir = temp_dir("peer");
-            let database = history_database(&dir);
-
-            let detail = get_peer_detail(&database, "peer-1").unwrap();
-
-            // Newest first: the payment an operator is looking for is the last one.
-            assert_eq!(detail.payments.len(), 2);
-            assert_eq!(detail.payments[0].tx_id, "tx-new");
-            assert_eq!(detail.payments[0].status, "unacknowledged");
-            assert_eq!(detail.payments[0].amount, "2000");
-            // A service event that happens to share the id is not this peer's history.
-            assert_eq!(detail.events.len(), 1);
-            assert_eq!(detail.events[0].reason, "payment_unacknowledged");
-            assert_eq!(detail.events[0].score_after, Some(-93));
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_client_carries_what_it_paid_what_it_was_given_and_what_it_runs() {
-            let dir = temp_dir("client");
-            let database = history_database(&dir);
-
-            let detail = get_client_detail(&database, "client-1").unwrap();
-
-            assert_eq!(detail.payments.len(), 1);
-            assert_eq!(detail.payments[0].deposit_token, "token-1");
-            assert_eq!(detail.deposits.len(), 1);
-            assert_eq!(detail.deposits[0].status, "payed");
-            // Only its own instances: father_id is the client that started them.
-            assert_eq!(detail.instances.len(), 1);
-            assert_eq!(detail.instances[0].name, "demo");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn the_unmetered_flag_reaches_the_table() {
-            let dir = temp_dir("unmetered");
-            let database = history_database(&dir);
-
-            let clients = get_clients(&database).unwrap();
-
-            assert_eq!(clients.len(), 1);
-            assert!(clients[0].unmetered, "a dev client is never charged");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn adjusting_a_score_by_hand_records_why() {
-            // Every other mover of a score writes an event. One that did not would be
-            // the single unexplained step in a peer's history.
-            let dir = temp_dir("adjust");
-            let database = history_database(&dir);
-
-            adjust_peer_reputation(&database, "peer-1", -3).unwrap();
-
-            let connection = Connection::open(&database).unwrap();
-            let (score, index): (i64, i64) = connection
-                .query_row(
-                    "SELECT reputation_score, reputation_index FROM peer WHERE id = 'peer-1'",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            assert_eq!((score, index), (4, 4));
-
-            let (amount, reason, after): (i64, String, i64) = connection
-                .query_row(
-                    "SELECT amount, reason, score_after FROM reputation_events
-                     WHERE subject_id = 'peer-1' ORDER BY id DESC LIMIT 1",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .unwrap();
-            assert_eq!(amount, -3);
-            assert_eq!(reason, "operator_adjustment");
-            assert_eq!(after, 4);
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_peer_that_has_done_nothing_yet_has_an_empty_history_not_an_error() {
-            let dir = temp_dir("empty");
-            let database = history_database(&dir);
-
-            let detail = get_peer_detail(&database, "peer-unknown").unwrap();
-
-            assert!(detail.payments.is_empty());
-            assert!(detail.events.is_empty());
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-    }
     /// The KyA gate (issue #395).
     ///
     /// The two ways this fails *silently*: a gate that never comes up on a node that
@@ -10877,12 +12274,14 @@ ergo: Cold Wallet: 9cold\n";
             let mut app = install.app();
             let page = app.page();
 
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             for kind in [
                 MouseEventKind::ScrollUp,
                 MouseEventKind::ScrollDown,
                 MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Down(MouseButton::Right),
             ] {
-                handle_mouse_events(
+                rt.block_on(handle_mouse_events(
                     MouseEvent {
                         kind,
                         column: 4,
@@ -10890,7 +12289,8 @@ ergo: Cold Wallet: 9cold\n";
                         modifiers: KeyModifiers::NONE,
                     },
                     &mut app,
-                );
+                ))
+                .unwrap();
             }
 
             assert!(app.awaiting_kya());
@@ -11119,7 +12519,7 @@ energy:
         }
 
         /// Nothing edits config.yaml while a transaction holds its backup: the same
-        /// guard the Config and Pricing editors have, for the same reason.
+        /// guard the All and Pricing editors have, for the same reason.
         #[tokio::test]
         async fn the_editor_refuses_to_open_while_a_change_is_being_applied() {
             let mut app = app_on_energy();
@@ -11444,5 +12844,214 @@ mod restart_state_regressions {
         });
         assert!(tokio::time::timeout(Duration::from_secs(2), wait_until_serving(&config)).await.unwrap());
         assign.await.unwrap();
+    }
+}
+
+/// `energy_consumption` folded into hours, and the totals the ENERGY page and the
+/// OVERVIEW card read from that fold (issue #442).
+#[cfg(test)]
+mod energy_series {
+    use super::*;
+
+    /// The real `CREATE TABLE` for `name`, from `src/database/migrate.py` -- lifted
+    /// rather than restated, for the same reason `tests::migration_table` is
+    /// (issue #414): a hand-copied schema is exactly what lets a query fall a
+    /// column behind the table it actually reads.
+    fn migration_table(name: &str) -> String {
+        let python = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../src/database/migrate.py"
+        ))
+        .expect("src/database/migrate.py ships with the repository");
+        let marker = format!("CREATE TABLE IF NOT EXISTS {name} (");
+        let start = python
+            .find(&marker)
+            .unwrap_or_else(|| panic!("migrate.py no longer creates a '{name}' table"));
+        let rest = &python[start..];
+        let end = rest
+            .find("'''")
+            .unwrap_or_else(|| panic!("the '{name}' table's SQL is unterminated"));
+        rest[..end].to_string()
+    }
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "nodo-tui-energy-series-{label}-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A database built from the node's own `energy_consumption` schema, with one
+    /// row per `(hours_ago, watts, joules, price_per_kwh)`. `hours_ago` is applied
+    /// by SQLite itself (`datetime('now', ?)`) rather than computed here, the same
+    /// way the peer/donation fixtures elsewhere in this file seed relative
+    /// timestamps -- a test has no calendar library to disagree with SQLite's own.
+    fn energy_database(dir: &Path, rows: &[(i64, f64, f64, f64)]) -> PathBuf {
+        let path = dir.join("database.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(&migration_table("energy_consumption"))
+            .unwrap();
+        for (hours_ago, watts, joules, price_per_kwh) in rows {
+            connection
+                .execute(
+                    "INSERT INTO energy_consumption
+                        (timestamp, energy_joules, watts, price_per_kwh, currency, backend, is_floor)
+                     VALUES (datetime('now', ?1), ?2, ?3, ?4, 'EUR', 'rapl', 0)",
+                    rusqlite::params![format!("-{hours_ago} hours"), joules, watts, price_per_kwh],
+                )
+                .unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn a_database_with_no_table_reads_as_no_history() {
+        let dir = TempDir::new("no-table");
+        let path = dir.0.join("database.sqlite");
+        Connection::open(&path).unwrap(); // empty database, no migration run
+
+        let series = get_energy_series(&path, 48).unwrap();
+        assert!(series.is_empty());
+    }
+
+    #[test]
+    fn samples_past_the_window_are_left_out() {
+        let dir = TempDir::new("window");
+        let path = energy_database(&dir.0, &[(80, 5.0, 18_000.0, 0.2), (1, 5.0, 18_000.0, 0.2)]);
+
+        let series = get_energy_series(&path, 48).unwrap();
+        assert_eq!(series.buckets.len(), 1, "the 80h-old sample is outside a 48h window");
+    }
+
+    #[test]
+    fn two_samples_in_the_same_hour_fold_into_one_bucket() {
+        let dir = TempDir::new("fold");
+        // Same hour: one sample peaks at 40W, the other at 10W; the bucket keeps
+        // the peak and sums both the energy and the cost, exactly like
+        // `get_demand_by_hour` keeps a peak rather than a mean.
+        let path = energy_database(
+            &dir.0,
+            &[(0, 40.0, 2_400.0, 0.20), (0, 10.0, 600.0, 0.20)],
+        );
+
+        let series = get_energy_series(&path, 48).unwrap();
+        assert_eq!(series.buckets.len(), 1, "two samples an hour apart, not two hours");
+        let bucket = series.buckets[0];
+        assert_eq!(bucket.peak_watts, 40.0);
+        assert_eq!(bucket.joules, 3_000.0);
+        assert!((bucket.cost - (3_000.0 / 3.6e6 * 0.20)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn peak_watts_is_the_worst_hour_not_the_last_one() {
+        let mut series = EnergySeries::default();
+        for (key, watts) in [("2026-09-20T00", 5.0), ("2026-09-20T01", 40.0), ("2026-09-20T02", 12.0)] {
+            series.keys.push(key.to_string());
+            series.buckets.push(EnergyBucket {
+                peak_watts: watts,
+                cost: 0.0,
+                joules: 0.0,
+            });
+        }
+        assert_eq!(series.peak_watts(), 40.0);
+    }
+
+    /// "Today" is read off the series' own last key rather than the host clock, so
+    /// it agrees with whatever `get_energy_series` actually returned instead of
+    /// racing the wall clock at a day boundary.
+    #[test]
+    fn today_is_the_most_recent_buckets_own_date() {
+        let mut series = EnergySeries::default();
+        for (key, joules, cost) in [
+            ("2026-09-19T23", 3_600_000.0, 1.0),
+            ("2026-09-20T00", 3_600_000.0, 2.0),
+            ("2026-09-20T01", 3_600_000.0, 3.0),
+        ] {
+            series.keys.push(key.to_string());
+            series.buckets.push(EnergyBucket {
+                peak_watts: 0.0,
+                cost,
+                joules,
+            });
+        }
+        assert_eq!(series.today_kwh(), 2.0, "only the two 09-20 hours count");
+        assert_eq!(series.today_cost(), 5.0);
+        assert_eq!(series.total_kwh(), 3.0, "the total covers all three hours");
+        assert_eq!(series.total_cost(), 6.0);
+    }
+
+    /// A synthetic month: `days` days of 24 hourly buckets each, day `d`'s buckets
+    /// all carrying `cost(d)` and `peak_watts(d)` -- day-granular values are enough
+    /// to test the trailing-hours window without needing 720 distinct numbers.
+    fn synthetic_days(days: u32, cost: impl Fn(u32) -> f64, watts: impl Fn(u32) -> f64) -> EnergySeries {
+        let mut series = EnergySeries::default();
+        for day in 1..=days {
+            for hour in 0..24 {
+                series.keys.push(format!("2026-01-{day:02}T{hour:02}"));
+                series.buckets.push(EnergyBucket {
+                    peak_watts: watts(day),
+                    cost: cost(day),
+                    joules: 0.0,
+                });
+            }
+        }
+        series
+    }
+
+    /// The trailing window excludes what fell off the front (issue #453): a spike
+    /// ten days ago must not still set "peak" once ten days have actually passed.
+    #[test]
+    fn peak_watts_over_drops_buckets_older_than_the_window() {
+        // Day 1 spikes to 100 W; every later day sits at a quiet 5 W.
+        let series = synthetic_days(10, |_| 0.0, |day| if day == 1 { 100.0 } else { 5.0 });
+
+        assert_eq!(series.peak_watts(), 100.0, "the whole series still has the spike");
+        assert_eq!(
+            series.peak_watts_over(7 * 24),
+            5.0,
+            "day 1 is 9 days back, outside a 7-day window"
+        );
+    }
+
+    /// `median_cost_today` reads only the most recent calendar day, same as
+    /// `today_kwh`/`today_cost` -- a cheap day is not averaged into an expensive one.
+    #[test]
+    fn median_cost_today_ignores_earlier_days() {
+        let series = synthetic_days(3, |day| if day == 3 { 9.0 } else { 1.0 }, |_| 0.0);
+        assert_eq!(series.median_cost_today(), 9.0);
+    }
+
+    /// The trailing-week and trailing-month medians read different amounts of the
+    /// same series (issue #453): a window of ten distinct days' costs has a
+    /// different middle value depending on how many of the ten it is asked to cover.
+    #[test]
+    fn median_cost_over_widens_with_the_window() {
+        let series = synthetic_days(10, |day| day as f64, |_| 0.0);
+
+        // Trailing 7 days are 4..=10; their median is the middle of that run, 7.
+        assert_eq!(series.median_cost_over(7), 7.0);
+        // 30 days asked for, but only 10 exist: the median of 1..=10, 5.5.
+        assert_eq!(series.median_cost_over(30), 5.5);
+    }
+
+    #[test]
+    fn median_of_an_empty_series_reads_as_zero_not_a_panic() {
+        let series = EnergySeries::default();
+        assert_eq!(series.median_cost_today(), 0.0);
+        assert_eq!(series.median_cost_over(7), 0.0);
     }
 }

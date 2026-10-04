@@ -40,6 +40,7 @@ from mnemonic import Mnemonic
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
 
 # A raw Ed25519 public key is 32 bytes -> 64 hex characters.
 _PUBLIC_KEY_HEX_LENGTH = 64
@@ -60,6 +61,13 @@ _SEED_PERSONALISATION: Final[bytes] = b"celaut-id"
 # peer_id can never be replayed as a signature over something else that wallet signs
 # (an IOU note, a reputation payload) and the other way round.
 _ATTESTATION_PREFIX: Final[str] = "celaut-ledger-attestation:"
+
+# Domain separation for binding a client_id to the peer requesting it
+# (GenerateClient, see gateway.GenerateClient / manager.generate_client_or_pow_required),
+# for the same reason: this node's identity key also signs a Peer announcement
+# (canonical_peer_payload) and, for a ledger wallet, an attestation -- without a
+# distinct prefix a signature made for one could be replayed as another.
+_CLIENT_BINDING_PREFIX: Final[str] = "celaut-client-binding:"
 
 
 def component_formal(pairs: Dict[str, str]) -> bytes:
@@ -161,8 +169,8 @@ class SignatureSchemeComponent(NamedTuple):
 # at all) needs no proto migration to be expressed, only a different-length stack.
 #
 # A descriptor, not an id derived from one: celaut never names a tags/prose/formal
-# component by a hash of itself (compare ``envs.ergo_ledger``, whose ``formal`` is
-# even empty), and doing it here would invent a naming rule for signature schemes that
+# component by a hash of itself (compare ``ledger_descriptors.ergo_payment_ledger``, whose
+# ``formal`` is the declaration itself), and doing it here would invent a naming rule for signature schemes that
 # nothing else in the protocol follows. The descriptor IS the name, and deciding
 # whether two of them denote the same thing is a comparison -- one a service of the
 # shape ``(scheme_a, scheme_b) -> bool`` can eventually make better than this node
@@ -175,8 +183,8 @@ class SignatureSchemeComponent(NamedTuple):
 # nothing about this implementation of it: a reader holding only the Peer message --
 # off a gRPC response, or off an Ergo register -- cannot follow a path into some
 # repository, and naming other projects only moves the question along ("and what is
-# that?"). Same reason envs.PROSE describes the Ergo system and not nodo's client for
-# it. It says everything a verification has to be written from and stands on its own,
+# that?"). Same reason a ledger's prose (src/utils/ledger_descriptors.py) describes the
+# chain and not nodo's client for it. It says everything a verification has to be written from and stands on its own,
 # because `formal` beside it names the same parameters without describing any of them:
 # the two are one declaration read at two levels of detail, and only `formal` is
 # compared.
@@ -334,6 +342,25 @@ def same_component(a, b) -> bool:
     return bool(set(a.tags) & set(b.tags))
 
 
+def same_declaration(a, b) -> bool:
+    """Whether two components declare the very same thing, in full.
+
+    The strict form of :func:`same_component`, for the places where the whole
+    declaration is what has to agree -- a ledger a node pays into or reads proofs
+    from. There a tag cannot stand in: a tag-only ``ergo`` ledger says nothing about
+    the network, the units or how a deposit is bound, so a peer that declares only
+    tags has not said what this node needs to check. Both sides must therefore carry
+    a non-empty ``formal``, and those bytes must be equal. A layer of the transport
+    stack also needs a non-empty ``formal``, but it is compared by protobuf's rules
+    (``transport_stack.compatible_layers``), not byte for byte.
+
+    ``same_component``'s tag fallback stays for descriptors that are loose by design
+    (signature-scheme building blocks, a URI's transport, network slots).
+    """
+    formal_a, formal_b = bytes(a.formal), bytes(b.formal)
+    return bool(formal_a) and bool(formal_b) and formal_a == formal_b
+
+
 def same_signature_scheme(a, b) -> bool:
     """Whether two scheme descriptors denote the same cryptography.
 
@@ -403,14 +430,11 @@ def speaks_our_signature_scheme(peer) -> bool:
     length, their encoding, the verification procedure -- is exactly what the scheme
     decides.
 
-    A descriptor with no components is the pre-field default rather than a wildcard:
-    back when the field did not exist there was only one scheme an announcement could
-    mean, so it resolves to this one, and a peer meaning anything else has to say so.
+    A descriptor with no components is refused: an announcement that does not say
+    which cryptography it is signed in gives a verifier nothing to verify it with, and
+    every node declares its scheme.
     """
-    scheme = peer.signature_scheme
-    if not scheme.components:
-        return True
-    return same_signature_scheme(scheme, node_signature_scheme())
+    return same_signature_scheme(peer.signature_scheme, node_signature_scheme())
 
 
 def normalize_public_key_hex(public_key_hex: str) -> Optional[str]:
@@ -478,7 +502,7 @@ def get_node_public_key_hex() -> Optional[str]:
 def _canonical_contract_message(contract) -> str:
     """Deterministic encoding of one ``Contract`` (a ledger plus its xattrs)."""
     xattrs = ";".join(
-        f"{key}={bytes(contract.xattrs[key]).hex()}" for key in sorted(contract.xattrs)
+        f"{key}={bytes(value).hex()}" for key, value in keyvalue.items(contract.xattrs)
     )
     return "~".join([
         contract.ledger.formal.hex(),
@@ -514,6 +538,32 @@ def _canonical_uri(uri) -> str:
         str(uri.expiry_unix_timestamp),
         _canonical_protocol(uri.transport),
         protocol_stack,
+    ])
+
+
+def _canonical_sysresources(sysresources) -> str:
+    """Deterministic encoding of one ``Sysresources``.
+
+    Presence is part of it: every scalar here is ``optional``, and an unset limit
+    ("nothing said") is not the same claim as a limit of 0. ``benchmark`` is sorted
+    by key, like every key/value list in the digest.
+    """
+    scalars = ",".join(
+        f"{name}={getattr(sysresources, name)}" if sysresources.HasField(name) else f"{name}="
+        for name in ("blkio_weight", "cpu_period", "cpu_quota", "mem_limit", "disk_space")
+    )
+    benchmark = ";".join(sorted(
+        f"{entry.key}={entry.value if entry.HasField('value') else ''}"
+        for entry in sysresources.benchmark
+    ))
+    return "~".join([scalars, benchmark])
+
+
+def _canonical_architecture_resources(entry) -> str:
+    """Deterministic encoding of one announced ``ArchitectureResources``."""
+    return "~".join([
+        _canonical_protocol(entry.architecture),
+        _canonical_sysresources(entry.resources) if entry.HasField("resources") else "-",
     ])
 
 
@@ -557,6 +607,12 @@ def canonical_peer_content_digest(peer) -> str:
     still verifies -- and, because ``gateway.utils`` caches on this digest, one whose
     fresh value is replaced by the cached announcement (issue #330).
 
+    ``resources`` (#459) is covered too: it is what a peer reads to decide whether to
+    call this node at all, so a relay able to rewrite it could make a node invisible
+    for an architecture it serves, or advertise a benchmark score it never measured.
+    Every field of every ``Sysresources`` is encoded with its presence, since an
+    unset limit and a limit of 0 are different claims.
+
     ``signature_scheme`` is covered as well, which it has to be as soon as more than one
     scheme can be accepted: a relay that could re-label a signature as belonging to a
     different scheme -- one whose verification also accepts those bytes, or simply a
@@ -572,8 +628,9 @@ def canonical_peer_content_digest(peer) -> str:
         sorted(_canonical_protocol(c) for c in peer.signature_scheme.components)
     )
     rates = ";".join(
-        f"{key}={peer.mu_per_call[key].n}" for key in sorted(peer.mu_per_call)
+        f"{key}={amount.n}" for key, amount in keyvalue.items(peer.mu_per_call)
     )
+    resources = sorted(_canonical_architecture_resources(r) for r in peer.resources)
 
     canonical = "|".join([
         "/".join(uris),
@@ -581,6 +638,7 @@ def canonical_peer_content_digest(peer) -> str:
         "/".join(proofs),
         rates,
         scheme,
+        "/".join(resources),
     ])
     # Blake2b-256. Nothing outside this function reads the value -- a verifier
     # recomputes it from the peer's own advertisement, and it is never stored or
@@ -637,5 +695,17 @@ def attestation_payload(peer_id: str) -> str:
     other things an Ergo key is asked to sign.
     """
     return _ATTESTATION_PREFIX + peer_id
+
+
+def client_binding_payload(peer_id: str, client_id: str) -> str:
+    """The exact string a peer signs to claim ``client_id`` as its own on ``GenerateClient``.
+
+    Both are bound together so the signature cannot be lifted onto a different
+    client_id this peer did not just request, nor claimed by a different peer for
+    this one. No timestamp: ``client_id`` is single-use by construction
+    (``sc.client_exists`` already refuses to mint the same one twice), so there is
+    nothing here a replay could achieve that requesting it fresh could not.
+    """
+    return f"{_CLIENT_BINDING_PREFIX}{peer_id}|{client_id}"
 
 

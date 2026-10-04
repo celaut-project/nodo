@@ -1,14 +1,14 @@
 """Where a signing backend's receiving address comes from, and what survives a dead node.
 
-Ergo derives its address from the mnemonic on every call, so it stores nothing. Bitcoin
-cannot: nodo holds no Bitcoin key on any backend -- with `core` the operator's bitcoind
-owns the wallet and nodo never sees a seed at all -- and what makes an address usable is
-not that it can be derived but that **Core is watching it**. An address Core does not
-watch reports no payments and spends no output.
+Ergo derives its address from the mnemonic on every call, so it stores nothing. So does
+the `explorer` backend. `core` cannot: the operator's bitcoind owns the wallet and nodo
+never sees a seed at all, and what makes an address usable there is not that it can be
+derived but that **Core is watching it**. An address Core does not watch reports no
+payments and spends no output.
 
-So Core is asked, under a label, and the answer is cached. The cache is the answer to
-the one thing asking cannot survive: a bitcoind that is down while a payment this node
-already advertised is arriving.
+So the backend is asked -- Core under a label -- and the answer is cached. The cache is
+the answer to the one thing asking cannot survive: a bitcoind that is down while a
+payment this node already advertised is arriving.
 """
 import os
 import tempfile
@@ -189,11 +189,10 @@ class WalletAddressTests(unittest.TestCase):
         btc._address_reads = 0
         btc._address_on_disk = None
 
-    def test_a_signing_backend_asks_core_rather_than_reading_configuration(self):
+    def test_the_backend_is_asked_rather_than_configuration_being_read(self):
         chain = mock.Mock()
         chain.receive_address.return_value = ADDRESS
-        with mock.patch.object(btc, "_signs", return_value=True), \
-                mock.patch.object(btc, "backend", return_value=chain), \
+        with mock.patch.object(btc, "backend", return_value=chain), \
                 mock.patch.object(btc, "_remember_address"), \
                 mock.patch.object(btc, "NETWORK", lambda: "mainnet"):
             self.assertEqual(btc.get_wallet_address(), ADDRESS)
@@ -202,8 +201,7 @@ class WalletAddressTests(unittest.TestCase):
     def test_no_address_anywhere_names_both_places_it_looked(self):
         chain = mock.Mock()
         chain.receive_address.return_value = ""
-        with mock.patch.object(btc, "_signs", return_value=True), \
-                mock.patch.object(btc, "backend", return_value=chain), \
+        with mock.patch.object(btc, "backend", return_value=chain), \
                 mock.patch.object(btc, "_read_cached_address", return_value=""):
             with self.assertRaises(ValueError) as raised:
                 btc.get_wallet_address()
@@ -218,8 +216,7 @@ class WalletAddressTests(unittest.TestCase):
         """
         chain = mock.Mock()
         chain.receive_address.return_value = ADDRESS  # mainnet
-        with mock.patch.object(btc, "_signs", return_value=True), \
-                mock.patch.object(btc, "backend", return_value=chain), \
+        with mock.patch.object(btc, "backend", return_value=chain), \
                 mock.patch.object(btc, "_remember_address"), \
                 mock.patch.object(btc, "NETWORK", lambda: "testnet"):
             with self.assertRaisesRegex(ValueError, "not a valid testnet"):

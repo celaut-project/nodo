@@ -1,11 +1,14 @@
 use crate::app::{
-    format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten,
-    unix_now, App, DemandByHour,
-    Client, ClientDetail, ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
-    LedgerEarnings, PageGroup, PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
+    cpu_breakdown, format_bytes, format_bytes_compact, format_rate_compact, memory_breakdown,
+    percent, segment_token, shorten, unix_now, App, DashboardStats, DemandByHour,
+    ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
+    LedgerEarnings, PaymentRow, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail,
 };
-use crate::cell::{self, Lever, LeverStatus, Organelle};
+#[cfg(test)]
+use crate::app::PageGroup;
+use crate::cell::{self, CellRow, Group, Lever, LeverStatus, Organelle};
+use crate::layout_util::{display_width, fit_hints, truncate_ellipsis};
 use crate::schedule;
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
@@ -18,38 +21,38 @@ use tui_tree_widget::{Tree, TreeItem};
 
 /// Selected tabs, focused borders, the node's own identity.
 #[inline]
-fn accent() -> Color {
+pub(crate) fn accent() -> Color {
     crate::theme::current().accent
 }
 
 /// Labels, dividers and help text: there to be read past rather than read.
 #[inline]
-fn muted() -> Color {
+pub(crate) fn muted() -> Color {
     crate::theme::current().muted
 }
 
 /// Working, healthy, running, local.
 #[inline]
-fn good() -> Color {
+pub(crate) fn good() -> Color {
     crate::theme::current().good
 }
 
 /// Worth a look, not yet a problem.
 #[inline]
-fn warn() -> Color {
+pub(crate) fn warn() -> Color {
     crate::theme::current().warn
 }
 
 /// For the things that cost the operator something: a payment nobody acknowledged,
 /// a deposit that was refused, a penalty. `warn` already means "look at this later".
 #[inline]
-fn bad() -> Color {
+pub(crate) fn bad() -> Color {
     crate::theme::current().bad
 }
 
 /// Ordinary text: a value, as opposed to the label beside it.
 #[inline]
-fn text_colour() -> Color {
+pub(crate) fn text_colour() -> Color {
     crate::theme::current().text
 }
 
@@ -62,7 +65,7 @@ fn inverse_text() -> Color {
 
 /// The background a popup paints over whatever it covers.
 #[inline]
-fn popup_background() -> Color {
+pub(crate) fn popup_background() -> Color {
     crate::theme::current().popup_background
 }
 
@@ -90,24 +93,53 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         frame.size(),
     );
 
+    // Remembered for the mouse: a click has only the coordinates, so the hit test needs
+    // where things ended up this frame. Cleared here so a page without a table (or the
+    // instances tree) cannot inherit the previous page's rows.
+    app.tabs_area = Rect::ZERO;
+    app.page_tabs_area = Rect::ZERO;
+    app.list_area = Rect::ZERO;
+    // Recomputed by whichever page draws a copyable id column/id line this frame
+    // (issue: click-to-copy full IDs); every other page leaves both empty.
+    app.id_column_x = None;
+    app.id_copy_areas.clear();
+    app.chat_card_buttons.clear();
+    app.chat_attach_area = Rect::ZERO;
+    app.chat_send_area = Rect::ZERO;
+
+    // Below the smallest size the pages are laid out for, say so instead of drawing
+    // a tab bar squeezed to nothing over a table of one-character columns (issue
+    // #453). The mouse is ignored while it shows -- whatever a page last recorded
+    // for its hit tests is not on screen -- and the keys keep working, so `q` still
+    // quits and the next resize redraws the page.
+    app.too_small = crate::layout_util::too_small(frame.size());
+    if app.too_small {
+        crate::layout_util::draw_too_small(
+            frame,
+            frame.size(),
+            Style::default().fg(text_colour()),
+            Style::default().fg(warn()),
+        );
+        return;
+    }
+
     // The page row only exists for a group that has more than one page. A row
     // holding a single already-selected title says nothing and costs the page below
     // it a line, so OVERVIEW, EARNINGS and LOGS get their space back.
     let page_row = if app.tabs.group().pages().len() > 1 { 1 } else { 0 };
+    // The page takes what the tab rows and the footer leave, never the reverse: a
+    // `Min` here larger than what is left let the solver take rows from the tab bar
+    // instead, and the group titles were the first thing to vanish on a short
+    // terminal. `too_small` above guarantees the page at least one table row.
     let layout = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(page_row),
-        Constraint::Min(8),
+        Constraint::Min(0),
         Constraint::Length(2),
     ])
     .split(frame.size());
-
-    // Remembered for the mouse: a click has only the coordinates, so the hit test needs
-    // where things ended up this frame. Cleared here so a page without a table (or the
-    // instances tree) cannot inherit the previous page's rows.
     app.tabs_area = layout[0];
     app.page_tabs_area = if page_row > 0 { layout[1] } else { Rect::ZERO };
-    app.list_area = Rect::ZERO;
 
     draw_tabs(frame, app, layout[0]);
     if page_row > 0 {
@@ -116,9 +148,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match app.page() {
         Page::Overview => draw_overview(frame, app, layout[2]),
         Page::Instances => draw_instances(frame, app, layout[2]),
+        Page::Tunnels => crate::tunnels::draw(frame, app, layout[2]),
+        Page::Packs => crate::packs::draw(frame, app, layout[2]),
         Page::Services => draw_services(frame, app, layout[2]),
-        Page::Peers => draw_peers(frame, app, layout[2]),
-        Page::Clients => draw_clients(frame, app, layout[2]),
+        Page::Peers => crate::peers::draw(frame, app, layout[2]),
+        Page::Clients => crate::clients::draw(frame, app, layout[2]),
+        Page::Chat => crate::chat::draw(frame, app, layout[2]),
         Page::Earnings => draw_earnings(frame, app, layout[2]),
         Page::Cell => draw_cell(frame, app, layout[2]),
         Page::Pricing => draw_pricing(frame, app, layout[2]),
@@ -126,6 +161,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Energy => draw_energy(frame, app, layout[2]),
         Page::Config => draw_config(frame, app, layout[2]),
         Page::Logs => draw_logs(frame, app, layout[2]),
+        Page::Docs => crate::docs::draw(frame, app, layout[2]),
     }
     draw_footer(frame, app, layout[3]);
 
@@ -137,11 +173,27 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         }
         InputMode::PickProfile => draw_profile_popup(frame, app),
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
+        InputMode::EditAssets => draw_assets_popup(frame, app),
+        InputMode::AddAsset => draw_asset_form_popup(frame, app),
+        InputMode::PickChatPeer => crate::chat::draw_peer_picker(frame, app),
+        InputMode::PickChatTopic => crate::chat::draw_topic_picker(frame, app),
+        InputMode::PickChatService => crate::chat::draw_service_picker(frame, app),
+        InputMode::ContextMenu => crate::context_menu::draw(frame, app),
+        // Drawn inline by `chat::draw` as part of the conversation pane, not as a
+        // centered popup -- the docked compose box is the whole point (issue: TUI
+        // chat/peers/clients redesign).
+        InputMode::ComposeChatMessage => {}
         InputMode::Connect
         | InputMode::EditConfig
         | InputMode::AddConfigItem
         | InputMode::FilterConfig
-        | InputMode::CreditClient => draw_input_popup(frame, app),
+        | InputMode::CreditClient
+        | InputMode::AddCustomUnit
+        | InputMode::NewChatTopic
+        | InputMode::SearchDocs
+        | InputMode::GetService
+        | InputMode::NewTunnel
+        | InputMode::NewPack => draw_input_popup(frame, app),
     }
 }
 
@@ -153,9 +205,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 /// Labelled by the group rather than by its first page: a group named `INSTANCES`
 /// would send somebody looking for CLIENTS past a label about instances.
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
-    let titles = PageGroup::ALL
+    // The same choice of full or short titles the click hit test makes (issue #453).
+    let row = crate::app::TabRow::groups(area.width);
+    let titles = row
+        .titles
         .iter()
-        .map(|group| Line::from(group.title()))
+        .map(|title| Line::from(*title))
         .collect::<Vec<_>>();
     let status_color = if app.node_info.service_status == "running" {
         good()
@@ -167,7 +222,9 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
             " NODO ",
             Style::default().fg(inverse_text()).bg(accent()).bold(),
         ),
-        Span::raw("  operations console  "),
+        // The tagline is the first thing to go on a narrow terminal: the status
+        // after it is the part of this border worth reading.
+        Span::raw(if area.width >= 60 { "  operations console  " } else { " " }),
         Span::styled(
             if app.node_info.service_status.is_empty() {
                 "unknown"
@@ -182,6 +239,7 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .select(app.tabs.group().index())
         .style(Style::default().fg(muted()))
         .highlight_style(Style::default().fg(accent()).bold())
+        .padding(row.pad(), row.pad())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
@@ -201,14 +259,17 @@ fn draw_page_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .position(|page| *page == app.page())
         .unwrap_or(0);
-    let titles = pages
+    let row = crate::app::TabRow::pages(group, area.width);
+    let titles = row
+        .titles
         .iter()
-        .map(|page| Line::from(page.title()))
+        .map(|title| Line::from(*title))
         .collect::<Vec<_>>();
     let tabs = Tabs::new(titles)
         .select(selected)
         .style(Style::default().fg(muted()))
         .highlight_style(Style::default().fg(text_colour()).bold().underlined())
+        .padding(row.pad(), row.pad())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
@@ -227,9 +288,202 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         area
     };
+    if area.width >= OVERVIEW_GRID_WIDTH && area.height >= OVERVIEW_GRID_HEIGHT {
+        draw_overview_grid(frame, app, area);
+    } else {
+        draw_overview_flow(frame, app, area);
+    }
+}
+
+/// The Overview's cards, in the order they give way on a small terminal: who and
+/// where this node is first, what it is running and holding next, the money and
+/// the machine after that, and the one-line summaries of other pages last -- each of
+/// those is a tab away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverviewCard {
+    Node,
+    Workload,
+    Storage,
+    Network,
+    Wallets,
+    HostCapacity,
+    NodeResources,
+    PeerResources,
+    Earnings,
+    Schedule,
+    Energy,
+}
+
+impl OverviewCard {
+    const ALL: [OverviewCard; 11] = [
+        OverviewCard::Node,
+        OverviewCard::Workload,
+        OverviewCard::Storage,
+        OverviewCard::Network,
+        OverviewCard::Wallets,
+        OverviewCard::HostCapacity,
+        OverviewCard::NodeResources,
+        OverviewCard::PeerResources,
+        OverviewCard::Earnings,
+        OverviewCard::Schedule,
+        OverviewCard::Energy,
+    ];
+
+    /// Rows the card needs to show everything, borders included -- the heights the
+    /// grid's rows were sized from.
+    fn height(self) -> u16 {
+        match self {
+            OverviewCard::Node => 8,
+            OverviewCard::Workload | OverviewCard::Storage => 5,
+            OverviewCard::Network => 4,
+            OverviewCard::Wallets | OverviewCard::HostCapacity | OverviewCard::PeerResources => 9,
+            OverviewCard::NodeResources
+            | OverviewCard::Earnings
+            | OverviewCard::Schedule
+            | OverviewCard::Energy => 6,
+        }
+    }
+}
+
+/// The widest and tallest page area the Overview's fixed grid is drawn in: four
+/// cards across, three rows. The 19 rows are what an 80×24 terminal leaves it.
+const OVERVIEW_GRID_WIDTH: u16 = 80;
+const OVERVIEW_GRID_HEIGHT: u16 = 19;
+/// The narrowest a card is drawn in the flowing layout: a metric label and a short
+/// value.
+const OVERVIEW_CARD_WIDTH: u16 = 26;
+
+fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Rect) {
+    match card {
+        OverviewCard::Node => draw_card(
+            frame,
+            area,
+            "NODE",
+            vec![
+                metric_line(
+                    "Status",
+                    nonempty(&app.node_info.service_status, "checking…"),
+                ),
+                metric_line("Address", nonempty(&app.node_info.address, "—")),
+                // Who this node *is* on the network, beside where it is. Every opinion
+                // it publishes and every opinion published about it is keyed by this
+                // string, so it is what an operator has to hand a peer to be vouched
+                // for -- and the screen they leave open was the one place it could not
+                // be read. Shortened head-and-tail by `shorten`, which is what makes an
+                // id comparable at a glance; `nodo info` prints it whole.
+                metric_line(
+                    "Node id",
+                    shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
+                ),
+                metric_line("Version", shorten(&app.node_info.version, 18)),
+                metric_line("Power", node_power_line(&app.node_energy)),
+                metric_line("Elec.", node_cost_line(&app.node_energy)),
+            ],
+            accent(),
+        ),
+        OverviewCard::Workload => draw_card(
+            frame,
+            area,
+            "WORKLOAD",
+            vec![
+                metric_line("Instances", app.instances.items.len().to_string()),
+                metric_line(
+                    "Memory now",
+                    format_bytes(app.stats.instance_memory_current),
+                ),
+                metric_line(
+                    "Reserved",
+                    format!(
+                        "{} RAM / {} disk",
+                        format_bytes(app.stats.instance_memory_reserved),
+                        format_bytes(app.stats.instance_disk_reserved)
+                    ),
+                ),
+            ],
+            series(0),
+        ),
+        OverviewCard::Storage => draw_card(
+            frame,
+            area,
+            "STORAGE",
+            vec![
+                metric_line(
+                    "Host disk",
+                    format!(
+                        "{} / {} ({}%)",
+                        format_bytes(app.stats.disk_used),
+                        format_bytes(app.stats.disk_total),
+                        percent(app.stats.disk_used, app.stats.disk_total)
+                    ),
+                ),
+                metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
+                metric_line("Services", app.services.items.len().to_string()),
+            ],
+            series(1),
+        ),
+        OverviewCard::Network => draw_card(
+            frame,
+            area,
+            "NETWORK",
+            vec![
+                metric_line("Peers", app.peers.items.len().to_string()),
+                metric_line("Clients", app.clients.items.len().to_string()),
+            ],
+            series(2),
+        ),
+        OverviewCard::Wallets => draw_ergo(frame, app, area),
+        OverviewCard::HostCapacity => draw_health(frame, app, area),
+        OverviewCard::NodeResources => draw_card(
+            frame,
+            area,
+            "NODE · ANNOUNCED",
+            node_resources_lines(app),
+            series(0),
+        ),
+        OverviewCard::PeerResources => draw_card(
+            frame,
+            area,
+            "TOTAL · UPPER BOUND",
+            peer_resources_lines(app),
+            series(1),
+        ),
+        // Each panel summarises a page that is otherwise a whole tab away, reading the
+        // same state that page reads. Nothing here fetches: a summary with its own data
+        // path can disagree with the page it summarises.
+        OverviewCard::Earnings => draw_card(
+            frame,
+            area,
+            "EARNINGS",
+            earnings_summary_lines(app),
+            series(2),
+        ),
+        OverviewCard::Schedule => draw_card(
+            frame,
+            area,
+            "SCHEDULE",
+            schedule_summary_lines(app),
+            series(0),
+        ),
+        OverviewCard::Energy => draw_card(
+            frame,
+            area,
+            "ENERGY",
+            energy_summary_lines(app),
+            warn(),
+        ),
+    }
+}
+
+/// Four cards across, three, then four: the Overview as it is drawn on a terminal
+/// of at least 80×24.
+fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
+        // NODE's card is the tallest of the top row's four at six lines, plus the
+        // card's own border.
+        Constraint::Length(8),
+        // HOST CAPACITY's CPU (title, bar, percentages) and RAM (the same, plus a
+        // bytes line) breakdowns, plus the card's own border.
         Constraint::Length(9),
-        Constraint::Length(7),
         Constraint::Min(6),
     ])
     .split(area);
@@ -240,119 +494,200 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Percentage(25),
     ])
     .split(rows[0]);
-
-    draw_card(
-        frame,
-        top[0],
-        "NODE",
-        vec![
-            metric_line(
-                "Status",
-                nonempty(&app.node_info.service_status, "checking…"),
-            ),
-            metric_line("Address", nonempty(&app.node_info.address, "—")),
-            // Who this node *is* on the network, beside where it is. Every opinion
-            // it publishes and every opinion published about it is keyed by this
-            // string, so it is what an operator has to hand a peer to be vouched
-            // for -- and the screen they leave open was the one place it could not
-            // be read. Shortened head-and-tail by `shorten`, which is what makes an
-            // id comparable at a glance; `nodo info` prints it whole.
-            metric_line(
-                "Node id",
-                shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
-            ),
-            metric_line("Version", shorten(&app.node_info.version, 18)),
-            metric_line("Power", node_power_line(&app.node_energy)),
-            metric_line("Elec.", node_cost_line(&app.node_energy)),
-        ],
-        accent(),
-    );
-    draw_card(
-        frame,
-        top[1],
-        "WORKLOAD",
-        vec![
-            metric_line("Instances", app.instances.items.len().to_string()),
-            metric_line(
-                "Memory now",
-                format_bytes(app.stats.instance_memory_current),
-            ),
-            metric_line(
-                "Reserved",
-                format!(
-                    "{} RAM / {} disk",
-                    format_bytes(app.stats.instance_memory_reserved),
-                    format_bytes(app.stats.instance_disk_reserved)
-                ),
-            ),
-        ],
-        series(0),
-    );
-    draw_card(
-        frame,
-        top[2],
-        "STORAGE",
-        vec![
-            metric_line(
-                "Host disk",
-                format!(
-                    "{} / {} ({}%)",
-                    format_bytes(app.stats.disk_used),
-                    format_bytes(app.stats.disk_total),
-                    percent(app.stats.disk_used, app.stats.disk_total)
-                ),
-            ),
-            metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
-            metric_line("Services", app.services.items.len().to_string()),
-        ],
-        series(1),
-    );
-    draw_card(
-        frame,
-        top[3],
-        "NETWORK",
-        vec![
-            metric_line("Peers", app.peers.items.len().to_string()),
-            metric_line("Clients", app.clients.items.len().to_string()),
-        ],
-        series(2),
-    );
-
-    let middle =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
-    draw_ergo(frame, app, middle[0]);
-    draw_health(frame, app, middle[1]);
-
-    // Each panel summarises a page that is otherwise a whole tab away, reading the
-    // same state that page reads. Nothing here fetches: a summary with its own data
-    // path can disagree with the page it summarises.
-    let summaries = Layout::horizontal([
+    // Wallets and host capacity, then everything this node can reach, itself and its
+    // peers (issue #455) -- the machine this node is beside the machines it reaches.
+    let middle = Layout::horizontal([
         Constraint::Percentage(34),
         Constraint::Percentage(33),
         Constraint::Percentage(33),
     ])
+    .split(rows[1]);
+    let summaries = Layout::horizontal([
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+    ])
     .split(rows[2]);
-    draw_card(
-        frame,
-        summaries[0],
-        "EARNINGS",
-        earnings_summary_lines(app),
-        series(2),
+    // In `OverviewCard::ALL` order. This node's own announcement sits under the total
+    // it is part of, at the end of the summaries row.
+    let areas = [
+        top[0], top[1], top[2], top[3], middle[0], middle[1], summaries[3], middle[2],
+        summaries[0], summaries[1], summaries[2],
+    ];
+    for (card, area) in OverviewCard::ALL.into_iter().zip(areas) {
+        draw_overview_card(frame, app, card, area);
+    }
+}
+
+/// The Overview on a terminal too small for the grid (issue #453): as many cards
+/// across as are at least [`OVERVIEW_CARD_WIDTH`] wide, in [`OverviewCard::ALL`]
+/// order, row after row while they fit. What does not fit is counted on the last
+/// line rather than drawn as a stack of empty borders.
+fn draw_overview_flow(frame: &mut Frame, app: &App, area: Rect) {
+    const MIN_CARD_HEIGHT: u16 = 3;
+    let across = (area.width / OVERVIEW_CARD_WIDTH).clamp(1, 4) as usize;
+    let rows: Vec<&[OverviewCard]> = OverviewCard::ALL.chunks(across).collect();
+    let mut y = area.y;
+    let mut drawn = 0;
+    for (index, row) in rows.iter().enumerate() {
+        let left = area.bottom() - y;
+        let last = index + 1 == rows.len();
+        // A line for the "more" note under this row, unless it is the last one.
+        let reserve = if last { 0 } else { 1 };
+        let want = row.iter().map(|card| card.height()).max().unwrap_or(MIN_CARD_HEIGHT);
+        let height = want.min(left.saturating_sub(reserve));
+        if height < MIN_CARD_HEIGHT {
+            break;
+        }
+        let row_area = Rect { x: area.x, y, width: area.width, height };
+        let cells = Layout::horizontal(vec![Constraint::Ratio(1, across as u32); across]).split(row_area);
+        for (card, cell) in row.iter().zip(cells.iter()) {
+            draw_overview_card(frame, app, *card, *cell);
+        }
+        drawn += row.len();
+        y += height;
+    }
+    let hidden = OverviewCard::ALL.len() - drawn;
+    if hidden > 0 && y < area.bottom() {
+        let note = format!("+{hidden} more card{} on a larger terminal", if hidden == 1 { "" } else { "s" });
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                truncate_ellipsis(&note, area.width as usize),
+                Style::default().fg(muted()),
+            ))
+            .alignment(Alignment::Center),
+            Rect { x: area.x, y, width: area.width, height: 1 },
+        );
+    }
+}
+
+/// What this node announces it can run (issue #455): its own `Peer.resources`, as
+/// `nodo resources --json` reports it -- the ceilings its peers read, one line per
+/// architecture. An announcement, not the live machine: HOST CAPACITY is that.
+fn node_resources_lines(app: &App) -> Vec<Line<'static>> {
+    use crate::peer_resources::{format_cores, short_arch, Announced};
+    let note = |text: &str, colour: Color| Line::from(Span::styled(text.to_string(), Style::default().fg(colour)));
+    let own = &app.own_resources;
+    let mut lines = Vec::new();
+    match &own.announced {
+        None if own.error.is_empty() => lines.push(note("reading…", muted())),
+        None => {}
+        Some(Announced::Undeclared) => lines.push(note("Announces none.", warn())),
+        Some(Announced::Unreadable) => lines.push(note("Unreadable.", warn())),
+        Some(Announced::Declared(offers)) => {
+            let unstated = || "?".to_string();
+            for offer in offers {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{:<6}", short_arch(&offer.arch)), Style::default().fg(muted())),
+                    Span::styled(
+                        format!(
+                            "{}c {} {}",
+                            offer.millicores.map(format_cores).unwrap_or_else(unstated),
+                            offer.mem_bytes.map(format_bytes_compact).unwrap_or_else(unstated),
+                            offer.disk_bytes.map(format_bytes_compact).unwrap_or_else(unstated),
+                        ),
+                        Style::default().fg(text_colour()).bold(),
+                    ),
+                ]));
+            }
+            // Peers holding a request to a benchmark skip an architecture with no
+            // score for it, so an unmeasured one is worth saying.
+            let unscored: Vec<&str> = offers
+                .iter()
+                .filter(|offer| offer.benchmark.is_empty())
+                .map(|offer| short_arch(&offer.arch))
+                .collect();
+            if !unscored.is_empty() {
+                lines.push(note(&format!("No scores: {}", unscored.join(", ")), warn()));
+            }
+        }
+    }
+    if !own.error.is_empty() {
+        lines.push(note(&own.error, bad()));
+    }
+    lines.push(note("Maxima, not free.", muted()));
+    lines
+}
+
+/// The optimistic upper bound on what this node can reach (issue #455): its own
+/// announced ceilings plus every peer's, summed, one line per architecture. The
+/// peers are the list the PEERS page draws, and this node's share is what the
+/// NODE · ANNOUNCED card shows, so neither can disagree with the total.
+///
+/// Announcements only. This node's live machine is HOST CAPACITY; adding it here
+/// would mix a measurement with announcements. Benchmarks are left out: they are
+/// per-core rates, which do not add up -- the peer's detail card shows them.
+fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
+    use crate::peer_resources::{aggregate_with_own, format_cores, short_arch};
+    let own_id = app.node_info.node_id.as_str();
+    let total = aggregate_with_own(
+        app.own_resources.announced.as_ref(),
+        app.peers
+            .items
+            .iter()
+            // A node never registers itself, but if one ever did, counting its own
+            // machine as a peer's would double it.
+            .filter(|peer| own_id.is_empty() || peer.id != own_id)
+            .map(|peer| &peer.resources),
     );
-    draw_card(
-        frame,
-        summaries[1],
-        "SCHEDULE",
-        schedule_summary_lines(app),
-        series(0),
-    );
-    draw_card(
-        frame,
-        summaries[2],
-        "ENERGY",
-        energy_summary_lines(app),
-        warn(),
-    );
+    let note = |text: String, colour: Color| Line::from(Span::styled(text, Style::default().fg(colour)));
+    let mut lines = Vec::new();
+    // Most important first, since a short card clips from the bottom: the totals,
+    // then who said nothing, then what the figures are. "Upper bound" is in the
+    // card's title, so it is never the line that gets clipped.
+    for (arch, row) in &total.per_arch {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<6}", short_arch(arch)), Style::default().fg(muted())),
+            Span::styled(
+                format!(
+                    "{}c {} {}",
+                    format_cores(row.millicores),
+                    format_bytes_compact(row.mem_bytes),
+                    format_bytes_compact(row.disk_bytes),
+                ),
+                Style::default().fg(text_colour()).bold(),
+            ),
+            Span::styled(
+                format!(
+                    " ×{}{}",
+                    row.peers,
+                    // Some peer left a limit unstated: that column is short by it.
+                    if row.partial > 0 { "*" } else { "" }
+                ),
+                Style::default().fg(muted()),
+            ),
+        ]));
+    }
+    if total.per_arch.is_empty() {
+        lines.push(note(
+            if total.peers() == 0 { "No peers yet." } else { "No peer announced resources." }.to_string(),
+            muted(),
+        ));
+    }
+    if !total.own_included {
+        // Not read yet, or this node announces nothing: what is left is peers only.
+        lines.push(note("This node not included.".to_string(), warn()));
+    }
+    let mut silent = Vec::new();
+    if total.undeclared > 0 {
+        silent.push(format!("{} undeclared", total.undeclared));
+    }
+    if total.unreadable > 0 {
+        silent.push(format!("{} unreadable", total.unreadable));
+    }
+    if !silent.is_empty() {
+        lines.push(note(silent.join(", "), warn()));
+    }
+    if !total.per_arch.is_empty() {
+        lines.push(note("cores RAM disk ×nodes".to_string(), muted()));
+        if total.per_arch.values().any(|row| row.partial > 0) {
+            lines.push(note("* a limit left unstated".to_string(), muted()));
+        }
+        lines.push(note("Sum of announced maxima,".to_string(), muted()));
+        lines.push(note("not free capacity.".to_string(), muted()));
+    }
+    lines
 }
 
 /// The EARNINGS page in five lines: what came in, over the windows that fit.
@@ -522,6 +857,31 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
         metric_line("Electricity", node_cost_line(energy)),
     ];
 
+    // Today's total and the window's worst hour -- what a glance at this card is
+    // for, next to the full trend on the ENERGY page itself (issue #442).
+    let series = &app.energy_series;
+    if !series.is_empty() {
+        let today = if energy.price_per_kwh > 0.0 {
+            let currency = if energy.currency.is_empty() {
+                "USD"
+            } else {
+                energy.currency.as_str()
+            };
+            format!(
+                "{:.2} kWh · {:.2} {currency}",
+                series.today_kwh(),
+                series.today_cost()
+            )
+        } else {
+            format!("{:.2} kWh", series.today_kwh())
+        };
+        lines.push(metric_line("Today", today));
+        lines.push(metric_line(
+            "Peak 48h",
+            format_watts(Some(series.peak_watts_over(48))),
+        ));
+    }
+
     // The same qualifier `node_power_line` puts on the NODE card, on its own line
     // here because there is room for it to be read rather than skimmed past.
     let source = if energy.backend.is_empty() {
@@ -669,7 +1029,7 @@ fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>>, color: Color) {
+pub(crate) fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>>, color: Color) {
     let block = Block::bordered()
         .title(Span::styled(
             format!(" {title} "),
@@ -679,7 +1039,7 @@ fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
+pub(crate) fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{label:<12}"), Style::default().fg(muted())),
         Span::styled(value.into(), Style::default().fg(text_colour()).bold()),
@@ -772,52 +1132,407 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(muted()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let rows = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Length(2),
-        Constraint::Length(1),
-    ])
-    .split(inner);
-    draw_gauge(frame, rows[0], "CPU", app.stats.cpu_percent, warn());
-    draw_gauge(
-        frame,
-        rows[1],
-        "RAM",
-        percent(app.stats.memory_used, app.stats.memory_total),
-        accent(),
-    );
+    // CPU gets a title line of its own (the way a bare `Gauge` block already put
+    // "CPU" above its bar) plus its bar and the three groups' percentages. RAM gets
+    // the same three rows plus a fourth spelling out what each group actually is in
+    // bytes -- kept because, unlike CPU's percentages, that figure says something the
+    // row above it does not.
+    let rows = Layout::vertical([Constraint::Length(1); 7]).split(inner);
+    draw_cpu_breakdown(frame, rows[0], rows[1], rows[2], &app.stats);
+    draw_memory_breakdown(frame, rows[3], rows[4], rows[5], rows[6], &app.stats);
+}
+
+/// The colour each breakdown bar's three groups are drawn in -- daemon, instances,
+/// host -- reused between the bar itself and its legend, and between CPU and RAM, so
+/// "daemon" means the same colour on both bars.
+fn breakdown_colours() -> (Color, Color, Color) {
+    (warn(), accent(), series(1))
+}
+
+/// One coloured run per group's share of `bar_width`, in group order, with whatever
+/// is left of `total` drawn as the unfilled track -- the bar body both breakdowns
+/// share. Widths are accumulated cumulatively (rather than scaled independently) so
+/// the three runs plus the gap always add up to exactly `bar_width`, with any
+/// rounding loss landing on the last group instead of opening a gap between runs.
+fn draw_breakdown_bar(
+    frame: &mut Frame,
+    bar_area: Rect,
+    groups: [u64; 3],
+    total: u64,
+    colours: (Color, Color, Color),
+) {
+    let bar_width = bar_area.width;
+    let total = total.max(1);
+    let mut used_so_far = 0u64;
+    let mut width_so_far = 0u16;
+    let mut segment = |amount: u64| -> u16 {
+        used_so_far = used_so_far.saturating_add(amount).min(total);
+        let width_now = ((used_so_far * bar_width as u64) / total).min(bar_width as u64) as u16;
+        let width = width_now.saturating_sub(width_so_far);
+        width_so_far = width_now;
+        width
+    };
+    let widths = [segment(groups[0]), segment(groups[1]), segment(groups[2])];
+    let free_w = bar_width.saturating_sub(width_so_far);
+
     frame.render_widget(
-        Paragraph::new(format!(
-            "{} used of {}",
-            format_bytes(app.stats.memory_used),
-            format_bytes(app.stats.memory_total)
-        ))
-        .style(Style::default().fg(muted())),
-        rows[2],
+        Paragraph::new(Line::from(vec![
+            Span::styled("█".repeat(widths[0] as usize), Style::default().fg(colours.0)),
+            Span::styled("█".repeat(widths[1] as usize), Style::default().fg(colours.1)),
+            Span::styled("█".repeat(widths[2] as usize), Style::default().fg(colours.2)),
+            Span::styled("░".repeat(free_w as usize), Style::default().fg(muted())),
+        ])),
+        bar_area,
     );
 }
 
-fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Color) {
-    // The percentage carries its own background. `Gauge` swaps fg and bg for the
-    // cells the label covers, so a foreground-only label lands on a bar of the same
-    // colour once the fill reaches it -- invisible under `mono`.
-    let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .title(label)
-                .style(Style::default().fg(muted()).bg(background())),
-        )
-        .gauge_style(
-            Style::default()
-                .fg(color)
-                .bg(crate::theme::current().gauge_background),
-        )
-        .percent(value.min(100) as u16)
-        .label(Span::styled(
-            format!("{value}%"),
-            Style::default().fg(inverse_text()).bg(color).bold(),
-        ));
-    frame.render_widget(gauge, area);
+/// CPU as OVERVIEW draws it, the same three-group shape `draw_memory_breakdown` uses
+/// for RAM: the daemon's own cgroup, what running instances are using, and everything
+/// else on the host, each a share of `cpu_percent` (already averaged across every
+/// core). Whatever the bar leaves unfilled is host CPU that is simply idle.
+fn draw_cpu_breakdown(
+    frame: &mut Frame,
+    title_area: Rect,
+    bar_area: Rect,
+    percent_area: Rect,
+    stats: &DashboardStats,
+) {
+    let breakdown = cpu_breakdown(stats);
+    let (daemon_colour, instances_colour, host_colour) = breakdown_colours();
+
+    frame.render_widget(
+        Paragraph::new(Span::styled("CPU", Style::default().fg(muted()))),
+        title_area,
+    );
+    draw_breakdown_bar(
+        frame,
+        bar_area,
+        [breakdown.daemon, breakdown.instances, breakdown.host_other],
+        breakdown.total,
+        (daemon_colour, instances_colour, host_colour),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Daemon ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.daemon_percent()),
+                Style::default().fg(daemon_colour).bold(),
+            ),
+            Span::styled("  Instances ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.instances_percent()),
+                Style::default().fg(instances_colour).bold(),
+            ),
+            Span::styled("  Host ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.host_other_percent()),
+                Style::default().fg(host_colour).bold(),
+            ),
+        ])),
+        percent_area,
+    );
+}
+
+/// RAM as OVERVIEW draws it: a title line, then one row of coloured blocks over
+/// `memory_total`'s width -- daemon, then instances' reservations, then everything
+/// else the host has resident -- followed by their percentages and, in bytes, what
+/// each figure actually is. Whatever the bar leaves unfilled is free, exactly as the
+/// gauge it replaced also left unfilled.
+fn draw_memory_breakdown(
+    frame: &mut Frame,
+    title_area: Rect,
+    bar_area: Rect,
+    percent_area: Rect,
+    bytes_area: Rect,
+    stats: &DashboardStats,
+) {
+    let breakdown = memory_breakdown(stats);
+    let (daemon_colour, instances_colour, host_colour) = breakdown_colours();
+
+    frame.render_widget(
+        Paragraph::new(Span::styled("RAM", Style::default().fg(muted()))),
+        title_area,
+    );
+    draw_breakdown_bar(
+        frame,
+        bar_area,
+        [breakdown.daemon, breakdown.instances_reserved, breakdown.host_other],
+        breakdown.total,
+        (daemon_colour, instances_colour, host_colour),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Daemon ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.daemon_percent()),
+                Style::default().fg(daemon_colour).bold(),
+            ),
+            Span::styled("  Instances ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.instances_percent()),
+                Style::default().fg(instances_colour).bold(),
+            ),
+            Span::styled("  Host ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.host_other_percent()),
+                Style::default().fg(host_colour).bold(),
+            ),
+        ])),
+        percent_area,
+    );
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{} · {} · {} of {}",
+            format_bytes(breakdown.daemon),
+            format_bytes(breakdown.instances_reserved),
+            format_bytes(breakdown.host_other),
+            format_bytes(breakdown.total),
+        ))
+        .style(Style::default().fg(muted())),
+        bytes_area,
+    );
+}
+
+/// The HOST CAPACITY panel's RAM bar: three groups of host memory rather than the one
+/// gauge it replaced (the daemon's own cgroup, what running instances have reserved,
+/// and everything else on the host).
+#[cfg(test)]
+mod ram_breakdown {
+    use super::render;
+    use crate::app::{App, Page};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn overview_screen(app: &mut App) -> String {
+        app.tabs.select_page(Page::Overview);
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A node with a daemon reading, running instances holding a reservation, and the
+    /// rest of the host in between: OVERVIEW names all three groups rather than just
+    /// the combined "used of total" the single RAM gauge used to print.
+    #[test]
+    fn the_three_groups_are_named_on_screen() {
+        let mut app = App::new();
+        app.stats.memory_total = 10_000;
+        app.stats.memory_used = 8_000;
+        app.stats.daemon_memory_used = 500;
+        app.stats.instance_memory_reserved = 2_500;
+
+        let screen = overview_screen(&mut app);
+
+        for label in ["Daemon", "Instances", "Host"] {
+            assert!(screen.contains(label), "no {label} group on screen:\n{screen}");
+        }
+        // 500/10_000, 2_500/10_000 and (8_000-500-2_500)/10_000.
+        assert!(screen.contains("5%"), "{screen}");
+        assert!(screen.contains("25%"), "{screen}");
+        assert!(screen.contains("50%"), "{screen}");
+    }
+
+    /// The bar itself, not just its legend: three distinctly coloured runs of filled
+    /// cells in reservation order (daemon, then instances, then the rest of the
+    /// host), because a legend nobody can line up against the bar it describes is not
+    /// much of a bar chart.
+    #[test]
+    fn the_bar_draws_three_differently_coloured_segments_in_order() {
+        let mut app = App::new();
+        app.stats.memory_total = 10_000;
+        app.stats.memory_used = 8_000;
+        app.stats.daemon_memory_used = 500;
+        app.stats.instance_memory_reserved = 2_500;
+        app.tabs.select_page(Page::Overview);
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        // The RAM bar is the row right below its own "RAM" title line -- found by
+        // "RAM" followed by nothing but padding up to the card's right border, since
+        // the bar no longer carries an inline label (RAM's title now sits on its own
+        // line, the way CPU's already did). A plain `contains("RAM")` would also match
+        // the WORKLOAD card's "Reserved ... RAM / ..." line, which has more text after
+        // "RAM" than padding.
+        let title_row = (0..buffer.area.height)
+            .find(|row| {
+                let line: String = (0..buffer.area.width)
+                    .map(|column| buffer.get(column, *row).symbol())
+                    .collect();
+                line.find("RAM")
+                    .map(|start| line[start + 3..].trim_start().starts_with('│'))
+                    .unwrap_or(false)
+            })
+            .expect("a RAM title row");
+        let row = title_row + 1;
+        let colours: Vec<_> = (0..buffer.area.width)
+            .filter(|column| buffer.get(*column, row).symbol() == "█")
+            .map(|column| buffer.get(column, row).style().fg)
+            .collect();
+        assert!(!colours.is_empty(), "no filled cell on the bar row");
+
+        let mut runs: Vec<_> = vec![colours[0]];
+        for colour in &colours[1..] {
+            if runs.last() != Some(colour) {
+                runs.push(*colour);
+            }
+        }
+        assert_eq!(
+            runs.len(),
+            3,
+            "expected three coloured segments, drew {}:\n{colours:?}",
+            runs.len()
+        );
+    }
+}
+
+/// The HOST CAPACITY panel's CPU bar: the same three-group shape as `ram_breakdown`,
+/// with a title line of its own above the bar rather than folded into it (issue: CPU
+/// already put its label on its own line via `Gauge`'s block; RAM's bar and this one
+/// now match it).
+#[cfg(test)]
+mod cpu_breakdown_ui {
+    use super::render;
+    use crate::app::{App, Page};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// A daemon and some instances each using a slice of a core, and the rest of the
+    /// host-wide reading is everyone else: the same three named groups RAM already
+    /// gets, rather than the single unlabelled percentage the old CPU gauge drew.
+    #[test]
+    fn the_three_groups_are_named_on_screen() {
+        let mut app = App::new();
+        app.stats.cpu_percent = 52;
+        app.stats.cpu_cores = 4;
+        app.stats.daemon_cpu_percent = 4.0;
+        app.stats.instance_cpu_percent = 200.0;
+        app.tabs.select_page(Page::Overview);
+
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let screen: String = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for label in ["Daemon", "Instances", "Host"] {
+            assert!(screen.contains(label), "no {label} group on screen:\n{screen}");
+        }
+        // 4/4=1% daemon, 200/4=50% instances, 52-1-50=1% host.
+        assert!(screen.contains("1%"), "{screen}");
+        assert!(screen.contains("50%"), "{screen}");
+    }
+
+    /// The bar sits on its own line directly below the "CPU" title, the same shape
+    /// RAM's bar now has, and still draws three distinctly coloured runs rather than
+    /// the single hue the old `Gauge`-based bar drew.
+    #[test]
+    fn the_bar_is_its_own_line_below_the_title_and_draws_three_segments() {
+        let mut app = App::new();
+        // Wide enough shares (20% / 40% / 20%) that none rounds away to a zero-width
+        // run on the bar -- unlike the first test's 1% daemon and host groups, which
+        // exist for the legend but are too thin to ask a rendered bar to show.
+        app.stats.cpu_percent = 80;
+        app.stats.cpu_cores = 2;
+        app.stats.daemon_cpu_percent = 40.0;
+        app.stats.instance_cpu_percent = 80.0;
+        app.tabs.select_page(Page::Overview);
+
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        // Found the same way `ram_breakdown` finds RAM's: "CPU" followed by nothing
+        // but padding up to the card's border, so this doesn't match some other line
+        // that happens to mention CPU.
+        let title_row = (0..buffer.area.height)
+            .find(|row| {
+                let line: String = (0..buffer.area.width)
+                    .map(|column| buffer.get(column, *row).symbol())
+                    .collect();
+                line.find("CPU")
+                    .map(|start| line[start + 3..].trim_start().starts_with('│'))
+                    .unwrap_or(false)
+            })
+            .expect("a CPU title row");
+        let row = title_row + 1;
+        let colours: Vec<_> = (0..buffer.area.width)
+            .filter(|column| buffer.get(*column, row).symbol() == "█")
+            .map(|column| buffer.get(column, row).style().fg)
+            .collect();
+        assert!(!colours.is_empty(), "no filled cell on the bar row");
+
+        let mut runs: Vec<_> = vec![colours[0]];
+        for colour in &colours[1..] {
+            if runs.last() != Some(colour) {
+                runs.push(*colour);
+            }
+        }
+        assert_eq!(
+            runs.len(),
+            3,
+            "expected three coloured segments, drew {}:\n{colours:?}",
+            runs.len()
+        );
+    }
+}
+
+/// The INSTANCES table's columns, most important first by `priority` (issue #453).
+///
+/// What identifies the instance (name, id) and what it is doing to the machine
+/// (service, CPU, time left, RAM) outlast who asked for it and what it is worth;
+/// the virtualizer, the network rates and the burn rate go first, because the card
+/// below repeats every one of them in full.
+pub(crate) const INSTANCE_COLUMNS: [crate::layout_util::Column; 13] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Name", Constraint::Length(14), 6, 0),
+        Column::new("Location", Constraint::Length(12), 5, 6),
+        Column::new("Instance", Constraint::Length(16), 8, 1),
+        Column::new("Service", Constraint::Length(14), 7, 2),
+        Column::new("Client", Constraint::Length(17), 7, 7),
+        Column::new("Up", Constraint::Length(8), 4, 9),
+        Column::new("Left", Constraint::Length(9), 5, 4),
+        Column::new("VM", Constraint::Length(6), 3, 12),
+        Column::new("CPU%", Constraint::Length(6), 4, 3),
+        Column::new("RAM now/max", Constraint::Length(13), 9, 5),
+        Column::new("Net ↓/↑ per s", Constraint::Length(13), 9, 10),
+        Column::new("Balance", Constraint::Length(12), 8, 8),
+        Column::new("Burn/h", Constraint::Min(10), 7, 11),
+    ]
+};
+
+/// A table above the card describing its selected row, when the terminal may be too
+/// short for both (issue #453).
+///
+/// The table comes first: it is how a row gets selected at all, and a card that
+/// squeezed it off the screen would describe a row nobody can change. It keeps
+/// `table_want` rows (border, header and a few rows) before the card grows; the
+/// card gets up to `card_want` and only appears at all with room for one line
+/// between its borders. Whatever is left after the card goes back to the table.
+pub(crate) fn list_and_card(area: Rect, table_want: u16, card_want: u16) -> [Rect; 2] {
+    const TABLE_MIN: u16 = 5;
+    const CARD_MIN: u16 = 3;
+    let heights = crate::layout_util::allocate_heights(
+        area.height,
+        &[(TABLE_MIN, table_want), (CARD_MIN, card_want)],
+        &[0, 1],
+    );
+    let card = heights[1];
+    let rects = crate::layout_util::stack(area, &[area.height - card, card]);
+    [rects[0], rects[1]]
 }
 
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -825,109 +1540,124 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    // 16 = 14 detail lines + the block's two border rows. The card carries the figures
+    // 18 = 16 detail lines + the block's two border rows. The card carries the figures
     // the row has no width for: the endpoint, the disk allocation, the vCPU allowance
     // the CPU% is measured against, the cumulative disk/net totals, the burn rate, the
-    // attributed watts (issue #258), who requested the instance, and what its balance
-    // is worth in time.
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(16)]).split(area);
-    let rows = app.instances.items.iter().map(|instance| {
-        let location = if instance.is_local() {
-            "local".to_string()
-        } else {
-            shorten(&instance.location, 14)
-        };
-        let location_style = if instance.is_local() {
-            Style::default().fg(good())
-        } else {
-            Style::default().fg(warn())
-        };
-        Row::new(vec![
-            Cell::from(instance.name.clone()),
-            Cell::from(location).style(location_style),
-            Cell::from(shorten(&instance.id, 18)),
-            Cell::from(instance.service.clone()),
-            // Whose work this is. `father_id` on its own is an opaque string that
-            // could be a client, a parent instance or a dev launch -- the page
-            // grouped by it and never said which.
-            Cell::from(instance.client.short())
-                .style(Style::default().fg(client_colour(&instance.client))),
-            Cell::from(format_duration_compact(instance.age_secs)),
-            // What the balance beside it is worth in time, which is the form the
-            // question is actually asked in: "does this need topping up today".
-            Cell::from(format_duration_compact(instance.remaining_secs()))
-                .style(Style::default().fg(remaining_colour(instance))),
-            Cell::from(instance.virtualizer.clone()),
-            Cell::from(format_cpu_percent(instance.usage.cpu_percent))
-                .style(Style::default().fg(cpu_load_color(instance))),
-            // Used against allocated in one cell: two columns made the operator do the
-            // division, which is the whole question being asked of this page.
-            Cell::from(format!(
-                "{} / {}",
-                instance
-                    .usage
-                    .memory_current
-                    .map(format_bytes_compact)
-                    .unwrap_or_else(|| "—".to_string()),
-                format_bytes_compact(instance.memory_limit)
-            )),
-            Cell::from(format!(
-                "{} / {}",
-                format_rate_compact(instance.usage.net_rx_rate),
-                format_rate_compact(instance.usage.net_tx_rate)
-            )),
-            Cell::from(app.money.format_raw(&instance.balance)),
-            Cell::from(format_burn_rate(instance.mu_per_hour, &app.money)),
-        ])
-    });
+    // attributed watts (issue #258), who requested the instance, what its balance
+    // is worth in time, and the tunnels that reach it.
+    //
+    // Below the card, the selected instance's tunnels as a table of their own -- one
+    // row per tunnel, the relationship `nodo tunnels --instance <id>` prints -- and
+    // only when there is one: the card's Tunnels line says "none" otherwise.
+    let (reaching, instance_label) = match app.instances.selected() {
+        Some(instance) => (
+            crate::tunnels::reaching(&app.tunnels.items, &instance.id, &instance.name)
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            if instance.name.trim().is_empty() { instance.id.clone() } else { instance.name.clone() },
+        ),
+        None => (Vec::new(), String::new()),
+    };
+    let tunnels_want = crate::tunnels::instance_tunnels_height(reaching.len());
+    let (layout, tunnels_area) = if tunnels_want == 0 {
+        (list_and_card(area, 8, 18), Rect::default())
+    } else {
+        // The table and the card keep their minimums first; the relationship table
+        // takes what is left, up to a row per tunnel.
+        let heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(5, 8), (3, 18), (3, tunnels_want)],
+            &[0, 1, 2],
+        );
+        let rects = crate::layout_util::stack(
+            area,
+            &[area.height - heights[1] - heights[2], heights[1], heights[2]],
+        );
+        ([rects[0], rects[1]], rects[2])
+    };
+    if tunnels_area.height > 0 {
+        crate::tunnels::draw_instance_tunnels(frame, &reaching, &instance_label, tunnels_area);
+    }
+    let rows = app
+        .instances
+        .items
+        .iter()
+        .map(|instance| {
+            let location = if instance.is_local() {
+                "local".to_string()
+            } else {
+                shorten(&instance.location, 14)
+            };
+            let location_style = if instance.is_local() {
+                Style::default().fg(good())
+            } else {
+                Style::default().fg(warn())
+            };
+            let cells: Vec<TextCell> = vec![
+                instance.name.clone().into(),
+                TextCell::from(location).style(location_style),
+                shorten(&instance.id, 18).into(),
+                instance.service.clone().into(),
+                // Whose work this is. `father_id` on its own is an opaque string that
+                // could be a client, a parent instance or a dev launch -- the page
+                // grouped by it and never said which.
+                TextCell::from(instance.client.short())
+                    .style(Style::default().fg(client_colour(&instance.client))),
+                format_duration_compact(instance.age_secs).into(),
+                // What the balance beside it is worth in time, which is the form the
+                // question is actually asked in: "does this need topping up today".
+                TextCell::from(format_duration_compact(instance.remaining_secs()))
+                    .style(Style::default().fg(remaining_colour(instance))),
+                instance.virtualizer.clone().into(),
+                TextCell::from(format_cpu_percent(instance.usage.cpu_percent))
+                    .style(Style::default().fg(cpu_load_color(instance))),
+                // Used against allocated in one cell: two columns made the operator do the
+                // division, which is the whole question being asked of this page.
+                format!(
+                    "{} / {}",
+                    instance
+                        .usage
+                        .memory_current
+                        .map(format_bytes_compact)
+                        .unwrap_or_else(|| "—".to_string()),
+                    format_bytes_compact(instance.memory_limit)
+                )
+                .into(),
+                format!(
+                    "{} / {}",
+                    format_rate_compact(instance.usage.net_rx_rate),
+                    format_rate_compact(instance.usage.net_tx_rate)
+                )
+                .into(),
+                app.money.format_raw(&instance.balance).into(),
+                format_burn_rate(instance.mu_per_hour, &app.money).into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
     let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
     let remote_count = app.instances.items.len() - local_count;
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(14),
-            Constraint::Length(12),
-            Constraint::Length(16),
-            Constraint::Length(14),
-            Constraint::Length(17),
-            Constraint::Length(8),
-            Constraint::Length(9),
-            Constraint::Length(6),
-            Constraint::Length(6),
-            Constraint::Length(13),
-            Constraint::Length(13),
-            Constraint::Length(12),
-            Constraint::Min(10),
-        ],
-    )
     // `IP` moved off the table and onto the card. It is the one column here nobody
     // scans -- an endpoint is copied, not compared -- and the three columns that
     // replaced it each answer a question the page could not answer at all: whose
     // work this is, how long it has been running, and how long it can keep running.
-    .header(header_row(vec![
-        "Name",
-        "Location",
-        "Instance",
-        "Service",
-        "Client",
-        "Up",
-        "Left",
-        "VM",
-        "CPU%",
-        "RAM now/max",
-        "Net ↓/↑ per s",
-        "Balance",
-        "Burn/h",
-    ]))
-    .block(section_block(
-        format!(
-            " INSTANCES • {} local • {} remote ",
-            local_count, remote_count
-        ),
-        series(0),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+    let (table, _) = fitted_table(
+        &INSTANCE_COLUMNS,
+        rows,
+        layout[0],
+        app.instances.state.selected().is_some(),
+    );
+    let table = table
+        .block(section_block(
+            format!(
+                " INSTANCES • {} local • {} remote ",
+                local_count, remote_count
+            ),
+            series(0),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     app.list_area = layout[0];
     frame.render_stateful_widget(table, layout[0], &mut app.instances.state);
 
@@ -985,6 +1715,11 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
                 format!("nodo observe {}", instance.id),
             ));
         }
+        // The way in from here that does not need a port of its own; `t` opens one.
+        lines.push(metric_line(
+            "Tunnels",
+            crate::tunnels::instance_summary(&app.tunnels.items, &instance.id, &instance.name),
+        ));
         lines
     } else {
         vec![Line::from(Span::styled(
@@ -1040,7 +1775,7 @@ fn started_detail(instance: &Instance) -> String {
 /// before `launched_at` existed) or has no answer (a remaining lifetime against no
 /// burn rate). Never `0`: that is a real reading -- an instance whose balance is
 /// already spent -- and it must not be what "unknown" looks like.
-fn format_duration_compact(secs: Option<f64>) -> String {
+pub(crate) fn format_duration_compact(secs: Option<f64>) -> String {
     let Some(secs) = secs.filter(|secs| secs.is_finite() && *secs >= 0.0) else {
         return "—".to_string();
     };
@@ -1216,7 +1951,7 @@ fn node_cost_line(energy: &crate::app::NodeEnergy) -> String {
         {
             let per_hour = (watts / 1000.0) * energy.price_per_kwh;
             let currency = if energy.currency.is_empty() {
-                "EUR"
+                "USD"
             } else {
                 energy.currency.as_str()
             };
@@ -1437,51 +2172,57 @@ fn external_parent_label(instance: &Instance, client_ids: &HashSet<&str>) -> Opt
     })
 }
 
+/// The SERVICES table's columns (issue #453): the tag an operator recognises and the
+/// id they would paste outlast the two sizes, and the size a transfer costs outlasts
+/// the one the local disk does.
+pub(crate) const SERVICE_COLUMNS: [crate::layout_util::Column; 4] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Tag", Constraint::Length(28), 8, 0),
+        Column::new("Content ID", Constraint::Min(38), 12, 1),
+        Column::new("Stored here", Constraint::Length(13), 7, 3),
+        Column::new("With blocks", Constraint::Length(14), 7, 2),
+    ]
+};
+
 fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
     // The card grows with the selected service's reputation history, and yields to the
     // table when the terminal is short, like the peer and client cards.
-    const MIN_TABLE_HEIGHT: u16 = 8;
     let card = service_detail_lines(app.services.selected(), app.service_detail.as_ref());
-    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
-    let card_height = (card.len() as u16 + 2).clamp(5, available.max(5));
-    let layout =
-        Layout::vertical([Constraint::Min(MIN_TABLE_HEIGHT), Constraint::Length(card_height)])
-            .split(area);
-    let rows = app.services.items.iter().map(|service| {
-        Row::new(vec![
-            Cell::from(service.tag.clone()),
-            Cell::from(service.id.clone()),
-            Cell::from(format_bytes(service.size_bytes)),
-            Cell::from(format_total_size(service))
-                .style(Style::default().fg(total_size_colour(service))),
-        ])
-    });
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(28),
-            Constraint::Min(38),
-            Constraint::Length(13),
-            Constraint::Length(14),
-        ],
-    )
-    // "Stored" is what this service adds to the disk; "With blocks" is what it
+    let layout = list_and_card(area, 8, (card.len() as u16 + 2).max(5));
+    let rows = app
+        .services
+        .items
+        .iter()
+        .map(|service| {
+            let cells: Vec<TextCell> = vec![
+                service.tag.clone().into(),
+                service.id.clone().into(),
+                format_bytes(service.size_bytes).into(),
+                TextCell::from(format_total_size(service))
+                    .style(Style::default().fg(total_size_colour(service))),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    // "Stored here" is what this service adds to the disk; "With blocks" is what it
     // weighs. The two differ by every byte it shares with another service, which
     // for a service whose bulk is one large layer is nearly all of it -- so a
     // single figure was answering one of two quite different questions without
     // saying which.
-    .header(header_row(vec![
-        "Tag",
-        "Content ID",
-        "Stored",
-        "With blocks",
-    ]))
-    .block(section_block(
-        format!(" SERVICES • {} available ", app.services.items.len()),
-        series(1),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+    let (table, _) = fitted_table(
+        &SERVICE_COLUMNS,
+        rows,
+        layout[0],
+        app.services.state.selected().is_some(),
+    );
+    let table = table
+        .block(section_block(
+            format!(" SERVICES • {} available ", app.services.items.len()),
+            series(1),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     app.list_area = layout[0];
     frame.render_stateful_widget(table, layout[0], &mut app.services.state);
 
@@ -1588,175 +2329,6 @@ fn service_detail_lines(
     lines
 }
 
-/// The peers page: who we talk to, and everything we have paid them.
-///
-/// Separate from clients: a peer is someone we pay, a client someone who pays us.
-fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
-    // The card sizes itself to what the selected peer actually has: contracts, the
-    // payments made to it, the events behind its score. It yields first when the
-    // terminal is short -- a card that squeezed the table off-screen would leave no
-    // way to pick the peer it is describing.
-    const MIN_TABLE_HEIGHT: u16 = 7;
-    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
-    let selected = app.peers.selected();
-    let detail_source = app.peer_detail.as_ref();
-    // Prefer the roomy breakdown, but fall back to one line per contract rather
-    // than let a short terminal clip the contracts away silently -- an empty
-    // card reads as "no contract registered", the exact confusion #231 is about.
-    let donation = selected.and_then(|peer| app.donations.for_peer(&peer.id));
-    // A failed query replaces the card outright, so it also has to be what the card
-    // is *sized* from: sizing to the peer detail and then drawing the error into it
-    // clips the one line that says what went wrong.
-    let detail = match &app.peers_error {
-        Some(error) => peers_unreadable_lines(error),
-        None => {
-            let full = peer_detail_lines(&app.money, selected, detail_source, donation, false);
-            if full.len() as u16 + 2 <= available {
-                full
-            } else {
-                peer_detail_lines(&app.money, selected, detail_source, donation, true)
-            }
-        }
-    };
-    let detail_height = (detail.len() as u16 + 2).min(available);
-    let split = Layout::vertical([
-        Constraint::Min(MIN_TABLE_HEIGHT),
-        Constraint::Length(detail_height),
-    ])
-    .split(area);
-
-    let peers = app.peers.items.iter().map(|peer| {
-        Row::new(vec![
-            Cell::from(peer.id.clone()),
-            Cell::from(peer.uris.clone()),
-            Cell::from(app.money.format_raw(&peer.balance)),
-            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(good()).bold()),
-            Cell::from(match peer.proof_ids.len() {
-                0 => "none".to_string(),
-                1 => shorten(&peer.proof_ids[0], 18),
-                n => format!("{n} announced"),
-            }),
-        ])
-    });
-    let peer_table = Table::new(
-        peers,
-        [
-            Constraint::Length(30),
-            Constraint::Length(24),
-            Constraint::Length(13),
-            Constraint::Length(7),
-            Constraint::Min(20),
-        ],
-    )
-    .header(header_row(vec![
-        "Peer ID",
-        "Endpoints",
-        "Our balance",
-        "Rep",
-        "Reputation proofs",
-    ]))
-    .block(section_block(
-        match &app.peers_error {
-            // Consequence first: an operator reading this row has to learn that the
-            // page is not answering before learning what SQLite said about it.
-            Some(_) => " PEERS • CANNOT BE READ ".to_string(),
-            None => format!(" PEERS • {} connected ", app.peers.items.len()),
-        },
-        if app.peers_error.is_some() { bad() } else { accent() },
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
-    app.list_area = split[0];
-    frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
-
-    // A query that failed takes the card, not a corner of it. `0 connected` is the
-    // screen a new node draws, so an unreadable table that merely looked empty was
-    // indistinguishable from a healthy one -- which is how a stale query survived a
-    // schema change unnoticed.
-    match &app.peers_error {
-        Some(_) => draw_card(frame, split[1], "PEERS UNREADABLE", detail, bad()),
-        None => draw_card(frame, split[1], "SELECTED PEER", detail, accent()),
-    }
-}
-
-/// What the card says instead of a peer, when the peer list could not be read.
-///
-/// Consequence first: the rows on screen are stale and the count cannot be trusted.
-/// The database's own words come second -- they are what an operator pastes into an
-/// issue, and useless without knowing they matter.
-fn peers_unreadable_lines(error: &str) -> Vec<Line<'static>> {
-    vec![
-        Line::from(Span::styled(
-            "This node's peers cannot be listed, so the table above is stale and its \
-             count cannot be trusted.",
-            Style::default().fg(bad()).bold(),
-        )),
-        Line::from(Span::styled(
-            error.to_string(),
-            Style::default().fg(text_colour()),
-        )),
-        Line::from(Span::styled(
-            "`nodo peers` reads the same database, and reports the same failure in full.",
-            Style::default().fg(muted()),
-        )),
-    ]
-}
-
-/// The clients page: who pays us, and what they are running here.
-fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
-    const MIN_TABLE_HEIGHT: u16 = 6;
-    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
-    let selected = app.clients.selected();
-    let detail_source = app.client_detail.as_ref();
-    let full = client_detail_lines(&app.money, selected, detail_source, false);
-    let detail = if full.len() as u16 + 2 <= available {
-        full
-    } else {
-        client_detail_lines(&app.money, selected, detail_source, true)
-    };
-    let detail_height = (detail.len() as u16 + 2).min(available);
-    let split = Layout::vertical([
-        Constraint::Min(MIN_TABLE_HEIGHT),
-        Constraint::Length(detail_height),
-    ])
-    .split(area);
-
-    let clients = app.clients.items.iter().map(|client| {
-        Row::new(vec![
-            Cell::from(client.id.clone()),
-            Cell::from(app.money.format_raw(&client.balance)),
-            Cell::from(client.last_usage.clone()),
-            // A balance that never moves is the flag doing its job, not a bug.
-            Cell::from(if client.unmetered { "never charged" } else { "" })
-                .style(Style::default().fg(muted())),
-        ])
-    });
-    let client_table = Table::new(
-        clients,
-        [
-            Constraint::Min(38),
-            Constraint::Length(24),
-            Constraint::Length(20),
-            Constraint::Length(14),
-        ],
-    )
-    .header(header_row(vec![
-        "Client ID",
-        "Balance",
-        "Last usage",
-        "Metering",
-    ]))
-    .block(section_block(
-        format!(" CLIENTS • {} known ", app.clients.items.len()),
-        accent(),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
-    app.list_area = split[0];
-    frame.render_stateful_widget(client_table, split[0], &mut app.clients.state);
-
-    draw_card(frame, split[1], "SELECTED CLIENT", detail, accent());
-}
 
 /// The two things a node earns by being up: money, and the network's opinion of it.
 ///
@@ -1775,18 +2347,47 @@ fn draw_earnings(frame: &mut Frame, app: &mut App, area: Rect) {
     // Two borders, the header, the blank line `header_row` puts under it, and a row
     // per payment network -- one placeholder row when there is none.
     let table_height = app.earnings.len().max(1) as u16 + 4;
-    let rows = Layout::vertical([
-        Constraint::Length(table_height),
-        Constraint::Length(donations.len() as u16 + 2),
-        Constraint::Length(notes.len() as u16 + 2),
-        Constraint::Min(MIN_OPINIONS_HEIGHT),
-    ])
-    .split(area);
+    let donations_height = donations.len() as u16 + 2;
+    let notes_height = notes.len() as u16 + 2;
+    let fixed = table_height + donations_height + notes_height;
+    let rows = if fixed + MIN_OPINIONS_HEIGHT <= area.height {
+        Layout::vertical([
+            Constraint::Length(table_height),
+            Constraint::Length(donations_height),
+            Constraint::Length(notes_height),
+            Constraint::Min(MIN_OPINIONS_HEIGHT),
+        ])
+        .split(area)
+        .to_vec()
+    } else {
+        // Short (issue #453): each card shrinks toward a single line between its
+        // borders, and then goes, in the order it matters least -- the notes about
+        // reputation first, then the donations, then the opinions table; what came in
+        // goes last. A card squeezed to its borders says nothing and hides the rows
+        // that would have.
+        let mut heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(5, table_height), (3, donations_height), (3, notes_height), (MIN_OPINIONS_HEIGHT, MIN_OPINIONS_HEIGHT)],
+            &[0, 3, 1, 2],
+        );
+        // What is left goes to the opinions when they are drawn at all, and to what
+        // came in when they are not -- never to an empty box.
+        let used: u16 = heights.iter().sum();
+        let grow = if heights[3] > 0 { 3 } else { 0 };
+        heights[grow] += area.height - used;
+        crate::layout_util::stack(area, &heights)
+    };
 
     draw_money_taken_in(frame, app, rows[0]);
-    draw_card(frame, rows[1], "DONATIONS PAID OUT", donations, series(1));
-    draw_card(frame, rows[2], "REPUTATION HELD ON THIS NODE", notes, accent());
-    draw_opinions(frame, app, rows[3]);
+    if rows[1].height > 0 {
+        draw_card(frame, rows[1], "DONATIONS PAID OUT", donations, series(1));
+    }
+    if rows[2].height > 0 {
+        draw_card(frame, rows[2], "REPUTATION HELD ON THIS NODE", notes, accent());
+    }
+    if rows[3].height > 0 {
+        draw_opinions(frame, app, rows[3]);
+    }
 }
 
 /// What this node donates, what is waiting to go out, and to whom.
@@ -1952,65 +2553,58 @@ fn draw_money_taken_in(frame: &mut Frame, app: &App, area: Rect) {
         " MONEY TAKEN IN ".to_string()
     };
 
-    let mut rows: Vec<Row> = app
+    let mut rows: Vec<(Vec<TextCell>, Style)> = app
         .earnings
         .iter()
         .map(|entry| {
-            Row::new(vec![
-                Cell::from(entry.ledger.clone()),
+            let cells = vec![
+                entry.ledger.clone().into(),
                 money_cell(&app.money, entry.day),
                 money_cell(&app.money, entry.week),
                 money_cell(&app.money, entry.month),
                 money_cell(&app.money, entry.year),
                 money_cell(&app.money, entry.total),
-            ])
+            ];
+            (cells, Style::default())
         })
         .collect();
     if rows.is_empty() {
         // A node nobody has paid has earned zero over every window, which is a
         // measurement -- so the row is drawn with the zeros rather than left out, and
         // named for why it has no payment network of its own.
-        rows.push(
-            Row::new(
-                std::iter::once(Cell::from("nothing paid in yet"))
-                    .chain((0..5).map(|_| money_cell(&app.money, 0)))
-                    .collect::<Vec<_>>(),
-            )
-            .style(Style::default().fg(muted())),
-        );
+        rows.push((
+            std::iter::once(TextCell::from("nothing paid in yet"))
+                .chain((0..5).map(|_| money_cell(&app.money, 0)))
+                .collect::<Vec<_>>(),
+            Style::default().fg(muted()),
+        ));
     }
 
-    frame.render_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Min(20),
-                Constraint::Length(12),
-                Constraint::Length(12),
-                Constraint::Length(12),
-                Constraint::Length(12),
-                Constraint::Length(12),
-            ],
-        )
-        .header(header_row(vec![
-            "Network",
-            "Last day",
-            "Last week",
-            "Last month",
-            "Last year",
-            "All time",
-        ]))
-        .block(section_block(title, accent())),
-        area,
-    );
+    let (table, _) = fitted_table(&MONEY_COLUMNS, rows, area, false);
+    frame.render_widget(table.block(section_block(title, accent())), area);
 }
+
+/// The MONEY TAKEN IN table's columns (issue #453): the network and the all-time
+/// total outlast the windows, which give way longest first -- the last day is the
+/// one a running node is watched by.
+const MONEY_COLUMNS: [crate::layout_util::Column; 6] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Network", Constraint::Min(20), 8, 0),
+        Column::new("Last day", Constraint::Length(12), 6, 2),
+        Column::new("Last week", Constraint::Length(12), 6, 3),
+        Column::new("Last month", Constraint::Length(12), 6, 4),
+        Column::new("Last year", Constraint::Length(12), 6, 5),
+        Column::new("All time", Constraint::Length(12), 6, 1),
+    ]
+};
 
 /// One amount, in the display unit, greyed when there is nothing in it.
 ///
 /// A real zero, not a `—`: the catalogue was read and nothing came in over that
 /// window, which is a measurement and not a gap.
-fn money_cell(money: &Money, amount: u128) -> Cell<'static> {
-    let cell = Cell::from(money.format_raw(&amount.to_string()));
+fn money_cell(money: &Money, amount: u128) -> TextCell {
+    let cell = TextCell::from(money.format_raw(&amount.to_string()));
     if amount == 0 {
         cell.style(Style::default().fg(muted()))
     } else {
@@ -2130,6 +2724,18 @@ fn reputation_lines(app: &App) -> Vec<Line<'static>> {
 }
 
 /// Every proof that has staked something on this node.
+/// The WHO STAKES table's columns (issue #453): the stake and whose proof it is
+/// outlast what it cost and when it was published.
+const OPINION_COLUMNS: [crate::layout_util::Column; 4] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Stake", Constraint::Length(10), 6, 0),
+        Column::new("Backed by", Constraint::Length(13), 8, 2),
+        Column::new("Proof", Constraint::Min(26), 10, 1),
+        Column::new("Published", Constraint::Length(10), 6, 3),
+    ]
+};
+
 fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
     if app.opinions.items.is_empty() {
         frame.render_widget(
@@ -2154,54 +2760,52 @@ fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
         .reputation
         .read_at
         .unwrap_or_else(|| unix_now().unwrap_or(0));
-    let rows = app.opinions.items.iter().map(|opinion| {
-        Row::new(vec![
-            Cell::from(format!(
-                "{}{}",
-                if opinion.positive { "+" } else { "−" },
-                format_share(opinion.weight)
-            ))
-            .style(Style::default().fg(if opinion.positive { good() } else { bad() })),
-            // What that share cost whoever published it. A proof sitting at the
-            // min-box value has had nothing sacrificed into it, which is what tells a
-            // cheap opinion from an expensive one.
-            Cell::from(format_erg(opinion.backed_nanoerg)).style(Style::default().fg(
-                if opinion.backed_nanoerg > 0.0 {
-                    accent()
-                } else {
-                    muted()
-                },
-            )),
-            // Long enough to identify the proof on an explorer, with the ellipsis
-            // making it plain that it is not the whole id.
-            Cell::from(shorten(&opinion.proof_id, 40)),
-            Cell::from(format_age(opinion.published_at, now)),
-        ])
-    });
-    let table = Table::new(
+    let rows = app
+        .opinions
+        .items
+        .iter()
+        .map(|opinion| {
+            let cells: Vec<TextCell> = vec![
+                TextCell::from(format!(
+                    "{}{}",
+                    if opinion.positive { "+" } else { "−" },
+                    format_share(opinion.weight)
+                ))
+                .style(Style::default().fg(if opinion.positive { good() } else { bad() })),
+                // What that share cost whoever published it. A proof sitting at the
+                // min-box value has had nothing sacrificed into it, which is what tells a
+                // cheap opinion from an expensive one.
+                TextCell::from(format_erg(opinion.backed_nanoerg)).style(Style::default().fg(
+                    if opinion.backed_nanoerg > 0.0 {
+                        accent()
+                    } else {
+                        muted()
+                    },
+                )),
+                // Long enough to identify the proof on an explorer, with the ellipsis
+                // making it plain that it is not the whole id.
+                shorten(&opinion.proof_id, 40).into(),
+                format_age(opinion.published_at, now).into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    let (table, _) = fitted_table(
+        &OPINION_COLUMNS,
         rows,
-        [
-            Constraint::Length(10),
-            Constraint::Length(13),
-            Constraint::Min(26),
-            Constraint::Length(10),
-        ],
-    )
-    .header(header_row(vec![
-        "Stake",
-        "Backed by",
-        "Proof",
-        "Published",
-    ]))
-    .block(section_block(
-        format!(
-            " WHO STAKES ON THIS NODE • {} opinions ",
-            app.opinions.items.len()
-        ),
-        accent(),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+        area,
+        app.opinions.state.selected().is_some(),
+    );
+    let table = table
+        .block(section_block(
+            format!(
+                " WHO STAKES ON THIS NODE • {} opinions ",
+                app.opinions.items.len()
+            ),
+            accent(),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     app.list_area = area;
     frame.render_stateful_widget(table, area, &mut app.opinions.state);
 }
@@ -2256,111 +2860,9 @@ fn format_age(published_at: Option<i64>, now: i64) -> String {
     }
 }
 
-/// Everything the Clients page knows about the selected client.
-///
-/// Deliberately nothing about *who* they are: a client id has no link back to a peer
-/// (`peer.remote_client_id` is our id inside a remote peer, issue #178), so the card
-/// shows what this client did here and nothing inferred.
-fn client_detail_lines(
-    money: &Money,
-    client: Option<&Client>,
-    detail: Option<&ClientDetail>,
-    compact: bool,
-) -> Vec<Line<'static>> {
-    let Some(client) = client else {
-        return vec![Line::from(Span::styled(
-            "Select a client to inspect its deposits, instances and payments.",
-            Style::default().fg(muted()),
-        ))];
-    };
-
-    let mut lines = vec![metric_line("Client", client.id.clone())];
-    if !compact {
-        lines.push(metric_line("Balance", money.format_raw(&client.balance)));
-        lines.push(metric_line(
-            "Last usage",
-            nonempty(&client.last_usage, "—").to_string(),
-        ));
-        if client.unmetered {
-            lines.push(Line::from(Span::styled(
-                "Never charged (unmetered): one of this node's own dev clients.",
-                Style::default().fg(muted()),
-            )));
-        }
-    }
-
-    // A stale card is worse than none: the selection can move between the load and
-    // the frame, and a payment shown under the wrong client is a lie about money.
-    let Some(detail) = detail.filter(|detail| detail.client_id == client.id) else {
-        return lines;
-    };
-
-    if compact {
-        lines.push(metric_line(
-            "History",
-            format!(
-                "{} deposit token(s) • {} instance(s) • {} payment(s)",
-                detail.deposits.len(),
-                detail.instances.len(),
-                detail.payments.len()
-            ),
-        ));
-        return lines;
-    }
-
-    lines.push(Line::from(""));
-    lines.extend(payment_lines(
-        money,
-        &detail.payments,
-        "Payments received",
-        "Nothing received from this client yet.",
-    ));
-
-    if !detail.deposits.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("Deposit tokens ({})", detail.deposits.len()),
-            Style::default().fg(accent()).bold(),
-        )));
-        for deposit in &detail.deposits {
-            lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(status_color(&deposit.status))),
-                Span::styled(
-                    format!("{:<10}", deposit.status.clone()),
-                    Style::default().fg(status_color(&deposit.status)),
-                ),
-                Span::styled(
-                    format!("{}  {}", deposit.created_at.clone(), shorten(&deposit.id, 20)),
-                    Style::default().fg(text_colour()),
-                ),
-            ]));
-        }
-    }
-
-    if !detail.instances.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("Instances started here ({})", detail.instances.len()),
-            Style::default().fg(accent()).bold(),
-        )));
-        for instance in &detail.instances {
-            lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(good())),
-                Span::styled(
-                    nonempty(&instance.name, "unnamed").to_string(),
-                    Style::default().fg(text_colour()).bold(),
-                ),
-                Span::styled(
-                    format!("  {}", shorten(&instance.id, 24)),
-                    Style::default().fg(muted()),
-                ),
-            ]));
-        }
-    }
-
-    lines
-}
 
 /// A payment history as card lines, shared by the peer and client cards.
-fn payment_lines(
+pub(crate) fn payment_lines(
     money: &Money,
     payments: &[PaymentRow],
     title: &str,
@@ -2407,7 +2909,7 @@ fn payment_lines(
 }
 
 /// Reputation history as card lines: what moved the score, and why.
-fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
+pub(crate) fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
     if events.is_empty() {
         return vec![Line::from(Span::styled(
             "No reputation event recorded yet.".to_string(),
@@ -2450,7 +2952,7 @@ fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
 
 /// Colour for a payment or deposit status: the ones that mean "money moved and
 /// nothing came of it" have to stand out from the ones that worked.
-fn status_color(status: &str) -> Color {
+pub(crate) fn status_color(status: &str) -> Color {
     match status {
         "communicated" | "accepted" | "payed" => good(),
         "unacknowledged" | "rejected" => bad(),
@@ -2458,173 +2960,13 @@ fn status_color(status: &str) -> Color {
     }
 }
 
-/// Full breakdown of the peer highlighted in the peers table: identity, balance,
-/// reputation, and every payment contract it has registered. Previously reachable
-/// only through a raw sqlite query (issue #231).
-///
-/// `compact` collapses each contract onto one line for terminals too short for the
-/// full card.
-fn peer_detail_lines(
-    money: &Money,
-    peer: Option<&Peer>,
-    detail: Option<&PeerDetail>,
-    donation: Option<(f64, f64)>,
-    compact: bool,
-) -> Vec<Line<'static>> {
-    let Some(peer) = peer else {
-        return vec![Line::from(Span::styled(
-            "Select a peer to inspect its endpoints, reputation and payment contracts.",
-            Style::default().fg(muted()),
-        ))];
-    };
-
-    // The full id is worth repeating even in compact mode: the table truncates it.
-    let mut lines = vec![metric_line("Peer", peer.id.clone())];
-    if !compact {
-        lines.push(metric_line(
-            "Endpoints",
-            nonempty(&peer.uris, "—").to_string(),
-        ));
-        lines.push(metric_line("Our balance", money.format_raw(&peer.balance)));
-        // Our id inside *their* node, which is what an operator needs when reading
-        // the other side's logs. Not a client of ours -- see the doc on the field.
-        lines.push(metric_line(
-            "Our client id there",
-            nonempty(&peer.remote_client_id, "not registered").to_string(),
-        ));
-        // The score is ours, first-hand, keyed by this peer's public key. The proofs
-        // below are the peer's own published opinions about other nodes, as it
-        // announced them -- unverified here (issue #281).
-        lines.push(metric_line(
-            "Reputation",
-            format!(
-                "{}  •  {}",
-                peer.reputation_score,
-                match peer.proof_ids.len() {
-                    0 => "no proof announced".to_string(),
-                    n => format!("{n} proof(s) announced"),
-                }
-            ),
-        ));
-        for proof_id in &peer.proof_ids {
-            lines.push(Line::from(vec![
-                Span::styled("      proof  ", Style::default().fg(muted())),
-                Span::styled(shorten(proof_id, 46), Style::default().fg(text_colour())),
-            ]));
-        }
-        // What this peer's on-chain donations earn it here, and only here: the credit
-        // is computed with *this* node's list of whose contributions it recognises, so
-        // it is this node's opinion and not a property of the peer. A peer with none
-        // is not being penalised -- the term is a bonus only.
-        lines.push(metric_line(
-            "Donation credit",
-            match donation {
-                Some((bonus, term)) => format!(
-                    "{bonus:.4}  •  +{term:.4} to its score (beats a price up to {:.0}% higher)",
-                    (term.exp() - 1.0) * 100.0
-                ),
-                None => "none counted by this node".to_string(),
-            },
-        ));
-        lines.push(Line::from(""));
-    }
-
-    // Same guard as the client card: the selection can move between the load and the
-    // frame, and payments shown under the wrong peer would be a lie about money.
-    let history = detail.filter(|detail| detail.peer_id == peer.id);
-    if let Some(history) = history {
-        if compact {
-            lines.push(metric_line(
-                "History",
-                format!(
-                    "{} payment(s) • {} reputation event(s)",
-                    history.payments.len(),
-                    history.events.len()
-                ),
-            ));
-        } else {
-            lines.extend(payment_lines(
-                money,
-                &history.payments,
-                "Payments made to this peer",
-                "Nothing paid to this peer yet.",
-            ));
-            lines.push(Line::from(""));
-            lines.extend(reputation_event_lines(&history.events));
-            lines.push(Line::from(""));
-        }
-    }
-
-    if peer.contracts.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No payment method registered for this peer.",
-            Style::default().fg(warn()),
-        )));
-        return lines;
-    }
-
-    lines.push(Line::from(Span::styled(
-        format!("Payment methods ({})", peer.contracts.len()),
-        Style::default().fg(accent()).bold(),
-    )));
-    for contract in &peer.contracts {
-        // The asset names the money: on Ergo one contract is paid in ERG and in every
-        // token at the same address, so the ledger alone would label two different
-        // rates identically. A 64-hex token id is shortened; a symbol is not.
-        let asset = shorten(nonempty(&contract.asset, &contract.ledger.to_uppercase()), 12);
-        if compact {
-            lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(good())),
-                Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
-                Span::styled(
-                    format!(
-                        "  {}  {}  {}  1 {} = {} MU",
-                        asset,
-                        shorten(&contract.contract_hash, 14),
-                        shorten(nonempty(&contract.address, "—"), 14),
-                        asset,
-                        nonempty(&contract.mu_per_unit, "—")
-                    ),
-                    Style::default().fg(text_colour()),
-                ),
-            ]));
-            continue;
-        }
-        lines.push(Line::from(vec![
-            Span::styled("  ● ", Style::default().fg(good())),
-            Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
-            Span::styled(
-                format!("  {}  contract {}", asset, shorten(&contract.contract_hash, 24)),
-                Style::default().fg(text_colour()),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("      address  ", Style::default().fg(muted())),
-            Span::styled(
-                shorten(nonempty(&contract.address, "—"), 46),
-                Style::default().fg(text_colour()),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("      rate     ", Style::default().fg(muted())),
-            Span::styled(
-                // What this peer says one unit of its ledger buys in ITS MU. This is
-                // what makes a price it quotes convertible into money we understand,
-                // so it is stated as an equation rather than as a bare number.
-                format!("1 {} = {} MU", asset, nonempty(&contract.mu_per_unit, "—")),
-                Style::default().fg(text_colour()),
-            ),
-        ]));
-    }
-    lines
-}
 
 /// The pricing page: what this node charges, as bars you can nudge.
 ///
 /// Recurring and one-off prices get separate charts: on a shared axis a build price
 /// three orders of magnitude above a tunnel-open one flattens the whole group. Exact
 /// figures are in the table below, which is also where the selection lives.
-/// The CELL page: the node drawn as a cell, and its policies as levers inside it.
+/// The POLICIES page: the node drawn as a cell, and its policies as levers inside it.
 ///
 /// The anatomy is load-bearing rather than decoration: what an operator is looking
 /// for ("can anyone reach me?") is found by asking which part of a cell would be
@@ -2645,7 +2987,7 @@ fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(muted()))
         .title(Span::styled(
-            " MEMBRANE · inside vs outside ",
+            " THIS NODE ",
             Style::default().fg(muted()),
         ))
         .title_alignment(Alignment::Center);
@@ -2701,7 +3043,9 @@ fn draw_cell_grid(
     area: Rect,
     document: Option<&serde_yaml::Value>,
 ) {
-    let nucleus_height = (Organelle::Nucleus.levers().len() as u16 + 3).min(area.height / 3);
+    // Two fifths rather than a third: with its three headings the nucleus is thirteen
+    // rows, and a third of a 40-row terminal clipped the last wallet.
+    let nucleus_height = (Organelle::Nucleus.rows().len() as u16 + 2).min(area.height * 2 / 5);
     let bands = Layout::vertical([
         Constraint::Min(5),
         Constraint::Length(nucleus_height),
@@ -2754,7 +3098,7 @@ fn draw_cell_accordion(
             if *organelle == focused {
                 // Whatever the collapsed rows leave: a box shorter than its levers
                 // would hide the ones at the bottom with no way to reach them.
-                Constraint::Min(focused.levers().len() as u16 + 2)
+                Constraint::Min(focused.rows().len() as u16 + 2)
             } else {
                 Constraint::Length(1)
             }
@@ -2811,6 +3155,7 @@ fn draw_organelle(
     }
 
     let levers = organelle.levers();
+    let cell_rows = organelle.rows();
     let rows = Layout::vertical(
         (0..inner.height)
             .map(|_| Constraint::Length(1))
@@ -2818,29 +3163,56 @@ fn draw_organelle(
     )
     .split(inner);
 
-    // A box's share of the band can be shorter than its lever list, and a lever drawn
+    // A box's share of the band can be shorter than its rows, and a lever drawn
     // nowhere cannot be operated. So the box scrolls: the selected row is always
-    // drawn. Unfocused boxes start at the first lever.
+    // drawn. Unfocused boxes start at the top. The offset counts drawn rows, headings
+    // included, because that is what runs out of room.
     let visible = rows.len();
-    let offset = if focused && visible > 0 && app.cell.lever >= visible {
-        (app.cell.lever + 1).saturating_sub(visible)
+    let selected_row = cell_rows
+        .iter()
+        .position(|row| *row == CellRow::Lever(app.cell.lever))
+        .unwrap_or(0);
+    let offset = if focused && visible > 0 && selected_row >= visible {
+        (selected_row + 1).saturating_sub(visible)
     } else {
         0
     };
-    for (row, (lever_index, lever)) in rows
-        .iter()
-        .zip(levers.iter().enumerate().skip(offset))
-    {
-        let selected = focused && app.cell.lever == lever_index;
-        // The absolute index, not the position in this window: it is what a mouse
-        // click resolves to a lever, and a scrolled box would otherwise select the
-        // wrong one.
-        app.cell.lever_areas.push((index, lever_index, *row));
-        frame.render_widget(
-            Paragraph::new(lever_line(lever, document, selected, row.width)),
-            *row,
-        );
+    for (row, cell_row) in rows.iter().zip(cell_rows.iter().skip(offset)) {
+        match *cell_row {
+            CellRow::Heading(group) => frame.render_widget(
+                Paragraph::new(group_heading(group, colour, row.width)),
+                *row,
+            ),
+            CellRow::Lever(lever_index) => {
+                let selected = focused && app.cell.lever == lever_index;
+                // The absolute index, not the position in this window: it is what a
+                // mouse click resolves to a lever, and a scrolled box would otherwise
+                // select the wrong one.
+                app.cell.lever_areas.push((index, lever_index, *row));
+                frame.render_widget(
+                    Paragraph::new(lever_line(levers[lever_index], document, selected, row.width)),
+                    *row,
+                );
+            }
+        }
     }
+}
+
+/// The title of a run of levers: a rule, the name, and what the run is about.
+fn group_heading(group: Group, colour: Color, width: u16) -> Line<'static> {
+    let text = format!("── {} · {} ", group.title(), group.subtitle());
+    let rule = "─".repeat((width as usize).saturating_sub(text.chars().count() + 1));
+    Line::from(vec![
+        Span::styled(" ", Style::default()),
+        Span::styled(
+            format!("── {} ", group.title()),
+            Style::default().fg(colour).bold(),
+        ),
+        Span::styled(
+            format!("· {} {rule}", group.subtitle()),
+            Style::default().fg(muted()),
+        ),
+    ])
 }
 
 /// A collapsed organelle: its name, and enough of its state to know whether to open
@@ -2937,9 +3309,140 @@ fn organelle_colour(organelle: Organelle) -> Color {
     }
 }
 
+/// The tokens this node accepts besides ERG: one row each, and the keys that change them.
+fn draw_assets_popup(frame: &mut Frame, app: &App) {
+    let assets = crate::app::configured_assets(app.config_document.as_ref());
+    let rows = assets.len().max(1) as u16;
+    let area = centered_rect(86, rows + 7, frame.size());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()))
+        .style(Style::default().fg(text_colour()).bg(popup_background()))
+        .title(Span::styled(
+            format!(" {} ", app.input_title.to_uppercase()),
+            Style::default().fg(accent()).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    if assets.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No tokens: this node accepts ERG only.",
+            Style::default().fg(muted()),
+        )));
+    }
+    for (index, asset) in assets.iter().enumerate() {
+        let selected = index == app.assets_index;
+        lines.push(Line::from(vec![
+            Span::styled(
+                if selected { "▸ " } else { "  " },
+                Style::default().fg(accent()).bold(),
+            ),
+            Span::styled(
+                format!("{:<10}", shorten(&asset.symbol, 10)),
+                if selected {
+                    Style::default().fg(text_colour()).bold()
+                } else {
+                    Style::default().fg(muted())
+                },
+            ),
+            Span::styled(
+                format!(" {:<14}", crate::app::short_token_id(&asset.token_id)),
+                Style::default().fg(muted()),
+            ),
+            Span::styled(
+                format!(" {} dec  {} MU/unit  unit {}", asset.decimals, asset.mu_per_unit, asset.unit_name),
+                Style::default().fg(good()),
+            ),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Each token is its own payment method, paid into the same wallet.",
+        Style::default().fg(muted()),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Adding or removing one writes config.yaml and restarts the node.",
+        Style::default().fg(muted()),
+    )));
+    lines.push(Line::from(Span::styled(
+        "a add  ·  d remove  ·  ↑/↓ choose  ·  Esc close",
+        Style::default().fg(warn()),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().fg(text_colour()).bg(popup_background())),
+        inner,
+    );
+}
+
+/// The form for one new asset, in place of the list: a labelled field per datum, the
+/// focused one with its cursor and a line saying what it wants.
+fn draw_asset_form_popup(frame: &mut Frame, app: &App) {
+    let form = &app.asset_form;
+    let area = centered_rect(86, crate::app::ASSET_FIELDS.len() as u16 + 10, frame.size());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()))
+        .style(Style::default().fg(text_colour()).bg(popup_background()))
+        .title(Span::styled(
+            " ERGO ASSETS · NEW ",
+            Style::default().fg(accent()).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (index, field) in crate::app::ASSET_FIELDS.iter().enumerate() {
+        let focused = index == form.focus;
+        let value = &form.values[index];
+        let mut spans = vec![
+            Span::styled(
+                if focused { "▸ " } else { "  " },
+                Style::default().fg(accent()).bold(),
+            ),
+            Span::styled(
+                format!("{:<12}", field.name),
+                if focused {
+                    Style::default().fg(text_colour()).bold()
+                } else {
+                    Style::default().fg(muted())
+                },
+            ),
+            Span::styled(value.clone(), Style::default().fg(good())),
+        ];
+        if focused {
+            spans.push(Span::styled("▏", Style::default().fg(accent()).bold()));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        crate::app::ASSET_FIELDS[form.focus.min(crate::app::ASSET_FIELDS.len() - 1)].help,
+        Style::default().fg(muted()),
+    )));
+    lines.push(match &form.error {
+        Some(error) => Line::from(Span::styled(format!("!! {error}"), Style::default().fg(bad()))),
+        None => Line::from(""),
+    });
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Tab/↑/↓ move  ·  Enter next, saves on the last  ·  Ctrl+U clears  ·  Esc back",
+        Style::default().fg(warn()),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(text_colour()).bg(popup_background())),
+        inner,
+    );
+}
+
 /// The profile picker: the postures, ordered from the most closed to the most open,
 /// with how far this node already is from each.
-/// The keys behind one CELL lever, as a list any of which can be edited.
+/// The keys behind one POLICIES lever, as a list any of which can be edited.
 ///
 /// The row this replaces was read-only and ended with "Edit them one at a time on
 /// the CONFIG page": a panel that named what it controlled and then declined to
@@ -3077,17 +3580,45 @@ fn draw_schedule(frame: &mut Frame, app: &mut App, area: Rect) {
     // exemption note -- six -- plus one row per window (or one placeholder line when
     // there are none), plus the block's own two border rows.
     let summary_height = 8 + schedule.windows.len().max(1) as u16;
-    let rows = Layout::vertical([
-        Constraint::Length(11),
-        Constraint::Length(summary_height),
-        Constraint::Min(3),
-    ])
-    .split(area);
+    let rows = if area.height >= 11 + 3 + 3 {
+        Layout::vertical([
+            Constraint::Length(11),
+            Constraint::Length(summary_height),
+            Constraint::Min(3),
+        ])
+        .split(area)
+        .to_vec()
+    } else {
+        // Short (issue #453): the day bar keeps the five lines inside its borders it
+        // needs to be a bar with an axis (`draw_day_bar` draws nothing in fewer),
+        // then the window list, then the help; a block that cannot have a line
+        // inside its borders is left out.
+        let heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(7, 11), (3, summary_height), (3, 3)],
+            &[0, 1, 2],
+        );
+        crate::layout_util::stack(area, &heights)
+    };
 
-    draw_day_bar(frame, rows[0], app, &schedule, now);
-    draw_schedule_summary(frame, rows[1], app, &schedule, now);
-
-    draw_schedule_help(frame, rows[2], app);
+    // The areas the summary and help record for the mouse are rebuilt by whichever
+    // of them is drawn; the ones left out must not keep last frame's.
+    app.schedule_edge_areas.clear();
+    app.schedule_remove_areas.clear();
+    app.schedule_add_area = Rect::ZERO;
+    app.schedule_enabled_area = Rect::ZERO;
+    app.schedule_on_close_area = Rect::ZERO;
+    if rows[0].height > 0 {
+        draw_day_bar(frame, rows[0], app, &schedule, now);
+    } else {
+        app.schedule_bar = None;
+    }
+    if rows[1].height > 0 {
+        draw_schedule_summary(frame, rows[1], app, &schedule, now);
+    }
+    if rows[2].height > 0 {
+        draw_schedule_help(frame, rows[2], app);
+    }
 }
 
 fn draw_day_bar(
@@ -3322,7 +3853,7 @@ fn demand_lines(
 /// an `+ add window` line.
 ///
 /// Every one is a mouse target whose position is recorded as it is laid out
-/// (`app.schedule_*_area(s)`) -- the same record-while-drawing pattern the CELL page
+/// (`app.schedule_*_area(s)`) -- the same record-while-drawing pattern the POLICIES page
 /// uses.
 fn draw_schedule_summary(
     frame: &mut Frame,
@@ -3499,6 +4030,22 @@ fn draw_schedule_summary(
     )));
 
     frame.render_widget(Paragraph::new(lines), inner);
+
+    // A line the box was too short (or too narrow) to show is not a click target:
+    // recorded unclipped, the closing-policy line of a short box sat over the help
+    // block below it, and a click there flipped what closing does (issue #453).
+    let clip = |rect: Rect| rect.intersection(inner);
+    for (_, _, rect) in app.schedule_edge_areas.iter_mut() {
+        *rect = clip(*rect);
+    }
+    for (_, rect) in app.schedule_remove_areas.iter_mut() {
+        *rect = clip(*rect);
+    }
+    app.schedule_edge_areas.retain(|(_, _, rect)| !rect.is_empty());
+    app.schedule_remove_areas.retain(|(_, rect)| !rect.is_empty());
+    app.schedule_add_area = clip(app.schedule_add_area);
+    app.schedule_enabled_area = clip(app.schedule_enabled_area);
+    app.schedule_on_close_area = clip(app.schedule_on_close_area);
 }
 
 fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
@@ -3539,16 +4086,44 @@ fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
-    let sections = Layout::vertical([Constraint::Min(8), Constraint::Length(12)]).split(area);
-    draw_payment_systems(frame, app, sections[1]);
+    // The payment-system cards yield first on a short terminal: the prices are what
+    // this page edits, and the ratios below them are a key each (issue #453).
+    let payments = 12.min(area.height.saturating_sub(8));
+    let payments = if payments >= 4 { payments } else { 0 };
+    let sections = crate::layout_util::stack(area, &[area.height - payments, payments]);
+    if payments > 0 {
+        draw_payment_systems(frame, app, sections[1]);
+    } else {
+        // Not drawn, so not clickable where they were last frame.
+        app.payment_rate_areas.clear();
+    }
     let area = sections[0];
-    let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
-        .split(area);
-    let left = Layout::vertical([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .split(columns[0]);
+    // Narrow (issue #453): one column, the table that selects and edits a price kept
+    // above everything else, then the two charts, then the unit card.
+    let narrow = area.width < 80;
+    let (left, money_area, table_area) = if narrow {
+        let heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(4, 6), (4, 6), (3, 13), (5, area.height)],
+            &[3, 0, 1, 2],
+        );
+        let rects = crate::layout_util::stack(area, &heights);
+        ([rects[0], rects[1]], rects[2], rects[3])
+    } else {
+        let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .split(area);
+        let left = Layout::vertical([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+        ])
+        .split(columns[0]);
+        // 13 rows fit the card's tallest state (a price selected, plus the worked
+        // example on the last line); anything shorter silently clips the example.
+        // The table keeps a row of its own before the card grows, though: a table
+        // squeezed to its header is a list of prices with none in it.
+        let [card, table] = card_and_list(columns[1], 13, 5);
+        ([left[0], left[1]], card, table)
+    };
 
     let selected = app.prices.state_id.clone();
     // Rebuilt every frame, so a bar that moved (a resize, a price appearing) is not
@@ -3582,11 +4157,24 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
     );
     app.price_bar_areas = bar_areas;
 
-    // 13 rows fit the card's tallest state (a price selected, plus the worked
-    // example on the last line); anything shorter silently clips the example.
-    let right = Layout::vertical([Constraint::Length(13), Constraint::Min(4)]).split(columns[1]);
-    draw_money_card(frame, app, right[0]);
-    draw_price_table(frame, app, right[1]);
+    if money_area.height > 0 {
+        draw_money_card(frame, app, money_area);
+    }
+    draw_price_table(frame, app, table_area);
+}
+
+/// A card above a table, where the table must keep `table_min` rows (border, header
+/// and a row) before the card grows toward `card_want`; the table takes the rest.
+/// The card is left out rather than drawn as two borders when it cannot have a line.
+fn card_and_list(area: Rect, card_want: u16, table_min: u16) -> [Rect; 2] {
+    let heights = crate::layout_util::allocate_heights(
+        area.height,
+        &[(3, card_want), (table_min, table_min)],
+        &[1, 0],
+    );
+    let card = heights[0];
+    let rects = crate::layout_util::stack(area, &[card, area.height - card]);
+    [rects[0], rects[1]]
 }
 
 /// Which half of the price vector a chart draws, and how it looks.
@@ -3769,7 +4357,7 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let money = app.money.clone();
-    let rows: Vec<Row> = app
+    let rows: Vec<(Vec<TextCell>, Style)> = app
         .prices
         .items
         .iter()
@@ -3782,29 +4370,34 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 money.format_mu(entry.mu)
             };
-            let row = Row::new(vec![entry.short.clone(), entry.mu.to_string(), amount]);
-            if entry.arch.is_some() {
-                row.style(Style::default().fg(muted()))
+            let cells = vec![entry.short.clone().into(), entry.mu.to_string().into(), amount.into()];
+            let style = if entry.arch.is_some() {
+                Style::default().fg(muted())
             } else {
-                row
-            }
+                Style::default()
+            };
+            (cells, style)
         })
         .collect();
-    let table = Table::new(
-        rows,
+    // Built here rather than kept as a constant: the unit column is headed by the
+    // display unit's own symbol.
+    let columns = {
+        use crate::layout_util::Column;
+        // The label and the amount in the operator's unit outlast the raw MU figure.
         [
-            Constraint::Length(12),
-            Constraint::Percentage(40),
-            Constraint::Percentage(48),
-        ],
-    )
-    .header(header_row(vec!["Price", "MU", money.symbol.as_str()]))
-    .block(section_block(
-        " PRICES • +/- adjust, e exact ".to_string(),
-        warn(),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("> ");
+            Column::new("Price", Constraint::Length(12), 6, 0),
+            Column::new("MU", Constraint::Percentage(40), 4, 2),
+            Column::new(money.symbol.as_str(), Constraint::Percentage(48), 6, 1),
+        ]
+    };
+    let (table, _) = fitted_table(&columns, rows, area, app.prices.state.selected().is_some());
+    let table = table
+        .block(section_block(
+            " PRICES • +/- adjust, e exact ".to_string(),
+            warn(),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("> ");
     app.list_area = area;
     frame.render_stateful_widget(table, area, &mut app.prices.state);
 }
@@ -3812,15 +4405,25 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
 /// The ENERGY page: the `energy:` block as a list of decisions with their reasons
 /// beside them (issue #395).
 ///
-/// Two columns, and the right one is the point: the keys are on Config already, but
-/// Config cannot show the paragraph saying `IDLE_WATTS` must be *measured* rather
+/// Two columns, and the right one is the point: the keys are on All already, but
+/// All cannot show the paragraph saying `IDLE_WATTS` must be *measured* rather
 /// than guessed.
 ///
 /// Rows record where they were drawn (`energy_row_areas`) so the mouse can find
 /// them: three bordered sections is not a geometry a generic hit test can retrace.
 fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
-    let columns = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
-        .split(area);
+    // Narrow (issue #453): the explanation goes under the keys rather than beside
+    // them, and only when it can have a few lines of its own.
+    let columns = if area.width >= 80 {
+        Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(area)
+            .to_vec()
+    } else {
+        let keys = (crate::energy::entries().len() as u16 + 2).min(area.height);
+        let help = area.height - keys;
+        let help = if help >= 4 { help } else { 0 };
+        crate::layout_util::stack(area, &[area.height - help, help])
+    };
 
     let entries = crate::energy::entries();
     // One block per section, each as tall as the rows it holds plus its border and
@@ -3834,6 +4437,18 @@ fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
             _ => sections.push((*section, vec![index])),
         }
     }
+    app.energy_row_areas.clear();
+    let needed: u16 = sections.iter().map(|(_, rows)| rows.len() as u16 + 3).sum();
+    if needed > columns[0].height {
+        // Too short for the three blocks: they were clipped from the bottom, and a
+        // selected key in the last of them was off screen (issue #453). One list
+        // instead, scrolled so the selection is always on it.
+        draw_energy_compact(frame, app, columns[0]);
+        if columns[1].height > 0 {
+            draw_energy_help(frame, app, columns[1]);
+        }
+        return;
+    }
     let constraints: Vec<Constraint> = sections
         .iter()
         .map(|(_, rows)| Constraint::Length(rows.len() as u16 + 3))
@@ -3841,14 +4456,209 @@ fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
     let panes = Layout::vertical(constraints).split(columns[0]);
 
-    app.energy_row_areas.clear();
     // `list_area` stays zero: this page is three blocks rather than one table, and a
     // generic row hit test over it would land on the wrong key.
     for (pane, (section, rows)) in panes.iter().zip(sections.iter()) {
         draw_energy_section(frame, app, *pane, *section, rows);
     }
+    // The trailing `Constraint::Min(0)` pane the sections' zip never consumes --
+    // whatever the config catalogue leaves below its three blocks is where the
+    // chart belongs, since that space already exists (issue #442).
+    if let Some(chart_area) = panes.last() {
+        draw_energy_chart(frame, app, *chart_area);
+    }
 
-    draw_energy_help(frame, app, columns[1]);
+    if columns[1].height > 0 {
+        draw_energy_help(frame, app, columns[1]);
+    }
+}
+
+/// Every `energy:` key in one block, one line each, scrolled to keep the selected one
+/// on screen: the ENERGY page on a terminal too short for its three sections.
+fn draw_energy_compact(frame: &mut Frame, app: &mut App, area: Rect) {
+    let entries = crate::energy::entries();
+    let section = entries
+        .get(app.energy_selected)
+        .map(|(section, _)| section.title())
+        .unwrap_or("");
+    let block = section_block(format!(" ENERGY • {section} "), accent());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+    let visible = inner.height as usize;
+    let offset = app.energy_selected.saturating_sub(visible - 1).min(entries.len().saturating_sub(visible));
+    let key_width = 26.min(inner.width as usize / 2);
+    let mut lines = Vec::new();
+    for (row, (index, (_, entry))) in entries.iter().enumerate().skip(offset).take(visible).enumerate() {
+        let selected = app.energy_selected == index;
+        let value = app
+            .energy_value(entry)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "(not set)".to_string());
+        let marker = if selected { "> " } else { "  " };
+        let key = truncate_ellipsis(entry.key(), key_width);
+        let key_style = if selected {
+            selected_style()
+        } else {
+            Style::default().fg(text_colour())
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker}{key:<key_width$}"), key_style),
+            Span::raw(" "),
+            Span::styled(value, Style::default().fg(energy_value_colour(entry, app))),
+        ]));
+        app.energy_row_areas
+            .push((index, Rect::new(inner.x, inner.y + row as u16, inner.width, 1)));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The chart the config catalogue's own layout leaves room for: peaks over
+/// `app.energy_series`'s window, and what they cost, hour by hour (issue #442).
+/// Nothing here is configuration -- it reads `app.energy_series`, which
+/// `App::refresh` already filled from `energy_consumption` the same tick as
+/// everything else on screen.
+fn draw_energy_chart(frame: &mut Frame, app: &App, area: Rect) {
+    let block = section_block(" HISTORY ".to_string(), series(0));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 {
+        return;
+    }
+    let currency = if app.node_energy.currency.is_empty() {
+        "USD"
+    } else {
+        app.node_energy.currency.as_str()
+    };
+    let lines = energy_chart_lines(&app.energy_series, inner.width, currency);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Peak watts and cost, hour by hour, most recent on the right (issue #442).
+///
+/// Character-height sparklines rather than a plotted line, the same device
+/// `demand_lines` uses on SCHEDULE: the shape against the axis is what "peaks" asks
+/// to see, and a column of numbers would not fit that many hours in one row.
+///
+/// The chart only ever draws as many of the most recent hours as the terminal is
+/// wide (`shown`, below); the medians on the last line read `history` whole, since
+/// "what does a typical hour cost this month" is a question about the month, not
+/// about however few of its hours happen to fit on screen.
+fn energy_chart_lines(
+    history: &crate::app::EnergySeries,
+    width: u16,
+    currency: &str,
+) -> Vec<Line<'static>> {
+    if history.is_empty() {
+        return vec![Line::from(Span::styled(
+            "No energy history yet — it will appear here as the node runs.",
+            Style::default().fg(muted()),
+        ))];
+    }
+
+    // Eight levels, so a busy hour and a quiet one are told apart by height rather
+    // than by reading a legend -- same alphabet `demand_lines` draws with.
+    const LEVELS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let slots = width.max(1) as usize;
+    let start = history.buckets.len().saturating_sub(slots);
+    let shown = &history.buckets[start..];
+    let shown_hours = shown.len();
+
+    let spark = |values: Vec<f64>, colour: Color| -> Line<'static> {
+        let peak = values.iter().copied().fold(0.0_f64, f64::max).max(1e-9);
+        let pad = slots.saturating_sub(values.len());
+        let mut spans = vec![Span::raw(" ".repeat(pad))];
+        for value in values {
+            let glyph = if value <= 0.0 {
+                ' '
+            } else {
+                let level = ((value / peak) * (LEVELS.len() - 1) as f64).round() as usize;
+                LEVELS[level.min(LEVELS.len() - 1)]
+            };
+            spans.push(Span::styled(glyph.to_string(), Style::default().fg(colour)));
+        }
+        Line::from(spans)
+    };
+
+    let watts: Vec<f64> = shown.iter().map(|bucket| bucket.peak_watts).collect();
+    let shown_peak = watts.iter().copied().fold(0.0_f64, f64::max);
+    // Whether *any* history has a price, not just the visible slice: a node whose
+    // tariff was only just set should not have its medians (which read the whole
+    // fetched month) hidden behind a "watts only" that only describes this week.
+    let has_cost = history.buckets.iter().any(|bucket| bucket.cost > 0.0);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "watts, peak per hour",
+            Style::default().fg(muted()),
+        )),
+        spark(watts, series(0)),
+    ];
+    if has_cost {
+        let costs: Vec<f64> = shown.iter().map(|bucket| bucket.cost).collect();
+        lines.push(Line::from(Span::styled(
+            "cost per hour",
+            Style::default().fg(muted()),
+        )));
+        lines.push(spark(costs, warn()));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "no tariff set — watts only",
+            Style::default().fg(muted()),
+        )));
+    }
+
+    // Peak and total, both scoped to exactly the window drawn above -- so the
+    // figures on this line and the "last Nh" naming it agree with each other.
+    let mut summary = vec![
+        Span::styled("peak ", Style::default().fg(muted())),
+        Span::styled(
+            format_watts(Some(shown_peak)),
+            Style::default().fg(series(0)),
+        ),
+    ];
+    if has_cost {
+        let shown_cost: f64 = shown.iter().map(|bucket| bucket.cost).sum();
+        summary.push(Span::styled(" · Σ ", Style::default().fg(muted())));
+        summary.push(Span::styled(
+            format!("{shown_cost:.2} {currency}"),
+            Style::default().fg(warn()),
+        ));
+    }
+    summary.push(Span::styled(
+        format!(" · last {shown_hours}h"),
+        Style::default().fg(muted()),
+    ));
+    lines.push(Line::from(summary));
+
+    // What a typical hour costs, at three horizons (issue #453): today, so a spike
+    // this afternoon does not read as the new normal; the trailing week and month,
+    // scoped to `history` as a whole rather than to `shown`, since the terminal's
+    // width has nothing to do with how much history is worth summarising here.
+    if has_cost {
+        lines.push(Line::from(vec![
+            Span::styled("median/h ", Style::default().fg(muted())),
+            Span::styled("today ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{:.2}", history.median_cost_today()),
+                Style::default().fg(text_colour()),
+            ),
+            Span::styled(" · 7d ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{:.2}", history.median_cost_over(7)),
+                Style::default().fg(text_colour()),
+            ),
+            Span::styled(" · 30d ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{:.2} {currency}", history.median_cost_over(30)),
+                Style::default().fg(text_colour()),
+            ),
+        ]));
+    }
+
+    lines
 }
 
 /// One band of the ENERGY page, and the rows in it.
@@ -3923,7 +4733,7 @@ fn energy_value_colour(entry: &crate::energy::EnergyEntry, app: &App) -> Color {
 
 /// The right-hand panel: what the selected key is, what it is set to, and why it
 /// matters. The last of those is the whole reason this page exists rather than a
-/// bookmark into the Config tree.
+/// bookmark into the All tree.
 fn draw_energy_help(frame: &mut Frame, app: &App, area: Rect) {
     let Some(entry) = app.selected_energy() else {
         frame.render_widget(
@@ -4139,25 +4949,82 @@ fn config_branch_line(token: &str, count: usize, highlighted: bool) -> Line<'sta
     ])
 }
 
+/// Muted, wrapped text in a bordered block, kept inside the border whatever the text
+/// holds (see [`crate::layout_util::wrap_guard`]): a log line is whatever the node
+/// or a service printed.
+fn draw_wrapped_text(frame: &mut Frame, text: String, block: Block<'static>, area: Rect) {
+    let inner = crate::layout_util::wrap_guard(
+        block.inner(area),
+        crate::layout_util::has_wide_glyph(&text),
+    );
+    frame.render_widget(block.style(Style::default().fg(muted())), area);
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(Style::default().fg(muted()))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
 fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     let split =
         Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)]).split(area);
     let node_text = visible_tail(&app.node_logs, split[0].height.saturating_sub(2) as usize);
-    frame.render_widget(
-        Paragraph::new(node_text)
-            .block(section_block(" NODE LOG • app.log ", text_colour()))
-            .style(Style::default().fg(muted()))
-            .wrap(Wrap { trim: false }),
-        split[0],
-    );
+    draw_wrapped_text(frame, node_text, section_block(" NODE LOG • app.log ", text_colour()), split[0]);
     let action_text = visible_tail(&app.app_logs, split[1].height.saturating_sub(2) as usize);
-    frame.render_widget(
-        Paragraph::new(action_text)
-            .block(section_block(" TUI ACTIONS ", accent()))
-            .style(Style::default().fg(muted()))
-            .wrap(Wrap { trim: false }),
-        split[1],
-    );
+    draw_wrapped_text(frame, action_text, section_block(" TUI ACTIONS ", accent()), split[1]);
+}
+
+/// The footer's page-local keys. The navigation keys are the same everywhere and
+/// are printed on their own line below, rather than repeated twelve times with
+/// twelve chances to fall out of step -- which is what "tab/shift+tab cycle" did
+/// on every one of these strings before the groups existed.
+///
+/// Also what the right-click menus (`context_menu.rs`) are held to: every key a
+/// menu presses is one this line documents.
+pub(crate) fn page_controls(page: Page) -> &'static str {
+    match page {
+        Page::Overview => "r refresh  \u{2022}  q quit",
+        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  t tunnel  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
+        Page::Tunnels => {
+            "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  r refresh  \u{2022}  q quit"
+        }
+        Page::Packs => {
+            "\u{2191}/\u{2193} select  \u{2022}  n new pack  \u{2022}  i log  \u{2022}  c cancel  \u{2022}  r refresh  \u{2022}  q quit"
+        }
+        Page::Services => {
+            "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  p pack  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
+        }
+        Page::Peers => {
+            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  d forget  \u{2022}  q quit"
+        }
+        Page::Clients => {
+            "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  r refresh  \u{2022}  q quit"
+        }
+        Page::Chat => {
+            "\u{2191}/\u{2193} select  \u{2022}  o new chat  \u{2022}  \u{23ce} reply  \u{2022}  c close  \u{2022}  R reopen  \u{2022}  q quit"
+        }
+        Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
+        Page::Cell => {
+            "\u{2192}/\u{2190} section  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e edit a key behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
+        }
+        Page::Pricing => {
+            "\u{2191}/\u{2193} select  \u{2022}  +/- adjust 10%  \u{2022}  e exact value  \u{2022}  r refresh  \u{2022}  q quit"
+        }
+        // The one page that keeps `[`/`]` for itself: they switch which window the
+        // arrows act on, which is why the group keys except it.
+        Page::Schedule => {
+            "\u{2192}/\u{2190} move edge 30m  \u{2022}  \u{2191}/\u{2193} which edge  \u{2022}  [/] window  \u{2022}  w on/off  \u{2022}  c closing  \u{2022}  \u{23ce} apply  \u{2022}  esc discard"
+        }
+        Page::Energy => "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} / e edit  \u{2022}  r refresh  \u{2022}  q quit",
+        Page::Config => {
+            "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
+        }
+        Page::Logs => "r refresh  \u{2022}  q quit",
+        Page::Docs => {
+            "\u{2191}/\u{2193} PgUp/PgDn Home/End  \u{2022}  \u{2190}/\u{2192} index/page  \u{2022}  \u{23ce} open/follow  \u{2022}  l/L link  \u{2022}  / search  \u{2022}  n/N match  \u{2022}  \u{232b} back  \u{2022}  r reload"
+        }
+    }
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
@@ -4178,57 +5045,63 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
         return;
     }
-    // Page-local keys only. The navigation keys are the same everywhere and are
-    // printed on their own line below, rather than repeated twelve times with
-    // twelve chances to fall out of step -- which is what "tab/shift+tab cycle" did
-    // on every one of these strings before the groups existed.
-    let controls = match app.page() {
-        Page::Overview => "r refresh  \u{2022}  q quit",
-        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
-        Page::Services => {
-            "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  d delete  \u{2022}  q quit"
-        }
-        Page::Peers => {
-            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  d forget  \u{2022}  q quit"
-        }
-        Page::Clients => {
-            "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  r refresh  \u{2022}  q quit"
-        }
-        Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
-        Page::Cell => {
-            "\u{2192}/\u{2190} organelle  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e edit a key behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
-        }
-        Page::Pricing => {
-            "\u{2191}/\u{2193} select  \u{2022}  +/- adjust 10%  \u{2022}  e exact value  \u{2022}  r refresh  \u{2022}  q quit"
-        }
-        // The one page that keeps `[`/`]` for itself: they switch which window the
-        // arrows act on, which is why the group keys except it.
-        Page::Schedule => {
-            "\u{2192}/\u{2190} move edge 30m  \u{2022}  \u{2191}/\u{2193} which edge  \u{2022}  [/] window  \u{2022}  w on/off  \u{2022}  c closing  \u{2022}  \u{23ce} apply  \u{2022}  esc discard"
-        }
-        Page::Energy => "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} / e edit  \u{2022}  r refresh  \u{2022}  q quit",
-        Page::Config => {
-            "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
-        }
-        Page::Logs => "r refresh  \u{2022}  q quit",
-    };
+    let controls = page_controls(app.page());
     // How to get anywhere, said once. SCHEDULE is the exception that has to be named
     // where it applies: a footer advertising `[/] group` on the one page where those
     // keys do something else would be advertising the wrong thing.
     let navigation = if app.page() == Page::Schedule {
-        "1-5 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     } else {
-        "[/] or 1-5 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "[/] or 1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     };
     let lines = vec![
-        Line::from(Span::styled(controls, Style::default().fg(muted()))),
-        Line::from(vec![
-            Span::styled(navigation, Style::default().fg(muted())),
-            Span::raw("   "),
-            Span::styled(app.status.clone(), Style::default().fg(warn())),
-        ]),
+        Line::from(Span::styled(
+            fit_hints(controls, HINT_SEPARATOR, area.width as usize),
+            Style::default().fg(muted()),
+        )),
+        navigation_line(navigation, &app.status, area.width),
     ];
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
+}
+
+/// What separates one key hint from the next on the footer and in popups.
+const HINT_SEPARATOR: &str = "  \u{2022}  ";
+
+/// The footer's second line: how to move between pages, then the status message.
+///
+/// The status is what the last action said happened, so on a narrow terminal it is
+/// the navigation hints that give way, whole hint by whole hint, and the status is
+/// only cut once there is no navigation left to drop (issue #453).
+fn navigation_line(navigation: &str, status: &str, width: u16) -> Line<'static> {
+    const GAP: &str = "   ";
+    let width = width as usize;
+    let status_width = display_width(status);
+    let full = display_width(navigation) + GAP.len() + status_width;
+    if full <= width {
+        return Line::from(vec![
+            Span::styled(navigation.to_string(), Style::default().fg(muted())),
+            Span::raw(GAP),
+            Span::styled(status.to_string(), Style::default().fg(warn())),
+        ]);
+    }
+    if status.is_empty() {
+        return Line::from(Span::styled(
+            fit_hints(navigation, HINT_SEPARATOR, width),
+            Style::default().fg(muted()),
+        ));
+    }
+    // Room for at least the first navigation hint and the gap beside the status?
+    let first_hint = navigation.split(HINT_SEPARATOR).next().unwrap_or("");
+    let room = width.saturating_sub(status_width + GAP.len());
+    // (The hint, the separator, and the `…` that says more were dropped.)
+    if room > display_width(first_hint) + display_width(HINT_SEPARATOR) {
+        return Line::from(vec![
+            Span::styled(fit_hints(navigation, HINT_SEPARATOR, room), Style::default().fg(muted())),
+            Span::raw(GAP),
+            Span::styled(status.to_string(), Style::default().fg(warn())),
+        ]);
+    }
+    Line::from(Span::styled(truncate_ellipsis(status, width), Style::default().fg(warn())))
 }
 
 /// Body lines and hint text for the `EditConfig` popup, one variant per
@@ -4245,6 +5118,9 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
             "Enter appends • Esc cancels • a YAML literal, so quote a leading *: \"*.example.com\""
                 .to_string(),
         );
+    }
+    if app.input_mode == InputMode::NewPack {
+        return pack_popup_body(app);
     }
     if app.input_mode != InputMode::EditConfig {
         return (
@@ -4307,22 +5183,24 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
     }
 }
 
-/// Break `text` into lines of at most `width` characters, on word boundaries.
+/// Break `text` into lines of at most `width` columns, on word boundaries.
 ///
 /// Characters, not bytes: splitting a multi-byte one produces a replacement glyph.
 /// An over-long word is left ragged rather than cut mid-token, because a truncated
 /// path is one the operator might paste.
-fn wrapped(text: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrapped(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![text.to_string()];
     }
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
     for word in text.split_whitespace() {
+        // Terminal columns rather than characters, so a line of CJK text is not
+        // counted at half the room it takes (issue #453). The same count for ASCII.
         let would_be = if current.is_empty() {
-            word.chars().count()
+            display_width(word)
         } else {
-            current.chars().count() + 1 + word.chars().count()
+            display_width(&current) + 1 + display_width(word)
         };
         if !current.is_empty() && would_be > width {
             lines.push(std::mem::take(&mut current));
@@ -4339,6 +5217,45 @@ fn wrapped(text: &str, width: usize) -> Vec<String> {
         lines.push(String::new());
     }
     lines
+}
+
+/// The pack prompt: what is typed, what it will pack (or why not), and the folders
+/// that match what is being typed -- so a path can be walked to with Tab rather than
+/// remembered.
+fn pack_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
+    let base = app.pack_base_dir();
+    let home = App::home_dir();
+    let mut lines = vec![Line::from(app.input.clone())];
+    if app.input.trim().is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("A relative folder is read from {}", base.display()),
+            Style::default().fg(muted()),
+        )));
+    } else {
+        lines.push(match crate::packs::input_feedback(&app.input, &base, home.as_deref()) {
+            Ok(text) => Line::from(Span::styled(format!("✓ {text}"), Style::default().fg(good()))),
+            Err(text) => Line::from(Span::styled(format!("✗ {text}"), Style::default().fg(warn()))),
+        });
+    }
+    let matches = crate::packs::folder_matches(&app.input, &base, home.as_deref());
+    if !matches.is_empty() {
+        let shown: Vec<String> = matches
+            .iter()
+            .take(crate::packs::SUGGESTIONS)
+            .map(|name| format!("{name}/"))
+            .collect();
+        let more = matches.len().saturating_sub(crate::packs::SUGGESTIONS);
+        let tail = if more > 0 { format!("  (+{more})") } else { String::new() };
+        lines.push(Line::from(Span::styled(
+            format!("  {}{tail}", shown.join("  ")),
+            Style::default().fg(muted()),
+        )));
+    }
+    (
+        lines,
+        "Tab completes a folder • Enter packs in the background • Esc cancels • Ctrl+U clears"
+            .to_string(),
+    )
 }
 
 fn draw_input_popup(frame: &mut Frame, app: &App) {
@@ -4367,6 +5284,8 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
     let height = (content.len() as u16 + 2).max(3) + 2 + hint_rows;
     let area = centered_rect(72, height, frame.size());
     frame.render_widget(Clear, area);
+    // Whole keys or none: a hint cut mid-word names a key that does not exist.
+    let hint = fit_hints(&hint, " • ", area.width.saturating_sub(2) as usize);
     content.push(Line::from(Span::styled(hint, Style::default().fg(muted()))));
     if let Some(root_hint) = root_hint {
         // Wrapped here rather than through `Paragraph::wrap`, which would also
@@ -4391,19 +5310,23 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
 }
 
 fn draw_confirm_popup(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 6, frame.size());
+    // The question wraps rather than running off the box on a narrow terminal: it
+    // names what is about to be deleted or killed, and that is the part to read
+    // before pressing y (issue #453). One line, the usual case, is the box it always
+    // was.
+    let probe = centered_rect(60, 6, frame.size());
+    let question = wrapped(&app.input_title, probe.width.saturating_sub(2) as usize);
+    let area = centered_rect(60, question.len() as u16 + 5, frame.size());
     frame.render_widget(Clear, area);
-    let content = vec![
-        Line::from(Span::styled(
-            app.input_title.clone(),
-            Style::default().fg(text_colour()).bold(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "y confirms • n / Esc cancels",
-            Style::default().fg(muted()),
-        )),
-    ];
+    let mut content: Vec<Line> = question
+        .into_iter()
+        .map(|line| Line::from(Span::styled(line, Style::default().fg(text_colour()).bold())))
+        .collect();
+    content.push(Line::from(""));
+    content.push(Line::from(Span::styled(
+        fit_hints("y confirms • n / Esc cancels", " • ", area.width.saturating_sub(2) as usize),
+        Style::default().fg(muted()),
+    )));
     let popup = Paragraph::new(content)
         .alignment(Alignment::Center)
         .block(
@@ -4442,43 +5365,150 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, area);
     let keys = if gating {
         "y accept · n decline · ↑↓ scroll"
+    } else if matches!(app.pending_action, Some(crate::app::PendingAction::EditLever { .. })) {
+        "y continue • n cancel • ↑/↓ scroll"
     } else if confirming {
         "y apply • n cancel • ↑/↓ scroll"
     } else {
         "↑/↓ scroll • Esc close"
     };
     let colour = if confirming || gating { warn() } else { accent() };
+    let block = Block::bordered()
+        .title(Span::styled(
+            format!(" {title} • {keys} "),
+            Style::default().fg(colour).bold(),
+        ))
+        .border_style(Style::default().fg(colour))
+        .style(Style::default().fg(text_colour()).bg(popup_background()));
+    let inner = crate::layout_util::wrap_guard(
+        block.inner(area),
+        crate::layout_util::has_wide_glyph(&text),
+    );
+    frame.render_widget(block, area);
     let popup = Paragraph::new(text)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
-        .block(
-            Block::bordered()
-                .title(Span::styled(
-                    format!(" {title} • {keys} "),
-                    Style::default().fg(colour).bold(),
-                ))
-                .border_style(Style::default().fg(colour)),
-        )
         .style(Style::default().fg(text_colour()).bg(popup_background()));
-    frame.render_widget(popup, area);
+    frame.render_widget(popup, inner);
 }
 
-fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
+/// A popup `percent_x` of `area`'s width and `height` rows tall, centred.
+///
+/// Never narrower than [`POPUP_MIN_WIDTH`] while the screen is wider than that: a
+/// percentage of a 40-column terminal is a box too narrow for the sentence inside it
+/// (issue #453). Never larger than `area` either way.
+pub(crate) fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let vertical = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(height.min(area.height)),
         Constraint::Fill(1),
     ])
     .split(area);
-    Layout::horizontal([
+    let rect = Layout::horizontal([
         Constraint::Percentage((100 - percent_x) / 2),
         Constraint::Percentage(percent_x),
         Constraint::Percentage((100 - percent_x) / 2),
     ])
-    .split(vertical[1])[1]
+    .split(vertical[1])[1];
+    if rect.width >= POPUP_MIN_WIDTH.min(area.width) {
+        return rect;
+    }
+    crate::layout_util::centered_rect_clamped(POPUP_MIN_WIDTH, rect.height, vertical[1])
 }
 
-fn header_row(labels: Vec<&str>) -> Row<'static> {
+/// The narrowest a centred popup is drawn, on any terminal at least that wide.
+const POPUP_MIN_WIDTH: u16 = 38;
+
+/// One table cell as text and a style, so it can be cut to whatever width its
+/// column ends up drawn at (issue #453). A `Cell` cannot be: it keeps no text to cut.
+pub(crate) struct TextCell {
+    text: String,
+    style: Style,
+}
+
+impl TextCell {
+    pub(crate) fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
+    }
+}
+
+impl From<String> for TextCell {
+    fn from(text: String) -> Self {
+        Self { text, style: Style::default() }
+    }
+}
+
+impl From<&str> for TextCell {
+    fn from(text: &str) -> Self {
+        text.to_string().into()
+    }
+}
+
+/// The width a table's `"▸ "` highlight symbol takes, which `Table` reserves on
+/// every row only while a row is selected.
+pub(crate) const HIGHLIGHT_GUTTER: u16 = 2;
+
+/// A bordered table with its columns fitted to `area` (issue #453): those that do not
+/// fit at their minimum width hidden, least important first, and every cell cut to
+/// its column with an ellipsis instead of mid-word.
+///
+/// `selected` is whether a row is highlighted, i.e. whether the highlight gutter
+/// takes its columns. Returns the column layout too, for a hit test to find a column
+/// where it was actually drawn rather than where it would be on a wide terminal.
+pub(crate) fn fitted_table(
+    columns: &[crate::layout_util::Column<'_>],
+    rows: Vec<(Vec<TextCell>, Style)>,
+    area: Rect,
+    selected: bool,
+) -> (Table<'static>, crate::layout_util::FittedColumns) {
+    let gutter = if selected { HIGHLIGHT_GUTTER } else { 0 };
+    let available = area.width.saturating_sub(2).saturating_sub(gutter);
+    let fitted = crate::layout_util::fit_columns(columns, available);
+    let cut = |text: &str, position: usize| truncate_ellipsis(text, fitted.widths[position] as usize);
+    let header = header_row(
+        fitted
+            .keep
+            .iter()
+            .enumerate()
+            .map(|(position, index)| cut(columns[*index].header, position))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str)
+            .collect(),
+    );
+    let rows: Vec<Row<'static>> = rows
+        .into_iter()
+        .map(|(cells, style)| {
+            let cells = crate::layout_util::pick(cells, &fitted.keep)
+                .into_iter()
+                .enumerate()
+                .map(|(position, cell)| Cell::from(cut(&cell.text, position)).style(cell.style))
+                .collect::<Vec<_>>();
+            Row::new(cells).style(style)
+        })
+        .collect();
+    let widths: Vec<Constraint> = fitted.widths.iter().map(|width| Constraint::Length(*width)).collect();
+    (Table::new(rows, widths).header(header), fitted)
+}
+
+/// The `[start, end)` screen columns column `index` of a table drawn by
+/// [`fitted_table`] in `area` occupies, or `None` when it was hidden. What the
+/// click-to-copy id columns hit-test against.
+pub(crate) fn fitted_column_x(
+    area: Rect,
+    fitted: &crate::layout_util::FittedColumns,
+    index: usize,
+    selected: bool,
+) -> Option<(u16, u16)> {
+    let (offset, width) = fitted.column(index)?;
+    let gutter = if selected { HIGHLIGHT_GUTTER } else { 0 };
+    let start = area.x.saturating_add(1 /* left border */).saturating_add(gutter).saturating_add(offset);
+    let end = start.saturating_add(width).min(area.right().saturating_sub(1));
+    (start < end).then_some((start, end))
+}
+
+pub(crate) fn header_row(labels: Vec<&str>) -> Row<'static> {
     Row::new(
         labels
             .into_iter()
@@ -4489,7 +5519,7 @@ fn header_row(labels: Vec<&str>) -> Row<'static> {
     .bottom_margin(1)
 }
 
-fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
+pub(crate) fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
     Block::bordered()
         .title(Span::styled(
             title.into(),
@@ -4498,11 +5528,11 @@ fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
         .border_style(Style::default().fg(color))
 }
 
-fn selected_style() -> Style {
+pub(crate) fn selected_style() -> Style {
     Style::default().fg(inverse_text()).bg(accent()).bold()
 }
 
-fn nonempty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
+pub(crate) fn nonempty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
     if value.trim().is_empty() {
         fallback
     } else {
@@ -5068,7 +6098,106 @@ mod tests {
                     organelle.title()
                 );
             }
-            assert!(screen.contains("MEMBRANE"), "the membrane frames the page");
+            assert!(screen.contains("THIS NODE"), "the frame names the page");
+        }
+
+        /// The nucleus holds a node's whole financial identity, and "wallet" means a
+        /// different chain's keys depending on the row. Each chain is headed.
+        #[test]
+        fn the_nucleus_is_headed_by_general_ergo_and_bitcoin() {
+            let screen = screen(140, 48, RENTING);
+            let at = |needle: &str| {
+                screen
+                    .find(needle)
+                    .unwrap_or_else(|| panic!("{needle} is missing:\n{screen}"))
+            };
+            assert!(at("GENERAL") < at("ERGO"), "{screen}");
+            assert!(at("ERGO") < at("BITCOIN"), "{screen}");
+            // Every row of the nucleus is on screen at this size, the last one included.
+            for lever in cell::Organelle::Nucleus.levers() {
+                assert!(screen.contains(lever.label), "{} is not drawn:\n{screen}", lever.label);
+            }
+            assert_eq!(screen.matches("keep hot").count(), 2, "{screen}");
+        }
+
+        fn assets_popup(list: &str) -> String {
+            let mut app = App::new();
+            app.config_document = Some(
+                serde_yaml::from_str(&format!(
+                    "ledgers:\n  ergo:\n    payments:\n      ASSETS: {list}\n"
+                ))
+                .unwrap(),
+            );
+            app.open_assets_modal();
+            let mut terminal = Terminal::new(TestBackend::new(110, 30)).unwrap();
+            terminal.draw(|frame| super::super::draw_assets_popup(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        #[test]
+        fn the_assets_modal_lists_each_token_with_its_rate() {
+            let screen = assets_popup(
+                "[{TOKEN_ID: \"003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0\", SYMBOL: SigUSD, UNIT_NAME: sigusd, DECIMALS: 2, MU_PER_UNIT: 20000000}]",
+            );
+            for needle in ["SigUSD", "003bd19d…85d0", "2 dec", "20000000 MU/unit", "unit sigusd", "a add", "d remove"] {
+                assert!(screen.contains(needle), "{needle} is missing:\n{screen}");
+            }
+        }
+
+        fn draw_form(configure: impl FnOnce(&mut App)) -> String {
+            let mut app = App::new();
+            app.open_add_asset_prompt();
+            configure(&mut app);
+            let mut terminal = Terminal::new(TestBackend::new(110, 30)).unwrap();
+            terminal.draw(|frame| super::super::draw_asset_form_popup(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        #[test]
+        fn the_asset_form_has_a_labelled_field_for_each_datum() {
+            let screen = draw_form(|app| {
+                app.asset_form.values[1] = "SigUSD".to_string();
+                app.asset_form.focus = 3;
+            });
+            for label in ["TOKEN_ID", "SYMBOL", "UNIT_NAME", "DECIMALS", "MU_PER_UNIT"] {
+                assert!(screen.contains(label), "{label} is missing:\n{screen}");
+            }
+            assert!(screen.contains("SigUSD"), "{screen}");
+            // The help line is the focused field's, not another's.
+            assert!(screen.contains("misprices by 10^n"), "{screen}");
+            assert!(!screen.contains("never its name"), "{screen}");
+            assert!(screen.contains("▸ DECIMALS"), "{screen}");
+        }
+
+        #[test]
+        fn a_refused_form_shows_why_beside_the_fields() {
+            let screen = draw_form(|app| {
+                app.asset_form.error = Some("DECIMALS is a whole number, 0 or more".to_string());
+            });
+            assert!(screen.contains("!! DECIMALS is a whole number"), "{screen}");
+        }
+
+        #[test]
+        fn the_assets_modal_says_so_when_there_are_none() {
+            let screen = assets_popup("[]");
+            assert!(screen.contains("accepts ERG only"), "{screen}");
+            assert!(screen.contains("a add"), "{screen}");
         }
 
         /// An organelle can hold more levers than its share of the band has rows --
@@ -6176,41 +7305,6 @@ mod tests {
         }
     }
 
-    fn peer_with(contracts: Vec<crate::app::PeerContract>) -> Peer {
-        Peer {
-            id: "f3b61c2e-aaaa-bbbb-cccc-ddddeeeeffff".to_string(),
-            uris: "10.0.0.4:8080".to_string(),
-            // Raw MU, as the catalogue stores it; formatting happens at draw time.
-            balance: "1000".to_string(),
-            remote_client_id: "cli-9f2a".to_string(),
-            proof_ids: Vec::new(),
-            reputation_score: "7".to_string(),
-            contracts,
-        }
-    }
-
-    fn ergo_contract() -> crate::app::PeerContract {
-        crate::app::PeerContract {
-            ledger: "ergo".to_string(),
-            contract_hash: "1c691f72deadbeef".to_string(),
-            asset: "ERG".to_string(),
-            address: "0008cd0392aabbcc".to_string(),
-            mu_per_unit: "1000000000".to_string(),
-        }
-    }
-
-    /// A second method on the SAME contract, differing only in its asset. This is what
-    /// an Ergo token is: one script, one address, another currency and another rate.
-    fn token_contract() -> crate::app::PeerContract {
-        crate::app::PeerContract {
-            ledger: "ergo".to_string(),
-            contract_hash: "1c691f72deadbeef".to_string(),
-            asset: "ab".repeat(32),
-            address: "0008cd0392aabbcc".to_string(),
-            mu_per_unit: "20000000".to_string(),
-        }
-    }
-
     mod wallets_card {
         use super::super::draw_ergo;
         use crate::app::{App, LedgerWallet};
@@ -6446,107 +7540,6 @@ mod tests {
             .join("\n")
     }
 
-    #[test]
-    fn peer_detail_prompts_when_nothing_is_selected() {
-        let text = rendered(peer_detail_lines(&Money::default(), None, None, None, false));
-        assert!(text.contains("Select a peer"));
-    }
-
-    #[test]
-    fn peer_detail_shows_ledger_contract_address_and_price() {
-        // The whole point of issue #231: these four facts were only reachable
-        // through a raw sqlite query before.
-        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![ergo_contract()])), None, None, false));
-        assert!(text.contains("Payment methods (1)"));
-        assert!(text.contains("ergo"));
-        assert!(text.contains("1c691f72deadbeef"));
-        assert!(text.contains("0008cd0392aabbcc"));
-        // The rate reads as an equation: what one unit of that ledger buys in MU.
-        assert!(text.contains("1 ERG = 1000000000 MU"));
-    }
-
-    #[test]
-    fn peer_detail_lists_every_contract_instance() {
-        // A peer with several instances used to get silently truncated to one.
-        let second = crate::app::PeerContract {
-            ledger: "simulator".to_string(),
-            contract_hash: "abc123".to_string(),
-            asset: "SIM".to_string(),
-            address: "sim-address".to_string(),
-            mu_per_unit: "500".to_string(),
-        };
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer_with(vec![ergo_contract(), second])),
-            None,
-            None,
-            false,
-        ));
-        assert!(text.contains("Payment methods (2)"));
-        assert!(text.contains("ergo"));
-        assert!(text.contains("simulator"));
-        assert!(text.contains("sim-address"));
-    }
-
-    #[test]
-    fn peer_detail_tells_two_assets_of_one_contract_apart() {
-        // Keyed by the contract alone these two rows are the same row twice, at two
-        // different rates -- and an operator reading "1 ERG = 20000000 MU" would see
-        // this node's ERG rate as the token's.
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer_with(vec![ergo_contract(), token_contract()])),
-            None,
-            None,
-            false,
-        ));
-        assert!(text.contains("Payment methods (2)"));
-        assert!(text.contains("1 ERG = 1000000000 MU"));
-        // The id is shortened for the width, so match its head rather than all 64.
-        assert!(text.contains("ababab"));
-        assert!(text.contains("= 20000000 MU"));
-    }
-
-    #[test]
-    fn peer_detail_says_so_when_no_contract_is_registered() {
-        // Must stay distinguishable from "peer charges through something we
-        // don't render", which is exactly what the old hardcoded lookup did.
-        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![])), None, None, false));
-        assert!(text.contains("No payment method registered"));
-    }
-
-    fn payment(status: &str, tx_id: &str, amount: &str) -> PaymentRow {
-        PaymentRow {
-            created_at: "2026-01-02 10:00:00".to_string(),
-            amount: amount.to_string(),
-            status: status.to_string(),
-            tx_id: tx_id.to_string(),
-            deposit_token: "token-1".to_string(),
-        }
-    }
-
-    fn peer_history(peer_id: &str) -> PeerDetail {
-        PeerDetail {
-            peer_id: peer_id.to_string(),
-            payments: vec![payment("unacknowledged", "abcdef0123456789", "2000")],
-            events: vec![ReputationEvent {
-                created_at: "2026-01-02 10:00:01".to_string(),
-                amount: -100,
-                reason: "payment_unacknowledged".to_string(),
-                score_after: Some(-93),
-            }],
-        }
-    }
-
-    fn a_client() -> Client {
-        Client {
-            id: "client-1".to_string(),
-            balance: "500".to_string(),
-            last_usage: "1700000000".to_string(),
-            unmetered: true,
-        }
-    }
-
     /// A service's blocks are shared, so what it stores and what it weighs are two
     /// different numbers -- and for a service whose bulk is one large layer they
     /// differ by orders of magnitude. The page showed only the first.
@@ -6646,213 +7639,6 @@ mod tests {
         let text = rendered(service_detail_lines(Some(&service), Some(&detail)));
 
         assert!(text.contains("not scored yet"), "{text}");
-    }
-
-    #[test]
-    fn peer_detail_shows_what_we_paid_and_why_the_score_moved() {
-        let peer = peer_with(vec![ergo_contract()]);
-        let history = peer_history(&peer.id);
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer),
-            Some(&history),
-            None,
-            false,
-        ));
-
-        assert!(text.contains("Payments made to this peer (1)"), "{text}");
-        assert!(text.contains("unacknowledged"), "{text}");
-        // The reason is stored with underscores and read as words.
-        assert!(text.contains("payment unacknowledged"), "{text}");
-        assert!(text.contains("-100"), "{text}");
-        assert!(text.contains("→ -93"), "{text}");
-    }
-
-    #[test]
-    fn a_peer_with_no_history_says_so_rather_than_showing_an_empty_card() {
-        let peer = peer_with(vec![ergo_contract()]);
-        let history = PeerDetail {
-            peer_id: peer.id.clone(),
-            payments: Vec::new(),
-            events: Vec::new(),
-        };
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer),
-            Some(&history),
-            None,
-            false,
-        ));
-
-        assert!(text.contains("Nothing paid to this peer yet."), "{text}");
-        assert!(text.contains("No reputation event recorded yet."), "{text}");
-    }
-
-    #[test]
-    fn history_loaded_for_another_peer_is_never_shown_under_this_one() {
-        // The selection can move between the load and the frame. A payment rendered
-        // under the wrong peer is a lie about money, so the id has to match.
-        let peer = peer_with(vec![ergo_contract()]);
-        let history = peer_history("some-other-peer");
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer),
-            Some(&history),
-            None,
-            false,
-        ));
-
-        assert!(!text.contains("Payments made to this peer"), "{text}");
-        assert!(!text.contains("payment unacknowledged"), "{text}");
-    }
-
-    #[test]
-    fn client_detail_shows_deposits_instances_and_payments() {
-        let client = a_client();
-        let detail = ClientDetail {
-            client_id: client.id.clone(),
-            deposits: vec![crate::app::DepositToken {
-                id: "token-1".to_string(),
-                status: "payed".to_string(),
-                created_at: "2026-01-03 09:59:00".to_string(),
-            }],
-            instances: vec![crate::app::ClientInstance {
-                id: "instance-1".to_string(),
-                name: "demo".to_string(),
-            }],
-            payments: vec![payment("accepted", "", "750")],
-        };
-
-        let text = rendered(client_detail_lines(
-            &Money::default(),
-            Some(&client),
-            Some(&detail),
-            false,
-        ));
-
-        assert!(text.contains("Payments received (1)"), "{text}");
-        assert!(text.contains("Deposit tokens (1)"), "{text}");
-        assert!(text.contains("Instances started here (1)"), "{text}");
-        assert!(text.contains("demo"), "{text}");
-        // An incoming payment has no transaction id; the token identifies it.
-        assert!(text.contains("token token-1"), "{text}");
-        // And the reason its balance never moves.
-        assert!(text.contains("Never charged"), "{text}");
-    }
-
-    #[test]
-    fn clients_page_renders_the_client_detail_card() {
-        let backend = TestBackend::new(140, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Clients).unwrap();
-        app.clients.items = vec![a_client()];
-        app.clients.state.select(Some(0));
-        app.client_detail = Some(ClientDetail {
-            client_id: "client-1".to_string(),
-            deposits: Vec::new(),
-            instances: Vec::new(),
-            payments: vec![payment("accepted", "", "750")],
-        });
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(screen.contains("CLIENTS • 1 known"), "{screen}");
-        assert!(screen.contains("SELECTED CLIENT"), "{screen}");
-        assert!(screen.contains("Payments received (1)"), "{screen}");
-        // Peers are a page of their own now, not a pane on this one.
-        assert!(!screen.contains("Reputation proof"), "{screen}");
-    }
-
-    #[test]
-    fn peers_page_renders_the_peer_detail_card() {
-        let backend = TestBackend::new(140, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
-        app.peers.items = vec![peer_with(vec![ergo_contract()])];
-        app.peers.state.select(Some(0));
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(screen.contains("SELECTED PEER"));
-        assert!(screen.contains("Payment methods (1)"));
-        // The table itself stays lean -- no contract columns were added to it.
-        assert!(screen.contains("Reputation proof"));
-        assert!(!screen.contains("Ledger  "));
-    }
-
-    /// A query that failed must not draw the screen a new node draws.
-    ///
-    /// `PEERS • 0 connected` was what an operator with peers saw for a whole release
-    /// (issue #414), because `unwrap_or_default()` turns a rejected statement into an
-    /// empty list and an empty list into a perfectly ordinary page.
-    #[test]
-    fn a_peer_query_that_failed_does_not_render_as_a_node_with_no_peers() {
-        let backend = TestBackend::new(140, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
-        app.peers.items = Vec::new();
-        app.peers_error = Some("no such column: ci.ledger_hash".to_string());
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(screen.contains("CANNOT BE READ"), "{screen}");
-        assert!(screen.contains("PEERS UNREADABLE"), "{screen}");
-        // The reason, so the operator has something to act on rather than a mood.
-        assert!(screen.contains("ci.ledger_hash"), "{screen}");
-        // And never the sentence a healthy empty node draws.
-        assert!(!screen.contains("0 connected"), "{screen}");
-    }
-
-    #[test]
-    fn a_short_terminal_keeps_both_the_peers_table_and_the_contracts() {
-        // Regression: a fixed-height detail card pushed the peers table off an
-        // 80x24 screen entirely, and clipped the contracts out of the card --
-        // leaving it looking exactly like a peer with nothing registered.
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
-        let second = crate::app::PeerContract {
-            ledger: "simulator".to_string(),
-            contract_hash: "abc123def456".to_string(),
-            asset: "SIM".to_string(),
-            address: "sim-address".to_string(),
-            mu_per_unit: "500".to_string(),
-        };
-        app.peers.items = vec![peer_with(vec![ergo_contract(), second])];
-        app.peers.state.select(Some(0));
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(screen.contains("PEERS • 1 connected"));
-        assert!(screen.contains("Payment methods (2)"));
-        assert!(screen.contains("ergo"));
-        assert!(screen.contains("simulator"));
     }
 
     #[test]
@@ -7057,7 +7843,8 @@ mod tests {
     /// nests instance-under-instance already; a client parent had nowhere to show, so
     /// an instance a client started read as one with no parent at all (issue #277).
     mod external_parents {
-        use crate::app::{App, Client, Instance, InstanceUsage};
+        use crate::app::{App, Instance, InstanceUsage};
+        use crate::clients::Client;
         use ratatui::{backend::TestBackend, Terminal};
 
         fn instance(id: &str, father: &str) -> Instance {
@@ -7139,34 +7926,12 @@ mod tests {
         }
     }
 
-    /// Our id inside a remote peer, which is what the other side's logs call us. The
-    /// CLI has always printed it; the TUI never carried the column at all (issue #277).
-    #[test]
-    fn the_peer_card_shows_our_client_id_on_that_peer() {
-        let peer = peer_with(vec![]);
-        let lines = peer_detail_lines(&Money::default(), Some(&peer), None, None, false);
-        let text: String = lines
-            .iter()
-            .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
-            .collect();
-        assert!(text.contains("cli-9f2a"), "{text}");
-
-        let unregistered = Peer {
-            remote_client_id: String::new(),
-            ..peer
-        };
-        let text: String = peer_detail_lines(&Money::default(), Some(&unregistered), None, None, false)
-            .iter()
-            .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
-            .collect();
-        assert!(text.contains("not registered"), "{text}");
-    }
-
     /// The mouse hit tests read off a *real* frame: the row arithmetic in `app.rs`
     /// retraces widget internals (border, header, the header's bottom margin, the tab
     /// padding and dividers), and nothing but a render can confirm it still matches.
     mod mouse_clicks {
         use super::*;
+        use crate::peers::Peer;
 
         fn app_with_peers() -> App {
             let mut app = App::new();
@@ -7179,9 +7944,11 @@ mod tests {
                         uris: "10.0.0.4:8080".to_string(),
                         balance: "1000".to_string(),
                         remote_client_id: String::new(),
+                        local_client_id: String::new(),
                         proof_ids: Vec::new(),
                         reputation_score: "0".to_string(),
                         contracts: Vec::new(),
+                        resources: Default::default(),
                     })
                     .collect(),
             );
@@ -7577,7 +8344,7 @@ mod tests {
     /// What the ENERGY page has to put on screen (issue #395).
     ///
     /// The page is not "the energy keys, again": every one of them is already on the
-    /// Config tree. What it adds is the sentence beside each key, and the point of
+    /// All tree. What it adds is the sentence beside each key, and the point of
     /// these tests is that the sentence is actually drawn — a page that lost its help
     /// panel in a layout change would still look perfectly reasonable.
     mod energy_page {
@@ -7620,7 +8387,7 @@ mod tests {
         }
 
         /// The reason the page exists. A key with no explanation beside it is a key
-        /// that belonged on the Config tree.
+        /// that belonged on the All tree.
         #[test]
         fn the_selected_key_gets_its_explanation() {
             let mut app = App::new();
@@ -7652,6 +8419,121 @@ mod tests {
         fn it_renders_at_the_common_sizes() {
             for (width, height) in [(80, 24), (140, 40)] {
                 draw_energy_at(width, height);
+            }
+        }
+
+        /// The chart the config catalogue's layout leaves room for below its three
+        /// sections (issue #442). Data is injected directly on `app.energy_series`,
+        /// the same way `schedule_page`'s tests inject `app.demand`, so the assertion
+        /// is about the drawing rather than about whatever this machine's own
+        /// database happens to hold.
+        mod chart {
+            use super::*;
+
+            fn series_with(hours: &[(&str, f64, f64, f64)]) -> crate::app::EnergySeries {
+                let mut series = crate::app::EnergySeries::default();
+                for (key, peak_watts, cost, joules) in hours {
+                    series.keys.push((*key).to_string());
+                    series.buckets.push(crate::app::EnergyBucket {
+                        peak_watts: *peak_watts,
+                        cost: *cost,
+                        joules: *joules,
+                    });
+                }
+                series
+            }
+
+            fn screen_with_energy(series: crate::app::EnergySeries) -> String {
+                let mut app = App::new();
+                app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Energy).unwrap();
+                app.energy_series = series;
+                // `App::new()` reads the real `node_energy` off whatever database this
+                // machine happens to have, currency included -- pinned here so the
+                // chart's currency fallback (and these tests) do not depend on it.
+                app.node_energy.currency = String::new();
+                let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+                terminal.draw(|frame| render(&mut app, frame)).unwrap();
+                let buffer = terminal.backend().buffer().clone();
+                (0..buffer.area.height)
+                    .map(|y| {
+                        (0..buffer.area.width)
+                            .map(|x| buffer.get(x, y).symbol())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+
+            #[test]
+            fn a_node_with_no_history_says_so_rather_than_drawing_an_empty_chart() {
+                let screen = screen_with_energy(crate::app::EnergySeries::default());
+                assert!(
+                    screen.contains("No energy history yet"),
+                    "{screen}"
+                );
+            }
+
+            #[test]
+            fn the_busiest_hour_sets_the_peak_the_summary_states() {
+                let series = series_with(&[
+                    ("2026-09-20T00", 2.0, 0.0, 7_200.0),
+                    ("2026-09-20T01", 40.0, 0.0, 144_000.0),
+                    ("2026-09-20T02", 5.0, 0.0, 18_000.0),
+                ]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("watts, peak per hour"), "{screen}");
+                assert!(screen.contains("40 W"), "the busiest hour's watts is not the stated peak:\n{screen}");
+            }
+
+            /// Zero is the honest default: a cost row over an unset tariff would show
+            /// a bar for a number nobody set.
+            #[test]
+            fn an_unset_tariff_reads_watts_only() {
+                let series = series_with(&[("2026-09-20T00", 10.0, 0.0, 36_000.0)]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("no tariff set — watts only"), "{screen}");
+                assert!(!screen.contains("cost per hour"), "{screen}");
+            }
+
+            /// The sum the ENERGY page exists to answer: what the hours actually
+            /// cost, each at its own sample's tariff.
+            #[test]
+            fn a_priced_history_sums_its_cost() {
+                let series = series_with(&[
+                    ("2026-09-20T00", 10.0, 0.50, 36_000.0),
+                    ("2026-09-20T01", 12.0, 0.60, 43_200.0),
+                ]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("cost per hour"), "{screen}");
+                assert!(screen.contains("1.10 USD"), "the two hours' cost was not summed:\n{screen}");
+            }
+
+            /// The three horizons the summary line adds beside the sum (issue #453):
+            /// a typical hour, at three widths, so a `Σ` a few spike hours dominate
+            /// is not the only figure on screen.
+            #[test]
+            fn the_median_line_states_all_three_horizons() {
+                let series = series_with(&[
+                    ("2026-09-20T00", 10.0, 1.0, 36_000.0),
+                    ("2026-09-20T01", 12.0, 3.0, 43_200.0),
+                ]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("median/h"), "{screen}");
+                assert!(
+                    screen.contains("today 2.00"),
+                    "median of 1.00 and 3.00 is 2.00:\n{screen}"
+                );
+                assert!(screen.contains("7d 2.00"), "{screen}");
+                assert!(screen.contains("30d 2.00 USD"), "{screen}");
+            }
+
+            /// No tariff, no median either -- the same honesty `no tariff set —
+            /// watts only` already states for the sparklines above it.
+            #[test]
+            fn an_unset_tariff_shows_no_median_line() {
+                let series = series_with(&[("2026-09-20T00", 10.0, 0.0, 36_000.0)]);
+                let screen = screen_with_energy(series);
+                assert!(!screen.contains("median/h"), "{screen}");
             }
         }
     }
@@ -7795,7 +8677,7 @@ mod pricing_preview {
 
 #[cfg(test)]
 mod config_tree {
-    //! The Config page is a collapsible tree, so the properties that matter are
+    //! The All page is a collapsible tree, so the properties that matter are
     //! that sections start collapsed, expanding reveals the nested (indented)
     //! scalars, and the `/` filter *expands and highlights* matches instead of
     //! hiding everything else.
@@ -7918,7 +8800,7 @@ mod config_tree {
         assert!(has_highlight, "expected a non-selected filter match to be highlighted");
     }
 
-    /// Prints the Config page once so a layout change is visible in the test
+    /// Prints the All page once so a layout change is visible in the test
     /// output. `cargo test -- --nocapture config_tree::preview` renders it.
     #[test]
     fn preview() {
@@ -8010,7 +8892,7 @@ mod cell_preview {
         assert_eq!(app.input_mode, InputMode::ConfirmWrites);
     }
 
-    /// Prints the CELL page for eyeballing during development:
+    /// Prints the POLICIES page for eyeballing during development:
     /// `cargo test cell_preview -- --ignored --nocapture`.
     #[test]
     #[ignore]
@@ -8304,7 +9186,7 @@ mod config_write_root_hint {
     }
 
     /// It is a property of the transaction, not of the key: the kWh price, a peer
-    /// price and a raw Config row all answer the same way, because there is one
+    /// price and a raw All row all answer the same way, because there is one
     /// writer behind all three.
     #[test]
     fn the_requirement_does_not_depend_on_which_key_is_being_edited() {
@@ -8326,7 +9208,7 @@ mod config_write_root_hint {
         );
     }
 
-    /// The hint belongs to config editing. The Connect box and the Config filter go
+    /// The hint belongs to config editing. The Connect box and the All filter go
     /// nowhere near `apply_config_change`, and a root warning on them would be a
     /// claim that is simply false.
     #[test]
@@ -8379,13 +9261,10 @@ mod two_level_tab_bar_preview {
 mod themes {
     use super::render;
     use crate::app::{App, Page};
-    use crate::theme::{self, Theme, DARK, LIGHT, MONO, UBUNTU};
+    use crate::theme::{self, Theme, DARK, LIGHT, MONO, UBUNTU, TEST_SERIAL as SERIAL};
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use ratatui::Terminal;
-    use std::sync::Mutex;
-
-    static SERIAL: Mutex<()> = Mutex::new(());
 
     /// Every foreground colour actually painted on a full render of `page`.
     fn colours_drawn(theme: Theme, page: Page) -> Vec<Color> {
@@ -8674,7 +9553,7 @@ mod themes {
         assert!(!backgrounds.contains(&Color::Black), "a hard-coded black background survived");
     }
 
-    /// The CONFIG page offers the theme as a picker rather than as free text, and
+    /// The ALL page offers the theme as a picker rather than as free text, and
     /// every name it offers resolves. A picker listing a value that silently falls
     /// back to something else would be lying about what it does.
     #[test]
@@ -8728,6 +9607,11 @@ mod overview_preview {
         )
         .ok();
         app.now_minute = 9 * 60 + 30;
+        app.stats.cpu_percent = 12;
+        app.stats.memory_total = 16 * 1024 * 1024 * 1024;
+        app.stats.memory_used = 9 * 1024 * 1024 * 1024;
+        app.stats.daemon_memory_used = 64 * 1024 * 1024;
+        app.stats.instance_memory_reserved = 4 * 1024 * 1024 * 1024;
 
         let mut terminal = Terminal::new(TestBackend::new(116, 26)).unwrap();
         terminal.draw(|frame| render(&mut app, frame)).unwrap();

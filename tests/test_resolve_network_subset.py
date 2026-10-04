@@ -326,6 +326,66 @@ class ResolveNetworkForPeerTests(unittest.TestCase):
         identify.assert_not_called()
         resolve.assert_not_called()
 
+    def _two_slot_instance(self):
+        """One Instance shaped exactly as `resolve_pow_network` builds one: a P2P
+        slot and a REST slot, tagged apart (issue #78)."""
+        from src.manager.pow_networks import P2P_SLOT_TAG, REST_SLOT_TAG
+
+        return celaut.Instance(
+            api=celaut.Service.Api(slot=[
+                celaut.Service.Api.Slot(
+                    port=9030, protocol_stack=[celaut.Service.Api.Protocol(tags=[P2P_SLOT_TAG])]
+                ),
+                celaut.Service.Api.Slot(
+                    port=9053, protocol_stack=[celaut.Service.Api.Protocol(tags=[REST_SLOT_TAG])]
+                ),
+            ]),
+            uri_slot=[
+                celaut.Instance.Uri_Slot(internal_port=9030, uri=[
+                    celaut.Instance.Uri(ip="203.0.113.5", port=9030)
+                ]),
+                celaut.Instance.Uri_Slot(internal_port=9053, uri=[
+                    celaut.Instance.Uri(ip="203.0.113.5", port=9053)
+                ]),
+            ],
+        )
+
+    def test_a_granted_local_caller_only_gets_the_slot_it_asked_for(self):
+        """A bare pow:ergo ask never asked for a REST hole next to its chain peer
+        (#404): what is answered to the guest, and what is opened for it, must both
+        be narrowed the same way."""
+        declared = [_network(["pow:ergo"], {"pow.chain": "ergo", "pow.block_id": BLOCK})]
+        requested = _network(["pow:ergo"], {"pow.chain": "ergo", "pow.block_id": BLOCK})
+        with patch.object(
+            nets, "declared_networks_of_caller", return_value=declared
+        ), patch.object(
+            nets.sc, "get_local_instance_id_by_uri", return_value="container-1"
+        ), patch.object(
+            nets.sc, "get_local_instance_envs", return_value=None
+        ), patch.object(
+            nets, "resolve_network", return_value=[self._two_slot_instance()]
+        ), patch.object(nets, "grant_resolved_network") as grant:
+            resolution = nets.resolve_network_for_peer(requested, caller_ip="10.0.0.9")
+
+        self.assertEqual(len(resolution.peer_instances[0].api.slot), 1)
+        granted = grant.call_args.kwargs["resolution"]
+        self.assertEqual(len(granted.peer_instances[0].api.slot), 1)
+
+    def test_an_unidentified_peer_gets_both_slots(self):
+        """Nothing it does opens a firewall on the strength of this answer, so it
+        gets the full picture -- this node's own peer discovery depends on it."""
+        requested = _network(["pow:ergo"], {"pow.chain": "ergo", "pow.block_id": BLOCK})
+        with patch.object(
+            nets, "declared_networks_of_caller", return_value=None
+        ), patch.object(
+            nets.sc, "get_local_instance_id_by_uri", return_value=None
+        ), patch.object(
+            nets, "resolve_network", return_value=[self._two_slot_instance()]
+        ):
+            resolution = nets.resolve_network_for_peer(requested, caller_ip="1.2.3.4")
+
+        self.assertEqual(len(resolution.peer_instances[0].api.slot), 2)
+
     def test_the_operator_policy_is_judged_before_the_declaration_is(self):
         """A caller learns "not from this node" before anything about its own spec.
 

@@ -15,6 +15,8 @@ from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import populate_possible_environment_workloads
+from src.utils import keyvalue
+from src.utils.benchmark import parse_benchmark, unrecognised_keys
 from src.utils.hashing import (
     BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
 )
@@ -30,7 +32,7 @@ from src.utils.filesystem_xattrs import (
     READ_MODE_RO,
     assert_complete_filesystem_metadata,
     describe_mode_type,
-    encode_filesystem_metadata_xattrs,
+    filesystem_metadata_xattrs,
     implicit_directory_metadata,
     is_supported_filesystem_entry_mode,
     metadata_from_lstat,
@@ -177,7 +179,12 @@ class ZipContainerPacker:
         self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
         self.path = path
-        self.json = json.load(open(self.path + "service.json", "r"))
+        # `json_object_hook` remembers a key an object repeats, so the objects that
+        # become key/value lists can refuse it instead of silently taking the last.
+        self.json = json.load(
+            open(self.path + "service.json", "r"),
+            object_pairs_hook=keyvalue.json_object_hook,
+        )
         self.aux_id = aux_id
         self.error_msg = None
         self._tar_metadata_by_path = {}
@@ -304,10 +311,42 @@ class ZipContainerPacker:
         # Read for its side effect: a malformed declaration must be refused here,
         # in __init__, rather than after BuildKit has built the whole image.
         self._read_only_filesystem_requested()
+        self._benchmarks()
         # Same reason, and one more: a `pow:` network's `formal` is parsed by the
         # very code that will read it at launch, so an ask that cannot resolve is
         # a pack failure rather than an instance that boots and reaches nothing.
         self._parsed_networks()
+
+    # ------------------------------------------------------------------ #
+    # resources.*.benchmark
+    # ------------------------------------------------------------------ #
+
+    def _benchmarks(self) -> dict:
+        """``resources.at_init.benchmark``: the per-core minimum the service requires.
+
+        Optional. Only ``at_init`` holds one: ``benchmark`` is a floor, and a floor is
+        what ``at_init`` says, so that is the half admission reads (see
+        Sysresources.benchmark in protos/celaut.proto). Under ``at_most`` it would carry
+        no meaning, so it is refused rather than packed into the service's hash to be
+        ignored by every node -- and so is the field's old name.
+        """
+        res = self.json.get("resources", {})
+        for end in ("at_init", "at_most"):
+            # Refused rather than ignored: a requirement silently dropped is a service
+            # admitted on hardware its author said it cannot run on (#459).
+            if "min_benchmark" in (res.get(end) or {}):
+                raise ValueError(
+                    f"service.json resources.{end}.min_benchmark was renamed to "
+                    "resources.at_init.benchmark."
+                )
+        if "benchmark" in (res.get("at_most") or {}):
+            raise ValueError(
+                "service.json resources.at_most.benchmark has no meaning: a per-core "
+                "minimum belongs in resources.at_init.benchmark."
+            )
+        return parse_benchmark(
+            (res.get("at_init") or {}).get("benchmark"), "resources.at_init.benchmark"
+        )
 
     # ------------------------------------------------------------------ #
     # read_only_filesystem
@@ -383,7 +422,7 @@ class ZipContainerPacker:
         # Per-entry metadata is mandatory for ro (assert_complete_filesystem_metadata
         # in src/utils/filesystem_xattrs.py refuses the build otherwise). Nothing to
         # emit here: recursive_parsing already calls
-        # encode_filesystem_metadata_xattrs on every branch it creates, root and
+        # filesystem_metadata_xattrs on every branch it creates, root and
         # nested alike, and that writes all of FILESYSTEM_METADATA_KEYS at once. The
         # gate exists for trees from other packers, and for services packed before
         # the metadata contract. Asserted here anyway, so that if that ever stops
@@ -397,7 +436,17 @@ class ZipContainerPacker:
                 f"tree is missing required per-entry filesystem metadata: {e}"
             ) from e
 
-        root_filesystem.xattrs[READ_MODE_KEY] = READ_MODE_RO.encode("utf-8")
+        keyvalue.set_value(root_filesystem.xattrs, READ_MODE_KEY, READ_MODE_RO.encode("utf-8"))
+
+    @staticmethod
+    def _init_xattrs(init: dict) -> dict:
+        """``init.xattrs`` from ``service.json`` (an object) as ``{key: bytes}``."""
+        declared = init.get("xattrs")
+        keyvalue.check_json_object(declared, "init.xattrs")
+        return {
+            key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
+            for key, value in (declared or {}).items()
+        }
 
     def parseContainer(self):
         def _normalize_path_segments(raw_path):
@@ -458,7 +507,9 @@ class ZipContainerPacker:
                         branch_metadata = implicit_directory_metadata()
                     else:
                         branch_metadata = metadata_from_lstat(branch_stat)
-                    encode_filesystem_metadata_xattrs(branch.xattrs, branch_metadata)
+                    keyvalue.from_dict(
+                        branch.xattrs, filesystem_metadata_xattrs(branch_metadata)
+                    )
 
                     # It's a link.
                     if os.path.islink(branch_host_path):
@@ -577,6 +628,18 @@ class ZipContainerPacker:
         r.at_most.mem_limit = most_mem_limit
         r.at_most.disk_space = most_disk_space
 
+        # Minimum per-core benchmark scores. Serialized as declared, recognised key
+        # or not: a key this packer has no name for may be one a node does, so it is
+        # said out loud rather than refused (see src.utils.benchmark).
+        init_benchmark = self._benchmarks()
+        keyvalue.from_dict(r.at_init.benchmark, init_benchmark)
+        unknown = unrecognised_keys(init_benchmark)
+        if unknown:
+            log.LOGGER(
+                "service.json resources.at_init.benchmark declares primitive(s) this node "
+                f"does not recognise, kept as written: {', '.join(unknown)}."
+            )
+
         # Possible descendant workloads. Each scenario is one independent
         # worst-case concurrent execution the service may trigger through its
         # descendants (not cumulative, no ordering). Interpreted at launch time
@@ -598,11 +661,7 @@ class ZipContainerPacker:
             # Legacy compatibility: map service.json entrypoint -> container.init.entry_path
             entry_path = _normalize_path_segments(self.json.get("entrypoint"))
         self.service.container.init.entry_path.extend(entry_path)
-        for key, value in init.get("xattrs", {}).items():
-            if isinstance(value, str):
-                self.service.container.init.xattrs[key] = value.encode("utf-8")
-            else:
-                self.service.container.init.xattrs[key] = bytes(value)
+        keyvalue.from_dict(self.service.container.init.xattrs, self._init_xattrs(init))
         
         # Arch
         
@@ -620,12 +679,12 @@ class ZipContainerPacker:
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
             celaut.Metadata.HashTag.AttrHashTag(
-                key=1,  # Container attr.
+                key=2,  # Service.container is field 2 (Service.prose is 1).
                 value=[
                     celaut.Metadata.HashTag(
                         attr_hashtag=[
                             celaut.Metadata.HashTag.AttrHashTag(
-                                key=2,  # Filesystem
+                                key=2,  # Service.Container.filesystem is field 2.
                                 value=[parseFilesys()]
                             )
                         ]
@@ -683,8 +742,11 @@ class ZipContainerPacker:
                     "renamed to 'mu_per_call' (amounts in MU, the node's unit of account). "
                     "See docs/PRICING.md."
                 )
-            for method, amount_mu in item.get("mu_per_call", {}).items():
-                slot.mu_per_call[method].n = str(amount_mu)
+            keyvalue.check_json_object(item.get("mu_per_call"), f"api[{slot.port}].mu_per_call")
+            keyvalue.from_dict(slot.mu_per_call, {
+                method: celaut.Amount(n=str(amount_mu))
+                for method, amount_mu in item.get("mu_per_call", {}).items()
+            })
             self.service.api.slot.append(slot)
             
     # ------------------------------------------------------------------ #

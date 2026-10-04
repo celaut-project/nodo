@@ -30,6 +30,10 @@ touch /nodo/storage/.acceptedkya
 
 When this file exists, Nodo treats the KyA as already accepted and starts without prompting. This is the same marker the interactive accept flow writes once you answer `yes`.
 
+The second first-run question, the share of earnings this node donates, is never asked without a terminal: with no TTY it is simply left for the next interactive run. To answer it headlessly, set `NODO_DONATION_PERCENTAGE` (a share between `0` and `1`, e.g. `0` to donate nothing) in the environment of the first command.
+
+Every command an agent needs is non-interactive and most have a `--json` form; see [Scripting and AI agents](#scripting-and-ai-agents-) for the conventions, the JSON shapes, and the TUI ↔ CLI mapping.
+
 > ⚠️ Creating this file means you accept the Know Your Assumptions ([`docs/KyA.md`](KyA.md)) without reading the interactive prompt. Only do this in environments you control.
 
 ---
@@ -38,12 +42,11 @@ When this file exists, Nodo treats the KyA as already accepted and starts withou
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--remote] [--name <instance-name>] [-e key value] <service id | service tag | '.celaut.bee' file path>`**  
-  Launches a service instance. Use `--remote` to advertise the host-facing IP instead of the internal VM/container IP. Use `--name` to assign a human-readable instance name. Use `-e` to add service enviroment variables.  
+- **execute `[--name <instance-name>] [-e key value] <service id | service tag | '.celaut.bee' file path>`**  
+  Launches a service instance. The address it prints is reachable from this host only; use `nodo tunnel` to reach the instance from elsewhere. Use `--name` to assign a human-readable instance name. Use `-e` to add service enviroment variables.  
   **Example:**  
   `nodo execute 1234567890abcdef`
-  `nodo execute --remote 1234567890abcdef`
-  `nodo execute --remote -e workers 8 -e timeout 20 1234567890abcdef`
+  `nodo execute -e workers 8 -e timeout 20 1234567890abcdef`
 
 - **estimate `<service id | service tag | '.celaut.bee' file path>`**  
   Estimates service execution cost without launching it.  
@@ -92,8 +95,13 @@ These are the most commonly used commands for daily tasks:
   `sudo nodo prune`  
   `sudo nodo prune --all`
 
-- **kill `<instance id>`** (requires root)  
-  Stops a running service instance by ID.  
+- **kill `<instance id> [--json]`** (requires root)  
+  Stops a running service instance by ID or name, and closes the tunnels this host
+  opened to it (`nodo tunnels --instance <id>`): a tunnel to a stopped instance would
+  keep its port bound and fail every connection. Each is closed the way
+  `nodo tunnel_close` closes it, so none of them is reopened after a restart. Exits `1`
+  when the instance could not be stopped.
+  JSON: `{"killed": "<id>", "tunnels": {"closed": ["3f9a0c12"], "failed": []}}`.  
   **Example:**  
   `sudo nodo kill abcdef1234567890`
 
@@ -182,7 +190,7 @@ These are the most commonly used commands for daily tasks:
   - Full AF_PACKET capture needs a Linux host with `CAP_NET_RAW`; elsewhere the
     RPC degrades to the conntrack fallback exactly like the CLI.
 
-- **tunnel `<instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]`**  
+- **tunnel `<instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>] [--detach] [--json]`**  
   Binds a local port and forwards its traffic to `<slot>` of the instance through
   the node's `Gateway.ServiceTunnel` stream, so a service can be reached without
   publishing a port of its own. `<slot>` must be a port the service **declares**
@@ -191,7 +199,40 @@ These are the most commonly used commands for daily tasks:
   `<instance id>` must be the token as **that** node knows it, since only it can
   resolve the token. The listener binds to `127.0.0.1` unless `--host` says
   otherwise, and `--listen` is optional (an ephemeral port is picked and
-  printed). Press `Ctrl-C` to stop.  
+  printed). Press `Ctrl-C` to stop, or close it from anywhere with
+  `nodo tunnel_close <id>`. Exits `1` when the local port cannot be bound.  
+
+  Every tunnel registers itself while it runs (`<main.STORAGE>/tunnels/<id>.json`,
+  removed on exit), which is what `nodo tunnels` and the TUI's TUNNELS page list.
+  `--detach` starts it in the background and returns once the listener is bound,
+  printing its id; its output goes to `<main.STORAGE>/tunnels/<id>.log`. This is
+  the form for scripts, agents and the TUI, none of which can keep a terminal open
+  for the tunnel's lifetime. A detached tunnel survives a reboot or a daemon
+  restart: its spec (`<id>.spec`: instance, slot, flags, pinned to the port it got)
+  is kept, and the daemon reopens it on start under the same id and port, the way
+  delegated endpoints are restored. Closing it on purpose (`nodo tunnel_close`, `d`
+  in the TUI, `nodo kill` of its instance) drops the spec; one whose instance no
+  longer exists is dropped with a log line, and one that fails to start three
+  daemon starts in a row is dropped too. A foreground tunnel is not reopened.
+  `--json` prints the tunnel as one object — at once
+  with `--detach`, or as the first line in the foreground (the per-connection log
+  then goes to stderr):
+  ```json
+  {"tunnel": {"id": "3f9a0c12", "pid": 41872, "instance": "my-instance",
+   "token": "abcdef1234567890", "slot": 8080, "transport": "tcp",
+   "listen_host": "127.0.0.1", "listen_port": 40517, "gateway": "127.0.0.1:8090",
+   "peer": null, "detached": true, "log": "/nodo/storage/tunnels/3f9a0c12.log",
+   "started_at": 1790000000, "open_fee_mu": 10000, "age_secs": 0,
+   "persistent": true},
+   "read_at": 1790000000}
+  ```
+  A tunnel that could not start is `{"error": "Error: cannot bind …"}` with exit `1`.  
+  **Fee.** Opening the listener is free; each connection through it (each UDP flow)
+  opens a `ServiceTunnel` stream, which spends `pricing.TUNNEL_OPEN_MU` of the
+  instance's balance on the relaying node, plus traffic (`pricing.NET_MU_PER_GIB`).
+  The output says how much (`Fee: …`; `open_fee_mu` in JSON, `null` through `--peer`,
+  whose node charges its own price). There is no prompt — scripts and agents run
+  this — while the TUI asks y/N with the amount before opening one.  
 
   `--udp` makes the local socket a datagram socket, for slots that declare UDP;
   the node picks the node-to-service transport from the slot's own declaration,
@@ -205,11 +246,54 @@ These are the most commonly used commands for daily tasks:
   `nodo tunnel abcdef1234567890 8080 --listen 9000`  
   `nodo tunnel abcdef1234567890 5353 --udp --listen 5353`  
   `nodo tunnel abcdef1234567890 8080 --peer 192.168.1.10:4040`  
+  `nodo tunnel my-instance 8080 --listen 9000 --detach`  
 
   The node also opens these tunnels for itself: when a service is delegated to a
   peer whose advertised addresses this node cannot reach, it stands in for the
   service locally and hands our client an endpoint of its own. That is controlled
-  by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`).
+  by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`). Those are
+  part of the delegated instance, not `nodo tunnel` processes, and are not listed by
+  `nodo tunnels`.
+
+- **tunnels `[<tunnel id> | --instance <instance> | --inbound] [--json]`**  
+  Lists the tunnels running on this host — every `nodo tunnel`, detached or in a
+  terminal — with where each listens, the slot it reaches, the instance, through
+  which node, its pid and age. A tunnel id (or an unambiguous prefix of one) shows
+  that tunnel with the last lines of its log. Files left by a tunnel that died
+  without cleaning up (killed with `-9`, a reboot) are swept, not listed. These are
+  the client ends this host opened.  
+  `--inbound` is the other end: the `ServiceTunnel` streams this node is relaying
+  for others right now — who (the caller's address), which instance and slot, the
+  protocol, bytes in (caller → service) and out so far, and age. The daemon keeps
+  them in memory and mirrors them to `<main.STORAGE>/tunnels/inbound.snapshot` (every
+  open and close, and every 2 s while one is open); a snapshot left by a daemon that
+  is no longer running lists nothing. List only: they cannot be closed from here.
+  `--instance <instance>` lists only the tunnels that reach that instance (by id or
+  name, through this node) — the instance → tunnels table the TUI shows under the
+  INSTANCES card. `nodo instances --json` also carries each local instance's tunnel
+  ids in `tunnels`.
+  JSON: `{"tunnels": [tunnel, …]}` / `{"tunnel": {…, "log_tail": ["…"]}}` /
+  `{"instance": "web", "tunnels": [tunnel, …]}`, with `tunnel` as above. An unknown
+  or ambiguous id is `{"error": …}`, exit `1`. `--inbound`:
+  `{"inbound": [{"id", "caller", "token", "slot", "transport", "target",
+  "started_at", "bytes_in", "bytes_out", "age_secs"}, …], "snapshot_at": 1790000000}`
+  (`snapshot_at` is `null` when the node is not running).  
+  **Examples:**  
+  `nodo tunnels`  
+  `nodo tunnels 3f9a --json`  
+  `nodo tunnels --instance my-instance --json`  
+  `nodo tunnels --inbound`
+
+- **tunnel_close `<tunnel id>... | --all` `[--json]`**  
+  Stops tunnels: SIGTERM, and SIGKILL if one is still running five seconds later.
+  The tunnel closes its listener and removes its own registry file, and a detached
+  one is no longer reopened when the node restarts. A tunnel
+  started by another user (root, typically) needs that user. Exits `1` if any
+  named tunnel was not found or could not be stopped.
+  JSON: `{"closed": ["3f9a0c12"], "failed": []}`.  
+  **Examples:**  
+  `nodo tunnel_close 3f9a0c12`  
+  `nodo tunnel_close --all`
 
 - **increase_deposit `<instance id> <amount>`**  
   Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
@@ -221,10 +305,13 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo decrease_deposit abcdef1234567890 0.005`
 
-- **services**  
-  Lists all available services on the node.  
+- **services `[<service id | tag>] [--json] [--limit N]`**  
+  Lists all available services on the node. With a service, shows its reputation
+  score on this node and the events behind it. `--json` for one JSON object
+  ([shape](#new-commands-for-tui-parity)).  
   **Example:**  
-  `nodo services`
+  `nodo services`  
+  `nodo services my_service_tag --json`
 
 - **connect `<ip:port>`**  
   Manually connects to a peer node. The address is dialled and the identity that answers
@@ -236,9 +323,15 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
-- **pack `<project directory>`**  
-  Packages a project into a service. There are two backends, selected by
-  `packer.local` in `config.yaml`:
+- **pack `<project directory | https git URL[#subdir]> [--local] [--detach] [--json]`**  
+  Packages a project into a service. The source is a local directory (relative
+  paths are read from the shell you typed in) or an **https** git URL, optionally
+  with `#<subdir>` for a project inside the repository. `http://` is refused (the
+  code would be sealed as it arrived, and over plain http it can be changed on the
+  way), and so are `ssh://` / `git@…` URLs (the repository is cloned without
+  credentials: clone it yourself and pack the folder). Exits `1` when the source is
+  refused or the pack produces no service. There are two backends, selected by
+  `packer.local` in `config.yaml`, or by `--local` for one run:
 
   **Default (`packer.local: false`) — packer-service:** nodo does **not** build
   locally. It sends the project to an external **packer-service** (a microVM that
@@ -261,44 +354,118 @@ These are the most commonly used commands for daily tasks:
   The builder runs as your own user, so packing never asks for sudo. Tune it with
   `packer.buildkit.*` and `dependencies.buildkit.*` in `config.yaml`.  
 
-  With the local backend, `--fast` inlines the whole image into one filesystem
-  block instead of splitting large files into their own content-addressed
-  blocks — quicker to pack, at the cost of holding the whole image in memory
-  and losing cross-service block deduplication. `--optimize` forces the normal
-  per-file-block behaviour back on for one invocation; `packer.fast: true` in
-  `config.yaml` makes fast the node's default. `--fast`/`--optimize` are
-  ignored (with a warning) on the default packer-service backend. Both modes
-  produce the identical service id.
+  **`--local` — local packer for this run only:** use the local rootless packer
+  for this pack, and also for the dependencies that it packs. The `config.yaml`
+  file does not change.
 
-  **Example:**  
+  **If the packer service is not available** (`packer.local: false`):
+  - In a terminal, nodo asks you to enable the local packer. If you answer yes,
+    nodo writes `packer.local: true` to `config.yaml` and continues the pack.
+  - Without a terminal (a script, CI or an AI agent), nodo does not ask. The pack
+    fails and nodo shows a hint.
+
+  **For AI agents and scripts:** if `nodo pack` fails because the packer service
+  is not available, run the same command again with `--local`. The first local
+  pack can install BuildKit with `bash/install_buildkit.sh`. This install can ask
+  for sudo one time. Do not use `--local` if the operator wants packs to stay off
+  this host.
+
+  **`--fast` / `--optimize` — single-block packing (local packer only):**
+  `--fast` inlines the whole image into one filesystem block instead of storing
+  each file at or over `packer.MIN_BUFFER_BLOCK_SIZE` as its own content-addressed
+  block — quicker to pack, but the pack reserves memory for the whole image
+  (`packer.PACKER_MEMORY_SIZE_FACTOR` × its size), the node that builds the VM
+  reads the whole image into memory, and nothing is deduplicated with other
+  services. `--optimize` forces the normal per-file blocks for one run;
+  `packer.fast: true` in `config.yaml` makes fast the node's default. Both modes
+  produce the same service id. The packer service ignores them (with a warning).
+
+  Every pack records itself in `<main.STORAGE>/packs/<id>.json` while it runs and
+  keeps the record afterwards with its outcome, so `nodo packs` and the TUI's PACKS
+  page see packs started anywhere — a terminal, a script, the TUI. **`--detach`**
+  runs the pack in the background and returns at once with its id; its output goes
+  to `<main.STORAGE>/packs/<id>.log`. That is the form for scripts, agents and the
+  TUI, none of which can hold a terminal open for a build that takes minutes. A
+  detached pack with the local packer that finds another pack using the builder
+  waits for it (`queued`) instead of failing, as one in a terminal does.
+  `--json` prints one object: with `--detach`, the pack as it started
+  ```json
+  {"pack": {"id": "3f9a0c12", "pid": 41872, "source": "/home/me/hello", "kind": "dir",
+   "packer": "local", "status": "running", "stage": "starting", "detached": true,
+   "log": "/nodo/storage/packs/3f9a0c12.log", "started_at": 1791051095,
+   "finished_at": null, "service_id": null, "error": null}}
+  ```
+  and in the foreground, the same record once it finished (the packer's own output
+  goes to stderr). A source that is refused is `{"error": "Error: …"}` with exit `1`.  
+  **Examples:**  
   `nodo pack /path/to/project`  
-  `nodo pack /path/to/project --fast`   (local backend only)
+  `nodo pack https://github.com/celaut-basics/demo-service.git#hello --detach`  
+  `nodo pack /path/to/project --local`  
+  `nodo pack /path/to/project --local --fast`  
+  `nodo pack ./my-service --detach --json`
   > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
   > reference for the project layout, `pack_config.json`, `service.json`, and the
   > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
   > is declared in `service.json → init.entry_path`). Do not guess the format.
 
+- **packs `[<pack id>] [--active] [--json]`**  
+  Lists the packs on record, newest first: id, status, source, the service id it
+  produced (or the stage a running one is at, or why one failed), age and how long
+  it took. `--active` keeps only the `queued`/`running` ones. A pack id (or an
+  unambiguous prefix) shows that pack with the last lines of its log. Statuses:
+  `queued` (waiting for another local pack to release the builder), `running`,
+  `done`, `failed`, `cancelled`. A record that says running but whose process is
+  gone (killed with -9, or the host restarted) is reported — and rewritten — as
+  `failed` with `error` saying so. The newest 20 finished packs are kept; older
+  records and their logs are pruned.
+  JSON: `{"packs": [pack, …]}` / `{"pack": {…, "log_tail": ["…"]}}`, with `pack` as
+  above plus `age_secs`, `duration_secs` and `last_line` (the last line of its log).
+  `stage` is one of `starting`, `waiting for another pack`, `starting the builder`,
+  `starting the packer service`, `cloning`, `copying the project`,
+  `waiting for the packer service`, `uploading dependencies`, `zipping the project`,
+  `building`, `building in the packer service`, `importing`; `null` once finished.  
+  **Examples:**  
+  `nodo packs`  
+  `nodo packs 3f9a --json`
+
+- **pack_cancel `<pack id>… [--json]`**  
+  Stops a queued or running pack. It is sent SIGTERM and unwinds through the
+  packer's own cleanup — stops nodo's rootless builder, removes the clone or copy,
+  releases the pack lock — and records itself `cancelled`. One still alive after
+  30 s is killed, with its whole process group when it was started with `--detach`
+  (the `git` / `buildctl` it was waiting on live there). What it cannot stop: a
+  build already sent to a packer **service** keeps running inside that VM until it
+  finishes; its result is just never imported. Exits `1` if a pack is unknown, not
+  running, or another user's.
+  JSON: `{"cancelled": ["3f9a0c12"], "failed": []}` (+ `"error"` when `failed` is
+  not empty).
+
 - **tui**  
   Launches the terminal user interface for monitoring and managing the node. Its
-  Config page is **the** place to change a setting: it validates the value, backs the
+  All page is **the** place to change a setting: it validates the value, backs the
   file up, writes it, and restarts the node in one step ([`CONFIG.md`](CONFIG.md)).  
   **Example:**  
   `nodo tui`
 
-- **info**  
-  Displays service status, version, the node's identity key, and configuration
-  details. The `Node id:` line is the node's Ed25519 public key in hex — the same
-  string the reputation system keys every opinion by, so it is what you compare
-  against when a peer says it vouched for you, and what you paste when asking one to.
-  It reads `unavailable (no identity mnemonic yet)` on a node that has not been
-  started long enough to derive one.  
+- **`nodo` (no arguments)**  
+  Prints the quick-start command list, then this node's own status: service status,
+  version, the node's identity key, address and balances, and — last, so it is the
+  last thing read — any operator alerts that need action. The
+  `Node id:` line is the node's Ed25519 public key in hex — the same string the
+  reputation system keys every opinion by, so it is what you compare against when a
+  peer says it vouched for you, and what you paste when asking one to. It reads
+  `unavailable (no identity mnemonic yet)` on a node that has not been started long
+  enough to derive one. When there are alerts, it also tells you to run
+  `sudo nodo daemon restart`.  
   **Example:**  
-  `nodo info`
+  `nodo`
 
-- **logs**  
-  Shows real-time application logs for monitoring.  
+- **logs `[-n <lines>] [--json]`**  
+  Shows real-time application logs for monitoring (follows until Ctrl+C). With
+  `-n`, prints the last N lines and exits; `--json` prints them as one object.  
   **Example:**  
-  `nodo logs`
+  `nodo logs`  
+  `nodo logs -n 200`
 
 - **export `<service> <dir> [--raw]`**  
   Exports a service into the specified directory. Two modes:
@@ -343,10 +510,13 @@ These are the most commonly used commands for daily tasks:
   `nodo integrity`  
   `nodo integrity my_service_tag --fix`
 
-- **instances**  
-  Lists all running instances and their details.  
+- **instances `[<search>] [--json]`**  
+  Lists all running instances and their details. A search term filters them;
+  `--json` adds raw values and live usage counters
+  ([shape](#new-commands-for-tui-parity)).  
   **Example:**  
-  `nodo instances`
+  `nodo instances`  
+  `nodo instances web --json`
 
 - **instances --grouped**  
   Lists running instances grouped by their parent service.  
@@ -380,15 +550,38 @@ These commands offer extended management and exploration features:
   **Example:**  
   `nodo tag 1234567890abcdef new_tag`
 
-- **clients**  
-  Lists clients currently connected to the node.  
+- **clients `[<client id>] [--json] [--limit N]`**  
+  Lists clients currently connected to the node. With a client id, adds what it
+  paid, its deposit tokens, the instances it started here and the peer it is bound to.  
   **Example:**  
-  `nodo clients`
+  `nodo clients`  
+  `nodo clients <client id> --json`
 
-- **peers**  
-  Displays the list of connected peer nodes.  
+- **peers `[<peer id>] [--json] [--limit N]`**  
+  Displays the list of connected peer nodes. With a peer id, adds every payment
+  made to it and the reputation events behind its score.  
   **Example:**  
-  `nodo peers`
+  `nodo peers`  
+  `nodo peers <peer id> --json`
+
+- **protocol `[<peer id> | <ip:port>] [--json] [--no-prose]`**  
+  Without an argument, prints the protocol this node announces on every address:
+  the signature scheme, the transport and the stack of layers (tls, http2, grpc,
+  bee-rpc, celaut-gateway), each with its `formal` parameters and its prose. With a
+  peer, asks it for its announcement and compares it with this node's, layer by layer,
+  naming every `formal` key that differs. A layer is `compatible` when it differs
+  only by message fields or RPCs that one side declares and the other does not:
+  protobuf and gRPC let the two nodes talk. Exits 0 when the peer speaks this node's
+  protocol on at least one address.  
+  **Example:**  
+  `nodo protocol`  
+  `nodo protocol <peer id> --json`
+
+- **peer_reputation `<peer id> <+N|-N>` `[--json]`**  
+  Moves this node's local reputation score of a peer and records why
+  (`operator_adjustment`) — the TUI's `+`/`-` on PEERS.  
+  **Example:**  
+  `nodo peer_reputation <peer id> -1`
 
 - **credit_client `<client id> <amount>`**  
   Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
@@ -654,8 +847,9 @@ Everything the node derives from a config value — its identity keypair, the TL
 certificate peers pin, the interpolated paths — is fixed for the life of the process,
 which is exactly the point.
 
-So change settings through `nodo tui`, which writes the file and restarts the node as
-one transaction (and reverts the file if the node does not come back).
+So change settings through `nodo tui` or `nodo config set` (scriptable — see
+[`config set`](#new-commands-for-tui-parity)), which write the file and restart the node
+as one transaction (and revert the file if the node does not come back).
 
 The same rule binds nodo's own commands: a CLI command that writes `config.yaml`
 (`nodo sync_reputation_proof`, `nodo submit_reputation`) restarts a serving node itself
@@ -680,12 +874,378 @@ If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic i
 
 ---
 
+## Scripting and AI agents 🤖
+
+### Can an AI agent use the TUI?
+
+**No, not reliably — and it does not need to.** `nodo tui` is a full-screen ratatui
+application: it needs a real terminal (PTY), redraws the whole screen every two
+seconds, lays itself out differently at every terminal size, answers keys and
+mouse clicks rather than arguments, prints no structured output, and has no exit
+status that says whether an action worked (outcomes appear as a one-line status
+message at the bottom of the screen). An agent could drive it only by emulating a
+terminal and scraping the screen, which is slow, fragile and unverifiable.
+
+Everything the TUI can *show* or *do* is therefore also a plain command, listed in
+the [TUI ↔ CLI mapping](#tui--cli-mapping) below. Most of the TUI's actions already
+were commands — it runs `nodo kill`, `nodo connect`, `nodo credit_client`,
+`nodo chat_*`, `nodo reputation --json`, … in the background — and the rest
+(configuration editing, profiles, the Overview, Earnings, Energy and Schedule
+pages, peer reputation adjustment, the detail cards) are commands now too.
+
+### Conventions
+
+- **Exit status** — `0` when the command did what it says, `1` when it refused or
+  failed. Read-only commands exit `0` when they produced their report, even if the
+  report says something bad (e.g. `nodo status` on a stopped node: read `serving`).
+- **`--json`** — prints exactly **one JSON object on one line** to stdout, stamped
+  with `read_at` (Unix seconds). A failure is still one object: `{"error": "...",
+  "read_at": ...}` with exit status `1`. MU amounts are integers in fields ending
+  in `_mu` (they can exceed 2^53 — parse them as big integers if your language
+  needs it); `*_display` fields are the same amount rendered in `ui.DISPLAY_UNIT`.
+  A figure that cannot be measured is `null`, never `0`.
+- **No prompts.** The only interactive questions are the first-run KyA and
+  donation questions (see "Non-interactive use" at the top of this page: create
+  `storage/.acceptedkya` and set `NODO_DONATION_PERCENTAGE`) and
+  `nodo burnall`, which needs `--yes`.
+- **Root.** Commands that restart the node (`config set|append|remove`,
+  `config profile --apply` on a serving node, `daemon …`) or touch VMs (`kill`,
+  `remove`, `prune`) need root, exactly as in the TUI.
+- **`--limit N`** bounds the history rows in a detail view (default 50; the TUI
+  shows 8).
+
+Commands with `--json`: `status`, `services`, `instances`, `peers`, `protocol`, `clients`,
+`peer_reputation`, `config` (all subcommands), `earnings`, `energy`, `schedule`,
+`logs -n`, `docs`, `chat <peer>` (reading), `chat_open`, `chat_threads`,
+`chat_thread`, `reputation`, `donations`, `resources`, `tx_history`, `kill`, `tunnel`,
+`tunnels`, `tunnel_close`.
+
+### Agent quick start
+
+```bash
+nodo status --json                         # is it serving? alerts? counts?
+nodo instances --json                      # what is running, with live counters
+nodo peers --json                          # who we talk to
+nodo peers <peer_id> --json                # + payments and reputation events
+nodo config get pricing --json             # read any config subtree
+sudo nodo config set network.DELEGATE_EXECUTION=true --json   # atomic, restarts, rolls back
+nodo config profile --json                 # which posture is this node closest to?
+nodo logs -n 100 --json                    # last 100 log lines, then exit
+nodo tunnel <instance> 8080 --detach --json  # reach a slot from here; returns its id
+nodo tunnels --json                        # tunnels running on this host
+nodo tunnels --instance <instance> --json  # the ones reaching one instance
+nodo tunnels --inbound --json              # streams this node relays for others
+nodo tunnel_close <tunnel id> --json       # and close one
+```
+
+### New commands for TUI parity
+
+- **status `[--json] [--wallet] [--storage]`**
+  The TUI's OVERVIEW page as one report: whether a node is serving on the gateway
+  port, version (git commit), node id, gateway port, the address peers are told,
+  reputation proof id, `ACTION REQUIRED` alerts, catalogue counts, memory/disk
+  reserved by local instances, and host CPU/load/memory/disk. `--wallet` adds the
+  payment-contract balances (starts a JVM; slow), `--storage` sizes the storage
+  directory (walks it; slow). Bare `nodo` prints the same in prose.
+  ```json
+  {"serving": true, "version": "d757bafc…", "node_id": "02ab…", "gateway_port": 8090,
+   "address": "203.0.113.5:8090", "scope": "public", "reputation_proof_id": "…",
+   "alerts": [{"key": "gateway_port", "summary": "…", "detail": "…", "line": "ACTION REQUIRED …"}],
+   "counts": {"local_instances": 2, "delegated_instances": 0, "peers": 5, "clients": 3,
+              "services": 7, "reserved_mem_bytes": 2147483648, "reserved_disk_bytes": 10737418240},
+   "host": {"cpu_count": 16, "load_avg": [0.4, 0.3, 0.2], "mem_total_bytes": …,
+            "mem_available_bytes": …, "disk_total_bytes": …, "disk_free_bytes": …},
+   "read_at": 1790000000}
+  ```
+
+- **config get `[<path>] [--json] [--show-secrets]`**
+  Reads `config.yaml` **as it is on disk** (not the interpolated view `nodo envs`
+  prints). Paths are dotted with `[n]` for list elements: `network.GATEWAY_PORT`,
+  `core_services[1].id`. No path prints the whole file. Text output is one
+  `path: value` line per leaf (values JSON-encoded), as the CONFIG page lists them.
+  Secret-looking paths (`mnemonic`, `password`, `secret`, `private_key`, `api_key`,
+  `token`) are masked as `********` unless `--show-secrets`.
+  JSON: `{"path": "pricing", "value": {...}}`.
+
+- **config set `<path>=<value> [<path>=<value> ...] [--json]`**
+  Writes one or more keys **in one transaction** — the same one every TUI page
+  uses: snapshot `config.yaml` to `config-<UTC stamp>-<nnnn>.yaml` (ten kept),
+  write with nodo's `yq` in place (comments kept; all keys in one `yq` call),
+  then, if a node is serving, `nodo daemon restart` and wait (up to 120 s) for the
+  gateway port to answer; **if it does not come back, the snapshot is restored and
+  the node restarted on it**. Values are YAML, so they keep their type: `true`,
+  `5000`, `1.5`, `null`, `[]`, `["a", "b"]`, `'"quoted"'`. On a serving node this
+  needs root (it is refused otherwise, and nothing is written). A changed gateway
+  port drops its "proven reachable" marker so the next start re-probes it.
+  ```bash
+  sudo nodo config set pricing.SCARCITY_CURVE=2.0 host_limits.ENABLED=true
+  nodo config set activity_window.ENABLED=true 'activity_window.WINDOWS=[{"START": "08:00", "END": "18:00"}]'
+  ```
+  JSON: `{"ok": true, "label": "Set …", "outcome": "restarted" | "not-running" |
+  "refused" | "reverted", "backup": "/…/config-20261002140501-0042.yaml",
+  "error": null, "values": {"pricing.SCARCITY_CURVE": 2.0}}`.
+
+- **config append `<list path> <value> [--json]`** / **config remove `<path>[<n>]` `[--json]`**
+  Add an element to a list, or remove one element (only list elements can be
+  removed — a key is set, never deleted, so the node never silently falls back to
+  a default). Same transaction as `set`.
+  ```bash
+  nodo config append service_networks.blacklist '"*.example.com"'
+  nodo config remove service_networks.blacklist[0]
+  ```
+
+- **config profile `[<profile>] [--apply] [--json]`**
+  The POLICIES page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
+  `workbench` (most closed to most open). No argument lists them with how far this
+  node is from each and which is closest (ties go to the more closed one). A
+  profile name lists exactly which keys differ (`from` → `to`); `--apply` writes
+  those keys in one transaction. A profile writes policy only — never an identity,
+  wallet, path or port. The catalogue is the TUI's (`cell.rs`); a test keeps the
+  two identical.
+  JSON (list): `{"closest": "cautious", "profiles": [{"id", "label", "blurb",
+  "total", "deviations": [{"path", "from", "set", "to"}]}]}`.
+
+- **peers `[<peer_id>] [--json] [--limit N]`**
+  No id lists every peer as before (now with its endpoints). An id narrows to one
+  peer and adds the PEERS detail card: every payment made to it and the reputation
+  events behind its score. JSON: `{"peers": [peer, …]}` or `{"peer": peer}` where
+  `peer` is `{"id", "endpoints", "protocol_stack", "remote_client_id",
+  "local_client_id", "balance_peer_mu", "balance_mu", "balance_display",
+  "balance_last_update", "payment_methods": [{"ledger_tag", "contract_hash",
+  "address", "token_id", "mu_per_unit"}], "advertised_rates", "reputation_proofs",
+  "reputation_score", "reputation_index", "last_index_on_ledger"}` plus, for one
+  peer, `"payments": [{"created_at", "direction", "amount_mu", "status", "ledger",
+  "tx_id", "deposit_token"}]` and `"reputation_events": [{"created_at", "amount",
+  "reason", "score_after"}]`.
+
+- **peer_reputation `<peer_id> <+N|-N> [--json]`**
+  The TUI's `+`/`-` on PEERS: moves this node's local score of a peer by N and
+  records an `operator_adjustment` reputation event in the same transaction.
+  JSON: `{"peer_id", "delta", "reputation_score", "reputation_index"}`.
+
+- **clients `[<client_id>] [--json] [--limit N]`**
+  No id lists every client as before (now with whether it is metered). An id adds
+  the CLIENTS detail card: what it paid us, its deposit tokens, the instances it
+  started here, and the peer it is bound to, if any. JSON: `{"clients": [...]}` /
+  `{"client": {"id", "balance_mu", "balance_display", "last_usage", "unmetered",
+  "payments", "deposit_tokens", "instances", "bound_peer_id"}}`.
+
+- **services `[<service>] [--json] [--limit N]`**
+  No argument lists the registry as before. A service id or tag adds the SERVICES
+  detail card: its reputation score here (across every instance of it that ever
+  ran) and the events behind it. JSON: `{"services": [{"id", "tag", "size_bytes",
+  "stored_bytes", "size_error"}]}` / `{"service": {…, "reputation_score",
+  "reputation_events"}}`.
+
+- **instances `[<search>] [--grouped] [--json]`**
+  `--json` prints `{"instances": [...]}`: the printed fields plus raw values —
+  `service_id`, `balance_mu`, `mem_limit_bytes`, `disk_space_bytes`, `uris`
+  (`[{"ip", "port", "internal_port"}]`), `runtime` (pid, uptime, RSS, cgroup memory)
+  and `usage`: cumulative `cpu_usage_usec`, `memory_current_bytes`, `net_rx_bytes`,
+  `net_tx_bytes`, read from the instance's cgroup and tap exactly as the INSTANCES
+  page reads them. These are counters, not rates: the TUI's CPU% is the
+  `cpu_usage_usec` delta between two reads divided by the elapsed microseconds
+  (not normalised by vCPUs). Delegated instances have no local counters (`null`).
+  Use `parent_id` to rebuild the `--grouped` tree.
+
+- **earnings `[--json]`**
+  The EARNINGS page's money half: what each payment network brought in over the
+  last day/week/month/year and all time (accepted incoming payments only; refused
+  deposits are counted apart). The reputation half is `nodo reputation --json`.
+  JSON: `{"earnings": [{"ledger": "ergo", "total_mu", "day_mu", "week_mu",
+  "month_mu", "year_mu", "refused_mu"}]}`.
+
+- **energy `[--json] [--hours N]`**
+  The ENERGY page: the latest `energy_consumption` sample, that table folded into
+  local hours over the last N hours (default 720), and the `energy:` config block.
+  JSON: `{"latest": {"timestamp", "watts", "price_per_kwh", "currency", "backend",
+  "is_floor"}, "hourly": [{"hour": "2026-10-02T14", "peak_watts", "joules", "cost"}],
+  "config": {...}, "hours": 720}`. Change the settings with `nodo config set energy.…`.
+
+- **schedule `[--json] [--days N]`**
+  The SCHEDULE page: whether the working hours are enforced, open right now, the
+  windows, what closing time does, and `demand_history` folded onto the 24 hours of
+  a clock over the last N days (default 30). JSON: `{"config": {...}, "enabled",
+  "open_now", "windows": [["08:00", "18:00"]], "stops_running_instances", "days",
+  "demand_by_hour": {"held": [24 ints], "refused": [24 ints]}}`. Change it with
+  `nodo config set activity_window.…` (all three keys in one call, so the node is
+  never restarted onto half a schedule).
+
+- **logs `[-n <lines>] [--json]`**
+  Bare `nodo logs` follows the log forever (`tail -f`). `-n N` prints the last N
+  lines and exits; `--json` prints `{"path", "lines": [...]}` (200 lines if no `-n`).
+
+- **docs `[<page>] [--json]`**
+  The DOCS page: lists every Markdown page under this installation's `docs/` with
+  its title, or prints one page's Markdown (`nodo docs CONFIG`, `nodo docs
+  proposals/x.md`). `NODO_DOCS_DIR` overrides the folder. JSON: `{"root", "pages":
+  [{"page", "title"}]}` / `{"page", "title", "markdown"}`.
+
+- **chat `<peer>` / chat_threads `[<peer>]` / chat_thread `<id>` / chat_open … `--json`**
+  The CHAT page's reads as JSON: `{"peer_id", "messages": [...]}`,
+  `{"conversations": [{"id", "peer_id", "opened_by_us", "topic", "opened_at",
+  "closed_at"}]}`, `{"conversation_id", "messages": [{"ts", "from_us", "body",
+  "conversation_id", "service"}]}`; `chat_open --json` returns the new
+  `{"conversation_id", "peer_id", "topic"}` so the next `chat_reply` can use it.
+
+### TUI ↔ CLI mapping
+
+| TUI page / action | Key | CLI equivalent |
+|---|---|---|
+| KyA gate (first run) | `y` / `n` | first interactive `nodo` run, or `touch <MAIN_DIR>/storage/.acceptedkya` |
+| OVERVIEW: status, version, node id, address, proof id | — | `nodo status [--json]` (new); bare `nodo` |
+| OVERVIEW: ACTION REQUIRED banner | — | `nodo status --json` → `alerts` (new); `nodo doctor` |
+| OVERVIEW: host CPU/RAM/disk, reserved resources, counts | — | `nodo status --json` → `host`, `counts` (new) |
+| OVERVIEW: storage size | — | `nodo status --storage` (new) |
+| OVERVIEW: wallet balances | — | `nodo status --wallet` (new); bare `nodo` |
+| OVERVIEW: peers' announced resources / own announcement | — | `nodo resources --json`; `nodo peers --json` |
+| OVERVIEW: earnings / donations summary | — | `nodo earnings`, `nodo donations --json` |
+| OVERVIEW: energy / schedule summary | — | `nodo energy`, `nodo schedule` (new) |
+| INSTANCES: table, live CPU/RAM/net | — | `nodo instances --json` (new `--json`, live counters); `nodo observe <id>` (interactive stream) |
+| INSTANCES: dependency tree | `g` | `nodo instances --grouped`; `parent_id` in `--json` |
+| INSTANCES: kill (closes its tunnels too) | `k` | `nodo kill <instance> [--json]` (new: closes its tunnels; `--json`) |
+| INSTANCES: open a tunnel to the selected instance (y/N with the fee) | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`; fee in `open_fee_mu`) |
+| INSTANCES: tunnels of the selected instance (card line + table under it) | — | `nodo tunnels --instance <instance> [--json]` (new); `nodo instances --json` → `tunnels` |
+| TUNNELS: table, card | — | `nodo tunnels [--json]` (new) |
+| TUNNELS: details + log tail | `i` | `nodo tunnels <tunnel id> [--json]` (new) |
+| TUNNELS: open a tunnel to any instance (y/N with the fee) | `n` | `nodo tunnel <instance> <slot> [flags] --detach` (new `--detach`; fee in `open_fee_mu`) |
+| TUNNELS: close | `d` | `nodo tunnel_close <tunnel id>` (new) |
+| TUNNELS: INBOUND table (streams relayed for others; list only) | — | `nodo tunnels --inbound [--json]` (new) |
+| SERVICES: list | — | `nodo services [--json]` (new `--json`) |
+| SERVICES: reputation card | — | `nodo services <service> [--json]` (new) |
+| SERVICES: details | `i` | `nodo inspect <service>` |
+| SERVICES: execute | `e` | `nodo execute <service>` |
+| SERVICES: delete | `d` | `nodo remove <service>` |
+| SERVICES: get from peers | — | `nodo get <service>` |
+| SERVICES / PACKS: pack a folder or an https git URL | `p` / `n` | `nodo pack <dir \| https URL[#subdir]> --detach [--json]` (new `--detach`, `--json`) |
+| PACKS: table, card (current and recent packs) | — | `nodo packs [--active] [--json]` (new) |
+| PACKS: details + log tail | `i` | `nodo packs <pack id> [--json]` (new) |
+| PACKS: cancel (y/N) | `c` | `nodo pack_cancel <pack id> [--json]` (new) |
+| PEERS: table | — | `nodo peers [--json]` (new `--json`) |
+| PEERS: payments + reputation events card | — | `nodo peers <peer> [--json]` (new) |
+| PEERS: connect | `c` | `nodo connect <host:port>` |
+| PEERS: forget | `d` | `nodo disconnect <peer>` |
+| PEERS: adjust local reputation | `+` / `-` | `nodo peer_reputation <peer> +1` / `-1` (new) |
+| CLIENTS: table | — | `nodo clients [--json]` (new `--json`) |
+| CLIENTS: payments / tokens / instances / bound peer card | — | `nodo clients <client> [--json]` (new) |
+| CLIENTS: credit / debit | `+` / `-` | `nodo credit_client` / `nodo debit_client <client> <amount>` |
+| CHAT: threads (ours / theirs) | `←` / `→` | `nodo chat_threads [<peer>] [--json]` (`opened_by_us`) |
+| CHAT: thread messages | — | `nodo chat_thread <id> [--json]` |
+| CHAT: open / reply / close / reopen | `o` / Enter / `c` / `R` | `nodo chat_open`, `chat_reply`, `chat_close`, `chat_reopen` |
+| EARNINGS: money per network and window | — | `nodo earnings [--json]` (new) |
+| EARNINGS: reputation staked, proofs | `r` | `nodo reputation [--json]` |
+| EARNINGS: donations | — | `nodo donations [--json]` |
+| POLICIES: closest profile, deviations | `d` | `nodo config profile [<profile>] [--json]` (new) |
+| POLICIES: apply a profile | `p` | `nodo config profile <profile> --apply` (new) |
+| POLICIES: move a lever / edit its keys | Enter / `e` | `nodo config set <key>=<value> …` (new; one call per lever, all its keys) |
+| POLICIES: Ergo accepted tokens add/remove | `a` / `d` | `nodo config append ledgers.ergo.payments.ASSETS '{…}'` / `nodo config remove ledgers.ergo.payments.ASSETS[n]` (new) |
+| POLICIES: router steps | `n` | `nodo nat-guide` |
+| PRICING: prices, nudge ±10 % | `+` / `-`, `e` | `nodo config get pricing --json` / `nodo config set pricing.…=<value>` (new) |
+| ENERGY: settings | `e`, Enter | `nodo config get energy` / `nodo config set energy.…` (new) |
+| ENERGY: history chart, today/7d/30d | — | `nodo energy [--json] [--hours N]` (new) |
+| SCHEDULE: windows, on/off, closing behaviour | `a`/`d`/`w`/`c`/arrows/Enter | `nodo config set activity_window.ENABLED=… activity_window.WINDOWS=… activity_window.ON_CLOSE=…` (new) |
+| SCHEDULE: demand by hour, refused while closed | — | `nodo schedule [--json] [--days N]` (new) |
+| CONFIG: browse / filter the tree | arrows, `/`, `x` | `nodo config get [<path>] [--json]` (new); `nodo envs` (interpolated) |
+| CONFIG: edit a value | `e` | `nodo config set <path>=<value>` (new) |
+| CONFIG: add / remove list element | `a` / `d` | `nodo config append` / `nodo config remove` (new) |
+| Any config change: backup → restart → rollback | — | built into every `nodo config` write (new) |
+| LOGS: tail of app.log | — | `nodo logs -n <lines> [--json]` (new `-n`) |
+| LOGS: output of actions launched from the TUI | — | each command's own stdout and exit status |
+| DOCS: index, read a page | arrows, Enter | `nodo docs [<page>] [--json]` (new) |
+| DOCS: search, follow links | `/`, `n`, `l`, Enter | `grep -r` over the `docs/` files |
+| Refresh | `r` | re-run the command |
+| Theme | `--theme` | n/a — presentation only |
+
+Not ported, deliberately: themes, layout and mouse handling (presentation only);
+in-page search and link following on DOCS (an agent reads the Markdown directly);
+the POLICIES page's *lever catalogue* — the named one-row decisions and their
+explanations. Every lever is a set of config keys, so `nodo config set` can put a
+node in any state a lever can, but the human-readable names and wording live only
+in `cell.rs`. The profile catalogue *is* ported, because "which posture is this
+node in" is a question an agent needs answered.
+
+### Complete command index
+
+Every command `nodo help` lists, in one place (details elsewhere on this page):
+
+| Command | What it does |
+|---|---|
+| `nodo` | quick start, status, address, wallet, alerts (prose) |
+| `help` | the command catalogue |
+| `tui` | the interactive operations console (humans) |
+| `status [--json] [--wallet] [--storage]` | the TUI's OVERVIEW as data |
+| `doctor` | check, and fix, what stops the node serving |
+| `daemon start\|status\|stop\|restart` | control the `nodo.service` unit (root) |
+| `logs [-n <lines>] [--json]` | follow the log, or print a bounded tail |
+| `envs` | print the effective (interpolated) config.yaml |
+| `config get\|set\|append\|remove\|profile` | read and change config.yaml transactionally |
+| `schedule [--json] [--days N]` | working hours and demand by hour |
+| `energy [--json] [--hours N]` | power drawn and what it cost |
+| `docs [<page>] [--json]` | list or print this installation's docs |
+| `nat-guide` | the router steps to be reachable from the Internet |
+| `firewall-compat status\|apply\|remove` | rules a coexisting firewall must keep |
+| `completion bash\|zsh\|install` | shell tab-completion |
+| `update` | update nodo itself (root) |
+| `pack <dir\|git url>` | package a project into a service |
+| `download <url> [-o <dir>]` | fetch a published service from its manifest |
+| `get <service> [--now]` | ask peers for a service not held locally |
+| `import <path>` / `export <service> <path> [--raw]` | read in / write out a `.celaut` file |
+| `publish <service>` | offer a service to the network |
+| `services [<service>] [--json]` | list the registry, or one service's reputation |
+| `inspect <service>` | a service's spec and metadata |
+| `tag <service> <tag>` | name a service |
+| `remove <service>` | drop a service from the registry (root) |
+| `integrity [<service>] [--fix]` | check stored blocks against their hashes |
+| `estimate <service>` | what an execution would cost |
+| `execute [--name n] [-e k v] <service>` | run a service |
+| `instances [<search>] [--grouped] [--json]` | what is running |
+| `observe <instance> [--save <path>]` | live metrics and network capture (streams; Ctrl+C) |
+| `tunnel <instance> <slot> [...] [--detach] [--json]` | reach an instance's port from here (until stopped; `--detach`: in the background) |
+| `tunnels [<tunnel> \| --instance <i> \| --inbound] [--json]` | the tunnels running on this host, one with its log, those reaching an instance, or the streams relayed for others |
+| `tunnel_close <tunnel>... \| --all [--json]` | stop tunnels |
+| `kill <instance> [--json]` | stop one instance and close its tunnels (root) |
+| `burnall [--yes]` | stop every instance, parents first |
+| `prune [--all] [--dry-run]` | reclaim orphaned runtime dirs |
+| `peers [<peer>] [--json] [--limit N]` | peers, or one with its history |
+| `peer_reputation <peer> <+N\|-N> [--json]` | move our local score of a peer |
+| `resources [--json]` | what this node announces it can run |
+| `connect <host:port>` / `disconnect <peer>` | introduce / forget a peer |
+| `chat <peer> [message...] [--service s] [--json]` | read or send the flat chat |
+| `chat_open <peer> <topic...> [--message m] [--service s] [--json]` | start a conversation |
+| `chat_reply <id> <message...> [--service s]` | reply in a conversation |
+| `chat_threads [<peer>] [--json]` / `chat_thread <id> [--json]` | list conversations / read one |
+| `chat_close <id>` / `chat_reopen <id>` | close / reopen (local only) |
+| `clients [<client>] [--json] [--limit N]` | clients, or one with its history |
+| `reputation [<peer>] [--json]` | what the network stakes on us (or on a peer) |
+| `verify_reputation <peer>` | validate a peer's reputation proof and ownership |
+| `submit_reputation` / `sync_reputation_proof` | publish / reconcile this node's proof |
+| `earnings [--json]` | money taken in, per network and window |
+| `donations [--json]` | who we fund, who we count |
+| `increase_deposit` / `decrease_deposit <instance> <amount>` | fund / defund a running instance |
+| `increase_peer_deposit <peer> <amount>` | top up what a peer holds for us |
+| `credit_client` / `debit_client <client> <amount>` | change a client's balance here |
+| `pay <peer> <amount> [--payment-method l:a] [--ledger] [--asset]` | pay a peer on-chain |
+| `tx_history [--json]` | payments made and received |
+| `serve` | run the node in the foreground (development) |
+| `migrate` | recreate the database from scratch |
+| `test <name>` | run one test from `tests/` |
+| `ggconf <dir> [-e k v]` | gateway config for a local project |
+| `force_execution <peer> <service>` | delegate to one peer, no balancer (testing) |
+| `local_builder <buildctl args>` | talk to nodo's rootless BuildKit builder |
+| `storage:prune_blocks` | drop blocks nothing references |
+| `prune_containers` | sweep dead VMs now (root) |
+| `refresh_clients` | settle client and peer deposits now |
+| `refresh_ergo_nodes` | refresh the list of Ergo nodes |
+
+---
+
 ## Terminal User Interface (TUI)
 
 Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
 instance resource usage and reservations, local services, peers, clients, what the node has
-earned, complete `config.yaml` editing, logs, storage, and Ergo wallet balances. The old
-tunnels page was removed because nodo does not use it.
+earned, complete `config.yaml` editing, logs, storage, Ergo wallet balances, and this
+documentation (the DOCS page). The TUNNELS page lists the `nodo tunnel` processes
+running on this host.
 
 - `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
 - `r` refreshes.
@@ -705,12 +1265,23 @@ tunnels page was removed because nodo does not use it.
   donates, what is still accrued, and the wallets it funds and counts, from
   `nodo donations` re-read every ten minutes. A peer's own donation credit, and the
   bonus it earns in routing, are on its card on the Peers page.
+- On Instances, `t` opens a tunnel to the selected instance: type the slot, plus any of
+  `--listen <port>`, `--udp`, `--host`, `--peer`, `--idle`. It runs
+  `nodo tunnel <instance> <slot> … --detach` after a y/N that states the fee (each
+  connection spends `pricing.TUNNEL_OPEN_MU` of the instance's balance), and the
+  status line says where it listens.
+  The card counts the tunnels already reaching that instance, and a table under it
+  lists them (listen, slot, id, via, age) — `nodo tunnels --instance <instance>`.
+- On Tunnels, `n` opens a tunnel to any instance (`<instance> <slot> [flags]`), `d`
+  closes the selected one after a confirmation (`nodo tunnel_close`), and `i` shows it
+  with the tail of its log. The INBOUND table under the card lists the streams this
+  node relays for others (`nodo tunnels --inbound`); it is read-only.
 - On Services, `e` executes the selected service and `d` deletes it.
-- On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
+- On All, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
   preserved, and each write snapshots the previous file to
   `config-<timestamp>-<nnnn>.yaml` — one snapshot per write, not per second.
-- On Cell, the node's policies are laid out as a cell: Right/Left move between organelles,
+- On Policies, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
   "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where
@@ -722,6 +1293,9 @@ tunnels page was removed because nodo does not use it.
   reads `config.yaml` once at start and never again, so a change that is not restarted
   into is a change the node never sees. The restart drives `systemctl`, so editing
   configuration on a serving node needs root.
+- On Docs (`6`), the `docs/` folder is indexed on the left and the selected page rendered
+  on the right: `/` searches it, `l` and Enter follow its links to other pages, and
+  Backspace comes back.
 - `q`, Escape, or Ctrl+C exits.
 
 See [the TUI reference](../src/commands/tui/README.md) for page details, refresh behavior, and
@@ -735,11 +1309,13 @@ Nodo ships `<Tab>` completion for **bash** and **zsh**. It completes command nam
 commands that take one, the identifier of the relevant object:
 
 - **Service id or tag** — `execute`, `estimate`, `inspect`, `remove`, `publish`, `tag`,
-  `export`, `integrity`, `get`
+  `export`, `integrity`, `get`, `services`
 - **No argument** — `prune` (flags only: `--all`, `--dry-run`)
 - **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
-- **Peer id** — `disconnect`, `increase_peer_deposit`
-- **Client id** — `credit_client`, `debit_client`
+- **Peer id** — `disconnect`, `increase_peer_deposit`, `peers`, `peer_reputation`, `reputation`,
+  `verify_reputation`, `pay`, `chat`, `chat_open`, `chat_threads`, `force_execution`
+- **Client id** — `credit_client`, `debit_client`, `clients`
+- **Tunnel id** — `tunnels`, `tunnel_close`
 - **Subcommands** — `daemon start|status|stop|restart`
 
 The installer sets this up automatically. To (re)install it yourself:

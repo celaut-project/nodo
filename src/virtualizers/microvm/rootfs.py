@@ -21,7 +21,9 @@ from src.database.sql_connection import SQLConnection
 from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.network_templates import Missing, substitute
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
+from src.manager.pow_networks import narrow_instances_for_local_grant
 from src.utils import guest_env
+from src.utils import keyvalue
 from src.utils import logger as log
 from src.utils.network_policy import enforce_network_policy
 from src.virtualizers.microvm.errors import MicroVMError
@@ -299,7 +301,7 @@ def build_network_resolution(
 
     # The requesting instance's own environment values feed `${VAR}` selection
     # keys in a network's `formal` (#385).
-    env = dict(config.environment_variables) if config else {}
+    env = keyvalue.to_dict(config.environment_variables) if config else {}
 
     resolutions: List[celaut.ConfigurationFile.NetworkResolution] = []
     for network in networks:
@@ -347,10 +349,21 @@ def build_network_resolution(
         else:
             network_to_resolve = network
 
+        # Narrowed to the slots this guest's own declaration actually asked for --
+        # harmless, a no-op scan, for any domain whose slots never carry a tag this
+        # checks. A pow:ergo peer's Instance carries both its P2P and its REST slot
+        # (resolve_pow_network), because a remote node asking as a peer opens
+        # nothing on the strength of either; this guest is about to have a firewall
+        # rule written per uri below (configure_guest_firewall_policy), and a bare
+        # pow:ergo declaration asked for a chain peer, not a REST hole granted next
+        # to it (#78).
+        instances = narrow_instances_for_local_grant(
+            resolve_network(network_to_resolve), network_to_resolve
+        )
         resolutions.append(
             celaut.ConfigurationFile.NetworkResolution(
                 tags=network.tags,
-                peer_instances=resolve_network(network_to_resolve),
+                peer_instances=instances,
             )
         )
 
@@ -383,7 +396,7 @@ def build_guest_envs_file(config: Optional[celaut.Configuration]) -> Optional[by
 
     One line per kept variable, ``NAME BASE64VALUE``: the value is base64
     rather than raw so a byte string that happens to contain a newline (legal
-    in ``Configuration.environment_variables``, a ``map<string, bytes>``) stays
+    in ``Configuration.environment_variables``, a list of ``bytes`` values) stays
     on its own line, and so ``bash/build_ch_initramfs.sh`` -- which has no
     ``sed``/``awk`` to lean on -- never has to parse anything more than
     whitespace-separated fields. ``NAME`` is already restricted to
@@ -397,7 +410,7 @@ def build_guest_envs_file(config: Optional[celaut.Configuration]) -> Optional[by
     if not config:
         return None
 
-    kept = guest_env.linux_env_vars(config.environment_variables)
+    kept = guest_env.linux_env_vars(keyvalue.to_dict(config.environment_variables))
     if not kept:
         return None
 

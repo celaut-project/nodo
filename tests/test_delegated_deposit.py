@@ -76,9 +76,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         ), patch.object(
             delegate_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(delegate_mod, "peer_channel"), patch.object(
-            delegate_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
-            delegate_mod.bee, "client_grpc", return_value=iter([instance])
+            delegate_mod.BeeClient, "start_service", return_value=instance
         ), patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(delegate_mod, "SQLConnection") as sql_connection:
@@ -334,7 +332,7 @@ class _StopHarness:
         self.calls.append(("stop_service_on_peer", PEER_TOKEN))
         if self.peer_raises:
             raise RuntimeError("peer is unreachable")
-        return iter([self.peer_refund])
+        return self.peer_refund
 
     def run(self, credit=True):
         with patch.object(manager, "sc", self.sc), \
@@ -343,8 +341,7 @@ class _StopHarness:
                 patch.object(manager.utils, "generate_uris_by_peer_id",
                              return_value=iter(["peer:5000"])), \
                 patch.object(manager, "node_channel"), \
-                patch.object(manager.celaut_pb2_grpc, "GatewayStub"), \
-                patch.object(manager.bee, "client_grpc", side_effect=self._stop_service), \
+                patch.object(manager.BeeClient, "call_one", side_effect=self._stop_service), \
                 patch.object(manager.delegated_endpoints, "close") as close:
             self.close = close
             return manager.stop_instance(token=OUR_ALIAS, credit=credit)
@@ -456,17 +453,16 @@ class DelegatedDepositModificationTests(unittest.TestCase):
 
         def client_grpc(**kwargs):
             sent.append(kwargs["input"])
-            return iter([celaut.ModifyDepositOutput(
+            return celaut.ModifyDepositOutput(
                 success=peer_accepts, message="ok" if peer_accepts else "refused"
-            )])
+            )
 
         with patch.object(manager, "sc", sc), \
                 patch.object(manager, "resolve_instance_token", return_value=None), \
                 patch.object(manager, "format_mu", str), \
                 patch.object(manager, "matching_payment_system", return_value=payment_system), \
                 patch.object(manager, "peer_channel"), \
-                patch.object(manager.celaut_pb2_grpc, "GatewayStub"), \
-                patch.object(manager.bee, "client_grpc", side_effect=client_grpc):
+                patch.object(manager.BeeClient, "call_one", side_effect=client_grpc):
             ok, message = manager.modify_deposit(
                 amount_mu=amount_mu, service_token=OUR_ALIAS
             )
@@ -527,6 +523,86 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         self.assertFalse(ok)
         sc.update_delegated_deposit.assert_not_called()
         self.assertEqual(sent, [])
+
+    def test_taking_out_more_than_is_there_credits_nobody(self):
+        # The father used to be credited before the check, which made MU.
+        _, _, sc, _ = self._modify(-2_000_000)
+
+        sc.add_balance.assert_not_called()
+        sc.update_instance_balance.assert_not_called()
+
+    def test_a_withdrawal_the_peer_refuses_credits_nobody(self):
+        ok, _, sc, _ = self._modify(-400_000, peer_accepts=False)
+
+        self.assertFalse(ok)
+        sc.add_balance.assert_not_called()
+
+    def test_a_withdrawal_credits_the_father_once_the_peer_moved(self):
+        _, _, sc, _ = self._modify(-400_000)
+
+        sc.add_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=400_000)
+
+    def test_a_top_up_the_peer_refuses_goes_back_to_the_father(self):
+        _, _, sc, _ = self._modify(500_000, peer_accepts=False)
+
+        sc.reduce_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=500_000)
+        sc.add_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=500_000)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class LocalDepositModificationTests(unittest.TestCase):
+    """`modify_deposit` on a local instance: no MU moves before the balance check."""
+
+    def _modify(self, amount_mu, *, balance=1_000_000, token="instance-token"):
+        sc = MagicMock()
+        sc.internal_instance_exists.side_effect = lambda id: id == "instance-token"
+        sc.get_internal_father_id.return_value = FATHER_CLIENT
+        sc.get_delegated_token_by_id.return_value = None
+        sc.client_exists.return_value = True
+        sc.get_instance_balance.return_value = balance
+        sc.get_client_balance.return_value = (10 ** 12, 0, 0)
+        with patch.object(manager, "sc", sc), patch.object(manager, "format_mu", str):
+            ok, message = manager.modify_deposit(amount_mu=amount_mu, service_token=token)
+        return ok, message, sc
+
+    def test_taking_out_more_than_is_there_credits_nobody(self):
+        ok, _, sc = self._modify(-2_000_000)
+
+        self.assertFalse(ok)
+        sc.add_balance.assert_not_called()
+        sc.update_instance_balance.assert_not_called()
+
+    def test_a_withdrawal_moves_the_balance_to_the_father(self):
+        ok, _, sc = self._modify(-400_000)
+
+        self.assertTrue(ok)
+        sc.add_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=400_000)
+        sc.update_instance_balance.assert_called_once_with(id="instance-token", balance_mu=600_000)
+
+    def test_an_instance_name_is_not_a_token(self):
+        # The RPC takes a token. A name is guessable; only `nodo modify_deposit`
+        # resolves one, before it calls this.
+        ok, _, sc = self._modify(500_000, token="my-instance-name")
+
+        self.assertFalse(ok)
+        sc.resolve_local_instance_reference.assert_not_called()
+        sc.get_local_instance_id_by_name.assert_not_called()
+        sc.reduce_balance.assert_not_called()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class StopByTokenOnlyTests(unittest.TestCase):
+    def test_stop_instance_does_not_resolve_a_name(self):
+        sc = MagicMock()
+        sc.internal_instance_exists.return_value = False
+        sc.get_delegated_token_by_id.return_value = None
+        with patch.object(manager, "sc", sc):
+            try:
+                manager.stop_instance(token="my-instance-name")
+            except Exception:
+                pass
+        sc.resolve_local_instance_reference.assert_not_called()
+        sc.get_local_instance_id_by_name.assert_not_called()
 
 
 if __name__ == "__main__":

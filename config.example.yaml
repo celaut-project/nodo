@@ -420,19 +420,37 @@ network:
   # collides across unrelated nodes (every Docker host has 172.17.0.1). Turn it on for
   # an all-on-one-LAN deployment where peers have no public addresses at all.
   ANNOUNCE_PRIVATE_ADDRESSES: false
-  PUBLIC_IP: ""  # Optional public IP or DNS name to advertise for `nodo execute --remote`. Leave empty to auto-detect from the default outbound interface.
+  PUBLIC_IP: ""  # Optional public IP or DNS name to advertise. Leave empty to auto-detect from the default outbound interface.
   EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
   PUBLIC_TCP_PORT: ""  # Optional external TCP port to advertise for the gateway (GATEWAY_PORT), in case your router forwards a different port than the one this node listens on. Leave empty to advertise GATEWAY_PORT itself.
   PUBLIC_UDP_PORT: ""  # Optional external UDP port to advertise, for when a peer-facing feature that listens on UDP exists. Nothing in nodo does yet -- GATEWAY_PORT is TCP-only (gRPC).
+  # Re-send this node's address to every already-known peer (IntroducePeer) as soon as
+  # it is seen to change -- e.g. moving from a LAN to a mobile connection, or a dynamic
+  # public IP being renewed. Without this, peers keep the stale address until their own
+  # refresh happens to fail and they re-fetch it, and in the meantime they penalise this
+  # node's reputation for being unreachable at an address it no longer holds.
+  REANNOUNCE_ON_NETWORK_CHANGE: true
+  # How often (seconds) the manager loop checks whether this node's announced address
+  # changed. Detection only, not the announcement itself -- cheap, so a short interval
+  # is fine.
+  NETWORK_CHANGE_CHECK_INTERVAL_SECONDS: 60
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
+  # If true, instances started by this node's own local clients (`nodo execute`, which
+  # are otherwise internal) are also published on a port of this host's interface, and
+  # `execute` prints that address. For a host whose operator's tools run outside the
+  # network namespace the node runs in, e.g. a node inside a VM driven from the machine
+  # hosting it. The address comes from PUBLIC_IP, else EXTERNAL_INTERFACE, else the
+  # default-route interface -- never loopback: if none resolves, the instance stays
+  # internal and the error is logged. Ports come from FREE_PORTS_RANGE. This is only the
+  # host's own interface; `nodo tunnel` is still the way in from anywhere else.
+  EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE: false
   CONSIDER_DEV_AS_INTERNAL: true  # If true, instances with "dev" in their father_id are considered internal regardless of actual network location. Use false in case node is controlled via ssh session for example.
   DISABLE_EXPOSE_OUTSIDE: false  # If true, no instances will be exposed outside regardless of other settings. Use for maximum isolation. Services stay reachable through service tunneling (Gateway.ServiceTunnel / `nodo tunnel`), which needs no port of its own -- see docs/TUNNELING.md.
   FREE_PORTS_RANGE:  # Free ports range to use for exposing services. Ports outside this range will not be used for service exposure. Useful to match router forwarding rules. Can be multiple ranges, e.g.: - START: 10000 \n END: 20000 \n - START: 30000 \n END: 40000
     - START: 50000
       END: 60000
-  DEFAULT_EXECUTE_REMOTE: false  # If true, `nodo execute` will default to remote execution. Use for nodes running in environments without reliable public IPs or with strict isolation requirements, e.g. on-premises servers behind NAT or in private cloud VPCs, or WSL2 Windows nodes.
   # If false, this node never asks a peer to run a service for it: the balancer stops
   # polling peers for prices and only ever selects "local", so a service this node
   # cannot run itself fails instead of being delegated. The automatic peer-deposit
@@ -463,6 +481,26 @@ network:
   # refuses every launch. That is a coherent thing to ask for -- a node that is only a
   # wallet and a peer directory -- and nothing stops you, but it is worth meaning.
   EXECUTE_LOCALLY: true
+  # How many nodes one StartService tree may span (issue #456): a StartService and every
+  # peer it is delegated to in turn. Counted from the node the request starts at -- or the
+  # first node that gets it without a count, which is what a peer predating the field
+  # sends. Each node passing it on sends one less; one given none left refuses it, and one
+  # with a single hop left runs it itself or not at all. A count from a peer is clamped to
+  # this, never raised by it. Cycles (A -> B -> A) are refused regardless, by the request's
+  # token. Cost quotes and availability probes carry none of this: they are answered from
+  # the cache below. See docs/RECURSION_GUARD.md.
+  RECURSION_MAX_HOPS: 16
+  # Answers to the two read-only queries (GetServiceEstimatedCost, GetResourceAvailability)
+  # are remembered by the content of the question (issue #456), so the same question is
+  # computed once, and one still being computed is waited for rather than computed twice;
+  # it is refused with "retry" only if the wait runs out, or if it came back to the node
+  # computing it (a loop). The same memory keeps what peers answered us, so a peer is not
+  # asked the same thing twice. A TTL of 0 turns it off for that query.
+  QUERY_CACHE_TTL_SECONDS: 30  # How long a quote's price is remembered. Whether there is room for it is checked on every answer.
+  QUERY_CACHE_PEER_TTL_SECONDS: 10  # How long a quote got from a peer is reused. Shorter: the peer may have served it from its own cache.
+  QUERY_CACHE_AVAILABILITY_TTL_SECONDS: 5  # How long an availability answer is remembered. Short: it moves fast. A local start, stop or resize forgets it at once.
+  QUERY_CACHE_WAIT_SECONDS: 5  # How long a question waits for the same one already being computed before it is refused with "retry".
+  QUERY_CACHE_MAX_ENTRIES: 4096  # Questions remembered at once; the least recently used go first.
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
@@ -546,21 +584,21 @@ service_networks:
 pow_networks:
   TIMEOUT_SECONDS: 10  # Per HTTP request to a candidate peer.
   MAX_PEERS: 8  # Stop verifying once this many peers qualify. Each one becomes a firewall rule.
-  # P2P port to assume for a qualifying peer whose P2P endpoint was never observed.
-  #
-  # A peer is CHECKED over its REST API and then handed to the guest as its **P2P**
-  # address, because a service declaring pow:ergo wants something to sync a chain
-  # against -- and no chain protocol is spoken on the REST port. Only the P2P uri is
-  # emitted; the REST one is not also opened, since it would be a hole the guest
-  # cannot use for what it asked for.
+  # A qualifying peer is CHECKED over its REST API and then handed to the guest as
+  # its **P2P** address, because a service declaring pow:ergo wants something to sync
+  # a chain against -- and no chain protocol is spoken on the REST port. Only the P2P
+  # uri is emitted; the REST one is not also opened, since it would be a hole the
+  # guest cannot use for what it asked for.
   #
   # This node does not assume a port for a network wherever it can observe one: the
   # peer crawl keeps each peer's `/peers/connected` address, so a peer on a
-  # non-conventional port is reached on that port. This key covers only the rest --
-  # `ledgers.ergo.NODE_URL`, `service_networks.default_instances`, and what other
-  # nodes answer over Gateway.ResolveNetwork -- where nothing ever saw a P2P port.
-  # Every such assumption is logged with the address it was made for.
-  ERGO_P2P_PORT: 9030
+  # non-conventional port is reached on that port. Only `ledgers.ergo.NODE_URL`,
+  # `service_networks.default_instances` and what other nodes answer over
+  # Gateway.ResolveNetwork -- where nothing ever saw a P2P port -- fall back to Ergo
+  # mainnet's conventional port (src/manager/ergo.py::MAINNET_P2P_PORT, 9030). Not a
+  # setting: nothing here can tell which peers run on a non-conventional port to bias
+  # a guess towards, and every such assumption is logged with the address it was
+  # made for.
   # How many known peers to ask (Gateway.ResolveNetwork) for addresses in this domain.
   # A latency budget, not a quality setting: the answers are pooled rather than compared,
   # and each ask is a round trip on the launch path. 0 switches the source off. A node
@@ -656,12 +694,18 @@ free_tier:
 # What the operator reads and types. Purely presentational: changing it never changes
 # what anybody is charged.
 ui:
-  # "erg" (default) or "mu". "erg" derives its rate from the ledger, so it stays correct
-  # if you change MU_PER_NANOERG.
+  # "erg" (default), "mu", or "btc" once ledgers.bitcoin.payments.MU_PER_SATOSHI is set.
+  # "erg" and "btc" derive their rate from their own ledger, so they stay correct if you
+  # change MU_PER_NANOERG / MU_PER_SATOSHI.
   #
   # Any other name must be declared under ui.UNITS below. That is the hook for showing,
   # say, a fiat figure -- but note the rate would be a static number nothing refreshes,
   # so it goes stale. It never affects what is charged, only what is printed.
+  #
+  # Edited from the TUI's Config page (or the CELL page's "display unit" lever) as a
+  # picker over exactly the units above; picking "custom..." there asks for a new name
+  # and its MU_PER_UNIT together, since one without the other is a display unit the node
+  # refuses to start against.
   DISPLAY_UNIT: erg
   # UNITS:
   #   usd:
@@ -701,7 +745,7 @@ deposits:
   # cold-wallet sweep below -- that moves this node's funds between its own wallets and
   # pays nobody. Delegation keeps working with this off; the peer just has to be funded
   # by hand, which is the point.
-  AUTOMATIC_REFILL: true
+  AUTOMATIC_REFILL: false
   # Largest share of a peer deposit that may be lost to the transaction fee. 0.02 caps
   # the fee at 2 % of the deposit. Lower it for cheaper transfers, at the cost of
   # locking up more per peer.
@@ -940,9 +984,29 @@ communication:
   # are the opinion; the announcement is extra. A peer whose announcement carries no
   # prose is small already and is always republished whole.
   SHARE_PROSE_ON_LEDGER: false
-  SELF_ANNOUNCE_TO_CONNECTING_PEERS: false
+  SELF_ANNOUNCE_TO_CONNECTING_PEERS: true
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
+
+  # DDOS protection for every gateway RPC but GenerateClient (issue #428): a shared
+  # sliding window of the last CLIENT_RATE_LIMIT_MAX_CALLS calls in
+  # CLIENT_RATE_LIMIT_WINDOW_SECONDS, per client_id, across all of them together. A
+  # client_id going over it is quarantined -- every such RPC refused outright -- for
+  # CLIENT_RATE_LIMIT_QUARANTINE_SECONDS. In-memory only, so a restart clears it.
+  # See src/gateway/client_gate.py.
+  CLIENT_RATE_LIMIT_WINDOW_SECONDS: 60
+  CLIENT_RATE_LIMIT_MAX_CALLS: 120
+  CLIENT_RATE_LIMIT_QUARANTINE_SECONDS: 300
+
+  # How long a "simple" RPC -- one whose whole request is a handful of small
+  # control messages, never a full service body (GetService, GetResourceAvailability,
+  # ResolveNetwork, IntroducePeer, Payable, GetPeerInfo, ...) -- may wait for its next
+  # expected message before this node gives up on it. These handlers never drain the
+  # rest of the request direction, so an unbounded wait can be parked forever by a
+  # peer that opens the stream and sends less than it declared; a generous timeout is
+  # also what lets them accept their messages (a client_id, a hash, ...) in whichever
+  # order the caller sent them. See src/gateway/client_gate.py.
+  SIMPLE_RPC_TIMEOUT_SECONDS: 60
 
 client:
   MIN_SLOTS_OPEN_PER_PEER: 1
@@ -950,12 +1014,22 @@ client:
   # when it tops up: a funded client is an active one.
   CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION: 1000
   DEV_CLIENT_POOL_SIZE: 1
-  DEV_EXTERNAL_CLIENT_POOL_SIZE: 1
   # If false, no client (local or peer) can open a NEW deposit -- GenerateDepositToken
   # is refused outright. A client that already holds MU keeps spending it normally;
   # this only cuts off acquiring more. Use to stop onboarding new demand (or new
   # top-ups from existing clients) without touching anyone's current balance.
   ACCEPT_NEW_DEPOSITS: true
+
+chat:
+  # A Chat message body over this many UTF-8 bytes is refused outright rather than
+  # truncated -- silently cutting a peer's message would leave both operators
+  # thinking they'd said something they hadn't.
+  MAX_MESSAGE_BYTES: 4096
+  # How many of a single peer's messages (either direction) this node keeps on
+  # disk. Bounds storage against a peer that never stops chatting; a bound per
+  # peer rather than on the whole table so one abusive peer cannot crowd out the
+  # history this node keeps with every other one.
+  MAX_STORED_MESSAGES_PER_PEER: 200
 
 misc:
   MEMSWAP_FACTOR: 0
@@ -977,8 +1051,8 @@ hashing:
 # `nodo execute` is asked to run but doesn't have locally.
 #
 # This is a mapping of role -> published service id (content hash). The key is the
-# well-known role the node looks up (currently: "source-application", "packer" and
-# "low-demand-fallback"); the value is the id for that role.
+# well-known role the node looks up (currently: "source-application", "packer",
+# "low-demand-fallback", "bitcoin-node" and "benchmark"); the value is the id for that role.
 #
 # Trust model: the auto-download fallback in `nodo execute` will only resolve+run a missing
 # service if it is reachable through one of these *configured* core services. An empty mapping
@@ -1011,6 +1085,46 @@ core_services:
   # what this node runs is the image, and the id is what says which one. Leave as
   # "<SET_ME>" until you have packed it. See docs/BITCOIN.md.
   bitcoin-node: "<SET_ME>"
+  # benchmark: OPTIONAL. Measures this node's per-core scores (the `benchmark:` block
+  # below) at startup, while any of them is still -1. Source:
+  # https://github.com/celaut-basics/demo-service (benchmark/). A service is one
+  # architecture, so a node serving more than one (natively and under QEMU) lists one
+  # id per architecture, packed from the same source: ["<amd64 id>", "<arm64 id>"].
+  # Leave as "<SET_ME>" to measure nothing -- scores then stay as written below, and an
+  # operator who benchmarked by hand can simply write them there. See docs/CONFIG.md.
+  benchmark: "<SET_ME>"
+
+# Per-core benchmark scores of this node, per architecture it serves (issue #459). What a
+# service's `resources.at_init.benchmark` requirement is held against at admission, and
+# what this node announces to its peers (Peer.resources), so a peer whose service needs
+# more does not even ask. Per core and per second, each one. Memory bandwidth is one key
+# per working set it is measured over (64mib, 256mib, 1gib), because a bandwidth is only
+# comparable over the same amount of memory.
+#
+# -1 means "not measured": a requirement on it is logged, never enforced. At startup,
+# while any score of an architecture this node serves is -1, the `benchmark` core service
+# (core_services above) is run to measure it and the result is written here -- only into
+# the -1s, so a value written by hand is never overwritten.
+#
+# Foreign architectures served under QEMU+TCG get their own scores: a guest there is
+# emulated, and scoring it with the host's numbers would admit exactly the emulated
+# "1.0 core" this exists to tell apart.
+benchmark:
+  BY_ARCH:
+    linux/amd64:
+      int_ops_per_sec: -1
+      flt_ops_per_sec: -1
+      mem_bandwidth_64mib_bytes_per_sec: -1
+      mem_bandwidth_256mib_bytes_per_sec: -1
+      mem_bandwidth_1gib_bytes_per_sec: -1
+      sha256_hashes_per_sec: -1
+    linux/arm64:
+      int_ops_per_sec: -1
+      flt_ops_per_sec: -1
+      mem_bandwidth_64mib_bytes_per_sec: -1
+      mem_bandwidth_256mib_bytes_per_sec: -1
+      mem_bandwidth_1gib_bytes_per_sec: -1
+      sha256_hashes_per_sec: -1
 
 # Opportunistic low-demand fallback scheduler (WIP — see docs/design/low-demand-fallback.md).
 # When ENABLED and the node is under ALL per-resource thresholds AND not serving real
@@ -1038,7 +1152,7 @@ energy:
   ENABLED: true
   SAMPLE_INTERVAL_SECONDS: 60
   PRICE_PER_KWH: 0.0          # 0 => show watts, omit currency cost. Persisted per sample.
-  CURRENCY: "EUR"             # Presentation only.
+  CURRENCY: "USD"             # Presentation only.
   PRICE_SOURCE: "fixed"       # Only "fixed" is implemented (works offline).
   # Coefficients of the model fallback, for a machine with no readable counter.
   # MEASURE THESE WITH A PLUG-IN METER -- do not estimate them. Read the wall once
@@ -1310,9 +1424,9 @@ ledgers:
       #     DONATION_PERCENTAGE: "0.02"
       #     DONATION_MIN_TRANSFER: "10"
 
-  # A second payment system, off until you fill in MU_PER_SATOSHI below. Being paid in
-  # BTC needs a Bitcoin node you control -- the same posture this project takes
-  # everywhere else -- and no new runtime: nodo talks to it over JSON-RPC.
+  # A second payment system, priced by MU_PER_SATOSHI below (empty = off). It needs no
+  # Bitcoin node of your own and no new runtime: by default nodo signs locally, like it
+  # does for Ergo, and asks a public explorer about the chain.
   #
   # Read docs/BITCOIN.md before turning this on. On-chain Bitcoin is for coarse,
   # infrequent, node-to-node deposits: at a realistic fee rate a single transaction
@@ -1321,32 +1435,26 @@ ledgers:
   bitcoin:
     tags: [ bitcoin ]
     NETWORK: mainnet                 # mainnet | testnet | signet | regtest
-    # How this node reaches Bitcoin. Two very different asks:
+    # How this node reaches Bitcoin. All three can be paid and can pay:
     #
-    #   explorer A public HTTP API (blockstream.info, mempool.space, or your own).
-    #            No key anywhere and nothing to run, and this node can be PAID in BTC
-    #            -- which is the side that matters if you are earning. It cannot pay
-    #            out: the payer walks the systems it shares with a peer and settles
-    #            through the first it can fund, so BTC is simply skipped when paying.
-    #            Payments land in payments.COLD_WALLET directly: a read-only API
-    #            cannot be asked for an address, and with no key there is no hot
-    #            wallet to sweep to cold later. Set it to a segwit address you own.
+    #   explorer A public HTTP API (blockstream.info, mempool.space, or your own) that
+    #            speaks Esplora. Ergo's posture: the wallet is derived from the mnemonic
+    #            below, every transaction is built and signed HERE, and the explorer is
+    #            only asked which outputs the wallet owns and to relay the result. It is
+    #            trusted for what it reports -- pick one you trust, or host your own --
+    #            but it never holds a key and cannot spend. Nothing to run.
     #
     #   core     A bitcoind you trust with your wallet, since Core is what signs. It
     #            may be remote -- RPC_URL is a URL -- but "remote" here means your own
-    #            machine over a LAN or VPN, not somebody else's node.
+    #            machine over a LAN or VPN, not somebody else's node. The keys live in
+    #            bitcoind's wallet, so back THAT up; no mnemonic is generated for it.
     #
     #   service  The same bitcoind, run by THIS node as a core service, with its wallet
     #            derived from the mnemonic below. It signs like `core` and needs no
-    #            infrastructure like `explorer`: you back up one mnemonic, the way you
-    #            already do for Ergo, and the node brings the rest up at boot. Needs
-    #            core_services.bitcoin-node, RPC_USER/RPC_PASSWORD, and
-    #            WALLET_KEYS_EXTERNAL false. Read the "Running your own node" section of
-    #            docs/BITCOIN.md before turning it on: the mnemonic is a real key, in
-    #            this file.
-    #
-    # Ergo's posture is the third one: a mnemonic in this file, and the chain's own
-    # software doing the signing.
+    #            infrastructure of yours: you back up one mnemonic, the way you already
+    #            do for Ergo, and the node brings the rest up at boot. Needs
+    #            core_services.bitcoin-node and RPC_USER/RPC_PASSWORD. Read the
+    #            "Running your own node" section of docs/BITCOIN.md before turning it on.
     BACKEND: explorer
     EXPLORER_URL: "https://blockstream.info/api"
     RPC_URL: "http://127.0.0.1:8332"
@@ -1356,25 +1464,20 @@ ledgers:
     RPC_USER: ""
     RPC_PASSWORD: ""
     WALLET_NAME: "nodo"
-    # With BACKEND core or explorer this chain's keys live in Core's own wallet or nowhere,
-    # not here, so nodo neither generates nor holds a mnemonic for it: back up bitcoind's
-    # wallet, not this file.
+    # The wallet the `explorer` and `service` backends derive. 12 or 24 BIP-39 words.
+    # Leave empty (or "auto") and a fresh one is generated on first load -- generating a
+    # mnemonic commits to nothing, since the wallet holds no funds until someone sends
+    # some. Paste your own to reuse a wallet. With BACKEND `core` nothing is generated:
+    # the keys are bitcoind's.
     #
-    # With BACKEND `service` it is the other way round. Set this to false and the node
-    # mints a 12-word BIP-39 mnemonic into WALLET_MNEMONIC below on the next load, exactly
-    # as it does for Ergo, and hands it to the bitcoind it runs. THEN THIS FILE IS THE
-    # BACKUP, and it is the only one: the service's wallet is derived, not stored.
-    WALLET_KEYS_EXTERNAL: true
-    # The wallet the `service` backend derives. 12 or 24 BIP-39 words. Leave empty with
-    # WALLET_KEYS_EXTERNAL false and one is generated; paste your own to reuse a wallet.
+    # It is derived at m/84'/0'/0'/0/0 (m/84'/1'/0'/0/0 on the test networks), P2WPKH --
+    # BIP-84, the ordinary path -- so any standard wallet can open it from these words
+    # alone. The `service` backend, pruned (PRUNE_MIB below), imports it as new and sees
+    # only payments made from then on: a mnemonic with history needs a full node to
+    # rescan, or a rescan done elsewhere. `explorer` reads the history off the explorer.
     #
-    # It is derived at m/84'/0'/0' (m/84'/1'/0' on the test networks), P2WPKH -- BIP-84,
-    # the ordinary path -- so any standard wallet can open it from these words alone. A
-    # pruned service (PRUNE_MIB below) imports it as new and sees only payments made from
-    # then on: a mnemonic with history needs a full node to rescan, or a rescan done
-    # elsewhere.
-    #
-    # TREAT AS A SECRET. Unused by the other two backends.
+    # TREAT AS A SECRET, and back it up: THIS FILE IS THE BACKUP, and the only one. Losing
+    # it loses the funds.
     WALLET_MNEMONIC: ""
     # Optional BIP-39 passphrase for the above. A different wallet for the same words --
     # and a second secret the words alone cannot recover, so set it only if you know you
@@ -1388,16 +1491,16 @@ ledgers:
     # arm board a node lives on. Pruned, the wallet is imported as new (see above).
     PRUNE_MIB: 10000
     payments:
-      # What one satoshi buys, in MU. THERE IS NO DEFAULT, and that is deliberate: a
-      # satoshi and a nanoERG are about six orders of magnitude apart in value, so
-      # copying MU_PER_NANOERG's 1 by analogy would misprice this node by a factor of a
-      # million. Left empty, the node does not offer Bitcoin at all -- which is the only
-      # answer that cannot quietly sell an hour of compute for a millionth of its price.
+      # What one satoshi buys, in MU. A satoshi and a nanoERG are about six orders of
+      # magnitude apart in value, so do NOT copy MU_PER_NANOERG's 1 by analogy: that would
+      # misprice this node by a factor of a million (the node warns if you set 1).
       #
-      # Work it out against your own market: MU_PER_SATOSHI = (MU per nanoERG) x
-      # (value of a nanoERG / value of a satoshi). At $0.50/ERG and $100,000/BTC that is
-      # about 2000000 -- an example, not a quoted price.
-      MU_PER_SATOSHI: ""
+      # The default is worked out at $0.50/ERG and $70,000/BTC, with MU_PER_NANOERG: 1:
+      #   MU_PER_SATOSHI = (MU per nanoERG) x (value of a satoshi / value of a nanoERG)
+      #                  = 1 x ($70,000 / 1e8) / ($0.50 / 1e9) = 7e-4 / 5e-10 = 1400000
+      # It is an example, not a quoted price: change it to your own market, and keep it
+      # in step with MU_PER_NANOERG if you change that. Set it to "" to not offer Bitcoin.
+      MU_PER_SATOSHI: 1400000
       # Confirmations before a payment counts. 1 is enough at these amounts; raise it if
       # you are being paid enough that a shallow reorg would matter.
       MIN_CONFIRMATIONS: 1
@@ -1410,8 +1513,8 @@ ledgers:
       # Maximum balance (BTC, decimal string) retained in the operational wallet.
       HOT_WALLET_LIMITS: "0.05"
       # Public Bitcoin address funds are swept to. Empty disables sweeping. Never a seed.
-      # On the read-only `explorer` backend this is also where payers are sent: there is
-      # no hot wallet to be paid into, so it must be set, and it must be segwit.
+      # Any address valid on NETWORK, segwit or legacy. Payers are sent to the node's own
+      # wallet (derived from WALLET_MNEMONIC), not to this address.
       COLD_WALLET: ""
       COLD_WALLET_MIN_TRANSFER: "0.01"
       # Per-system override of deposits.MAX_FEE_OVERHEAD. 2% is right for Ergo and
@@ -1421,6 +1524,15 @@ ledgers:
       # percentage applies to incoming payments, not to the cold-wallet sweep.
       DONATION_PERCENTAGE: "0.02"
       DONATION_MIN_TRANSFER: "0.0005"
-      DONATION_WALLETS: []
-      DONATION_CREDIT_WALLETS: []
+      # The same two lists as Ergo's, with the same shape and the same rules: entries are
+      # `{ address, weight }`, weights are normalised, and the address must be valid on
+      # NETWORK. The default is the project's Bitcoin address in both, as on Ergo. Set
+      # DONATION_PERCENTAGE to 0 to opt out of paying; the lists are then inert.
+      #
+      # Read DONATION_CREDIT_WALLETS as a trust decision (see the Ergo block above). It
+      # does nothing yet on Bitcoin: no scanner reads Bitcoin donations (docs/BITCOIN.md).
+      DONATION_WALLETS:
+        - { address: "bc1qqxqq7kec2fyuzvc6hg5n0jat63zw7fv4447dcr", weight: 1.0 }
+      DONATION_CREDIT_WALLETS:
+        - { address: "bc1qqxqq7kec2fyuzvc6hg5n0jat63zw7fv4447dcr", weight: 1.0 }
       DONATION_MIN_CONFIRMATIONS: 6

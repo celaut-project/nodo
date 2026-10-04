@@ -22,6 +22,11 @@ REMOVED_KEYS = (
     "AUXILIAR_MNEMONIC",
     "PAYMENTS_RECEIVER_WALLET",
     "PAYMENTS_RECIVER_WALLET",
+    # Bitcoin signs locally on `explorer` and `service`, so whether the config holds a
+    # mnemonic now follows from BACKEND (`core` is the only one without). A stale `true`
+    # said "put no key in this file"; ignoring it would mint one anyway and move where
+    # this node is paid, so it is rejected and the operator decides.
+    "WALLET_KEYS_EXTERNAL",
     # ERG-native pricing (docs/PRICING.md). The gas model is gone: prices are now per
     # resource, in ERG, under `pricing:`. Leaving a stale key silently in place would
     # keep a node quoting a price nobody charges, so they are rejected outright.
@@ -238,6 +243,70 @@ def validate_host_policy_config(config: Dict[str, Any]) -> None:
             )
 
 
+def validate_benchmark_config(config: Dict[str, Any]) -> None:
+    """Validate ``benchmark.BY_ARCH``: this node's per-core scores, per architecture.
+
+    Absent is valid and means nothing is measured: every requirement is then logged
+    rather than enforced, which is how a node without the block has always behaved.
+
+    A malformed entry raises. These are the numbers admission refuses a service on, and
+    the two ways of "handling" a score nobody can read are reading it as 0 (refusing
+    every service that asks for anything) or ignoring it (admitting work the node cannot
+    do). Each value is a non-negative integer, or ``-1`` for "not measured", which is
+    what the benchmark core service fills in at startup. An unknown architecture or key
+    raises too -- ``amd64`` for ``linux/amd64`` or a misspelt primitive would otherwise be
+    a score the operator believes is in force and never is.
+    """
+    from src.utils.benchmark import REMOVED_KEYS, SCORE_KEYS, UNMEASURED
+
+    section = config.get("benchmark")
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        raise ConfigValidationError("Malformed 'benchmark' mapping: expected a BY_ARCH block.")
+    for key in section:
+        if key != "BY_ARCH":
+            raise ConfigValidationError(
+                f"benchmark.{key} is not a setting. Scores go under benchmark.BY_ARCH.<arch>."
+            )
+    block = section.get("BY_ARCH")
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise ConfigValidationError(
+            "Malformed 'benchmark.BY_ARCH' mapping: expected one block per architecture, "
+            f"got {type(block).__name__}."
+        )
+    for arch, entry in block.items():
+        if arch not in CANONICAL_ARCHITECTURES:
+            raise ConfigValidationError(
+                f"benchmark.BY_ARCH.{arch} is not an architecture this node knows. Use a "
+                f"canonical tag: {', '.join(CANONICAL_ARCHITECTURES)}."
+            )
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            raise ConfigValidationError(
+                f"Malformed 'benchmark.BY_ARCH.{arch}' mapping: expected score keys, got "
+                f"{type(entry).__name__}."
+            )
+        for key, value in entry.items():
+            if key in REMOVED_KEYS:
+                raise ConfigValidationError(
+                    f"benchmark.BY_ARCH.{arch}.{key} no longer exists: {REMOVED_KEYS[key]}."
+                )
+            if key not in SCORE_KEYS:
+                raise ConfigValidationError(
+                    f"benchmark.BY_ARCH.{arch}.{key} is not a benchmark this node knows. "
+                    f"Known: {', '.join(SCORE_KEYS)}."
+                )
+            if isinstance(value, bool) or not isinstance(value, int) or value < UNMEASURED:
+                raise ConfigValidationError(
+                    f"benchmark.BY_ARCH.{arch}.{key} must be a non-negative integer (per "
+                    f"core, per second), or {UNMEASURED} for not measured; got {value!r}."
+                )
+
+
 PRICE_KEYS = (
     "RAM_MU_PER_GIB_HOUR",
     "CPU_MU_PER_VCPU_HOUR",
@@ -347,11 +416,10 @@ def _validate_payment_rate(config: Dict[str, Any]) -> Decimal:
         raise ConfigValidationError(
             f"ledgers.ergo.payments.MU_PER_NANOERG must be positive, got {rate}"
         )
-    per_erg = rate * 1_000_000_000
-    if per_erg != per_erg.to_integral_value():
+    if rate != rate.to_integral_value():
         raise ConfigValidationError(
-            f"ledgers.ergo.payments.MU_PER_NANOERG={rate} makes one ERG {per_erg} MU, "
-            "which is not a whole number of MU."
+            f"ledgers.ergo.payments.MU_PER_NANOERG={rate} is not a whole number of MU per "
+            "nanoERG. Peers are told it as is (ContractRate.mu_per_unit, an integer)."
         )
     return rate
 
@@ -810,19 +878,12 @@ def _validate_bitcoin_node_service(config: Dict[str, Any], bitcoin: Dict[str, An
 
     * A **published service id**, because the node cannot invent one and a core service
       with no id is not configured (see ``core_services.get_core_service_id``).
-    * A **mnemonic of its own**, which means ``WALLET_KEYS_EXTERNAL`` must be false: the
-      flag is what tells the config loader whether to mint one, and left true for this
-      backend the node would hold no Bitcoin key and the service would come up with no
-      wallet. The pair is checked rather than silently corrected because the honest
-      reading of "the keys are external" is "do not put a key in my config file", and
-      overriding that is not a decision this validator gets to make.
-
-      The *flag* is checked and the mnemonic's emptiness is not, deliberately: this runs
-      **before** the loader mints one, so refusing an empty value would refuse exactly
-      the setup the documentation asks for -- an operator who set the flag and left the
-      phrase blank for the node to fill in. With the flag false a mnemonic is what the
-      next few lines of the loader produce; if it somehow does not, the launch refuses
-      and says which key it wanted rather than starting a bitcoind with no wallet.
+    * A **mnemonic of its own**, which the config loader mints on load for every backend
+      but ``core``. Its emptiness is not checked here, deliberately: this runs **before**
+      the loader mints one, so refusing an empty value would refuse exactly the setup the
+      documentation asks for -- an operator who left the phrase blank for the node to
+      fill in. If it somehow does not, the launch refuses and says which key it wanted
+      rather than starting a bitcoind with no wallet.
     * ``RPC_USER`` **and** ``RPC_PASSWORD``, because they are what nodo and the service
       agree on. Core's cookie is written inside the service's own filesystem, where nodo
       cannot read it -- and a stale cookie from some other node on this host would
@@ -838,15 +899,7 @@ def _validate_bitcoin_node_service(config: Dict[str, Any], bitcoin: Dict[str, An
         raise ConfigValidationError(
             f"ledgers.bitcoin.BACKEND is 'service' but core_services.{BITCOIN_NODE} is "
             "not set to a published service id, so there is no bitcoind for this node "
-            "to run. Set it, or use 'explorer' to be paid in BTC without running one."
-        )
-
-    if bitcoin.get("WALLET_KEYS_EXTERNAL"):
-        raise ConfigValidationError(
-            "ledgers.bitcoin.BACKEND is 'service' but WALLET_KEYS_EXTERNAL is true. "
-            "That flag says this node holds no Bitcoin key, and the service derives its "
-            "wallet from one: set it to false and the node mints a BIP-39 mnemonic into "
-            "ledgers.bitcoin.WALLET_MNEMONIC the way it does for Ergo, or paste your own."
+            "to run. Set it, or use 'explorer' to reach Bitcoin without running a node."
         )
 
     for key in ("RPC_USER", "RPC_PASSWORD"):
@@ -903,8 +956,8 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
     if chosen not in ("core", "explorer", "service"):
         raise ConfigValidationError(
             f"ledgers.bitcoin.BACKEND must be 'core', 'explorer' or 'service', got "
-            f"{chosen!r}. 'explorer' is a read-only HTTP API -- the node can be paid in "
-            "BTC but not pay in it; 'core' is a bitcoind you run that holds the wallet "
+            f"{chosen!r}. 'explorer' is a public HTTP API, with the node signing locally "
+            "from a mnemonic it holds; 'core' is a bitcoind you run that holds the wallet "
             "and signs; 'service' is a bitcoind the node runs itself as a core service, "
             "with the wallet derived from a mnemonic it holds."
         )
@@ -956,6 +1009,12 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
     if rate_value <= 0:
         raise ConfigValidationError(
             f"ledgers.bitcoin.payments.MU_PER_SATOSHI must be positive, got {rate_value}"
+        )
+    if rate_value != rate_value.to_integral_value():
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.payments.MU_PER_SATOSHI={rate_value} is not a whole number "
+            "of MU per satoshi. Peers are told it as is (ContractRate.mu_per_unit, an "
+            "integer)."
         )
     if warn is not None and rate_value == 1:
         # The specific mistake worth naming: 1 is what MU_PER_NANOERG is, and copying it

@@ -1,11 +1,11 @@
 ---
 name: celaut-bridge-skill
-version: 1.3.0
-description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), package projects into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
+version: 1.5.0
+description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), develop services locally with `ggconf` and package them into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
 author: Community Contribution
 license: MIT
 compatibility:
-  # Verified against celaut-project/nodo `dev` @ 68a25ac9 (2026-07-31).
+  # Verified against celaut-project/nodo `dev` @ 44f6b65d (2026-09-23).
   # Tracks the nodo CLI surface on the `stable`/`dev` branches.
   nodo: ">=1 (stable/dev)"
 system_requirements:
@@ -75,8 +75,18 @@ Understand these before running anything. Full glossary:
 * **Ergo relationship:** Celaut is multi-ledger *by design*; Ergo is the ledger
   implemented today — "not necessarily the only ledger to be used"
   ([`../ERGO.md`](../ERGO.md)).
-* **Peers:** nodes reciprocally offer and request services from each other, so a
-  workload can run locally or on a peer.
+* **Peers (nodo's own P2P layer):** nodes reciprocally offer and request services
+  from each other, so a workload can run locally or on a peer. There is no
+  bootstrap list, DHT, or gossip: an operator adds a peer explicitly with
+  `nodo connect <ip:port>`, which dials it over TLS, verifies its identity from
+  the certificate, and pulls its signed `Peer` announcement over
+  `Gateway.GetPeerInfo`. **This is a different layer from `Service.Network`
+  below.** `Gateway.ResolveNetwork` (and `network_discovery.py`'s
+  `ask_peers`/`ask_peer`) asks a peer you are *already* connected to for the
+  addresses of **service instances** inside a named network domain (e.g. a set
+  of Bitcoin-node instances, or `pow:ergo`) — it never discovers or adds a nodo
+  peer itself. Reading "ask peers for a network" as "how nodo peers are
+  discovered" is the mistake to avoid.
 * **Service composition:** a project can declare `dependencies` in
   `pack_config.json`; with `dependencies_env` the packer injects each resolved
   dependency's content hash into the build as an env var. See
@@ -88,9 +98,12 @@ Understand these before running anything. Full glossary:
   and the match is a plain tag-set intersection — `*` is matched **literally**, so
   a parent declaring `["ipv4", "public"]` authorizes a child asking for `["*"]`
   exactly as little as a parent declaring nothing. **A parent must therefore
-  declare every network its children need, for itself.** See
-  [`../NETWORKS.md`](../NETWORKS.md), and rule 8 in §6 for why this one is worth a
-  rule of its own.
+  declare every network its children need, for itself.** `Service.Network` names
+  a domain of *service instances* (e.g. Bitcoin nodes) resolved via
+  `Gateway.ResolveNetwork` over nodo peers this node already has — it is not the
+  P2P peer layer the "Peers" bullet above describes, and resolving it never adds
+  or discovers a nodo peer. See [`../NETWORKS.md`](../NETWORKS.md), and rule 8 in
+  §6 for why this one is worth a rule of its own.
 
 ## 1. Celaut Node Installation & Management
 
@@ -153,6 +166,48 @@ runtime steps), follow the **Manual Installation Guide**:
 To deploy a service you package a project into a deterministic Celaut service
 specification with `nodo pack`. **Do not guess the input format — read
 [`../PACKING.md`](../PACKING.md) before packing.** The essentials are below.
+
+### Local development loop — do not re-pack to test a code change
+
+`nodo pack` is for producing the final, distributable, content-addressed
+`.celaut.bee`. It is **not** an iteration tool: the default backend round-trips
+through an external packer-service microVM, and the opt-in `packer.local`
+backend still runs a full `buildctl build --output type=tar` filesystem export —
+either one can take on the order of an hour for a non-trivial image. Re-running
+`nodo pack` for every code change turns development into a build queue; **do not
+package a service just to test it.**
+
+To run and iterate on a service's own code directly on the host — no packaging,
+no microVM boot — while it still reaches the node for whatever it needs (peers,
+dependencies, other running services), use:
+
+```bash
+nodo ggconf /path/to/project [-e key value]...
+```
+
+`ggconf` ("generate_gateway_config_dev") only writes two files into the project
+directory; it does not build, pack, or execute the service itself:
+
+* **`__config__`** — the exact same `celaut.ConfigurationFile` a booted instance
+  would receive, including the real **`gateway`** peer address
+  (`get_config` in `src/utils/configuration_file.py`). Deserialize it from the
+  service's own entry point (`python service/main.py`, `node index.js`, run
+  under a debugger, …) to get the identical gateway endpoint a packaged instance
+  uses — the code runs as a normal host process, not inside a `ch` microVM, and
+  still talks to the network exactly as it would once packaged.
+* **`.dependencies`** — `env=<hash>` lines resolved from `pack_config.json`'s
+  `dependencies` against the **local registry only** (it raises if a dependency
+  is not already imported — pack or import that dependency once, first; see
+  [`../PACKING.md`](../PACKING.md)).
+
+`ggconf` also records the sandbox as a `rundev::<path>` local instance under an
+unmetered dev client, so it shows up like any other instance for `nodo observe`
+/ `nodo instances` without ever having been packed. A service that declares a
+`guest` shared directory additionally needs a `__shares__` JSON file beside
+`__config__` — see [`../SHARED_FILESYSTEMS.md`](../SHARED_FILESYSTEMS.md).
+
+Reach for `nodo pack` only once the implementation is verified this way — pack
+answers "what do I ship", not "does the code work".
 
 > **Note on Containerization (fixed per the two-backend reality):** Docker is used
 > **only** for the packaging phase, never for execution — running services are
@@ -274,12 +329,13 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
 
 2. **Launching Instances (`nodo execute`):**
  Execute by service id, tag, or a `.celaut.bee` path (the path form imports the
- package first, then executes it). Pass declared env vars with `-e <key> <value>`;
- use `--remote` to advertise the host-facing IP.
+ package first, then executes it). Pass declared env vars with `-e <key> <value>`.
+ The address it hands back is reachable from this host only; use `nodo tunnel` to
+ reach the instance from elsewhere.
  ```bash
  nodo execute 1234567890abcdef
- nodo execute --remote -e workers 8 -e timeout 20 my_service_tag
- # signature: execute [--remote] [--name <instance-name>] [-e key value]... <service id | tag | '.celaut.bee' path>
+ nodo execute -e workers 8 -e timeout 20 my_service_tag
+ # signature: execute [--name <instance-name>] [-e key value]... <service id | tag | '.celaut.bee' path>
  ```
  `execute` launches the instance; read its id (which is also its token) and API
  address from `nodo instances` — `execute` itself prints the `nodo inspect` dump
@@ -422,18 +478,19 @@ sudo nodo update
   under the identity that answers there and removed from any other peer still holding it.
 * `nodo tui`: Operations console; its Config page edits the runtime configuration
   ([`../CONFIG.md`](../CONFIG.md)).
-* `nodo info`: Shows runtime versions, node address, and identity.
+* `nodo` (no arguments): Shows runtime versions, node address, identity, and any operator alerts.
 * `nodo logs`: Streams the application daemon logs.
 
 > **Scope note.** This skill documents the commands an agent needs to install,
-> pack, distribute, execute, observe, and discover. Node-operator / maintenance
-> and development commands (`serve`, `migrate`, `storage:prune_blocks`,
-> `prune_containers`, `submit_reputation`, `sync_reputation_proof`,
-> `refresh_ergo_nodes`, `refresh_clients`, `tx_history`, `increase_peer_deposit`,
-> `disconnect`, `envs`, `test`, `ggconf`, `pay`, `verify_reputation`,
-> `local_builder`, `completion`) are intentionally out of scope here. Note
-> that [`../USAGE.md`](../USAGE.md) does not document these either; consult
-> `nodo --help` for the development-command surface.
+> pack, distribute, execute, observe, and discover — plus `ggconf` (§2), which is
+> squarely agent-facing: it is the local iteration loop for a service under
+> development. Node-operator / maintenance commands (`serve`, `migrate`,
+> `storage:prune_blocks`, `prune_containers`, `submit_reputation`,
+> `sync_reputation_proof`, `refresh_ergo_nodes`, `refresh_clients`, `tx_history`,
+> `increase_peer_deposit`, `disconnect`, `envs`, `test`, `pay`,
+> `verify_reputation`, `local_builder`, `completion`) remain intentionally out of
+> scope here. Note that [`../USAGE.md`](../USAGE.md) does not document these
+> either; consult `nodo --help` for the development-command surface.
 
 ---
 
@@ -459,7 +516,15 @@ sudo nodo update
    debugging it is to widen the *child's* declaration, which can never help.
    Cross-check with `nodo observe <instance id>`, whose per-flow view shows the
    traffic that is not happening.
-9. **Disclose Irreversibility Before Funds:** Before any operation that configures a wallet, spends ERG, pays a peer, or submits reputation, disclose to the user that Nodo is **alpha** and that Ergo payments are **final and irreversible** with self-custodied keys and no recourse (see [`../KyA.md`](../KyA.md)). Do not initiate on-chain spending without explicit user consent.
+9. **Do Not Pack To Test — Use `ggconf`:** `nodo pack` can take on the order of an
+   hour per run (external packer-service round-trip, or a full local BuildKit
+   filesystem export). Never pack a service just to check whether a code change
+   works. While developing, run `nodo ggconf <path>` once per dependency change,
+   then execute the service's own entry point directly on the host; it reaches
+   the gateway and its resolved dependencies exactly as a packaged instance
+   would (§2, "Local development loop"). Only pack once that local run confirms
+   the code is correct.
+10. **Disclose Irreversibility Before Funds:** Before any operation that configures a wallet, spends ERG, pays a peer, or submits reputation, disclose to the user that Nodo is **alpha** and that Ergo payments are **final and irreversible** with self-custodied keys and no recourse (see [`../KyA.md`](../KyA.md)). Do not initiate on-chain spending without explicit user consent.
 
 ---
 

@@ -10,6 +10,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from uuid import uuid4
 
 IMPORT_ERROR = None
 try:
@@ -19,6 +20,7 @@ try:
     from src.database import migrate
     from src.database.sql_connection import SQLConnection
     from src.identity import node_identity as ni
+    from src.identity.transport_stack import declare_transport_stack
     from src.reputation_system.bip_wallet_verification import (
         bip_schnorr_sign,
         derive_compressed_pubkey,
@@ -28,8 +30,9 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class PeerIdentityRegistrationTests(unittest.TestCase):
+class _PeerFixture:
+    """Shared by every test class below: a file-backed DB and a signing identity."""
+
     def setUp(self):
         # A file-backed DB: parts of the registration path go through
         # query_interface.fetch_query, which opens its own connection to DATABASE_FILE
@@ -82,9 +85,15 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         for ip, port in uris:
             uri = peer.uri.add(ip=ip, port=port)
             uri.transport.tags.append(transport)
+            # Every node declares what each address speaks; one that declares nothing
+            # is not spoken to (transport_stack.speaks_our_transport_stack).
+            declare_transport_stack(uri, prose=False)
         mu_per_unit = peer.payment_contracts.add()
         mu_per_unit.contract.ledger.formal = contract
         mu_per_unit.mu_per_unit.n = "1"
+        # Every node declares its scheme; a test about the scheme rewrites it in
+        # ``prepare``, before signing.
+        ni.declare_signature_scheme(peer)
         if prepare:
             prepare(peer)
         if signed:
@@ -98,6 +107,9 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
             ).fetchall()
         )
 
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class PeerIdentityRegistrationTests(_PeerFixture, unittest.TestCase):
     def test_signed_peer_is_identified_by_its_public_key(self):
         self.assertEqual(manager.add_peer_instance(self._peer([("10.0.0.1", 9999)])), self.pubkey)
 
@@ -175,9 +187,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
 
     def test_a_peer_declaring_our_signature_scheme_is_registered(self):
-        # The cryptography a node speaks, spelled out rather than assumed. Declaring
-        # it must be the same announcement as declaring nothing, or upgrading would
-        # split the network in two.
+        # The cryptography a node speaks, spelled out rather than assumed.
         peer = self._peer([("10.0.0.1", 9999)], prepare=ni.declare_signature_scheme)
         self.assertEqual(manager.add_peer_instance(peer), self.pubkey)
 
@@ -186,6 +196,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         # refused, because the peer says those bytes are something this node cannot
         # verify. Accepting it would mean trusting a signature nobody checked.
         def _other_scheme(peer):
+            peer.ClearField("signature_scheme")
             peer.signature_scheme.components.add(tags=["ed25519"])
             peer.signature_scheme.components.add(tags=["ed25519ph"])
 
@@ -227,6 +238,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         # part of what a descriptor says (Peer.SignatureScheme.components is explicitly
         # unordered).
         def _reversed(peer):
+            peer.ClearField("signature_scheme")
             for declared in reversed(ni.SIGNATURE_SCHEME_COMPONENTS):
                 peer.signature_scheme.components.add(
                     tags=list(declared.tags), prose=declared.prose, formal=declared.formal
@@ -285,12 +297,12 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
             self.assertEqual(component.formal, declared.formal)
         self.assertTrue(ni.same_signature_scheme(scheme, ni.node_signature_scheme()))
 
-    def test_an_announcement_without_a_scheme_still_verifies(self):
-        # What every node sent before the field existed. It has exactly one meaning,
-        # so it keeps it -- an empty descriptor is the default, never a wildcard.
-        peer = self._peer([("10.0.0.1", 9999)])
+    def test_an_announcement_without_a_scheme_is_refused(self):
+        # A signature whose scheme the announcement does not state cannot be checked,
+        # and there is no older default to read it as.
+        peer = self._peer([("10.0.0.1", 9999)], prepare=lambda p: p.ClearField("signature_scheme"))
         self.assertFalse(peer.HasField("signature_scheme"))
-        self.assertEqual(manager.verified_peer_public_key(peer), self.pubkey)
+        self.assertIsNone(manager.verified_peer_public_key(peer))
 
     def test_every_stored_peer_id_is_a_public_key(self):
         for signed in (False, True):
@@ -351,6 +363,97 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM uri WHERE peer_id=?", (self.pubkey,)
             ).fetchone()[0], 1
         )
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class AssociateClientTests(_PeerFixture, unittest.TestCase):
+    """associate_client_with_peer -- the deferred half of Client.peer_id/signature
+    binding (issue #428), and the AssociateClient RPC's own reason for existing: a
+    peer this node does not know yet (the case at `GenerateClient` time, before
+    `IntroducePeer` has run) must not bind, and later, once it is known, must.
+    """
+
+    def _client_id(self) -> str:
+        client_id = uuid4().hex
+        manager.generate_client(client_id=client_id)
+        return client_id
+
+    def _binding_signature(self, client_id: str) -> str:
+        return self._private_key.sign(
+            ni.client_binding_payload(self.pubkey, client_id).encode("utf-8")
+        ).hex()
+
+    def test_binds_once_the_peer_is_already_known(self):
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)]))
+        client_id = self._client_id()
+
+        bound, reason = manager.associate_client_with_peer(
+            client_id, self.pubkey, self._binding_signature(client_id)
+        )
+
+        self.assertTrue(bound)
+        self.assertEqual(reason, "")
+        self.assertEqual(manager.sc.get_peer_local_client_id(peer_id=self.pubkey), client_id)
+        self.assertEqual(manager.sc.get_peer_id_by_local_client(client_id=client_id), self.pubkey)
+
+    def test_refuses_a_peer_this_node_does_not_know_yet(self):
+        # The exact case connect()'s self-announce hits at GenerateClient time, before
+        # IntroducePeer has registered this node as a peer there: nothing to bind to.
+        client_id = self._client_id()
+
+        bound, reason = manager.associate_client_with_peer(
+            client_id, self.pubkey, self._binding_signature(client_id)
+        )
+
+        self.assertFalse(bound)
+        self.assertIn("does not know", reason)
+        self.assertIsNone(manager.sc.get_peer_local_client_id(peer_id=self.pubkey))
+
+    def test_refuses_a_signature_that_does_not_verify(self):
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)]))
+        client_id = self._client_id()
+
+        bound, reason = manager.associate_client_with_peer(client_id, self.pubkey, "not-a-signature")
+
+        self.assertFalse(bound)
+        self.assertIn("did not verify", reason)
+
+    def test_refuses_an_unknown_client_id(self):
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)]))
+
+        bound, reason = manager.associate_client_with_peer(
+            uuid4().hex, self.pubkey, "irrelevant"
+        )
+
+        self.assertFalse(bound)
+        self.assertIn("no such client_id", reason)
+
+    def test_reapplying_the_same_binding_is_harmless(self):
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)]))
+        client_id = self._client_id()
+        signature = self._binding_signature(client_id)
+
+        first = manager.associate_client_with_peer(client_id, self.pubkey, signature)
+        second = manager.associate_client_with_peer(client_id, self.pubkey, signature)
+
+        self.assertEqual(first, (True, ""))
+        self.assertEqual(second, (True, ""))
+
+    def test_generate_client_still_binds_opportunistically_when_the_peer_is_already_known(self):
+        # _created_client's own pre-existing behaviour, now delegated to
+        # associate_client_with_peer -- must keep working unchanged for every caller
+        # that already had a registered peer at mint time (chat, metrics, the
+        # balancer, delegate execution).
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)]))
+        client_id = uuid4().hex
+
+        manager.generate_client_or_pow_required(
+            client_id=client_id,
+            peer_id=self.pubkey,
+            signature=self._binding_signature(client_id),
+        )
+
+        self.assertEqual(manager.sc.get_peer_local_client_id(peer_id=self.pubkey), client_id)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ IMPORT_ERROR = None
 try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
-    from src.payment_system.contracts.bitcoin import explorer
+    from src.payment_system.contracts.bitcoin import explorer, signer
     from src.payment_system.contracts.bitcoin.backend import (
         BackendUnavailable,
         ChainBackend,
@@ -24,6 +24,10 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     explorer = None  # type: ignore[assignment]
 
 ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+# Only the reads are exercised here, which never touch the key: any valid wallet will do.
+WALLET = signer.derive_wallet_key(
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+) if explorer is not None else None
 DECODED = {"vout": [{"value": 0.001, "n": 0, "scriptPubKey": {"hex": "0014" + "11" * 20}}]}
 
 
@@ -109,7 +113,7 @@ class ExplorerPaginationTests(unittest.TestCase):
         }
         for last_seen, page in chain_pages.items():
             responses[f"/address/{ADDRESS}/txs/chain/{last_seen}"] = page
-        backend = explorer.ExplorerBackend("https://example.invalid/api")
+        backend = explorer.ExplorerBackend("https://example.invalid/api", wallet=WALLET)
         asked = []
 
         def _get(path):

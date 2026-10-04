@@ -93,6 +93,36 @@ pub const GATEWAY_NOTICE_FILE: &str = ".gateway_notice";
 /// port and an unreachable plaintext port never answer for each other.
 pub const GATEWAY_PLAINTEXT_NOTICE_FILE: &str = ".gateway_plaintext_notice";
 
+/// The port a pending plaintext notice is about, matching
+/// `GATEWAY_PLAINTEXT_NOTICE_PORT_FILE` in `src/utils/config.py` (issue #438).
+pub const GATEWAY_PLAINTEXT_NOTICE_PORT_FILE: &str = ".gateway_plaintext_notice.port";
+
+/// What the operator should do, taken from the notice itself rather than pointing at
+/// its file: the one-line command in the `.cmd` companion when there is one,
+/// otherwise the notice's body with its framing rules and title dropped. Mirrors
+/// `_command_block` in `src/utils/operator_alerts.py`, minus the centering -- the
+/// banner wraps its own lines.
+fn notice_instruction(config: &Path, notice_file: &str, notice: &str) -> String {
+    let command = notice_files(config, notice_file)[1].clone();
+    if let Some(command) = fs::read_to_string(command)
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+    {
+        return command;
+    }
+    notice
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("nodo:")
+                && !line.chars().all(|c| matches!(c, '=' | '-' | '─' | '━' | '*' | '#'))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn gateway_notice_path(config: &Path) -> PathBuf {
     config
         .parent()
@@ -105,6 +135,19 @@ fn gateway_plaintext_notice_path(config: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(GATEWAY_PLAINTEXT_NOTICE_FILE)
+}
+
+/// A notice file and every companion `src/utils/config.py` writes beside it: its
+/// one-line command (`.cmd`) and the port it is about (`.port`). What
+/// `ConfigManager._clear_notice_unlocked` removes, so what a TUI edit that moves a
+/// port has to remove too.
+pub(crate) fn notice_files(config: &Path, notice: &str) -> [PathBuf; 3] {
+    let dir = config.parent().unwrap_or_else(|| Path::new("."));
+    [
+        dir.join(notice),
+        dir.join(format!("{notice}.cmd")),
+        dir.join(format!("{notice}.port")),
+    ]
 }
 
 /// `network.GATEWAY_PORT` as a real port, or `None` for `auto`, empty or out of
@@ -177,9 +220,9 @@ fn gateway_port_alert(
             key: "gateway_port_firewall",
             summary: format!(
                 "{} TCP {port} is not open in the host firewall, so peers cannot reach \
-                 this node. Open it: see {} for the exact command.",
+                 this node. Open it: {}",
                 unreachable_lead(serving),
-                gateway_notice_path(config).display()
+                notice_instruction(config, GATEWAY_NOTICE_FILE, &notice.clone().unwrap_or_default())
             ),
         }),
         // A port is assigned, the firewall has no open question about it, and still
@@ -249,18 +292,32 @@ fn plaintext_gateway_port_alert(
 ) -> Option<OperatorAlert> {
     let port = plaintext_assigned_port(document)?;
 
-    fs::read_to_string(gateway_plaintext_notice_path(config))
+    let pending = fs::read_to_string(gateway_plaintext_notice_path(config))
         .ok()
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())?;
+
+    // A notice about another port is not a question about this one (issue #438):
+    // `auto` moves with GATEWAY_PORT, and the old notice read under the new number
+    // sent the operator to open the port the node had just left. Mirrors
+    // `plaintext_gateway_port_alert` in `src/utils/operator_alerts.py`.
+    let about = config
+        .parent()
+        .map(|dir| dir.join(GATEWAY_PLAINTEXT_NOTICE_PORT_FILE))
+        .and_then(|path| fs::read_to_string(path).ok());
+    if let Some(about) = about.map(|text| text.trim().to_string()) {
+        if !about.is_empty() && about != port.to_string() {
+            return None;
+        }
+    }
 
     Some(OperatorAlert {
         key: "gateway_plaintext_port_unreachable",
         summary: format!(
             "TCP {port} (the plaintext gateway) is not reachable from the guest \
              subnet, so services this node launches cannot call back into it. Fix \
-             it: see {} for the exact command.",
-            gateway_plaintext_notice_path(config).display()
+             it: {}",
+            notice_instruction(config, GATEWAY_PLAINTEXT_NOTICE_FILE, &pending)
         ),
     })
 }
@@ -731,6 +788,38 @@ mod tests {
         let document = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: 0\n");
 
         assert_eq!(plaintext_gateway_port_alert(&config, Some(&document)), None);
+    }
+
+    /// Issue #438: GATEWAY_PORT moved 52285 -> 60000, so `auto` is now 60001, and
+    /// the notice on disk was written about 52286. Reported under 60001 it sent the
+    /// operator to open 52286; after that and a restart, came a second alert for
+    /// 60001 -- the port in use all along.
+    #[test]
+    fn a_notice_about_the_port_auto_used_to_be_is_not_reported() {
+        let dir = scratch("plaintext-stale-port");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_PLAINTEXT_NOTICE_FILE), "open TCP 52286").unwrap();
+        fs::write(dir.join(GATEWAY_PLAINTEXT_NOTICE_PORT_FILE), "52286").unwrap();
+        let moved = document("network:\n  GATEWAY_PORT: 60000\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+        let unmoved = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+
+        assert_eq!(plaintext_gateway_port_alert(&config, Some(&moved)), None);
+        assert!(plaintext_gateway_port_alert(&config, Some(&unmoved)).is_some());
+    }
+
+    #[test]
+    fn the_notice_port_file_is_the_one_python_writes() {
+        let python = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../src/utils/config.py"
+        ))
+        .expect("src/utils/config.py ships with the repository");
+        assert!(
+            python.contains(&format!(
+                "GATEWAY_PLAINTEXT_NOTICE_PORT_FILE = \"{GATEWAY_PLAINTEXT_NOTICE_PORT_FILE}\""
+            )),
+            "src/utils/config.py no longer writes {GATEWAY_PLAINTEXT_NOTICE_PORT_FILE}"
+        );
     }
 
     #[test]

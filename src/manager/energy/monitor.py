@@ -46,7 +46,7 @@ LOG_PREFIX = "[energy]"
 DEFAULT_ENABLED = True
 DEFAULT_INTERVAL_SECONDS = 60
 DEFAULT_PRICE_PER_KWH = 0.0
-DEFAULT_CURRENCY = "EUR"
+DEFAULT_CURRENCY = "USD"
 # The model's coefficients have no defaults worth shipping: a number that fits one
 # machine is an order of magnitude wrong on another. 0 means uncalibrated, and an
 # uncalibrated model reports nothing at all.
@@ -54,7 +54,17 @@ DEFAULT_IDLE_WATTS = 0.0
 DEFAULT_LOAD_WATTS = 0.0
 MIN_INTERVAL_SECONDS = 5
 
+# How long ``energy_consumption`` history is kept. Unlike ``demand_history`` (one
+# row per hour), this table gets one row per sample -- 1,440 rows a day at the
+# default interval -- so it needs a ceiling to not grow without an owner. Not
+# configurable, same as demand_history.RETENTION_DAYS: an operator who wants a
+# chart of the last month should not first have to discover a setting that keeps
+# the month around.
+RETENTION_DAYS = 30
+PRUNE_INTERVAL_SECONDS = 86400
+
 _last_tick_monotonic: Optional[float] = None
+_last_prune_monotonic: Optional[float] = None
 _cpu_weights = CpuWeightTracker()
 _rapl = RaplBackend()
 # Price sources live as long as the process, so one that caches a day-ahead curve
@@ -315,6 +325,25 @@ def _instance_usage_usec() -> Dict[str, Optional[int]]:
     return usage
 
 
+def _maybe_prune(sc) -> None:
+    """Drop samples past ``RETENTION_DAYS``, at most once a day.
+
+    Gated the same way ``energy_tick`` gates itself: a cheap no-op on every tick
+    but one, so the interval a tariff or a chart is read at never pays for a
+    DELETE scan it did not ask for.
+    """
+    global _last_prune_monotonic
+    now = time.monotonic()
+    last = _last_prune_monotonic
+    if last is not None and (now - last) < PRUNE_INTERVAL_SECONDS:
+        return
+    _last_prune_monotonic = now
+    try:
+        sc.prune_energy_consumption(keep_days=RETENTION_DAYS)
+    except Exception as exc:
+        log.LOGGER(f"{LOG_PREFIX} could not prune energy history: {exc}")
+
+
 def _persist(reading, tariff: Tariff, attributed, elapsed_seconds: float) -> None:
     from src.database.sql_connection import SQLConnection
 
@@ -333,6 +362,7 @@ def _persist(reading, tariff: Tariff, attributed, elapsed_seconds: float) -> Non
             for instance_id, watts in attributed.instance_watts.items()
         }
     )
+    _maybe_prune(sc)
 
 
 def _prime() -> None:

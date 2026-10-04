@@ -33,69 +33,78 @@ implemented.
 
 ## What you need, and what for
 
-Two different asks — to be **paid** in BTC, or to **pay** in it — and three ways to
-answer them. `ledgers.bitcoin.BACKEND` chooses.
+Three ways to reach Bitcoin, and all three can be paid and can pay.
+`ledgers.bitcoin.BACKEND` chooses.
 
-| | runs nothing | can be paid | can pay | where the key is |
-|---|---|---|---|---|
-| `explorer` | ✅ | ✅ | ❌ | nowhere |
-| `core` | ❌ you run a bitcoind | ✅ | ✅ | bitcoind's wallet, which you back up |
-| `service` | ✅ the node runs it | ✅ | ✅ | derived from a mnemonic in `config.yaml` |
+| | runs nothing | signs | where the key is |
+|---|---|---|---|
+| `explorer` | ✅ | nodo, locally | derived from a mnemonic in `config.yaml` |
+| `core` | ❌ you run a bitcoind | Core | bitcoind's wallet, which you back up |
+| `service` | ✅ the node runs it | Core | derived from the same mnemonic in `config.yaml` |
 
-### `explorer` — to be paid. Nothing to run, no key anywhere.
+### `explorer` — Ergo's posture. Nothing to run, signs locally.
 
 A public HTTP API: blockstream.info, mempool.space, or one you host — any of them, so
-long as it speaks the Esplora HTTP API, which is what `EXPLORER_URL` points at. `nodo`
-reads the chain through it and holds no Bitcoin key at all, so it can be paid in BTC
-and **cannot pay in it**. That is not a half-working state: the payer walks the payment
-systems it shares with a peer and settles through the first one it can fund, so a node
-with a read-only Bitcoin backend simply pays in something else. Nothing is broadcast
-and nothing fails halfway through a payment.
+long as it speaks the Esplora HTTP API, which is what `EXPLORER_URL` points at. This is
+what Ergo does with `NODE_URL`: a remote public node for everything that is a question
+about the chain, and a key held here for everything that moves money.
 
-Payers are sent to `payments.COLD_WALLET`, and it is the one address you have to set.
-A read-only API cannot be asked to mint one — and there is nothing to mint *into*:
-the hot/cold split exists so a signing wallet can hold a working balance and sweep the
-excess away, and a backend that holds no key has neither half. So the cold wallet is
-where payments land in the first place, which also means there is no second address to
-choose and no sweep that could ever fail. It must be **segwit**, because its
-`scriptPubKey` is what peers are advertised. The contract is not offered until it is
-set.
+- **The key** is derived from `WALLET_MNEMONIC`, which the node generates on first load
+  if it is empty (generating one commits to nothing; the wallet holds no funds until
+  someone sends some). BIP-84, P2WPKH, `m/84'/0'/0'/0/0` — `m/84'/1'/0'/0/0` off mainnet
+  — so any standard wallet opens the same funds from the same words. An optional
+  `WALLET_PASSPHRASE` is a different wallet for the same words.
+- **To be paid**, that one address is advertised as a `scriptPubKey`, and incoming
+  payments are read back off the explorer.
+- **To pay**, `nodo` lists the wallet's confirmed outputs
+  (`/address/:addr/utxo`), builds the transaction, signs each input (BIP-143) and posts
+  the raw hex (`POST /tx`). It spends the largest outputs first and only as many as the
+  amount and the fee need, never an unconfirmed one, and change comes back to the same
+  address. Before anything is sent every signature is verified, and the txid the
+  explorer answers with has to match the one computed locally.
+- **The explorer is trusted for what it reports**, and for nothing else. BIP-143 commits
+  each signature to the input's amount, so an output it misreports yields a transaction
+  the network rejects, not one that moves more than the wallet holds. The worst a
+  lying or failing explorer can do is make a payment fail or hide a balance — so pick
+  one you trust, or host your own.
 
-This is the shipped default, because being paid is the side that matters to a node that
-is earning.
+The trade is explicit: **the mnemonic is in `config.yaml`**. That is a real Bitcoin key
+in a file on this machine, and the file is its only backup. This is the shipped
+default, as it is for Ergo.
 
-### `core` — to pay. A bitcoind you trust with your wallet.
+`payments.COLD_WALLET` is optional here, as on every backend: set it and the excess over
+`HOT_WALLET_LIMITS` is swept there; leave it empty and nothing is. It may be any address
+valid on the configured network, segwit or legacy. Payers are sent to the node's own
+wallet either way — the cold wallet is never where payments land.
+
+### `core` — A bitcoind you trust with your wallet.
 
 Bitcoin Core over JSON-RPC. Core signs, broadcasts, counts confirmations and keeps the
-wallet, so `nodo` still holds no key — but the node has to be one you would hand your
-wallet to. `RPC_URL` is a URL, so it may be **remote**: your own machine over a LAN or a
-VPN. Not somebody else's public node.
+wallet, so `nodo` holds no key — but the node has to be one you would hand your wallet
+to. `RPC_URL` is a URL, so it may be **remote**: your own machine over a LAN or a VPN.
+Not somebody else's public node.
 
-Back up **bitcoind's wallet**, not `config.yaml`. `nodo` neither generates nor stores a
-seed for this chain, and `WALLET_KEYS_EXTERNAL: true` is what tells it not to.
+Back up **bitcoind's wallet**, not `config.yaml`. This is the one backend for which
+`nodo` neither generates nor stores a seed.
 
-### `service` — to pay, without running a bitcoind yourself
+### `service` — Core's signing, without running a bitcoind yourself
 
 The same Bitcoin Core, run by **this node** as a [core service](#running-your-own-node),
-with its wallet derived from a mnemonic the node holds. It signs like `core` and asks
-nothing of you like `explorer`: you back up one phrase, the way you already do for Ergo,
-and the node brings the rest up at boot.
+with its wallet derived from the mnemonic the node holds. It signs like `core` and asks
+nothing of you: you back up one phrase, the way you already do for Ergo, and the node
+brings the rest up at boot. It is also the answer for a node that wants a full node's
+view of the chain instead of trusting an explorer's.
 
-The trade is explicit and it is the whole of it: **the mnemonic is in `config.yaml`**.
-That is a real Bitcoin key in a file on this machine. A node that would rather hold none
-should stay on `explorer` — it can still be paid, which is the half that earns.
+It uses the same `WALLET_MNEMONIC` and the same BIP-84 account as `explorer`, so the
+words mean the same wallet to any standard tool.
 
 ### How this compares to Ergo
 
-Ergo's posture is the third one: `ledgers.ergo.NODE_URL` defaults to somebody else's
-public node and the wallet mnemonic lives in `config.yaml`, so the node runs no Ergo
-infrastructure *and* can both send and receive.
-
-Bitcoin cannot borrow the first half of that. There is no public node that will sign for
-you, and doing it here would mean raw segwit construction, BIP-143 sighashes and UTXO
-selection — every line of it money-moving, and none of it needed to be paid. So
-`service` borrows the *second* half instead: the mnemonic is nodo's, and the signing is
-still Core's. The node just runs the Core.
+Ergo's posture is `ledgers.ergo.NODE_URL` defaulting to somebody else's public node with
+the wallet mnemonic in `config.yaml`, so the node runs no Ergo infrastructure *and* can
+both send and receive. `explorer` is the same arrangement: the signing is local, the
+public server only answers questions and relays. `service` is the variant for an
+operator who would rather not trust one.
 
 No backend needs a JVM, so a node that will not run one can be paid in BTC even though
 it cannot be paid in ERG.
@@ -123,7 +132,6 @@ core_services:
 ledgers:
   bitcoin:
     BACKEND: service
-    WALLET_KEYS_EXTERNAL: false      # so the node mints a mnemonic, as it does for Ergo
     WALLET_MNEMONIC: ""              # filled in on the next load; paste your own to reuse one
     WALLET_PASSPHRASE: ""            # optional BIP-39 passphrase
     RPC_USER: "nodo"                 # what nodo and the service authenticate with
@@ -132,7 +140,7 @@ ledgers:
     PRUNE_MIB: 10000                 # 0 keeps the whole chain and builds a txindex
 ```
 
-All five are checked at startup, because each one missing gives a node that boots,
+All of these are checked at startup, because each one missing gives a node that boots,
 advertises Bitcoin, and then cannot settle a payment — a failure that would otherwise
 surface as a payout that silently did not happen.
 
@@ -178,54 +186,58 @@ ledgers:
   bitcoin:
     tags: [ bitcoin ]
     NETWORK: mainnet                 # mainnet | testnet | signet | regtest
-    BACKEND: explorer                # explorer (be paid) | core (also pay)
+    BACKEND: explorer                # explorer | core | service
     EXPLORER_URL: "https://blockstream.info/api"
+    WALLET_MNEMONIC: ""              # explorer / service: generated on first load
+    WALLET_PASSPHRASE: ""            # optional BIP-39 passphrase
     RPC_URL: "http://127.0.0.1:8332"        # BACKEND: core only
     RPC_COOKIE_PATH: "~/.bitcoin/.cookie"   # or RPC_USER / RPC_PASSWORD
     WALLET_NAME: "nodo"
-    WALLET_KEYS_EXTERNAL: true       # the keys are Core's, not this file's
     payments:
-      MU_PER_SATOSHI: ""             # you must set this -- see below
+      MU_PER_SATOSHI: 1400000        # $0.50/ERG, $70,000/BTC -- set your own, see below
       MIN_CONFIRMATIONS: 1
       TARGET_CONF: 6
       MAX_FEE_RATE_SAT_VB: 100
       HOT_WALLET_LIMITS: "0.05"
-      COLD_WALLET: ""                # also the receiving address on `explorer`
+      COLD_WALLET: ""                # the sweep target; optional
       COLD_WALLET_MIN_TRANSFER: "0.01"
       MAX_FEE_OVERHEAD: 0.25
 ```
 
-There is no receiving-address setting. On a signing backend the address lives in Core's
-wallet under the label `nodo`, and that label is how it is found again; on `explorer` it
-is `COLD_WALLET`. Nothing about it is written into `config.yaml`.
+There is no receiving-address setting. On `core` and `service` the address lives in
+Core's wallet under the label `nodo`, and that label is how it is found again; on
+`explorer` it is derived from the mnemonic and is the same on every call. Nothing about
+it is written into `config.yaml`.
 
 The cookie is preferred and is what Core writes on every start, so the ordinary setup
 keeps no credential in `config.yaml` at all. `RPC_USER` / `RPC_PASSWORD` are the
 fallback. The RPC password is never written to a log, a URL or an error message.
 
-### `MU_PER_SATOSHI` has no default, on purpose
+### `MU_PER_SATOSHI`: change it to your own market
 
-This is the one setting you cannot skip, and leaving it empty is a working state: **the
-node simply does not offer Bitcoin.**
+The shipped value is `1400000`, and leaving it empty is a working state: **the node
+simply does not offer Bitcoin.**
 
 MU is `nodo`'s unit of account and has no intrinsic value; each payment contract says
 what one MU is worth in its own money. A satoshi and a nanoERG are about **six orders of
 magnitude apart**, so copying Ergo's `MU_PER_NANOERG: 1` by analogy would sell an hour
 of compute for roughly a millionth of its price. That is the exact failure
 [`PRICING.md`](PRICING.md) exists to prevent, and the one the old gas model shipped
-with — so there is no borrowed default to fall into.
+with.
 
-Work it out against your own market:
+The shipped value is worked out like this:
 
 ```
-MU_PER_SATOSHI = MU_PER_NANOERG × (value of one nanoERG / value of one satoshi)
+MU_PER_SATOSHI = MU_PER_NANOERG × (value of one satoshi / value of one nanoERG)
 ```
 
-At $0.50/ERG and $100,000/BTC with `MU_PER_NANOERG: 1`, that is about `2000000`. The
-node warns at startup if you set it to `1`, because 1 is `MU_PER_NANOERG`'s value and
-copying it is the specific mistake worth naming.
+At $0.50/ERG and $70,000/BTC with `MU_PER_NANOERG: 1`, one satoshi is $0.0007 and one
+nanoERG is $0.0000000005, so `MU_PER_SATOSHI` is `1400000`. That is an example, not a
+quoted price: change it to your own market, and keep it in step if you change
+`MU_PER_NANOERG`. The node warns at startup if you set it to `1`, because 1 is
+`MU_PER_NANOERG`'s value and copying it is the specific mistake worth naming.
 
-Until it is set: the contract is not registered, nothing is advertised to peers, `btc`
+While it is empty: the contract is not registered, nothing is advertised to peers, `btc`
 is not offered as a display unit, and `nodo donations` shows no Bitcoin block. Nothing
 half-works.
 
@@ -237,13 +249,14 @@ register, so `nodo` uses the literal translation: **one static receiving address
 
 - The advertised `script` xattr is one fixed `scriptPubKey` — the bytes, never a
   human-readable address, exactly as Ergo advertises propositionBytes.
-- On a signing backend the receiving address is **asked of Core**, every time, under the
-  label `nodo` — Core is the only thing that knows which addresses its wallet watches,
-  and an address it does not watch is one whose payments it will not report and whose
-  output it cannot spend. The answer is cached in `__cache__/bitcoind_receive_address`,
-  so a node whose bitcoind is down still knows what it advertised and can still check an
-  incoming payment against it. The cache is rewritten whenever Core's answer changes,
-  and once every 20 reads otherwise. On `explorer` the address is `payments.COLD_WALLET`.
+- On `core` and `service` the receiving address is **asked of Core**, every time, under
+  the label `nodo` — Core is the only thing that knows which addresses its wallet
+  watches, and an address it does not watch is one whose payments it will not report and
+  whose output it cannot spend. The answer is cached in
+  `__cache__/bitcoind_receive_address`, so a node whose bitcoind is down still knows what
+  it advertised and can still check an incoming payment against it. The cache is
+  rewritten whenever Core's answer changes, and once every 20 reads otherwise. On
+  `explorer` the address is **derived** from the mnemonic, so there is nothing to ask.
 - Exactly one address is ever minted, by `init()`, and only for a wallet that has none
   under the label. No other caller may mint: an address minted on the receiving path
   would be one no payer was ever told about.
@@ -357,14 +370,18 @@ excess = balance - HOT_WALLET_LIMITS - fee
 ```
 
 swept only when it is at least `COLD_WALLET_MIN_TRANSFER` **and** above the dust
-threshold. There is no sweep on `explorer`: payments already land in the cold wallet,
-and nothing there could sign one anyway. `COLD_WALLET` must be a valid address **for the
-configured network** — an
-address valid on another one is refused, because sweeping savings to it would send funds
-nobody on this chain can spend. The check is bech32/base58check arithmetic and needs no
+threshold, with the fee taken out of the swept amount so the hot limit is retained
+whatever the transaction weighs. `COLD_WALLET` must be a valid address **for the
+configured network** — an address valid on another one is refused, because sweeping
+savings to it would send funds nobody on this chain can spend. The check is bech32/base58check arithmetic and needs no
 node, so a node that cannot reach `bitcoind` still refuses a typo.
 
 ## Donations
+
+**The lists are Ergo's lists.** `DONATION_WALLETS` and `DONATION_CREDIT_WALLETS` take
+`{ address, weight }` entries here too, read by the same code and checked by the same
+validator (against Bitcoin's addresses for the configured network). Both ship with the
+project's Bitcoin address at weight 1.0, as Ergo's do.
 
 **Half the circuit, and the half that costs money.** Bitcoin *pays* donations exactly as
 [`DONATIONS.md`](DONATIONS.md) describes: it declares its own percentage, its own minimum
@@ -394,10 +411,11 @@ Bitcoin. Donating in BTC today is a transfer, not a position in anybody's routin
   paid needs a scanner that is not written.
 - **Lightning**. It is a separate payment contract with its own rate and it slots into
   the same registry.
-- **Raw transaction construction.** nodo builds no Bitcoin transaction and holds no
-  Bitcoin signing code: Core signs on every backend that can pay. What `service` changes
-  is *who runs the Core*, not who signs — which is why paying in BTC needed a node image
-  rather than a segwit implementation here.
+- **Anything but one P2WPKH key.** `explorer` builds and signs transactions for a single
+  native-segwit address — no other script types, no multisig, no taproot spends, no
+  coin control, no fee bumping. It spends confirmed outputs only, so a payment made
+  right after another waits for the first to confirm. Those are Core's job, which is
+  what `core` and `service` are for.
 - **Per-deposit derived addresses**, above.
 
 ## See also

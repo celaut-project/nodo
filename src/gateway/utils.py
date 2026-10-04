@@ -11,8 +11,10 @@ import netifaces as ni
 from src.payment_system.ledgers import local_payment_methods, register_local_contracts
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
+from src.utils import keyvalue
 from src.utils.config import ConfigManager
 from src.identity.transport_stack import (
+    declare_transport,
     declare_transport_stack,
     share_prose_on_get_peer_info,
 )
@@ -116,6 +118,22 @@ def _public_host() -> Optional[str]:
     )
 
 
+def _public_port(internal_port: int) -> int:
+    """The port to advertise alongside ``_public_host()``: ``network.PUBLIC_TCP_PORT``,
+    else ``internal_port``.
+
+    A router forwarding a different external port than the one this node listens on
+    internally needs that external port announced, or a remote peer is told to
+    connect to a port nothing is actually listening on there.
+    """
+    from src.utils.network import resolve_public_port
+
+    return resolve_public_port(
+        configured=str(env_manager.get("network.PUBLIC_TCP_PORT", "") or ""),
+        internal_port=internal_port,
+    )
+
+
 def _is_loopback(ip: str) -> bool:
     """True for the whole loopback range, not just 127.0.0.1 / ::1."""
     try:
@@ -160,11 +178,9 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     public_host = _public_host()
     if public_host:
         seen_ips.add(public_host)
-        gateway_port = _gateway_port()
-        uris.append(celaut.Instance.Uri(ip=public_host, port=gateway_port))
-        log.LOGGER(f'Announcing public host {public_host}:{gateway_port}')
-    else:
-        log.LOGGER('No public address to announce (set network.PUBLIC_IP if behind NAT).')
+        public_port = _public_port(_gateway_port())
+        uris.append(celaut.Instance.Uri(ip=public_host, port=public_port))
+        log.LOGGER(f'Announcing public host {public_host}:{public_port}')
 
     announce_private = bool(env_manager.get("network.ANNOUNCE_PRIVATE_ADDRESSES", False))
     private: List[celaut.Instance.Uri] = []
@@ -370,9 +386,10 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     # address itself rather than on a separate slot: tcp:8080 and udp:9000 would be
     # different endpoints, so a reader needs to know which without matching the two
     # by port number.
+    prose = share_prose_on_get_peer_info()
     for uri in uris:
         announced = peer.uri.add(ip=uri.ip, port=uri.port)
-        announced.transport.tags.append("tcp")
+        declare_transport(announced, prose=prose)
         # What the endpoint actually speaks, spelled out rather than named: the tags
         # alone would let two nodes both write "tls" while disagreeing on the extension
         # OID, on what the signature covers or on which RPCs exist, and neither could
@@ -380,11 +397,12 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
         # comparison reads; the prose is there so a reader can implement the thing (see
         # src/identity/transport_stack.py). Covered by the signature below, so a relay can
         # neither strip the declaration nor edit a parameter out of it.
-        declare_transport_stack(announced, prose=share_prose_on_get_peer_info())
+        declare_transport_stack(announced, prose=prose)
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not
-    # here: that is what GetServiceEstimatedCost is for. Values are ceilings; see
+    # here: that is what GetServiceEstimatedCost is for. Values are base prices (the
+    # node scales RAM, CPU and disk up to scarcity_max_multiplier); see
     # node_advertised_rates(). Node-wide rather than per-address, because a node's
     # rates do not depend on which of its addresses you reach it through.
     #
@@ -392,13 +410,27 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     # virtualizer stack, which imports this module back at import time.
     from src.utils.cost_functions.general_cost_functions import node_advertised_rates
 
-    for rate, amount_mu in node_advertised_rates().items():
-        peer.mu_per_call[rate].n = str(amount_mu)
+    keyvalue.from_dict(peer.mu_per_call, {
+        rate: celaut.Amount(n=str(amount_mu))
+        for rate, amount_mu in node_advertised_rates().items()
+    })
 
     payment_contracts = _local_payment_contracts()
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
     if payment_contracts:
         peer.payment_contracts.extend(payment_contracts)
+
+    # The most this node supports per architecture it serves, measured benchmark scores
+    # included (#459). Covered by the signature like everything else here, and stable
+    # between announcements -- ceilings, not headroom -- so it does not defeat the
+    # announcement cache. Best-effort: a node that cannot work its ceilings out
+    # announces none, and is then called by peers as before.
+    try:
+        from src.utils.cost_functions.architecture_resources import announced_resources
+
+        peer.resources.extend(announced_resources())
+    except Exception as e:
+        log.LOGGER(f'Could not work out the resources to announce: {e}')
 
     from src.reputation_system.fetch import local_proofs
 
@@ -430,8 +462,7 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     slot = instance.api.slot.add()
     slot.port = port
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
-    for rate, amount in peer.mu_per_call.items():
-        slot.mu_per_call[rate].n = amount.n
+    keyvalue.from_dict(slot.mu_per_call, keyvalue.to_dict(peer.mu_per_call))
     instance.api.payment_contracts.extend(peer.payment_contracts)
 
     uri_slot = instance.uri_slot.add()
