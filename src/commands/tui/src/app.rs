@@ -4603,6 +4603,7 @@ impl App {
 
         self.paths = Paths::discover();
         self.reload_after_config_write();
+        self.forget_node_info_from_before(&transaction.result);
 
         match transaction.result {
             Ok(applied) => {
@@ -4631,6 +4632,46 @@ impl App {
             }
         }
         self.refresh_local(true);
+    }
+
+    /// Whether the node serves, as the operator alerts must read it.
+    ///
+    /// `None` while a configuration transaction is in flight. That transaction
+    /// restarts the node, so the gateway port is closed for a time on purpose, and
+    /// "nothing is listening" is not a fact to report in that window.
+    pub(crate) fn serving_for_alerts(&self) -> Option<bool> {
+        if self.config_task.is_some() {
+            return None;
+        }
+        match self.node_info.service_status.as_str() {
+            "running" => Some(true),
+            "not running" => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Make `node_info` agree with the node that a configuration transaction left.
+    ///
+    /// `nodo info` runs on its own 60 s timer. A run that fell in the restart
+    /// probed a closed port and reported "not running". Without this, that stale
+    /// answer stays until the next run. The alerts then read the new port with no
+    /// notice beside it, and show "nothing is listening" for up to a minute on a
+    /// node that serves.
+    ///
+    /// A run still in flight is dropped for the same reason: it can have probed
+    /// the port before the node opened it. Then the next tick starts a new run.
+    fn forget_node_info_from_before(&mut self, result: &Result<Applied, String>) {
+        if let Some(task) = self.wallet_task.take() {
+            task.abort();
+        }
+        let now = Instant::now();
+        self.last_wallet_refresh = now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now);
+        // `wait_until_serving` proved the new port answers before it returned
+        // `Restarted`. The other results leave the state unknown until `nodo info`
+        // answers again.
+        if matches!(result, Ok(Applied::Restarted)) {
+            self.node_info.service_status = "running".to_string();
+        }
     }
 
     // --- Cell ---------------------------------------------------------------
@@ -6023,11 +6064,7 @@ impl App {
             // "running but unreachable" -- the state no local check can see --
             // rather than only "not reachable". `None` until the first `nodo info`
             // answers, which is what the third wording is for.
-            let serving = match self.node_info.service_status.as_str() {
-                "running" => Some(true),
-                "not running" => Some(false),
-                _ => None,
-            };
+            let serving = self.serving_for_alerts();
             self.alerts
                 .poll(&self.paths.config, self.config_document.as_ref(), serving);
         }
@@ -6423,7 +6460,9 @@ async fn fetch_node_info() -> Result<NodeInfo, String> {
     // lines ahead of them are simply ignored.
     let output = tokio::time::timeout(
         Duration::from_secs(20),
-        Command::new("nodo").output(),
+        // A run that is aborted (see `forget_node_info_from_before`) must not leave
+        // its `nodo` process behind.
+        Command::new("nodo").kill_on_drop(true).output(),
     )
     .await
     .map_err(|_| "nodo timed out after 20 seconds".to_string())?
@@ -12844,6 +12883,85 @@ mod restart_state_regressions {
         });
         assert!(tokio::time::timeout(Duration::from_secs(2), wait_until_serving(&config)).await.unwrap());
         assign.await.unwrap();
+    }
+
+    /// A finished transaction whose result `poll_config_task` can take at once.
+    async fn finished_transaction(result: Result<Applied, String>) -> JoinHandle<ConfigTransaction> {
+        let task = tokio::spawn(async move {
+            ConfigTransaction {
+                label: "network.GATEWAY_PORT".to_string(),
+                result,
+            }
+        });
+        while !task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        task
+    }
+
+    /// A `nodo info` that never answers: a run still in flight.
+    fn node_info_in_flight() -> JoinHandle<Result<NodeInfo, String>> {
+        tokio::spawn(async {
+            std::future::pending::<()>().await;
+            unreachable!()
+        })
+    }
+
+    /// The restart closes the gateway port on purpose. While the transaction is in
+    /// flight, the alerts must not read that as "nothing is listening".
+    #[tokio::test]
+    async fn a_restart_in_flight_does_not_report_the_port_as_closed() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.config_task = Some(tokio::spawn(async {
+            std::future::pending::<()>().await;
+            unreachable!()
+        }));
+
+        assert_eq!(app.serving_for_alerts(), None);
+    }
+
+    /// The bug: a gateway port moved to a port that peers can reach. A `nodo info`
+    /// run in the restart reported "not running", and the Overview then showed
+    /// "nothing is listening" for up to 60 s on a node that served.
+    #[tokio::test]
+    async fn a_restart_that_came_back_clears_a_stale_not_running() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.last_wallet_refresh = Instant::now();
+        let stale = node_info_in_flight();
+        let stale_abort = stale.abort_handle();
+        app.wallet_task = Some(stale);
+        app.config_task = Some(finished_transaction(Ok(Applied::Restarted)).await);
+
+        app.poll_config_task().await;
+
+        assert_eq!(app.node_info.service_status, "running");
+        assert_eq!(app.serving_for_alerts(), Some(true));
+        assert!(app.wallet_task.is_none(), "a stale nodo info run is still in flight");
+        tokio::task::yield_now().await;
+        assert!(stale_abort.is_finished(), "the stale nodo info run was not aborted");
+        assert!(
+            app.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL,
+            "the next tick does not ask nodo info again"
+        );
+    }
+
+    /// A failed transaction proves nothing about the port. The status stays as it
+    /// was, and a new `nodo info` is due at once.
+    #[tokio::test]
+    async fn a_failed_restart_asks_nodo_info_again_without_a_guess() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.last_wallet_refresh = Instant::now();
+        app.wallet_task = Some(node_info_in_flight());
+        app.config_task = Some(finished_transaction(Err("restart failed".to_string())).await);
+
+        app.poll_config_task().await;
+
+        assert_eq!(app.node_info.service_status, "not running");
+        assert!(app.wallet_task.is_none());
+        assert!(app.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL);
     }
 }
 
