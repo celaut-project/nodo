@@ -406,16 +406,19 @@ network:
   EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
   PUBLIC_TCP_PORT: ""  # Optional external TCP port to advertise for the gateway (GATEWAY_PORT), in case your router forwards a different port than the one this node listens on. Leave empty to advertise GATEWAY_PORT itself.
   PUBLIC_UDP_PORT: ""  # Optional external UDP port to advertise, for when a peer-facing feature that listens on UDP exists. Nothing in nodo does yet -- GATEWAY_PORT is TCP-only (gRPC).
-  # Re-send this node's address to every already-known peer (IntroducePeer) as soon as
-  # it is seen to change -- e.g. moving from a LAN to a mobile connection, or a dynamic
-  # public IP being renewed. Without this, peers keep the stale address until their own
-  # refresh happens to fail and they re-fetch it, and in the meantime they penalise this
-  # node's reputation for being unreachable at an address it no longer holds.
-  REANNOUNCE_ON_NETWORK_CHANGE: true
-  # How often (seconds) the manager loop checks whether this node's announced address
+  # Re-send this node's announcement (its signed Peer) to every already-known peer
+  # (IntroducePeer) as soon as it is seen to change: its address (moving from a LAN to a
+  # mobile connection, a dynamic public IP being renewed), the resources it offers (none
+  # under EXECUTE_LOCALLY: false), its rates, payment contracts, reputation proofs or
+  # benchmark scores. Without this, peers keep the stale announcement until their own
+  # refresh happens to re-fetch it -- penalising this node as unreachable at an address
+  # it no longer holds, or counting resources it no longer offers.
+  # (Formerly REANNOUNCE_ON_NETWORK_CHANGE, which is still read when this is absent.)
+  REANNOUNCE_ON_CHANGE: true
+  # How often (seconds) the manager loop checks whether this node's announcement
   # changed. Detection only, not the announcement itself -- cheap, so a short interval
-  # is fine.
-  NETWORK_CHANGE_CHECK_INTERVAL_SECONDS: 60
+  # is fine. (Formerly NETWORK_CHANGE_CHECK_INTERVAL_SECONDS.)
+  ANNOUNCEMENT_CHECK_INTERVAL_SECONDS: 60
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
@@ -452,6 +455,10 @@ network:
   # node to run services for them go through the same balancer and are refused too,
   # which is the point; client.ACCEPT_NEW_DEPOSITS is the separate question of whether
   # they may open an account at all.
+  #
+  # Off, this node announces no resources (Peer.resources is empty): peers stop counting
+  # its machine in what they could reach, and the changed announcement is pushed to
+  # every known peer (see REANNOUNCE_ON_CHANGE).
   #
   # One exception, and it is a physical one rather than a carve-out: a service that
   # inherits a directory from its parent (a `guest=true` xattr) is materialized from
