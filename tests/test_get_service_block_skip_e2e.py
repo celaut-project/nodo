@@ -29,7 +29,7 @@ try:
 
     from protos import celaut_pb2 as celaut
     from protos import celaut_pb2_grpc
-    from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
+    from protos.gateway_bee import GetService_output_message_mode, rpc_input, rpc_output
 
     from tests.config_bootstrap import load_example_config
     load_example_config()
@@ -161,10 +161,10 @@ class GetServiceBlockSkipEndToEndTests(unittest.TestCase):
         return list(
             client_grpc(
                 method=stub.GetService,
-                indices_serializer={1: celaut.Metadata.HashTag.Hash, 2: celaut.Client},
+                indices_serializer=rpc_input("GetService"),
                 input=[celaut.Client(client_id="test-fixture"), _hash],
-                indices_parser=StartService_input_indices,
-                partitions_message_mode_parser=StartService_input_message_mode,
+                indices_parser=rpc_output("GetService"),
+                partitions_message_mode_parser=dict(GetService_output_message_mode),
                 block_skip=block_skip,
                 timeout=RPC_TIMEOUT_S,
             )
