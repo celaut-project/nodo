@@ -15,16 +15,31 @@ _ARCH_CANONICAL = {
 }
 
 
+# AttrHashTag.key is the field number of the part in the message that contains it.
+_SERVICE_CONTAINER_FIELD = celaut_pb2.Service.DESCRIPTOR.fields_by_name["container"].number
+_CONTAINER_ARCHITECTURE_FIELD = (
+    celaut_pb2.Service.Container.DESCRIPTOR.fields_by_name["architecture"].number
+)
+
+
+def _parts(hashtags, key: int):
+    """The HashTags of the part at field ``key``, in any of ``hashtags``."""
+    return [
+        part
+        for hashtag in hashtags
+        for attr in hashtag.attr_hashtag if attr.key == key
+        for part in attr.value
+    ]
+
+
 def _tags_from_metadata(metadata: celaut_pb2.Metadata) -> Set[str]:
+    """The tags that the metadata gives for Service.container.architecture.
+
+    Found by the field numbers in ``AttrHashTag.key``, not by position in the list.
     """
-    Safely extract a set of tags from metadata.hashtag.attr_hashtag.
-    """
-    try:
-        groups = metadata.hashtag.attr_hashtag
-        attrs = groups[1][0].attr_hashtag
-        return { tag for ah in attrs for tag in ah.tag }
-    except (IndexError, AttributeError):  # Handle unexpected structure
-        return set()
+    containers = _parts([metadata.hashtag], _SERVICE_CONTAINER_FIELD)
+    architectures = _parts(containers, _CONTAINER_ARCHITECTURE_FIELD)
+    return {tag for hashtag in architectures for tag in hashtag.tag}
 
 
 def get_arch_tag(
