@@ -2964,7 +2964,7 @@ pub(crate) fn status_color(status: &str) -> Color {
 /// Recurring and one-off prices get separate charts: on a shared axis a build price
 /// three orders of magnitude above a tunnel-open one flattens the whole group. Exact
 /// figures are in the table below, which is also where the selection lives.
-/// The CELL page: the node drawn as a cell, and its policies as levers inside it.
+/// The POLICIES page: the node drawn as a cell, and its policies as levers inside it.
 ///
 /// The anatomy is load-bearing rather than decoration: what an operator is looking
 /// for ("can anyone reach me?") is found by asking which part of a cell would be
@@ -2985,7 +2985,7 @@ fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(muted()))
         .title(Span::styled(
-            " MEMBRANE · inside vs outside ",
+            " THIS NODE ",
             Style::default().fg(muted()),
         ))
         .title_alignment(Alignment::Center);
@@ -3440,7 +3440,7 @@ fn draw_asset_form_popup(frame: &mut Frame, app: &App) {
 
 /// The profile picker: the postures, ordered from the most closed to the most open,
 /// with how far this node already is from each.
-/// The keys behind one CELL lever, as a list any of which can be edited.
+/// The keys behind one POLICIES lever, as a list any of which can be edited.
 ///
 /// The row this replaces was read-only and ended with "Edit them one at a time on
 /// the CONFIG page": a panel that named what it controlled and then declined to
@@ -3851,7 +3851,7 @@ fn demand_lines(
 /// an `+ add window` line.
 ///
 /// Every one is a mouse target whose position is recorded as it is laid out
-/// (`app.schedule_*_area(s)`) -- the same record-while-drawing pattern the CELL page
+/// (`app.schedule_*_area(s)`) -- the same record-while-drawing pattern the POLICIES page
 /// uses.
 fn draw_schedule_summary(
     frame: &mut Frame,
@@ -4403,8 +4403,8 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
 /// The ENERGY page: the `energy:` block as a list of decisions with their reasons
 /// beside them (issue #395).
 ///
-/// Two columns, and the right one is the point: the keys are on Config already, but
-/// Config cannot show the paragraph saying `IDLE_WATTS` must be *measured* rather
+/// Two columns, and the right one is the point: the keys are on All already, but
+/// All cannot show the paragraph saying `IDLE_WATTS` must be *measured* rather
 /// than guessed.
 ///
 /// Rows record where they were drawn (`energy_row_areas`) so the mouse can find
@@ -4731,7 +4731,7 @@ fn energy_value_colour(entry: &crate::energy::EnergyEntry, app: &App) -> Color {
 
 /// The right-hand panel: what the selected key is, what it is set to, and why it
 /// matters. The last of those is the whole reason this page exists rather than a
-/// bookmark into the Config tree.
+/// bookmark into the All tree.
 fn draw_energy_help(frame: &mut Frame, app: &App, area: Rect) {
     let Some(entry) = app.selected_energy() else {
         frame.render_widget(
@@ -5001,7 +5001,7 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         }
         Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
         Page::Cell => {
-            "\u{2192}/\u{2190} organelle  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e edit a key behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
+            "\u{2192}/\u{2190} section  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e edit a key behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
         }
         Page::Pricing => {
             "\u{2191}/\u{2193} select  \u{2022}  +/- adjust 10%  \u{2022}  e exact value  \u{2022}  r refresh  \u{2022}  q quit"
@@ -6051,7 +6051,7 @@ mod tests {
                     organelle.title()
                 );
             }
-            assert!(screen.contains("MEMBRANE"), "the membrane frames the page");
+            assert!(screen.contains("THIS NODE"), "the frame names the page");
         }
 
         /// The nucleus holds a node's whole financial identity, and "wallet" means a
@@ -8297,7 +8297,7 @@ mod tests {
     /// What the ENERGY page has to put on screen (issue #395).
     ///
     /// The page is not "the energy keys, again": every one of them is already on the
-    /// Config tree. What it adds is the sentence beside each key, and the point of
+    /// All tree. What it adds is the sentence beside each key, and the point of
     /// these tests is that the sentence is actually drawn — a page that lost its help
     /// panel in a layout change would still look perfectly reasonable.
     mod energy_page {
@@ -8340,7 +8340,7 @@ mod tests {
         }
 
         /// The reason the page exists. A key with no explanation beside it is a key
-        /// that belonged on the Config tree.
+        /// that belonged on the All tree.
         #[test]
         fn the_selected_key_gets_its_explanation() {
             let mut app = App::new();
@@ -8630,7 +8630,7 @@ mod pricing_preview {
 
 #[cfg(test)]
 mod config_tree {
-    //! The Config page is a collapsible tree, so the properties that matter are
+    //! The All page is a collapsible tree, so the properties that matter are
     //! that sections start collapsed, expanding reveals the nested (indented)
     //! scalars, and the `/` filter *expands and highlights* matches instead of
     //! hiding everything else.
@@ -8753,7 +8753,7 @@ mod config_tree {
         assert!(has_highlight, "expected a non-selected filter match to be highlighted");
     }
 
-    /// Prints the Config page once so a layout change is visible in the test
+    /// Prints the All page once so a layout change is visible in the test
     /// output. `cargo test -- --nocapture config_tree::preview` renders it.
     #[test]
     fn preview() {
@@ -8845,7 +8845,7 @@ mod cell_preview {
         assert_eq!(app.input_mode, InputMode::ConfirmWrites);
     }
 
-    /// Prints the CELL page for eyeballing during development:
+    /// Prints the POLICIES page for eyeballing during development:
     /// `cargo test cell_preview -- --ignored --nocapture`.
     #[test]
     #[ignore]
@@ -9139,7 +9139,7 @@ mod config_write_root_hint {
     }
 
     /// It is a property of the transaction, not of the key: the kWh price, a peer
-    /// price and a raw Config row all answer the same way, because there is one
+    /// price and a raw All row all answer the same way, because there is one
     /// writer behind all three.
     #[test]
     fn the_requirement_does_not_depend_on_which_key_is_being_edited() {
@@ -9161,7 +9161,7 @@ mod config_write_root_hint {
         );
     }
 
-    /// The hint belongs to config editing. The Connect box and the Config filter go
+    /// The hint belongs to config editing. The Connect box and the All filter go
     /// nowhere near `apply_config_change`, and a root warning on them would be a
     /// claim that is simply false.
     #[test]
@@ -9506,7 +9506,7 @@ mod themes {
         assert!(!backgrounds.contains(&Color::Black), "a hard-coded black background survived");
     }
 
-    /// The CONFIG page offers the theme as a picker rather than as free text, and
+    /// The ALL page offers the theme as a picker rather than as free text, and
     /// every name it offers resolves. A picker listing a value that silently falls
     /// back to something else would be lying about what it does.
     #[test]

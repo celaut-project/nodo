@@ -6,7 +6,7 @@ pub mod alerts;
 /// Ubuntu terminal this node is overwhelmingly installed from.
 pub mod theme;
 
-/// The CELL page: policy levers and profiles.
+/// The POLICIES page: policy levers and profiles.
 pub mod cell;
 
 /// The SCHEDULE page: the hours this node works, and the arithmetic of a window that

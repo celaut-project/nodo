@@ -357,7 +357,7 @@ These are the most commonly used commands for daily tasks:
 
 - **tui**  
   Launches the terminal user interface for monitoring and managing the node. Its
-  Config page is **the** place to change a setting: it validates the value, backs the
+  All page is **the** place to change a setting: it validates the value, backs the
   file up, writes it, and restarts the node in one step ([`CONFIG.md`](CONFIG.md)).  
   **Example:**  
   `nodo tui`
@@ -897,7 +897,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
   ```
 
 - **config profile `[<profile>] [--apply] [--json]`**
-  The CELL page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
+  The POLICIES page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
   `workbench` (most closed to most open). No argument lists them with how far this
   node is from each and which is closest (ties go to the more closed one). A
   profile name lists exactly which keys differ (`from` → `to`); `--apply` writes
@@ -1033,11 +1033,11 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | EARNINGS: money per network and window | — | `nodo earnings [--json]` (new) |
 | EARNINGS: reputation staked, proofs | `r` | `nodo reputation [--json]` |
 | EARNINGS: donations | — | `nodo donations [--json]` |
-| CELL: closest profile, deviations | `d` | `nodo config profile [<profile>] [--json]` (new) |
-| CELL: apply a profile | `p` | `nodo config profile <profile> --apply` (new) |
-| CELL: move a lever / edit its keys | Enter / `e` | `nodo config set <key>=<value> …` (new; one call per lever, all its keys) |
-| CELL: Ergo accepted tokens add/remove | `a` / `d` | `nodo config append ledgers.ergo.payments.ASSETS '{…}'` / `nodo config remove ledgers.ergo.payments.ASSETS[n]` (new) |
-| CELL: router steps | `n` | `nodo nat-guide` |
+| POLICIES: closest profile, deviations | `d` | `nodo config profile [<profile>] [--json]` (new) |
+| POLICIES: apply a profile | `p` | `nodo config profile <profile> --apply` (new) |
+| POLICIES: move a lever / edit its keys | Enter / `e` | `nodo config set <key>=<value> …` (new; one call per lever, all its keys) |
+| POLICIES: Ergo accepted tokens add/remove | `a` / `d` | `nodo config append ledgers.ergo.payments.ASSETS '{…}'` / `nodo config remove ledgers.ergo.payments.ASSETS[n]` (new) |
+| POLICIES: router steps | `n` | `nodo nat-guide` |
 | PRICING: prices, nudge ±10 % | `+` / `-`, `e` | `nodo config get pricing --json` / `nodo config set pricing.…=<value>` (new) |
 | ENERGY: settings | `e`, Enter | `nodo config get energy` / `nodo config set energy.…` (new) |
 | ENERGY: history chart, today/7d/30d | — | `nodo energy [--json] [--hours N]` (new) |
@@ -1056,7 +1056,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 
 Not ported, deliberately: themes, layout and mouse handling (presentation only);
 in-page search and link following on DOCS (an agent reads the Markdown directly);
-the CELL page's *lever catalogue* — the named one-row decisions and their
+the POLICIES page's *lever catalogue* — the named one-row decisions and their
 explanations. Every lever is a set of config keys, so `nodo config set` can put a
 node in any state a lever can, but the human-readable names and wording live only
 in `cell.rs`. The profile catalogue *is* ported, because "which posture is this
@@ -1175,11 +1175,11 @@ running on this host.
   with the tail of its log. The INBOUND table under the card lists the streams this
   node relays for others (`nodo tunnels --inbound`); it is read-only.
 - On Services, `e` executes the selected service and `d` deletes it.
-- On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
+- On All, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
   preserved, and each write snapshots the previous file to
   `config-<timestamp>-<nnnn>.yaml` — one snapshot per write, not per second.
-- On Cell, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
+- On Policies, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
   "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where

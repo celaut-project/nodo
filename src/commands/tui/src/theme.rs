@@ -131,10 +131,10 @@ pub const MONO: Theme = Theme {
     series: [Color::White, Color::Gray, Color::White, Color::Gray],
 };
 
-/// Every theme, in the order the CONFIG page offers them.
+/// Every theme, in the order the ALL page offers them.
 pub const ALL: [Theme; 4] = [UBUNTU, DARK, LIGHT, MONO];
 
-/// The names `ui.THEME` accepts, for the CONFIG page's picker and for an error
+/// The names `ui.THEME` accepts, for the ALL page's picker and for an error
 /// message that can list them.
 pub const NAMES: [&str; 5] = ["default", "ubuntu", "dark", "light", "mono"];
 

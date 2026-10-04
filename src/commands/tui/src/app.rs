@@ -102,7 +102,7 @@ pub enum Page {
     /// two separate fields cannot say so.
     Schedule,
     /// What the machine costs to run, as watts and as money (`energy:`). Its own page
-    /// rather than a branch of Config because the block is a dozen keys spread over
+    /// rather than a branch of All because the block is a dozen keys spread over
     /// five mutually exclusive measurement sources, and the comments that say which
     /// one applies to a given machine are the whole difference between a reading and
     /// a number somebody invented (issue #395).
@@ -260,11 +260,11 @@ impl Page {
             Page::Clients => "CLIENTS",
             Page::Chat => "CHAT",
             Page::Earnings => "EARNINGS",
-            Page::Cell => "CELL",
+            Page::Cell => "POLICIES",
             Page::Pricing => "PRICING",
             Page::Schedule => "SCHEDULE",
             Page::Energy => "ENERGY",
-            Page::Config => "CONFIG",
+            Page::Config => "ALL",
             Page::Logs => "LOGS",
             Page::Docs => "DOCS",
         }
@@ -282,11 +282,11 @@ impl Page {
             Page::Clients => "CLNT",
             Page::Chat => "CHAT",
             Page::Earnings => "EARN",
-            Page::Cell => "CELL",
+            Page::Cell => "POLICY",
             Page::Pricing => "PRICE",
             Page::Schedule => "SCHED",
             Page::Energy => "ENERGY",
-            Page::Config => "CONFIG",
+            Page::Config => "ALL",
             Page::Logs => "LOGS",
             Page::Docs => "DOCS",
         }
@@ -474,7 +474,7 @@ pub enum InputMode {
     AcceptKya,
     Connect,
     EditConfig,
-    /// A new element for the list the Config page's selection points at.
+    /// A new element for the list the All page's selection points at.
     AddConfigItem,
     FilterConfig,
     /// Amount entry for crediting/debiting the selected client's balance.
@@ -483,12 +483,12 @@ pub enum InputMode {
     Confirm,
     /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
     Details,
-    /// Profile picker on the CELL page: choose a posture, then confirm its diff.
+    /// Profile picker on the POLICIES page: choose a posture, then confirm its diff.
     PickProfile,
-    /// Which of the config keys behind one CELL lever to edit (issue #414).
+    /// Which of the config keys behind one POLICIES lever to edit (issue #414).
     ///
     /// A lever stands for several keys, and used to answer `e` with a read-only
-    /// list that ended by sending the operator to the Config page. This is that
+    /// list that ended by sending the operator to the All page. This is that
     /// list made actionable, over exactly the same keys.
     PickLeverKey,
     /// Confirmation showing every key a lever or profile would change, before any
@@ -501,10 +501,10 @@ pub enum InputMode {
     /// (`src/utils/monetary.py::display_unit` refuses one with none), so this does
     /// not just set `ui.DISPLAY_UNIT` -- it takes a name and a MU-per-unit ratio
     /// together and writes both `ui.DISPLAY_UNIT` and `ui.UNITS.<name>.MU_PER_UNIT`
-    /// in the one transaction, the same way a CELL profile writes a dozen keys
+    /// in the one transaction, the same way a POLICIES profile writes a dozen keys
     /// rather than leaving the node to run on a partial edit.
     AddCustomUnit,
-    /// The tokens this node accepts besides ERG, reached from the CELL page's
+    /// The tokens this node accepts besides ERG, reached from the POLICIES page's
     /// `assets` lever: the list, with `a` to add one and `d` to remove the selected.
     EditAssets,
     /// The form for one new asset, inside the assets modal (see [`AssetForm`]).
@@ -2900,7 +2900,7 @@ impl<T: Identifiable> StatefulList<T> {
     }
 }
 
-/// Where the cursor is on the CELL page, and where the page last drew things so a
+/// Where the cursor is on the POLICIES page, and where the page last drew things so a
 /// click can be resolved back to them.
 ///
 /// (organelle, lever) rather than a flat index: ←/→ move between boxes while ↑/↓
@@ -2963,7 +2963,7 @@ pub struct App {
     /// or `["servers", "[1]", "id"]` for a sequence element), which lets the tree
     /// keep its expanded sections and selection stable across refreshes and edits.
     pub config_tree_state: TreeState<String>,
-    /// Cursor and hit-test geometry for the CELL page.
+    /// Cursor and hit-test geometry for the POLICIES page.
     pub cell: CellState,
     /// config.yaml as a parsed document, from which every cell lever's position is
     /// derived. Cached and refreshed with the rest of the data rather than read per
@@ -3158,7 +3158,7 @@ pub struct App {
     pub status: String,
     /// Where the tab bar and the current page's selectable table were last drawn, so a
     /// click can be mapped back to a tab or a row. Written by the draw path each frame;
-    /// `list_area` stays empty on pages with no table (Overview, Logs, Config — the
+    /// `list_area` stays empty on pages with no table (Overview, Logs, All — the
     /// config tree tracks its own rendered area).
     pub tabs_area: Rect,
     /// Where the second row — the pages inside the open group — was last drawn, so a
@@ -3944,7 +3944,7 @@ impl App {
     }
 
     /// Expand or collapse the selected configuration section (Enter/Space on the
-    /// Config page). A no-op on a scalar leaf, which has nothing to expand.
+    /// All page). A no-op on a scalar leaf, which has nothing to expand.
     pub fn toggle_selected_config_node(&mut self) {
         self.config_tree_state.toggle_selected();
     }
@@ -4481,7 +4481,7 @@ impl App {
         self.config_follow_up = write.follow_up.clone();
         // Said once, here, on the way in: this is the single funnel every config
         // write in the interface passes through, so one line covers the ENERGY
-        // page's kWh price, a cell profile, a price nudge and a raw Config row
+        // page's kWh price, a cell profile, a price nudge and a raw All row
         // alike. It was previously learned by watching a value be written and then
         // silently put back.
         if let Some(hint) = self.config_write_root_hint() {
@@ -4521,7 +4521,7 @@ impl App {
     ///
     /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
     /// by the same `write_config_value` as every price, every cell lever and every
-    /// raw Config row; there is one writer and one transaction. It is a property of
+    /// raw All row; there is one writer and one transaction. It is a property of
     /// **whether something is serving**, which is why the same edit succeeds
     /// silently on a stopped node and is refused on a running one -- and why it
     /// looked arbitrary.
@@ -4616,7 +4616,7 @@ impl App {
         cell::closest_profile(self.config_document.as_ref())
     }
 
-    /// Route a click on the CELL page: a lever row selects it, anywhere else in an
+    /// Route a click on the POLICIES page: a lever row selects it, anywhere else in an
     /// organelle's box moves the cursor into that box.
     fn click_cell(&mut self, position: Position) {
         if let Some((organelle, lever, _)) = self
@@ -4660,7 +4660,7 @@ impl App {
                 if let Some(index) = Page::ALL.iter().position(|candidate| *candidate == page) {
                     self.tabs.index = index;
                     self.status =
-                        format!("{} is edited here — or `e` on the CELL row for one key", lever.label);
+                        format!("{} is edited here — or `e` on the POLICIES row for one key", lever.label);
                 }
             }
             LeverKind::Scalar { .. } => self.open_lever_editor(),
@@ -4699,7 +4699,7 @@ impl App {
     ///
     /// A cycle lever has no single key to edit, so `e` there lists the keys it owns
     /// instead: the operator gets to see exactly which settings one named position
-    /// stands for, and the Config page remains the place to break them apart.
+    /// stands for, and the All page remains the place to break them apart.
     /// `e` on the selected lever: edit one of the keys behind it, here.
     ///
     /// A scalar lever is one key, so it opens straight into the editor. Anything
@@ -4786,7 +4786,7 @@ impl App {
             infer_edit_kind(path, value_type)
         };
         // A secret opens empty, so the plaintext is never on screen -- the same rule
-        // the Config editor follows.
+        // the All editor follows.
         self.input = if lever.secret { String::new() } else { current };
         self.status = if wallet_mnemonic_ledger(path).is_some() {
             "12 or 24 words • \"\" has the node generate a fresh one • Esc cancels".to_string()
@@ -5152,7 +5152,7 @@ impl App {
     ///
     /// Wraps because the catalogue is short and fully visible: with fourteen rows on
     /// screen at once, stopping at the end is a keypress that does nothing for no
-    /// reason the operator can see. Same behaviour the CELL page's lever cursor has.
+    /// reason the operator can see. Same behaviour the POLICIES page's lever cursor has.
     pub fn move_energy_selection(&mut self, delta: i32) {
         let count = energy::entries().len();
         if count == 0 {
@@ -5177,7 +5177,7 @@ impl App {
 
     /// Open the ordinary config editor on the selected energy key (issue #395).
     ///
-    /// The same popup, path and transaction the Config page uses. This page
+    /// The same popup, path and transaction the All page uses. This page
     /// contributes the catalogue and the explanation beside it, and nothing else: a
     /// second way to write YAML would be a second set of quoting rules.
     ///
@@ -5945,7 +5945,7 @@ impl App {
         self.demand = get_demand_by_hour(&self.paths.database, DEMAND_HISTORY_DAYS)
             .unwrap_or_default();
         self.paths = Paths::discover();
-        // Picks up an edit made on the Config page, or in a shell, so the cell's
+        // Picks up an edit made on the All page, or in a shell, so the cell's
         // levers describe the file as it is rather than as it was at start-up.
         self.config_document = read_yaml(&self.paths.config).ok();
 
@@ -7643,7 +7643,7 @@ fn yaml_edit_value(value: &Value) -> String {
 }
 
 /// Which editor widget a key gets: the closed value set some keys document, else
-/// the widget for its YAML type. Shared by the Config page and the cell levers, so
+/// the widget for its YAML type. Shared by the All page and the cell levers, so
 /// one key is edited the same way whichever page opened it.
 fn infer_edit_kind(path: &str, value_type: &str) -> EditKind {
     if let Some(options) = known_enum_values(path) {
@@ -10386,7 +10386,7 @@ ergo: Cold Wallet: 9cold\n";
         app.config_all = vec![entry];
     }
 
-    /// An app on the Config page whose tree is the real `flatten_yaml` reading of
+    /// An app on the All page whose tree is the real `flatten_yaml` reading of
     /// `yaml`, so a list is a leaf or a section here for exactly the reason it is one
     /// on screen.
     fn on_config_page(yaml: &str) -> App {
@@ -10952,7 +10952,7 @@ ergo: Cold Wallet: 9cold\n";
         assert_eq!(percent(1, 0), 0);
     }
 
-    /// ←/→ walk the Config tree; pages are cycled with Tab/Shift+Tab only.
+    /// ←/→ walk the All tree; pages are cycled with Tab/Shift+Tab only.
     /// Editing the working day: what the keys move, and what reaches config.yaml.
     ///
     /// The arithmetic of a window lives in `crate::schedule` and is tested there. What
@@ -11429,7 +11429,7 @@ ergo: Cold Wallet: 9cold\n";
 
         #[test]
         fn the_arrows_never_change_page() {
-            // They used to be page navigation; a stray ← on Config must no longer
+            // They used to be page navigation; a stray ← on All must no longer
             // throw the operator onto another page mid-edit.
             let mut app = on_config_page();
             app.config_tree_state.select(vec!["network".to_string()]);
@@ -12474,7 +12474,7 @@ energy:
         }
 
         /// Nothing edits config.yaml while a transaction holds its backup: the same
-        /// guard the Config and Pricing editors have, for the same reason.
+        /// guard the All and Pricing editors have, for the same reason.
         #[tokio::test]
         async fn the_editor_refuses_to_open_while_a_change_is_being_applied() {
             let mut app = app_on_energy();
