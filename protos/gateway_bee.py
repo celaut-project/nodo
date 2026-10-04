@@ -14,6 +14,11 @@ StartService_input_indices = {
 }
 StartService_input_message_mode = {1: True, 2: True, 3: True, 4: True, 5: True, 6: False}  # False yield a Dir.
 
+# GetService answers with the StartService envelope's 4/5/6 (see GATEWAY_RPCS), and
+# bee-rpc wants a message mode for exactly the indices it parses: the Service, index 6,
+# is stored as a Dir.
+GetService_output_message_mode = {4: True, 5: True, 6: False}
+
 # GenerateClient answers with one of two messages (issue #361), so both ends need the
 # same index for each: bee-rpc numbers a lone message 1 by itself, which would put a
 # Client and a PoWRequired on the same index and leave the caller unable to tell which

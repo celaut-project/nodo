@@ -35,7 +35,7 @@ from bee_rpc.control import StreamControl
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import (
-    StartService_input_message_mode,
+    GetService_output_message_mode,
     rpc_input,
     rpc_output,
 )
@@ -420,9 +420,8 @@ class BeeClient:
             input=input_messages,
             indices_serializer=rpc_input("GetService"),
             indices_parser=rpc_output("GetService"),
-            # Keyed by the StartService envelope's indices, which GetService's 4/5/6
-            # reuse: index 6, the Service, is stored as a Dir.
-            partitions_message_mode_parser=StartService_input_message_mode,
+            # A copy: bee-rpc adds its own index 0 to the dict it is handed.
+            partitions_message_mode_parser=dict(GetService_output_message_mode),
             # Tell the peer which blocks of what it sends we already hold, so it
             # stops mid-block instead of us draining and discarding bytes it did
             # not need to send (issue #371). Ignored by a peer that does not
