@@ -895,7 +895,7 @@ message ModifyDepositInput {
     // instance that started it. A negative value moves balance from the instance back
     // to the parent.
     Amount difference = 1;
-    // The instance token. The node also accepts the name of a local instance.
+    // The instance token.
     string service_token = 2;
 }
 

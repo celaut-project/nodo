@@ -1,4 +1,4 @@
-from src.manager.manager import modify_deposit
+from src.manager.manager import modify_deposit, resolve_instance_token
 from src.utils.monetary import display_unit, format_mu, parse_to_mu
 
 
@@ -22,7 +22,9 @@ def modify_instance_deposit(instance: str, amount: str, decrement: bool = False)
     if decrement:
         amount_mu *= -1
 
-    result, msg = modify_deposit(amount_mu=amount_mu, service_token=instance)
+    # The operator can type an instance name; the manager takes only the token.
+    token = resolve_instance_token(reference=instance) or instance
+    result, msg = modify_deposit(amount_mu=amount_mu, service_token=token)
     verb = "decreased" if decrement else "increased"
     if result:
         print(f"Deposit of instance {instance} {verb} by {format_mu(abs(amount_mu))}.")

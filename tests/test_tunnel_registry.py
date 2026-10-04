@@ -383,7 +383,8 @@ class KillClosesTunnelsTests(RegistryTestCase):
             ok, document = _run_json(kill_command.kill, "web")
 
         self.assertTrue(ok)
-        stop.assert_called_once_with(token="web")
+        # The command resolves the name; the manager takes only the token.
+        stop.assert_called_once_with(token="abcdef0123456789")
         self.assertEqual(document["killed"], "abcdef0123456789")
         self.assertEqual(document["tunnels"], {"closed": ["mine0003"], "failed": []})
         self.assertEqual(mine.wait(timeout=5), -signal.SIGTERM)
