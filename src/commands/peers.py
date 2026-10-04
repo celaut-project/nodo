@@ -124,6 +124,29 @@ def _table_exists(connection, name: str) -> bool:
     ).fetchone() is not None
 
 
+# Decimals of the natives a person reads in whole units. A token's are not on the wire.
+_NATIVE_DECIMALS = {"ERG": 9, "BTC": 8}
+_NATIVE_OF_LEDGER = {"ergo": "ERG", "bitcoin": "BTC"}
+
+
+def _rate_for_a_person(contract) -> str:
+    """A peer's advertised rate as a person reads it.
+
+    On the wire (``ContractRate.mu_per_unit``) the rate is MU per BASE unit -- nanoERG,
+    satoshi, a token's smallest unit. A person thinks in whole ERG or BTC, so a native
+    asset's rate is shown per whole unit too; a token's decimals are not on the wire,
+    so its rate stays per base unit and says so. Same reading as the TUI's PEERS card.
+    """
+    rate = contract.get("mu_per_unit")
+    if rate is None:
+        return "N/A"
+    asset = contract.get("token_id") or _NATIVE_OF_LEDGER.get(contract.get("ledger_tag"), "")
+    decimals = _NATIVE_DECIMALS.get(asset)
+    if decimals is None:
+        return f"{rate} MU per base unit"
+    return f"{rate} MU per base unit (1 {asset} = {int(rate) * 10 ** decimals} MU)"
+
+
 def _print_peer(record) -> None:
     peer_id = record["id"]
     if record["advertisement_error"]:
@@ -162,15 +185,14 @@ def _print_peer(record) -> None:
             print(f"  Ledger: {contract['ledger_tag']}  Asset: {asset}")
             print(f"    Contract hash: {contract['contract_hash']}")
             print(f"    Address:       {contract['address'] or 'N/A'}")
-            mu_per_unit = contract['mu_per_unit']
-            print(f"    MU per unit:   {mu_per_unit if mu_per_unit is not None else 'N/A'}")
+            print(f"    Rate:          {_rate_for_a_person(contract)}")
     else:
         print("  No payment method registered for this peer.")
     print()
 
     # Section: Advertised rates
     # What this peer charges on a recurring basis, as it advertised. These
-    # are ceilings, not quotes -- the price of a specific service still
+    # are base prices, not quotes -- the price of a specific service still
     # comes from GetServiceEstimatedCost.
     print("[Rates] (base prices in MU; see [Contracts] for what an MU is worth)")
     if record["advertised_rates"]:

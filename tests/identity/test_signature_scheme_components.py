@@ -291,9 +291,11 @@ class ComponentCapTests(unittest.TestCase):
 
 
 class SpeaksOurSignatureSchemeTests(unittest.TestCase):
-    def test_no_components_is_the_pre_field_default(self):
+    def test_no_components_is_refused(self):
+        # An announcement that does not say which cryptography it is signed in gives a
+        # verifier nothing to verify it with.
         peer = celaut.Peer()
-        self.assertTrue(ni.speaks_our_signature_scheme(peer))
+        self.assertFalse(ni.speaks_our_signature_scheme(peer))
 
     def test_our_own_declared_scheme_speaks_our_scheme(self):
         peer = celaut.Peer()

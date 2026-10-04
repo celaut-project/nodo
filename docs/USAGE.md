@@ -323,7 +323,7 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
-- **pack `<project directory | https git URL[#subdir]> [--detach] [--json]`**  
+- **pack `<project directory | https git URL[#subdir]> [--local] [--detach] [--json]`**  
   Packages a project into a service. The source is a local directory (relative
   paths are read from the shell you typed in) or an **https** git URL, optionally
   with `#<subdir>` for a project inside the repository. `http://` is refused (the
@@ -331,7 +331,7 @@ These are the most commonly used commands for daily tasks:
   way), and so are `ssh://` / `git@…` URLs (the repository is cloned without
   credentials: clone it yourself and pack the folder). Exits `1` when the source is
   refused or the pack produces no service. There are two backends, selected by
-  `packer.local` in `config.yaml`:
+  `packer.local` in `config.yaml`, or by `--local` for one run:
 
   **Default (`packer.local: false`) — packer-service:** nodo does **not** build
   locally. It sends the project to an external **packer-service** (a microVM that
@@ -354,6 +354,22 @@ These are the most commonly used commands for daily tasks:
   The builder runs as your own user, so packing never asks for sudo. Tune it with
   `packer.buildkit.*` and `dependencies.buildkit.*` in `config.yaml`.  
 
+  **`--local` — local packer for this run only:** use the local rootless packer
+  for this pack, and also for the dependencies that it packs. The `config.yaml`
+  file does not change.
+
+  **If the packer service is not available** (`packer.local: false`):
+  - In a terminal, nodo asks you to enable the local packer. If you answer yes,
+    nodo writes `packer.local: true` to `config.yaml` and continues the pack.
+  - Without a terminal (a script, CI or an AI agent), nodo does not ask. The pack
+    fails and nodo shows a hint.
+
+  **For AI agents and scripts:** if `nodo pack` fails because the packer service
+  is not available, run the same command again with `--local`. The first local
+  pack can install BuildKit with `bash/install_buildkit.sh`. This install can ask
+  for sudo one time. Do not use `--local` if the operator wants packs to stay off
+  this host.
+
   Every pack records itself in `<main.STORAGE>/packs/<id>.json` while it runs and
   keeps the record afterwards with its outcome, so `nodo packs` and the TUI's PACKS
   page see packs started anywhere — a terminal, a script, the TUI. **`--detach`**
@@ -374,6 +390,7 @@ These are the most commonly used commands for daily tasks:
   **Examples:**  
   `nodo pack /path/to/project`  
   `nodo pack https://github.com/celaut-basics/demo-service.git#hello --detach`  
+  `nodo pack /path/to/project --local`  
   `nodo pack ./my-service --detach --json`
   > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
   > reference for the project layout, `pack_config.json`, `service.json`, and the
@@ -414,7 +431,7 @@ These are the most commonly used commands for daily tasks:
 
 - **tui**  
   Launches the terminal user interface for monitoring and managing the node. Its
-  Config page is **the** place to change a setting: it validates the value, backs the
+  All page is **the** place to change a setting: it validates the value, backs the
   file up, writes it, and restarts the node in one step ([`CONFIG.md`](CONFIG.md)).  
   **Example:**  
   `nodo tui`
@@ -535,6 +552,19 @@ These commands offer extended management and exploration features:
   **Example:**  
   `nodo peers`  
   `nodo peers <peer id> --json`
+
+- **protocol `[<peer id> | <ip:port>] [--json] [--no-prose]`**  
+  Without an argument, prints the protocol this node announces on every address:
+  the signature scheme, the transport and the stack of layers (tls, http2, grpc,
+  bee-rpc, celaut-gateway), each with its `formal` parameters and its prose. With a
+  peer, asks it for its announcement and compares it with this node's, layer by layer,
+  naming every `formal` key that differs. A layer is `compatible` when it differs
+  only by message fields or RPCs that one side declares and the other does not:
+  protobuf and gRPC let the two nodes talk. Exits 0 when the peer speaks this node's
+  protocol on at least one address.  
+  **Example:**  
+  `nodo protocol`  
+  `nodo protocol <peer id> --json`
 
 - **peer_reputation `<peer id> <+N|-N>` `[--json]`**  
   Moves this node's local reputation score of a peer and records why
@@ -873,7 +903,7 @@ pages, peer reputation adjustment, the detail cards) are commands now too.
 - **`--limit N`** bounds the history rows in a detail view (default 50; the TUI
   shows 8).
 
-Commands with `--json`: `status`, `services`, `instances`, `peers`, `clients`,
+Commands with `--json`: `status`, `services`, `instances`, `peers`, `protocol`, `clients`,
 `peer_reputation`, `config` (all subcommands), `earnings`, `energy`, `schedule`,
 `logs -n`, `docs`, `chat <peer>` (reading), `chat_open`, `chat_threads`,
 `chat_thread`, `reputation`, `donations`, `resources`, `tx_history`, `kill`, `tunnel`,
@@ -954,7 +984,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
   ```
 
 - **config profile `[<profile>] [--apply] [--json]`**
-  The CELL page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
+  The POLICIES page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
   `workbench` (most closed to most open). No argument lists them with how far this
   node is from each and which is closest (ties go to the more closed one). A
   profile name lists exactly which keys differ (`from` → `to`); `--apply` writes
@@ -1094,11 +1124,11 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | EARNINGS: money per network and window | — | `nodo earnings [--json]` (new) |
 | EARNINGS: reputation staked, proofs | `r` | `nodo reputation [--json]` |
 | EARNINGS: donations | — | `nodo donations [--json]` |
-| CELL: closest profile, deviations | `d` | `nodo config profile [<profile>] [--json]` (new) |
-| CELL: apply a profile | `p` | `nodo config profile <profile> --apply` (new) |
-| CELL: move a lever / edit its keys | Enter / `e` | `nodo config set <key>=<value> …` (new; one call per lever, all its keys) |
-| CELL: Ergo accepted tokens add/remove | `a` / `d` | `nodo config append ledgers.ergo.payments.ASSETS '{…}'` / `nodo config remove ledgers.ergo.payments.ASSETS[n]` (new) |
-| CELL: router steps | `n` | `nodo nat-guide` |
+| POLICIES: closest profile, deviations | `d` | `nodo config profile [<profile>] [--json]` (new) |
+| POLICIES: apply a profile | `p` | `nodo config profile <profile> --apply` (new) |
+| POLICIES: move a lever / edit its keys | Enter / `e` | `nodo config set <key>=<value> …` (new; one call per lever, all its keys) |
+| POLICIES: Ergo accepted tokens add/remove | `a` / `d` | `nodo config append ledgers.ergo.payments.ASSETS '{…}'` / `nodo config remove ledgers.ergo.payments.ASSETS[n]` (new) |
+| POLICIES: router steps | `n` | `nodo nat-guide` |
 | PRICING: prices, nudge ±10 % | `+` / `-`, `e` | `nodo config get pricing --json` / `nodo config set pricing.…=<value>` (new) |
 | ENERGY: settings | `e`, Enter | `nodo config get energy` / `nodo config set energy.…` (new) |
 | ENERGY: history chart, today/7d/30d | — | `nodo energy [--json] [--hours N]` (new) |
@@ -1117,7 +1147,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 
 Not ported, deliberately: themes, layout and mouse handling (presentation only);
 in-page search and link following on DOCS (an agent reads the Markdown directly);
-the CELL page's *lever catalogue* — the named one-row decisions and their
+the POLICIES page's *lever catalogue* — the named one-row decisions and their
 explanations. Every lever is a set of config keys, so `nodo config set` can put a
 node in any state a lever can, but the human-readable names and wording live only
 in `cell.rs`. The profile catalogue *is* ported, because "which posture is this
@@ -1236,11 +1266,11 @@ running on this host.
   with the tail of its log. The INBOUND table under the card lists the streams this
   node relays for others (`nodo tunnels --inbound`); it is read-only.
 - On Services, `e` executes the selected service and `d` deletes it.
-- On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
+- On All, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
   preserved, and each write snapshots the previous file to
   `config-<timestamp>-<nnnn>.yaml` — one snapshot per write, not per second.
-- On Cell, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
+- On Policies, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
   "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where

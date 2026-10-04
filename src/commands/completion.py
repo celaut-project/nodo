@@ -54,6 +54,7 @@ PEER_COMMANDS = [
     "chat_threads",
     "peers",
     "peer_reputation",
+    "protocol",
 ]
 
 # Commands whose first positional argument is a client id.
@@ -112,6 +113,7 @@ COMMANDS = sorted(
         "tag",
         "clients",
         "peers",
+        "protocol",
         "instances",
         "connect",
         "disconnect",

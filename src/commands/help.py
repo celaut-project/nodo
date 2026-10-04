@@ -47,7 +47,7 @@ GROUPS: List[Group] = [
         "Services",
         "the local registry: what this node can run",
         [
-            ("pack <dir | https url>", "package a project (--detach, --json)"),
+            ("pack <dir | https url>", "package a project (--local, --detach, --json)"),
             ("packs [<pack>]", "list/inspect recent packs (--active, --json)"),
             ("pack_cancel <pack>", "stop a running or queued pack"),
             ("download <url> [-o <dir>]", "fetch a published service from its manifest"),
@@ -83,6 +83,7 @@ GROUPS: List[Group] = [
         None,
         [
             ("peers [<peer>]", "list peers, or one with its payments (--json)"),
+            ("protocol [<peer>]", "ours, or compare a peer's (adds a client there)"),
             ("peer_reputation <peer> <N>", "move our local score of a peer (+/-)"),
             ("resources", "what this node announces it can run (--json)"),
             ("connect <ip:port>", "introduce this node to a peer"),

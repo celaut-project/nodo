@@ -353,14 +353,22 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
             # then fail in the handshake, with nothing in the error saying why, so the
             # address is skipped here and the reason logged from what the peer itself
             # declared. Only `formal` and the tags are read: prose is the same protocol
-            # worded differently (node_identity.same_component_stack).
-            declared = "; ".join(
-                " ".join(c.tags) + (f" formal={bytes(c.formal).hex()}" if c.formal else "")
-                for c in uri.protocol_stack
-            )
+            # worded differently (transport_stack.compatible_layer_stacks).
+            # The layers by name and which of them differ; the keys that differ are what
+            # `nodo protocol <peer>` prints -- a formal carries the whole schema, far too
+            # much for a log line.
+            from src.identity.transport_stack import compare_layer_stacks, node_transport_stack
+            differing = [
+                "/".join(layer["tags"]) + f":{layer['status']}"
+                for layer in compare_layer_stacks(
+                    node_transport_stack(prose=False), uri.protocol_stack
+                )
+                if layer["status"] not in ("match", "compatible")
+            ]
             log.LOGGER(
-                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks [{declared}], "
-                "which this node does not. Skipping."
+                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks another protocol "
+                f"({', '.join(differing) or 'nothing declared'}). Skipping; "
+                f"'nodo protocol {peer_id}' shows the differences."
             )
             continue
         sc.add_peer_uri(uri=uri, peer_id=peer_id, transport=protocol.value)
@@ -501,7 +509,9 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     # Contracts
     for rate in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
+        if not _accept_contract(rate.contract, peer_id):
+            continue
+        log.LOGGER(f"Adding contract {rate.contract.ledger.tags} for peer {peer_id}")
         try:
             sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
@@ -522,6 +532,30 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     return peer_id
 
+def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
+    """Whether a payment contract a peer advertises is on a ledger this node settles on.
+
+    The ledger is compared on its whole declaration (``node_identity.same_declaration``
+    against ``ledger_descriptors.payment_ledger``), not on its tag: a contract that says
+    "ergo" but declares another network, other units or another deposit binding cannot
+    be paid by this node, and storing it would make the payer try. A contract with only
+    a tag (a node from before ledgers were declared) is refused too: its rate is per
+    whole unit, and it would be read here as per base unit.
+    """
+    from src.identity.node_identity import same_declaration
+    from src.utils.ledger_descriptors import payment_ledger
+
+    tags = list(contract.ledger.tags)
+    ours = payment_ledger(tags[0]) if tags else None
+    if ours is not None and same_declaration(contract.ledger, ours):
+        return True
+    log.LOGGER(
+        f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags or '(none)'}: "
+        "it does not declare a ledger this node settles on."
+    )
+    return False
+
+
 def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int]]:
     """Refresh a known peer; returns the addresses actually stored (see
     :func:`_store_peer_uris`), which is what a caller may then prune down to."""
@@ -538,7 +572,9 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
     if not peer.payment_contracts:
         log.LOGGER(f"Peer {peer_id} advertises no payment contract; it cannot be paid.")
     for rate in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
+        if not _accept_contract(rate.contract, peer_id):
+            continue
+        log.LOGGER(f"Adding contract {rate.contract.ledger.tags} for peer {peer_id}")
         try:
             sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
@@ -557,6 +593,27 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
     return stored
 
 
+def fetch_peer_info(channel, peer_id: str) -> Optional[celaut_pb2.Peer]:
+    """``GetPeerInfo`` from a known peer over ``channel``, under our client_id there.
+
+    GetPeerInfo is gated like every RPC but GenerateClient (issue #428), so asking a
+    known peer without a client_id is asking to be refused. The client this node already
+    holds at that peer is reused; when there is none yet it is minted over the channel
+    the caller already opened -- not through ``get_client_id_on_other_peer``, which
+    refuses a peer that is not currently "available", and a refresh exists precisely
+    for peers whose availability is in doubt.
+    """
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if not client_id:
+        proposed_id = uuid4().hex
+        client_id = _mint_client_over_channel(
+            channel, proposed_id=proposed_id, binding=_peer_identity_binding(proposed_id)
+        )
+        if client_id:
+            sc.add_external_client(peer_id=peer_id, client_id=client_id)
+    return BeeClient.get_peer_info(channel, client_id=client_id or "")
+
+
 def refresh_peer_instance(peer_id: str) -> bool:
     """Re-fetch a known peer's instance over ``GetPeerInfo`` and re-register it.
 
@@ -569,7 +626,7 @@ def refresh_peer_instance(peer_id: str) -> bool:
         log.LOGGER(f"No known URI for peer {peer_id}; cannot refresh.")
         return False
     try:
-        peer = BeeClient.get_peer_info(node_channel(uri, expected_peer_id=peer_id))
+        peer = fetch_peer_info(node_channel(uri, expected_peer_id=peer_id), peer_id)
     except Exception as e:
         log.LOGGER(f"Could not fetch info for peer {peer_id}: {e}")
         return False
@@ -1179,6 +1236,10 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
     separate account -- this node's wholesale deposit there, in the peer's MU -- and
     settles on the peer, not with the father.
 
+    ``token`` is the instance token, exactly: the StopService RPC calls this, and an
+    RPC takes a token, never a name (a name is guessable). ``nodo kill`` resolves a
+    name to the token before it calls this.
+
     ``credit=False`` stops the instance and reads the leftover without crediting
     anybody: the returned figure is then a debt the caller has taken on, and the
     money exists nowhere else once the row is purged. Only a caller that stops a
@@ -1187,7 +1248,6 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
     is already gone by then. Every other caller stops one instance whose father is
     still there, and wants the default.
     """
-    token = resolve_instance_token(token) or token
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
     reserved_mem_limit = 0
@@ -1356,11 +1416,24 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
 
 # Modify an instance's deposit, in MU.
 def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
-    service_token = resolve_instance_token(service_token) or service_token
+    """Move ``amount_mu`` between an instance and its father: a positive figure tops the
+    instance up out of the father's balance, a negative one gives it back.
 
+    ``service_token`` is the instance token, exactly: the ModifyDeposit RPC calls this,
+    and an RPC takes a token, never a name (a name is guessable). ``nodo
+    modify_deposit`` resolves a name to the token before it calls this.
+
+    No MU moves before the instance is known to keep a balance of 0 or more. On a
+    delegated instance the father is credited only after the peer has moved its side,
+    and a top-up the peer refuses is given back to the father.
+    """
     log.LOGGER(f"Modify deposit of {service_token} by {format_mu(abs(amount_mu))}")
 
+    if amount_mu == 0:
+        return True, 'Nothing to modify'
+
     is_internal = sc.internal_instance_exists(id=service_token)
+    external_token = None
 
     if is_internal:
         father_id = sc.get_internal_father_id(id=service_token)
@@ -1376,6 +1449,14 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         log.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
 
+    # Before any MU moves: crediting the father first and finding afterwards that the
+    # instance had less than asked for made MU out of nothing.
+    current = sc.get_instance_balance(id=service_token) if is_internal \
+        else sc.get_delegated_balance(token=external_token)
+    desired_amount = current + amount_mu
+    if desired_amount < 0:
+        return False, "The instance does not have that balance"
+
     if amount_mu > 0:
         log.LOGGER(f"Charge father {father_id}")
         if not spend_mu(
@@ -1385,83 +1466,75 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         ):
             return False, 'Error charging the father'
 
-    elif amount_mu < 0:
-        # The reverse of spend_mu(): what the instance gives back goes to its father.
-        log.LOGGER(f"Credit father {father_id}")
+    if is_internal:
+        if amount_mu < 0:
+            # The reverse of spend_mu(): what the instance gives back goes to its father.
+            log.LOGGER(f"Credit father {father_id}")
+            if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
+                return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
+        sc.update_instance_balance(id=service_token, balance_mu=desired_amount)
+        return True, "Deposit modified correctly"
 
+    def give_back_top_up() -> None:
+        # The father paid for a top-up the peer never received.
+        if amount_mu > 0 and not credit_father(father_id=father_id, amount_mu=amount_mu):
+            log.LOGGER(f"Could not give {format_mu(amount_mu)} back to {father_id}.")
+
+    try:
+        peer_id = sc.get_peer_id_by_external_service(token=external_token)
+        if not peer_id:
+            log.LOGGER(f"No peer for the token {external_token}")
+            give_back_top_up()
+            return False, "No peer found for the external service."
+
+        # The peer prices the instance in its own MU, so what travels is the
+        # translated figure -- the same crossing `configuration_for_peer` makes
+        # for the initial deposit. Rounding goes the direction that cannot pay
+        # the client's costs out of this node's pocket: a top-up hands the peer
+        # no more than the value moved, a withdrawal takes back no less than
+        # what was credited here.
+        payment_system = matching_payment_system(peer_id)
+        peer_amount = convert_mu(
+            abs(amount_mu),
+            from_mu_per_unit=payment_system.local_mu_per_unit,
+            to_mu_per_unit=payment_system.peer_mu_per_unit,
+            round_up=amount_mu < 0,
+        )
+        _output = BeeClient.modify_deposit(
+            peer_channel(peer_id),
+            difference=utils.to_amount(
+                -peer_amount if amount_mu < 0 else peer_amount
+            ),
+            service_token=external_token,
+        )
+    except Exception as e:
+        log.LOGGER(f"Exception on modify_deposit for external service: {e}")
+        give_back_top_up()
+        return False, "Node error."
+
+    if not _output.success:
+        give_back_top_up()
+        return False, _output.message
+
+    # Only once the peer has actually moved its side. A local row raised for a top-up
+    # the peer never received would refund the father at the stop for runtime that was
+    # never bought, out of this node's own pocket; a father credited for a withdrawal
+    # the peer refused would hold MU that exists nowhere.
+    if amount_mu < 0:
+        log.LOGGER(f"Credit father {father_id}")
         if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
             return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
-
-    else:
-        return True, 'Nothing to modify'
-
-    if is_internal:
-        desired_amount = sc.get_instance_balance(id=service_token) + amount_mu
-
-        if desired_amount < 0:
-            return False, "Negative amount have no sense"
-        sc.update_instance_balance(id=service_token, balance_mu=desired_amount)
-
-    else:
-        try:
-            external_token = sc.get_delegated_token_by_id(id=service_token)
-            if not external_token:
-                log.LOGGER(f"No external token for the token {external_token}")
-                return False, "No external token found."
-
-            peer_id = sc.get_peer_id_by_external_service(token=external_token)
-            if not peer_id:
-                log.LOGGER(f"No peer for the token {external_token}")
-                return False, "No peer found for the external service."
-
-            # The father has already been charged (or credited) in our MU, so the
-            # row that holds his deposit has to move by the same figure -- the same
-            # bookkeeping an internal instance gets a few lines above.
-            desired_amount = sc.get_delegated_balance(token=external_token) + amount_mu
-            if desired_amount < 0:
-                return False, "Negative amount have no sense"
-
-            # The peer prices the instance in its own MU, so what travels is the
-            # translated figure -- the same crossing `configuration_for_peer` makes
-            # for the initial deposit. Rounding goes the direction that cannot pay
-            # the client's costs out of this node's pocket: a top-up hands the peer
-            # no more than the value moved, a withdrawal takes back no less than
-            # what was credited here.
-            payment_system = matching_payment_system(peer_id)
-            peer_amount = convert_mu(
-                abs(amount_mu),
-                from_mu_per_unit=payment_system.local_mu_per_unit,
-                to_mu_per_unit=payment_system.peer_mu_per_unit,
-                round_up=amount_mu < 0,
-            )
-            _output = BeeClient.modify_deposit(
-                peer_channel(peer_id),
-                difference=utils.to_amount(
-                    -peer_amount if amount_mu < 0 else peer_amount
-                ),
-                service_token=external_token,
-            )
-            # Only once the peer has actually moved its side. A local row raised for
-            # a top-up the peer never received would refund the father at the stop
-            # for runtime that was never bought, out of this node's own pocket.
-            if _output.success:
-                # Both sides together. The maintenance tick charges the fall in the
-                # peer's own figure for this instance, so a deposit change has to move
-                # the mark it measures against by the same amount: left behind, a
-                # top-up reads as an instance that consumed nothing and hides a whole
-                # interval's usage.
-                sc.update_delegated_deposit(
-                    token=external_token,
-                    balance_mu=desired_amount,
-                    peer_balance_mu=max(
-                        0,
-                        sc.get_delegated_peer_balance(token=external_token)
-                        + (-peer_amount if amount_mu < 0 else peer_amount),
-                    ),
-                )
-            return _output.success, _output.message
-        except Exception as e:
-            log.LOGGER(f"Exception on modify_deposit for external service: {e}")
-            return False, "Node error."
-
-    return True, "Deposit modified correctly"
+    # Both sides together. The maintenance tick charges the fall in the peer's own
+    # figure for this instance, so a deposit change has to move the mark it measures
+    # against by the same amount: left behind, a top-up reads as an instance that
+    # consumed nothing and hides a whole interval's usage.
+    sc.update_delegated_deposit(
+        token=external_token,
+        balance_mu=desired_amount,
+        peer_balance_mu=max(
+            0,
+            sc.get_delegated_peer_balance(token=external_token)
+            + (-peer_amount if amount_mu < 0 else peer_amount),
+        ),
+    )
+    return True, _output.message or "Deposit modified correctly"

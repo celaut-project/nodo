@@ -3,8 +3,7 @@ from typing import Optional, Generator, Set, Tuple
 
 from protos import celaut_pb2 as celaut
 from protos import celaut_pb2
-from protos.gateway_bee import StartService_input_indices, \
-    StartService_input_message_mode
+from protos.gateway_bee import StartService_input_message_mode, rpc_input
 from src.gateway.client_gate import ClientRequired, require_caller
 from src.gateway.utils import save_service
 from src.utils import logger as log
@@ -55,6 +54,10 @@ class Hash:
 
 class AbstractInputServiceIterable:
 
+    # The Gateway RPC this iterable serves: its request indices come from
+    # protos.gateway_bee.GATEWAY_RPCS, the table this node also announces.
+    RPC: str = "StartService"
+
     # Class-level too, so an iterable built without __init__ (a handler under test)
     # reads "the sender gave no hop count" rather than failing on the attribute.
     recursion_guard_hops: Optional[int] = None
@@ -62,7 +65,7 @@ class AbstractInputServiceIterable:
     def __init__(self, request_iterator, context):
         self.parser_iterator = BeeClient.parse(
             request_iterator,
-            indices=StartService_input_indices,
+            indices=rpc_input(self.RPC),
             partitions_message_mode=StartService_input_message_mode
         )
 
@@ -165,13 +168,20 @@ class AbstractInputServiceIterable:
             # refusal definitive in the latter case). Nothing has been yielded yet at
             # this point either way, so deferring never leaves a half-sent response.
             if not self._caller_checked:
+                # The check runs once. After it gives an answer (a pass or a
+                # refusal), final() does not run it again: each call counts against
+                # the client's rate limit, and a second call could replace the real
+                # error of generate() with "calling too fast".
+                decided = True
                 try:
                     require_caller(self.context, self.client_id or "")
                 except ClientRequired:
-                    if self.client_id:
-                        raise
-                    return
-                self._caller_checked = True
+                    if not self.client_id:
+                        decided = False
+                        return
+                    raise
+                finally:
+                    self._caller_checked = decided
 
             yield Buffer(signal=True)
 
@@ -187,8 +197,24 @@ class AbstractInputServiceIterable:
         self.start()
         try:
             yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
+            # Only when the request stream ends, not when the caller cancels it. Neither
+            # side has the service: the node does not hold it, and the request did not
+            # carry it. Answering nothing left the caller to guess why.
+            if not self.service_saved:
+                raise Exception(self._missing_service_reason())
         finally:
             self.final()
+
+    def _missing_service_reason(self) -> str:
+        if self.service_hash:
+            return (
+                f"This node does not have the service {self.service_hash}, and the "
+                "request does not contain it."
+            )
+        return (
+            "The request gives no hash of the type this node uses for its registry "
+            f"({CONFIGURED_HASH_ID.hex()}), and no service."
+        )
 
     def start(self):
         pass
@@ -199,7 +225,7 @@ class AbstractInputServiceIterable:
     def final(self):
         if self.service_hash and not self.service_saved:
             add_wanted(self.service_hash)
-        elif self.service_saved and not self.generated:
+        elif self.service_saved and not self._caller_checked:
             # The stream ended with the service ready to serve but no client_id ever
             # arrived to confirm a caller -- what looked like "might still be coming"
             # above never came. Nothing was sent for this request (the check above

@@ -19,7 +19,7 @@ from src.utils import pack_registry as registry
 #: Log lines an inspect shows.
 LOG_TAIL_LINES = 20
 
-USAGE = "Usage: nodo pack <project directory | https git URL[#subdir]> [--detach] [--json]"
+USAGE = "Usage: nodo pack <project directory | https git URL[#subdir]> [--local] [--detach] [--json]"
 
 NODO_PY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nodo.py"))
 
@@ -34,7 +34,9 @@ def _age(seconds: Any) -> str:
     return f"{seconds}s"
 
 
-def _packer_kind() -> str:
+def _packer_kind(local: bool = False) -> str:
+    if local:
+        return "local"
     try:
         from src.utils.config import ConfigManager
 
@@ -113,7 +115,7 @@ def render_one(record: Dict[str, Any], log_lines: List[str]) -> str:
 
 
 def pack_command(argv: List[str]) -> int:
-    """``nodo pack <source> [--detach] [--json]``; returns the exit status.
+    """``nodo pack <source> [--local] [--detach] [--json]``; returns the exit status.
 
     1 when the source is refused or the pack produced no service (it used to exit 0
     either way, which a script could not tell from success).
@@ -121,6 +123,7 @@ def pack_command(argv: List[str]) -> int:
     args = list(argv)
     as_json = "--json" in args and not args.remove("--json")
     detached = "--detach" in args and not args.remove("--detach")
+    local = "--local" in args and not args.remove("--local")
     if len(args) != 1 or args[0].startswith("--"):
         return 0 if emit_error(as_json, USAGE) else 1
 
@@ -133,13 +136,14 @@ def pack_command(argv: List[str]) -> int:
         return 1
 
     if detached:
-        return 0 if detach(source, as_json=as_json) else 1
-    return 0 if foreground(source, kind, as_json=as_json) else 1
+        return 0 if detach(source, as_json=as_json, local=local) else 1
+    return 0 if foreground(source, kind, as_json=as_json, local=local) else 1
 
 
 def detach(source: str, as_json: bool = False, timeout_s: float = registry.DETACH_TIMEOUT_S,
-           command: Optional[List[str]] = None) -> bool:
-    record, error = registry.spawn_detached(source, NODO_PY, timeout_s=timeout_s, command=command)
+           command: Optional[List[str]] = None, local: bool = False) -> bool:
+    record, error = registry.spawn_detached(source, NODO_PY, timeout_s=timeout_s, command=command,
+                                            options=["--local"] if local else None)
     if record is None:
         return emit_error(as_json, error)
     if as_json:
@@ -153,7 +157,7 @@ def detach(source: str, as_json: bool = False, timeout_s: float = registry.DETAC
     return True
 
 
-def foreground(source: str, kind: str, as_json: bool = False) -> bool:
+def foreground(source: str, kind: str, as_json: bool = False, local: bool = False) -> bool:
     """Pack here, registered so `nodo packs` and the TUI see it while it runs.
 
     With ``--json`` the packer's chatter goes to stderr and stdout carries only the
@@ -168,7 +172,7 @@ def foreground(source: str, kind: str, as_json: bool = False) -> bool:
         os.dup2(2, 1)
     try:
         service_id, pack_id = registry.run(
-            source, kind, _packer_kind(), lambda: pack(directory=source)
+            source, kind, _packer_kind(local), lambda: pack(directory=source, local=local)
         )
     finally:
         if saved_stdout is not None:

@@ -30,10 +30,12 @@ Configuring the packer (resolution order):
      — only needed to point at an out-of-band packer (one running elsewhere, not as
      a local instance). Used as a last resort when no service id is set, or when a
      configured id can neither be found running nor be launched.
-If neither yields an endpoint, `nodo pack` fails with an actionable message
-instead of trying to use a local Docker that no longer exists.
+If neither yields an endpoint, or the packer does not answer, `nodo pack` asks
+the operator if it must enable the local packer (``packer.local: true``) and
+continue with it. Without a terminal, it fails with an actionable message.
 """
 import os
+import sys
 import tempfile
 from typing import Optional
 
@@ -160,30 +162,94 @@ def _resolve_packer_endpoint() -> Optional[str]:
     return None
 
 
+# True when `nodo pack --local` selects the local packer for this run only. It
+# is a module flag, so the nested packs of dependencies also build locally.
+_local_for_this_run = False
+
+
 def _local_packer_enabled() -> bool:
-    """True when config selects nodo's optional local (Docker) packer.
+    """True when `--local` or config selects nodo's optional local packer.
 
     ``packer.local`` defaults to False: the node keeps the packer-service
     behaviour (resolve the packer by its ``core_services`` id, falling back to the
     ``PACKER_SERVICE_URL`` override). When True, `nodo pack` builds the service
     locally with nodo's isolated Docker toolchain instead.
     """
-    return bool(env_manager.get("packer.local", False))
+    return _local_for_this_run or bool(env_manager.get("packer.local", False))
 
 
-def pack(directory: str) -> Optional[str]:
+# Return value of _pack_via_service() when no packer service is available. It
+# is different from None (a packer that is available but did not pack), because
+# only this case lets the operator change to the local packer.
+_SERVICE_UNAVAILABLE = object()
+
+
+def _offer_local_packer() -> bool:
+    """Ask the operator to enable the local packer. Return True if enabled.
+
+    The local packer installs nodo's rootless BuildKit toolchain (buildkitd and
+    buildctl) on demand. If the answer is yes, this function writes
+    ``packer.local: true`` to config.yaml, so the next packs also use it.
+    Without a terminal, there is no question and the function returns False.
+    """
+    if not (sys.stdin is not None and sys.stdin.isatty()):
+        print(
+            "To build on this host instead, run `nodo pack <project dir> --local` "
+            "(this run only), or set `packer.local: true` in config.yaml."
+        )
+        return False
+
+    try:
+        answer = input(
+            "\nThe packer service is not available. Enable the local packer "
+            "(packer.local: true) and continue?\n"
+            "If BuildKit is not installed, nodo installs it now (this can ask for sudo). [y/N]: "
+        ).strip().lower()
+    except EOFError:
+        return False
+
+    if answer not in ("y", "yes"):
+        return False
+
+    env_manager.set("packer.local", True)
+    print("Set packer.local: true in config.yaml.")
+    return True
+
+
+def _pack_local(directory: str) -> Optional[str]:
+    from src.commands.packer.zip_with_dockerfile.local_pack import pack_local
+    return pack_local(directory)
+
+
+def pack(directory: str, local: bool = False) -> Optional[str]:
     """Pack a project into a Celaut service.
 
-    Dispatches to the local Docker packer when ``packer.local: true``, otherwise
-    to the packer-service HTTP client (the default).
+    Dispatches to the local BuildKit packer when ``local`` is True (`--local`) or
+    ``packer.local: true``. Otherwise it uses the packer-service HTTP client (the
+    default). If the packer service is not available, the operator can enable
+    the local packer and continue.
     """
+    global _local_for_this_run
+    if local:
+        _local_for_this_run = True
     if _local_packer_enabled():
-        from src.commands.packer.zip_with_dockerfile.local_pack import pack_local
-        return pack_local(directory)
-    return _pack_via_service(directory)
+        return _pack_local(directory)
+
+    result = _pack_via_service(directory)
+    if result is _SERVICE_UNAVAILABLE:
+        if _offer_local_packer():
+            pack_registry.use_packer("local")
+            return _pack_local(directory)
+        return None
+    return result
 
 
-def _pack_via_service(directory: str) -> Optional[str]:
+def _pack_via_service(directory: str):
+    """Pack with the packer service.
+
+    Returns the service id, None if the packer did not pack the project, or
+    ``_SERVICE_UNAVAILABLE`` if no packer service is available.
+    """
     pack_registry.stage("starting the packer service")
     packer_url = _resolve_packer_endpoint()
     if not packer_url:
@@ -193,7 +259,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
         )
         _msg = (
             "\nNo packer service is configured.\n\n"
-            "nodo does not build services locally anymore — packing is done by a\n"
+            "By default, nodo does not build services locally — packing is done by a\n"
             "packer-service microVM (it runs Docker/buildx inside a sealed VM, so you\n"
             "never install Docker on this host).\n\n"
             "Configure the packer by its published service id and re-run `nodo pack`;\n"
@@ -207,7 +273,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
             "set the override URL in config.yaml:  packer.PACKER_SERVICE_URL: \"http://<ip>:8080\".\n"
         )
         print(_msg)
-        return None
+        return _SERVICE_UNAVAILABLE
 
     _id: Optional[str] = None
     # TODO Better approach, generator: return only path and finally remove if remote.
@@ -232,7 +298,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
         )
         if is_remote:
             __remove_path(directory)
-        return None
+        return _SERVICE_UNAVAILABLE
 
     bee_path: Optional[str] = None
     try:
@@ -317,7 +383,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
             "via `nodo execute`) or the PACKER_SERVICE_URL override, and that the "
             "packer-service instance is running and reachable."
         )
-        return None
+        return _SERVICE_UNAVAILABLE
     except Exception as e:
         pack_registry.note_error(f"Exception packing {directory}: {e}")
         print(f"Exception packing {directory}: {e}")

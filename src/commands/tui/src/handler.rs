@@ -457,7 +457,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(-1)
         }
-        // Pricing mirrors the Peers page's +/- and Config's `e`: nudge in place, or open the
+        // Pricing mirrors the Peers page's +/- and All's `e`: nudge in place, or open the
         // ordinary editor for an exact figure.
         (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Pricing => {
             app.adjust_selected_price(1)
@@ -470,14 +470,14 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Pricing => app.open_payment_rate_editor("ergo"),
         (KeyModifiers::NONE, KeyCode::Char('b')) if app.page() == Page::Pricing => app.open_payment_rate_editor("bitcoin"),
-        // ENERGY mirrors Config's `e` and adds Enter, because the page is a list of
+        // ENERGY mirrors All's `e` and adds Enter, because the page is a list of
         // one-key decisions and Enter is what "work this row" means on every other
         // list in this interface (issue #395).
         (_, KeyCode::Enter) if app.page() == Page::Energy => app.open_energy_editor(),
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Energy => {
             app.open_energy_editor()
         }
-        // The CELL page: Enter works the selected lever, `e` reaches the keys behind
+        // The POLICIES page: Enter works the selected lever, `e` reaches the keys behind
         // it, `p` picks a posture and `d` says how this node differs from one.
         // The SCHEDULE page: ←/→ and ↑/↓ reach it through on_left/on_right/on_up, so
         // only the keys with no arrow of their own are here.
@@ -490,7 +490,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         // A schedule is a list of windows: `a` appends one (empty, so it refuses
         // nothing until its hours are moved), `d` removes the selected one, and
-        // `[`/`]` switch which window ←/→/↑/↓ act on. Mirrors Config's `a`/`d` on its
+        // `[`/`]` switch which window ←/→/↑/↓ act on. Mirrors All's `a`/`d` on its
         // own lists.
         (KeyModifiers::NONE, KeyCode::Char('a')) if app.page() == Page::Schedule => {
             app.add_schedule_window()

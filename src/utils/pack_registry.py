@@ -255,6 +255,12 @@ def queued(waiting: bool) -> None:
             stage="waiting for another pack" if waiting else "starting")
 
 
+def use_packer(name: str) -> None:
+    """The pack changed to another packer (``local``). An error from the previous
+    packer is not the reason this one fails, so it is removed."""
+    _update(packer=name, error=None)
+
+
 def note_error(message: str) -> None:
     """Why the pack failed. The first reason wins: a dependency that failed to pack is
     the cause, not the "packing produced no service id" that follows it."""
@@ -435,6 +441,7 @@ def spawn_detached(
     timeout_s: float = DETACH_TIMEOUT_S,
     directory: Optional[str] = None,
     command: Optional[List[str]] = None,
+    options: Optional[List[str]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Run ``nodo pack <source>`` in the background; ``(record, None)`` once it registered.
 
@@ -442,7 +449,8 @@ def spawn_detached(
     in a session of its own -- so closing the terminal (or quitting the TUI) does not
     stop it, and ``pack_cancel`` can kill its whole process group. If it exits before
     registering, its last log line is the error. ``command`` replaces the
-    ``[python, nodo.py, "pack"]`` prefix (tests).
+    ``[python, nodo.py, "pack"]`` prefix (tests). ``options`` go after the source
+    (for example ``--local``).
     """
     pack_id = pack_id or new_id()
     directory = directory or registry_dir()
@@ -455,7 +463,7 @@ def spawn_detached(
     prefix = command or [sys.executable, nodo_py, "pack"]
     with log_file:
         child = subprocess.Popen(
-            [*prefix, source],
+            [*prefix, source, *(options or [])],
             stdin=subprocess.DEVNULL,
             stdout=log_file,
             stderr=subprocess.STDOUT,

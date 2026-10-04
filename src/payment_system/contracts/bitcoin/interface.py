@@ -42,6 +42,7 @@ from time import sleep
 from typing import Optional, Tuple
 
 from protos import celaut_pb2
+from src.utils.ledger_descriptors import bitcoin_payment_ledger as _bitcoin_ledger
 from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
 from src.payment_system.contracts.bitcoin import backend as core_backend
@@ -71,18 +72,9 @@ CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 LEDGER = "bitcoin"
 NATIVE_ASSET = "BTC"
 
-# The TAG is this ledger's identity: it is what a `contract_instance` row is keyed by,
-# what `MethodKey` carries and what the check in `payment_process_validator` compares.
-# `PROSE` and `FORMAL` are description -- they travel to peers in the advertised
-# `Contract.Ledger` and nothing on this side reads them back, which is exactly why they
-# must not be part of how a ledger is identified.
-PROSE = (
-    "Bitcoin: PoW blockchain with a UTXO model, script-based spending conditions, "
-    "a fixed supply schedule, and settlement finality measured in confirmations."
-)
-# No formal specification is published for the chain itself, so this is empty rather
-# than a placeholder that would claim one exists.
-FORMAL = b""
+# The ledger tag: what a `contract_instance` row is keyed by and what `MethodKey`
+# carries. The full declaration peers receive is `ledger()`
+# (src/utils/ledger_descriptors.py).
 
 # The proof of an incoming payment is a *confirmed transaction*, not an unspent output,
 # so nothing here breaks if the receiving outputs are spent. That is what keeps this
@@ -300,8 +292,6 @@ def can_pay() -> bool:
         return False
 
 
-bitcoin_ledger = celaut_pb2.Contract.Ledger(tags=[LEDGER], prose=PROSE, formal=FORMAL)
-
 _transaction_url_reporter: ContextVar = ContextVar("bitcoin_transaction_url_reporter", default=None)
 _transaction_id_reporter: ContextVar = ContextVar("bitcoin_transaction_id_reporter", default=None)
 
@@ -358,11 +348,16 @@ def unavailable_reason() -> Optional[str]:
 
 def ledger() -> celaut_pb2.Contract.Ledger:
     """The ledger message this contract settles on, as peers receive it."""
-    return bitcoin_ledger
+    return _bitcoin_ledger()
+
+
+def mu_per_base_unit() -> int:
+    """MU per satoshi: what travels to peers as ``ContractRate.mu_per_unit``."""
+    return rate.advertised_mu_per_satoshi()
 
 
 def mu_per_unit() -> int:
-    """MU bought by one whole BTC. What peers are told as ``ContractRate.mu_per_unit``."""
+    """MU bought by one whole BTC, for a person (``nodo pay`` amounts in BTC)."""
     return rate.mu_per_unit()
 
 
@@ -555,7 +550,7 @@ def init():
     if script is None:
         raise ValueError(f"{address} is not a segwit address, so it has no scriptPubKey")
 
-    contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
+    contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
     set_token_id(contract, NATIVE_ASSET)
     # Canonical value: the raw scriptPubKey a payer builds its output against.
     set_script(contract, script)
@@ -661,7 +656,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
                 )
             if confirmations >= wanted:
                 LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
-                contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
+                contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
                 set_token_id(contract, NATIVE_ASSET)
                 set_script(contract, script)
                 set_contract_type(contract, CONTRACT.encode("utf-8"))

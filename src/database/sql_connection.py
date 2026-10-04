@@ -206,12 +206,19 @@ def _plain(value: Decimal) -> str:
 
 def _ensure_traceability_tables(connection) -> None:
     try:
-        from src.database.migrate import ensure_columns, ensure_tables
+        from src.database.migrate import (
+            ensure_columns,
+            ensure_tables,
+            forget_peer_rates_per_whole_unit,
+        )
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
         for table, columns in TRACEABILITY_COLUMNS.items():
             ensure_columns(cursor, table, columns)
+        # The restart after pulling new code is the only upgrade path (see above), so
+        # the one-shot rate migration runs here too, not only from `migrate`.
+        forget_peer_rates_per_whole_unit(cursor)
         connection.commit()
     except Exception as e:
         # A read-only or otherwise unusable database is the node's problem to report

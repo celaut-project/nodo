@@ -1,12 +1,12 @@
-//! The CELL page's catalogue: the policies an operator actually chooses between,
+//! The POLICIES page's catalogue: the policies an operator actually chooses between,
 //! and what each choice writes into `config.yaml`.
 //!
-//! The Config page edits the YAML tree, ordered by where a key lives. That helps
+//! The All page edits the YAML tree, ordered by where a key lives. That helps
 //! someone who already knows which key they want. This is the other half: a closed
 //! catalogue of *decisions*, each named by the question it answers.
 //!
 //! One primitive at three scales -- a **lever state** is a small set of writes, a
-//! **profile** a whole posture of twenty-odd keys, and the Config page the same
+//! **profile** a whole posture of twenty-odd keys, and the All page the same
 //! thing at one key.
 //!
 //! Nothing records which state or profile is active: it is **derived** by asking
@@ -962,7 +962,7 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
-    // --- WALL · footprint & hours ------------------------------------------
+    // --- RESOURCES · footprint & hours ------------------------------------------
     //
     // Nothing else on this page can say "not with my whole machine". Scarcity pricing
     // makes a busy host expensive and `spare capacity` gates only the opportunistic
@@ -988,7 +988,7 @@ static LEVERS: &[Lever] = &[
     },
     // The three shares are cycles rather than typed numbers because the decision is
     // "roughly how much of my PC", not a figure anyone measures. Any other value set on
-    // the Config page still applies -- the row simply reads `custom`, which is the whole
+    // the All page still applies -- the row simply reads `custom`, which is the whole
     // point of deriving the state instead of storing it.
     Lever {
         id: "cpu-ceiling",
@@ -2203,7 +2203,7 @@ mod tests {
 
         /// The two decisions the WALL organelle exists for, read back off a document.
         /// Both write more than one key, which is the reason they are levers rather
-        /// than something to find on the Config page: an operator who set
+        /// than something to find on the All page: an operator who set
         /// `activity_window.ENABLED` and left `ON_CLOSE` alone would have a window
         /// whose closing behaviour they never chose.
         #[test]
@@ -2236,7 +2236,7 @@ mod tests {
             assert_eq!(status(lever, Some(&uncapped)).label(lever), "no cap");
             let half = document("host_limits:\n  MAX_RAM_SHARE: 0.5\n");
             assert_eq!(status(lever, Some(&half)).label(lever), "half");
-            // A figure typed on the Config page is reported as unnamed rather than
+            // A figure typed on the All page is reported as unnamed rather than
             // rounded to the nearest position.
             let typed = document("host_limits:\n  MAX_RAM_SHARE: 0.6\n");
             assert_eq!(status(lever, Some(&typed)), LeverStatus::Custom);

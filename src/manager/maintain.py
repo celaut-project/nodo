@@ -6,7 +6,7 @@ import traceback
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer
+from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
@@ -544,7 +544,7 @@ def peer_deposits(debug_mode: bool = False):
             if debug_mode: log.LOGGER(f"Peer {peer_id} needs a refresh. Attempting to fetch info.")
 
             try:
-                peer = BeeClient.get_peer_info(peer_channel(peer_id=peer_id))
+                peer = fetch_peer_info(peer_channel(peer_id=peer_id), peer_id)
                 _peer_is_reachable_again(peer_id)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:

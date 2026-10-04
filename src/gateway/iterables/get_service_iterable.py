@@ -2,7 +2,7 @@ from typing import Generator
 from bee_rpc.utils import get_expanded_block_length
 
 from protos import celaut_pb2
-from protos.gateway_bee import StartService_input_indices
+from protos.gateway_bee import rpc_input, rpc_output
 from src.gateway.client_gate import require_caller, simple_rpc_timeout_seconds
 from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.virtualizers.architecture import UnsupportedArchitectureException
@@ -29,7 +29,7 @@ class GetServiceIterable:
         # -- safe: see ``client_gate.simple_rpc_timeout_seconds``.
         self.parser_iterator = BeeClient.parse(
             request_iterator,
-            indices={1: celaut_pb2.Metadata.HashTag.Hash, 2: celaut_pb2.Client},
+            indices=rpc_input("GetService"),
             control=self.control,
             timeout=simple_rpc_timeout_seconds(),
         )
@@ -91,7 +91,7 @@ class GetServiceIterable:
                     metadata=read_metadata_from_disk(service_hash=service_hash),
                     recursion_guard_token=None  # TODO: Needed if executing the same RPC to peers as well, in case the service is not available locally.
                 ),
-                indices=StartService_input_indices,  # Client and configuration not needed.
+                indices=rpc_output("GetService"),
                 control=self.control,
             )
         except UnsupportedArchitectureException as e:

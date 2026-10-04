@@ -665,12 +665,12 @@ class ZipContainerPacker:
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
             celaut.Metadata.HashTag.AttrHashTag(
-                key=1,  # Container attr.
+                key=2,  # Service.container is field 2 (Service.prose is 1).
                 value=[
                     celaut.Metadata.HashTag(
                         attr_hashtag=[
                             celaut.Metadata.HashTag.AttrHashTag(
-                                key=2,  # Filesystem
+                                key=2,  # Service.Container.filesystem is field 2.
                                 value=[parseFilesys()]
                             )
                         ]

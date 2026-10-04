@@ -1,9 +1,11 @@
 import os
 from typing import Generator
 
+from src.gateway.client_gate import require_caller
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as log
+from protos.gateway_bee import rpc_output
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.config import ConfigManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
@@ -44,7 +46,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
             raise Exception(f"Corrupt metadata for the service {self.service_hash}")
 
         yield from BeeClient.respond(
-            indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
+            indices=rpc_output("StartService"),
             message_iterator=launch_service(
                 service_id=self.service_hash,
                 service=service,
@@ -67,3 +69,10 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 f"This is on registry -> {[h for h in os.listdir(REGISTRY)]} \n"
                 f"\n"
             )
+        elif not self._caller_checked:
+            # The service was ready but no client_id ever arrived: the gate in the base
+            # class deferred, waiting for one, and the stream ended first. Its final()
+            # makes that refusal definitive; overriding it without doing the same left
+            # such a caller with an empty response instead of an error. A caller
+            # already checked is not checked again, also when generate() failed.
+            require_caller(self.context, self.client_id or "")

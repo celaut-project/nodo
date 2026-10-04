@@ -210,7 +210,7 @@ class ParseWithClientWireTests(unittest.TestCase):
     def test_a_payload_with_no_client_parses_with_an_empty_client_id(self):
         peer = celaut_pb2.Peer(public_key="abc")
         buffers = self._round_trip([peer], {1: celaut_pb2.Peer, 2: celaut_pb2.Client})
-        payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
+        payload, client_id = parse_with_client(iter(buffers), method="IntroducePeer")
         self.assertEqual(payload, peer)
         self.assertEqual(client_id, "")
 
@@ -223,14 +223,19 @@ class ParseWithClientWireTests(unittest.TestCase):
                 buffers = self._round_trip(
                     messages, {1: celaut_pb2.Peer, 2: celaut_pb2.Client}
                 )
-                payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
+                payload, client_id = parse_with_client(iter(buffers), method="IntroducePeer")
                 self.assertEqual(payload, peer)
                 self.assertEqual(client_id, client.client_id)
+
+    def test_a_method_without_one_payload_and_one_client_is_refused(self):
+        # The indices come from GATEWAY_RPCS; GetPeerInfo takes only a Client.
+        with self.assertRaises(ValueError):
+            parse_with_client(iter([]), method="GetPeerInfo")
 
     def test_a_caller_that_sends_nothing_parses_to_no_payload_and_no_client(self):
         from bee_rpc import buffer_pb2 as bee_buffer_pb2
         buffers = list(bee.serialize_to_buffer(message_iterator=bee_buffer_pb2.Empty(), indices={}))
-        payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
+        payload, client_id = parse_with_client(iter(buffers), method="IntroducePeer")
         self.assertIsNone(payload)
         self.assertEqual(client_id, "")
 

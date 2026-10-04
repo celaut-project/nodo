@@ -21,7 +21,7 @@ def local_proofs() -> Generator[celaut.Contract, None, None]:
 
     proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
     if proof_id:
-        contract = celaut.Contract(ledger=ergo_ledger)
+        contract = celaut.Contract(ledger=ergo_ledger())
         set_script(contract, bytes.fromhex(REPUTATION_PROOF_ERGO_TREE))
         set_token_id(contract, proof_id)
         # Best-effort: an unattested proof is announced anyway and simply not credited

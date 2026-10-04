@@ -72,6 +72,14 @@ def packs_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def this_process_packs(monkeypatch):
+    """A record with this process's pid reads as running. ``pid_alive`` looks for
+    "pack" in the arguments of the process, and pytest does not have it."""
+    real = registry.pid_alive
+    monkeypatch.setattr(registry, "pid_alive", lambda pid: pid == os.getpid() or real(pid))
+
+
+@pytest.fixture
 def fake_pack(tmp_path):
     script = tmp_path / "fake_pack.py"
     script.write_text(FAKE_PACK.format(root=ROOT, sid=SERVICE_ID))
@@ -182,6 +190,18 @@ class TestRun:
         assert record["status"] == "failed"
         assert record["error"] == "Error in the compilation process: COPY failed"
 
+    def test_use_packer_removes_the_error_of_the_previous_packer(self, packs_dir):
+        def pack():
+            registry.note_error("Could not reach the packer service")
+            registry.use_packer("local")
+            registry.note_error("Error in the compilation process: COPY failed")
+            return None
+
+        _, pack_id = registry.run("/src/demo", "dir", "service", pack, directory=packs_dir)
+        record = registry._read(registry.record_path(pack_id, packs_dir))
+        assert record["packer"] == "local"
+        assert record["error"] == "Error in the compilation process: COPY failed"
+
     def test_failure_without_a_reason_points_at_the_log(self, packs_dir):
         _, pack_id = registry.run("/src/demo", "dir", "local", lambda: None, directory=packs_dir)
         assert "no service id" in registry._read(registry.record_path(pack_id, packs_dir))["error"]
@@ -273,7 +293,7 @@ class TestListing:
         assert registry.list_packs(packs_dir, sweep=False)[0]["status"] == "failed"
         assert registry._read(registry.record_path("dead0002", packs_dir))["status"] == "queued"
 
-    def test_prunes_old_finished_packs_but_never_running_ones(self, packs_dir):
+    def test_prunes_old_finished_packs_but_never_running_ones(self, packs_dir, this_process_packs):
         now = int(time.time())
         for index in range(registry.KEEP_FINISHED + 5):
             _record(packs_dir, f"old{index:05d}", "done", now - 1000 + index)
@@ -405,13 +425,51 @@ class TestCommands:
         monkeypatch.setenv("ORIGINAL_DIR", str(tmp_path))
         real_detach = packs.detach
         monkeypatch.setattr(packs, "detach",
-                            lambda source, as_json=False: real_detach(source, as_json, command=fake_pack))
+                            lambda source, as_json=False, local=False:
+                            real_detach(source, as_json, command=fake_pack, local=local))
         assert packs.pack_command(["proj", "--detach", "--json"]) == 0
         document = _json(capsys)
         assert document["pack"]["source"] == str(tmp_path / "proj")
         assert document["pack"]["detached"] is True
 
-    def test_packs_list_and_inspect(self, packs_dir, capsys):
+    def test_pack_local_goes_to_the_packer_and_the_record(self, packs_dir, tmp_path, monkeypatch):
+        import types
+        from src.commands import packs
+
+        (tmp_path / "proj").mkdir()
+        monkeypatch.setenv("ORIGINAL_DIR", str(tmp_path))
+        calls = []
+
+        def pack(directory, local=False):
+            calls.append((directory, local))
+            return SERVICE_ID
+
+        monkeypatch.setitem(sys.modules, "src.commands.packer.zip_with_dockerfile.pack",
+                            types.SimpleNamespace(pack=pack))
+        with redirect_stdout(io.StringIO()):
+            assert packs.pack_command(["proj", "--local"]) == 0
+        assert calls == [(str(tmp_path / "proj"), True)]
+        [record] = registry.list_packs(packs_dir)
+        assert record["packer"] == "local"
+
+    def test_pack_local_detach_gives_the_flag_to_the_child(self, packs_dir, tmp_path, monkeypatch):
+        from src.commands import packs
+
+        (tmp_path / "proj").mkdir()
+        monkeypatch.setenv("ORIGINAL_DIR", str(tmp_path))
+        seen = {}
+
+        def spawn_detached(source, nodo_py, **kwargs):
+            seen.update(kwargs, source=source)
+            return {"id": "3f9a0c12", "pid": 1, "source": source, "log": "x.log"}, None
+
+        monkeypatch.setattr(registry, "spawn_detached", spawn_detached)
+        with redirect_stdout(io.StringIO()):
+            assert packs.pack_command(["proj", "--detach", "--local"]) == 0
+        assert seen["source"] == str(tmp_path / "proj")
+        assert seen["options"] == ["--local"]
+
+    def test_packs_list_and_inspect(self, packs_dir, capsys, this_process_packs):
         from src.commands.packs import list_packs
 
         now = int(time.time())
