@@ -47,7 +47,7 @@ GROUPS: List[Group] = [
         "Services",
         "the local registry: what this node can run",
         [
-            ("pack <dir | https url>", "package a project (--local, --fast|--optimize, --detach, --json)"),
+            ("pack <dir | https url>", "package a project (--local, --detach, --json)"),
             ("packs [<pack>]", "list/inspect recent packs (--active, --json)"),
             ("pack_cancel <pack>", "stop a running or queued pack"),
             ("download <url> [-o <dir>]", "fetch a published service from its manifest"),
