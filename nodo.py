@@ -361,16 +361,8 @@ if __name__ == '__main__':
                 import os
                 import sys
 
-                # `--local` builds with the local packer for this run only.
-                pack_args = sys.argv[2:]
-                local = "--local" in pack_args
-                pack_args = [arg for arg in pack_args if arg != "--local"]
-                if len(pack_args) != 1:
-                    print("Usage: nodo pack <project dir | git URL> [--local]")
-                    sys.exit(1)
-
                 # Get the path provided by the user
-                user_path = pack_args[0]
+                user_path = sys.argv[2]
                 absolute_path = resolve_user_path(user_path)
 
                 # Check if the file exists
@@ -849,26 +841,34 @@ if __name__ == '__main__':
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
 
             case 'pack':
-                from src.commands.packer.zip_with_dockerfile.pack import pack
+                # A project directory (relative to the shell it was typed in) or an
+                # https git URL. Every pack is recorded under <main.STORAGE>/packs, so
+                # `nodo packs` and the TUI's PACKS page see it; --detach runs it in
+                # the background (src/commands/packs.py).
+                from src.commands.packs import pack_command
+                code = pack_command(sys.argv[2:])
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os._exit(code)
 
-                import os
-                import sys
+            case "packs":
+                from src.commands.packs import list_packs
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                active_only = "--active" in args and not args.remove("--active")
+                if len(args) > 1 or (args and args[0].startswith("--")):
+                    print("Usage: nodo packs [<pack id>] [--active] [--json]", flush=True)
+                    sys.exit(1)
+                ok = list_packs(reference=args[0] if args else "", as_json=as_json,
+                                active_only=active_only)
+                os._exit(0 if ok else 1)
 
-                # Get the path provided by the user
-                user_path = sys.argv[2]
-
-                if "http" not in user_path[:4]:
-                    absolute_path = resolve_user_path(user_path)
-
-                    # Check if the directory exists
-                    if not os.path.exists(absolute_path):
-                        print(f"Error: The directory {absolute_path} does not exist")
-                        sys.exit(1)
-
-                else:
-                    absolute_path = user_path  # In case it's an external git repository
-
-                pack(directory=absolute_path, local=local)
+            case "pack_cancel":
+                from src.commands.packs import cancel_packs
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                ok = cancel_packs(args, as_json=as_json)
+                os._exit(0 if ok else 1)
 
             case "tui":
                 # A binary built by CI for this host's target, when there was a

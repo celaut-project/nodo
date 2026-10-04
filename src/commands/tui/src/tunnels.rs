@@ -127,6 +127,13 @@ pub fn parse_tunnel(text: &str) -> Option<Tunnel> {
 /// where `/proc` exists its command line says whether it is still a tunnel, so a pid
 /// recycled after a reboot does not keep a dead tunnel on screen.
 pub fn pid_alive(pid: i64) -> bool {
+    process_running_as(pid, b"tunnel")
+}
+
+/// Whether `pid` is a running process with `word` as one of its arguments (where
+/// `/proc` can say; otherwise whether it exists at all). `pid_alive` for tunnels, and
+/// the same check for `nodo pack` (`packs.rs`).
+pub fn process_running_as(pid: i64, word: &[u8]) -> bool {
     if pid <= 0 || pid > i32::MAX as i64 {
         return false;
     }
@@ -136,7 +143,7 @@ pub fn pid_alive(pid: i64) -> bool {
         return false;
     }
     match std::fs::read(format!("/proc/{pid}/cmdline")) {
-        Ok(cmdline) => cmdline.split(|byte| *byte == 0).any(|arg| arg == b"tunnel"),
+        Ok(cmdline) => cmdline.split(|byte| *byte == 0).any(|arg| arg == word),
         Err(_) => true,
     }
 }

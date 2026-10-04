@@ -323,8 +323,14 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
-- **pack `<project directory>` `[--local]`**  
-  Packages a project into a service. There are two backends, selected by
+- **pack `<project directory | https git URL[#subdir]> [--local] [--detach] [--json]`**  
+  Packages a project into a service. The source is a local directory (relative
+  paths are read from the shell you typed in) or an **https** git URL, optionally
+  with `#<subdir>` for a project inside the repository. `http://` is refused (the
+  code would be sealed as it arrived, and over plain http it can be changed on the
+  way), and so are `ssh://` / `git@…` URLs (the repository is cloned without
+  credentials: clone it yourself and pack the folder). Exits `1` when the source is
+  refused or the pack produces no service. There are two backends, selected by
   `packer.local` in `config.yaml`, or by `--local` for one run:
 
   **Default (`packer.local: false`) — packer-service:** nodo does **not** build
@@ -364,13 +370,64 @@ These are the most commonly used commands for daily tasks:
   for sudo one time. Do not use `--local` if the operator wants packs to stay off
   this host.
 
+  Every pack records itself in `<main.STORAGE>/packs/<id>.json` while it runs and
+  keeps the record afterwards with its outcome, so `nodo packs` and the TUI's PACKS
+  page see packs started anywhere — a terminal, a script, the TUI. **`--detach`**
+  runs the pack in the background and returns at once with its id; its output goes
+  to `<main.STORAGE>/packs/<id>.log`. That is the form for scripts, agents and the
+  TUI, none of which can hold a terminal open for a build that takes minutes. A
+  detached pack with the local packer that finds another pack using the builder
+  waits for it (`queued`) instead of failing, as one in a terminal does.
+  `--json` prints one object: with `--detach`, the pack as it started
+  ```json
+  {"pack": {"id": "3f9a0c12", "pid": 41872, "source": "/home/me/hello", "kind": "dir",
+   "packer": "local", "status": "running", "stage": "starting", "detached": true,
+   "log": "/nodo/storage/packs/3f9a0c12.log", "started_at": 1791051095,
+   "finished_at": null, "service_id": null, "error": null}}
+  ```
+  and in the foreground, the same record once it finished (the packer's own output
+  goes to stderr). A source that is refused is `{"error": "Error: …"}` with exit `1`.  
   **Examples:**  
   `nodo pack /path/to/project`  
-  `nodo pack /path/to/project --local`
+  `nodo pack https://github.com/celaut-basics/demo-service.git#hello --detach`  
+  `nodo pack /path/to/project --local`  
+  `nodo pack ./my-service --detach --json`
   > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
   > reference for the project layout, `pack_config.json`, `service.json`, and the
   > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
   > is declared in `service.json → init.entry_path`). Do not guess the format.
+
+- **packs `[<pack id>] [--active] [--json]`**  
+  Lists the packs on record, newest first: id, status, source, the service id it
+  produced (or the stage a running one is at, or why one failed), age and how long
+  it took. `--active` keeps only the `queued`/`running` ones. A pack id (or an
+  unambiguous prefix) shows that pack with the last lines of its log. Statuses:
+  `queued` (waiting for another local pack to release the builder), `running`,
+  `done`, `failed`, `cancelled`. A record that says running but whose process is
+  gone (killed with -9, or the host restarted) is reported — and rewritten — as
+  `failed` with `error` saying so. The newest 20 finished packs are kept; older
+  records and their logs are pruned.
+  JSON: `{"packs": [pack, …]}` / `{"pack": {…, "log_tail": ["…"]}}`, with `pack` as
+  above plus `age_secs`, `duration_secs` and `last_line` (the last line of its log).
+  `stage` is one of `starting`, `waiting for another pack`, `starting the builder`,
+  `starting the packer service`, `cloning`, `copying the project`,
+  `waiting for the packer service`, `uploading dependencies`, `zipping the project`,
+  `building`, `building in the packer service`, `importing`; `null` once finished.  
+  **Examples:**  
+  `nodo packs`  
+  `nodo packs 3f9a --json`
+
+- **pack_cancel `<pack id>… [--json]`**  
+  Stops a queued or running pack. It is sent SIGTERM and unwinds through the
+  packer's own cleanup — stops nodo's rootless builder, removes the clone or copy,
+  releases the pack lock — and records itself `cancelled`. One still alive after
+  30 s is killed, with its whole process group when it was started with `--detach`
+  (the `git` / `buildctl` it was waiting on live there). What it cannot stop: a
+  build already sent to a packer **service** keeps running inside that VM until it
+  finishes; its result is just never imported. Exits `1` if a pack is unknown, not
+  running, or another user's.
+  JSON: `{"cancelled": ["3f9a0c12"], "failed": []}` (+ `"error"` when `failed` is
+  not empty).
 
 - **tui**  
   Launches the terminal user interface for monitoring and managing the node. Its
@@ -1049,6 +1106,10 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | SERVICES: execute | `e` | `nodo execute <service>` |
 | SERVICES: delete | `d` | `nodo remove <service>` |
 | SERVICES: get from peers | — | `nodo get <service>` |
+| SERVICES / PACKS: pack a folder or an https git URL | `p` / `n` | `nodo pack <dir \| https URL[#subdir]> --detach [--json]` (new `--detach`, `--json`) |
+| PACKS: table, card (current and recent packs) | — | `nodo packs [--active] [--json]` (new) |
+| PACKS: details + log tail | `i` | `nodo packs <pack id> [--json]` (new) |
+| PACKS: cancel (y/N) | `c` | `nodo pack_cancel <pack id> [--json]` (new) |
 | PEERS: table | — | `nodo peers [--json]` (new `--json`) |
 | PEERS: payments + reputation events card | — | `nodo peers <peer> [--json]` (new) |
 | PEERS: connect | `c` | `nodo connect <host:port>` |

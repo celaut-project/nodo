@@ -327,6 +327,10 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
                 (_, KeyCode::Enter) => app.submit_input().await,
                 (_, KeyCode::Esc) => app.close_input(),
+                // The pack prompt completes folder names, like a shell.
+                (_, KeyCode::Tab) if app.input_mode == InputMode::NewPack => {
+                    app.complete_pack_input()
+                }
                 // ↑/↓ step a number, cycle an enum, or (with ←/→/Space) flip a
                 // checkbox — additive on top of typing for number/enum, the only
                 // way to change a checkbox (see the char/backspace guard below).
@@ -428,6 +432,21 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Tunnels => {
             app.open_tunnel_details()
+        }
+        // Packs: `n` here (or `p` on SERVICES, where the result lands) packs a folder
+        // or an https git URL in the background; `c` cancels, `i` shows the log. Every
+        // action is the `nodo pack --detach` / `nodo pack_cancel` an operator would type.
+        (KeyModifiers::NONE, KeyCode::Char('n')) if app.page() == Page::Packs => {
+            app.open_new_pack()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('p')) if app.page() == Page::Services => {
+            app.open_new_pack()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Packs => {
+            app.open_cancel_pack_confirm()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Packs => {
+            app.open_pack_details()
         }
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()

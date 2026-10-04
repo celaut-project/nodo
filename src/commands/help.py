@@ -47,7 +47,9 @@ GROUPS: List[Group] = [
         "Services",
         "the local registry: what this node can run",
         [
-            ("pack <project dir> [--local]", "package a project (a dir, or a git URL)"),
+            ("pack <dir | https url>", "package a project (--local, --detach, --json)"),
+            ("packs [<pack>]", "list/inspect recent packs (--active, --json)"),
+            ("pack_cancel <pack>", "stop a running or queued pack"),
             ("download <url> [-o <dir>]", "fetch a published service from its manifest"),
             ("get <service> [--now]", "ask peers for one not held locally"),
             ("import <path>", "read a packaged '.celaut' file in"),

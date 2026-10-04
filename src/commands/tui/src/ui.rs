@@ -149,6 +149,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Overview => draw_overview(frame, app, layout[2]),
         Page::Instances => draw_instances(frame, app, layout[2]),
         Page::Tunnels => crate::tunnels::draw(frame, app, layout[2]),
+        Page::Packs => crate::packs::draw(frame, app, layout[2]),
         Page::Services => draw_services(frame, app, layout[2]),
         Page::Peers => crate::peers::draw(frame, app, layout[2]),
         Page::Clients => crate::clients::draw(frame, app, layout[2]),
@@ -191,7 +192,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         | InputMode::NewChatTopic
         | InputMode::SearchDocs
         | InputMode::GetService
-        | InputMode::NewTunnel => draw_input_popup(frame, app),
+        | InputMode::NewTunnel
+        | InputMode::NewPack => draw_input_popup(frame, app),
     }
 }
 
@@ -4987,8 +4989,11 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         Page::Tunnels => {
             "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  r refresh  \u{2022}  q quit"
         }
+        Page::Packs => {
+            "\u{2191}/\u{2193} select  \u{2022}  n new pack  \u{2022}  i log  \u{2022}  c cancel  \u{2022}  r refresh  \u{2022}  q quit"
+        }
         Page::Services => {
-            "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  p pack  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
         }
         Page::Peers => {
             "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  d forget  \u{2022}  q quit"
@@ -5114,6 +5119,9 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
                 .to_string(),
         );
     }
+    if app.input_mode == InputMode::NewPack {
+        return pack_popup_body(app);
+    }
     if app.input_mode != InputMode::EditConfig {
         return (
             vec![Line::from(app.input.clone())],
@@ -5209,6 +5217,45 @@ pub(crate) fn wrapped(text: &str, width: usize) -> Vec<String> {
         lines.push(String::new());
     }
     lines
+}
+
+/// The pack prompt: what is typed, what it will pack (or why not), and the folders
+/// that match what is being typed -- so a path can be walked to with Tab rather than
+/// remembered.
+fn pack_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
+    let base = app.pack_base_dir();
+    let home = App::home_dir();
+    let mut lines = vec![Line::from(app.input.clone())];
+    if app.input.trim().is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("A relative folder is read from {}", base.display()),
+            Style::default().fg(muted()),
+        )));
+    } else {
+        lines.push(match crate::packs::input_feedback(&app.input, &base, home.as_deref()) {
+            Ok(text) => Line::from(Span::styled(format!("✓ {text}"), Style::default().fg(good()))),
+            Err(text) => Line::from(Span::styled(format!("✗ {text}"), Style::default().fg(warn()))),
+        });
+    }
+    let matches = crate::packs::folder_matches(&app.input, &base, home.as_deref());
+    if !matches.is_empty() {
+        let shown: Vec<String> = matches
+            .iter()
+            .take(crate::packs::SUGGESTIONS)
+            .map(|name| format!("{name}/"))
+            .collect();
+        let more = matches.len().saturating_sub(crate::packs::SUGGESTIONS);
+        let tail = if more > 0 { format!("  (+{more})") } else { String::new() };
+        lines.push(Line::from(Span::styled(
+            format!("  {}{tail}", shown.join("  ")),
+            Style::default().fg(muted()),
+        )));
+    }
+    (
+        lines,
+        "Tab completes a folder • Enter packs in the background • Esc cancels • Ctrl+U clears"
+            .to_string(),
+    )
 }
 
 fn draw_input_popup(frame: &mut Frame, app: &App) {
