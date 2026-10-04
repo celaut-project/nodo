@@ -6,7 +6,8 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
 
 - `Contract`
   - `ledger = 1`
-  - `xattrs = 2` (`script`, `address`, `token_id`, optional `reputation_key`)
+  - `xattrs = 2` (`script`, `address`, `token_id`, `contract_type`, and on a
+    reputation proof `owner_public_key` and `owner_signature`)
 - `Service.Container`
   - `init` (`entry_path`, `xattrs`)
   - `config_declaration`
