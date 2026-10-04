@@ -361,8 +361,16 @@ if __name__ == '__main__':
                 import os
                 import sys
 
+                # `--local` builds with the local packer for this run only.
+                pack_args = sys.argv[2:]
+                local = "--local" in pack_args
+                pack_args = [arg for arg in pack_args if arg != "--local"]
+                if len(pack_args) != 1:
+                    print("Usage: nodo pack <project dir | git URL> [--local]")
+                    sys.exit(1)
+
                 # Get the path provided by the user
-                user_path = sys.argv[2]
+                user_path = pack_args[0]
                 absolute_path = resolve_user_path(user_path)
 
                 # Check if the file exists
@@ -855,7 +863,7 @@ if __name__ == '__main__':
                 else:
                     absolute_path = user_path  # In case it's an external git repository
 
-                pack(directory=absolute_path)
+                pack(directory=absolute_path, local=local)
 
             case "tui":
                 # A binary built by CI for this host's target, when there was a

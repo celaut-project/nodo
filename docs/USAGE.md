@@ -323,9 +323,9 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
-- **pack `<project directory>`**  
+- **pack `<project directory>` `[--local]`**  
   Packages a project into a service. There are two backends, selected by
-  `packer.local` in `config.yaml`:
+  `packer.local` in `config.yaml`, or by `--local` for one run:
 
   **Default (`packer.local: false`) — packer-service:** nodo does **not** build
   locally. It sends the project to an external **packer-service** (a microVM that
@@ -348,8 +348,25 @@ These are the most commonly used commands for daily tasks:
   The builder runs as your own user, so packing never asks for sudo. Tune it with
   `packer.buildkit.*` and `dependencies.buildkit.*` in `config.yaml`.  
 
-  **Example:**  
-  `nodo pack /path/to/project`
+  **`--local` — local packer for this run only:** use the local rootless packer
+  for this pack, and also for the dependencies that it packs. The `config.yaml`
+  file does not change.
+
+  **If the packer service is not available** (`packer.local: false`):
+  - In a terminal, nodo asks you to enable the local packer. If you answer yes,
+    nodo writes `packer.local: true` to `config.yaml` and continues the pack.
+  - Without a terminal (a script, CI or an AI agent), nodo does not ask. The pack
+    fails and nodo shows a hint.
+
+  **For AI agents and scripts:** if `nodo pack` fails because the packer service
+  is not available, run the same command again with `--local`. The first local
+  pack can install BuildKit with `bash/install_buildkit.sh`. This install can ask
+  for sudo one time. Do not use `--local` if the operator wants packs to stay off
+  this host.
+
+  **Examples:**  
+  `nodo pack /path/to/project`  
+  `nodo pack /path/to/project --local`
   > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
   > reference for the project layout, `pack_config.json`, `service.json`, and the
   > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
