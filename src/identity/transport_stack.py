@@ -75,6 +75,7 @@ from src.identity.node_identity import (
     parse_component_formal,
     same_component,
 )
+from src.identity import protocol_doc
 from src.identity.protocol_schema import schema_pairs
 from src.utils.config import ConfigManager
 from src.identity.tls_identity import (
@@ -355,91 +356,20 @@ def _service_hash_types() -> str:
     return ",".join(sorted(hash_id.hex() for hash_id in HASH_SPECS))
 
 
-# What every method says it does, for the prose. Keyed by RPC so a method with no entry
-# here is a test failure rather than a method the prose silently skips.
-RPC_PROSE: Final[Dict[str, str]] = {
-    "GetPeerInfo": (
-        "GetPeerInfo returns the Peer of the node. The Peer gives all the addresses of "
-        "the node, the payment contracts, the rates and the reputation proofs. The "
-        "signature of the Peer covers all of these."
-    ),
-    "IntroducePeer": (
-        "IntroducePeer sends the Peer of the caller. The node returns a RecursionGuard. "
-        "Its token is the peer id that the node stored, or \"REFUSED\"."
-    ),
-    "GenerateClient": (
-        "GenerateClient returns a Client. The caller can send a Client with a proposed "
-        "client_id. If the node requires a proof of work, it returns a PoWRequired at "
-        "index 2. Then the caller sends the Client again, with the same client_id, the "
-        "challenge and a solution."
-    ),
-    "AssociateClient": (
-        "AssociateClient binds a client_id to the identity of the caller. The Client "
-        "gives the client_id, the peer_id and a signature."
-    ),
-    "GenerateDepositToken": (
-        "GenerateDepositToken returns a TokenMessage. The payer writes this token in its "
-        "ledger transaction. The payment contract gives where and how."
-    ),
-    "Payable": (
-        "Payable tells the node about a payment. The Payment gives the deposit token, the "
-        "contract and the amount. The node examines the ledger before it adds credit."
-    ),
-    "StartService": (
-        "StartService starts a service. The caller sends the service as content hashes, "
-        "as Metadata, or as the full Service. The node returns a ServiceInstance with "
-        "the addresses of the instance and its token."
-    ),
-    "StopService": (
-        "StopService stops an instance. The TokenMessage gives the instance token. The "
-        "node returns a Refund with the balance that the instance did not use."
-    ),
-    "ModifyDeposit": (
-        "ModifyDeposit changes the balance of an instance. The service_token gives the "
-        "instance."
-    ),
-    "ModifyServiceSystemResources": (
-        "ModifyServiceSystemResources changes the resource limits of an instance. Only a "
-        "local instance of the node can call it. The node identifies the instance by "
-        "its address."
-    ),
-    "GetServiceEstimatedCost": (
-        "GetServiceEstimatedCost takes the same objects as StartService. It returns the "
-        "cost to run the service, and starts nothing."
-    ),
-    "GetResourceAvailability": (
-        "GetResourceAvailability asks if the node can run one instance with the given "
-        "architecture and resources now."
-    ),
-    "GetService": (
-        "GetService takes a content hash. It returns the hashes at index 4, the Metadata "
-        "at index 5 and the Service at index 6. These are the StartService indices, so "
-        "the caller can send them to StartService without a change."
-    ),
-    "GetMetrics": (
-        "GetMetrics takes a token. For an instance token, it returns the balance of the "
-        "instance. For a client_id, it returns the balance of the client."
-    ),
-    "ServiceTunnel": (
-        "ServiceTunnel opens a byte stream to a port of an instance. First, the caller "
-        "sends a TokenMessage. Its token is the instance token. Its slot is the internal "
-        "port, as a decimal number. Then each side sends raw bytes at index 0. When the "
-        "stream of the caller stops, the node closes the write side of the connection "
-        "to the service."
-    ),
-    "Observe": (
-        "Observe takes an ObserveRequest and returns a stream of ObserveEvent. The first "
-        "event is a session event."
-    ),
-    "Chat": (
-        "Chat sends a message to the operator of the node. The client_id in the "
-        "ChatMessage must have a binding to a peer. The node returns a ChatAck."
-    ),
-    "ResolveNetwork": (
-        "ResolveNetwork takes a Service.Network and returns the addresses that the node "
-        "knows in it. The caller must make sure that each address is correct."
-    ),
-}
+def _indices_prose(table: Dict[int, type]) -> str:
+    return ", ".join(f"index {i} {_type_name(t)}" for i, t in sorted(table.items())) or "nothing"
+
+
+def _method_prose(name: str) -> str:
+    """One RPC for the prose: its indices and auth kind from ``GATEWAY_RPCS``, then the
+    description from its comment in ``celaut.proto`` (``protocol_doc``)."""
+    rpc = GATEWAY_RPCS[name]
+    description = protocol_doc.method_prose(GATEWAY_SERVICE_NAME, name) or ""
+    return (
+        f"{name}. Request: {_indices_prose(rpc.input)}. "
+        f"Response: {_indices_prose(rpc.output)}. Authentication: {rpc.auth}. "
+        f"{description}"
+    ).rstrip()
 
 
 def gateway_component() -> Layer:
@@ -500,7 +430,7 @@ def gateway_component() -> Layer:
     pairs.update(schema_pairs(celaut_pb2.DESCRIPTOR))
     formal = component_formal(pairs)
 
-    methods = "\n".join(RPC_PROSE[name] for name in sorted(GATEWAY_RPCS))
+    methods = "\n".join(_method_prose(name) for name in sorted(GATEWAY_RPCS))
     prose = (
         "This layer is the celaut gateway. The service is celaut.Gateway. The formal "
         "field gives the schema of all messages. It also gives, for each method, the "
@@ -541,7 +471,14 @@ def gateway_component() -> Layer:
         "by the solution, both in UTF-8. The hexadecimal digest must end with a number "
         "of zeros equal to the difficulty. Send the challenge again without a change.\n"
         "\n"
-        "METHODS.\n" + methods
+        "METHODS. Each method gives the type of each index in the request and in the "
+        "response, and its kind of authentication.\n" + methods + "\n"
+        "\n"
+        "MESSAGES. Each message gives its full name and what it is. Then each field "
+        "gives its number, its name, its cardinality, its type and what it is. The "
+        "formal field identifies a field only by its number. The names are only for "
+        "a reader.\n"
+        "\n" + protocol_doc.messages_prose()
     )
     return ("celaut-gateway",), prose, formal
 

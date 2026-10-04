@@ -118,6 +118,28 @@ It only compiles `celaut.proto` and `pack.proto` to Python — never
 (protoc 23.1): the committed `celaut_pb2.py` is that output with the `buffer_pb2`
 import pointed at `bee_rpc`.
 
+## Comments are protocol text
+
+The leading comment of each message, field and RPC in `celaut.proto` is its protocol
+description, in ASD-STE100. The node puts it in the prose of the `celaut-gateway`
+layer that it announces (`src/identity/protocol_doc.py`). A note for developers goes
+in a detached comment, with a blank line between it and the element. The head of
+`celaut.proto` gives the rules.
+
+The gencode drops the comments, so `bash/generate_protos.sh` also writes
+`protos/celaut_doc.binpb`: the descriptor with its source info. Run the script after
+each change to `celaut.proto`, also a change to a comment only. If you only changed
+comments, this command is sufficient, with any version of `grpcio-tools`:
+
+```
+python3 -m grpc_tools.protoc -Iprotos --include_source_info \
+  --descriptor_set_out=protos/celaut_doc.binpb protos/celaut.proto \
+  --experimental_allow_proto3_optional
+```
+
+`tests/identity/test_protocol_doc.py` fails if an element has no description, or if
+`celaut_doc.binpb` is not current.
+
 ## Operational notes
 
 - This migration is breaking: no legacy fallback.
