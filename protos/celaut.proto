@@ -1056,7 +1056,7 @@ service Gateway {
     // RecursionGuard. The node returns a ServiceInstance with the addresses of the
     // instance and its token. The node can start the service on a peer and give the
     // addresses of that instance. If the node does not have the service and the caller
-    // does not send it, the node returns no message.
+    // does not send it, the node refuses with an error.
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Stops an instance. The TokenMessage gives the instance token. The node gives the
     // balance that the instance did not use back to its parent, and returns a Refund
@@ -1110,7 +1110,7 @@ service Gateway {
     // Takes the same objects as StartService. Returns the cost to run the service on
     // this node, and starts nothing. A node that cannot run the service now refuses
     // with the reason. If the node does not have the service and the caller does not
-    // send it, the node returns no message. The node ignores a RecursionGuard here.
+    // send it, the node refuses with an error. The node ignores a RecursionGuard here.
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Asks if the node can run one instance with the given architecture and resources
     // now. The resources do not need to be those of a known service.

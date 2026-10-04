@@ -197,8 +197,24 @@ class AbstractInputServiceIterable:
         self.start()
         try:
             yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
+            # Only when the request stream ends, not when the caller cancels it. Neither
+            # side has the service: the node does not hold it, and the request did not
+            # carry it. Answering nothing left the caller to guess why.
+            if not self.service_saved:
+                raise Exception(self._missing_service_reason())
         finally:
             self.final()
+
+    def _missing_service_reason(self) -> str:
+        if self.service_hash:
+            return (
+                f"This node does not have the service {self.service_hash}, and the "
+                "request does not contain it."
+            )
+        return (
+            "The request gives no hash of the type this node uses for its registry "
+            f"({CONFIGURED_HASH_ID.hex()}), and no service."
+        )
 
     def start(self):
         pass
