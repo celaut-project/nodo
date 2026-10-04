@@ -69,9 +69,10 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 f"This is on registry -> {[h for h in os.listdir(REGISTRY)]} \n"
                 f"\n"
             )
-        elif not self.generated:
+        elif not self._caller_checked:
             # The service was ready but no client_id ever arrived: the gate in the base
             # class deferred, waiting for one, and the stream ended first. Its final()
             # makes that refusal definitive; overriding it without doing the same left
-            # such a caller with an empty response instead of an error.
+            # such a caller with an empty response instead of an error. A caller
+            # already checked is not checked again, also when generate() failed.
             require_caller(self.context, self.client_id or "")

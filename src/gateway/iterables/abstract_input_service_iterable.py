@@ -168,13 +168,20 @@ class AbstractInputServiceIterable:
             # refusal definitive in the latter case). Nothing has been yielded yet at
             # this point either way, so deferring never leaves a half-sent response.
             if not self._caller_checked:
+                # The check runs once. After it gives an answer (a pass or a
+                # refusal), final() does not run it again: each call counts against
+                # the client's rate limit, and a second call could replace the real
+                # error of generate() with "calling too fast".
+                decided = True
                 try:
                     require_caller(self.context, self.client_id or "")
                 except ClientRequired:
-                    if self.client_id:
-                        raise
-                    return
-                self._caller_checked = True
+                    if not self.client_id:
+                        decided = False
+                        return
+                    raise
+                finally:
+                    self._caller_checked = decided
 
             yield Buffer(signal=True)
 
@@ -202,7 +209,7 @@ class AbstractInputServiceIterable:
     def final(self):
         if self.service_hash and not self.service_saved:
             add_wanted(self.service_hash)
-        elif self.service_saved and not self.generated:
+        elif self.service_saved and not self._caller_checked:
             # The stream ended with the service ready to serve but no client_id ever
             # arrived to confirm a caller -- what looked like "might still be coming"
             # above never came. Nothing was sent for this request (the check above
