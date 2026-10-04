@@ -5,6 +5,7 @@ from src.gateway.client_gate import require_caller
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as log
+from protos.gateway_bee import rpc_output
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.config import ConfigManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
@@ -45,7 +46,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
             raise Exception(f"Corrupt metadata for the service {self.service_hash}")
 
         yield from BeeClient.respond(
-            indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
+            indices=rpc_output("StartService"),
             message_iterator=launch_service(
                 service_id=self.service_hash,
                 service=service,

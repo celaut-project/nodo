@@ -26,6 +26,7 @@ blobs on disk -- from framing a gRPC call, and the files that do it keep importi
 ``bee_rpc`` directly.
 """
 import concurrent.futures
+import itertools
 from typing import Any, Optional, Union
 
 from bee_rpc import client as bee
@@ -34,7 +35,6 @@ from bee_rpc.control import StreamControl
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import (
-    StartService_input_indices,
     StartService_input_message_mode,
     rpc_input,
     rpc_output,
@@ -126,10 +126,31 @@ class BeeClient:
 
     @staticmethod
     def respond(message_iterator=None, indices=None, control: Optional[StreamControl] = None):
-        """Serialize a handler's response -- ``yield from`` this."""
+        """Serialize a handler's response -- ``yield from`` this.
+
+        ``indices`` is the method's table as it is (``rpc_output``), also when it has
+        only index 0 (``ServiceTunnel``). For such a table, bee_rpc gets the index from
+        the first message with an unguarded ``next()``. Thus a response with no message
+        stops with a RuntimeError, not with an empty stream. This method reads the first
+        message before bee_rpc does, and sends an empty stream if there is none.
+        """
+        if isinstance(indices, dict) and set(indices) <= {0} and message_iterator is not None:
+            return BeeClient._respond_from_first(message_iterator, indices, control)
         return bee.serialize_to_buffer(
             message_iterator=message_iterator,
             indices=indices,
+            control=control,
+        )
+
+    @staticmethod
+    def _respond_from_first(message_iterator, indices, control):
+        iterator = iter(message_iterator)
+        first = next(iterator, BeeClient._NOTHING)
+        if first is BeeClient._NOTHING:
+            return
+        yield from bee.serialize_to_buffer(
+            message_iterator=itertools.chain([first], iterator),
+            indices=dict(indices),
             control=control,
         )
 
@@ -331,7 +352,7 @@ class BeeClient:
     def get_service_estimated_cost(
             channel, message_iterator, timeout: Optional[float] = None
     ) -> Optional[celaut_pb2.EstimatedCost]:
-        """``message_iterator`` is a ``StartService_input_indices``-shaped envelope
+        """``message_iterator`` is a ``rpc_input("GetServiceEstimatedCost")``-shaped envelope
         (``src.utils.utils.service_extended``'s output) -- the same one used to
         quote and to actually launch, so a quote and the launch it precedes are
         always priced off the same declaration.
@@ -398,9 +419,9 @@ class BeeClient:
             method=celaut_pb2_grpc.GatewayStub(channel).GetService,
             input=input_messages,
             indices_serializer=rpc_input("GetService"),
-            # A superset of rpc_output("GetService"): its 4/5/6 are the StartService
-            # envelope's, and the partition modes below are keyed by the whole envelope.
-            indices_parser=StartService_input_indices,
+            indices_parser=rpc_output("GetService"),
+            # Keyed by the StartService envelope's indices, which GetService's 4/5/6
+            # reuse: index 6, the Service, is stored as a Dir.
             partitions_message_mode_parser=StartService_input_message_mode,
             # Tell the peer which blocks of what it sends we already hold, so it
             # stops mid-block instead of us draining and discarding bytes it did

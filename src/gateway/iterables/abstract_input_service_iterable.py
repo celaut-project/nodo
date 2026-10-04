@@ -3,8 +3,7 @@ from typing import Optional, Generator, Set, Tuple
 
 from protos import celaut_pb2 as celaut
 from protos import celaut_pb2
-from protos.gateway_bee import StartService_input_indices, \
-    StartService_input_message_mode
+from protos.gateway_bee import StartService_input_message_mode, rpc_input
 from src.gateway.client_gate import ClientRequired, require_caller
 from src.gateway.utils import save_service
 from src.utils import logger as log
@@ -55,6 +54,10 @@ class Hash:
 
 class AbstractInputServiceIterable:
 
+    # The Gateway RPC this iterable serves: its request indices come from
+    # protos.gateway_bee.GATEWAY_RPCS, the table this node also announces.
+    RPC: str = "StartService"
+
     # Class-level too, so an iterable built without __init__ (a handler under test)
     # reads "the sender gave no hop count" rather than failing on the attribute.
     recursion_guard_hops: Optional[int] = None
@@ -62,7 +65,7 @@ class AbstractInputServiceIterable:
     def __init__(self, request_iterator, context):
         self.parser_iterator = BeeClient.parse(
             request_iterator,
-            indices=StartService_input_indices,
+            indices=rpc_input(self.RPC),
             partitions_message_mode=StartService_input_message_mode
         )
 

@@ -132,9 +132,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
         gRPC plumbing around them, and a decision buried in a handler is a decision
         nobody can test.
         """
-        network, client_id = parse_with_client(
-            request_iterator, payload_type=celaut_pb2.Service.Network
-        )
+        network, client_id = parse_with_client(request_iterator, method="ResolveNetwork")
 
         if network is None:
             raise Exception("ResolveNetwork needs a Service.Network to resolve.")
@@ -174,7 +172,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # never stopped a flood of new, validly-signed ones, each still worth a DB
         # write. A client_id is what makes that expensive to repeat -- see
         # client_gate.require_caller.
-        peer, client_id = parse_with_client(request_iterator, payload_type=celaut_pb2.Peer)
+        peer, client_id = parse_with_client(request_iterator, method="IntroducePeer")
         require_caller(context, client_id)
 
         log.LOGGER('Introduce peer method.')
@@ -292,7 +290,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def Payable(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for payment.')
-        payment, client_id = parse_with_client(request_iterator, payload_type=celaut_pb2.Payment)
+        payment, client_id = parse_with_client(request_iterator, method="Payable")
         require_caller(context, client_id)
         raw_script = get_script(payment.contract)
         # Select the payment validator by the stable, wallet-independent contract_type; the
@@ -349,12 +347,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
         try:
             yield from BeeClient.respond(
                     message_iterator=relay,
-                    # Mirrors the input map. Declaring a second index also keeps
-                    # bee_rpc from inferring the index off the first message, which
-                    # it does by calling next() unguarded — a service that closes
-                    # without replying would surface as a RuntimeError instead of an
-                    # empty stream.
-                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
+                    indices=rpc_output("ServiceTunnel"),
             )
         finally:
             # The socket is opened eagerly inside service_tunnel; guarantee it is

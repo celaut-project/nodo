@@ -2,6 +2,7 @@ from src.utils.utils import read_service_from_disk
 from typing import Generator, Optional, Tuple
 
 from protos import celaut_pb2
+from protos.gateway_bee import rpc_output
 from src.utils.tools.query_cache import QueryCache, canonical_key, quote_ttl, with_sorted_hashes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
@@ -16,6 +17,7 @@ from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 
 
 class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
+    RPC = "GetServiceEstimatedCost"
     
     # https://github.com/celaut-project/nodo/issues/70
     
@@ -90,7 +92,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
 
             yield from BeeClient.respond(
                 message_iterator=price,
-                indices=celaut_pb2.EstimatedCost
+                indices=rpc_output("GetServiceEstimatedCost")
             )
 
         except UnsupportedArchitectureException as e:

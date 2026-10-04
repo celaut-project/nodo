@@ -41,7 +41,7 @@ class GetResourceAvailabilityIterable:
             # than refused -- the same shape get_resource_availability itself gives an
             # unset `at_most`.
             request, client_id = parse_with_client(
-                self.request_iterator, payload_type=celaut_pb2.ArchitectureResources
+                self.request_iterator, method="GetResourceAvailability"
             )
             require_caller(self.context, client_id)
             if request is None:

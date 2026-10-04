@@ -70,8 +70,8 @@ class DeclarationTests(unittest.TestCase):
         self.assertEqual(set(GATEWAY_RPCS), served)
 
     def test_a_client_gated_rpc_takes_its_payload_at_one_and_the_client_at_two(self):
-        # What client_gate.parse_with_client reads; a table that put them elsewhere
-        # would describe a method the server does not serve.
+        # What every caller sends (bee_client) and what client_gate.parse_with_client
+        # reads from this same table.
         for name, rpc in GATEWAY_RPCS.items():
             if rpc.auth == "client" and len(rpc.input) == 2:
                 self.assertIs(rpc.input[2], celaut_pb2.Client, name)
