@@ -180,8 +180,6 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
         public_port = _public_port(_gateway_port())
         uris.append(celaut.Instance.Uri(ip=public_host, port=public_port))
         log.LOGGER(f'Announcing public host {public_host}:{public_port}')
-    else:
-        log.LOGGER('No public address to announce (set network.PUBLIC_IP if behind NAT).')
 
     announce_private = bool(env_manager.get("network.ANNOUNCE_PRIVATE_ADDRESSES", False))
     private: List[celaut.Instance.Uri] = []
