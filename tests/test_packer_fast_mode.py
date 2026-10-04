@@ -249,6 +249,19 @@ class PackCommandFlagsTests(unittest.TestCase):
                 self.assertEqual(self.packs.pack_command(["proj", "--detach", *argv]), 0)
             self.assertEqual(seen["options"], expected, argv)
 
+    def test_detach_warns_in_the_parent_that_the_service_ignores_fast(self):
+        from src.utils import pack_registry
+        spawned = ({"id": "3f9a0c12", "pid": 1, "source": "proj", "log": "x.log"}, None)
+        for argv, kind, warned in ((["--fast"], "service", True), (["--fast"], "local", False),
+                                   ([], "service", False)):
+            with mock.patch.object(pack_registry, "spawn_detached", return_value=spawned), \
+                 mock.patch.object(self.packs, "_packer_kind", return_value=kind), \
+                 mock.patch("builtins.print") as printed:
+                self.assertEqual(self.packs.pack_command(["proj", "--detach", *argv]), 0)
+            self.assertEqual(
+                any(c.args and c.args[0] == self.packs.FAST_IGNORED
+                    for c in printed.call_args_list), warned, (argv, kind))
+
     def test_service_fallback_to_local_keeps_fast(self):
         with mock.patch.object(pack_mod, "_local_packer_enabled", return_value=False), \
              mock.patch.object(pack_mod, "_pack_via_service",

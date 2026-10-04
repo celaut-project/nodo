@@ -243,10 +243,8 @@ def pack(directory: str, local: bool = False, fast: bool = False) -> Optional[st
         return _pack_local(directory, fast=fast)
 
     if fast:
-        print(
-            "--fast only affects the local packer; the packer service ignores it "
-            "and packs normally."
-        )
+        from src.commands.packs import FAST_IGNORED
+        print(FAST_IGNORED)
     result = _pack_via_service(directory)
     if result is _SERVICE_UNAVAILABLE:
         if _offer_local_packer():

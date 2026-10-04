@@ -76,6 +76,10 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict, fast:
                     try:
                         dependency = pack(_dir, fast=fast)
                     except Exception as e:
+                        # Say why: the "Dependency packing error" below names no cause.
+                        print(f"Packing the dependency {_dir} failed: {e!r}")
+                        from src.utils import pack_registry
+                        pack_registry.note_error(f"dependency {_dir}: {e}")
                         dependency = None
                     
                     if not dependency:

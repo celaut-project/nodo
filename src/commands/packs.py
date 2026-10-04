@@ -22,6 +22,9 @@ LOG_TAIL_LINES = 20
 USAGE = ("Usage: nodo pack <project directory | https git URL[#subdir]> [--local] "
          "[--fast | --optimize] [--detach] [--json]")
 
+FAST_IGNORED = ("--fast only affects the local packer; the packer service ignores it "
+                "and packs normally.")
+
 NODO_PY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nodo.py"))
 
 
@@ -43,7 +46,8 @@ def _fast(fast_flag: bool, optimize_flag: bool) -> bool:
         from src.utils.config import ConfigManager
 
         return bool(ConfigManager().get("packer.fast", False))
-    except Exception:
+    except Exception as e:  # An unreadable config must not stop a pack; say so.
+        print(f"Could not read packer.fast ({e!r}); packing normally.", file=sys.stderr)
         return False
 
 
@@ -157,12 +161,16 @@ def pack_command(argv: List[str]) -> int:
         emit_error(as_json, f"Error: {e}")
         return 1
 
+    fast = _fast(fast_flag, optimize_flag)
     if detached:
+        # pack() warns that the packer service ignores --fast, but a detached
+        # child's output only reaches its log: say it here, where it is seen.
+        if fast and _packer_kind(local) == "service":
+            print(FAST_IGNORED, file=sys.stderr)
         # The child re-runs `nodo pack` and resolves packer.fast itself, so it gets
         # the flags as typed rather than the resolved value.
         mode = ["--fast"] if fast_flag else ["--optimize"] if optimize_flag else []
         return 0 if detach(source, as_json=as_json, local=local, options=mode) else 1
-    fast = _fast(fast_flag, optimize_flag)
     return 0 if foreground(source, kind, as_json=as_json, local=local, fast=fast) else 1
 
 
