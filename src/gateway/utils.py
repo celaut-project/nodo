@@ -403,7 +403,8 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not
-    # here: that is what GetServiceEstimatedCost is for. Values are ceilings; see
+    # here: that is what GetServiceEstimatedCost is for. Values are base prices (the
+    # node scales RAM, CPU and disk up to scarcity_max_multiplier); see
     # node_advertised_rates(). Node-wide rather than per-address, because a node's
     # rates do not depend on which of its addresses you reach it through.
     #

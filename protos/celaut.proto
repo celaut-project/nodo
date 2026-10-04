@@ -24,8 +24,8 @@ import "buffer.proto";
 // CEL•AUT MESSAGES
 // -----------------------
 
-// A description of a data format. The tags name the format, the prose explains it to
-// a reader, and the formal field gives it in a form that a program can read.
+// A description of a data format. The tags name the format. The prose explains it to a
+// reader. The formal field gives it in a form that a program can read.
 message DataFormat {
     // Names of the format.
     repeated string tags = 1;
@@ -47,7 +47,7 @@ message DataFormat {
 // therefore different ids. A repeated field keeps the order it was given.
 // (src/utils/keyvalue.py is the one place that implements the convention below.)
 
-// One entry of a list of key-value entries, with a bytes value. In a list, a producer
+// One entry of a list of key-value entries, with a bytes value. In a list, a sender
 // sorts the entries by key (UTF-8 bytes, ascending), writes one entry for each key and
 // writes no empty key. A reader uses the last entry of a key. The value has explicit
 // presence, so an entry with an empty value is still written.
@@ -109,20 +109,26 @@ message Uint64KeyValue {
 // its rules. The xattrs give all the values that are specific to the ledger.
 //
 // Keys of xattrs:
-// "script": the script bytes of the wallet (on Ergo, the propositionBytes).
-// "address": the address of the wallet on the ledger, as text.
-// "token_id": the asset. On a reputation proof, the id of the proof.
-// "contract_type": an identifier of the kind of contract. It does not depend on the
-// wallet.
+// "script": the script bytes that receive the payment (on Ergo, the propositionBytes;
+// on Bitcoin, the scriptPubKey). On a reputation proof, the ErgoTree of the reputation
+// contract.
+// "address": the address of the wallet on the ledger, as text, for a person. Senders do
+// not set it now. A reader uses it only if there is no script.
+// "token_id": the asset: the name of the native asset (for example "ERG" or "BTC"), or
+// the id of the token. On a reputation proof, the token id of the proof.
+// "contract_type": an identifier of the kind of payment contract, as UTF-8 text. It
+// does not depend on the wallet. A reputation proof does not have it.
 // "owner_public_key" and "owner_signature": on a reputation proof only, the owner
-// attestation. The key published the proof on the ledger, in the encoding of that
-// ledger. The signature is by that key, on the id of the peer that announces the
-// proof. The attestation proves that the owner of the key agrees, and nothing more. If
-// it does not verify, the reader uses the proof as a proof with no owner.
+// attestation. The public key is the key that published the proof, in the encoding
+// that the ledger declaration gives. The signature is by that key, on a text that
+// contains the id of the peer that announces the proof. The ledger declaration gives
+// the text. The attestation proves only that the owner of the key accepts this peer as
+// the holder of the proof. If the attestation is missing or does not verify, the
+// reader does not credit the proof to the peer.
 message Contract {
-    // A description of a ledger, in the same form as each replaceable component. The
-    // tags name the ledger, the prose explains it, and the formal field gives the
-    // network, the units and the rules as key=value lines.
+    // A description of a ledger, with the same three parts as DataFormat. The tags name
+    // the ledger. The prose explains it. The formal field gives the network, the units
+    // and the rules as sorted key=value lines. The formal field can be empty.
     message Ledger {
         // Names of the ledger, for example "ergo".
         repeated string tags = 1;
@@ -137,16 +143,17 @@ message Contract {
     repeated BytesKeyValue xattrs = 2;
 }
 
-// Why a string and not an integer: a balance has no limit. Ergo is the only payment
-// system now and defaults to 1 MU = 1 nanoERG (ledgers.ergo.payments.MU_PER_NANOERG),
-// but that is a default the operator can change, not a definition.
+// Why a string and not an integer: a balance has no limit. Ergo defaults to 1 MU = 1
+// nanoERG (ledgers.ergo.payments.MU_PER_NANOERG), but the operator can change that
+// default. It is not a definition.
 
 // An amount in MU, the monetary unit of the node that issues it. MU has no value of its
 // own. Each payment contract gives the value of MU (ContractRate.mu_per_unit), so a
 // reader can convert a price. Do not assume a fixed rate.
 message Amount {
     // A decimal integer, with a minus sign if it is negative. Most fields have a value
-    // of 0 or more. ModifyDepositInput.difference can be negative.
+    // of 0 or more. ModifyDepositInput.difference can be negative. A balance can be
+    // negative if the node allows debt.
     string n = 1;
 }
 
@@ -158,27 +165,30 @@ message Amount {
 message ContractRate {
     // The contract that a payer pays into.
     Contract contract = 1;
-    // MU for one base unit of the asset: one nanoERG, one satoshi, or one smallest unit
-    // of a token. Never for one whole ERG or BTC. A whole number. The ledger declaration
-    // of the contract (payment.rate.unit) says the same.
+    // The MU for one base unit of the asset: one nanoERG, one satoshi, or one smallest
+    // unit of a token. It is not the MU for one whole ERG or BTC. The value is an
+    // integer. The ledger declaration of the contract can give the same rule
+    // (payment.rate.unit).
     Amount mu_per_unit = 2;
 }
 
 // What identifies and describes a service: its content hashes, its names and the
 // reputation proofs about it.
 message Metadata {
-    // The hashes and the names of a service.
+    // The hashes and the names of an object: a service or a part of a service.
     message HashTag {
         // One hash of an object.
         message Hash {
-            // The type of the hash: the digest of an empty input with that algorithm.
+            // The type of the hash: the digest of an empty input with that algorithm and
+            // output length. The value has the same length.
             bytes type = 1;
             // The digest of the object.
             bytes value = 2;
         }
         // The hashes and the names of one part of a service.
         message AttrHashTag {
-            // The field number in the Service message of the part.
+            // The field number of the part in the message that contains it. At the top
+            // level, a field number of Service.
             int32 key = 1;
             // The hashes and the names of the part. A HashTag can contain more
             // AttrHashTag entries for the parts of the part.
@@ -186,7 +196,7 @@ message Metadata {
         }
         // The hashes of the object, one for each hash type.
         repeated Hash hash = 1;
-        // Names of the service for a person. The first name is the main name.
+        // Names of the object for a person. The first name is the main name.
         repeated string tag = 2;
         // The hashes and the names of the parts of the service, for example the
         // container and its filesystem.
@@ -196,7 +206,7 @@ message Metadata {
     optional HashTag hashtag = 1;
     // The data format of the service. Senders do not set it now.
     optional DataFormat format = 2;
-    // Reputation proofs about the service.
+    // Reputation proofs about the service. Senders do not set it now.
     repeated Contract reputation_proofs = 3;
 }
 
@@ -211,8 +221,7 @@ message Metadata {
 message Service {
     // The interface of the service: its ports with their protocols, the payment
     // contracts that it accepts and its prices. A service costs MU at the start (a
-    // fixed cost) and while it runs (a usage cost). The protocols of the API give the
-    // rules of the cost.
+    // fixed cost) and while it runs (a usage cost). The node sets the two costs.
     message Api {
         // A description of a protocol, in the same form as each replaceable component.
         message Protocol {
@@ -231,14 +240,17 @@ message Service {
             Protocol transport = 2;
             // The protocols on the transport, bottom to top, for example "grpc".
             repeated Protocol protocol_stack = 3;
-            // MU for each call, by the name of a method of the service. Only for
-            // information: the node does not charge it.
+            // MU for each call, by the name of a method of the service. In
+            // ConfigurationFile.gateway, the keys are the names of the rates of the node.
+            // Only for information: the node does not charge it.
             repeated AmountKeyValue mu_per_call = 4;
         }
 
         // The ports of the service.
         repeated Slot slot = 1;
         // The payment contracts that the service accepts, and the value of each in MU.
+        // Senders do not set it on a Service now. In ConfigurationFile.gateway, these
+        // are the contracts of the node.
         repeated ContractRate payment_contracts = 2;
     }
 
@@ -247,8 +259,10 @@ message Service {
     // instance itself), these describe its descendants.
 
     // One scenario of instances that the service can start at the same time. Scenarios
-    // are independent: they do not add up, and they have no sequence. A node can refuse
-    // to start the service if it, or a peer that it knows, cannot run each scenario.
+    // are independent: they do not add up, and they have no sequence. Each workload of a
+    // scenario must be able to run on the node or on a peer that it knows. If not, the
+    // node can refuse to start the service. The node checks one instance of each workload. It does not
+    // keep resources for the instances.
     message PossibleEnvironmentWorkload {
         // One group of identical instances that run at the same time.
         message Workload {
@@ -269,7 +283,8 @@ message Service {
 
             // The number of instances that run at the same time.
             uint32 count = 1;
-            // The resources that each of these instances can need.
+            // The most resources that each of these instances can use. Its benchmark
+            // gives the minimum score for each core.
             Sysresources resources = 2;
             // The service of the instances, if the workload is for one service. If the
             // field is absent, the workload gives only resources.
@@ -300,36 +315,45 @@ message Service {
             message ItemBranch {
                 // A symbolic link.
                 message Link {
-                    // The target of the link. A path relative to the root of the image
-                    // if the target is in the image.
+                    // The fully resolved target of the link. If the target is in the
+                    // image, it is an absolute path from the root of the image.
                     string src = 1;
-                    // The path of the link in the tree.
+                    // The full path of the link from the root of the image. It is the
+                    // same as the path of this entry.
                     string dst = 2;
                 }
                 // The name of the file, the link or the directory.
                 string name = 1;
                 oneof item {
-                    // The content of a file.
+                    // The content of a file, or a buffer.Block that points to the
+                    // content. Empty for a device.
                     bytes file = 2;
                     // A symbolic link.
                     Link link = 3;
                     // The content of a directory.
                     Filesystem filesystem = 4;
                 }
-                // Attributes of the entry. File keys: "mode", "uid", "gid", "mtime_ns",
-                // and for a device "device.major", "device.minor", "device.is_block".
-                // Directory keys for a shared directory: "shared" ("true" exports the
-                // directory to the child services), "guest" ("true" gets the directory
-                // from the parent service), "access" ("ro" or "rw", default "rw"),
-                // "share_tag" and "share_env".
+                // Attributes of the entry. Every entry has all or none of these keys:
+                // "mode", "uid", "gid", "mtime_ns", "device.major", "device.minor",
+                // "device.is_block". Their values are base-10 integers as UTF-8 text. On
+                // an entry that is not a device, the three device keys are "0". Keys for
+                // a shared directory:
+                // "shared": "true" exports the directory to the child services.
+                // "guest": "true" gets the directory from the parent service. A service
+                // with "guest" does not start if its parent does not export that share.
+                // "access": "ro" or "rw". The default is "rw".
+                // "share_tag": the name of the share. The default is the path.
+                // "share_env": the name of an environment variable. Its value selects
+                // the share.
                 repeated BytesKeyValue xattrs = 5;
             }
             // The entries of the directory.
             repeated ItemBranch branch = 1;
             // Attributes of the whole tree. Only on the root Filesystem: a reader
             // ignores them on a subdirectory. Key "read_mode": "rw" (the default) or
-            // "ro". With "ro", the service needs no space to write in its root
-            // filesystem, apart from /tmp. The node can then make a compressed image
+            // "ro". Another value is an error. With "ro", the service can write only in
+            // /tmp and /run. Every entry must then have all the metadata keys, and no
+            // directory can have "shared". The node can then make a compressed image
             // and mount it read-only.
             repeated BytesKeyValue xattrs = 2;
         }
@@ -338,7 +362,8 @@ message Service {
         message Init {
             // The path of the executable, as path segments. No arguments.
             repeated string entry_path = 1;
-            // Other start options of the service.
+            // Other start options of the service, as keys and values. The node does not
+            // read them now.
             repeated BytesKeyValue xattrs = 2;
         }
 
@@ -346,9 +371,11 @@ message Service {
         message ConfigDeclaration {
             // The path of the configuration file in the container, as path segments.
             // The default is "__config__". The file contains a serialized
-            // ConfigurationFile.
+            // ConfigurationFile. The node can ignore this path and write the file to
+            // "/__config__".
             repeated string path = 1;
-            // The format of the configuration. Senders do not set it now.
+            // The format of the configuration. Senders set it to an empty DataFormat
+            // now. A reader ignores it.
             DataFormat format = 2;
         }
 
@@ -384,24 +411,29 @@ message Service {
 
     // Shared disks / VirtioFS / filesystem inheritance are NOT networks. Those are an
     // execution-environment concern expressed through Container.Filesystem.ItemBranch.xattrs
-    // (shared/guest/access).
+    // (shared, guest, access, share_tag, share_env).
 
     // A logical domain where the instances of the service find their peers. It gives
     // which peers the service wants (tags, prose, formal) and which protocols these
     // peers must speak (protocol_stack).
     message Network {
-        // Names of the domain. Each tag names the same destination: a hostname, "ipv4",
-        // "public", "pow:ergo" or another tag.
+        // Names of the domain. Each tag names the same destination: a hostname in
+        // lowercase, "pow:ergo", or another tag. The tag "*" lets the instance connect
+        // to all addresses.
         repeated string tags = 1;
         // A text that explains the domain to a reader.
         string prose = 2;
         // The parameters of the domain, as sorted key=value lines in UTF-8. A
         // proof-of-work domain uses keys with the prefix "pow.": "pow.chain",
         // "pow.block_id", "pow.min_cumulative_difficulty", and optionally "pow.min_height"
-        // and "pow.max_tip_age_s". A value can contain ${VAR}, which the node replaces
-        // with an environment variable of the Configuration. A reader keeps a key that it
-        // does not know. If two domains both have a formal field, the formal field
-        // decides if they are the same. If not, one common tag is sufficient.
+        // and "pow.max_tip_age_s". A value can be only "${NAME}". The node then replaces
+        // it with the environment variable NAME of the Configuration. A value cannot
+        // contain "${" together with other text. The value of "pow.chain" cannot be a
+        // variable. If the variable is absent, or its value is not UTF-8 text on one
+        // line, the node does not resolve the domain at the start. The instance can
+        // then ask for it with ResolveNetwork. A reader keeps a key that it does not
+        // know. If two domains both have a formal field, they are the same only if the
+        // two fields have the same bytes. If not, one common tag is sufficient.
         bytes formal = 3;
         // The protocols that the peers in the domain must speak.
         repeated Api.Protocol protocol_stack = 4;
@@ -423,7 +455,7 @@ message Service {
 message Instance {
     // One address of an instance.
     message Uri {
-        // The IP address.
+        // The IP address or the host name.
         string ip = 1;
         // The port.
         int32 port = 2;
@@ -449,25 +481,30 @@ message Instance {
 // The configuration that a caller gives to start a service.
 message Configuration {
     // Values of the environment variables of the service. The key is the name of the
-    // variable. The value is its bytes, as UTF-8 text.
+    // variable. The value is bytes, usually UTF-8 text. The node also gives a variable
+    // to the process of the service, if its name is a C identifier. Its value must have
+    // no NUL byte. The key "__nodo_instance_name" is reserved: the node removes it and
+    // uses its value as the name of the instance.
     repeated BytesKeyValue environment_variables = 1;
     // Not used. Senders do not set it, and receivers ignore it.
     repeated int32 spec_slot = 2;
     // The balance of the instance at the start, in MU. The node charges it to the
-    // caller. If it is absent, the node calculates a default from the resources at the
-    // start.
+    // caller. If it is absent or zero, the node calculates a default from the
+    // resources at the start.
     optional Amount initial_mu = 3;
 }
 
 // What the node gives to an instance when it starts it. The node writes it, serialized,
-// in the configuration file of the instance (Container.config_declaration).
+// to the file "/__config__" in the root of the instance.
 message ConfigurationFile {
     // The peers of one network of the service.
     message NetworkResolution {
         // The tags of the network, the same as in Service.Network.
         repeated string tags = 1;
         // The peers in the network that the instance can reach, each with only the
-        // ports that match the network.
+        // ports that match the network. The node lets the instance connect only to these
+        // peers. For the tag "*", the list is empty and the instance can connect to all
+        // addresses.
         repeated Instance peer_instances = 2;
     }
     // The gateway of the node, as the instance can reach it. Its API gives the rates
@@ -475,7 +512,8 @@ message ConfigurationFile {
     Instance gateway = 1;
     // The Configuration of the start.
     Configuration config = 2;
-    // The peers of each network of the service.
+    // The peers of each network that the node resolved at the start. A network that
+    // the node did not resolve is not here.
     repeated NetworkResolution network_resolution = 3;
     // The resources of the instance at the start.
     Sysresources initial_sysresources = 4;
@@ -483,15 +521,15 @@ message ConfigurationFile {
 
 // -----------------------
 // SYSTEM RESOURCES
-// Defines resource limits and weights for container updates.
+// Resource limits, requirements and measured scores.
 // -----------------------
 
 // The benchmark keys are in src/utils/benchmark.py::BENCHMARK_KEYS. New primitives are
 // new entry keys, never new proto fields -- this must never need a wire-format change
 // to add one. (benchmark.MEM_WORKING_SETS, benchmark.shortfalls)
 
-// The system resources of one instance. Where the Sysresources is gives if a value is
-// a minimum, a maximum or a measurement.
+// The system resources of one instance. The location of the Sysresources tells if a
+// value is a minimum, a maximum or a measurement.
 message Sysresources {
     // The block I/O weight, relative, from 10 to 1000.
     optional uint64 blkio_weight = 1;
@@ -512,9 +550,10 @@ message Sysresources {
     // "mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec" (bytes of memory written per
     // second, over a working set of that size). Compare a bandwidth only with a
     // bandwidth over the same size. If the node has no score for that size, it uses the
-    // score of the smallest larger size that it measured. In
-    // Service.Container.Resources.at_init and in a GetResourceAvailability request, the
-    // values are the minimum. In Peer.resources, they are the scores that the node
+    // score of the smallest larger size that it measured. If it has no such score, it
+    // does not apply that minimum. In Service.Container.Resources.at_init, in
+    // PossibleEnvironmentWorkload.Workload.resources and in a GetResourceAvailability
+    // request, the values are the minimum. In Peer.resources, they are the scores that the node
     // measured. In Service.Container.Resources.at_most, they have no meaning.
     repeated Uint64KeyValue benchmark = 99;
 }
@@ -525,9 +564,9 @@ message Sysresources {
 
 // A token, and a slot for some methods.
 message TokenMessage {
-    // The token. In StopService, ServiceTunnel and Observe: an instance token. In
-    // GetMetrics: an instance token or a client_id. In the response of
-    // GenerateDepositToken: a new deposit token.
+    // The token. In StopService and ServiceTunnel: an instance token. In GetMetrics: an
+    // instance token or a client_id. In the response of GenerateDepositToken: a new
+    // deposit token.
     string token = 1;
     // In ServiceTunnel: the internal port, as a decimal number. It must be one of the
     // Instance.uri_slot.internal_port values. Other methods do not use it.
@@ -536,8 +575,10 @@ message TokenMessage {
 
 // The cost to run a service on the node. The node that answers sets it.
 message EstimatedCost {
-    // The cost at the start, in MU: the cost to build the service and the balance of
-    // the instance at the start (Configuration.initial_mu).
+    // The cost at the start, in MU: the cost to build the service, plus the balance of
+    // the instance at the start. This balance is Configuration.initial_mu. If the
+    // request has no initial_mu, the node uses its own default balance for the
+    // resources at the start.
     Amount cost = 1;
     // The cost of one maintenance period with the resources at the start, in MU.
     Amount init_maintenance_cost = 2;
@@ -546,11 +587,12 @@ message EstimatedCost {
     // The length of one maintenance period, in seconds.
     int32 maintenance_seconds_loop = 4;
     // How much the real costs can be different from the estimate, with no unit. A
-    // reader increases each cost by this value times its own factor. 0 now.
+    // reader multiplies each cost by (1 + variance * k). The reader selects the factor
+    // k. A node that cannot estimate the difference sends 0.
     float variance = 5;
 }
 
-// Used to evaluate Service.PossibleEnvironmentWorkload scenarios: a descendant workload
+// Peers use this message to evaluate Service.PossibleEnvironmentWorkload scenarios: a descendant workload
 // group can declare only `resources`, with no `hash`/embedded `service` to ask
 // GetServiceEstimatedCost about. Resources differ per architecture -- most visibly
 // `benchmark`, since the same "1.0 core" is native silicon under one virtualizer and
@@ -558,8 +600,9 @@ message EstimatedCost {
 
 // The resources for one architecture. In Peer.resources: the most that the node
 // supports for that architecture, with its measured benchmark scores. In a
-// GetResourceAvailability request: the resources asked about. The limits are the most
-// that one instance can grow to, and the benchmark is the minimum score for each core.
+// GetResourceAvailability request: the resources asked about. In that request, the
+// limits are the most that one instance can grow to, and the benchmark is the minimum
+// score for each core.
 message ArchitectureResources {
     // The architecture, compared by tag. In a GetResourceAvailability request, an empty
     // architecture is the native architecture of the node.
@@ -637,7 +680,7 @@ message Peer {
         // A description of one layer of the protocols of an address, in the same form
         // as each replaceable component.
         message Protocol {
-            // Names of the protocol, for example "tls". No version in a tag.
+            // Names of the protocol, for example "tls".
             repeated string tags = 1;
             // A text that explains the protocol to a reader. Nodes do not compare it.
             string prose = 2;
@@ -650,8 +693,8 @@ message Peer {
         string ip = 1;
         // The port.
         int32 port = 2;
-        // The unix time, in seconds, after which the address can stop being correct,
-        // for example the end of a DHCP lease. 0 means no estimate.
+        // The unix time, in seconds, after which the address can become incorrect, for
+        // example at the end of a DHCP lease. 0 means no estimate.
         int64 expiry_unix_timestamp = 3;
         // The transport of the address: "tcp" or "udp", in the tags.
         Protocol transport = 4;
@@ -667,19 +710,24 @@ message Peer {
     // The payment contracts that the node accepts, and the value of each in MU. They are
     // the same for all the addresses.
     repeated ContractRate payment_contracts = 3;
-    // The rates of the node, in MU. Keys: "ram_mu_per_gib_second" (and
+    // The rates of the node. Keys: "ram_mu_per_gib_second" (and
     // "ram_mu_per_gib_second:<architecture>"), "cpu_mu_per_vcpu_second",
     // "disk_mu_per_gib_second", "net_mu_per_gib", "build_mu", "tunnel_open_mu",
-    // "modify_resources_mu", "scarcity_max_multiplier". Each value is a maximum. A
-    // reader ignores a key that it does not know.
+    // "modify_resources_mu", "scarcity_max_multiplier". The values of the "_mu" keys
+    // are in MU. Each RAM, CPU and disk rate is a base price. When a resource is scarce,
+    // the node multiplies its rate by a factor from 1 to scarcity_max_multiplier. The
+    // other rates do not change. scarcity_max_multiplier has no unit. The node does not
+    // send a rate of 0. A reader ignores a key that it does not know.
     repeated AmountKeyValue mu_per_call = 4;
-    // The public key of the identity of the node, in hexadecimal, in the encoding that
-    // signature_scheme gives. It is the id of the peer.
+    // The public key of the identity of the node, in the encoding that
+    // signature_scheme gives, as 64 lowercase hexadecimal characters. It is the id of
+    // the peer. A reader refuses a key with uppercase characters or spaces.
     string public_key = 5;
-    // The signature, by public_key, of the text "<public_key>|<ts>|<content digest>".
-    // The content digest covers all the other fields of the Peer. The celaut-gateway
-    // layer gives how to make it. The signature proves that the sender holds the key,
-    // so no challenge is necessary.
+    // The signature, by public_key, of the text "<public_key>|<ts>|<content digest>", in
+    // lowercase hexadecimal. The content digest covers all the other fields of the
+    // Peer. The celaut-gateway layer specifies the digest. The signature proves that
+    // the holder of the key made this content. Thus a node can accept the Peer from a
+    // relay, and no challenge is necessary.
     string signature = 6;
 
     // Why a stack and not four named fields: a scheme with a different shape
@@ -707,21 +755,24 @@ message Peer {
             // fully known. Else empty.
             bytes formal = 3;
         }
-        // The components, in no sequence. Two schemes are the same if each component of
-        // one pairs with one component of the other: equal formal fields if both have
-        // one, else one common tag. Each component must have tags, a formal field or
-        // both.
+        // The components, in no sequence. Two schemes are the same if they have the same
+        // number of components. Also, each component of one must pair with a different
+        // component of the other. Two components pair if their formal fields are equal,
+        // when both have one. Else they pair if they have one common tag. Each component
+        // must have tags, a formal field or both.
         repeated Protocol components = 1;
     }
     // The signature scheme. The signature covers it, so a relay cannot change it.
     SignatureScheme signature_scheme = 7;
     // The maximum resources that the node supports, one entry for each architecture
-    // that it runs. An architecture that is not in the list is one that the node does
-    // not run. Each value is a limit of capacity, not the free capacity now: a request
-    // that fits can be refused because of load, but a request that does not fit is
-    // always refused. The benchmark gives the measured score for each core. A score that
-    // the node did not measure is absent, never 0. Before a caller asks for a cost or
-    // for availability, it can skip a node whose entry does not fit the request.
+    // that it runs. If the list is not empty, the node does not run an architecture
+    // that is not in it. If the list is empty, the node gives no data about its
+    // resources. Each value is a limit of capacity, not the free capacity now. The node
+    // can refuse a request that fits, because of load. The node always refuses a
+    // request that does not fit. The benchmark gives the measured score for each core.
+    // If the node did not measure a score, the score is absent, never 0. Before a
+    // caller asks for a cost or for availability, it can skip a node whose entry does
+    // not fit the request.
     repeated ArchitectureResources resources = 8;
     // The unix time of the announcement, in seconds. A reader accepts a Peer only if its
     // ts is more than the ts of the last Peer that it accepted for the same public_key.
@@ -741,8 +792,9 @@ message Client {
     optional string challenge = 2;
     // The solution of the proof of work. Only with challenge.
     optional string pow_solution = 3;
-    // The id of a peer that the caller is. Optional. With signature, it binds the
-    // client to that peer.
+    // Optional. The id of the peer that sends the request. With signature, it binds the
+    // client to that peer. The node binds it only if it already knows the peer. If not,
+    // the caller calls AssociateClient after IntroducePeer.
     optional string peer_id = 4;
     // The signature, by the identity key of peer_id, of the client binding text that
     // the celaut-gateway layer gives. It covers peer_id and client_id.
@@ -756,11 +808,12 @@ message PoWRequired {
     repeated string tags = 1;
     // A text that explains the proof of work to a reader.
     string prose = 2;
-    // The parameters of the proof of work, as sorted key=value lines.
+    // The rule of the proof of work, as a text that a program can read.
     bytes formal = 3;
     // The challenge. Send it back without a change, with the solution.
     string challenge = 4;
-    // The number of zeros that the solution needs. The node uses the difficulty in the
+    // The number of "0" characters that must be at the end of the hexadecimal digest of
+    // the challenge followed by the solution. The node uses the difficulty in the
     // challenge, not this copy.
     int32 difficulty = 5;
 }
@@ -773,9 +826,10 @@ message ChatMessage {
     string client_id = 1;
     // The text of the message.
     string body = 2;
-    // The identifier of the conversation, a UUID4 as 32 hexadecimal characters.
-    // Optional. The side that starts a conversation makes it. Both sides then send it
-    // with each message of that conversation.
+    // The identifier of the conversation. Optional. The side that starts a
+    // conversation makes it, for example as a UUID4 in 32 hexadecimal characters. Both
+    // sides then send it with each message of that conversation. The receiver does not
+    // examine its format.
     optional string conversation_id = 3;
     // The Metadata of a service that the sender shares. Optional. The body also names
     // the service, for a reader that does not know this field.
@@ -792,15 +846,21 @@ message ChatAck {
 
 // See docs/RECURSION_GUARD.md (issue #456).
 
-// The guard of a request that a node can forward to its peers (StartService,
-// GetServiceEstimatedCost). It stops a request that comes back to a node.
+// The guard of a StartService request that a node can forward to its peers. It stops a
+// request that comes back to a node, and it limits the depth of the tree. The node
+// ignores the guard of a request from one of its local instances. That request starts
+// a new tree.
 message RecursionGuard {
-    // The name of the whole tree of requests. A node forwards it without a change. A
-    // node that already answers a request with this token refuses it again.
+    // The name of the whole tree of requests. A node forwards it without a change.
+    // While a node answers a request with this token, it refuses each other request
+    // with the same token. If the token is empty, the node starts a new tree with a new
+    // token. The node refuses a token that is longer than 128 characters, or that has
+    // characters other than A-Z, a-z, 0-9, ".", "_", ":" and "-".
     string token = 1;
     // How many nodes the tree can still go into, with the receiver. Each forward sends
     // one less. A receiver that gets 0 refuses. If it is absent, the receiver uses its
-    // own maximum.
+    // own maximum. A value more than the maximum of the receiver becomes that maximum.
+    // A receiver that gets 1 can do the work, but it does not forward the request.
     optional uint32 remaining_hops = 2;
 }
 
@@ -831,10 +891,11 @@ message ModifyServiceSystemResourcesInput {
 // The request of ModifyDeposit.
 message ModifyDepositInput {
     // The change of the balance of the instance, in MU. A positive value moves balance
-    // from the caller to the instance. A negative value moves balance from the instance
-    // back to the caller.
+    // from the parent of the instance to the instance. The parent is the client or the
+    // instance that started it. A negative value moves balance from the instance back
+    // to the parent.
     Amount difference = 1;
-    // The instance token.
+    // The instance token. The node also accepts the name of a local instance.
     string service_token = 2;
 }
 
@@ -848,25 +909,26 @@ message ModifyDepositOutput {
 
 // The request of Observe.
 message ObserveRequest {
-    // The instance token of the instance to observe.
+    // The instance token of a local instance of the node.
     string instance_id = 1;
     // True to also get one event for each packet. Without it, the stream has only the
     // session, the metrics and the notices.
     bool include_packets = 2;
 }
 
-// Fields mirror what src/commands/observe.py writes to metrics.jsonl (metrics) and
-// serialize_event (packet).
+// src/commands/observe.py makes these events (metrics_record, serialize_event).
 
 // One live event of an observed instance.
 message ObserveEvent {
-    // The time of the event, as HH:MM:SS.
+    // The time of the event, as HH:MM:SS in the local time of the node. Empty in the
+    // notice that tells why the observation did not start.
     string time = 1;
     // The kind of the event: "session", "metrics", "packet" or "notice". It names the
     // field of the oneof that the event sets.
     string kind = 2;
 
-    // How the node observes the instance. Always the first event, one time only.
+    // How the node observes the instance. It is the first event and it occurs one time,
+    // if the observation starts.
     message Session {
         // The instance token.
         string instance_id = 1;
@@ -877,7 +939,8 @@ message ObserveEvent {
         string capture_mode = 3;
         // Why the capture is not full. Empty when the capture is "pcap".
         string degraded_reason = 4;
-        // The libpcap LINKTYPE of the packets: 1 for Ethernet, 101 for raw IP.
+        // The libpcap LINKTYPE of the packets: 1 for Ethernet, 101 for raw IP. Only for
+        // "pcap".
         int32 link_type = 5;
         // The capture snap length, in bytes.
         uint32 snaplen = 6;
@@ -891,17 +954,18 @@ message ObserveEvent {
         bool alive = 1;
         // The CPU use, in percent.
         optional double cpu_percent = 2;
-        // The highest CPU use, in percent.
+        // The highest CPU use since the start of this observation, in percent.
         optional double cpu_peak_percent = 3;
         // The memory use, in bytes.
         optional uint64 mem_bytes = 4;
-        // The highest memory use, in bytes.
+        // The highest memory use since the start of this observation, in bytes.
         optional uint64 mem_peak_bytes = 5;
         // All the bytes that the instance read from its disks.
         optional uint64 disk_read_bytes = 6;
         // All the bytes that the instance wrote to its disks.
         optional uint64 disk_write_bytes = 7;
-        // All the bytes that the instance sent.
+        // All the bytes that the instance sent. The name uses the view of the host
+        // interface: rx is what the host receives from the instance.
         optional uint64 net_rx_bytes = 8;
         // All the bytes that the instance received.
         optional uint64 net_tx_bytes = 9;
@@ -915,17 +979,19 @@ message ObserveEvent {
 
     // One connection event or packet of the instance.
     message Packet {
-        // "IN" or "OUT", from the view of the instance.
+        // "OUT" if the instance is the source, "IN" if it is the destination. With
+        // "conntrack", this is the source and the destination of the first packet of the
+        // connection.
         string direction = 1;
         // The transport, for example "tcp", "udp" or "icmp".
         string transport = 2;
         // The transport in capital letters, for display.
         string protocol = 3;
-        // The TCP flags.
+        // The TCP flags. Only with "pcap" and TCP.
         string tcp_flags = 4;
-        // The source, as ip:port.
+        // The source, as ip:port. The port is "None" if the transport has no port.
         string src = 5;
-        // The destination, as ip:port.
+        // The destination, as ip:port. The port is "None" if the transport has no port.
         string dst = 6;
         // The length of the captured frame, in bytes. Only with "pcap".
         optional uint32 frame_len = 7;
@@ -933,7 +999,8 @@ message ObserveEvent {
         string peer_kind = 8;
         // The instance token of the other side, if it is an instance.
         string peer_instance_id = 9;
-        // The name of the service of the other side.
+        // The first tag of the service of the other side and the first three characters
+        // of its service id, for display. Empty if the other side is external.
         string peer_tag = 10;
         // How the other side relates to this instance: "parent", "child" or "peer".
         string peer_relationship = 11;
@@ -943,12 +1010,12 @@ message ObserveEvent {
         string source = 13;
         // The captured frame, without a change. Only with "pcap" and include_packets.
         bytes raw_frame = 14;
-        // The receive time of the frame, in unix seconds.
+        // The receive time of the frame, in unix seconds. Only with raw_frame.
         optional double frame_timestamp = 15;
     }
 
-    // A message about the observation, for example why it is degraded. It never
-    // contains invented data.
+    // A message about the observation, for example why the observation is not full, or
+    // that the instance stopped.
     message Notice {
         // The text of the notice.
         string message = 1;
@@ -972,50 +1039,59 @@ message ObserveEvent {
 // GATEWAY SERVICE DEFINITION
 // -----------------------
 
-// The Gateway of a node. Each RPC is a stream of buffer.Buffer in each direction.
-// protos/gateway_bee.py (GATEWAY_RPCS) gives the type at each bee-rpc index and the
-// kind of authentication of each RPC. The node announces that table in the
-// celaut-gateway layer. The authentication (src/gateway/client_gate.py):
-//   * client: a Client at index 2, next to the payload at index 1, in any sequence. A
-//     local instance of the node is exempt. All these RPCs share one rate limit for
-//     each client_id.
+// The Gateway of a node. Each RPC is a stream of buffer.Buffer in each direction. The
+// celaut-gateway layer of each address gives the message type at each bee-rpc index and
+// the kind of authentication of each RPC:
+//   * client: a Client in the request, at the index that the layer gives, in any
+//     sequence. A local instance of the node is exempt. All these RPCs share one rate
+//     limit for each client_id.
 //   * token: a token in the payload (an instance token; GetMetrics also takes a
 //     client_id).
 //   * client-in-message: Chat, with the client_id in the ChatMessage.
 //   * local-address: ModifyServiceSystemResources, only for a local instance.
 //   * none: GenerateClient, which can answer with a PoWRequired.
 service Gateway {
-    // Starts a service. The caller sends the service as content hashes, as Metadata, or
-    // as the full Service, with a Configuration and a RecursionGuard. The node returns
-    // a ServiceInstance with the addresses of the instance and its token. The node can
-    // start the service on a peer and give its addresses.
+    // Starts a service. The caller sends a Client and the service as content hashes, as
+    // Metadata or as the full Service. It can also send a Configuration and a
+    // RecursionGuard. The node returns a ServiceInstance with the addresses of the
+    // instance and its token. The node can start the service on a peer and give the
+    // addresses of that instance. If the node does not have the service and the caller
+    // does not send it, the node returns no message.
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Stops an instance. The TokenMessage gives the instance token. The node returns a
-    // Refund with the balance that the instance did not use.
+    // Stops an instance. The TokenMessage gives the instance token. The node gives the
+    // balance that the instance did not use back to its parent, and returns a Refund
+    // with that amount. If the node does not know the token, the Refund is 0.
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Changes the balance of an instance. The service_token gives the instance.
+    // Changes the balance of an instance. The service_token gives the instance. The
+    // parent of the instance pays or gets the difference.
     rpc ModifyDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Returns the Peer of the node. The Peer gives all the addresses of the node, the
     // payment contracts, the rates and the reputation proofs. The signature of the
     // Peer covers all of these.
     rpc GetPeerInfo(stream buffer.Buffer) returns (stream buffer.Buffer) {}
 
-    // Any Service.Network, not one kind of it: a caller that had to know in advance which
-    // kind it was holding would be doing the resolving itself. A `pow:` network has no
-    // name to look up, so its addresses have to be found (issue #78).
+    // Any Service.Network, not one kind of it. If the caller must know the kind first,
+    // the caller does the resolution itself. A `pow:` network has no name to look up,
+    // so the node must find its addresses (issue #78).
 
-    // Takes a Service.Network and returns the addresses of the peers that the node
-    // knows in it. This is what the node believes, not a proof: the caller must make
-    // sure that each address is correct. For a local instance, the node also opens the
-    // addresses in the firewall of that instance.
+    // Takes a Service.Network and returns the addresses of the members of that network
+    // that the node can find. The node does not ask other nodes. This is what the node
+    // believes, not a proof: the caller must make sure that each address is correct.
+    // The node refuses a network that its policy does not allow, and a network with an
+    // unfilled ${VAR}. For a local instance, the request must agree with a network that
+    // its service declares. The node then also opens the addresses in the firewall of
+    // that instance.
     rpc ResolveNetwork(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Sends the Peer of the caller. The node returns a RecursionGuard. Its token is the
-    // peer id that the node stored, or "REFUSED".
+    // Sends the Peer of the caller, with a Client. The node returns a RecursionGuard.
+    // Its token is the peer id (the public key) of the caller if the node knows the
+    // caller now, or "REFUSED".
     rpc IntroducePeer(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Returns a new Client. The caller can send a Client with a proposed client_id, and
-    // a peer_id with a signature to bind the client to that peer. If the node needs a
-    // proof of work, it returns a PoWRequired at index 2. Then the caller sends the
-    // Client again, with the same client_id, the challenge and a solution.
+    // Returns a new Client. The caller can send a Client with a proposed client_id. It
+    // can also send a peer_id and a signature to bind the client to that peer. The node
+    // binds it only if it already knows that peer. If not, use AssociateClient later.
+    // If the node needs a proof of work, it returns a PoWRequired at index 2. Then the
+    // caller sends the Client again, with the same client_id, the challenge and a
+    // solution.
     rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Binds a client_id to the identity of the caller, after IntroducePeer stored the
     // caller as a peer. The Client gives the client_id, the peer_id and a signature.
@@ -1024,14 +1100,17 @@ service Gateway {
     // this token in its ledger transaction. The payment contract gives where and how.
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Tells the node about a payment. The Payment gives the deposit token, the contract
-    // and the amount. The node examines the ledger before it adds balance to the client.
+    // and the amount. The node examines the ledger. Then it adds the amount to the
+    // client that got that deposit token. The node accepts each deposit token one time.
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Changes the resource limits of an instance. Only a local instance of the node can
-    // call it. The node identifies the instance by its address.
+    // call it. The node identifies the instance by its address. The node takes a fee
+    // from the balance of the instance. It returns the new resources and the balance.
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes the same objects as StartService. Returns the cost to run the service on
     // this node, and starts nothing. A node that cannot run the service now refuses
-    // with the reason.
+    // with the reason. If the node does not have the service and the caller does not
+    // send it, the node returns no message. The node ignores a RecursionGuard here.
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Asks if the node can run one instance with the given architecture and resources
     // now. The resources do not need to be those of a known service.
@@ -1043,13 +1122,16 @@ service Gateway {
     // Takes a token. For an instance token, returns the balance of the instance. For a
     // client_id, returns the balance of the client.
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Opens a byte stream to a port of an instance. First, the caller sends a
-    // TokenMessage with the instance token and the internal port in slot. Then each side
-    // sends raw bytes at index 0. When the stream of the caller stops, the node closes
-    // the write side of the connection to the service.
+    // Opens a byte stream to a declared slot of a local instance. First, the caller
+    // sends a TokenMessage with the instance token and the internal port in slot. Then
+    // each side sends raw bytes at index 0. For a TCP slot, when the stream of the
+    // caller stops, the node closes the write side of the connection to the service.
+    // For a UDP slot, each message is one datagram. The node takes the traffic cost
+    // from the balance of the instance.
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Takes an ObserveRequest and returns a stream of ObserveEvent. The first event is a
-    // session event.
+    // Takes an ObserveRequest and returns a stream of ObserveEvent. If the observation
+    // starts, the first event is a session event. If not, the stream has only one
+    // notice that tells why. The stream stops when the instance stops.
     rpc Observe(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Sends a ChatMessage to the operator of the node. The node returns a ChatAck.
     rpc Chat(stream buffer.Buffer) returns (stream buffer.Buffer) {}

@@ -398,7 +398,7 @@ def gateway_component() -> Layer:
         "peer.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
         "peer.signature.payload": canonical_peer_payload(peer_id, ts, digest),
         "peer.digest": "blake2b-256 hex of UTF-8 of "
-                       "uris/contracts/proofs|rates|scheme|resources",
+                       "uris|contracts|proofs|rates|scheme|resources",
         "peer.digest.uris": "'/'.join(sorted(uri))",
         "peer.digest.uri": "ip~port~expiry~protocol(transport)~';'.join(sorted(protocol(stack)))",
         "peer.digest.protocol": "hex(formal)~','.join(sorted(tags))~prose",

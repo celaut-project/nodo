@@ -192,7 +192,7 @@ def _print_peer(record) -> None:
 
     # Section: Advertised rates
     # What this peer charges on a recurring basis, as it advertised. These
-    # are ceilings, not quotes -- the price of a specific service still
+    # are base prices, not quotes -- the price of a specific service still
     # comes from GetServiceEstimatedCost.
     print("[Rates] (base prices in MU; see [Contracts] for what an MU is worth)")
     if record["advertised_rates"]:
