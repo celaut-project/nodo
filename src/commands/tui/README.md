@@ -161,11 +161,11 @@ stored, so it cannot drift from the one the virtualizer programmed. CPU% and the
 are deltas between consecutive sweeps, which is why they read `—` for one tick after an
 instance appears.
 
-Memory is the cgroup's **working set**: `memory.current` minus the `inactive_file` it reports
-in `memory.stat` (what `docker stats` and cAdvisor show). `memory.current` charges page cache
-to whoever read the file, so a cloud-hypervisor process streaming its rootfs -- or the daemon
-itself after building an image -- would otherwise carry gigabytes of reclaimable cache. The
-OVERVIEW daemon figure (`nodo.service`'s own cgroup) is read the same way.
+Memory is the cgroup's raw `memory.current`, page cache included, like `nodo instances` and
+`nodo observe`: an instance's figure is everything the VM takes from the host. Only the OVERVIEW
+daemon figure (`nodo.service`'s own cgroup) is the **working set** -- `memory.current` minus the
+`inactive_file` it reports in `memory.stat` (what `docker stats` and cAdvisor show) -- because the
+daemon reads gigabytes of microVM rootfs images that would otherwise show up as reclaimable cache.
 
 CPU% follows `nodo observe`'s convention: **cumulative core time, not normalised by the vCPU
 count**, so an instance saturating two vCPUs reads `200%`. The detail card states the

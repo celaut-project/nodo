@@ -7978,7 +7978,7 @@ fn read_instance_usage(cgroup: &Path, instance_id: &str) -> InstanceUsage {
     let (disk_read_bytes, disk_write_bytes) = read_cgroup_io_bytes(&cgroup.join("io.stat"));
     let tap = tap_ifname_for_instance(instance_id);
     InstanceUsage {
-        memory_current: read_cgroup_memory_working_set(cgroup),
+        memory_current: read_u64(&cgroup.join("memory.current")),
         cpu_usage_usec: read_cgroup_keyed_u64(&cgroup.join("cpu.stat"), "usage_usec"),
         disk_read_bytes,
         disk_write_bytes,
