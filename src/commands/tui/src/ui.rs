@@ -294,8 +294,13 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         area
     };
-    if area.width >= OVERVIEW_GRID_WIDTH && area.height >= OVERVIEW_GRID_HEIGHT {
-        draw_overview_grid(frame, app, area);
+    if area.width >= OVERVIEW_GRID_WIDTH && area.height > OVERVIEW_GRID_HEIGHT {
+        // One spare row buys the status bar, and the bar buys NODE two rows back.
+        let split = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
+        draw_status_bar(frame, app, split[0]);
+        draw_overview_grid(frame, app, split[1], true);
+    } else if area.width >= OVERVIEW_GRID_WIDTH && area.height >= OVERVIEW_GRID_HEIGHT {
+        draw_overview_grid(frame, app, area, false);
     } else {
         draw_overview_flow(frame, app, area);
     }
@@ -359,34 +364,14 @@ const OVERVIEW_GRID_HEIGHT: u16 = 19;
 /// value.
 const OVERVIEW_CARD_WIDTH: u16 = 26;
 
-fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Rect) {
+fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Rect, bar: bool) {
     match card {
         OverviewCard::Node => draw_card_as(
             frame,
             area,
             CardKind::Primary,
             "NODE",
-            vec![
-                status_line(
-                    "Status",
-                    service_health(&app.node_info.service_status),
-                    nonempty(&app.node_info.service_status, "checking…"),
-                ),
-                metric_line("Address", nonempty(&app.node_info.address, "—")),
-                // Who this node *is* on the network, beside where it is. Every opinion
-                // it publishes and every opinion published about it is keyed by this
-                // string, so it is what an operator has to hand a peer to be vouched
-                // for -- and the screen they leave open was the one place it could not
-                // be read. Shortened head-and-tail by `shorten`, which is what makes an
-                // id comparable at a glance; `nodo info` prints it whole.
-                metric_line(
-                    "Node id",
-                    shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
-                ),
-                metric_line("Version", shorten(&app.node_info.version, 18)),
-                metric_line("Power", node_power_line(&app.node_energy)),
-                metric_line("Elec.", node_cost_line(&app.node_energy)),
-            ],
+            node_lines(app, bar),
             accent(),
         ),
         OverviewCard::Workload => draw_card(
@@ -496,13 +481,99 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
     }
 }
 
+/// The NODE card. With the status bar above the grid, `bar`, the state and version
+/// are left to it: drawn twice they would be two places to disagree.
+fn node_lines(app: &App, bar: bool) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if !bar {
+        lines.push(status_line(
+            "Status",
+            service_health(&app.node_info.service_status),
+            nonempty(&app.node_info.service_status, "checking…"),
+        ));
+    }
+    lines.push(metric_line("Address", nonempty(&app.node_info.address, "—")));
+    // Who this node *is* on the network, beside where it is. Every opinion it
+    // publishes and every opinion published about it is keyed by this string, so it
+    // is what an operator has to hand a peer to be vouched for -- and the screen
+    // they leave open was the one place it could not be read. Shortened head-and-tail
+    // by `shorten`, which is what makes an id comparable at a glance; `nodo info`
+    // prints it whole.
+    lines.push(metric_line(
+        "Node id",
+        shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
+    ));
+    if !bar {
+        lines.push(metric_line("Version", shorten(&app.node_info.version, 18)));
+    }
+    lines.push(metric_line("Power", node_power_line(&app.node_energy)));
+    lines.push(metric_line("Elec.", node_cost_line(&app.node_energy)));
+    lines
+}
+
+/// The one-line summary above the grid: whether the node is up, which build, and the
+/// counts the NETWORK and WORKLOAD cards break down. Segments are added in priority
+/// order while they fit, so a narrow terminal loses the tail rather than a half-cut
+/// word.
+fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let health = service_health(&app.node_info.service_status);
+    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let segments: Vec<Vec<Span<'static>>> = vec![
+        vec![
+            Span::styled(format!("{} ", health.glyph()), Style::default().fg(health.colour())),
+            Span::styled(
+                nonempty(&app.node_info.service_status, "checking…").to_uppercase(),
+                Style::default().fg(health.colour()).bold(),
+            ),
+        ],
+        vec![Span::styled(
+            shorten(nonempty(&app.node_info.version, "version ?"), 18),
+            Style::default().fg(text_colour()),
+        )],
+        vec![Span::styled(
+            count(app.peers.items.len(), "peer", "peers"),
+            Style::default().fg(text_colour()),
+        )],
+        vec![Span::styled(
+            count(app.clients.items.len(), "client", "clients"),
+            Style::default().fg(text_colour()),
+        )],
+        vec![Span::styled(
+            count(app.instances.items.len(), "instance", "instances"),
+            Style::default().fg(text_colour()),
+        )],
+    ];
+    // Only a reading: a lone dash in the bar says nothing.
+    let power = node_power_line(&app.node_energy);
+    let mut segments = segments;
+    if power != "—" {
+        segments.push(vec![Span::styled(power, Style::default().fg(label_colour()))]);
+    }
+    let divider = " │ ";
+    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
+    let mut used = 1usize;
+    for (index, segment) in segments.into_iter().enumerate() {
+        let width: usize = segment.iter().map(|span| span.content.chars().count()).sum();
+        let gap = if index == 0 { 0 } else { divider.chars().count() };
+        if used + gap + width > area.width as usize {
+            break;
+        }
+        if index > 0 {
+            spans.push(Span::styled(divider, Style::default().fg(muted())));
+        }
+        spans.extend(segment);
+        used += gap + width;
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
 /// Four cards across, three, then four: the Overview as it is drawn on a terminal
 /// of at least 80×24.
-fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect, bar: bool) {
     let rows = Layout::vertical([
         // NODE's card is the tallest of the top row's four at six lines, plus the
-        // card's own border.
-        Constraint::Length(8),
+        // card's own border; four with the status bar carrying the other two.
+        Constraint::Length(if bar { 6 } else { 8 }),
         // HOST CAPACITY's CPU (title, bar, percentages) and RAM (the same, plus a
         // bytes line) breakdowns, plus the card's own border.
         Constraint::Length(9),
@@ -538,7 +609,7 @@ fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
         summaries[0], summaries[1], summaries[2],
     ];
     for (card, area) in OverviewCard::ALL.into_iter().zip(areas) {
-        draw_overview_card(frame, app, card, area);
+        draw_overview_card(frame, app, card, area, bar);
     }
 }
 
@@ -565,7 +636,7 @@ fn draw_overview_flow(frame: &mut Frame, app: &App, area: Rect) {
         let row_area = Rect { x: area.x, y, width: area.width, height };
         let cells = Layout::horizontal(vec![Constraint::Ratio(1, across as u32); across]).split(row_area);
         for (card, cell) in row.iter().zip(cells.iter()) {
-            draw_overview_card(frame, app, *card, *cell);
+            draw_overview_card(frame, app, *card, *cell, false);
         }
         drawn += row.len();
         y += height;
@@ -628,7 +699,6 @@ fn node_resources_lines(app: &App) -> Vec<Line<'static>> {
     if !own.error.is_empty() {
         lines.push(note(&own.error, bad()));
     }
-    lines.push(note("Maxima, not free.", muted()));
     lines
 }
 
@@ -706,8 +776,7 @@ fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
         if total.per_arch.values().any(|row| row.partial > 0) {
             lines.push(note("* a limit left unstated".to_string(), muted()));
         }
-        lines.push(note("Sum of announced maxima,".to_string(), muted()));
-        lines.push(note("not free capacity.".to_string(), muted()));
+        lines.push(note("maxima, not free capacity".to_string(), muted()));
     }
     lines
 }
@@ -726,11 +795,7 @@ fn earnings_summary_lines(app: &App) -> Vec<Line<'static>> {
                 Style::default().fg(muted()),
             )),
             Line::from(Span::styled(
-                "A node nobody has paid has earned zero,",
-                Style::default().fg(muted()),
-            )),
-            Line::from(Span::styled(
-                "which is a measurement, not a gap.",
+                "Zero earned is a measurement, not a gap.",
                 Style::default().fg(muted()),
             )),
         ];
@@ -853,15 +918,11 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
                 Span::styled("unmeasured", Style::default().fg(muted()).bold()),
             ]),
             Line::from(Span::styled(
-                "No sample yet. Nothing is assumed:",
+                "No sample yet, and none is guessed.",
                 Style::default().fg(muted()),
             )),
             Line::from(Span::styled(
-                "a guessed wattage reads like a",
-                Style::default().fg(muted()),
-            )),
-            Line::from(Span::styled(
-                "measured one. See the ENERGY page.",
+                "See the ENERGY page.",
                 Style::default().fg(muted()),
             )),
         ];
@@ -1248,7 +1309,7 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(Span::styled(
         nonempty(
             &app.node_info.error,
-            "On-chain balances, not node balances • refreshes every 60s",
+            "On-chain, not node balances • every 60s",
         ),
         Style::default().fg(if app.node_info.error.is_empty() {
             muted()
@@ -9885,11 +9946,55 @@ mod overview_summaries {
     fn the_node_status_carries_a_glyph() {
         let mut app = App::new();
         app.node_info.service_status = "running".to_string();
-        assert!(overview(&mut app).contains("● running"));
+        assert!(overview(&mut app).contains("● RUNNING"));
         app.node_info.service_status = "not running".to_string();
-        assert!(overview(&mut app).contains("✕ not running"));
+        assert!(overview(&mut app).contains("✕ NOT RUNNING"));
         app.node_info.service_status = String::new();
-        assert!(overview(&mut app).contains("○ checking"));
+        assert!(overview(&mut app).contains("○ CHECKING"));
+    }
+
+    fn overview_at(app: &mut App, width: u16, height: u16) -> String {
+        app.tabs.select_page(Page::Overview);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|row| (0..buffer.area.width).map(|column| buffer.get(column, row).symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// With room to spare the state and version live in a bar above the cards and
+    /// not in NODE as well; at 80x24 there is no spare row, so NODE keeps them.
+    #[test]
+    fn the_status_bar_takes_the_state_off_the_node_card_only_when_it_fits() {
+        let mut app = App::new();
+        app.node_info.service_status = "running".to_string();
+        app.node_info.version = "1.4.2".to_string();
+        app.peers.items = Vec::new();
+
+        let roomy = overview_at(&mut app, 120, 30);
+        assert!(roomy.contains("● RUNNING"), "{roomy}");
+        assert!(roomy.contains("0 peers"), "{roomy}");
+        assert!(!roomy.contains("Status"), "{roomy}");
+
+        let tight = overview_at(&mut app, 80, 24);
+        assert!(!tight.contains("0 peers"), "{tight}");
+        assert!(tight.contains("Status"), "{tight}");
+        assert!(tight.contains("running"), "{tight}");
+    }
+
+    /// A narrow bar drops its tail, not half a word.
+    #[test]
+    fn a_narrow_status_bar_loses_whole_segments() {
+        let mut app = App::new();
+        app.node_info.service_status = "running".to_string();
+        let mut terminal = Terminal::new(TestBackend::new(34, 1)).unwrap();
+        terminal.draw(|frame| super::draw_status_bar(frame, &app, frame.size())).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let bar: String = (0..34).map(|column| buffer.get(column, 0).symbol()).collect();
+        assert!(bar.contains("● RUNNING │ version ? │ 0 peers"), "{bar:?}");
+        assert!(!bar.contains("clients"), "{bar:?}");
     }
 
     /// Summed across payment networks, which the EARNINGS page does not do: there a
