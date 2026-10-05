@@ -164,6 +164,25 @@ busybox, or CH refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(Uefi
   `NODO_ALLOW_HOST_BUSYBOX=1` is set, which the installer never does and which
   produces a dev-only image no node runs.
 
+## virtiofsd missing: a service with shared directories is refused
+
+**Symptom:** a launch fails with *this service declares shared directories, which
+need the Rust virtiofsd on this node*, or (before #478)
+`MicroVMError: [Errno 2] No such file or directory: 'virtiofsd'`. `nodo doctor`
+shows `[WARN]` under `virtiofsd (shared filesystems)`.
+
+**Why:** each share is served by a `virtiofsd` on the host, and the node gives it
+the flags of the Rust implementation. The node finds it through
+`virtualizers.ch.VIRTIOFSD_BINARY`, as root. The old QEMU C daemon at
+`/usr/lib/qemu/virtiofsd` does not accept those flags, and a binary in
+`~/.cargo/bin` is not on root's `PATH`.
+
+**Fix:** re-run the installer, which puts the Rust daemon in `<MAIN_DIR>/bin` and
+sets the absolute path. Or install it by hand and set the path, as
+[SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#host-requirement-the-rust-virtiofsd)
+shows. Then run `sudo nodo doctor` again. Services without shared directories do
+not need it.
+
 ## Initramfs contract version mismatch
 
 **Symptom:** `nodo execute` fails before the microVM starts, with *Cloud
