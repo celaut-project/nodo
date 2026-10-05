@@ -17,7 +17,8 @@ from src.utils.cost_functions.workload_admission import evaluate_possible_enviro
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.utils.network_policy import enforce_network_policy
 from src.manager.shares import ShareAuthorizationError, authorize_shares
-from src.utils.shared_filesystems import service_requires_parent_colocation
+from src.utils.shared_filesystems import declarations_for_service, service_requires_parent_colocation
+from src.virtualizers.microvm import virtiofsd
 
 sc = SQLConnection()
 
@@ -255,6 +256,23 @@ def launch_service(
             log.LOGGER(f"Refusing to launch service {service_id}: {e}")
             raise Exception(f"Unable to launch service {service_id}: {e}") from e
 
+        # Every share is served by a virtiofsd on this host, so check it here too,
+        # before anything is charged or built (#478). A service with a `guest`
+        # directory can only run here, so a missing daemon ends the launch. A service
+        # that only exports can still run on a peer: this node stops being a
+        # candidate, and the reason goes into the failure message if no peer takes it.
+        local_virtiofsd_failure = None
+        share_declarations = declarations_for_service(service)
+        if share_declarations:
+            try:
+                virtiofsd.require_usable()
+            except virtiofsd.VirtiofsdUnavailable as e:
+                if any(d.guest for d in share_declarations):
+                    log.LOGGER(f"Refusing to launch service {service_id}: {e}")
+                    raise Exception(f"Unable to launch service {service_id}: {e}") from e
+                log.LOGGER(f"Service {service_id} cannot run on this node: {e}")
+                local_virtiofsd_failure = str(e)
+
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
         # `father_id` -- dev client ids are drawn from a small reusable pool
@@ -324,6 +342,9 @@ def launch_service(
                     continue
                 if pin_local and peer != 'local':
                     log.LOGGER(f"Skipping peer {peer}: this launch is pinned to the local node.")
+                    continue
+                if local_virtiofsd_failure and peer == 'local':
+                    launch_failures.append(f"local: {local_virtiofsd_failure}")
                     continue
 
                 log.LOGGER(f'Service balancer select peer {peer}')
