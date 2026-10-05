@@ -35,7 +35,9 @@ name: tui-release
 # today; a musl target here would publish a binary for a host nodo cannot
 # otherwise be installed on.
 #
-# Run it with:
+# It also republishes on a push to dev that touches the crate or protos/.
+#
+# Run it by hand with:
 #   gh workflow run tui-release -f tag=tui
 # or by pushing the `tui` tag.
 
@@ -49,6 +51,15 @@ on:
   push:
     tags:
       - "tui"
+    # Republish on every merge to dev that changes the crate, so the release
+    # does not fall behind the source. Only a push to this repository's own dev
+    # branch gets here: a pull request (fork or not) never reaches the release
+    # job, and the `release` job below refuses any other repository.
+    branches:
+      - dev
+    paths:
+      - 'src/commands/tui/**'
+      - 'protos/**'
   # On a PR, build only -- nothing is published. This is the check that keeps the
   # crate compiling for both architectures, which is otherwise only discovered by
   # an operator whose install tried to build it.
@@ -62,6 +73,11 @@ on:
 # hold a token that can write to this repo. Only the release job publishes.
 permissions:
   contents: read
+
+# Two merges in a row must not race to replace the same mutable release.
+concurrency:
+  group: tui-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -127,7 +143,7 @@ jobs:
     # A pull request builds and stops there: it has nothing to publish onto, and
     # a workflow that publishes from a PR would let a fork replace the binary
     # every node downloads.
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.repository == 'celaut-project/nodo'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
@@ -154,7 +170,10 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          # A push to dev has no tag input and its ref_name is the branch, so
+          # the release tag is fixed to `tui` unless a tag push or a manual run
+          # says otherwise.
+          TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || 'tui' }}
           NOTES: "The `nodo tui` operations console, built from src/commands/tui for each supported Linux target. Each binary ships with a `.host-triple` marker holding the `rustc -vV` host line it was built for; the installer and `nodo tui` refuse to execute a binary whose marker does not name the running host. SHA256SUMS proves the download was not altered in transit -- it is published in this same mutable release, so it is not a content pin. A node that cannot fetch or verify a binary builds one from the source in its own checkout, with the self-contained toolchain under MAIN_DIR/runtime/rust."
         run: |
           set -euo pipefail
