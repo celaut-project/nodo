@@ -113,6 +113,33 @@ class VirtiofsOrchestrationTest(unittest.TestCase):
         )
         self.assertEqual((args, state), ([], []))
 
+    def test_two_shares_are_one_fs_option_with_two_values(self):
+        # cloud-hypervisor declares `--fs <fs>...` as one option taking several values and
+        # refuses it repeated, so `--fs a --fs b` cannot start a guest with two shares.
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            mounts = [
+                vf.mount_for(_ref(share_id=sid * 64), base, exported=True) for sid in ("a", "b")
+            ]
+            args, state = vf.attach_virtiofs_backends(
+                mounts, "vm-1", base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                spawn_fn=lambda cmd, log_path: 4242, pid_alive_fn=lambda pid: True,
+            )
+            self.assertEqual(args.count("--fs"), 1)
+            self.assertEqual(args[0], "--fs")
+            self.assertEqual(len(args), 3)
+            self.assertEqual(len(state), 2)
+            self.assertTrue(all(value.startswith("tag=") for value in args[1:]))
+
+    def test_one_share_is_still_a_single_fs_option(self):
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            mount = vf.mount_for(_ref(share_id="c" * 64), base, exported=True)
+            args, _state = vf.attach_virtiofs_backends(
+                [mount], "vm-1", base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                spawn_fn=lambda cmd, log_path: 4242, pid_alive_fn=lambda pid: True,
+            )
+            self.assertEqual(len(args), 2)
+            self.assertEqual(args[0], "--fs")
+
     def test_ensure_backend_spawns_then_reuses(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
             sid = "a" * 64

@@ -397,6 +397,9 @@ if [ -f /newroot/.__nodo_virtiofs ]; then
     # Flatten each JSON object onto its own line (one {tag,path,ro} per line), then
     # iterate via redirect — NOT a pipe — so the loop runs in this shell and a
     # `fatal` actually halts init. Parsed with sed (no jq in the initramfs).
+    # The initramfs has no /tmp of its own (only /newroot/tmp, created below), and this
+    # redirect fails without it -- init then exits and the kernel panics.
+    mkdir -p /tmp
     tr '}' '\n' < /newroot/.__nodo_virtiofs > /tmp/.__nodo_virtiofs.lines
     while IFS= read -r obj; do
         case "$obj" in
