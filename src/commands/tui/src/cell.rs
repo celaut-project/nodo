@@ -521,7 +521,7 @@ static LEVERS: &[Lever] = &[
         organelle: Organelle::Ribosomes,
         label: "run work here",
         question: "Does this machine run services itself, or only hand them to peers?",
-        consequence: "Delegate only makes this node an orchestrator: it prices nothing for itself, so work no peer will take fails instead of running here. Needs `delegate work` on, or nothing can run at all.",
+        consequence: "Delegate only makes this node an orchestrator: it prices nothing for itself and announces no resources to its peers, so work no peer will take fails instead of running here. Needs `delegate work` on, or nothing can run at all.",
         kind: LeverKind::Cycle(&[
             LeverState {
                 label: "delegate only",

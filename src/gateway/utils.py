@@ -380,6 +380,17 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
+    peer = _unsigned_peer(uris)
+    _sign_peer(peer)
+    return peer
+
+
+def _unsigned_peer(uris: List[celaut.Instance.Uri], *, quiet: bool = False) -> celaut_pb2.Peer:
+    """Everything this node announces at ``uris``, before it is signed.
+
+    ``quiet`` drops the per-build log lines, for a caller that builds the announcement
+    on a timer only to see whether it changed (``announcement_digest``).
+    """
     peer = celaut_pb2.Peer()
 
     # Every address this node serves its gateway at. The transport rides on the
@@ -416,7 +427,8 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     })
 
     payment_contracts = _local_payment_contracts()
-    log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
+    if not quiet:
+        log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
     if payment_contracts:
         peer.payment_contracts.extend(payment_contracts)
 
@@ -435,10 +447,9 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     from src.reputation_system.fetch import local_proofs
 
     reputation_proofs = list(local_proofs())
-    log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')
+    if not quiet:
+        log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')
     peer.reputation_proofs.extend(reputation_proofs)
-
-    _sign_peer(peer)
     return peer
 
 
@@ -526,13 +537,40 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     return _build_peer([_uri_for_network(network)])
 
 
-def generate_full_node_peer_info() -> celaut_pb2.Peer:
+def generate_full_node_peer_info(fresh: bool = False) -> celaut_pb2.Peer:
     """A Peer advertising every address this node is reachable at, signed with its
     identity key. Used for peer-to-peer discovery (GetPeerInfo, IntroducePeer
     self-announce) -- see :func:`generate_node_peer_info` for the single-network form.
+
+    ``fresh`` signs it now rather than re-serving a cached signature. A peer only stores
+    an announcement whose ``ts`` is newer than the last one it accepted
+    (``manager._passes_anti_replay``), and the cache is keyed on content: an
+    announcement that changed *back* -- an address that left and returned, a policy
+    turned off and on again -- would otherwise come out of it with a ``ts`` older than
+    the one in between, and be dropped as stale by exactly the peers it is pushed to.
     """
     log.LOGGER('Generating gateway instance for all reachable interfaces')
+    if fresh:
+        with _SIGNED_PEER_LOCK:
+            _signed_peers.clear()
     return _build_peer(_uris_for_all_interfaces())
+
+
+def announcement_digest() -> str:
+    """A digest of what :func:`generate_full_node_peer_info` would announce right now.
+
+    The same ``canonical_peer_content_digest`` the signed-announcement cache keys on,
+    over the same content -- addresses, rates, payment contracts, resources, reputation
+    proofs, the declared signature scheme -- so two calls agree exactly when the
+    announcement a peer would receive has not changed. Nothing is signed: this is what
+    ``src/manager/announcement_change.py`` polls to decide whether known peers must be
+    told, and a signature would be spent on every poll for no one.
+    """
+    from src.identity.node_identity import canonical_peer_content_digest, declare_signature_scheme
+
+    peer = _unsigned_peer(_uris_for_all_interfaces(), quiet=True)
+    declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
+    return canonical_peer_content_digest(peer)
 
 
 # If the service is not on the registry, save it.
