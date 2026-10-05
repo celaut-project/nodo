@@ -19,6 +19,7 @@ from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
 from src.virtualizers.ch import vgic as ch_vgic
 from src.virtualizers.microvm import initramfs as ch_initramfs
 from src.virtualizers.microvm import guest as ch_guest
+from src.virtualizers.microvm import virtiofsd as microvm_virtiofsd
 
 
 def _parse_unit_user(unit_content: str) -> str:
@@ -173,6 +174,9 @@ def _resolve_config_paths(main_dir: str):
             k: _interpolate(v)
             for k, v in (qemu_cfg.get("BINARY_PATHS") or {}).items()
         },
+        "virtiofsd_binary": _interpolate(
+            ch_cfg.get("VIRTIOFSD_BINARY") or microvm_virtiofsd.DEFAULT_BINARY
+        ),
         "main_dir": str(main_dir_cfg),
     }
 
@@ -715,6 +719,30 @@ def _doctor_emulated_architectures(cfg: dict, host_arch_tag: str):
     return executable
 
 
+def _doctor_virtiofsd(virtiofsd_binary: str):
+    """Report the virtiofsd that serves shared filesystems, and which one it is.
+
+    A WARN and never a FAIL: only a service that declares shared or guest
+    directories starts one, and every other service runs without it. The launch
+    check in launch_service gives such a service the same reason, before any charge.
+    """
+    print("\nvirtiofsd (shared filesystems):", flush=True)
+
+    result = microvm_virtiofsd.probe(virtiofsd_binary)
+    if result.usable:
+        print(f"[OK] {result.detail}", flush=True)
+        return result
+
+    print(f"[WARN] {result.detail}", flush=True)
+    print(
+        "  Services that declare shared or guest directories cannot run on this "
+        "node. Other services are not affected.",
+        flush=True,
+    )
+    print(f"  Suggestion: {microvm_virtiofsd.INSTALL_HINT}", flush=True)
+    return result
+
+
 def _doctor_cloud_hypervisor(main_dir: str):
     """Run all Cloud Hypervisor compatibility checks."""
     cfg = _resolve_config_paths(main_dir)
@@ -732,6 +760,7 @@ def _doctor_cloud_hypervisor(main_dir: str):
     _doctor_vgic()
     _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)
     _doctor_emulated_architectures(cfg, host_arch_tag)
+    _doctor_virtiofsd(cfg.get("virtiofsd_binary", ""))
 
 
 def _doctor_network_checks():
