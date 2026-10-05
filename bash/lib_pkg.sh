@@ -190,6 +190,29 @@ install_foreign_arch_emulator() {
     esac
 }
 
+# Libraries `cargo install virtiofsd` links against (bash/lib_virtiofsd.sh). Only
+# installed when no prebuilt virtiofsd fits this host, and a failure returns
+# non-zero instead of failing the install: virtiofsd is needed only by services
+# that declare shared directories.
+install_virtiofsd_build_deps() {
+    local packages=()
+
+    case "$PKG_MGR" in
+        apt) packages=(libcap-ng-dev libseccomp-dev pkg-config) ;;
+        dnf) packages=(libcap-ng-devel libseccomp-devel pkgconf-pkg-config) ;;
+    esac
+
+    echo "Installing virtiofsd build dependencies: ${packages[*]}"
+    case "$PKG_MGR" in
+        apt)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}"
+            ;;
+        dnf)
+            dnf install -y "${packages[@]}"
+            ;;
+    esac
+}
+
 ensure_utf8_locale() {
     echo "Ensuring UTF-8 locale support..."
     # Debian generates locales on demand; on Fedora (and most others) the
