@@ -154,12 +154,18 @@ would otherwise wonder where that stake went.
 ## Live instance usage
 
 The Instances page reads each instance's usage from the same places `nodo observe` does, on
-every two-second sweep: `cpu.stat`, `memory.current` and `io.stat` inside the instance's
+every two-second sweep: `cpu.stat`, `memory.current`/`memory.stat` and `io.stat` inside the instance's
 cgroup (`<virtualizers.ch.CGROUPS_BASE_DIR>/nodo-ch/<id>`), and the byte counters of its tap
 interface under `/sys/class/net`. The tap name is re-derived from the instance id rather than
 stored, so it cannot drift from the one the virtualizer programmed. CPU% and the network rates
 are deltas between consecutive sweeps, which is why they read `—` for one tick after an
 instance appears.
+
+Memory is the cgroup's **working set**: `memory.current` minus the `inactive_file` it reports
+in `memory.stat` (what `docker stats` and cAdvisor show). `memory.current` charges page cache
+to whoever read the file, so a cloud-hypervisor process streaming its rootfs -- or the daemon
+itself after building an image -- would otherwise carry gigabytes of reclaimable cache. The
+OVERVIEW daemon figure (`nodo.service`'s own cgroup) is read the same way.
 
 CPU% follows `nodo observe`'s convention: **cumulative core time, not normalised by the vCPU
 count**, so an instance saturating two vCPUs reads `200%`. The detail card states the

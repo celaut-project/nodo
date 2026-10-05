@@ -6114,7 +6114,7 @@ impl App {
             .filter_map(|instance| instance.usage.cpu_percent)
             .sum();
         self.stats.daemon_memory_used =
-            read_u64(&daemon_cgroup_dir(&self.paths).join("memory.current")).unwrap_or(0);
+            read_cgroup_memory_working_set(&daemon_cgroup_dir(&self.paths)).unwrap_or(0);
         self.stats.daemon_cpu_percent = self.derive_daemon_cpu_rate(Instant::now());
     }
 
@@ -7978,7 +7978,7 @@ fn read_instance_usage(cgroup: &Path, instance_id: &str) -> InstanceUsage {
     let (disk_read_bytes, disk_write_bytes) = read_cgroup_io_bytes(&cgroup.join("io.stat"));
     let tap = tap_ifname_for_instance(instance_id);
     InstanceUsage {
-        memory_current: read_u64(&cgroup.join("memory.current")),
+        memory_current: read_cgroup_memory_working_set(cgroup),
         cpu_usage_usec: read_cgroup_keyed_u64(&cgroup.join("cpu.stat"), "usage_usec"),
         disk_read_bytes,
         disk_write_bytes,
@@ -8002,6 +8002,22 @@ fn read_cgroup_keyed_u64(path: &Path, key: &str) -> Option<u64> {
         }
         fields.next()?.parse().ok()
     })
+}
+
+/// A cgroup's working set: `memory.current` minus the `inactive_file` it reports in
+/// `memory.stat`, the figure `docker stats` and cAdvisor show.
+///
+/// `memory.current` charges the page cache to whoever faulted it in, so a daemon that
+/// has just read a few GiB of microVM rootfs images carries all of it -- a reading
+/// that once put `nodo.service` at 29% of host RAM while its own anonymous memory was
+/// 230 MiB. Inactive file pages are the first thing the kernel reclaims, so they are
+/// not memory the cgroup is holding onto. A missing `memory.stat` (or key) subtracts
+/// nothing rather than hiding the reading.
+fn read_cgroup_memory_working_set(cgroup: &Path) -> Option<u64> {
+    let current = read_u64(&cgroup.join("memory.current"))?;
+    let inactive_file =
+        read_cgroup_keyed_u64(&cgroup.join("memory.stat"), "inactive_file").unwrap_or(0);
+    Some(current.saturating_sub(inactive_file))
 }
 
 /// Cumulative block-IO from cgroup v2 `io.stat`, summed over every backing device.
@@ -9615,7 +9631,8 @@ mod tests {
     mod usage {
         use super::super::{
             counter_rate, format_bytes_compact, format_rate_compact, read_cgroup_io_bytes,
-            read_cgroup_keyed_u64, read_cpu_max_allowance, tap_ifname_for_instance, vcpu_allowance,
+            read_cgroup_keyed_u64, read_cgroup_memory_working_set, read_cpu_max_allowance,
+            tap_ifname_for_instance, vcpu_allowance,
             App, Instance,
             InstanceUsage,
         };
@@ -9834,6 +9851,29 @@ mod tests {
                 read_cgroup_keyed_u64(&dir.path("absent.stat"), "usage_usec"),
                 None
             );
+        }
+
+        #[test]
+        fn memory_working_set_excludes_inactive_page_cache() {
+            let dir = TempDir::new("memory-working-set");
+            dir.write("memory.current", "4251078656\n");
+            dir.write(
+                "memory.stat",
+                "anon 241487872\nfile 3945881600\nactive_file 13598720\ninactive_file 3932282880\n",
+            );
+            assert_eq!(
+                read_cgroup_memory_working_set(&dir.path("")),
+                Some(4_251_078_656 - 3_932_282_880)
+            );
+        }
+
+        #[test]
+        fn memory_working_set_without_stat_falls_back_to_current() {
+            let dir = TempDir::new("memory-working-set-no-stat");
+            dir.write("memory.current", "1048576\n");
+            assert_eq!(read_cgroup_memory_working_set(&dir.path("")), Some(1_048_576));
+            let empty = TempDir::new("memory-working-set-absent");
+            assert_eq!(read_cgroup_memory_working_set(&empty.path("")), None);
         }
 
         #[test]
