@@ -361,9 +361,10 @@ const OVERVIEW_CARD_WIDTH: u16 = 26;
 
 fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Rect) {
     match card {
-        OverviewCard::Node => draw_card(
+        OverviewCard::Node => draw_card_as(
             frame,
             area,
+            CardKind::Primary,
             "NODE",
             vec![
                 status_line(
@@ -468,23 +469,26 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
         // Each panel summarises a page that is otherwise a whole tab away, reading the
         // same state that page reads. Nothing here fetches: a summary with its own data
         // path can disagree with the page it summarises.
-        OverviewCard::Earnings => draw_card(
+        OverviewCard::Earnings => draw_card_as(
             frame,
             area,
+            CardKind::Summary,
             "EARNINGS",
             earnings_summary_lines(app),
             series(2),
         ),
-        OverviewCard::Schedule => draw_card(
+        OverviewCard::Schedule => draw_card_as(
             frame,
             area,
+            CardKind::Summary,
             "SCHEDULE",
             schedule_summary_lines(app),
             series(0),
         ),
-        OverviewCard::Energy => draw_card(
+        OverviewCard::Energy => draw_card_as(
             frame,
             area,
+            CardKind::Summary,
             "ENERGY",
             energy_summary_lines(app),
             warn(),
@@ -1041,14 +1045,62 @@ fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+/// How much weight a card carries on the Overview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CardKind {
+    /// What the operator opens the page to see: a rounded box in the accent colour.
+    Primary,
+    /// Supporting figures: the plain muted box every other page uses.
+    Secondary,
+    /// A one-glance summary of a page that is a tab away. No box, so it reads as a
+    /// pointer rather than a place, and it gets the two border rows back.
+    Summary,
+}
+
 pub(crate) fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>>, color: Color) {
-    let block = Block::bordered()
-        .title(Span::styled(
-            format!(" {title} "),
-            Style::default().fg(color).bold(),
-        ))
-        .border_style(Style::default().fg(muted()));
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    draw_card_as(frame, area, CardKind::Secondary, title, lines, color);
+}
+
+pub(crate) fn draw_card_as<'a>(
+    frame: &mut Frame,
+    area: Rect,
+    kind: CardKind,
+    title: &str,
+    lines: Vec<Line<'a>>,
+    color: Color,
+) {
+    match kind {
+        CardKind::Primary | CardKind::Secondary => {
+            let primary = kind == CardKind::Primary;
+            let block = Block::bordered()
+                .border_type(if primary { BorderType::Rounded } else { BorderType::Plain })
+                .title(Span::styled(
+                    format!(" {title} "),
+                    Style::default().fg(color).bold(),
+                ))
+                .border_style(Style::default().fg(if primary { accent() } else { muted() }));
+            frame.render_widget(Paragraph::new(lines).block(block), area);
+        }
+        CardKind::Summary => {
+            if area.height == 0 {
+                return;
+            }
+            let heading = format!("─ {title} ");
+            let rule = "─".repeat((area.width as usize).saturating_sub(heading.chars().count() + 1));
+            let split = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(heading, Style::default().fg(color).bold()),
+                    Span::styled(rule, Style::default().fg(muted())),
+                ])),
+                split[0],
+            );
+            // One column in from each edge, where a box's border would have been, so
+            // two summaries side by side do not run into each other.
+            let body = Rect { x: split[1].x + 1, width: split[1].width.saturating_sub(2), ..split[1] };
+            frame.render_widget(Paragraph::new(lines), body);
+        }
+    }
 }
 
 pub(crate) fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
@@ -1205,7 +1257,7 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
         }),
     )));
 
-    draw_card(frame, area, "WALLETS", lines, series(2));
+    draw_card_as(frame, area, CardKind::Primary, "WALLETS", lines, series(2));
 }
 
 /// A balance with the unit the chain reported, or a dash when it could not be read.
@@ -1226,7 +1278,8 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
             " HOST CAPACITY ",
             Style::default().fg(warn()).bold(),
         ))
-        .border_style(Style::default().fg(muted()));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     // CPU gets a title line of its own (the way a bare `Gauge` block already put
@@ -9094,7 +9147,7 @@ mod alert_banner {
         // while asserting nothing.
         let node_card = screen
             .lines()
-            .position(|line| line.contains("\u{250c} NODE \u{2500}"))
+            .position(|line| line.contains("\u{256d} NODE \u{2500}"))
             .expect("the NODE card");
         // Above, not beside: a warning under the fold is a warning nobody has
         // scrolled to.
@@ -9793,6 +9846,18 @@ mod overview_summaries {
         for panel in ["EARNINGS", "SCHEDULE", "ENERGY"] {
             assert!(screen.contains(panel), "no {panel} panel:\n{screen}");
         }
+    }
+
+    /// Weight shows in the border: the node and its wallets are drawn rounded, the
+    /// summaries of other pages are not boxed at all.
+    #[test]
+    fn cards_are_drawn_by_weight() {
+        let screen = overview(&mut App::new());
+
+        assert!(screen.contains("\u{256d} NODE "), "{screen}");
+        assert!(screen.contains("\u{250c} WORKLOAD "), "{screen}");
+        assert!(screen.contains("\u{2500} EARNINGS "), "{screen}");
+        assert!(!screen.contains("\u{250c} EARNINGS"), "{screen}");
     }
 
     /// A meter fills in eighths of a cell, and an unknown capacity draws no fill.
