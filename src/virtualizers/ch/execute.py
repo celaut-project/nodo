@@ -160,6 +160,17 @@ def _kernel_cmdline(vm_ip: str, netmask: str, rootfs_format: str = ROOTFS_FORMAT
     return " ".join(cmdline_parts)
 
 
+def _ch_memory_arg(mem_mib: int, shared: bool) -> str:
+    """Value for cloud-hypervisor ``--memory``.
+
+    A guest with a virtio-fs device talks to its virtiofsd over vhost-user, which
+    shares the guest's memory with that process, and cloud-hypervisor refuses to start
+    one without ``shared=on`` ("Using vhost-user requires using shared memory or huge
+    pages"). Only guests that have shares pay for shared memory.
+    """
+    return f"size={mem_mib}M,shared=on" if shared else f"size={mem_mib}M"
+
+
 def _build_ch_process_args(start_command: List[str], vmachine_id: str) -> List[str]:
     """Rename the hypervisor process so a recycled PID cannot impersonate this VM.
 
@@ -466,7 +477,7 @@ def execute(
             "--cpus",
             f"boot={vcpus}",
             "--memory",
-            f"size={mem_mib}M",
+            _ch_memory_arg(mem_mib, shared=bool(shares.fs_device_args)),
             "--net",
             f"tap={tap_name},mac={mac}",
             "--cmdline",

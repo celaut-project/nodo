@@ -381,14 +381,17 @@ def attach_virtiofs_backends(
 
     Returns ``(fs_device_args, mounts_state)``:
       * ``fs_device_args``: flat argv to splice into the cloud-hypervisor command
-        (``["--fs", "<arg>", …]``), one per share.
+        (``["--fs", "<arg>", "<arg>", …]``): one ``--fs`` followed by one value per
+        share. cloud-hypervisor declares ``--fs <fs>...`` as a single option taking
+        several values and refuses it repeated ("cannot be used multiple times"), so a
+        guest with two shares cannot be started with ``--fs a --fs b``.
       * ``mounts_state``: JSON-serializable list persisted in the VM runtime
         state, which is what its teardown later releases.
 
     A VM with no shared filesystems yields empty lists — a complete no-op for
     ordinary services.
     """
-    fs_device_args: List[str] = []
+    fs_device_values: List[str] = []
     mounts_state: List[Dict[str, object]] = []
     for mount in mounts:
         backend = ensure_share_backend(
@@ -403,10 +406,9 @@ def attach_virtiofs_backends(
             seed_fn=seed_fn,
             logger_fn=logger_fn,
         )
-        fs_device_args.extend(
-            ["--fs", build_fs_device_arg(mount.tag, backend["socket"])]
-        )
+        fs_device_values.append(build_fs_device_arg(mount.tag, backend["socket"]))
         mounts_state.append(backend)
+    fs_device_args = ["--fs", *fs_device_values] if fs_device_values else []
     return fs_device_args, mounts_state
 
 
