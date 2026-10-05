@@ -29,6 +29,9 @@ is no `Service.Network` involvement.
 | `share_tag=<tag>` | logical **name** of the share, used instead of the mount path |
 | `share_env=<ENV_VAR>` | environment variable whose **value** picks the concrete share |
 
+A packed service gets these xattrs from the `shared_filesystems` field of
+`service.json`; see [PACKING.md](PACKING.md#shared_filesystems).
+
 Everything decidable from a spec alone is rejected (`ValueError`) as soon as the
 node reads it, which is what makes it validatable at pack time:
 
