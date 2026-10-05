@@ -66,7 +66,10 @@ virtualizers:
     # Keep this path short to avoid Unix socket SUN_LEN limits.
     API_SOCKET_DIR: "/tmp/nodo-ch"
     # virtiofsd daemon for shared filesystems (parent -> child inheritance).
-    # Only invoked for services that declare shared/guest directories.
+    # Only invoked for services that declare shared/guest directories. It must be
+    # the Rust virtiofsd, not the old QEMU one in /usr/lib/qemu. The installer
+    # puts it in ${main.MAIN_DIR}/bin and writes that absolute path here, unless
+    # this is already set to a path of your own. `nodo doctor` checks it.
     VIRTIOFSD_BINARY: "virtiofsd"
     NETWORK_MODE: "tap_bridge"
     NETWORK_BRIDGE_NAME: "nodo-br-ch"
