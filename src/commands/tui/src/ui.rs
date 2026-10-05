@@ -340,7 +340,7 @@ impl OverviewCard {
     fn height(self) -> u16 {
         match self {
             OverviewCard::Node => 8,
-            OverviewCard::Workload | OverviewCard::Storage => 5,
+            OverviewCard::Workload | OverviewCard::Storage => 6,
             OverviewCard::Network => 4,
             OverviewCard::Wallets | OverviewCard::HostCapacity | OverviewCard::PeerResources => 9,
             OverviewCard::NodeResources
@@ -398,6 +398,13 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
                     "Memory now",
                     format_bytes(app.stats.instance_memory_current),
                 ),
+                // Against what the instances reserved, not the host: this is how full
+                // their own limits are. HOST CAPACITY has the host.
+                meter_line(
+                    app.stats.instance_memory_current,
+                    app.stats.instance_memory_reserved,
+                    area.width.saturating_sub(2),
+                ),
                 metric_line(
                     "Reserved",
                     format!(
@@ -417,11 +424,15 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
                 metric_line(
                     "Host disk",
                     format!(
-                        "{} / {} ({}%)",
-                        format_bytes(app.stats.disk_used),
-                        format_bytes(app.stats.disk_total),
-                        percent(app.stats.disk_used, app.stats.disk_total)
+                        "{}% of {}",
+                        percent(app.stats.disk_used, app.stats.disk_total),
+                        format_bytes(app.stats.disk_total)
                     ),
+                ),
+                meter_line(
+                    app.stats.disk_used,
+                    app.stats.disk_total,
+                    area.width.saturating_sub(2),
                 ),
                 metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
                 metric_line("Services", app.services.items.len().to_string()),
@@ -893,14 +904,15 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
     } else {
         energy.backend.clone()
     };
-    lines.push(Line::from(Span::styled(
-        source,
-        Style::default().fg(if energy.backend == "model" || energy.is_floor {
-            warn()
-        } else {
-            muted()
-        }),
-    )));
+    // A guess or a partial count wears the warning glyph; a real reading is plain.
+    lines.push(if energy.backend == "model" || energy.is_floor {
+        Line::from(vec![
+            Span::styled(format!("{} ", Health::Warn.glyph()), Style::default().fg(warn())),
+            Span::styled(source, Style::default().fg(warn())),
+        ])
+    } else {
+        Line::from(Span::styled(source, Style::default().fg(muted())))
+    });
 
     if energy.price_per_kwh <= 0.0 {
         // Zero is the honest default rather than a missing value: a cost computed
@@ -1043,6 +1055,41 @@ pub(crate) fn metric_line(label: &str, value: impl Into<String>) -> Line<'static
     Line::from(vec![
         Span::styled(format!("{label:<12}"), Style::default().fg(label_colour())),
         Span::styled(value.into(), Style::default().fg(text_colour()).bold()),
+    ])
+}
+
+/// The colour a load reads in: calm below 70%, worth a look to 90%, trouble past it.
+fn load_colour(percent: u64) -> Color {
+    match percent {
+        0..=69 => good(),
+        70..=89 => warn(),
+        _ => bad(),
+    }
+}
+
+/// A one-line meter `width` cells wide: `used` of `total`, in eighths of a cell so a
+/// 2% change still moves it, coloured by [`load_colour`]. The unfilled part is the
+/// same `░` the host-capacity bars use.
+///
+/// A zero `total` draws an empty track in `muted`: no capacity is known, and a
+/// coloured fill would claim a reading nobody took.
+fn meter_line(used: u64, total: u64, width: u16) -> Line<'static> {
+    const PARTIAL: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+    let width = width as u64;
+    if total == 0 || width == 0 {
+        return Line::from(Span::styled(
+            "░".repeat(width as usize),
+            Style::default().fg(muted()),
+        ));
+    }
+    let eighths = (used.min(total) as u128 * width as u128 * 8 / total as u128) as u64;
+    let (full, rest) = ((eighths / 8) as usize, (eighths % 8) as usize);
+    let track = width as usize - full - usize::from(rest > 0);
+    let fill = Style::default().fg(load_colour(percent(used, total)));
+    Line::from(vec![
+        Span::styled("█".repeat(full), fill),
+        Span::styled(PARTIAL[rest], fill),
+        Span::styled("░".repeat(track), Style::default().fg(muted())),
     ])
 }
 
@@ -9746,6 +9793,26 @@ mod overview_summaries {
         for panel in ["EARNINGS", "SCHEDULE", "ENERGY"] {
             assert!(screen.contains(panel), "no {panel} panel:\n{screen}");
         }
+    }
+
+    /// A meter fills in eighths of a cell, and an unknown capacity draws no fill.
+    #[test]
+    fn meters_fill_in_eighths_and_never_overflow() {
+        let text = |line: ratatui::text::Line| line.spans.iter().map(|s| s.content.to_string()).collect::<String>();
+        assert_eq!(text(super::meter_line(50, 100, 8)), "████░░░░");
+        assert_eq!(text(super::meter_line(1, 16, 8)), "▌░░░░░░░");
+        assert_eq!(text(super::meter_line(500, 100, 4)), "████");
+        assert_eq!(text(super::meter_line(5, 0, 4)), "░░░░");
+        assert_eq!(text(super::meter_line(0, 100, 4)), "░░░░");
+    }
+
+    #[test]
+    fn the_storage_card_draws_a_meter_for_the_host_disk() {
+        let mut app = App::new();
+        app.stats.disk_total = 100;
+        app.stats.disk_used = 50;
+        assert!(overview(&mut app).contains("50% of"));
+        assert!(overview(&mut app).contains('█'));
     }
 
     /// The node's state is a glyph as well as a colour, so `mono` can tell them apart.
