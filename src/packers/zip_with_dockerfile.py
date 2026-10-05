@@ -3,14 +3,15 @@ import fcntl
 import posixpath
 import stat
 import zipfile
-from typing import Generator, List, Tuple
+from typing import Generator, List, Optional, Tuple
 
 from src.utils import logger as log
 import json
 import os, shutil, subprocess, platform, sys, uuid
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
-from bee_rpc.utils import Enviroment, modify_env, block_pointer, hash_types_for_packing
+from bee_rpc.utils import Enviroment, modify_env, block_pointer, hash_types_for_packing, \
+    METADATA_FILE_NAME
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
@@ -65,6 +66,16 @@ PACKER_MEMORY_OVERHEAD = env_manager.get("PACKER_MEMORY_OVERHEAD", 40_000_000) o
 WAIT_FOR_UNLOCK_MEMORY = env_manager.get("packer.WAIT_FOR_UNLOCK_MEMORY", 300) or 300
 SAVE_ALL = env_manager.get("SAVE_ALL", False)
 MIN_BUFFER_BLOCK_SIZE = env_manager.get("packer.MIN_BUFFER_BLOCK_SIZE")
+# Largest exported image `--fast` / packer.fast will inline into one block.
+# Over it the pack falls back to per-file blocks (see fast_fallback_reason). In
+# fast mode the whole rootfs is a single Container.Filesystem message, and
+# protobuf cannot serialize a message of 2 GiB or more -- found out only after
+# the build and after reading every file into memory. The serialized message is
+# larger than the raw bytes (paths, per-file metadata, field framing), so the
+# default stays at half that limit: room for millions of files' overhead, and
+# an image that big gains little from fast mode anyway, since its large files
+# are what per-file blocks stream to disk instead of holding.
+FAST_MAX_BYTES = env_manager.get("packer.FAST_MAX_BYTES", 1 << 30) or 1 << 30
 # Name of the Dockerfile inside the project directory. BuildKit's dockerfile
 # frontend defaults to "Dockerfile" too; this only exists to make it overridable.
 DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile") or "Dockerfile"
@@ -104,6 +115,41 @@ def _normalize_tar_member_path(name: str) -> str:
 COMPANION_HASH_IDS = (SHA3_256_ID, BLAKE2B_ID)
 
 
+def _is_inline(size: int, fast: bool) -> bool:
+    """Whether a file this size is inlined rather than stored as its own block.
+
+    ``fast`` short-circuits the size check entirely: every file inlines, so
+    ``ZipContainerPacker`` never calls ``block_builder.create_block`` and the
+    filesystem's own ``build_multiblock`` call (see ``parseFilesys``) collapses
+    to a single block with nothing to point at -- the whole point of `--fast`.
+    """
+    return fast or size < MIN_BUFFER_BLOCK_SIZE
+
+
+def fast_fallback_reason(image_len: int, ram_available: int) -> Optional[str]:
+    """Why a `--fast` pack of an ``image_len``-byte image must pack normally, or None.
+
+    Decided before the filesystem tree is built or any memory is locked, so a
+    fast pack that cannot work becomes a normal one instead of failing late:
+
+    * over packer.FAST_MAX_BYTES, the single filesystem message would approach
+      protobuf's 2 GiB serialization limit;
+    * fast mode reserves PACKER_MEMORY_SIZE_FACTOR x the whole image. If that
+      is more than the memory manager could grant right now, the pack would
+      wait packer.WAIT_FOR_UNLOCK_MEMORY and then time out, while per-file
+      blocks need only the small files' share of it.
+    """
+    mb = lambda n: f"{n / (1024 ** 2):.2f} MB"
+    if image_len > int(FAST_MAX_BYTES):
+        return (f"the image is {mb(image_len)}, over packer.FAST_MAX_BYTES "
+                f"({mb(int(FAST_MAX_BYTES))})")
+    needed = packing_memory_estimate(inline_len=image_len)
+    if needed > ram_available:
+        return (f"fast mode needs {mb(needed)} of RAM and only {mb(ram_available)} "
+                f"is available")
+    return None
+
+
 def packing_memory_estimate(inline_len: int, block_count: int = 0) -> int:
     """RAM to reserve for a pack, from what it will actually hold.
 
@@ -139,7 +185,17 @@ def _install_as_block(block_id: bytes, directory: str) -> bytes:
     source: str = directory.rstrip(os.sep)
 
     if os.path.exists(destination):
-        shutil.rmtree(source, ignore_errors=True)
+        # Same content, but not necessarily the same form. A `--fast` pack stores
+        # the filesystem with every file inlined; a later normal pack of the same
+        # service produces the form that points at per-file blocks. Builds read
+        # the stored form as it is (container_filesystem._filesystem_block_bytes),
+        # so keeping the inlined one would make every build hold the whole image
+        # however the service is re-packed. Replace it; never the other way round.
+        if (os.path.isdir(destination) and _points_at_blocks(source)
+                and not _points_at_blocks(destination)):
+            _replace_block_directory(source, destination)
+        else:
+            shutil.rmtree(source, ignore_errors=True)
         return block_id
 
     staging: str = destination + '.tmp-' + uuid.uuid4().hex
@@ -154,14 +210,62 @@ def _install_as_block(block_id: bytes, directory: str) -> bytes:
     return block_id
 
 
+def _points_at_blocks(directory: str) -> bool:
+    """Whether a multiblock directory references other blocks (a `_.json` entry
+    that is ``[block id, positions]`` rather than a part number)."""
+    try:
+        with open(os.path.join(directory, METADATA_FILE_NAME)) as f:
+            return any(not isinstance(e, int) for e in json.load(f))
+    except (OSError, ValueError):
+        return False
+
+
+def _exchange(a: str, b: str) -> bool:
+    """Atomically swap two paths (Linux renameat2 RENAME_EXCHANGE); False if unsupported."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+    except (OSError, AttributeError):
+        return False
+    AT_FDCWD, RENAME_EXCHANGE = -100, 2
+    return renameat2(AT_FDCWD, a.encode(), AT_FDCWD, b.encode(), RENAME_EXCHANGE) == 0
+
+
+def _replace_block_directory(source: str, destination: str) -> None:
+    """Put ``source`` in place of the block directory ``destination``.
+
+    Staged inside the registry like a first install, then swapped in with one
+    atomic exchange, so a build opening ``destination/wbp.bin`` always finds a
+    complete form (either one; both expand to the same content). Where the
+    exchange is unavailable the old directory is renamed aside first, which
+    leaves a window of two renames in which the block is absent. Packs are
+    serialized by the pack lock, so no other packer replaces it meanwhile.
+    """
+    staging: str = destination + '.tmp-' + uuid.uuid4().hex
+    shutil.move(source, staging)
+    if not _exchange(staging, destination):
+        old: str = destination + '.old-' + uuid.uuid4().hex
+        os.rename(destination, old)
+        os.rename(staging, destination)
+        staging = old
+    # `staging` now holds the replaced form.
+    shutil.rmtree(staging, ignore_errors=True)
+    log.LOGGER(f"Replaced the inlined (fast) form of block {os.path.basename(destination)} "
+               f"with the per-file-block form.")
+
+
 class ZipContainerPacker:
-    def __init__(self, path, aux_id):
+    def __init__(self, path, aux_id, fast: bool = False):
         self.blocks: List[bytes] = []
         # The block the container filesystem is stored as; see parseFilesys.
         self.filesystem_block: bytes = b''
         self.buffer_len: int = 0
         self.inline_len: int = 0
         self.block_count: int = 0
+        # --fast: every file inlines into the one filesystem block, regardless
+        # of MIN_BUFFER_BLOCK_SIZE. See _is_inline and parseFilesys.
+        self.fast = fast
         self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
         self.path = path
@@ -276,13 +380,16 @@ class ZipContainerPacker:
                     if not os.path.islink(fp):
                         size = os.path.getsize(fp)
                         total_size += size
-                        if size < MIN_BUFFER_BLOCK_SIZE:
+                        if _is_inline(size, fast=False):
                             inline_size += size
                         else:
                             block_count += 1
             self.buffer_len = total_size
-            self.inline_len = inline_size
-            self.block_count = block_count
+            # The per-file-block split is kept even in fast mode, so a fast
+            # pack that has to fall back (ok(), drop_fast) needs no second walk.
+            self._blocked_inline_len = inline_size
+            self._blocked_block_count = block_count
+            self._apply_mode()
 
         except Exception as e:
             self.error_msg = f"Unexpected error during build: {str(e)}"
@@ -291,6 +398,19 @@ class ZipContainerPacker:
 
         # Check first tag for use as name
         self.tag = self.json.get("tag")
+
+    def _apply_mode(self) -> None:
+        if self.fast:
+            # Every file inlines: the whole image, no blocks besides the filesystem.
+            self.inline_len, self.block_count = self.buffer_len, 0
+        else:
+            self.inline_len = self._blocked_inline_len
+            self.block_count = self._blocked_block_count
+
+    def drop_fast(self) -> None:
+        """Pack with per-file blocks after all (see ok() / fast_fallback_reason)."""
+        self.fast = False
+        self._apply_mode()
 
     def _validate_service_json_shape(self) -> None:
         resources = self.json.get("resources", {})
@@ -508,7 +628,7 @@ class ZipContainerPacker:
                         branch.file = b""
                     # It's a file.
                     elif os.path.isfile(branch_host_path):
-                        if os.path.getsize(branch_host_path) < MIN_BUFFER_BLOCK_SIZE:
+                        if _is_inline(os.path.getsize(branch_host_path), self.fast):
                             with open(branch_host_path, 'rb') as file:
                                 branch.file = file.read()
                         else:
@@ -1130,22 +1250,32 @@ class ZipContainerPacker:
             
         return service_id, self.metadata, service
 
-def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
-    spec_file = ZipContainerPacker(path=path, aux_id=aux_id)
-    
+def ok(path, aux_id, fast: bool = False,
+       notes: Optional[dict] = None) -> Tuple[str, celaut.Metadata, str]:
+    """``notes``, when given, receives ``fast_fallback``: why a fast pack packed
+    with per-file blocks instead (the worker reports it to the parent)."""
+    spec_file = ZipContainerPacker(path=path, aux_id=aux_id, fast=fast)
+
     # Check if there was an error during initialization
     if spec_file.error_msg:
         return "", None, spec_file.error_msg
 
     iobd = IOBigData()
     iobd.log_snapshot(context=f"pack-worker:start aux_id={aux_id}")
+    if spec_file.fast:
+        reason = fast_fallback_reason(spec_file.buffer_len, iobd.get_ram_avaliable())
+        if reason:
+            log.LOGGER(f"--fast: {reason}; packing with per-file blocks instead.")
+            spec_file.drop_fast()
+            if notes is not None:
+                notes["fast_fallback"] = reason
     _memory = packing_memory_estimate(
         inline_len=spec_file.inline_len, block_count=spec_file.block_count)
     log.LOGGER(
         f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process "
         f"(inlined: {spec_file.inline_len / (1024**2):.2f} MB of "
-        f"{spec_file.buffer_len / (1024**2):.2f} MB exported, in "
-        f"{spec_file.block_count} blocks). "
+        f"{spec_file.buffer_len / (1024**2):.2f} MB exported, "
+        f"{'fast mode: one filesystem block' if spec_file.fast else f'in {spec_file.block_count} blocks'}). "
         f"RAM avaliable before locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB"
     )
     try:
@@ -1317,7 +1447,8 @@ def _extract_zip(zip_path: str, dest: str) -> None:
             ) from e
 
 
-def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, str]:
+def zipfile_ok(zip: str, fast: bool = False,
+               notes: Optional[dict] = None) -> Tuple[str, celaut.Metadata, str]:
     # uuid4().hex, not str(random.random()): this names a directory under a cache
     # shared by every concurrent pack, and `random` is a Mersenne twister seeded per
     # process. Nothing parses aux_id -- it is only ever joined into paths and
@@ -1345,11 +1476,15 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, str]:
 
     return ok(
         path=build_dir + os.sep,
-        aux_id=aux_id
+        aux_id=aux_id,
+        fast=fast,
+        notes=notes
     )  # Specification file
 
 
-def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+def pack_zip(
+        zip: str, saveit: bool = SAVE_ALL, fast: bool = False
+) -> Generator[buffer_pb2.Buffer, None, None]:
     log.LOGGER('Compiling zip ' + str(zip))
     IOBigData().log_snapshot(context=f"pack-daemon:before-worker zip={zip}")
     lock_file = _acquire_pack_lock()
@@ -1360,6 +1495,11 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
             sys.executable, "-m", "src.packers.zip_with_dockerfile",
             "--worker", zip, result_path
         ]
+        # The worker runs in its own subprocess (below), so `fast` cannot be
+        # passed as a Python argument -- it rides along as a trailing flag,
+        # parsed back out by _worker_main.
+        if fast:
+            cmd.append("--fast")
         proc = subprocess.run(cmd, cwd=main_dir)
         IOBigData().log_snapshot(
             context=f"pack-daemon:after-worker zip={zip} returncode={proc.returncode}"
@@ -1391,6 +1531,8 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
             result = json.load(f)
         os.remove(result_path)
         
+        if result.get("fast_fallback"):
+            _report_fast_fallback(result["fast_fallback"])
         error_msg = result.get("error")
         if error_msg:
             service_id, metadata, service = None, None, error_msg
@@ -1432,6 +1574,13 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
     # TODO if saveit: convert dirs to local partition model and save it into the registry.
 
 
+def _report_fast_fallback(reason: str) -> None:
+    """Tell the operator (and `nodo packs`) that a fast pack packed normally."""
+    print(f"--fast: {reason}; packed with per-file blocks instead.")
+    from src.utils import pack_registry
+    pack_registry.stage(f"building (fast fell back to per-file blocks: {reason})")
+
+
 def _acquire_pack_lock():
     lock_path = os.path.join(CACHE, "pack.lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
@@ -1458,14 +1607,18 @@ def _worker_main() -> None:
     if not argv or argv[0] != "--worker":
         return
 
+    fast = "--fast" in argv
+    argv = [a for a in argv if a != "--fast"]
+
     if len(argv) != 3:
-        print("Usage: --worker <zip> <result_path>", file=sys.stderr)
+        print("Usage: --worker <zip> <result_path> [--fast]", file=sys.stderr)
         sys.exit(2)
 
     _, zip_path, result_path = argv
 
     try:
-        service_id, metadata, service = zipfile_ok(zip=zip_path)
+        notes: dict = {}
+        service_id, metadata, service = zipfile_ok(zip=zip_path, fast=fast, notes=notes)
 
         if not service_id and not metadata and service:
             _write_pack_result(result_path, {"error": service})
@@ -1477,7 +1630,8 @@ def _worker_main() -> None:
                 _write_pack_result(result_path, {
                     "service_id": service_id,
                     "metadata_b64": metadata_b64,
-                    "service_dir": service
+                    "service_dir": service,
+                    "fast_fallback": notes.get("fast_fallback"),
                 })
     except Exception as e:
         _write_pack_result(result_path, {"error": f"Worker exception: {str(e)}"})

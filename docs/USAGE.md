@@ -370,6 +370,22 @@ These are the most commonly used commands for daily tasks:
   for sudo one time. Do not use `--local` if the operator wants packs to stay off
   this host.
 
+  **`--fast` / `--optimize` — single-block packing (local packer only):**
+  `--fast` inlines the whole image into one filesystem block instead of storing
+  each file at or over `packer.MIN_BUFFER_BLOCK_SIZE` as its own content-addressed
+  block — quicker to pack, but the pack reserves memory for the whole image
+  (`packer.PACKER_MEMORY_SIZE_FACTOR` × its size), the node that builds the VM
+  reads the whole image into memory, and nothing is deduplicated with other
+  services. `--optimize` forces the normal per-file blocks for one run;
+  `packer.fast: true` in `config.yaml` makes fast the node's default. Both modes
+  produce the same service id. The packer service ignores them (with a warning).
+
+  A fast-packed service costs its whole image in memory at **every build**, not
+  only at pack time, until it is re-packed with `--optimize` — which replaces the
+  stored single block with the per-file one (same id). A fast pack falls back to
+  per-file blocks by itself, and says so, when the image is over
+  `packer.FAST_MAX_BYTES` (1 GiB) or the node lacks the RAM fast mode reserves.
+
   Every pack records itself in `<main.STORAGE>/packs/<id>.json` while it runs and
   keeps the record afterwards with its outcome, so `nodo packs` and the TUI's PACKS
   page see packs started anywhere — a terminal, a script, the TUI. **`--detach`**
@@ -391,6 +407,7 @@ These are the most commonly used commands for daily tasks:
   `nodo pack /path/to/project`  
   `nodo pack https://github.com/celaut-basics/demo-service.git#hello --detach`  
   `nodo pack /path/to/project --local`  
+  `nodo pack /path/to/project --local --fast`  
   `nodo pack ./my-service --detach --json`
   > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
   > reference for the project layout, `pack_config.json`, `service.json`, and the

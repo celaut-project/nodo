@@ -137,7 +137,7 @@ class OfferLocalPackerTests(unittest.TestCase):
         self.assertEqual(result, "localid")
         ask.assert_called_once()
         set_config.assert_called_once_with("packer.local", True)
-        local.assert_called_once_with("/some/project")
+        local.assert_called_once_with("/some/project", fast=False)
 
     def test_no_keeps_config_and_fails(self):
         result, _, set_config, local = self._pack_without_service(tty=True, answer="n")
@@ -162,7 +162,7 @@ class OfferLocalPackerTests(unittest.TestCase):
             # Nested dependency packs of the same run also build locally.
             self.assertTrue(pack_mod._local_packer_enabled())
         self.assertEqual(result, "localid")
-        local.assert_called_once_with("/some/project")
+        local.assert_called_once_with("/some/project", fast=False)
         resolve.assert_not_called()
         set_config.assert_not_called()
 
@@ -180,7 +180,7 @@ class OfferLocalPackerTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 result = pack_mod.pack("/some/project")
         self.assertEqual(result, "localid")
-        local.assert_called_once_with("/some/project")
+        local.assert_called_once_with("/some/project", fast=False)
 
 
 class _Clock:

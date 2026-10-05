@@ -425,8 +425,9 @@ class TestCommands:
         monkeypatch.setenv("ORIGINAL_DIR", str(tmp_path))
         real_detach = packs.detach
         monkeypatch.setattr(packs, "detach",
-                            lambda source, as_json=False, local=False:
-                            real_detach(source, as_json, command=fake_pack, local=local))
+                            lambda source, as_json=False, local=False, options=None:
+                            real_detach(source, as_json, command=fake_pack, local=local,
+                                        options=options))
         assert packs.pack_command(["proj", "--detach", "--json"]) == 0
         document = _json(capsys)
         assert document["pack"]["source"] == str(tmp_path / "proj")
@@ -440,7 +441,7 @@ class TestCommands:
         monkeypatch.setenv("ORIGINAL_DIR", str(tmp_path))
         calls = []
 
-        def pack(directory, local=False):
+        def pack(directory, local=False, fast=False):
             calls.append((directory, local))
             return SERVICE_ID
 

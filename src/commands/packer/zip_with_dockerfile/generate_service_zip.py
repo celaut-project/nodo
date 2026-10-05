@@ -27,7 +27,7 @@ DEFAULT_METADATA_DEPENDENCIES_DIRECTORY = "__metadata__"
 DEFAULT_BLOCKS_DIRECTORY = "__block__"
 
 
-def __export_registry(project_dir: str, directory: str, pack_config: Dict):
+def __export_registry(project_dir: str, directory: str, pack_config: Dict, fast: bool = False):
     # Resolve the dependency-directory names. These keys are optional in
     # pack_config.json (see docs/PACKING.md); when omitted we fall back to the
     # documented default directory names instead of raising a KeyError.
@@ -74,8 +74,12 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                     print(f"Go to pack {dependency}")
                     from src.commands.packer.zip_with_dockerfile.pack import pack
                     try:
-                        dependency = pack(_dir)
+                        dependency = pack(_dir, fast=fast)
                     except Exception as e:
+                        # Say why: the "Dependency packing error" below names no cause.
+                        print(f"Packing the dependency {_dir} failed: {e!r}")
+                        from src.utils import pack_registry
+                        pack_registry.note_error(f"dependency {_dir}: {e}")
                         dependency = None
                     
                     if not dependency:
@@ -114,7 +118,7 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                 with open(os.path.join(directory, ".dependencies"), "a") as f:
                     f.write(f"{env}={dependency}\n")
 
-def generate_service_zip(project_directory: str) -> str:
+def generate_service_zip(project_directory: str, fast: bool = False) -> str:
     
     # Remove the last character '/' from the path if it exists
     if project_directory[-1] == '/':
@@ -183,7 +187,10 @@ def generate_service_zip(project_directory: str) -> str:
                     p.unlink(missing_ok=True)
 
     # Add the dependencies
-    __export_registry(project_dir=project_directory, directory=complete_source_directory, pack_config=pack_config)
+    __export_registry(
+        project_dir=project_directory, directory=complete_source_directory,
+        pack_config=pack_config, fast=fast
+    )
 
     if 'zip' in pack_config and pack_config['zip']:
         # Dependency-directory keys are optional; fall back to the documented

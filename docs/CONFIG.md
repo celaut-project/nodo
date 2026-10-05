@@ -230,6 +230,8 @@ The most important choice for anyone packing services. Full authoring format:
 | Key | Default | Meaning |
 |---|---|---|
 | `packer.local` | `false` | `false` → delegate the build to a **packer-service** microVM (no builder on this host). `true` → build **locally** with nodo's rootless BuildKit toolchain (provisioned on demand, no sudo). |
+| `packer.fast` | `false` | Local packer only. `true` → `nodo pack` inlines the whole image into a single filesystem block (as `--fast`): faster, but no per-file blocks, no deduplication, and the whole image is held in memory at pack time and at every build until the service is re-packed with `--optimize` (which replaces the stored block). `nodo pack --optimize` / `--fast` override it per run. Same service id either way. |
+| `packer.FAST_MAX_BYTES` | `1073741824` (1 GiB) | Local packer only: largest exported image a fast pack inlines. Over it — or when fast mode's reservation (`packer.PACKER_MEMORY_SIZE_FACTOR` × the image) exceeds the RAM available — the pack falls back to per-file blocks and says so. Kept well under protobuf's 2 GiB message limit, since the single filesystem message is larger than the raw image. |
 | `packer.PACKER_SOURCE_URL` | `""` | Manifest URL nodo downloads the packer service from directly when it needs to acquire it. Empty → resolve via the `source-application` core service. |
 | `packer.PACKER_SERVICE_URL` | `""` | Override: `ip:port` base URL of an out-of-band packer-service. Used only when no packer id is set / no running instance is found. |
 | `packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT` | `true` | Architectures `nodo pack` accepts/announces (**packer-side** — to limit what the node can *execute*, use `builder.*` instead). |
