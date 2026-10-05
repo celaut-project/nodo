@@ -25,10 +25,16 @@ pub(crate) fn accent() -> Color {
     crate::theme::current().accent
 }
 
-/// Labels, dividers and help text: there to be read past rather than read.
+/// Borders, dividers and help text: there to be read past rather than read.
 #[inline]
 pub(crate) fn muted() -> Color {
     crate::theme::current().muted
+}
+
+/// The name beside a value. Legible, unlike `muted`.
+#[inline]
+pub(crate) fn label_colour() -> Color {
+    crate::theme::current().label
 }
 
 /// Working, healthy, running, local.
@@ -360,8 +366,9 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
             area,
             "NODE",
             vec![
-                metric_line(
+                status_line(
                     "Status",
+                    service_health(&app.node_info.service_status),
                     nonempty(&app.node_info.service_status, "checking…"),
                 ),
                 metric_line("Address", nonempty(&app.node_info.address, "—")),
@@ -579,7 +586,7 @@ fn node_resources_lines(app: &App) -> Vec<Line<'static>> {
             let unstated = || "?".to_string();
             for offer in offers {
                 lines.push(Line::from(vec![
-                    Span::styled(format!("{:<6}", short_arch(&offer.arch)), Style::default().fg(muted())),
+                    Span::styled(format!("{:<6}", short_arch(&offer.arch)), Style::default().fg(label_colour())),
                     Span::styled(
                         format!(
                             "{}c {} {}",
@@ -638,7 +645,7 @@ fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
     // card's title, so it is never the line that gets clipped.
     for (arch, row) in &total.per_arch {
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<6}", short_arch(arch)), Style::default().fg(muted())),
+            Span::styled(format!("{:<6}", short_arch(arch)), Style::default().fg(label_colour())),
             Span::styled(
                 format!(
                     "{}c {} {}",
@@ -733,7 +740,7 @@ fn earnings_summary_lines(app: &App) -> Vec<Line<'static>> {
     let refused = sum(|e| e.refused);
     if refused > 0 {
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<12}", "Refused"), Style::default().fg(muted())),
+            Span::styled(format!("{:<12}", "Refused"), Style::default().fg(label_colour())),
             Span::styled(
                 app.money.format_raw(&refused.to_string()),
                 Style::default().fg(bad()).bold(),
@@ -763,10 +770,7 @@ fn schedule_summary_lines(app: &App) -> Vec<Line<'static>> {
 
     if !schedule.enabled {
         return vec![
-            Line::from(vec![
-                Span::styled(format!("{:<12}", "Hours"), Style::default().fg(muted())),
-                Span::styled("not enforced", Style::default().fg(good()).bold()),
-            ]),
+            status_line("Hours", Health::Ok, "not enforced"),
             Line::from(Span::styled(
                 "This node takes work at any hour.",
                 Style::default().fg(muted()),
@@ -775,15 +779,11 @@ fn schedule_summary_lines(app: &App) -> Vec<Line<'static>> {
     }
 
     let open = schedule.contains(now);
-    let mut lines = vec![Line::from(vec![
-        Span::styled(format!("{:<12}", "Right now"), Style::default().fg(muted())),
-        Span::styled(
-            if open { "OPEN" } else { "CLOSED" },
-            Style::default()
-                .fg(if open { good() } else { bad() })
-                .bold(),
-        ),
-    ])];
+    let mut lines = vec![status_line(
+        "Right now",
+        if open { Health::Ok } else { Health::Bad },
+        if open { "OPEN" } else { "CLOSED" },
+    )];
 
     lines.push(match schedule.minutes_until_flip(now) {
         Some(minutes) => metric_line(
@@ -834,7 +834,7 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
     if energy.watts.is_none() {
         return vec![
             Line::from(vec![
-                Span::styled(format!("{:<12}", "Power"), Style::default().fg(muted())),
+                Span::styled(format!("{:<12}", "Power"), Style::default().fg(label_colour())),
                 Span::styled("unmeasured", Style::default().fg(muted()).bold()),
             ]),
             Line::from(Span::styled(
@@ -1041,9 +1041,59 @@ pub(crate) fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: V
 
 pub(crate) fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<12}"), Style::default().fg(muted())),
+        Span::styled(format!("{label:<12}"), Style::default().fg(label_colour())),
         Span::styled(value.into(), Style::default().fg(text_colour()).bold()),
     ])
+}
+
+/// How a status reads, as a glyph and a colour.
+///
+/// The glyph differs as well as the colour: `mono` has one colour for everything,
+/// and "running" must not look like "not running" there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Health {
+    Ok,
+    Warn,
+    Bad,
+    Unknown,
+}
+
+impl Health {
+    pub(crate) fn glyph(self) -> &'static str {
+        match self {
+            Health::Ok => "●",
+            Health::Warn => "▲",
+            Health::Bad => "✕",
+            Health::Unknown => "○",
+        }
+    }
+
+    pub(crate) fn colour(self) -> Color {
+        match self {
+            Health::Ok => good(),
+            Health::Warn => warn(),
+            Health::Bad => bad(),
+            Health::Unknown => muted(),
+        }
+    }
+}
+
+/// A labelled status: the name, then a coloured glyph and the word.
+pub(crate) fn status_line(label: &str, health: Health, text: impl Into<String>) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{label:<12}"), Style::default().fg(label_colour())),
+        Span::styled(format!("{} ", health.glyph()), Style::default().fg(health.colour())),
+        Span::styled(text.into(), Style::default().fg(health.colour()).bold()),
+    ])
+}
+
+/// What `nodo info` reports as the service state, as a [`Health`].
+fn service_health(status: &str) -> Health {
+    match status {
+        "running" => Health::Ok,
+        "not running" => Health::Bad,
+        _ => Health::Unknown,
+    }
 }
 
 /// One block per payment system this node offers, and never a total.
@@ -1069,7 +1119,7 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
             wallet.ledger.to_uppercase()
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{name:<9}"), Style::default().fg(muted())),
+            Span::styled(format!("{name:<9}"), Style::default().fg(label_colour())),
             Span::styled(balance, Style::default().fg(series(2)).bold()),
         ]));
         lines.push(Line::from(Span::styled(
@@ -9696,6 +9746,18 @@ mod overview_summaries {
         for panel in ["EARNINGS", "SCHEDULE", "ENERGY"] {
             assert!(screen.contains(panel), "no {panel} panel:\n{screen}");
         }
+    }
+
+    /// The node's state is a glyph as well as a colour, so `mono` can tell them apart.
+    #[test]
+    fn the_node_status_carries_a_glyph() {
+        let mut app = App::new();
+        app.node_info.service_status = "running".to_string();
+        assert!(overview(&mut app).contains("● running"));
+        app.node_info.service_status = "not running".to_string();
+        assert!(overview(&mut app).contains("✕ not running"));
+        app.node_info.service_status = String::new();
+        assert!(overview(&mut app).contains("○ checking"));
     }
 
     /// Summed across payment networks, which the EARNINGS page does not do: there a
