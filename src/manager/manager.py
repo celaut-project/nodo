@@ -186,8 +186,16 @@ def get_dev_clients(amount_mu: int) -> Generator[str, None, None]:
     clients = _ensure_dev_client_pool(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE)
     for client_id in clients:
         client_balance = _get_client_balance(client_id=client_id)
-        if client_balance is not None and client_balance > amount_mu:
-            yield client_id
+        if client_balance is None:
+            continue
+        # The pool only holds `_target_dev_client_balance(0)`, so filtering on the balance
+        # alone yields nothing for any real amount. Dev clients are unmetered: raise the
+        # one handed out, as `_acquire_dev_client` does. The generator is lazy, so only the
+        # clients actually consumed are topped up.
+        target_balance = _target_dev_client_balance(amount_mu)
+        if client_balance < target_balance:
+            sc.add_balance(client_id=client_id, balance_mu=target_balance - client_balance)
+        yield client_id
 
 
 def get_execute_client(amount_mu: int) -> str:
