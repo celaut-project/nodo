@@ -379,10 +379,11 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
             area,
             "WORKLOAD",
             vec![
-                metric_line("Instances", app.instances.items.len().to_string()),
-                metric_line(
+                metric_line_right("Instances", app.instances.items.len().to_string(), area.width.saturating_sub(2)),
+                metric_line_right(
                     "Memory now",
                     format_bytes(app.stats.instance_memory_current),
+                    area.width.saturating_sub(2),
                 ),
                 // Against what the instances reserved, not the host: this is how full
                 // their own limits are. HOST CAPACITY has the host.
@@ -407,21 +408,22 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
             area,
             "STORAGE",
             vec![
-                metric_line(
+                metric_line_right(
                     "Host disk",
                     format!(
                         "{}% of {}",
                         percent(app.stats.disk_used, app.stats.disk_total),
-                        format_bytes(app.stats.disk_total)
+                        format_bytes_compact(app.stats.disk_total)
                     ),
+                    area.width.saturating_sub(2),
                 ),
                 meter_line(
                     app.stats.disk_used,
                     app.stats.disk_total,
                     area.width.saturating_sub(2),
                 ),
-                metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
-                metric_line("Services", app.services.items.len().to_string()),
+                metric_line_right("Nodo data", format_bytes(app.stats.storage_bytes), area.width.saturating_sub(2)),
+                metric_line_right("Services", app.services.items.len().to_string(), area.width.saturating_sub(2)),
             ],
             series(1),
         ),
@@ -430,8 +432,8 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
             area,
             "NETWORK",
             vec![
-                metric_line("Peers", app.peers.items.len().to_string()),
-                metric_line("Clients", app.clients.items.len().to_string()),
+                metric_line_right("Peers", app.peers.items.len().to_string(), area.width.saturating_sub(2)),
+                metric_line_right("Clients", app.clients.items.len().to_string(), area.width.saturating_sub(2)),
             ],
             series(2),
         ),
@@ -459,7 +461,7 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
             area,
             CardKind::Summary,
             "EARNINGS",
-            earnings_summary_lines(app),
+            earnings_summary_lines(app, area.width.saturating_sub(2)),
             series(2),
         ),
         OverviewCard::Schedule => draw_card_as(
@@ -475,7 +477,7 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
             area,
             CardKind::Summary,
             "ENERGY",
-            energy_summary_lines(app),
+            energy_summary_lines(app, area.width.saturating_sub(2)),
             warn(),
         ),
     }
@@ -787,7 +789,7 @@ fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
 /// total would be money the operator cannot spend as one sum, but here the question
 /// is "is this node earning at all". The network count is named so the figure is not
 /// read as a single balance.
-fn earnings_summary_lines(app: &App) -> Vec<Line<'static>> {
+fn earnings_summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     if app.earnings.is_empty() {
         return vec![
             Line::from(Span::styled(
@@ -805,13 +807,10 @@ fn earnings_summary_lines(app: &App) -> Vec<Line<'static>> {
         app.earnings.iter().map(pick).sum()
     };
     let mut lines = vec![
-        metric_line("Last day", app.money.format_raw(&sum(|e| e.day).to_string())),
-        metric_line("Last week", app.money.format_raw(&sum(|e| e.week).to_string())),
-        metric_line(
-            "Last month",
-            app.money.format_raw(&sum(|e| e.month).to_string()),
-        ),
-        metric_line("All time", app.money.format_raw(&sum(|e| e.total).to_string())),
+        metric_line_right("Last day", app.money.format_raw(&sum(|e| e.day).to_string()), width),
+        metric_line_right("Last week", app.money.format_raw(&sum(|e| e.week).to_string()), width),
+        metric_line_right("Last month", app.money.format_raw(&sum(|e| e.month).to_string()), width),
+        metric_line_right("All time", app.money.format_raw(&sum(|e| e.total).to_string()), width),
     ];
 
     // Named rather than folded into the totals: a network that keeps refusing
@@ -909,7 +908,7 @@ fn schedule_summary_lines(app: &App) -> Vec<Line<'static>> {
 /// guess: `model` is an estimate from coefficients nobody may have measured, and a
 /// `floor` misses whatever the counter does not cover. Neither is the machine's
 /// consumption, and the number alone would present one as the other.
-fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
+fn energy_summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let energy = &app.node_energy;
     if energy.watts.is_none() {
         return vec![
@@ -929,8 +928,8 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
     }
 
     let mut lines = vec![
-        metric_line("Power", format_watts(energy.watts)),
-        metric_line("Electricity", node_cost_line(energy)),
+        metric_line_right("Power", format_watts(energy.watts), width),
+        metric_line_right("Electricity", node_cost_line(energy), width),
     ];
 
     // Today's total and the window's worst hour -- what a glance at this card is
@@ -951,11 +950,23 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
         } else {
             format!("{:.2} kWh", series.today_kwh())
         };
-        lines.push(metric_line("Today", today));
-        lines.push(metric_line(
-            "Peak 48h",
-            format_watts(Some(series.peak_watts_over(48))),
-        ));
+        lines.push(metric_line_right("Today", today, width));
+        // The 48h peak, and the last day or so of hourly peaks beside it when the card
+        // is wide enough to hold a row of them: the shape, not just the worst point.
+        let peak = format_watts(Some(series.peak_watts_over(48)));
+        let room = (width as usize).saturating_sub(12 + peak.chars().count() + 2);
+        let hourly: Vec<f64> = series.buckets.iter().map(|bucket| bucket.peak_watts).collect();
+        let spark = if room >= 6 { sparkline(&hourly, room.min(24)) } else { String::new() };
+        lines.push(if spark.is_empty() {
+            metric_line_right("Peak 48h", peak, width)
+        } else {
+            Line::from(vec![
+                Span::styled(format!("{:<12}", "Peak 48h"), Style::default().fg(label_colour())),
+                Span::styled(peak, Style::default().fg(text_colour()).bold()),
+                Span::raw("  "),
+                Span::styled(spark, Style::default().fg(warn())),
+            ])
+        });
     }
 
     // The same qualifier `node_power_line` puts on the NODE card, on its own line
@@ -1169,6 +1180,42 @@ pub(crate) fn metric_line(label: &str, value: impl Into<String>) -> Line<'static
         Span::styled(format!("{label:<12}"), Style::default().fg(label_colour())),
         Span::styled(value.into(), Style::default().fg(text_colour()).bold()),
     ])
+}
+
+/// Like [`metric_line`], with the value pushed to the right edge of `width` columns
+/// so a column of figures lines up on its last digit and can be compared by eye.
+/// Falls back to the left-aligned form when label and value do not both fit.
+pub(crate) fn metric_line_right(label: &str, value: impl Into<String>, width: u16) -> Line<'static> {
+    let value = value.into();
+    let label_width = label.chars().count().max(12);
+    let value_width = value.chars().count();
+    let width = width as usize;
+    if label_width + value_width > width {
+        return metric_line(label, value);
+    }
+    Line::from(vec![
+        Span::styled(format!("{label:<label_width$}"), Style::default().fg(label_colour())),
+        Span::raw(" ".repeat(width - label_width - value_width)),
+        Span::styled(value, Style::default().fg(text_colour()).bold()),
+    ])
+}
+
+/// The last `width` readings as one row of block glyphs, scaled to their own maximum.
+/// A zero reading is the lowest block rather than a gap, so the row never looks
+/// broken; no readings at all is an empty string.
+fn sparkline(values: &[f64], width: usize) -> String {
+    const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let tail = &values[values.len().saturating_sub(width)..];
+    let peak = tail.iter().copied().fold(0.0_f64, f64::max);
+    tail.iter()
+        .map(|&value| {
+            if peak <= 0.0 || !value.is_finite() {
+                BLOCKS[0]
+            } else {
+                BLOCKS[((value / peak) * 7.0).round().clamp(0.0, 7.0) as usize]
+            }
+        })
+        .collect()
 }
 
 /// The colour a load reads in: calm below 70%, worth a look to 90%, trouble past it.
@@ -9919,6 +9966,23 @@ mod overview_summaries {
         assert!(screen.contains("\u{250c} WORKLOAD "), "{screen}");
         assert!(screen.contains("\u{2500} EARNINGS "), "{screen}");
         assert!(!screen.contains("\u{250c} EARNINGS"), "{screen}");
+    }
+
+    #[test]
+    fn a_sparkline_scales_to_its_own_peak_and_keeps_the_tail() {
+        assert_eq!(super::sparkline(&[0.0, 50.0, 100.0], 8), "▁▅█");
+        assert_eq!(super::sparkline(&[100.0, 0.0, 100.0], 2), "▁█");
+        assert_eq!(super::sparkline(&[0.0, 0.0], 8), "▁▁");
+        assert_eq!(super::sparkline(&[], 8), "");
+    }
+
+    #[test]
+    fn figures_line_up_on_their_last_digit() {
+        let text = |line: ratatui::text::Line| line.spans.iter().map(|s| s.content.to_string()).collect::<String>();
+        assert_eq!(text(super::metric_line_right("Peers", "7", 20)), "Peers              7");
+        assert_eq!(text(super::metric_line_right("Peers", "1234", 20)).chars().count(), 20);
+        // Too narrow for both: the left-aligned form, never a clipped label.
+        assert_eq!(text(super::metric_line_right("Peers", "1234567", 14)), "Peers       1234567");
     }
 
     /// A meter fills in eighths of a cell, and an unknown capacity draws no fill.
