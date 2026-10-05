@@ -228,6 +228,58 @@ Write concurrency between participants is the application's problem, as it would
 be over NFS; the node arbitrates nothing beyond the mount mode each guest asked
 for.
 
+### Host requirement: the Rust virtiofsd
+
+The node starts the daemon with the flags of the Rust
+[virtiofsd](https://gitlab.com/virtio-fs/virtiofsd) (`--socket-path`,
+`--shared-dir`, `--sandbox`, `--cache`). `virtualizers.ch.VIRTIOFSD_BINARY` names
+it. Two things do not work:
+
+- The old C daemon from QEMU, `/usr/lib/qemu/virtiofsd` (from
+  `qemu-system-common` up to 7.x). It does not accept these flags.
+- A binary that only your user can find. The node runs as root, so
+  `~/.cargo/bin` is not on its `PATH`. Use an absolute path.
+
+There is no distro package for the Rust daemon on Ubuntu 22.04.
+
+**The installer** puts virtiofsd 1.14.0 at `<MAIN_DIR>/bin/virtiofsd` and writes
+that absolute path to `VIRTIOFSD_BINARY` (`bash/lib_virtiofsd.sh`):
+
+- x86_64: the static binary that upstream attaches to the release. The zip and
+  the binary in it are pinned by SHA-256.
+- arm64 (upstream publishes no binary), or when the download fails:
+  `cargo install virtiofsd --version =1.14.0 --locked`, in the node's own Rust
+  toolchain (`dependencies.rust.RUNTIME_ROOT`), after it installs
+  `libcap-ng-dev`, `libseccomp-dev` and `pkg-config` (`libcap-ng-devel`,
+  `libseccomp-devel` and `pkgconf-pkg-config` on Fedora).
+
+If `VIRTIOFSD_BINARY` is already a path of your own, the installer does not
+change it and installs nothing. If the installer cannot get the daemon, the
+install still completes, and only services with shared directories cannot run.
+
+**By hand:**
+
+```bash
+sudo apt-get install -y libcap-ng-dev libseccomp-dev pkg-config
+cargo install virtiofsd --locked
+sudo install -m 0755 ~/.cargo/bin/virtiofsd /nodo/bin/virtiofsd
+sudo nodo config set virtualizers.ch.VIRTIOFSD_BINARY=/nodo/bin/virtiofsd
+```
+
+**Check it** with `sudo nodo doctor`. The `virtiofsd (shared filesystems)` part
+gives the resolved path and says if it is the Rust daemon, the old QEMU daemon, or
+missing. A missing daemon is a `[WARN]`, not a failure, because only services
+with shared directories need it.
+
+**At launch**, the node probes the daemon (`--version`) for a service that
+declares shared or guest directories, before it charges the client or builds a
+rootfs (`src/virtualizers/microvm/virtiofsd.py`). If the daemon is missing or is
+the old one:
+
+- a service with a `guest` directory is refused. It can only run on this node.
+- a service that only exports (`shared`) is not run on this node. A peer can
+  still take it. If no peer does, the launch error gives the reason.
+
 ### Accounting
 
 A share lives outside every rootfs, so its bytes are in no instance's recorded
