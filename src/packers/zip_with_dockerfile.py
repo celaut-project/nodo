@@ -107,6 +107,16 @@ def _normalize_tar_member_path(name: str) -> str:
     return "" if normalized == "." else normalized
 
 
+def image_link_target(host_path: str) -> str:
+    # The link text exactly as the image has it. The guest resolves it against
+    # its own root at run time. Do not resolve it here: realpath follows an
+    # absolute target through the packing host's root, so the guest got the
+    # host's /etc/alternatives choices (awk -> gawk) and the host's usrmerge
+    # (/lib64/ld-linux-x86-64.so.2 -> /usr/lib/...), and the service id
+    # changed with the packing host (#485).
+    return os.readlink(host_path)
+
+
 # Every service carries these digests regardless of `hashing.HASH`, so any
 # node -- whatever algorithm it is configured with -- can resolve or verify a
 # service it did not pack itself (get_service_hex_main_hash falls back to
@@ -613,9 +623,7 @@ class ZipContainerPacker:
                     # It's a link.
                     if os.path.islink(branch_host_path):
                         branch.link.dst = directory + b_name
-                        branch.link.src = os.path.realpath(branch_host_path)[
-                                          len(host_dir):] if host_dir in os.path.realpath(
-                            branch_host_path) else os.path.realpath(branch_host_path)
+                        branch.link.src = image_link_target(branch_host_path)
                     # Device node (block/char): represent as file placeholder and recover via xattrs in CH build.
                     elif branch_metadata.is_device:
                         branch.file = b""
