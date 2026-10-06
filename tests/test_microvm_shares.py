@@ -238,7 +238,7 @@ class FailedLaunchReleaseTest(unittest.TestCase):
         teardown.assert_not_called()
 
     def test_the_shares_of_a_failed_launch_are_released(self):
-        mounts_state = [{"share_id_hex": "a" * 64, "pid": 7, "own_daemon": True}]
+        mounts_state = [{"share_id_hex": "a" * 64, "pid": 7}]
         setup = shares.ShareSetup([], mounts_state, [])
         with tempfile.TemporaryDirectory() as root, \
              patch.object(shares.paths, "cache_root", return_value=root), \

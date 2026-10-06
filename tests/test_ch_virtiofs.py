@@ -182,7 +182,6 @@ class VirtiofsOrchestrationTest(unittest.TestCase):
             self.assertEqual(state["users"], ["vm-parent", "vm-child"])
             self.assertEqual(state["daemons"]["vm-parent"], {"pid": 4242, "socket": parent["socket"]})
             self.assertEqual(state["daemons"]["vm-child"], {"pid": 4343, "socket": child["socket"]})
-            self.assertTrue(parent["own_daemon"] and child["own_daemon"])
 
     def test_the_same_vm_reuses_its_own_daemon(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
@@ -352,36 +351,10 @@ class VirtiofsTeardownTest(unittest.TestCase):
             killed = []
             vf.teardown_virtiofs_for_vm(
                 "vm-child",
-                [{"share_id_hex": sid, "pid": 303, "socket": str(Path(base) / "c.sock"),
-                  "own_daemon": True}],
+                [{"share_id_hex": sid, "pid": 303, "socket": str(Path(base) / "c.sock")}],
                 base_dir=base, kill_fn=killed.append,
             )
             self.assertEqual(killed, [303])
-
-    def test_a_share_from_an_older_node_keeps_its_single_daemon_for_the_exporter(self):
-        # Before per-guest daemons, one daemon served everyone and was recorded at the
-        # top level. A guest leaving must not stop it; the exporter leaving does.
-        with tempfile.TemporaryDirectory() as base:
-            sid = "e" * 64
-            for vmachine_id, exported in (("vm-parent", True), ("vm-child", False)):
-                vf.shared_dir(base, sid).mkdir(parents=True, exist_ok=True)
-                vf.reserve_share(base, vf.mount_for(_ref(share_id=sid), base, exported=exported),
-                                 vmachine_id)
-            path = vf.share_state_path(base, sid)
-            state = vf.load_share_state(base, sid)
-            state.update({"pid": 999, "socket": str(Path(base) / "s.sock")})
-            vf._save_share_state(path, state)
-            # The guest's mount points at that shared daemon, without `own_daemon`.
-            legacy_mount = {"share_id_hex": sid, "pid": 999, "socket": state["socket"]}
-
-            killed = []
-            vf.teardown_virtiofs_for_vm("vm-child", [legacy_mount], base_dir=base,
-                                        kill_fn=killed.append)
-            self.assertEqual(killed, [])
-            vf.teardown_virtiofs_for_vm("vm-parent", [legacy_mount], base_dir=base,
-                                        kill_fn=killed.append)
-            self.assertEqual(killed, [999])
-            self.assertFalse(vf.share_state_dir(base, sid).exists())
 
     def test_a_handed_over_directory_is_released_but_never_deleted(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as host:
