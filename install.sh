@@ -299,6 +299,23 @@ PYTHON_RUNTIME_BIN_PATH="$(read_config_path_or_default '.dependencies.python.RUN
 PYTHON_VENV_BIN_PATH="$(read_config_path_or_default '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
 PYTHON_RUNTIME_BIN_DIR_PATH="$(dirname "$PYTHON_RUNTIME_BIN_PATH")"
 
+# TEMPORARY: install the portable Java runtime by default, unless it is already
+# there. This is provisional, only until the Ergo service is ready (it will then
+# bring its own Java, and the node will no longer need one on the host).
+install_java_if_needed() {
+  if [ -x "$JAVA_HOME_PATH/bin/java" ]; then
+    printf "Java already installed at %s. Skipping.\n" "$JAVA_HOME_PATH"
+    return 0
+  fi
+
+  printf "Java not found at %s. Installing it (provisional, until the Ergo service is ready)...\n" "$JAVA_HOME_PATH"
+  if ! /bin/bash "$TARGET_DIR/bash/install_java.sh" "$TARGET_DIR"; then
+    printf "Warning: Java installation failed. Retry with: sudo /bin/bash %s/bash/install_java.sh %s\n" "$TARGET_DIR" "$TARGET_DIR" >&2
+  fi
+}
+
+install_java_if_needed
+
 # resolve_admin_group() lives in bash/lib_pkg.sh so that install.sh and the setup
 # scripts cannot disagree about it -- they both render nodo.service.template, and
 # when only two of the three renderers knew about {{ADMIN_GROUP}} the third shipped
