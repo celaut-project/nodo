@@ -730,8 +730,11 @@ def _write_item(
                     block_id_from_pointer(block=_blk, inherited=hash_types)
                     or get_hash_from_block(block=_blk, internal_block=True)
                 )
-                
-                _is_block_pointer = block_id is not None
+                # Both resolutions return '' for a message with no usable hash.
+                # That is inline content whose bytes happen to parse as a
+                # Buffer.Block (a small protobuf data file does), not a pointer,
+                # and copy_block_if_exists already treated it as inline (#488).
+                _is_block_pointer = bool(block_id)
             except DecodeError:
                 _is_block_pointer = False
 

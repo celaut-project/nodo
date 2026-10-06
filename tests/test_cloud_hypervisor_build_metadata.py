@@ -13,6 +13,7 @@ IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue
+    from src.utils.hashing import SHA3_256_ID
     ch_build = importlib.import_module("src.virtualizers.microvm.build")
     ch_limits = importlib.import_module("src.virtualizers.microvm.limits")
     microvm_paths = importlib.import_module("src.virtualizers.microvm.paths")
@@ -100,6 +101,57 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             self.assertTrue(written.is_file())
             self.assertEqual(symlinks, [])
             self.assertIn(written, legacy_regular_files)
+
+    # A 74-byte file of the onnx 1.17.0 wheel
+    # (onnx/backend/test/data/node/test_sequence_map_add_2_sequences/
+    # test_data_set_0/input_0.pb). It parses as a Buffer.Block with no usable hash.
+    ONNX_INPUT_PB = bytes.fromhex(
+        "0a02783010011a1e080610014a1853a25b3f7de5583fdfa11f3faecdc43e7556983ede4b"
+        "683d1a0a080110014a049b998b3e1a16080410014a108690f43e4aea4f3f91bff53e171bc93e"
+    )
+
+    def test_write_item_writes_inline_bytes_that_parse_as_a_block_with_no_hash(self):
+        # #488: this file stopped the build with "Block reconstruction failed.
+        # block_id=''", so the service could never start.
+        branch = celaut.Service.Container.Filesystem.ItemBranch()
+        branch.name = "input_0.pb"
+        branch.file = self.ONNX_INPUT_PB
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ch_build._write_item(
+                branch=branch,
+                root_dir=Path(tmpdir),
+                parent_rel_path="/",
+                symlinks=[],
+                legacy_regular_files=set(),
+                security_context=self._security_context(),
+                hash_types=(SHA3_256_ID,),
+            )
+
+            self.assertEqual((Path(tmpdir) / "input_0.pb").read_bytes(), self.ONNX_INPUT_PB)
+
+    def test_write_item_still_refuses_a_pointer_to_a_missing_block(self):
+        # The guard of #131 stays: a real pointer whose block is not in the
+        # registry must not be written as the file.
+        pointer = ch_build.buffer_pb2.Buffer.Block()
+        pointer_hash = pointer.hashes.add()
+        pointer_hash.type = b""
+        pointer_hash.value = bytes(range(32))
+        branch = celaut.Service.Container.Filesystem.ItemBranch()
+        branch.name = "big.bin"
+        branch.file = pointer.SerializeToString()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(ch_build, "copy_block_if_exists", return_value=False):
+                with self.assertRaisesRegex(RuntimeError, "Block reconstruction failed"):
+                    ch_build._write_item(
+                        branch=branch,
+                        root_dir=Path(tmpdir),
+                        parent_rel_path="/",
+                        symlinks=[],
+                        legacy_regular_files=set(),
+                        security_context=self._security_context(),
+                    )
 
     def test_write_item_rejects_mismatched_link_dst(self):
         branch = celaut.Service.Container.Filesystem.ItemBranch()
