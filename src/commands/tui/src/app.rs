@@ -2058,6 +2058,31 @@ mod cpu_breakdown_tests {
     /// No cores reported (an `App` built before the first `sys.refresh_cpu()`, say)
     /// must not divide by zero.
     #[test]
+    fn root_is_found_when_the_compiled_path_does_not_exist() {
+        use super::locate_root;
+        let base = std::env::temp_dir().join(format!("nodo-tui-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let install = base.join("install");
+        std::fs::create_dir_all(install.join("bin")).unwrap();
+        std::fs::write(install.join("config.yaml"), "main: {}\n").unwrap();
+        let ghost = base.join("home/runner/work/nodo");
+
+        // Explicit variable wins.
+        assert_eq!(
+            locate_root(Some(install.clone()), &ghost, None, None),
+            install
+        );
+        // Otherwise it is found from the binary's own location.
+        assert_eq!(
+            locate_root(None, &ghost, Some(install.join("bin/tui")), None),
+            install
+        );
+        // Nothing matches: the compiled root, as before.
+        assert_eq!(locate_root(None, &ghost, None, None), ghost);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn zero_cores_does_not_panic() {
         let breakdown = cpu_breakdown(&stats(0, 0, 0.0, 0.0));
 
@@ -2083,12 +2108,55 @@ pub struct Paths {
     pub yq: PathBuf,
 }
 
+/// Names the nodo checkout explicitly. `nodo.py` sets it when it launches the TUI,
+/// because the path this crate was compiled at is the CI runner's
+/// (`/home/runner/work/nodo/...`) in a released binary and does not exist on the
+/// operator's machine.
+pub const ROOT_ENV: &str = "NODO_ROOT";
+
+/// Whether `dir` is a nodo checkout: it has the config or the docs tree.
+fn is_nodo_root(dir: &Path) -> bool {
+    dir.join("config.yaml").is_file() || dir.join("docs").join("KyA.md").is_file()
+}
+
+/// The directory `config.yaml` and `docs/` are resolved against.
+///
+/// In order: the explicit variable (taken at its word when it is a directory); the
+/// compile-time root when it still looks like a checkout (a local build); then the
+/// first ancestor of the executable or working directory that does. When nothing
+/// matches, the compile-time root is returned, as before.
+pub fn locate_root(
+    explicit: Option<PathBuf>,
+    compiled: &Path,
+    executable: Option<PathBuf>,
+    working_dir: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(dir) = explicit.filter(|dir| dir.is_dir()) {
+        return dir;
+    }
+    if is_nodo_root(compiled) {
+        return compiled.to_path_buf();
+    }
+    for start in [executable, working_dir].into_iter().flatten() {
+        if let Some(found) = start.ancestors().find(|dir| is_nodo_root(dir)) {
+            return found.to_path_buf();
+        }
+    }
+    compiled.to_path_buf()
+}
+
 impl Paths {
     pub fn discover() -> Self {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
-            .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."));
+        let compiled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let compiled = compiled.canonicalize().unwrap_or(compiled);
+        let root = locate_root(
+            std::env::var_os(ROOT_ENV)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from),
+            &compiled,
+            std::env::current_exe().ok(),
+            std::env::current_dir().ok(),
+        );
         let config = root.join("config.yaml");
         let document = read_yaml(&config).ok();
 

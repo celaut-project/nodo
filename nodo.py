@@ -889,7 +889,14 @@ if __name__ == '__main__':
                         flush=True,
                     )
                     sys.exit(1)
-                sys.exit(subprocess.call([tui_binary]))
+                # The binary was compiled on a CI runner, so the checkout path it
+                # was built at does not exist here: tell it where config.yaml and
+                # docs/ really are.
+                tui_env = {
+                    **os.environ,
+                    "NODO_ROOT": os.path.dirname(os.path.abspath(__file__)),
+                }
+                sys.exit(subprocess.call([tui_binary], env=tui_env))
 
             case "ggconf":
                 from src.commands.ggconf import generate_gateway_config_dev
