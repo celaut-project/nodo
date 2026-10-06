@@ -56,7 +56,7 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     delete_runtime_state,
 )
-from src.virtualizers.microvm.shares import materialize_shares
+from src.virtualizers.microvm.shares import NO_SHARES, materialize_shares, release_shares
 from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 from src.virtualizers.qemu.config import (
     QEMU_CONSOLE_BY_ARCH,
@@ -415,6 +415,8 @@ def execute(
     serial_log_path = runtime_dir / "qemu.serial.log"
     qmp_socket_path = _qmp_socket_path(vmachine_id)
     resolved_entrypoint: Optional[str] = None
+    # What the failure path gives back if the launch fails after shares are up.
+    shares = NO_SHARES
 
     try:
         log.LOGGER(f"[QEMU][{vmachine_id}] event=start")
@@ -824,6 +826,10 @@ def execute(
             time.sleep(0.5)
             if process.poll() is None:
                 process.kill()
+
+        # The process is gone, so its daemons have no client left: release this VM's
+        # shares, which no runtime state will hand to a kill.
+        release_shares(vmachine_id, shares, f"[QEMU][{vmachine_id}]")
 
         if tap_name:
             network.delete_tap(tap_name)

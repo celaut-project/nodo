@@ -46,7 +46,7 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     save_runtime_state,
 )
-from src.virtualizers.microvm.shares import materialize_shares
+from src.virtualizers.microvm.shares import NO_SHARES, materialize_shares, release_shares
 from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 
 env_manager = ConfigManager()
@@ -230,6 +230,8 @@ def execute(
     stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
     serial_log_path: Optional[Path] = None
     resolved_entrypoint: Optional[str] = None
+    # What the failure path gives back if the launch fails after shares are up.
+    shares = NO_SHARES
 
     try:
         log.LOGGER(f"[CH][{vmachine_id}] event=start")
@@ -694,6 +696,10 @@ def execute(
             if process.poll() is None:
                 log.LOGGER(f"[CH][{vmachine_id}] killing cloud-hypervisor process pid={process.pid}")
                 process.kill()
+
+        # The process is gone, so its daemons have no client left: release this VM's
+        # shares, which no runtime state will hand to a kill.
+        release_shares(vmachine_id, shares, log_prefix)
 
         if tap_name:
             log.LOGGER(f"[CH][{vmachine_id}] deleting TAP interface: {tap_name}")
