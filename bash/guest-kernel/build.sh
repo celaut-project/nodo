@@ -113,6 +113,8 @@ if [ "$TARGET_ARCH" = "arm64" ]; then
     assert_config CONFIG_EFI_ZBOOT n
 else
     assert_config CONFIG_SERIAL_8250_CONSOLE y
+    # Without it, a guest sees one CPU on Cloud Hypervisor (#486).
+    assert_config CONFIG_X86_X2APIC y
 fi
 echo "Config assertions OK."
 
