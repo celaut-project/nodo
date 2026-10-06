@@ -96,5 +96,34 @@ class KernelCmdlineTests(unittest.TestCase):
         self.assertIn("ip=192.168.200.5::", cmdline)
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DiskArgsTests(unittest.TestCase):
+    """cloud-hypervisor refuses a second ``--disk`` option (#483)."""
+
+    ROOTFS = "path=/run/x/rootfs.squashfs,image_type=raw,readonly=on"
+
+    def test_a_guest_with_a_metadata_disk_gets_one_disk_option(self):
+        args = ch_execute._ch_disk_args(self.ROOTFS, ch_execute.Path("/run/x/metadata.ext4"))
+
+        self.assertEqual(
+            args,
+            [
+                "--disk",
+                self.ROOTFS,
+                "path=/run/x/metadata.ext4,image_type=raw,readonly=on",
+            ],
+        )
+
+    def test_the_rootfs_stays_first_so_it_is_vda(self):
+        args = ch_execute._ch_disk_args(self.ROOTFS, ch_execute.Path("/run/x/m.ext4"))
+
+        self.assertEqual(args[1], self.ROOTFS)
+
+    def test_a_guest_without_a_metadata_disk_is_unchanged(self):
+        rw = "path=/run/x/rootfs.ext4,image_type=raw"
+
+        self.assertEqual(ch_execute._ch_disk_args(rw, None), ["--disk", rw])
+
+
 if __name__ == "__main__":
     unittest.main()
