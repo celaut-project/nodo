@@ -359,9 +359,6 @@ def ensure_share_backend(
         "readonly": mount.readonly,
         "guest_path": mount.guest_path,
         "external": mount.external,
-        # The pid recorded with this mount is this VM's own daemon, which teardown
-        # may stop even if the share's state file is gone.
-        "own_daemon": True,
     }
 
     # This VM's daemon, if it is already running (the same VM ensured twice).
@@ -504,10 +501,9 @@ def teardown_virtiofs_for_vm(
         state = release_share(base_dir, sid, vmachine_id)
 
         # This VM's own daemon. The mount's record covers a share whose state file
-        # is gone; a mount without `own_daemon` was attached to the single shared
-        # daemon of an older node, which is not this VM's to stop.
+        # is gone.
         own = state.get("released")
-        if own is None and mount.get("own_daemon"):
+        if own is None:
             own = {"pid": mount.get("pid"), "socket": mount.get("socket")}
         stop(sid, own, f"vm={vmachine_id}")
 
@@ -524,10 +520,6 @@ def teardown_virtiofs_for_vm(
             )
         for other, daemon in (state.get("daemons") or {}).items():
             stop(sid, daemon, f"vm={other}")
-        # A share materialized by an older node has one daemon for everyone,
-        # recorded at the top level.
-        if state.get("pid"):
-            stop(sid, {"pid": state.get("pid"), "socket": state.get("socket")}, "shared")
 
         if state.get("external") or mount.get("external"):
             logger_fn(f"[virtiofs] share={sid} released; external directory kept.")
