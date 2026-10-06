@@ -40,6 +40,26 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result.version, "1.14.0")
         self.assertIn("Rust virtiofsd 1.14.0", result.detail)
 
+    def test_rust_virtiofsd_older_than_1_13_is_not_usable(self):
+        # 1.11.0 stops at --readonly ("unexpected argument '--readonly' found"),
+        # so a guest with a read-only share never boots on it.
+        with patch.object(virtiofsd.shutil, "which", return_value="/usr/local/bin/virtiofsd"), \
+             patch.object(virtiofsd.subprocess, "run", return_value=_completed("virtiofsd 1.11.0\n")):
+            result = virtiofsd.probe("/usr/local/bin/virtiofsd")
+
+        self.assertEqual(result.status, virtiofsd.TOO_OLD)
+        self.assertFalse(result.usable)
+        self.assertEqual(result.version, "1.11.0")
+        self.assertIn("1.13.0 or later", result.detail)
+        self.assertIn("--readonly", result.detail)
+
+    def test_rust_virtiofsd_1_13_is_usable(self):
+        with patch.object(virtiofsd.shutil, "which", return_value="/nodo/bin/virtiofsd"), \
+             patch.object(virtiofsd.subprocess, "run", return_value=_completed("virtiofsd 1.13.0\n")):
+            result = virtiofsd.probe("/nodo/bin/virtiofsd")
+
+        self.assertTrue(result.usable)
+
     def test_old_qemu_c_virtiofsd_is_not_usable(self):
         path = virtiofsd.LEGACY_QEMU_PATH
         with patch.object(virtiofsd.shutil, "which", return_value=path), \
