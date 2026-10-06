@@ -194,9 +194,13 @@ devices reach the guest. Authorization is asked again there, from the same
 records: a backend that simply trusts what it is handed would be a single point of
 failure for the one rule only the node can enforce.
 
-1. One `virtiofsd` daemon per share on the host, exporting its directory over a
-   Unix socket keyed by the share id (`--sandbox chroot`, deny-by-default). The
-   exporting parent and every co-located child reuse it.
+1. One `virtiofsd` daemon **per VM and share**, exporting the share's directory
+   over a Unix socket keyed by both (`--sandbox chroot`, deny-by-default). A
+   `virtiofsd` serves a single vhost-user client: a second VM connected to the
+   same socket is queued by the kernel and never answered, so its hypervisor waits
+   in the handshake and the guest never boots, and the daemon exits when its one
+   client disconnects. So the exporting parent and each co-located child get a
+   daemon of their own, all exporting the one host directory (#480).
 2. The first materialization of an export **seeds** its directory with the
    exporter's own packaged subtree at that path, read out of the offline image
    with `debugfs rdump` (rootless, like every other image access), so mounting
@@ -214,8 +218,9 @@ failure for the one rule only the node can enforce.
    storage, so nothing is left to hold it up or to be charged for it — and its
    guests then lose the directory, which is the whole of what being a guest
    means. If the exporter is already gone, the last user out ends what remains,
-   so nothing outlives everyone. A guest leaving while the exporter runs changes
-   nothing. A handed-over rundev directory is released but never deleted.
+   so nothing outlives everyone. A guest leaving while the exporter runs stops its
+   own daemon and changes nothing else. Ending a share stops every daemon still
+   serving it. A handed-over rundev directory is released but never deleted.
 
    A guest that loses its share mid-run keeps running with a mount point whose
    accesses fail. Nothing can be unmounted from outside the guest, so the choice

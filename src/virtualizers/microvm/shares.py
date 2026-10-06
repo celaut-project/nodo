@@ -39,6 +39,7 @@ from src.virtualizers.microvm.virtiofs import (
     mount_for,
     share_bytes,
     shared_fs_base_dir,
+    teardown_virtiofs_for_vm,
 )
 
 # Read under the `ch` key for both backends: it names the one virtiofsd binary
@@ -166,6 +167,28 @@ def materialize_shares(
         mounts_state=mounts_state,
         exported_share_ids=[ref.share_id for ref in exports],
     )
+
+
+def release_shares(vmachine_id: str, setup: ShareSetup, log_prefix: str) -> None:
+    """Give back the shares a launch materialized, when that launch fails.
+
+    A VM that fails to start never keeps the runtime state its kill would read its
+    shares from, so without this its reservation stays in each share -- a guest
+    that never ran, still counted as a user -- and the daemons started for it keep
+    running. Call it once the hypervisor process is gone. Never raises: it runs on
+    a failure path that has its own error to report.
+    """
+    if not setup.any:
+        return
+    try:
+        teardown_virtiofs_for_vm(
+            vmachine_id=vmachine_id,
+            mounts_state=setup.mounts_state,
+            base_dir=str(shared_fs_base_dir(paths.cache_root())),
+            logger_fn=log.LOGGER,
+        )
+    except Exception as e:  # noqa: BLE001 - best effort on a failure path
+        log.LOGGER(f"{log_prefix} could not release shared filesystems: {e}")
 
 
 def exported_disk_bytes(vmachine_id: str) -> int:
