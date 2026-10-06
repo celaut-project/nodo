@@ -73,6 +73,13 @@ class VirtiofsBuildersTest(unittest.TestCase):
         other_share = vf.virtiofs_socket_path("/tmp/nodo-ch", "b" * 64, "1" * 64)
         self.assertEqual(len({parent, child, other_share}), 3)
 
+    def test_a_read_only_daemon_is_started_readonly(self):
+        rw = vf.build_virtiofsd_command("virtiofsd", "/s.sock", "/d")
+        ro = vf.build_virtiofsd_command("virtiofsd", "/s.sock", "/d", readonly=True)
+        self.assertNotIn("--readonly", rw)
+        self.assertIn("--readonly", ro)
+        self.assertEqual(ro[:-1], rw)
+
     def test_the_socket_path_fits_in_sun_path(self):
         # AF_UNIX paths are limited to 108 bytes including the terminator.
         path = vf.virtiofs_socket_path("/tmp/nodo-ch", "f" * 64, "e" * 64)
@@ -182,6 +189,35 @@ class VirtiofsOrchestrationTest(unittest.TestCase):
             self.assertEqual(state["users"], ["vm-parent", "vm-child"])
             self.assertEqual(state["daemons"]["vm-parent"], {"pid": 4242, "socket": parent["socket"]})
             self.assertEqual(state["daemons"]["vm-child"], {"pid": 4343, "socket": child["socket"]})
+
+    def test_only_the_daemon_of_a_read_only_guest_refuses_writes(self):
+        # `-o ro` in the guest is the guest's own choice: it is root in its VM and can
+        # remount read-write. Its daemon is what keeps it from writing, and only its
+        # daemon, since the exporter and other guests have their own.
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            sid = "a" * 64
+            commands = {}
+            pids = iter(range(100, 110))
+
+            def spawn(cmd, log_path):
+                commands[cmd[cmd.index("--socket-path") + 1]] = cmd
+                return next(pids)
+
+            kwargs = dict(base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                          spawn_fn=spawn, pid_alive_fn=lambda pid: True)
+            exporter = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid, readonly=True), base, exported=True),
+                "vm-parent", **kwargs)
+            reader = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid, readonly=True), base, exported=False),
+                "vm-reader", **kwargs)
+            writer = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid, readonly=False), base, exported=False),
+                "vm-writer", **kwargs)
+            # The exporter always writes, whatever its declaration said.
+            self.assertNotIn("--readonly", commands[exporter["socket"]])
+            self.assertIn("--readonly", commands[reader["socket"]])
+            self.assertNotIn("--readonly", commands[writer["socket"]])
 
     def test_the_same_vm_reuses_its_own_daemon(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:

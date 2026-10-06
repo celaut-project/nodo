@@ -211,7 +211,10 @@ failure for the one rule only the node can enforce.
    `vhost-user-fs` wiring from the same mount state.
 4. A guest mount plan (`/.__nodo_virtiofs`, a JSON list of `{tag, path, ro}`)
    injected into the rootfs; guest init mounts each entry (`-o ro` for `ro`). The
-   daemon is always read-write; `ro` is applied guest-side.
+   daemon of a guest that asked for `ro` also runs `--readonly`, so the host
+   refuses its writes: the guest's `-o ro` alone is a choice the guest could undo,
+   since it is root in its own VM and can remount the device read-write. The
+   exporter's daemon is always read-write.
 5. **Lifecycle by ownership.** A share's own state file records who is using it
    and which instance exports it, written *before* the VM that will use it is
    built. A share ends when its **exporter** leaves — it is that instance's

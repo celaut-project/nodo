@@ -20,7 +20,9 @@ For each share (identified by ``shared_filesystems.share_id``) it provides:
 2. **A device per guest.** A ``--fs tag=<…>,socket=<…>`` device (cloud-hypervisor)
    or the same socket wired as ``vhost-user-fs`` (QEMU), so the guest can
    ``mount -t virtiofs <tag> <declared-path>``. A child that asked for
-   ``access=ro`` mounts with ``-o ro``.
+   ``access=ro`` mounts with ``-o ro``, and its daemon runs ``--readonly`` so the
+   host refuses its writes too: a guest is root in its own VM and could remount
+   the device read-write.
 3. **Seeding.** The first time an export is materialized its directory is filled
    with what the exporter packaged at that path, so the mount does not hide the
    content the service shipped.
@@ -159,20 +161,27 @@ def build_virtiofsd_command(
     *,
     sandbox: str = "chroot",
     cache: str = "auto",
+    readonly: bool = False,
 ) -> List[str]:
     """Command line for the rust ``virtiofsd`` daemon exporting ``export_dir``.
 
-    The daemon is always read-write and confined to ``export_dir`` via
-    ``--sandbox`` (deny-by-default). A read-only child mounts the device of its
-    own daemon with ``-o ro`` on the guest side.
+    The daemon is confined to ``export_dir`` via ``--sandbox`` (deny-by-default).
+    ``readonly`` starts it with ``--readonly``, for a guest that asked for
+    ``access=ro``. The guest also mounts the device ``-o ro``, but that is the
+    guest's own choice: it is root in its VM and can remount it read-write, so the
+    daemon is what actually keeps it from writing. Each guest has a daemon of its
+    own, so making one read-only takes nothing from the others.
     """
-    return [
+    command = [
         binary,
         "--socket-path", str(socket_path),
         "--shared-dir", str(export_dir),
         "--sandbox", sandbox,
         "--cache", cache,
     ]
+    if readonly:
+        command.append("--readonly")
+    return command
 
 
 def build_guest_mount_plan(mounts: List[SharedMount]) -> str:
@@ -375,7 +384,7 @@ def ensure_share_backend(
         pass
 
     command = build_virtiofsd_command(
-        virtiofsd_binary, socket_path, export_dir, sandbox=sandbox
+        virtiofsd_binary, socket_path, export_dir, sandbox=sandbox, readonly=mount.readonly
     )
     log_path = virtiofsd_log_path(base_dir, sid, vmachine_id)
     logger_fn(f"[virtiofs] share={sid} vm={vmachine_id} starting daemon: {' '.join(command)}")
