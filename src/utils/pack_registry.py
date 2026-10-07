@@ -112,6 +112,51 @@ def new_record(
     }
 
 
+def _name_of(uid: int) -> str:
+    try:
+        import pwd
+
+        return pwd.getpwuid(uid).pw_name
+    except (ImportError, KeyError):
+        return str(uid)
+
+
+def unwritable_hint(directory: str) -> str:
+    """Who owns ``directory`` and what to run, when this process cannot write to it.
+
+    The usual cause is a registry created by a root run (``sudo nodo pack``, the
+    daemon, the TUI): a later pack as a normal user finds the directory, cannot
+    create a file in it, and until now said only ``Permission denied`` about a
+    temporary file's name (#476). Empty when the directory is not owned by someone
+    else, because then ``chown`` would not help -- a full or read-only disk says so in
+    the error itself.
+    """
+    existing = os.path.abspath(directory)
+    while existing and not os.path.exists(existing):
+        parent = os.path.dirname(existing)
+        if parent == existing:
+            return ""
+        existing = parent
+    try:
+        owner = os.stat(existing).st_uid
+    except OSError:
+        return ""
+    me = os.geteuid() if hasattr(os, "geteuid") else owner
+    if owner == me:
+        return ""
+    where = "" if existing == os.path.abspath(directory) else f" (its nearest existing parent {existing})"
+    return (
+        f"{directory} belongs to {_name_of(owner)}{where}, and this pack runs as "
+        f"{_name_of(me)}. Give it to the user who packs: "
+        f"sudo chown -R {_name_of(me)} {existing}"
+    )
+
+
+def _unwritable_message(directory: str, error: OSError) -> str:
+    hint = unwritable_hint(directory)
+    return f"{error}. {hint}" if hint else str(error)
+
+
 def write(record: Dict[str, Any], directory: Optional[str] = None) -> str:
     """Write ``record`` atomically, so a reader never sees half of it."""
     directory = directory or registry_dir()
@@ -301,7 +346,10 @@ def run(
         write(record, directory)
     except OSError as e:
         # Packing does not need the registry; only listing it does.
-        print(f"Warning: this pack is not listed by `nodo packs` ({e}).", flush=True)
+        print(
+            f"Warning: this pack is not listed by `nodo packs` ({_unwritable_message(directory, e)}).",
+            flush=True,
+        )
         _current.clear()
 
     previous = signal.signal(signal.SIGTERM, _raise_cancelled)
@@ -458,7 +506,7 @@ def spawn_detached(
         os.makedirs(directory, exist_ok=True)
         log_file = open(log_path(pack_id, directory), "ab")
     except OSError as e:
-        return None, f"Error: cannot write the pack registry {directory} ({e})."
+        return None, f"Error: cannot write the pack registry {directory} ({_unwritable_message(directory, e)})."
 
     prefix = command or [sys.executable, nodo_py, "pack"]
     with log_file:
