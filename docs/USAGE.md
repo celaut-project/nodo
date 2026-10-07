@@ -470,16 +470,16 @@ These are the most commonly used commands for daily tasks:
   `nodo import /service/path`
 
 - **publish `<service id | service tag>`**  
-  Exports a local service and publishes it in chunks to the configured GitHub repository.
+  Exports a local service and uploads it as an asset of a GitHub Release (tag `celaut-<service id>`) of the configured repository. A file above `publisher.SPLIT_SIZE_MB` is uploaded as parts plus a `manifest` asset. It prints the artifact URL (or the manifest URL) and the matching `nodo download` command. Publishing the same service again reuses its release. See `publisher.*` in [CONFIG.md](CONFIG.md).
   **Examples:**  
   `nodo publish 1234567890abcdef`  
   `nodo publish my_service_tag`
 
 - **download `<manifest url | .celaut.bee https url>`**  
-  Downloads a published service and imports it locally (the service id is recomputed from content on import). Accepts either a manifest URL listing chunk URLs (one per line, `nodo publish`'s default output) or a direct HTTPS link to a `.celaut.bee` artifact, downloaded in a single request.
+  Downloads a published service and imports it locally (the service id is recomputed from content on import). Accepts either a manifest URL listing chunk URLs (one per line; `nodo publish` gives one for a file above `publisher.SPLIT_SIZE_MB`) or a direct HTTPS link to a `.celaut.bee` artifact (what `nodo publish` gives for a smaller file), downloaded in a single request.
   **Examples:**  
-  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
-  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`  
+  `nodo download https://github.com/user/repo/releases/download/celaut-<service_hash>/<service_hash>.celaut.bee`  
+  `nodo download https://github.com/user/repo/releases/download/celaut-<service_hash>/manifest -o /tmp/services`  
   `nodo download https://example.com/path/to/service.celaut.bee`
 
 - **get `<service id | service tag> [--now]`**  

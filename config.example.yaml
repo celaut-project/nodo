@@ -1195,8 +1195,13 @@ energy:
 
 publisher:
   PROVIDER: "github"
+  # `nodo publish` uploads the .celaut.bee as an asset of a GitHub Release of this
+  # repository, tagged celaut-<service id>. Nothing is committed to the repository. It must
+  # be public (the published URL is https://github.com/<repo>/releases/download/...) and
+  # have at least one commit for the tag to point at.
   REPOSITORY: "owner/repo"
-  BRANCH: "main"
+  # Branch the release tag is created on. Empty: the repository's default branch.
+  BRANCH: ""
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
   # How a freshly-published source gets registered, resolved across four levels:
   #   1. AUTO_PUBLISH_TX true + SOURCE_PROFILE_BOX_ID set + a configured "source-application"
@@ -1229,15 +1234,22 @@ publisher:
   # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
   CONTENT_FORMAT: ".grpcbb"
   RAW_FORMAT: ".celaut"
-  # Direct token in config (optional).
+  # Direct token in config (optional). It must be allowed to create releases:
+  # 'Contents: Read and write' on REPOSITORY for a fine-grained token, or the 'repo'
+  # ('public_repo' for a public repository) scope for a classic one.
   TOKEN: ""
   # Environment variable names read by ConfigManager-based scripts (optional).
   TOKEN_ENV_VAR: "CLOUD_TOKEN"
   # Optional direct fallback token.
   FALLBACK_TOKEN: ""
   FALLBACK_TOKEN_ENV_VAR: "GITHUB_TOKEN"
-  CHUNK_SIZE_MB: 24
-  UPLOADS_PREFIX: "uploads"
+  # A file above SPLIT_SIZE_MB is uploaded as parts of PART_SIZE_MB, plus a `manifest`
+  # asset that lists the part URLs; the manifest URL is then the source URL. At or below
+  # it, the file is one asset and its own URL is the source URL. Both at most 2047: GitHub
+  # refuses an asset of 2 GiB or more. (CHUNK_SIZE_MB and UPLOADS_PREFIX are not read any
+  # more: they set the old upload through commits.)
+  SPLIT_SIZE_MB: 2000
+  PART_SIZE_MB: 1000
   TIMEOUT_SECONDS: 300
   MAX_RETRY: 3
   BACKOFF_SECONDS: 2
