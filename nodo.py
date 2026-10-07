@@ -22,12 +22,13 @@ MAIN_DIR = env_manager.get("MAIN_DIR")
 def _exit(code):
     """End the process now, with what the command printed already on the wire.
 
-    Commands end in ``os._exit`` so that a worker or gRPC thread still alive cannot
-    hold the process open. It skips interpreter shutdown, and with it the flush of
-    ``sys.stdout``: on a terminal Python line-buffers, so nothing is lost, but through
-    a pipe, a redirect or ``$(...)`` the buffer is dropped and the caller reads an
-    empty answer that looks like success (#489). Flush here, once, rather than in
-    every command.
+    Commands end in ``os._exit`` so that a thread still alive cannot hold the process
+    open -- the JVM that the Ergo commands start through jpype leaves non-daemon
+    threads behind (see the end of the dispatch). It skips interpreter shutdown, and
+    with it the flush of ``sys.stdout``: on a terminal Python line-buffers, so nothing
+    is lost, but through a pipe, a redirect or ``$(...)`` the buffer is dropped and the
+    caller reads an empty answer that looks like success (#489). Flush here, once,
+    rather than in every command.
     """
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -1225,7 +1226,5 @@ if __name__ == '__main__':
     # start a JVM through jpype, whose non-daemon threads otherwise keep the
     # interpreter alive and hang the shell after the command has already done its
     # work. `serve` blocks in wait_for_termination() and never reaches here, and the
-    # codebase registers no atexit handlers, so flush the streams and exit hard.
-    sys.stdout.flush()
-    sys.stderr.flush()
+    # codebase registers no atexit handlers, so exit hard; _exit flushes the streams.
     _exit(0)
