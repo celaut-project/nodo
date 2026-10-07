@@ -33,6 +33,12 @@ OK = "ok"
 MISSING = "missing"
 LEGACY = "legacy"
 UNUSABLE = "unusable"
+TOO_OLD = "too_old"
+
+# The oldest Rust virtiofsd that has every flag the node gives it. --readonly,
+# for the daemon of a guest that mounts a share read-only, came in 1.13.0. An
+# older daemon stops at that flag, and the guest that waits for it never boots.
+MIN_RUST_VERSION = (1, 13, 0)
 
 # Rust: "virtiofsd 1.14.0". C: "virtiofsd version 6.2.0 (Debian ...)", then a
 # copyright line and "using FUSE kernel interface version 7.31".
@@ -53,7 +59,7 @@ class VirtiofsdUnavailable(MicroVMError):
 
 
 class VirtiofsdProbe(NamedTuple):
-    status: str               # OK, MISSING, LEGACY or UNUSABLE
+    status: str               # OK, MISSING, LEGACY, UNUSABLE or TOO_OLD
     configured: str           # the value of virtualizers.ch.VIRTIOFSD_BINARY
     path: Optional[str]       # what it resolved to, if anything
     version: str              # as printed by --version, if known
@@ -102,6 +108,14 @@ def probe(binary: Optional[str], timeout: float = 10) -> VirtiofsdProbe:
     rust = _RUST_VERSION.match(first_line)
     if result.returncode == 0 and rust:
         version = rust.group(1)
+        if _version_tuple(version) < MIN_RUST_VERSION:
+            minimum = ".".join(str(n) for n in MIN_RUST_VERSION)
+            return VirtiofsdProbe(
+                TOO_OLD, configured, path, version,
+                f"{path} is the Rust virtiofsd {version}, but the node needs "
+                f"{minimum} or later. Older versions do not accept --readonly, "
+                "which the node gives the daemon of a read-only share.",
+            )
         return VirtiofsdProbe(
             OK, configured, path, version, f"{path} is the Rust virtiofsd {version}."
         )
@@ -121,6 +135,10 @@ def probe(binary: Optional[str], timeout: float = 10) -> VirtiofsdProbe:
         f"'{path} --version' exited {result.returncode} and printed "
         f"{first_line or 'nothing'!r}, which is not the Rust virtiofsd.",
     )
+
+
+def _version_tuple(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("."))
 
 
 def require_usable(binary: Optional[str] = None) -> VirtiofsdProbe:
