@@ -3,6 +3,7 @@ import os
 import pathlib
 import shutil
 from typing import Dict
+from src.utils.block_tree import block_tree
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -96,18 +97,16 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                 os.system(f"cp -R {METADATA}/{dependency} "
                           f"{directory}/{metadata_deps_dir}")
 
-            # Move dependency's blocks.
+            # Move dependency's blocks, with the blocks that its blocks name.
+            # Without them the service cannot send the dependency to a node
+            # that does not have it ("gRPCbb: Error reading block.").
             if os.path.isdir(f"{SERVICES}/{dependency}"):
-                with open(f"{SERVICES}/{dependency}/_.json", 'r') as dependency_json_file:
-                    dependency_json = json.load(dependency_json_file)
-                    for _e in dependency_json:
-                        if type(_e) == list:
-                            block: str = _e[0]
-                            if not os.path.exists(
-                                    f'{directory}/{blocks_dir}/{block}'
-                            ):
-                                os.system(f"cp -r {BLOCKS}/{block} "
-                                          f"{directory}/{blocks_dir}")
+                for block in block_tree(f"{SERVICES}/{dependency}", BLOCKS):
+                    if not os.path.exists(
+                            f'{directory}/{blocks_dir}/{block}'
+                    ):
+                        os.system(f"cp -r {BLOCKS}/{block} "
+                                  f"{directory}/{blocks_dir}")
 
             # Write env
             if write_env:
