@@ -107,14 +107,47 @@ def _normalize_tar_member_path(name: str) -> str:
     return "" if normalized == "." else normalized
 
 
-def image_link_target(host_path: str) -> str:
+class ImageLinkEscapeError(RuntimeError):
+    """A symlink of the image points outside the image root."""
+
+
+def _link_escapes_image(image_path: str, target: str) -> bool:
+    # Resolve the target by its text alone, against the image root: an absolute
+    # target starts at that root, a relative one at the link's own directory.
+    # It escapes if a ".." climbs above the root. Nothing on the packing host
+    # is read, so the answer is the same on every host.
+    if target.startswith("/"):
+        parts = []
+    else:
+        parts = [p for p in posixpath.dirname(image_path).split("/") if p]
+    for segment in target.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if not parts:
+                return True
+            parts.pop()
+        else:
+            parts.append(segment)
+    return False
+
+
+def image_link_target(host_path: str, image_path: str) -> str:
     # The link text exactly as the image has it. The guest resolves it against
     # its own root at run time. Do not resolve it here: realpath follows an
     # absolute target through the packing host's root, so the guest got the
     # host's /etc/alternatives choices (awk -> gawk) and the host's usrmerge
     # (/lib64/ld-linux-x86-64.so.2 -> /usr/lib/...), and the service id
     # changed with the packing host (#485).
-    return os.readlink(host_path)
+    #
+    # A link whose target leaves the image root stops the pack: the service
+    # must not depend on, or point at, anything outside its own filesystem.
+    target = os.readlink(host_path)
+    if _link_escapes_image(image_path, target):
+        raise ImageLinkEscapeError(
+            f"Symlink '{image_path}' -> '{target}' points outside the image root."
+        )
+    return target
 
 
 # Every service carries these digests regardless of `hashing.HASH`, so any
@@ -623,7 +656,9 @@ class ZipContainerPacker:
                     # It's a link.
                     if os.path.islink(branch_host_path):
                         branch.link.dst = directory + b_name
-                        branch.link.src = image_link_target(branch_host_path)
+                        branch.link.src = image_link_target(
+                            branch_host_path, directory + b_name
+                        )
                     # Device node (block/char): represent as file placeholder and recover via xattrs in CH build.
                     elif branch_metadata.is_device:
                         branch.file = b""
