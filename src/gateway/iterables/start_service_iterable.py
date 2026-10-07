@@ -4,6 +4,7 @@ from typing import Generator
 from src.gateway.client_gate import require_caller
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
+from src.manager.manager import stop_instance
 from src.utils import logger as log
 from protos.gateway_bee import rpc_output
 from src.utils.bee_client import BeeClient, Buffer
@@ -45,18 +46,36 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
             raise Exception(f"Corrupt metadata for the service {self.service_hash}")
 
+        instance = launch_service(
+            service_id=self.service_hash,
+            service=service,
+            metadata=metadata,
+            configuration=self.configuration,
+            father_ip=get_only_the_ip_from_context(context_peer=self.context.peer()),
+            father_id=self.client_id,  # Only client, not set the internal_service_id because depends of the recursion guard.
+            recursion_guard_token=self.recursion_guard_token,
+            recursion_guard_hops=self.recursion_guard_hops,
+        )
+
+        # The launch starts in the middle of the request stream and takes some
+        # seconds. If the call ended in that time (the client cancelled it, its
+        # request stream failed, or its deadline passed), the answer goes to
+        # nobody. The caller then has no token for the instance and cannot stop
+        # it, but it paid for it. Stop it here, and give the deposit back (#487).
+        if not self.context.is_active():
+            log.LOGGER(
+                f"The StartService call for {self.service_hash} ended before the answer. "
+                f"Stop the instance that nobody received."
+            )
+            stop_instance(token=instance.token)
+            raise Exception(
+                f"The call ended before the instance of {self.service_hash} was sent. "
+                f"The instance is stopped."
+            )
+
         yield from BeeClient.respond(
             indices=rpc_output("StartService"),
-            message_iterator=launch_service(
-                service_id=self.service_hash,
-                service=service,
-                metadata=metadata,
-                configuration=self.configuration,
-                father_ip=get_only_the_ip_from_context(context_peer=self.context.peer()),
-                father_id=self.client_id,  # Only client, not set the internal_service_id because depends of the recursion guard.
-                recursion_guard_token=self.recursion_guard_token,
-                recursion_guard_hops=self.recursion_guard_hops,
-            )
+            message_iterator=instance,
         )
 
     def final(self):

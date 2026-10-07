@@ -147,5 +147,61 @@ class StartServiceChecksTheCallerOnceTests(unittest.TestCase):
         require.assert_called_once()
 
 
+@unittest.skipIf(
+    START_SERVICE_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {START_SERVICE_IMPORT_ERROR}",
+)
+class StartServiceStopsAnInstanceNobodyReceivedTests(unittest.TestCase):
+    """#487: the call ended while the node launched. Nobody gets the instance."""
+
+    SERVICE_HASH = "a" * 64
+
+    def _generate(self, call_is_active):
+        iterable = start_service_iterable.StartServiceIterable.__new__(
+            start_service_iterable.StartServiceIterable
+        )
+        iterable.context = mock.MagicMock()
+        iterable.context.is_active.return_value = call_is_active
+        iterable.context.peer.return_value = "ipv4:192.168.200.10:40000"
+        iterable.configuration = None
+        iterable.client_id = "c" * 32
+        iterable.recursion_guard_token = None
+        iterable.recursion_guard_hops = None
+        iterable.service_hash = self.SERVICE_HASH
+        iterable.metadata = celaut_pb2.Metadata()
+
+        instance = celaut_pb2.ServiceInstance(token="instance-token")
+        stop = mock.MagicMock()
+        respond = mock.MagicMock(return_value=iter(["answer"]))
+        module = start_service_iterable
+        with mock.patch.object(module, "read_service_from_disk", return_value=celaut_pb2.Service()), \
+                mock.patch.object(module, "get_service_hex_main_hash", return_value=self.SERVICE_HASH), \
+                mock.patch.object(module, "launch_service", return_value=instance), \
+                mock.patch.object(module, "stop_instance", stop), \
+                mock.patch.object(module.BeeClient, "respond", respond):
+            try:
+                return list(iterable.generate()), stop, respond, None
+            except Exception as e:
+                return None, stop, respond, e
+
+    def test_an_ended_call_stops_the_instance_and_sends_nothing(self):
+        out, stop, respond, error = self._generate(call_is_active=False)
+
+        stop.assert_called_once_with(token="instance-token")
+        respond.assert_not_called()
+        self.assertIsNone(out)
+        self.assertIn("The instance is stopped", str(error))
+
+    def test_an_active_call_gets_the_instance(self):
+        out, stop, respond, error = self._generate(call_is_active=True)
+
+        self.assertIsNone(error)
+        stop.assert_not_called()
+        self.assertEqual(out, ["answer"])
+        self.assertEqual(
+            respond.call_args.kwargs["message_iterator"].token, "instance-token"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

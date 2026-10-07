@@ -395,7 +395,10 @@ class StartServiceTests(unittest.TestCase):
         it.client_id = "client-1"
         it.recursion_guard_token = "tok-1"
         it.recursion_guard_hops = 3
-        it.context = type("Ctx", (), {"peer": lambda self: "ipv4:10.0.0.1:1"})()
+        it.context = type("Ctx", (), {
+            "peer": lambda self: "ipv4:10.0.0.1:1",
+            "is_active": lambda self: True,
+        })()
         with patch.object(ssi, "read_service_from_disk", return_value=celaut.Service()), \
                 patch.object(ssi, "get_service_hex_main_hash", return_value="abc"), \
                 patch.object(ssi, "launch_service", return_value=iter([])) as launch, \
