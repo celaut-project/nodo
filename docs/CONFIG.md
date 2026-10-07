@@ -801,4 +801,30 @@ for coarse node-to-node deposits rather than for a client topping up an instance
   buries the rest of the node log on a busy tunnel. See [`TUNNELING.md`](TUNNELING.md).
 - `low_demand.*` — opportunistic idle scheduler (off by default; WIP).
 - `publisher.*` — how `nodo publish` uploads a service and how a freshly-published
-  source gets registered (GitHub repo, chunking, auto-publish-tx settings).
+  source gets registered (GitHub repo, split and part sizes, auto-publish-tx settings).
+  The service goes to a GitHub Release of `publisher.REPOSITORY`, tagged
+  `celaut-<service id>`; nothing is committed to the repository.
+  - `publisher.REPOSITORY` — `owner/repo`. It must be public, so that the
+    `releases/download` URLs work without a token, and have at least one commit for the
+    release tag to point at.
+  - `publisher.BRANCH` — the branch the release tag is created on. Empty (default): the
+    repository's default branch. It does not hold any file data.
+  - `publisher.SPLIT_SIZE_MB` (`2000`) — a file above this size is uploaded as parts.
+    At or below it, the file is one asset, `<service id>.celaut.bee`, and its URL is the
+    source URL.
+  - `publisher.PART_SIZE_MB` (`1000`) — size of each part. The parts go with a `manifest`
+    asset that lists their URLs, one per line; the manifest URL is the source URL. Both
+    sizes are at most `2047`: GitHub refuses an asset of 2 GiB or more.
+  - `publisher.TOKEN` / `TOKEN_ENV_VAR` / `FALLBACK_TOKEN` / `FALLBACK_TOKEN_ENV_VAR` —
+    the token. It must be allowed to create releases: *Contents: Read and write* for a
+    fine-grained token, the `repo` (or `public_repo`) scope for a classic one.
+  - `publisher.TIMEOUT_SECONDS`, `MAX_RETRY`, `BACKOFF_SECONDS` — applied to every
+    release API call and asset upload.
+  - Publishing the same service again reuses its release when the assets are already
+    there, and replaces them when they differ (for example, other part sizes). The
+    release stays a draft until every asset is uploaded, and is deleted if an upload
+    fails, so a published release never points to a missing part.
+  - `publisher.CHUNK_SIZE_MB` and `publisher.UPLOADS_PREFIX` are not read any more. They
+    set the old upload through commits to the branch. Sources registered with those
+    `raw.githubusercontent.com` URLs keep working while the commits stay in the
+    repository; there is no migration.

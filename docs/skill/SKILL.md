@@ -288,7 +288,7 @@ nodo export <service id|tag> /export/dir
 # --raw → a raw .celaut for HASH VERIFICATION ONLY (NOT importable):
 nodo export <service id|tag> /export/dir --raw
 
-# Publish a local service in chunks to the configured repository (see publisher.* in config)
+# Publish a local service as a GitHub Release asset of the configured repository (see publisher.* in config)
 nodo publish <service id|tag>
 
 # Download a published service and import it locally (the service id is recomputed from content on import).
