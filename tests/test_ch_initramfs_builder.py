@@ -311,6 +311,19 @@ class GuestKernelConfigTests(unittest.TestCase):
         self.assertIn("assert_config CONFIG_MODULES n", build)
         self.assertIn("assert_config CONFIG_EFI_ZBOOT n", build)
 
+    def test_containers_in_the_guest_get_bpf_and_the_raw_table(self):
+        # runc on cgroup v2 needs bpf(2) for the device rules, and dockerd 28+ needs
+        # the iptables raw table. The x86_64 defconfig has neither, the arm64 one
+        # has bpf, so the shared fragment sets them and the build asserts them
+        # (#504). Asserted in build.sh, because Kconfig drops a symbol silently.
+        fragment = Path("bash/guest-kernel/nodo-guest.config").read_text(encoding="utf-8")
+        build = Path("bash/guest-kernel/build.sh").read_text(encoding="utf-8")
+        asserted = build[build.index("for symbol in"):build.index("assert_config CONFIG_MODULES n")]
+
+        for symbol in ("CONFIG_BPF_SYSCALL", "CONFIG_CGROUP_BPF", "CONFIG_IP_NF_RAW"):
+            self.assertIn(f"{symbol}=y", fragment)
+            self.assertIn(symbol, asserted)
+
     def test_arm64_image_magic_is_verified_before_publishing(self):
         # Cloud Hypervisor's aarch64 loader only accepts a raw arm64 Image ("ARM\\x64"
         # at offset 56). Anything else fails at boot time, on the user's machine.
