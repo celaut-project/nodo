@@ -259,6 +259,87 @@ class TestRun:
         assert "not listed" in capsys.readouterr().out
 
 
+class TestUnwritableRegistryHint:
+    """#476: a registry made by a root run, then used by a normal user.
+
+    The tests run as whatever user runs the suite -- often root, for whom nothing is
+    unwritable -- so who owns the directory and who is running are set, not arranged
+    with real permissions.
+    """
+
+    @pytest.fixture
+    def as_user(self, monkeypatch, tmp_path):
+        """The directory belongs to uid 0 (root) and this process is uid 1000 (jse)."""
+        directory = tmp_path / "packs"
+        directory.mkdir()
+        real_stat = os.stat
+
+        def stat(path, *args, **kwargs):
+            result = real_stat(path, *args, **kwargs)
+            if os.fspath(path) == str(directory):
+                return os.stat_result((result.st_mode, result.st_ino, result.st_dev,
+                                       result.st_nlink, 0, result.st_gid, result.st_size,
+                                       result.st_atime, result.st_mtime, result.st_ctime))
+            return result
+
+        import pwd
+
+        monkeypatch.setattr(os, "stat", stat)
+        monkeypatch.setattr(os, "geteuid", lambda: 1000)
+        monkeypatch.setattr(pwd, "getpwuid", lambda uid: type(
+            "Entry", (), {"pw_name": {0: "root", 1000: "jse"}[uid]})())
+        return str(directory)
+
+    def test_names_the_directory_its_owner_and_the_fix(self, as_user):
+        hint = registry.unwritable_hint(as_user)
+
+        assert as_user in hint
+        assert "belongs to root" in hint
+        assert "runs as jse" in hint
+        assert f"sudo chown -R jse {as_user}" in hint
+
+    def test_a_missing_directory_names_the_parent_that_blocks_it(self, as_user):
+        hint = registry.unwritable_hint(os.path.join(as_user, "deeper", "packs"))
+
+        assert "nearest existing parent" in hint
+        assert f"sudo chown -R jse {as_user}" in hint
+
+    def test_no_hint_when_the_user_owns_it(self, tmp_path):
+        # chown would change nothing: a full or read-only disk explains itself.
+        assert registry.unwritable_hint(str(tmp_path)) == ""
+
+    def test_the_warning_of_a_foreground_pack_carries_it(self, as_user, monkeypatch, capsys):
+        monkeypatch.setattr(registry, "write", lambda *a, **k: (_ for _ in ()).throw(
+            PermissionError(13, "Permission denied", as_user + "/x.json.1.tmp")))
+
+        service_id, _ = registry.run("/src", "dir", "local", lambda: SERVICE_ID,
+                                     directory=as_user)
+
+        out = capsys.readouterr().out
+        assert service_id == SERVICE_ID
+        assert "not listed by `nodo packs`" in out
+        assert f"sudo chown -R jse {as_user}" in out
+
+    def test_the_error_of_a_detached_pack_carries_it(self, as_user, monkeypatch):
+        def refuse(path, *args, **kwargs):
+            raise PermissionError(13, "Permission denied", path)
+
+        monkeypatch.setattr("builtins.open", refuse)
+
+        record, error = registry.spawn_detached("/src", "nodo.py", directory=as_user)
+
+        assert record is None
+        assert error.startswith(f"Error: cannot write the pack registry {as_user}")
+        assert f"sudo chown -R jse {as_user}" in error
+
+    def test_a_directory_nobody_can_name_falls_back_to_the_uid(self, as_user, monkeypatch):
+        import pwd
+
+        monkeypatch.setattr(pwd, "getpwuid", lambda uid: (_ for _ in ()).throw(KeyError(uid)))
+
+        assert "sudo chown -R 1000" in registry.unwritable_hint(as_user)
+
+
 # -- Reading -----------------------------------------------------------------------------
 
 
