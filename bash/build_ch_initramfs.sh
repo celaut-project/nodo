@@ -447,6 +447,11 @@ fi
 # and untouched, kept or not by this path.
 if [ -f /newroot/.__nodo_envs ]; then
     log "applying guest environment variables from .__nodo_envs"
+    # No trace while the values pass through the shell. `set -x` prints every
+    # command with its arguments, so it would write each value, in base64 and
+    # decoded, into the serial log, and the node copies that log into its own
+    # when a launch fails (#497). Turned on again after the loop.
+    set +x
     # This script's own control variables (PATH -- needed by every command
     # below, including base64 in this very loop -- and ENTRYPOINT, read for
     # the exec check and switch_root just after) must survive this loop
@@ -468,6 +473,7 @@ if [ -f /newroot/.__nodo_envs ]; then
     PATH="$__nodo_init_path"
     ENTRYPOINT="$__nodo_init_entrypoint"
     unset __nodo_init_path __nodo_init_entrypoint
+    set -x
 fi
 
 [ -x "/newroot$ENTRYPOINT" ] || fatal "entrypoint is not executable: $ENTRYPOINT"

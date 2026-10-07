@@ -319,5 +319,64 @@ class GuestKernelConfigTests(unittest.TestCase):
         self.assertIn('skip=56 count=4 status=none)" = "ARMd"', build)
 
 
+
+class InitEnvironmentTraceTests(unittest.TestCase):
+    def _run_env_block(self, secret: str):
+        # Runs the .__nodo_envs block of the generated /init, with the same
+        # `set -x` the real /init has, and returns (stdout, stderr).
+        import base64
+        import shutil
+
+        shell = shutil.which("dash") or shutil.which("sh")
+        init = Path("bash/build_ch_initramfs.sh").read_text(encoding="utf-8")
+        start = init.index("if [ -f /newroot/.__nodo_envs ]; then")
+        end = init.index("\nfi\n", start) + len("\nfi\n")
+        block = init[start:end]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            newroot = Path(tmp)
+            encoded = base64.b64encode(secret.encode()).decode()
+            (newroot / ".__nodo_envs").write_text(f"AUDIT_SECRET {encoded}\n")
+            script = (
+                "set -x\nset -eu\n"
+                "log() { echo \"[nodo-ch-initramfs] $*\" >&2; }\n"
+                "ENTRYPOINT=/service/entrypoint.sh\n"
+                + block.replace("/newroot", str(newroot))
+                + 'echo "after_block"\n'
+                + 'echo "len=${#AUDIT_SECRET}"\n'
+            )
+            result = subprocess.run(
+                [shell, "-c", script], capture_output=True, text=True, check=False
+            )
+        return result
+
+    def test_init_does_not_trace_the_environment_values(self):
+        # /init runs with `set -x`, and the node copies the serial log into its own
+        # when a launch fails. A traced `export NAME=value` put every -e secret
+        # there (#497). Neither the value nor its base64 may reach the trace.
+        import base64
+
+        secret = "s3cr3t-audit-4875"
+        result = self._run_env_block(secret)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(secret, result.stderr)
+        self.assertNotIn(secret, result.stdout)
+        self.assertNotIn(base64.b64encode(secret.encode()).decode(), result.stderr)
+
+    def test_init_still_exports_the_environment_values(self):
+        secret = "s3cr3t-audit-4875"
+        result = self._run_env_block(secret)
+
+        self.assertIn(f"len={len(secret)}", result.stdout)
+
+    def test_init_traces_again_after_the_environment_block(self):
+        # The trace is for debugging /init, so only the block that handles the
+        # values loses it.
+        result = self._run_env_block("s3cr3t-audit-4875")
+
+        self.assertIn("+ echo after_block", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
