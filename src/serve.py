@@ -18,7 +18,11 @@ from src.utils.firewall.gateway import (
     operator_notice,
 )
 from src.utils.firewall.legacy import sweep_compat_tables
-from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
+from src.utils.firewall.reachability import (
+    ProbeResult,
+    probe_tcp_from_bridge,
+    sweep_leaked_probes,
+)
 from src.identity.grpc_transport import server_credentials
 from src.utils.network_policy import NetworkPolicy, NetworkPolicyConfigError
 
@@ -37,6 +41,24 @@ def _gateway_port_call(port: int, *, verify: bool) -> ProbeResult:
         config_path=env_manager.config_path,
         log=log.LOGGER,
     )
+
+
+def _sweep_leaked_probes() -> None:
+    """Delete the probe namespaces a previous daemon left on the guest bridge.
+
+    A daemon killed mid-probe never runs the probe's cleanup, and the namespace it
+    leaves keeps an address on the bridge that a guest can be given (#493). The
+    allocator skips those addresses, but only a sweep gives them back.
+    """
+    try:
+        removed = sweep_leaked_probes()
+        if removed:
+            log.LOGGER(
+                f"Removed {len(removed)} leaked reachability-probe namespace(s) and "
+                f"link(s): {', '.join(removed)}"
+            )
+    except Exception as e:
+        log.LOGGER(f"Could not sweep leaked reachability-probe namespaces: {e}")
 
 
 def _ensure_guest_bridge() -> None:
@@ -287,6 +309,7 @@ def serve():
     except GatewayPortUnavailable as e:
         _refuse_to_start(e)
     port = env_manager.get_gateway_port()
+    _sweep_leaked_probes()
     _ensure_guest_bridge()
     _open_gateway_port(port)
 

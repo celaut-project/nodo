@@ -88,13 +88,32 @@ def used_ips() -> set[str]:
     return used
 
 
+def _probe_held_ips() -> set[str]:
+    """Addresses the reachability probe holds on the bridge, see #493.
+
+    The probe draws from the same subnet, and a namespace a dead process leaked
+    keeps answering ARP for its address: a guest given that address boots and is
+    never reached. Best-effort, because the allocator must not fail on a host
+    where the namespaces cannot be read.
+    """
+    try:
+        from src.utils.firewall.reachability import probe_held_addresses
+
+        return probe_held_addresses()
+    except Exception as e:
+        log.LOGGER(f"Could not read the addresses held by reachability probes: {e}")
+        return set()
+
+
 def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     """An address and MAC for this VM, derived from its id rather than served.
 
     No DHCP, so the address is stable for the life of the VM and the firewall can
     be written against it before the guest exists. Derived from the id and then
     probed against :func:`used_ips`, so two VMs never share one and a relaunch of
-    the same id lands on the same address whenever it is free.
+    the same id lands on the same address whenever it is free. Addresses held by
+    a reachability probe's namespace are skipped too: the node has no record of
+    them, but they answer on the bridge all the same.
     """
     network = ip_network()
     gateway_ip = ipaddress.ip_address(NETWORK_GATEWAY_IP)
@@ -107,7 +126,7 @@ def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     if hosts <= 1:
         raise MicroVMError(f"No usable host addresses in subnet {NETWORK_SUBNET}")
 
-    used = used_ips()
+    used = used_ips() | _probe_held_ips()
     digest = hashlib.sha256(vmachine_id.encode("utf-8")).digest()
     seed = int.from_bytes(digest[:8], "big")
 
