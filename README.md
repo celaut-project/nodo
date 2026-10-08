@@ -98,12 +98,11 @@ Below is a breakdown of **Nodo** feature support across different operating syst
 
 | Functionality         | Linux     | Windows          | Mac              |
 |---------------------- |---------- |------------------|------------------|
-| Local execution       | 🟢 Beta  | 🟢 Beta          | 🔴 Not supported |
-| Packaging             | 🟢 Beta  | 🟢 Beta          | 🔴 Not supported |
+| Local execution       | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
+| Packaging             | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
 | Local network         | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
 | Trustless network     | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
 
-* 🟢 **Beta**: Functionality implemented and relatively stable.
 * 🟡 **Alpha**: Functionality under active development and subject to change.
 * 🔴 **Not supported**: Functionality not available on this platform.
 
