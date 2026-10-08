@@ -783,6 +783,10 @@ if __name__ == '__main__':
                 ok = list_instances(groupable=groupable, search=search, as_json=as_json)
                 _exit(0 if ok is not False else 1)
 
+            case "refresh_peers":
+                from src.commands.peers import refresh_peers_command
+                _exit(0 if refresh_peers_command(sys.argv[2:]) else 1)
+
             case 'connect':
                 from src.commands.connect import connect
                 connect(sys.argv[2])

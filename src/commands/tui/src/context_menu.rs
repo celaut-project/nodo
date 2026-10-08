@@ -78,6 +78,7 @@ pub fn page_actions(page: Page) -> Vec<MenuItem> {
             MenuItem::new("Lower reputation", '-'),
             MenuItem::new("Forget", 'd'),
             MenuItem::new("Connect a peer…", 'c'),
+            MenuItem::new("Refresh all peers", 'r'),
         ],
         Page::Clients => vec![MenuItem::new("Credit…", '+'), MenuItem::new("Debit…", '-')],
         Page::Chat => vec![

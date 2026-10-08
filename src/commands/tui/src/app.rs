@@ -668,6 +668,9 @@ pub enum PendingAction {
     /// moment it launches, and goes on burning MU until something stops it.
     ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Re-fetch every peer and our balance there. Confirmed because it contacts all of
+    /// them, which is heavy on network and disk I/O.
+    RefreshPeers,
     /// Stop a running tunnel. Confirmed because whatever is connected through it is
     /// cut off, and reopening it may not get the same local port back.
     CloseTunnel { id: String, label: String },
@@ -720,6 +723,9 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
         )),
+        PendingAction::RefreshPeers => {
+            Some(("Refresh peers".to_string(), vec!["refresh_peers".to_string()]))
+        }
         PendingAction::CloseTunnel { id, label } => Some((
             format!("Close tunnel {label}"),
             vec!["tunnel_close".to_string(), id, "--json".to_string()],
@@ -3240,6 +3246,8 @@ pub struct App {
     pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
     pub chat_attach_area: Rect,
     pub chat_send_area: Rect,
+    /// The ⟳ button on the PEERS table's border; `Rect::ZERO` when not drawn.
+    pub peers_refresh_area: Rect,
     /// The open right-click menu, while `input_mode` is `ContextMenu`.
     pub context_menu: Option<crate::context_menu::ContextMenu>,
     /// The DOCS page: its index, the page open in it, and where both were drawn.
@@ -3405,6 +3413,7 @@ impl Default for App {
             chat_card_buttons: Vec::new(),
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
+            peers_refresh_area: Rect::ZERO,
             context_menu: None,
             docs: crate::docs::DocsState::default(),
             details: None,
@@ -3735,6 +3744,10 @@ impl App {
             .cloned()
         {
             self.copy_to_clipboard(&id);
+            return;
+        }
+        if self.page() == Page::Peers && self.peers_refresh_area.contains(position) {
+            self.open_refresh_peers_confirm();
             return;
         }
         // The config tree remembers where it drew each node, so it can resolve the
@@ -5884,6 +5897,11 @@ impl App {
             PendingAction::CloseTunnel { id, label } => {
                 if let Some((label, args)) = pending_command(PendingAction::CloseTunnel { id, label }) {
                     self.spawn_command(CommandKind::Tunnel, label, args);
+                }
+            }
+            PendingAction::RefreshPeers => {
+                if let Some((label, args)) = pending_command(PendingAction::RefreshPeers) {
+                    self.spawn_command(CommandKind::Report, label, args);
                 }
             }
             PendingAction::OpenTunnel { label, args } => {

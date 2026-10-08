@@ -411,6 +411,19 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Down) => app.on_down(),
         (_, KeyCode::Right) => app.on_right(),
         (_, KeyCode::Left) => app.on_left(),
+        // On PEERS `r` asks every peer again over the network (`nodo refresh_peers`), the
+        // same as the ⟳ button, and so asks first: it is a round of connections to every
+        // peer. The list re-reads our own database every couple of seconds regardless.
+        (_, KeyCode::Char('r' | 'R')) if app.page() == Page::Peers => {
+            app.open_refresh_peers_confirm()
+        }
+        // These pages are re-read from the database every couple of seconds and have
+        // nothing slower for `r` to bring forward, so it is not offered there.
+        (KeyModifiers::NONE, KeyCode::Char('r'))
+            if matches!(
+                app.page(),
+                Page::Instances | Page::Tunnels | Page::Packs | Page::Clients | Page::Energy | Page::Logs
+            ) => {}
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
             app.toggle_instances_grouped()

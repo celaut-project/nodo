@@ -112,6 +112,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.chat_card_buttons.clear();
     app.chat_attach_area = Rect::ZERO;
     app.chat_send_area = Rect::ZERO;
+    app.peers_refresh_area = Rect::ZERO;
 
     // Below the smallest size the pages are laid out for, say so instead of drawing
     // a tab bar squeezed to nothing over a table of one-character columns (issue
@@ -5243,21 +5244,21 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 pub(crate) fn page_controls(page: Page) -> &'static str {
     match page {
         Page::Overview => "r refresh  \u{2022}  q quit",
-        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  t tunnel  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
+        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  t tunnel  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  q quit",
         Page::Tunnels => {
-            "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  r refresh  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  q quit"
         }
         Page::Packs => {
-            "\u{2191}/\u{2193} select  \u{2022}  n new pack  \u{2022}  i log  \u{2022}  c cancel  \u{2022}  r refresh  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  n new pack  \u{2022}  i log  \u{2022}  c cancel  \u{2022}  q quit"
         }
         Page::Services => {
             "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  p pack  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
         }
         Page::Peers => {
-            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  d forget  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  r/\u{27f3} refresh all  \u{2022}  d forget  \u{2022}  q quit"
         }
         Page::Clients => {
-            "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  r refresh  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  q quit"
         }
         Page::Chat => {
             "\u{2191}/\u{2193} select  \u{2022}  o new chat  \u{2022}  \u{23ce} reply  \u{2022}  c close  \u{2022}  R reopen  \u{2022}  q quit"
@@ -5274,11 +5275,11 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         Page::Schedule => {
             "\u{2192}/\u{2190} move edge 30m  \u{2022}  \u{2191}/\u{2193} which edge  \u{2022}  [/] window  \u{2022}  w on/off  \u{2022}  c closing  \u{2022}  \u{23ce} apply  \u{2022}  esc discard"
         }
-        Page::Energy => "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} / e edit  \u{2022}  r refresh  \u{2022}  q quit",
+        Page::Energy => "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} / e edit  \u{2022}  q quit",
         Page::Config => {
             "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
         }
-        Page::Logs => "r refresh  \u{2022}  q quit",
+        Page::Logs => "q quit",
         Page::Docs => {
             "\u{2191}/\u{2193} PgUp/PgDn Home/End  \u{2022}  \u{2190}/\u{2192} index/page  \u{2022}  \u{23ce} open/follow  \u{2022}  l/L link  \u{2022}  / search  \u{2022}  n/N match  \u{2022}  \u{232b} back  \u{2022}  r reload"
         }

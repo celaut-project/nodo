@@ -126,11 +126,28 @@ def balance_on_other_peer(peer_id: str) -> int:
         if (datetime.datetime.now() - last_update_time).total_seconds() <= min(10.0, float(MANAGER_ITERATION_TIME)):
             return _in_local_mu(peer_id, peer['balance_mu'])
 
+    return _in_local_mu(peer_id, _fetch_balance_on_peer(peer_id))
+
+
+def refresh_balance_on_peer(peer_id: str) -> int:
+    """Ask the peer what we hold there *now*, ignoring the few-seconds cache.
+
+    ``balance_on_other_peer`` answers from the stored row when it is fresh enough, which
+    is right for the hot paths and wrong for an operator who asked to see the current
+    figure. Returns the peer's own MU, as stored; raises when the peer cannot be asked.
+    """
+    return _fetch_balance_on_peer(peer_id, raise_on_error=True)
+
+
+def _fetch_balance_on_peer(peer_id: str, raise_on_error: bool = False) -> int:
+    """Read our balance from the peer's ``Metrics`` and store it, in the peer's MU."""
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
     if not client_id:
         logger(f'No client_id for peer {peer_id}; cannot get balance.')
+        if raise_on_error:
+            raise ConnectionError(f'No client_id for peer {peer_id}.')
         return 0
-    
+
     try:
         metrics = __get_metrics_external(
                         peer_id=peer_id,
@@ -141,15 +158,17 @@ def balance_on_other_peer(peer_id: str) -> int:
         if is_peer_available(peer_id=peer_id):
             logger('It is assumed that the client was invalid on peer ' + peer_id)
             sc.delete_external_client(peer_id=peer_id)
+        if raise_on_error:
+            raise
         return 0
-        
+
     balance = from_amount(metrics.balance)
-                          
+
     # Stored verbatim, in the peer's MU: it is the peer's own accounting, and
     # a cached row converted at write time would go stale the moment either
     # node changed its rate.
     sc.refresh_balance_for_peer(peer_id=peer_id, balance_mu=balance)
-    return _in_local_mu(peer_id, balance)
+    return balance
 
 
 

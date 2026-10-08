@@ -53,6 +53,7 @@ PEER_COMMANDS = [
     "chat_open",
     "chat_threads",
     "peers",
+    "refresh_peers",
     "peer_reputation",
     "protocol",
 ]
@@ -113,6 +114,7 @@ COMMANDS = sorted(
         "tag",
         "clients",
         "peers",
+        "refresh_peers",
         "protocol",
         "instances",
         "connect",

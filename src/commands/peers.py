@@ -331,3 +331,66 @@ def adjust_peer_reputation(peer_id: str, delta: str, as_json: bool = False) -> b
     else:
         print(f"Peer {peer_id}: reputation {amount:+d} -> score {score}.", flush=True)
     return True
+
+
+def _refresh_one_peer(peer_id: str) -> dict:
+    """Re-read one peer from the network: its announcement, then what we hold there.
+
+    The two halves fail on their own: a peer whose ``GetPeerInfo`` is refused can
+    still answer ``Metrics`` and the other way round, so each reports its own outcome.
+    """
+    from src.manager.manager import refresh_peer_instance
+    from src.manager.metrics import refresh_balance_on_peer
+
+    result = {"id": peer_id, "peer_refreshed": False, "balance_refreshed": False,
+              "balance_peer_mu": None, "balance_mu": None, "error": None}
+    try:
+        result["peer_refreshed"] = bool(refresh_peer_instance(peer_id))
+    except Exception as e:
+        result["error"] = f"peer: {e}"
+    try:
+        balance = refresh_balance_on_peer(peer_id)
+        result["balance_refreshed"] = True
+        result["balance_peer_mu"] = str(balance)
+        result["balance_mu"] = _balance_in_local_mu(peer_id, balance)
+    except Exception as e:
+        result["error"] = "; ".join(filter(None, [result["error"], f"balance: {e}"]))
+    return result
+
+
+def refresh_peers_command(argv=None) -> bool:
+    """``nodo refresh_peers [<peer_id>] [--json]`` -- the TUI's ``r`` / ⟳ on PEERS.
+
+    Re-fetches every known peer's ``Peer`` announcement (addresses, payment contracts,
+    rates, reputation proofs) and our client's balance there, instead of waiting for the
+    manager's next pass. With an id, only that peer. Succeeds when at least one peer
+    was refreshed in full, or when there was nothing to refresh.
+    """
+    from src.commands import _catalogue as catalogue
+
+    argv = list(argv or [])
+    as_json = "--json" in argv
+    args = catalogue.positionals(argv)
+    if args:
+        if not sq.peer_exists(args[0]):
+            return catalogue.emit_error(as_json, f"No peer with id {args[0]}.")
+        peer_ids = [args[0]]
+    else:
+        peer_ids = sq.get_peers_id()
+
+    results = [_refresh_one_peer(peer_id) for peer_id in peer_ids]
+    full = sum(1 for r in results if r["peer_refreshed"] and r["balance_refreshed"])
+    if as_json:
+        catalogue.emit_json({"peers": results, "refreshed": full, "total": len(results)})
+    else:
+        for r in results:
+            state = "ok" if r["peer_refreshed"] and r["balance_refreshed"] else "partial" \
+                if r["peer_refreshed"] or r["balance_refreshed"] else "failed"
+            line = f"  {r['id']}: {state}"
+            if r["balance_mu"] is not None:
+                line += f", balance {format_mu(r['balance_mu'])}"
+            if r["error"]:
+                line += f" ({r['error']})"
+            print(line)
+        print(f"Refreshed {full} of {len(results)} peers.", flush=True)
+    return full > 0 or not results

@@ -487,6 +487,7 @@ fn hit_areas_are_on_the_page(app: &App, buffer: &Buffer) -> Result<(), String> {
     areas.extend(app.chat_card_buttons.iter().map(|(_, rect)| ("card button", *rect)));
     areas.push(("attach", app.chat_attach_area));
     areas.push(("send", app.chat_send_area));
+    areas.push(("peers refresh", app.peers_refresh_area));
     areas.extend(app.energy_row_areas.iter().map(|(_, rect)| ("energy row", *rect)));
     areas.extend(app.price_bar_areas.iter().map(|(_, rect)| ("price bar", *rect)));
     areas.extend(app.payment_rate_areas.iter().map(|(_, rect)| ("payment rate", *rect)));

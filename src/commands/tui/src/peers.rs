@@ -17,6 +17,7 @@ use crate::ui::{fitted_column_x, fitted_table, TextCell,
 };
 use prost::Message;
 use ratatui::prelude::*;
+use ratatui::widgets::Paragraph;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use std::path::Path;
 
@@ -297,6 +298,23 @@ impl App {
         }
     }
 
+    /// Ask before re-fetching every peer's announcement and our balance there
+    /// (`nodo refresh_peers`): it opens a connection to each peer, which is a lot of
+    /// network and disk I/O. Reached by `r`, and by clicking the ⟳ button.
+    pub fn open_refresh_peers_confirm(&mut self) {
+        if self.page() != crate::app::Page::Peers {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let count = self.peers.items.len();
+        self.input_mode = crate::app::InputMode::Confirm;
+        self.input_title = format!("Refresh all {count} peers from the network? Heavy on I/O (y/N)");
+        self.pending_action = Some(PendingAction::RefreshPeers);
+    }
+
     /// Increase or decrease the selected peer's local reputation score.
     pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
         if self.page() != crate::app::Page::Peers {
@@ -381,6 +399,9 @@ impl App {
         });
     }
 }
+
+/// The refresh button: a clockwise open-circle arrow.
+const REFRESH_BUTTON: &str = "[ \u{27f3} ]";
 
 /// The PEERS table's columns (issue #453): the id, then what this node holds there
 /// and the peer's standing, outlast where it is reached and what it announced --
@@ -468,6 +489,20 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     // Where the id column was actually drawn, after any narrower columns gave way.
     app.id_column_x = fitted_column_x(split[0], &columns, 0, has_selection);
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
+    // The ⟳ button sits on the table's top border, right-aligned. Clicking it asks the
+    // same confirmation as `r`.
+    let button_width = REFRESH_BUTTON.chars().count() as u16;
+    if split[0].width > button_width + 4 {
+        let area = Rect::new(split[0].right() - button_width - 2, split[0].y, button_width, 1);
+        app.peers_refresh_area = area;
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                REFRESH_BUTTON,
+                Style::default().fg(accent()).add_modifier(Modifier::BOLD),
+            )),
+            area,
+        );
+    }
 
     // A query that failed takes the card, not a corner of it. `0 connected` is the
     // screen a new node draws, so an unreadable table that merely looked empty was
