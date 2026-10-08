@@ -10,6 +10,7 @@ from typing import Dict
 from pathlib import Path
 from src.utils.config import ConfigManager
 from src.utils import keyvalue
+from src.utils.block_tree import block_tree, copy_block
 from protos.celaut_pb2 import Configuration
 
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import (
@@ -105,18 +106,13 @@ def _generate_dev_dependencies(path: str):
             os.system(f"cp -R {METADATA}/{dependency} "
                         f"{path}/{pack_config[METADATA_DEPENDENCIES_DIRECTORY]}")
 
-        # Move dependency's blocks.
+        # Move dependency's blocks, with the blocks that its blocks name.
         if os.path.isdir(f"{SERVICES}/{dependency}"):
-            with open(f"{SERVICES}/{dependency}/_.json", 'r') as dependency_json_file:
-                dependency_json = json.load(dependency_json_file)
-                for _e in dependency_json:
-                    if type(_e) == list:
-                        block: str = _e[0]
-                        if not os.path.exists(
-                                f'{path}/{pack_config[BLOCKS_DIRECTORY]}/{block}'
-                        ):
-                            os.system(f"cp -r {BLOCKS}/{block} "
-                                        f"{path}/{pack_config[BLOCKS_DIRECTORY]}")
+            for block in block_tree(f"{SERVICES}/{dependency}", BLOCKS):
+                if not os.path.exists(
+                        f'{path}/{pack_config[BLOCKS_DIRECTORY]}/{block}'
+                ):
+                    copy_block(BLOCKS, block, f"{path}/{pack_config[BLOCKS_DIRECTORY]}")
 
     # Write the .dependencies file in the service's root directory
     dependencies_file_path = Path(path) / ".dependencies"

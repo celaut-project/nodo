@@ -272,7 +272,7 @@ DATA_GENERATOR=def456hashvalue
 #### `blocks_directory`
 - **Type:** `string`
 - **Required:** No
-- **Description:** Directory name where block files referenced by dependencies will be stored. Blocks are resolved automatically from each dependency's `_.json` manifest.
+- **Description:** Directory name where block files referenced by dependencies will be stored. Blocks are resolved automatically from each dependency's `_.json` manifest, at every depth: a block that is a multiblock directory brings the blocks that its own `_.json` names. The service needs all of them to send the dependency to a node that does not have it.
 
 ```json
 {

@@ -22,10 +22,13 @@ from src.commands.packer.zip_with_dockerfile.packer_service_client import (
     resolve_and_upload_dependencies,
 )
 
+# A block id is a hex digest of the block content (see src/utils/block_tree.py).
+BLOCK_ID = "b10c" * 16
+
 
 def _make_registry(tmp):
     """Create REGISTRY/METADATA/BLOCKS dirs with one packed dependency 'depABC'
-    (referencing block 'blkzzz') and return the three dir paths."""
+    (referencing block BLOCK_ID) and return the three dir paths."""
     services = os.path.join(tmp, "registry")
     metadata = os.path.join(tmp, "metadata")
     blocks = os.path.join(tmp, "blocks")
@@ -35,12 +38,12 @@ def _make_registry(tmp):
     svc = os.path.join(services, "depABC")
     os.makedirs(svc, exist_ok=True)
     with open(os.path.join(svc, "_.json"), "w") as f:
-        json.dump([["blkzzz"], "inline0"], f)
+        json.dump([[BLOCK_ID], "inline0"], f)
     with open(os.path.join(svc, "inline0"), "wb") as f:
         f.write(b"chunkbytes")
     with open(os.path.join(metadata, "depABC"), "wb") as f:
         f.write(b"meta")
-    with open(os.path.join(blocks, "blkzzz"), "wb") as f:
+    with open(os.path.join(blocks, BLOCK_ID), "wb") as f:
         f.write(b"blockbytes")
     return services, metadata, blocks
 
@@ -129,7 +132,7 @@ class BundleTests(unittest.TestCase):
         self.assertIn("service/_.json", names)
         self.assertIn("service/inline0", names)
         self.assertIn("metadata", names)
-        self.assertIn("blocks/blkzzz", names)
+        self.assertIn("blocks/" + BLOCK_ID, names)
 
     def test_bundle_missing_service_raises(self):
         tmp = tempfile.mkdtemp()
