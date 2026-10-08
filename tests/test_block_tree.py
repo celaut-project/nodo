@@ -9,7 +9,8 @@ with "gRPCbb: Error reading block." (celaut-basics/sort-sat-solver#6).
 
 These tests check ``block_tree`` and the three places that copy a dependency:
 the pack of a service with dependencies, ``nodo ggconf`` and the bundle for a
-remote packer.
+remote packer. They also check ``nodo storage:prune_blocks``, which must keep
+the blocks at every depth.
 """
 import io
 import json
@@ -23,6 +24,7 @@ from tests.config_bootstrap import load_example_config
 load_example_config()
 
 from src.utils.block_tree import block_tree, manifest_block_ids
+from src.commands import storage
 from src.commands.packer.zip_with_dockerfile import generate_service_zip
 from src.commands.packer.zip_with_dockerfile.packer_service_client import build_dependency_bundle
 
@@ -132,6 +134,35 @@ class DependencyBundleTest(StorageCase):
             names = tf.getnames()
         blocks = sorted({n.split("/")[1] for n in names if n.startswith("blocks/")})
         self.assertEqual(blocks, ["base", "leaf", "mid", "top1", "top2"])
+
+
+class PruneBlocksTest(StorageCase):
+    """``nodo storage:prune_blocks`` deletes only the blocks that no service needs."""
+
+    def _prune(self):
+        with mock.patch.object(storage, "REGISTRY", self.services), \
+                mock.patch.object(storage, "BLOCKDIR", self.blocks):
+            storage.prune_blocks()
+
+    def test_keeps_nested_blocks(self):
+        self._prune()
+        self.assertEqual(sorted(os.listdir(self.blocks)), ["base", "leaf", "mid", "top1", "top2"])
+        self.assertTrue(os.path.isfile(self.blocks + "mid/_.json"))
+
+    def test_deletes_unused_directory_block(self):
+        _multiblock(self.blocks + "unused", [b"u", "other"])
+        self._prune()
+        self.assertFalse(os.path.exists(self.blocks + "unused"))
+        self.assertFalse(os.path.exists(self.blocks + "other"))
+
+    def test_deletes_unused_file_block(self):
+        self._prune()
+        self.assertFalse(os.path.exists(self.blocks + "other"))
+
+    def test_service_that_is_one_file(self):
+        _write(self.services + "plain", b"a service without blocks")
+        self._prune()
+        self.assertEqual(sorted(os.listdir(self.blocks)), ["base", "leaf", "mid", "top1", "top2"])
 
 
 if __name__ == "__main__":
