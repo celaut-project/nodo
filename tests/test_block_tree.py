@@ -15,6 +15,7 @@ the blocks at every depth.
 import io
 import json
 import os
+import shutil
 import tarfile
 import tempfile
 import unittest
@@ -24,7 +25,7 @@ from tests.config_bootstrap import load_example_config
 load_example_config()
 
 from src.utils.block_tree import MissingManifestError, block_tree, manifest_block_ids
-from src.commands import storage
+from src.commands import ggconf, storage
 from src.commands.packer.zip_with_dockerfile import generate_service_zip
 from src.commands.packer.zip_with_dockerfile.packer_service_client import build_dependency_bundle
 
@@ -91,8 +92,12 @@ class BlockTreeTest(StorageCase):
             ["top1", "base", "top2", "mid", "leaf"],
         )
 
-    def test_missing_block_is_listed_without_children(self):
+    def test_block_without_manifest_names_no_blocks(self):
         os.remove(self.blocks + "mid/_.json")
+        self.assertEqual(block_tree(self.services + "dep", self.blocks), ["top1", "base", "top2", "mid"])
+
+    def test_missing_block_is_listed_without_children(self):
+        shutil.rmtree(self.blocks + "mid")
         self.assertEqual(block_tree(self.services + "dep", self.blocks), ["top1", "base", "top2", "mid"])
 
     def test_service_without_manifest_is_an_error(self):
@@ -141,6 +146,36 @@ class ExportRegistryTest(StorageCase):
                 mock.patch.object(generate_service_zip, "BLOCKS", self.blocks):
             with self.assertRaises(MissingManifestError):
                 getattr(generate_service_zip, "__export_registry")(project, directory, pack_config)
+
+
+class GgconfTest(StorageCase):
+    """``nodo ggconf`` copies the dependencies of a service under development."""
+
+    def test_copies_nested_blocks(self):
+        project = os.path.join(self.tmp.name, "project")
+        os.makedirs(os.path.join(project, ".service"))
+        pack_config = {
+            "dependencies": {"DEP": "dep"},
+            "dependencies_env": True,
+            "service_dependencies_directory": "__services__",
+            "metadata_dependencies_directory": "__metadata__",
+            "blocks_directory": "__block__",
+        }
+        with open(os.path.join(project, ".service", "pack_config.json"), "w") as f:
+            json.dump(pack_config, f)
+        with mock.patch.object(ggconf, "SERVICES", self.services), \
+                mock.patch.object(ggconf, "METADATA", self.metadata), \
+                mock.patch.object(ggconf, "BLOCKS", self.blocks), \
+                mock.patch.object(ggconf, "get_id", lambda dependency: dependency):
+            ggconf._generate_dev_dependencies(project)
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(project, "__block__"))),
+            ["base", "leaf", "mid", "top1", "top2"],
+        )
+        self.assertTrue(os.path.isfile(os.path.join(project, "__block__", "mid", "_.json")))
+        self.assertEqual(os.listdir(os.path.join(project, "__services__")), ["dep"])
+        with open(os.path.join(project, ".dependencies")) as f:
+            self.assertEqual(f.read(), "DEP=dep\n")
 
 
 class DependencyBundleTest(StorageCase):
