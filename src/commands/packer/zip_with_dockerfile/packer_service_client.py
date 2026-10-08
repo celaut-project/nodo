@@ -122,20 +122,24 @@ def build_dependency_bundle(
     """Serialise a packed dependency into the gzip-tar bundle the packer
     service's POST /registry/<id> expects:
 
-        service/          -> contents of {services_dir}/<id>/ (multiblock dir)
+        service           -> {services_dir}/<id>: a multiblock dir, or a single
+                             file when the service has no blocks
         metadata          -> {metadata_dir}/<id>, if present
         blocks/<blockid>  -> each block referenced by service/_.json, and each
                              block that those blocks name, if present
     """
     service_path = os.path.join(services_dir, service_id)
-    if not os.path.isdir(service_path):
+    if not os.path.exists(service_path):
         raise MissingDependencyError(
             f"Dependency '{service_id}' not found in the services registry at "
             f"'{services_dir}'. Ensure the dependency is packed locally first."
         )
 
     # Collect block ids referenced by the multiblock manifest, at every depth.
-    block_ids: List[str] = block_tree(service_path, blocks_dir)
+    # A service without blocks is one file and names no blocks.
+    block_ids: List[str] = (
+        block_tree(service_path, blocks_dir) if os.path.isdir(service_path) else []
+    )
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:

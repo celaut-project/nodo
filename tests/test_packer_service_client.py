@@ -134,6 +134,19 @@ class BundleTests(unittest.TestCase):
         self.assertIn("metadata", names)
         self.assertIn("blocks/" + BLOCK_ID, names)
 
+    def test_bundle_file_service(self):
+        # A service without blocks is stored as one file, not a directory.
+        tmp = tempfile.mkdtemp()
+        services, metadata, blocks = _make_registry(tmp)
+        with open(os.path.join(services, "fileDEF"), "wb") as f:
+            f.write(b"servicebytes")
+        data = build_dependency_bundle("fileDEF", services, metadata, blocks)
+        import io
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+            self.assertEqual(tf.getnames(), ["service"])
+            self.assertTrue(tf.getmember("service").isfile())
+            self.assertEqual(tf.extractfile("service").read(), b"servicebytes")
+
     def test_bundle_missing_service_raises(self):
         tmp = tempfile.mkdtemp()
         services, metadata, blocks = _make_registry(tmp)
@@ -181,6 +194,16 @@ class ResolveUploadTests(unittest.TestCase):
         import io
         with tarfile.open(fileobj=io.BytesIO(_Recorder.posted[0][1]), mode="r:gz") as tf:
             self.assertIn("service/_.json", tf.getnames())
+
+    def test_uploads_file_service_dep(self):
+        with open(os.path.join(self.services, "fileDEF"), "wb") as f:
+            f.write(b"servicebytes")
+        _write_pack_config(self.project, {"DEP": "fileDEF"})
+        summary = self._resolve()
+        self.assertEqual(summary["uploaded"], ["fileDEF"])
+        import io
+        with tarfile.open(fileobj=io.BytesIO(_Recorder.posted[0][1]), mode="r:gz") as tf:
+            self.assertTrue(tf.getmember("service").isfile())
 
     def test_skips_when_already_present(self):
         _Recorder.present_ids = {"depABC"}
