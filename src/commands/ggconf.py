@@ -10,7 +10,7 @@ from typing import Dict
 from pathlib import Path
 from src.utils.config import ConfigManager
 from src.utils import keyvalue
-from src.utils.block_tree import block_tree
+from src.utils.block_tree import block_tree, copy_block
 from protos.celaut_pb2 import Configuration
 
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import (
@@ -112,8 +112,7 @@ def _generate_dev_dependencies(path: str):
                 if not os.path.exists(
                         f'{path}/{pack_config[BLOCKS_DIRECTORY]}/{block}'
                 ):
-                    os.system(f"cp -r {BLOCKS}/{block} "
-                                f"{path}/{pack_config[BLOCKS_DIRECTORY]}")
+                    copy_block(BLOCKS, block, f"{path}/{pack_config[BLOCKS_DIRECTORY]}")
 
     # Write the .dependencies file in the service's root directory
     dependencies_file_path = Path(path) / ".dependencies"

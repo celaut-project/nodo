@@ -3,7 +3,7 @@ import os
 import pathlib
 import shutil
 from typing import Dict
-from src.utils.block_tree import block_tree
+from src.utils.block_tree import block_tree, copy_block
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -105,8 +105,7 @@ def __export_registry(project_dir: str, directory: str, pack_config: Dict):
                     if not os.path.exists(
                             f'{directory}/{blocks_dir}/{block}'
                     ):
-                        os.system(f"cp -r {BLOCKS}/{block} "
-                                  f"{directory}/{blocks_dir}")
+                        copy_block(BLOCKS, block, f"{directory}/{blocks_dir}")
 
             # Write env
             if write_env:

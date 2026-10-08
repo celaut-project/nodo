@@ -10,9 +10,19 @@ only the blocks that the service's own ``_.json`` names.
 """
 import json
 import os
+import re
+import shutil
 from typing import List, Set
 
 MANIFEST = "_.json"
+
+# bee-rpc names a block by the hex digest of its content (sha3-256 by default,
+# but the hash is configurable, so the length is not fixed).
+BLOCK_ID = re.compile(r"[0-9a-f]+")
+
+
+class InvalidBlockIdError(ValueError):
+    """A ``_.json`` names a block id that is not a lowercase hex digest."""
 
 
 class MissingManifestError(FileNotFoundError):
@@ -24,13 +34,24 @@ def manifest_block_ids(directory: str) -> List[str]:
 
     A directory without ``_.json`` (a block that is one file, or a missing
     block) names no blocks.
+
+    The callers use a block id as a file name in the block directory. Thus an
+    id that is not a lowercase hex digest (for example ``../x`` or ``/etc``) is
+    not accepted: ``InvalidBlockIdError`` is raised.
     """
     manifest = os.path.join(directory, MANIFEST)
     if not os.path.isfile(manifest):
         return []
     with open(manifest) as f:
         entries = json.load(f)
-    return [e[0] for e in entries if isinstance(e, list) and e and isinstance(e[0], str)]
+    block_ids = [e[0] for e in entries if isinstance(e, list) and e and isinstance(e[0], str)]
+    for block_id in block_ids:
+        if not BLOCK_ID.fullmatch(block_id):
+            raise InvalidBlockIdError(
+                f"The file '{manifest}' names the block {block_id!r}, which is not "
+                f"a lowercase hex digest. The service in the registry is not correct."
+            )
+    return block_ids
 
 
 def block_tree(service_dir: str, blocks_dir: str) -> List[str]:
@@ -65,3 +86,20 @@ def block_tree(service_dir: str, blocks_dir: str) -> List[str]:
 
     visit(manifest_block_ids(service_dir))
     return found
+
+
+def copy_block(blocks_dir: str, block_id: str, dest_dir: str) -> None:
+    """Copy the block ``block_id`` from ``blocks_dir`` into ``dest_dir``.
+
+    A block is one file or a multiblock directory. The copy has the same name.
+    If the block is not in ``blocks_dir``, a warning is printed and nothing is
+    copied.
+    """
+    source = os.path.join(blocks_dir, block_id)
+    destination = os.path.join(dest_dir, block_id)
+    if not os.path.exists(source):
+        print(f"WARNING: The block {block_id} is not in '{blocks_dir}'. It is not copied.")
+    elif os.path.isdir(source):
+        shutil.copytree(source, destination)
+    else:
+        shutil.copy2(source, destination)

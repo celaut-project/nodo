@@ -12,6 +12,7 @@ the pack of a service with dependencies, ``nodo ggconf`` and the bundle for a
 remote packer. They also check ``nodo storage:prune_blocks``, which must keep
 the blocks at every depth.
 """
+import hashlib
 import io
 import json
 import os
@@ -24,10 +25,27 @@ from unittest import mock
 from tests.config_bootstrap import load_example_config
 load_example_config()
 
-from src.utils.block_tree import MissingManifestError, block_tree, manifest_block_ids
+from src.utils.block_tree import (
+    InvalidBlockIdError,
+    MissingManifestError,
+    block_tree,
+    copy_block,
+    manifest_block_ids,
+)
 from src.commands import ggconf, storage
 from src.commands.packer.zip_with_dockerfile import generate_service_zip
 from src.commands.packer.zip_with_dockerfile.packer_service_client import build_dependency_bundle
+
+
+def _block_id(name):
+    """A block id in the form that bee-rpc uses: a lowercase hex digest."""
+    return hashlib.sha3_256(name.encode()).hexdigest()
+
+
+TOP1, TOP2, BASE, MID, LEAF, LEAF2, OTHER, GHOST, UNUSED = (
+    _block_id(n) for n in ("top1", "top2", "base", "mid", "leaf", "leaf2", "other", "ghost", "unused")
+)
+ALL_BLOCKS = sorted([TOP1, BASE, TOP2, MID, LEAF])
 
 
 def _write(path, data=b"x"):
@@ -53,7 +71,8 @@ def _multiblock(directory, parts):
 class StorageCase(unittest.TestCase):
     """A registry with service `dep`: its `_.json` names the layer blocks `top1`
     and `top2`. Both are multiblock directories that name the shared block
-    `base` (one file). `top2` also names `mid`, which names `leaf`."""
+    `base` (one file). `top2` also names `mid`, which names `leaf`. The
+    constant `TOP1` is the block id of `top1`, and so on."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -62,14 +81,14 @@ class StorageCase(unittest.TestCase):
         self.metadata = os.path.join(root, "metadata") + "/"
         self.blocks = os.path.join(root, "blocks") + "/"
         os.makedirs(self.metadata)
-        _multiblock(self.services + "dep", [b"head", "top1", b"mid", "top2", b"tail"])
+        _multiblock(self.services + "dep", [b"head", TOP1, b"mid", TOP2, b"tail"])
         _write(self.metadata + "dep", b"meta")
-        _multiblock(self.blocks + "top1", [b"a", "base", b"b"])
-        _multiblock(self.blocks + "top2", [b"c", "base", b"d", "mid", b"e"])
-        _multiblock(self.blocks + "mid", [b"f", "leaf"])
-        _write(self.blocks + "base", b"shared layer")
-        _write(self.blocks + "leaf", b"leaf")
-        _write(self.blocks + "other", b"not used by dep")
+        _multiblock(self.blocks + TOP1, [b"a", BASE, b"b"])
+        _multiblock(self.blocks + TOP2, [b"c", BASE, b"d", MID, b"e"])
+        _multiblock(self.blocks + MID, [b"f", LEAF])
+        _write(self.blocks + BASE, b"shared layer")
+        _write(self.blocks + LEAF, b"leaf")
+        _write(self.blocks + OTHER, b"not used by dep")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -78,27 +97,27 @@ class StorageCase(unittest.TestCase):
 class BlockTreeTest(StorageCase):
 
     def test_manifest_block_ids(self):
-        self.assertEqual(manifest_block_ids(self.services + "dep"), ["top1", "top2"])
+        self.assertEqual(manifest_block_ids(self.services + "dep"), [TOP1, TOP2])
 
     def test_one_file_block_names_no_blocks(self):
-        self.assertEqual(manifest_block_ids(self.blocks + "base"), [])
+        self.assertEqual(manifest_block_ids(self.blocks + BASE), [])
 
     def test_missing_directory_names_no_blocks(self):
-        self.assertEqual(manifest_block_ids(self.blocks + "ghost"), [])
+        self.assertEqual(manifest_block_ids(self.blocks + GHOST), [])
 
     def test_every_depth_once_parent_first(self):
         self.assertEqual(
             block_tree(self.services + "dep", self.blocks),
-            ["top1", "base", "top2", "mid", "leaf"],
+            [TOP1, BASE, TOP2, MID, LEAF],
         )
 
     def test_block_without_manifest_names_no_blocks(self):
-        os.remove(self.blocks + "mid/_.json")
-        self.assertEqual(block_tree(self.services + "dep", self.blocks), ["top1", "base", "top2", "mid"])
+        os.remove(self.blocks + MID + "/_.json")
+        self.assertEqual(block_tree(self.services + "dep", self.blocks), [TOP1, BASE, TOP2, MID])
 
     def test_missing_block_is_listed_without_children(self):
-        shutil.rmtree(self.blocks + "mid")
-        self.assertEqual(block_tree(self.services + "dep", self.blocks), ["top1", "base", "top2", "mid"])
+        shutil.rmtree(self.blocks + MID)
+        self.assertEqual(block_tree(self.services + "dep", self.blocks), [TOP1, BASE, TOP2, MID])
 
     def test_service_without_manifest_is_an_error(self):
         os.remove(self.services + "dep/_.json")
@@ -107,12 +126,69 @@ class BlockTreeTest(StorageCase):
         self.assertIn(self.services + "dep", str(cm.exception))
 
     def test_cycle_ends(self):
-        _multiblock(self.blocks + "leaf2", [b"g", "top2"])
-        _multiblock(self.blocks + "mid", [b"f", "leaf2"])
+        _multiblock(self.blocks + LEAF2, [b"g", TOP2])
+        _multiblock(self.blocks + MID, [b"f", LEAF2])
         self.assertEqual(
             block_tree(self.services + "dep", self.blocks),
-            ["top1", "base", "top2", "mid", "leaf2"],
+            [TOP1, BASE, TOP2, MID, LEAF2],
         )
+
+
+class BlockIdTest(StorageCase):
+    """A block id is a file name in the block directory, so it must be a hex digest."""
+
+    BAD_IDS = ["../" + OTHER, "/etc", OTHER + "/x", "..", "", OTHER.upper(), OTHER + "; rm -rf ~"]
+
+    def test_bad_ids_are_rejected(self):
+        for bad in self.BAD_IDS:
+            with self.subTest(block_id=bad):
+                _multiblock(self.services + "dep", [b"head", TOP1, bad])
+                with self.assertRaises(InvalidBlockIdError):
+                    manifest_block_ids(self.services + "dep")
+
+    def test_bad_nested_id_is_rejected(self):
+        _multiblock(self.blocks + MID, [b"f", "../../registry/dep"])
+        with self.assertRaises(InvalidBlockIdError):
+            block_tree(self.services + "dep", self.blocks)
+
+    def test_pack_with_bad_id_copies_nothing(self):
+        _multiblock(self.blocks + MID, [b"f", "x; touch pwned"])
+        project = os.path.join(self.tmp.name, "project")
+        directory = os.path.join(project, ".service", "service")
+        os.makedirs(directory)
+        pack_config = {"dependencies": {"DEP": "dep"}, "dependencies_env": True}
+        with mock.patch.object(generate_service_zip, "SERVICES", self.services), \
+                mock.patch.object(generate_service_zip, "METADATA", self.metadata), \
+                mock.patch.object(generate_service_zip, "BLOCKS", self.blocks):
+            with self.assertRaises(InvalidBlockIdError):
+                getattr(generate_service_zip, "__export_registry")(project, directory, pack_config)
+        self.assertEqual(os.listdir(os.path.join(directory, "__block__")), [])
+
+    def test_prune_with_bad_id_deletes_nothing(self):
+        _multiblock(self.blocks + MID, [b"f", "../" + OTHER])
+        with mock.patch.object(storage, "REGISTRY", self.services), \
+                mock.patch.object(storage, "BLOCKDIR", self.blocks):
+            with self.assertRaises(InvalidBlockIdError):
+                storage.prune_blocks()
+        self.assertIn(OTHER, os.listdir(self.blocks))
+
+
+class CopyBlockTest(StorageCase):
+
+    def test_copies_file_and_directory_blocks(self):
+        dest = os.path.join(self.tmp.name, "dest")
+        os.makedirs(dest)
+        copy_block(self.blocks, BASE, dest)
+        copy_block(self.blocks, MID, dest)
+        with open(os.path.join(dest, BASE), "rb") as f:
+            self.assertEqual(f.read(), b"shared layer")
+        self.assertTrue(os.path.isfile(os.path.join(dest, MID, "_.json")))
+
+    def test_missing_block_is_not_copied(self):
+        dest = os.path.join(self.tmp.name, "dest")
+        os.makedirs(dest)
+        copy_block(self.blocks, GHOST, dest)
+        self.assertEqual(os.listdir(dest), [])
 
 
 class ExportRegistryTest(StorageCase):
@@ -130,9 +206,9 @@ class ExportRegistryTest(StorageCase):
             getattr(generate_service_zip, "__export_registry")(project, directory, pack_config)
         self.assertEqual(
             sorted(os.listdir(os.path.join(directory, "__block__"))),
-            ["base", "leaf", "mid", "top1", "top2"],
+            ALL_BLOCKS,
         )
-        self.assertTrue(os.path.isfile(os.path.join(directory, "__block__", "mid", "_.json")))
+        self.assertTrue(os.path.isfile(os.path.join(directory, "__block__", MID, "_.json")))
         self.assertEqual(os.listdir(os.path.join(directory, "__services__")), ["dep"])
 
     def test_dependency_without_manifest_is_an_error(self):
@@ -170,9 +246,9 @@ class GgconfTest(StorageCase):
             ggconf._generate_dev_dependencies(project)
         self.assertEqual(
             sorted(os.listdir(os.path.join(project, "__block__"))),
-            ["base", "leaf", "mid", "top1", "top2"],
+            ALL_BLOCKS,
         )
-        self.assertTrue(os.path.isfile(os.path.join(project, "__block__", "mid", "_.json")))
+        self.assertTrue(os.path.isfile(os.path.join(project, "__block__", MID, "_.json")))
         self.assertEqual(os.listdir(os.path.join(project, "__services__")), ["dep"])
         with open(os.path.join(project, ".dependencies")) as f:
             self.assertEqual(f.read(), "DEP=dep\n")
@@ -186,7 +262,7 @@ class DependencyBundleTest(StorageCase):
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
             names = tf.getnames()
         blocks = sorted({n.split("/")[1] for n in names if n.startswith("blocks/")})
-        self.assertEqual(blocks, ["base", "leaf", "mid", "top1", "top2"])
+        self.assertEqual(blocks, ALL_BLOCKS)
 
 
 class PruneBlocksTest(StorageCase):
@@ -199,23 +275,23 @@ class PruneBlocksTest(StorageCase):
 
     def test_keeps_nested_blocks(self):
         self._prune()
-        self.assertEqual(sorted(os.listdir(self.blocks)), ["base", "leaf", "mid", "top1", "top2"])
-        self.assertTrue(os.path.isfile(self.blocks + "mid/_.json"))
+        self.assertEqual(sorted(os.listdir(self.blocks)), ALL_BLOCKS)
+        self.assertTrue(os.path.isfile(self.blocks + MID + "/_.json"))
 
     def test_deletes_unused_directory_block(self):
-        _multiblock(self.blocks + "unused", [b"u", "other"])
+        _multiblock(self.blocks + UNUSED, [b"u", OTHER])
         self._prune()
-        self.assertFalse(os.path.exists(self.blocks + "unused"))
-        self.assertFalse(os.path.exists(self.blocks + "other"))
+        self.assertFalse(os.path.exists(self.blocks + UNUSED))
+        self.assertFalse(os.path.exists(self.blocks + OTHER))
 
     def test_deletes_unused_file_block(self):
         self._prune()
-        self.assertFalse(os.path.exists(self.blocks + "other"))
+        self.assertFalse(os.path.exists(self.blocks + OTHER))
 
     def test_service_that_is_one_file(self):
         _write(self.services + "plain", b"a service without blocks")
         self._prune()
-        self.assertEqual(sorted(os.listdir(self.blocks)), ["base", "leaf", "mid", "top1", "top2"])
+        self.assertEqual(sorted(os.listdir(self.blocks)), ALL_BLOCKS)
 
 
 if __name__ == "__main__":
