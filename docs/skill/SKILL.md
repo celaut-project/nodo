@@ -353,8 +353,8 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  nodo instances --grouped        # grouped by parent service
 
  # Adjust the deposit of a running workload (amounts in ERG)
- nodo increase_deposit <instance id> 0.01   # in ui.DISPLAY_UNIT (ERG by default)
- nodo decrease_deposit <instance id> 0.005
+ nodo increase_deposit <instance id> 10000000   # in ui.DISPLAY_UNIT (MU by default)
+ nodo decrease_deposit <instance id> 5000000
 
  # Stop a running instance (requires root)
  sudo nodo kill <instance id>

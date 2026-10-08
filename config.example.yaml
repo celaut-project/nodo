@@ -686,7 +686,9 @@ free_tier:
 # What the operator reads and types. Purely presentational: changing it never changes
 # what anybody is charged.
 ui:
-  # "erg" (default), "mu", or "btc" once ledgers.bitcoin.payments.MU_PER_SATOSHI is set.
+  # "mu" (default), "erg", or "btc" once ledgers.bitcoin.payments.MU_PER_SATOSHI is set.
+  # MU is the node's own accounting unit, not money held anywhere: it is the default so
+  # nobody mistakes the figures for real ERG. Pick "erg"/"btc" to read them as that asset.
   # "erg" and "btc" derive their rate from their own ledger, so they stay correct if you
   # change MU_PER_NANOERG / MU_PER_SATOSHI.
   #
@@ -698,7 +700,7 @@ ui:
   # picker over exactly the units above; picking "custom..." there asks for a new name
   # and its MU_PER_UNIT together, since one without the other is a display unit the node
   # refuses to start against.
-  DISPLAY_UNIT: erg
+  DISPLAY_UNIT: mu
   # UNITS:
   #   usd:
   #     MU_PER_UNIT: 500000000

@@ -5,7 +5,7 @@ from src.utils.monetary import display_unit, format_mu, parse_to_mu
 def modify_instance_deposit(instance: str, amount: str, decrement: bool = False):
     """Move funds into or out of an instance's deposit.
 
-    The amount is in the operator's display unit (`ui.DISPLAY_UNIT`, ERG by default) --
+    The amount is in the operator's display unit (`ui.DISPLAY_UNIT`, MU by default) --
     what they read everywhere else. MU is the integer unit the node counts in and is
     never asked for here.
     """

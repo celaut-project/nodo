@@ -123,7 +123,7 @@ operator reads would be off by the ratio between the two.
 
 ```yaml
 ui:
-  DISPLAY_UNIT: erg       # "erg" (default) or "mu"
+  DISPLAY_UNIT: mu        # "mu" (default) or "erg"
 ```
 
 Purely presentational: changing it never changes what anybody is charged. `erg` derives
@@ -160,7 +160,7 @@ because it runs while that singleton is still being built.
 
 ### What the user sees
 
-Never MU, unless they ask for it. Every CLI and log boundary renders the display unit
+MU by default, so the figures are not mistaken for ERG actually held; a ledger's unit (`erg`, `btc`) is opt-in. Every CLI and log boundary renders the display unit
 through `format_mu` (`src/utils/monetary.py`), and every operator-supplied amount is
 parsed from it by `parse_to_mu`, which refuses anything that would not land on a whole MU
 rather than rounding it.
@@ -513,7 +513,7 @@ shipped defaults, [`CONFIG.md`](CONFIG.md#balancers) for every key, and
 
 3. **CLI: the commands act on the balance, in the operator's display unit.**
    `increase_gas` / `decrease_gas` become `increase_deposit` / `decrease_deposit` and
-   take an amount in `ui.DISPLAY_UNIT` (ERG by default). `nodo pay` is the exception and
+   take an amount in `ui.DISPLAY_UNIT` (MU by default). `nodo pay` is the exception and
    stays in ERG: it moves an on-chain ERG transfer.
 
 ## Found while implementing

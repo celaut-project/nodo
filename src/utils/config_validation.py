@@ -429,7 +429,7 @@ def _validate_display_unit(config: Dict[str, Any], rate: Decimal) -> None:
     ui = config.get("ui") or {}
     if not isinstance(ui, dict):
         raise ConfigValidationError("Malformed 'ui' mapping.")
-    name = str(ui.get("DISPLAY_UNIT", "erg") or "erg").strip().lower()
+    name = str(ui.get("DISPLAY_UNIT", "mu") or "mu").strip().lower()
     if name in ("erg", "mu"):
         return
 

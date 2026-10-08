@@ -105,7 +105,7 @@ GROUPS: List[Group] = [
     ),
     (
         "Money",
-        "amounts in ui.DISPLAY_UNIT, ERG by default",
+        "amounts in ui.DISPLAY_UNIT, MU by default",
         [
             ("earnings", "money taken in, by network (--json)"),
             ("donations", "who we fund, who we count (--json)"),

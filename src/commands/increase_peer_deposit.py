@@ -8,7 +8,7 @@ def increase_peer_deposit(peer_id, amount):
 
     :param peer_id: The ID of the peer to deposit with.
     :param amount: The amount to add, in the operator's display unit
-        (`ui.DISPLAY_UNIT`, ERG by default).
+        (`ui.DISPLAY_UNIT`, MU by default).
     """
     try:
         amount_mu = parse_to_mu(amount)

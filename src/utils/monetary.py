@@ -17,8 +17,8 @@ real money, so a second payment system is added without touching the accounting 
 
 **What the operator reads and types** is a third thing again: the display unit
 (``ui.DISPLAY_UNIT``). It exists so nobody has to think in MU. The units on offer are
-whatever the configured payment contracts contribute (ERG, while Ergo is the only one),
-plus ``mu`` and anything the operator declares by hand under ``ui.UNITS``.
+``mu`` (the default) plus whatever the configured payment contracts contribute (ERG,
+while Ergo is the only one), and anything the operator declares by hand under ``ui.UNITS``.
 
 Why this is not the gas model it replaced: gas had no declared rate anywhere, so a
 price quoted in it meant nothing to the node reading it, and the shipped numbers put
@@ -108,14 +108,13 @@ def contract_display_units() -> Dict[str, Dict[str, Any]]:
 
 
 def default_display_unit_name() -> str:
-    """What to show when ``ui.DISPLAY_UNIT`` is unset.
+    """What to show when ``ui.DISPLAY_UNIT`` is unset: MU.
 
-    The unit of whatever payment system this node is configured for -- ERG on a node
-    settling in Ergo -- because that is the money the operator actually deals in. Raw MU
-    only when no payment contract offers a unit at all, which is the honest answer: there
-    is nothing to express the balance in.
+    MU is the node's own accounting unit, not money. Defaulting to a ledger's unit (ERG)
+    made operators believe they were handling real ERG when the figures are only the
+    value the node gives things, so a ledger's unit is something the operator opts into.
     """
-    return next(iter(contract_display_units()), UNIT_MU)
+    return UNIT_MU
 
 
 def display_unit() -> DisplayUnit:
@@ -132,7 +131,7 @@ def display_unit() -> DisplayUnit:
     is charged, only what is printed.
     """
     contributed = contract_display_units()
-    fallback = next(iter(contributed), UNIT_MU)
+    fallback = default_display_unit_name()
     name = str(_config().get("ui.DISPLAY_UNIT", fallback) or fallback).strip().lower()
 
     if name == UNIT_MU:
@@ -158,9 +157,35 @@ def display_unit() -> DisplayUnit:
     )
 
 
+# Suffixes for large MU figures, largest first. MU is a small unit (one nanoERG on a
+# default node), so an hour of a modest service is millions of them.
+_MU_SUFFIXES = (("G", 10 ** 9), ("M", 10 ** 6), ("K", 10 ** 3))
+
+
+def abbreviate_mu(amount_mu: int) -> str:
+    """``5100000`` -> ``5.1M``; the figure itself when no suffix can say it exactly.
+
+    Never rounds: a suffix is used only when it needs at most two decimals, so what is
+    shown is always the exact amount (``5123456`` stays ``5123456``). A balance shown
+    shorter than it is would be a figure nobody could reconcile.
+    """
+    amount = int(amount_mu)
+    magnitude = abs(amount)
+    for suffix, scale in _MU_SUFFIXES:
+        if magnitude >= scale and (magnitude * 100) % scale == 0:
+            text = format(Decimal(magnitude) / scale, "f")
+            if "." in text:
+                text = text.rstrip("0").rstrip(".")
+            return f"{'-' if amount < 0 else ''}{text}{suffix}"
+    return str(amount)
+
+
 def format_mu(amount_mu: int, *, with_symbol: bool = True) -> str:
     """Render an MU amount in the display unit. Display and logging only."""
     unit = display_unit()
+    if unit.name == UNIT_MU:
+        text = abbreviate_mu(amount_mu)
+        return f"{text} {unit.symbol}" if with_symbol else text
     value = Decimal(int(amount_mu)) / unit.mu_per_unit
 
     if unit.decimals <= 0:
@@ -180,6 +205,12 @@ def parse_to_mu(text: Union[str, int, Decimal]) -> int:
     operator asked for a specific amount and must not silently be charged another.
     """
     unit = display_unit()
+    if unit.name == UNIT_MU and isinstance(text, str):
+        # What `format_mu` prints must be what can be typed back: "5.1M" is 5100000.
+        suffix = text.strip()[-1:].upper()
+        scale = dict(_MU_SUFFIXES).get(suffix)
+        if scale:
+            text = _decimal(text.strip()[:-1], what=f"amount in {unit.symbol}") * scale
     value = _decimal(text, what=f"amount in {unit.symbol}")
     if value < 0:
         raise ValueError(f"Amount must not be negative: {text!r}")

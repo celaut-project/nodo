@@ -2270,8 +2270,33 @@ fn exact_pow10(value: f64) -> Option<u32> {
     ((candidate - value).abs() < f64::EPSILON * candidate.max(1.0)).then_some(exponent as u32)
 }
 
+/// `5100000` -> `5.1M`: the figure itself when no suffix can say it exactly.
+///
+/// The same rule as `abbreviate_mu` in `src/utils/monetary.py`. Never rounds: a suffix is
+/// used only when it needs at most two decimals, so what is shown is the exact amount.
+/// `digits` is a non-negative integer with no leading zeros (empty for zero).
+fn abbreviate_mu(digits: &str) -> String {
+    for (suffix, zeros) in [("G", 9usize), ("M", 6), ("K", 3)] {
+        // Needs at least one digit above the scale, and the last `zeros - 2` digits zero
+        // (the two before them are the decimals the suffix may show).
+        if digits.len() <= zeros || !digits.ends_with(&"0".repeat(zeros - 2)) {
+            continue;
+        }
+        let kept = &digits[..digits.len() - (zeros - 2)];
+        let (whole, fraction) = kept.split_at(kept.len() - 2);
+        let fraction = fraction.trim_end_matches('0');
+        return if fraction.is_empty() {
+            format!("{whole}{suffix}")
+        } else {
+            format!("{whole}.{fraction}{suffix}")
+        };
+    }
+    digits.to_string()
+}
+
 impl Money {
-    /// Resolve the display unit from `config.yaml`, falling back to ERG.
+    /// Resolve the display unit from `config.yaml`, falling back to MU: what the node
+    /// counts in, not money anyone holds (see `ui.DISPLAY_UNIT`).
     pub fn load(config: &Path) -> Self {
         let document = read_yaml(config).ok();
         let mu_per_nanoerg = yaml_scalar(
@@ -2283,7 +2308,7 @@ impl Money {
         .unwrap_or(1.0);
 
         let name = yaml_string(document.as_ref(), &["ui", "DISPLAY_UNIT"])
-            .unwrap_or_else(|| "erg".to_string())
+            .unwrap_or_else(|| "mu".to_string())
             .trim()
             .to_lowercase();
 
@@ -2374,7 +2399,7 @@ impl Money {
         }
 
         let text = match self.mu_per_unit_pow10 {
-            Some(0) => digits.trim_start_matches('0').to_string(),
+            Some(0) => abbreviate_mu(digits.trim_start_matches('0')),
             Some(shift) => {
                 let shift = shift as usize;
                 let padded = format!("{digits:0>width$}", width = shift + 1);
@@ -10098,6 +10123,13 @@ mod tests {
                 mu_per_nanoerg: 1.0,
             };
             assert_eq!(money.format_raw("14582"), "14582 MU");
+        assert_eq!(money.format_raw("5100000"), "5.1M MU");
+        assert_eq!(money.format_raw("10000000"), "10M MU");
+        assert_eq!(money.format_raw("1500"), "1.5K MU");
+        assert_eq!(money.format_raw("-2500000"), "-2.5M MU");
+        assert_eq!(money.format_raw("5123456"), "5123456 MU");
+        assert_eq!(money.format_raw("1000"), "1K MU");
+        assert_eq!(money.format_raw("999"), "999 MU");
         }
 
         #[test]

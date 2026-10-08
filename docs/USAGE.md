@@ -296,14 +296,14 @@ These are the most commonly used commands for daily tasks:
   `nodo tunnel_close --all`
 
 - **increase_deposit `<instance id> <amount>`**  
-  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
+  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (MU by default).  
   **Example:**  
-  `nodo increase_deposit abcdef1234567890 0.01`
+  `nodo increase_deposit abcdef1234567890 10000000`
 
 - **decrease_deposit `<instance id> <amount>`**  
   Takes back part of a service instance's deposit.  
   **Example:**  
-  `nodo decrease_deposit abcdef1234567890 0.005`
+  `nodo decrease_deposit abcdef1234567890 5000000`
 
 - **services `[<service id | tag>] [--json] [--limit N]`**  
   Lists all available services on the node. With a service, shows its reputation
@@ -573,14 +573,14 @@ These commands offer extended management and exploration features:
   `nodo peer_reputation <peer id> -1`
 
 - **credit_client `<client id> <amount>`**  
-  Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
+  Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (MU by default).  
   **Example:**  
-  `nodo credit_client abcdef1234567890 0.01`
+  `nodo credit_client abcdef1234567890 10000000`
 
 - **debit_client `<client id> <amount>`**  
   Takes back part of a client's balance.  
   **Example:**  
-  `nodo debit_client abcdef1234567890 0.005`
+  `nodo debit_client abcdef1234567890 5000000`
 
 ---
 
