@@ -178,6 +178,7 @@ PAY_SYSTEM = MatchingPaymentSystem(
     contract_hash=sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest(),
     local_mu_per_unit=1_000_000_000,
     peer_mu_per_unit=1_000_000_000,
+    asset="ERG",
 )
 
 
@@ -251,6 +252,7 @@ class PayCommandTests(unittest.TestCase):
         import src.payment_system.contracts.ergo.interface as ergo_iface
         import src.payment_system.payment_process as payment_process
         import src.database.access_functions.ledgers as ledgers
+        from src.payment_system.contracts.registry import PaymentMethod
 
         # A fresh iterator per call, not one shared: the command asks for the peer's
         # instances, and so does the advertisement read behind `deposit_refusal_reason`.
@@ -268,6 +270,11 @@ class PayCommandTests(unittest.TestCase):
             # payment system would need advertised rows on both sides.
             mock.patch("src.payment_system.mu_conversion.matching_payment_systems",
                        return_value=[PAY_SYSTEM]),
+            # Ergo's native method, whatever the machine running the tests can reach:
+            # the registry only offers a ledger whose runtime answers, and the payment
+            # guards below are the ones the patches above stand in for.
+            mock.patch.object(pv, "_method_for",
+                              return_value=(PaymentMethod(ergo_iface, "ERG"), None)),
         ]
         if readback is not None:
             patches.append(

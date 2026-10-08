@@ -39,6 +39,7 @@ class PeerDepositRefillTests(unittest.TestCase):
 
         with patch.object(maintain.SQLConnection, "get_peers_id", return_value=["peer-1"]), \
              patch.object(maintain, "is_peer_available", return_value=True), \
+             patch.object(maintain, "_automatic_refill_enabled", return_value=True), \
              patch.object(maintain.SQLConnection, "get_peer_expiry_unix_timestamp", return_value=0), \
              patch.object(maintain, "balance_on_other_peer", return_value=0), \
              patch.object(maintain, "matching_payment_system", return_value=system), \

@@ -354,11 +354,12 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             self.assertTrue((root_dir / "app-link").is_symlink())
 
     def test_resolve_initial_rootfs_size_bytes_respects_requested_disk_space(self):
+        requested = 2 * ch_limits.MIN_ROOTFS_BYTES
         service = celaut.Service(
             container=celaut.Service.Container(
                 resources=celaut.Service.Container.Resources(
-                    at_init=celaut.Sysresources(disk_space=256),
-                    at_most=celaut.Sysresources(disk_space=4096),
+                    at_init=celaut.Sysresources(disk_space=requested),
+                    at_most=celaut.Sysresources(disk_space=4 * requested),
                 )
             )
         )
@@ -368,7 +369,8 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             total_bytes=1024,
         )
 
-        self.assertEqual(size_bytes, 4096)
+        # The declared at_init figure, once it is above the image floor.
+        self.assertEqual(size_bytes, requested)
 
     def test_resolve_initial_rootfs_size_bytes_keeps_filesystem_overhead_floor(self):
         service = celaut.Service(
@@ -379,7 +381,8 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             )
         )
 
-        total_bytes = 10 * 1024 * 1024
+        # Big enough that the tree plus the overhead is what sets the size, not the floor.
+        total_bytes = ch_limits.MIN_ROOTFS_BYTES
         size_bytes = ch_limits.initial_rootfs_size_bytes(
             service=service,
             total_bytes=total_bytes,

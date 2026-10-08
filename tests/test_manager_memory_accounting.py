@@ -14,7 +14,9 @@ class ModifySysreqMemoryAccountingTests(unittest.TestCase):
     def tearDown(self) -> None:
         IOBigData._instances.pop(IOBigData, None)
 
-    def test_modify_sysreq_releases_memory_when_limit_decreases(self):
+    def test_modify_sysreq_does_not_adjust_the_lock_counter_when_limit_decreases(self):
+        # What an instance holds is read off its running VM process (`_get_nodo_ch_memory_stats`),
+        # so a resize no longer moves `ram_locked`; counting it twice would shrink the pool.
         io_big_data = IOBigData(ram_pool_method=lambda: 1024**3)
         io_big_data.ram_locked = 200
 
@@ -23,12 +25,14 @@ class ModifySysreqMemoryAccountingTests(unittest.TestCase):
         with patch("src.manager.modify_resources.SQLConnection") as mock_sql_connection:
             mock_sc = mock_sql_connection.return_value
             mock_sc.internal_instance_exists.return_value = True
-            mock_sc.get_sys_req.return_value = {"mem_limit": 100}
+            mock_sc.get_sys_req.return_value = {
+                "mem_limit": 100, "disk_space": 0, "cpu_period": 0, "cpu_quota": 0,
+            }
             mock_sc.update_sys_req.return_value = True
 
             self.assertTrue(modify_sysreq(id="vm-1", sys_req=sys_req))
 
-        self.assertEqual(io_big_data.ram_locked, 150)
+        self.assertEqual(io_big_data.ram_locked, 200)
 
 
 class ModifySysreqGrowthOnlyTests(unittest.TestCase):
@@ -80,7 +84,9 @@ class ModifySysreqGrowthOnlyTests(unittest.TestCase):
 
 
 class StopInstanceMemoryAccountingTests(unittest.TestCase):
-    def test_stop_instance_releases_reserved_memory_for_internal_instances(self):
+    def test_stop_instance_does_not_unlock_ram_for_internal_instances(self):
+        # The memory is read off the running VM, which is gone once it is killed; there
+        # is no separate lock counter to give back.
         with patch.object(manager_module.sc, "internal_instance_exists", side_effect=lambda id: id == "vm-1"), patch.object(
             manager_module.sc, "get_sys_req", return_value={"mem_limit": 256}
         ), patch.object(
@@ -99,7 +105,7 @@ class StopInstanceMemoryAccountingTests(unittest.TestCase):
             refund = manager_module.stop_instance(token="vm-1")
 
         self.assertEqual(refund, 123)
-        mock_unlock.assert_called_once_with(ram_amount=256)
+        mock_unlock.assert_not_called()
 
 
 if __name__ == "__main__":

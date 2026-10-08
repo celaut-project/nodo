@@ -246,6 +246,12 @@ class ServiceTunnelInboundListTests(unittest.TestCase):
             from src.tunneling import inbound
             live = [s for s in inbound.snapshot() if s["id"] == stream["id"]][0]
             self.assertEqual(live["bytes_out"], len(first))
+            # What the caller sent is counted by the thread that pumps it, which can be
+            # a moment behind the first byte coming back.
+            deadline = time.monotonic() + 2.0
+            while live["bytes_in"] != 4 and time.monotonic() < deadline:
+                time.sleep(0.01)
+                live = [s for s in inbound.snapshot() if s["id"] == stream["id"]][0]
             self.assertEqual(live["bytes_in"], 4)
 
             self.assertEqual(first + b"".join(relay), b"ping")

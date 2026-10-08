@@ -50,6 +50,8 @@ class ExecuteCommandTests(unittest.TestCase):
         out = io.StringIO()
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
+            execute_cmd, "inspect_service"
+        ), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.BeeClient, "start_service", return_value=response
@@ -58,8 +60,8 @@ class ExecuteCommandTests(unittest.TestCase):
                 execute_cmd.execute("svc")
 
         rendered = out.getvalue()
-        self.assertIn("service partition ->", rendered)
-        self.assertNotIn("HTTP Service", rendered)
+        self.assertIn("No endpoints available", rendered)
+        self.assertNotIn("http://", rendered)
         mock_channel.return_value.close.assert_called_once()
 
     def test_execute_prints_http_endpoint_when_http_is_declared_in_transport(self):
@@ -67,6 +69,8 @@ class ExecuteCommandTests(unittest.TestCase):
         out = io.StringIO()
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
+            execute_cmd, "inspect_service"
+        ), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.BeeClient, "start_service", return_value=response
@@ -75,7 +79,7 @@ class ExecuteCommandTests(unittest.TestCase):
                 execute_cmd.execute("svc")
 
         rendered = out.getvalue()
-        self.assertIn("HTTP Service (Port: 5000)", rendered)
+        self.assertIn("Endpoints available", rendered)
         self.assertIn("http://127.0.0.1:18080", rendered)
         mock_channel.return_value.close.assert_called_once()
 

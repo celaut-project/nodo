@@ -25,7 +25,33 @@ from src.database import migrate as migrate_module  # noqa: E402
 DATABASE_FILE = ConfigManager().get("DATABASE_FILE")
 
 
+_BOUND = False
+
+
+def _bind_commands_to_this_database():
+    """Point the commands under test at the database these tests seed.
+
+    A command module reads ``DATABASE_FILE`` once, when it is first imported, and which
+    config that is depends on what the rest of the suite imported before it. So the
+    commands are bound here rather than trusted to agree with this module's own config.
+    """
+    global _BOUND
+    if _BOUND:
+        return
+    from src.commands import _catalogue, clients, history, instances, peers
+
+    patchers = [patch.object(module, "DATABASE_FILE", DATABASE_FILE)
+                for module in (clients, instances, peers)]
+    patchers.append(patch.object(history, "_database",
+                                 lambda: _catalogue.connect(DATABASE_FILE)))
+    for patcher in patchers:
+        patcher.start()
+        unittest.addModuleCleanup(patcher.stop)
+    _BOUND = True
+
+
 def _fresh_database():
+    _bind_commands_to_this_database()
     # Emptied rather than deleted: SQLConnection keeps the file open, and a new
     # file at the same path would be invisible to it.
     os.makedirs(os.path.dirname(DATABASE_FILE), exist_ok=True)
