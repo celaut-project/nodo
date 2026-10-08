@@ -23,7 +23,7 @@ from unittest import mock
 from tests.config_bootstrap import load_example_config
 load_example_config()
 
-from src.utils.block_tree import block_tree, manifest_block_ids
+from src.utils.block_tree import MissingManifestError, block_tree, manifest_block_ids
 from src.commands import storage
 from src.commands.packer.zip_with_dockerfile import generate_service_zip
 from src.commands.packer.zip_with_dockerfile.packer_service_client import build_dependency_bundle
@@ -95,6 +95,12 @@ class BlockTreeTest(StorageCase):
         os.remove(self.blocks + "mid/_.json")
         self.assertEqual(block_tree(self.services + "dep", self.blocks), ["top1", "base", "top2", "mid"])
 
+    def test_service_without_manifest_is_an_error(self):
+        os.remove(self.services + "dep/_.json")
+        with self.assertRaises(MissingManifestError) as cm:
+            block_tree(self.services + "dep", self.blocks)
+        self.assertIn(self.services + "dep", str(cm.exception))
+
     def test_cycle_ends(self):
         _multiblock(self.blocks + "leaf2", [b"g", "top2"])
         _multiblock(self.blocks + "mid", [b"f", "leaf2"])
@@ -123,6 +129,18 @@ class ExportRegistryTest(StorageCase):
         )
         self.assertTrue(os.path.isfile(os.path.join(directory, "__block__", "mid", "_.json")))
         self.assertEqual(os.listdir(os.path.join(directory, "__services__")), ["dep"])
+
+    def test_dependency_without_manifest_is_an_error(self):
+        os.remove(self.services + "dep/_.json")
+        project = os.path.join(self.tmp.name, "project")
+        directory = os.path.join(project, ".service", "service")
+        os.makedirs(directory)
+        pack_config = {"dependencies": {"DEP": "dep"}, "dependencies_env": True}
+        with mock.patch.object(generate_service_zip, "SERVICES", self.services), \
+                mock.patch.object(generate_service_zip, "METADATA", self.metadata), \
+                mock.patch.object(generate_service_zip, "BLOCKS", self.blocks):
+            with self.assertRaises(MissingManifestError):
+                getattr(generate_service_zip, "__export_registry")(project, directory, pack_config)
 
 
 class DependencyBundleTest(StorageCase):

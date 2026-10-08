@@ -15,6 +15,10 @@ from typing import List, Set
 MANIFEST = "_.json"
 
 
+class MissingManifestError(FileNotFoundError):
+    """A service directory has no ``_.json``, so its blocks are not known."""
+
+
 def manifest_block_ids(directory: str) -> List[str]:
     """The block ids that the ``_.json`` of ``directory`` names, in order.
 
@@ -37,7 +41,17 @@ def block_tree(service_dir: str, blocks_dir: str) -> List[str]:
     names, at any depth. Each id is given once, a block before the blocks that
     it names. A block that is not in ``blocks_dir`` is in the list, but the
     blocks that it would name are not.
+
+    A block without ``_.json`` is one file and names no blocks. But
+    ``service_dir`` must have a ``_.json``: a multiblock service without it is
+    not complete, and a copy of it would not hold its blocks. If it has no
+    ``_.json``, ``MissingManifestError`` is raised.
     """
+    if not os.path.isfile(os.path.join(service_dir, MANIFEST)):
+        raise MissingManifestError(
+            f"The service directory '{service_dir}' has no {MANIFEST}, so its "
+            f"blocks are not known. The service in the registry is not complete."
+        )
     found: List[str] = []
     seen: Set[str] = set()
 
