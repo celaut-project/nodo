@@ -638,35 +638,47 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
         if id_reporter:
             id_reporter(tx_id)
 
-        wanted = MIN_CONFIRMATIONS()
-        for _ in range(WAIT_TX_TIME):
-            sleep(WAIT_TX_SLEEP_TIME)
-            try:
-                status = chain.tx_status(tx_id)
-            except BackendUnavailable as e:
-                LOGGER(f"Could not read tx {tx_id} yet: {e}")
-                continue
-            confirmations = int(status.get("confirmations", 0) or 0)
-            if confirmations < 0:
-                # Core says the transaction was replaced or reorged out. That is not
-                # "not yet confirmed": waiting longer cannot make it true again.
-                raise ValueError(
-                    f"Transaction {tx_id} was replaced or left the chain "
-                    f"({confirmations} confirmations); nothing was credited."
-                )
-            if confirmations >= wanted:
-                LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
-                contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
-                set_token_id(contract, NATIVE_ASSET)
-                set_script(contract, script)
-                set_contract_type(contract, CONTRACT.encode("utf-8"))
-                return contract
+        return await_payment(tx_id=tx_id, script=script, chain=chain)
 
-        raise TimeoutError(
-            f"Transaction {tx_id} did not reach {wanted} confirmation(s) in "
-            f"{WAIT_TX_TIME * WAIT_TX_SLEEP_TIME // 60} minutes. The money is on-chain; "
-            "the peer has not been told."
-        )
+
+def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
+    """Wait until ``tx_id`` has ``MIN_CONFIRMATIONS``; return the contract the peer is told.
+
+    The second half of `process_payment`, kept apart so a payment the daemon stopped in
+    the middle of can be finished from its transaction id alone (#523). It spends
+    nothing, so it needs no `payment_lock`.
+    """
+    if chain is None:
+        chain = backend()
+    wanted = MIN_CONFIRMATIONS()
+    for _ in range(WAIT_TX_TIME):
+        sleep(WAIT_TX_SLEEP_TIME)
+        try:
+            status = chain.tx_status(tx_id)
+        except BackendUnavailable as e:
+            LOGGER(f"Could not read tx {tx_id} yet: {e}")
+            continue
+        confirmations = int(status.get("confirmations", 0) or 0)
+        if confirmations < 0:
+            # Core says the transaction was replaced or reorged out. That is not
+            # "not yet confirmed": waiting longer cannot make it true again.
+            raise ValueError(
+                f"Transaction {tx_id} was replaced or left the chain "
+                f"({confirmations} confirmations); nothing was credited."
+            )
+        if confirmations >= wanted:
+            LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
+            contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
+            set_token_id(contract, NATIVE_ASSET)
+            set_script(contract, script)
+            set_contract_type(contract, CONTRACT.encode("utf-8"))
+            return contract
+
+    raise TimeoutError(
+        f"Transaction {tx_id} did not reach {wanted} confirmation(s) in "
+        f"{WAIT_TX_TIME * WAIT_TX_SLEEP_TIME // 60} minutes. The money is on-chain; "
+        "the peer has not been told."
+    )
 
 
 def _op_return_tokens(transaction: dict) -> list:

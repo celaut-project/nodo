@@ -864,29 +864,48 @@ def _settle(amount: int, deposit_token: str, ledger: str,
                 else:
                     raise e
 
-            for _ in range(0, WAIT_TX_TIME):
-                sleep(WAT_TX_SLEEP_TIME)
-                response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
-                if response.status_code != 200:
-                    if response.status_code != 404:
-                        LOGGER(f"{ergo.get_api_url()} tx {tx_id} check failed: {response.status_code}")
-                    continue
-
-                obj = response.json()
-                if obj["numConfirmations"] > 1:
-                    LOGGER(f"Tx {tx_id} verified.")
-                    contract = celaut_pb2.Contract(ledger=_ergo_ledger())
-                    # Which asset was paid, so the peer files the credit against the
-                    # method it advertised rather than against this contract's default.
-                    set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
-                    set_script(contract, script)
-                    set_contract_type(contract, CONTRACT.encode("utf-8"))
-                    return contract
-
-            raise Exception(f"Can't verify the tx {tx_id}")
+            return _await_settlement(tx_id=tx_id, script=script, asset=asset, ergo=ergo)
 
         except Exception as e:
             raise e
+
+
+def await_payment(tx_id: str, script: bytes) -> celaut_pb2.Contract:
+    """Wait for an ERG payment already broadcast, and return what `Payable` carries."""
+    return _await_settlement(tx_id=tx_id, script=script, asset=None)
+
+
+def _await_settlement(tx_id: str, script: bytes, asset, ergo=None) -> celaut_pb2.Contract:
+    """Wait until ``tx_id`` has two confirmations; return the contract the peer is told.
+
+    The second half of `_settle`, kept apart so a payment the daemon stopped in the
+    middle of can be finished from its transaction id alone (#523). It needs no
+    `payment_lock`: it spends nothing, it only reads the chain. Raises when the wait
+    runs out, and the payment is then still on the network: the caller keeps it to
+    resume, it does not pay again.
+    """
+    if ergo is None:
+        ergo = __init_ergo()
+    for _ in range(0, WAIT_TX_TIME):
+        sleep(WAT_TX_SLEEP_TIME)
+        response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
+        if response.status_code != 200:
+            if response.status_code != 404:
+                LOGGER(f"{ergo.get_api_url()} tx {tx_id} check failed: {response.status_code}")
+            continue
+
+        obj = response.json()
+        if obj["numConfirmations"] > 1:
+            LOGGER(f"Tx {tx_id} verified.")
+            contract = celaut_pb2.Contract(ledger=_ergo_ledger())
+            # Which asset was paid, so the peer files the credit against the
+            # method it advertised rather than against this contract's default.
+            set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
+            set_script(contract, script)
+            set_contract_type(contract, CONTRACT.encode("utf-8"))
+            return contract
+
+    raise TimeoutError(f"Can't verify the tx {tx_id}")
 
 
 # Validate the payment by checking for an unspent box with the token in register R4 at the wallet.
@@ -1097,6 +1116,7 @@ def methods():
             "mu_to_native": partial(rate.mu_to_base_units_exact, asset=asset),
             "check_sender_balance": partial(_token_check_sender_balance, asset=asset),
             "process_payment": partial(_settle, asset=asset),
+            "await_payment": partial(_await_settlement, asset=asset),
             "payment_process_validator": partial(_validate, asset=asset),
         }))
     return built

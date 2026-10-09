@@ -102,6 +102,21 @@ def available_payment_process() -> Dict[contract_hash, Callable[[amount, token, 
     }
 
 
+def payment_awaiters() -> Dict[MethodKey, Callable[[tx_id, script], contract_ledger]]:
+    """Per method: wait for an already broadcast payment and return what `Payable` carries.
+
+    The second half of ``process_payment``, on its own, so a payment interrupted between
+    the broadcast and the confirmation can be finished by a later process that only has
+    the transaction id. Optional: a contract that settles on no chain reports no
+    transaction, so it leaves nothing to resume and exposes no ``await_payment``.
+    """
+    return {
+        key: method.await_payment
+        for key, method in methods().items()
+        if callable(getattr(method, "await_payment", None))
+    }
+
+
 def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:
     return {
         key: method.check_sender_balance
@@ -289,7 +304,7 @@ def transaction_id_reporting(reporter, method: Optional[MethodKey] = None):
     back to a peer with. Recovering the id by parsing the URL would put link formatting
     in the accounting path, where a changed link would silently become a missing record.
     """
-    return _reporting(contract_hash, "transaction_id_reporting", reporter)
+    return _reporting(method, "transaction_id_reporting", reporter)
 
 
 def display_units() -> Dict[str, Dict[str, Any]]:
