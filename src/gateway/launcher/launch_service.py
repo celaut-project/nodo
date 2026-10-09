@@ -109,7 +109,6 @@ def _force_delegate(
         resources=service.container.resources,
         metadata=metadata,
         configuration=configuration,
-        recursion_guard_token=recursion_guard_token,
     )
     if estimated_cost is None:
         raise Exception(
