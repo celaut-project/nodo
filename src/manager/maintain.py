@@ -16,6 +16,7 @@ from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.payment_system.mu_conversion import matching_payment_system
 from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
+from src.tunneling import delegated_endpoints
 from src.utils import activity_window, demand_history
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
@@ -457,6 +458,18 @@ def enforce_activity_window(debug_mode: bool = False):
             log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
 
 
+def close_orphaned_delegated_endpoints() -> None:
+    """Close the local endpoints of delegated instances that are gone.
+
+    A delegated instance stopped outside the daemon (``nodo kill`` runs in the CLI
+    process) cannot close the daemon's listeners itself (issue #522). Never raises.
+    """
+    try:
+        delegated_endpoints.close_orphaned()
+    except Exception as e:
+        log.LOGGER(f"Could not close orphaned delegated endpoints: {e}")
+
+
 def maintain_clients(debug_mode: bool=False):
     for client_id in SQLConnection().get_clients_id():
         if debug_mode: log.LOGGER(f"Maintain client {client_id}.")
@@ -750,6 +763,7 @@ def _manager_pass(short_interval_count: int) -> int:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
     maintain_delegated_instances(debug_mode=DEBUG_MODE())
+    close_orphaned_delegated_endpoints()
     enforce_activity_window(debug_mode=DEBUG_MODE())
     maintain_clients(debug_mode=DEBUG_MODE())
     peer_deposits(debug_mode=DEBUG_MODE())

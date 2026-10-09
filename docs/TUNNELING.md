@@ -310,7 +310,9 @@ approximates what the client can reach, and a UDP slot cannot be probed at all
 
 ### Lifetime
 
-Listeners live as long as the delegated instance and are closed when it stops. The
+Listeners live as long as the delegated instance and are closed when it stops. A stop
+from outside the daemon (`nodo kill`) cannot reach them; the daemon's maintenance
+tick then closes the listeners whose instance has no `delegated_instances` row. The
 instance stored in `delegated_instances.serialized_instance` is the **rewritten**
 one — what the client was told is what gets persisted — so the same listeners can
 be rebound on the same ports when the node restarts, and firewall cleanup targets
