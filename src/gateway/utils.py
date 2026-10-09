@@ -595,4 +595,22 @@ def save_service(
                 return False
         return True
 
-    return os.path.exists(os.path.join(REGISTRY, service_hash)) or __save()
+    if os.path.exists(os.path.join(REGISTRY, service_hash)):
+        return True
+    if not __save():
+        return False
+    _split_oversized_filesystem_block(service_hash)
+    return True
+
+
+def _split_oversized_filesystem_block(service_hash: str):
+    """Right after a service is received: a peer may have sent its filesystem block
+    with more inline than a message can be parsed from. Done here so the block is
+    stored small from the start; the build does the same check again
+    (`load_container_filesystem`), so a failure here only costs the time."""
+    from src.utils.container_filesystem import split_oversized_filesystem_block
+    from src.utils.utils import load_service_from_disk
+    try:
+        split_oversized_filesystem_block(load_service_from_disk(service_hash))
+    except Exception as e:
+        log.LOGGER(f'Could not give the filesystem block of {service_hash} sub-blocks: {e}')

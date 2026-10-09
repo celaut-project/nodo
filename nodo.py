@@ -1,4 +1,5 @@
 import sys, os, subprocess
+from bee_rpc.client import MAX_BLOCK_NESTING
 from bee_rpc.utils import modify_env
 from src.commands.daemon import config_digest, is_serving, restart_after_config_write
 from src.manager.manager import resolve_instance_token
@@ -197,7 +198,9 @@ if __name__ == '__main__':
         cache_dir=CACHE,
         mem_manager=iobd.mem_manager,
         block_dir=BLOCKDIR,
-        block_depth=1
+        # Send every level of blocks framed, as deep as a receiver reads: a block
+        # that holds blocks then arrives in the form it is stored in (#524).
+        block_depth=MAX_BLOCK_NESTING
     )
 
     if len(sys.argv) == 1:
