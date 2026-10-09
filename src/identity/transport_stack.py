@@ -62,6 +62,7 @@ import hashlib
 from typing import Dict, Final, Iterable, List, Optional, Tuple
 
 from bee_rpc import buffer_pb2
+from bee_rpc.client import MAX_BLOCK_NESTING
 from bee_rpc.utils import Enviroment
 
 from protos import celaut_pb2
@@ -248,14 +249,16 @@ def bee_rpc_component() -> Layer:
         "signal": "each signal=true toggles: first pauses the peer's sending, next resumes it",
         "signal_only_buffer": "carries no object",
         "block.start": "Buffer.block naming the block",
-        "block.content": "the block's bytes, flat, as chunks",
+        "block.content": "the block's bytes as chunks; a block inside it is framed the same way, nested",
+        "block.nesting.max": str(MAX_BLOCK_NESTING),
         "block.end": "Buffer.block with the same hashes; always sent",
         "block.overlap": "forbidden",
         "block.id": "hash of the block's expanded bytes",
         "block.hash.type": "the algorithm's digest of the empty input",
         "block.hash.type_on_wire": "always present on every hash",
         "block.hash.required_type": Enviroment.hash_type.hex(),
-        "block.previous_lengths_position": "offsets, in the expanded object, of the length varints that enclose the block",
+        "block.previous_lengths_position": "offsets, in the expanded content of the enclosing block or object, of the length varints that enclose the block",
+        "block.verify": "the receiver stores a block only if its expanded bytes hash to its id",
         "block.object": "chunks and block contents concatenated in order are the serialized object",
         "skip": "receiver to sender: Buffer.skip names a block the receiver holds",
         "skip.sender": "may stop the block's content; still sends block.end",
@@ -286,14 +289,20 @@ def bee_rpc_component() -> Layer:
         "BLOCKS. A sender can send a part of an object as a block. A Buffer with a "
         "block field starts the block. Then the bytes of the block follow as chunks. "
         "Then a Buffer with the same block field stops the block. The sender always "
-        "sends this last Buffer. Two blocks must not overlap. The object is all the "
+        "sends this last Buffer. Two blocks must not overlap. A block can contain "
+        "blocks. The sender sends a block inside a block in the same way, between the "
+        "Buffers that start and stop the outer block. The nesting must not be deeper "
+        "than the value that the formal field gives. The object is all the "
         "chunks and all the block bytes, in sequence. Each hash in a block field gives "
         "its type. The type of a hash algorithm is the digest of an empty input with "
         "that algorithm. The identifier of a block is the hash of its bytes. The formal "
         "field gives the hash type that the receiver uses to find blocks. Each block "
         "field must contain a hash of this type. The field "
         "previous_lengths_position gives the positions of the length varints that "
-        "contain the block, in the bytes of the object.\n"
+        "contain the block. The positions are in the bytes of the block that contains "
+        "it, or in the bytes of the object if no block contains it. The receiver "
+        "calculates the hash of the bytes of each block. If the hash is not the "
+        "identifier, the receiver does not keep the block.\n"
         "\n"
         "SKIP. A receiver that already has a block can tell this to the sender. It "
         "sends a Buffer with the skip field and an empty chunk, in the opposite "

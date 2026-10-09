@@ -7969,7 +7969,7 @@ const SERVICE_MANIFEST: &str = "_.json";
 /// figure it shows. A Python helper would mean an interpreter spawn per service on
 /// every refresh, four times a second, to re-read files the TUI has open anyway.
 ///
-/// Mirrors `bee_rpc.utils.getsize` as pinned (bee-rpc-over-grpc-py v0.0.1), which is
+/// Mirrors `bee_rpc.utils.getsize` as pinned (bee-rpc-over-grpc-py v0.0.2), which is
 /// what `nodo services` prints (issue #438): an integer entry is a local part, a
 /// list entry is `[block_id, ...]` and contributes the block's whole expansion
 /// (`get_expanded_block_length`) -- a block file's full length, or for a multiblock
