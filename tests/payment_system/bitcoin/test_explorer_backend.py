@@ -141,6 +141,20 @@ class SendTests(unittest.TestCase):
         self.assertEqual(outputs[2][1], _wallet().script_pubkey)  # change, to itself
         self.assertEqual(witness[1], _wallet().public_key)
 
+    def test_the_txid_is_reported_before_the_relay(self):
+        """The payer writes its row from this, so it has to come before any money moves."""
+        events = []
+        posts = []
+        chain, _ = self._funded()
+        chain._post = lambda path, body: (events.append("relay"), posts.append(body),
+                                          _txid_of(body))[-1]
+
+        txid = chain.send_to(ADDRESS, 30_000, fee_rate_sat_vb=5.0,
+                             on_signed=lambda signed: events.append(("signed", signed)))
+
+        self.assertEqual(events, [("signed", txid), "relay"])
+        self.assertEqual(txid, _txid_of(posts[0]))
+
     def test_unconfirmed_outputs_are_never_spent(self):
         chain, posts = self._funded(_utxo(1, 999_999, height=None), _utxo(2, 100_000))
         chain.send_to(ADDRESS, 30_000, fee_rate_sat_vb=5.0)

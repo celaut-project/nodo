@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from base64 import b64encode
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -192,19 +192,25 @@ class ChainBackend:
 
     def send_to(self, address: str, amount_sat: int, *, op_return: Optional[bytes] = None,
                 fee_rate_sat_vb: Optional[float] = None,
-                subtract_fee_from_amount: bool = False) -> str:
+                subtract_fee_from_amount: bool = False,
+                on_signed: Optional[Callable[[str], None]] = None) -> str:
         """Pay one address, optionally carrying ``op_return``. Returns the txid."""
         return self.send_many(
             [(address, amount_sat)], op_return=op_return,
             fee_rate_sat_vb=fee_rate_sat_vb,
             subtract_fee_from_outputs=[0] if subtract_fee_from_amount else None,
+            on_signed=on_signed,
         )
 
     def send_many(self, outputs: List[Tuple[str, int]], *,
                   op_return: Optional[bytes] = None,
                   fee_rate_sat_vb: Optional[float] = None,
-                  subtract_fee_from_outputs: Optional[List[int]] = None) -> str:
+                  subtract_fee_from_outputs: Optional[List[int]] = None,
+                  on_signed: Optional[Callable[[str], None]] = None) -> str:
         """Pay several addresses in one transaction, and return the txid.
+
+        ``on_signed`` is called with the txid once the transaction is signed and before
+        it is broadcast, so a payer can write the payment down before any money moves.
 
         One transaction rather than one each, because the fee is per transaction: a
         donation split across three wallets should cost one fee, not three.
@@ -245,6 +251,9 @@ class ChainBackend:
             raise BackendUnavailable(
                 "bitcoind could not fully sign the transaction; nothing was broadcast"
             )
+        if on_signed is not None:
+            decoded = self._call("decoderawtransaction", [signed["hex"]], wallet_scoped=False)
+            on_signed(str(decoded["txid"]))
         return str(self._call("sendrawtransaction", [signed["hex"]], wallet_scoped=False))
 
     def list_received(self, address: str, min_conf: int) -> List[Dict[str, Any]]:

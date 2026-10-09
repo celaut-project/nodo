@@ -311,7 +311,9 @@ def transaction_id_reporting(reporter):
     """Temporarily report a submitted transaction's *id* to the caller.
 
     Kept apart from the URL hook for the same reason Ergo does: the URL is
-    presentation, the id is the record `payments.tx_id` stores.
+    presentation, the id is the record `payments.tx_id` stores. Called twice, as on
+    Ergo: with ``sent=False`` once the transaction is signed, and with ``sent=True``
+    once it was relayed.
     """
     token = _transaction_id_reporter.set(reporter)
     try:
@@ -621,6 +623,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
             )
 
         chain = backend()
+        id_reporter = _transaction_id_reporter.get()
         tx_id = chain.send_to(
             address,
             amount_sat,
@@ -628,15 +631,18 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
             # transaction to the deposit the receiver is expecting.
             op_return=deposit_token.encode("utf-8"),
             fee_rate_sat_vb=_fee_rate_sat_vb(),
+            # Signed and not yet sent: the payer writes its row now, so a daemon that
+            # stops right after the send still has the id to resume by (#523).
+            on_signed=(lambda signed_id: id_reporter(signed_id, sent=False))
+            if id_reporter else None,
         )
         url = f"https://mempool.space/tx/{tx_id}"
         LOGGER(f"Transaction submitted: {url} for token {deposit_token}")
         reporter = _transaction_url_reporter.get()
         if reporter:
             reporter(url)
-        id_reporter = _transaction_id_reporter.get()
         if id_reporter:
-            id_reporter(tx_id)
+            id_reporter(tx_id, sent=True)
 
         return await_payment(tx_id=tx_id, script=script, chain=chain)
 

@@ -317,13 +317,23 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                             sc.set_outgoing_payment_status(submitted_tx[-1], status)):
                         record(status)
 
-                def on_broadcast(tx_id: str):
-                    # Written the moment the transaction is on the network, before the
-                    # confirmation wait. A daemon that stops during the wait leaves this
+                # Whether the network took the transaction. Until it did, a refusal
+                # means no money moved.
+                sent_tx: list = []
+
+                def on_transaction_id(tx_id: str, sent: bool = True):
+                    # Reported twice by a contract: once signed and not yet sent, so the
+                    # row exists before any money can move, and once the network took
+                    # it. A daemon that stops at any point after the first leaves this
                     # row behind, and `resume_outgoing_payments` finishes it (#523).
+                    if sent:
+                        sent_tx.append(tx_id)
+                    if submitted_tx and submitted_tx[-1] == tx_id:
+                        set_status('broadcast')
+                        return
                     submitted_tx.append(tx_id)
                     _claim_outgoing(tx_id)
-                    record('broadcast')
+                    record('broadcast' if sent else 'signed')
 
                 try:
                     # Reported against *this* contract: with two payment systems, a
@@ -337,7 +347,7 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                     )
                     report_id = getattr(payment_envs, "transaction_id_reporting", None)
                     id_context = (
-                        report_id(on_broadcast, method=method)
+                        report_id(on_transaction_id, method=method)
                         if callable(report_id)
                         else nullcontext()
                     )
@@ -354,6 +364,11 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         # update_reputation(=ledger, amount=1)  # TODO On envs.
                 except DoubleSpendingAttempt as e:
                     _l.LOGGER(str(e))
+                    if submitted_tx:
+                        # The node refused the send, so the transaction never existed
+                        # on the chain and the next ledger may be tried.
+                        set_status('failed')
+                        _release_outgoing(submitted_tx[-1])
                     # Internally, the exception updates the wait time to retry the ledger. 
                     # It is not necessary to update its reputation at this point.
                     continue
@@ -361,14 +376,17 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                     _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
 
                     if submitted_tx:
-                        # The transaction is on the network and only its confirmation
-                        # failed to arrive in time. It is NOT a failed payment: trying
-                        # the next ledger would pay a second time against the same
-                        # deposit token. The row stays 'broadcast' and the resume
-                        # carries on waiting, then tells the peer.
+                        # The transaction is signed, and may be on the network: either
+                        # its confirmation did not arrive in time, or the send failed in
+                        # a way that does not say whether the network took it. It is NOT
+                        # a failed payment: trying the next ledger would pay a second
+                        # time against the same deposit token. The row keeps its state
+                        # and the resume carries on waiting, then tells the peer -- or,
+                        # for a 'signed' one that never shows up, marks it 'failed'.
+                        state = 'broadcast' if sent_tx else 'signed'
                         _l.LOGGER(
-                            f"Tx {submitted_tx[-1]} was broadcast but is not confirmed "
-                            "yet; it will be resumed instead of paid again."
+                            f"Tx {submitted_tx[-1]} is {state} and not confirmed yet; "
+                            "it will be resumed instead of paid again."
                         )
                         _release_outgoing(submitted_tx[-1])
                         resume_outgoing_payments()
@@ -484,7 +502,8 @@ def resume_outgoing_payments() -> int:
     """Finish the outgoing payments left between the broadcast and `Payable` (#523).
 
     A payment is two steps: the transaction goes on the network, and once it is
-    confirmed the peer is told with `Payable`. The wait in between is long (up to
+    confirmed the peer is told with `Payable`. Its row is written as 'signed' before
+    the send, so even a stop right after the send leaves the id behind. The wait in between is long (up to
     twenty minutes on Ergo, an hour on Bitcoin), and a daemon that stopped in it --
     restart, upgrade, crash -- used to lose the payment: the money was on-chain and
     the peer never credited it. The row is written at the broadcast now, so it can be
@@ -550,11 +569,15 @@ def _resume_outgoing_payment(row: dict) -> None:
                 return
             except Exception as e:
                 if age() > ttl:
+                    # A 'signed' transaction may never have reached the network: the
+                    # daemon stopped before the send, or the send failed. One that has
+                    # not shown up by now is taken as never sent, and no money moved.
+                    final = 'failed' if row.get('status') == 'signed' else 'unacknowledged'
                     _l.LOGGER(
                         f"Tx {tx_id} is still not confirmed after the deposit token's "
-                        f"lifetime ({ttl}s): {e}. Marked unacknowledged."
+                        f"lifetime ({ttl}s): {e}. Marked {final}."
                     )
-                    set_status('unacknowledged')
+                    set_status(final)
                     return
                 _l.LOGGER(f"Tx {tx_id} is not confirmed yet ({e}); waiting again.")
                 sleep(RESUME_RETRY_DELAY)
