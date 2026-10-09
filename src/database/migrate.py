@@ -248,6 +248,12 @@ TABLES = {
     # nobody indexed, because the ledger cannot map an address back to a peer id.
     #
     # `status` is what happened, not what we hoped:
+    #   broadcast     -- outgoing, the transaction is on the network and is not yet
+    #                    confirmed. Written at the broadcast, before the wait, so a
+    #                    daemon that stops during the wait still knows the money left.
+    #   confirmed     -- outgoing, the transaction is confirmed and the peer has not
+    #                    been told yet. Both of these are resumed at startup (see
+    #                    `payment_process.resume_outgoing_payments`).
     #   communicated  -- outgoing, the peer acknowledged our Payable call
     #   unacknowledged-- outgoing, the transaction was broadcast and the call failed.
     #                    Money left, credit never arrived. The row an operator needs.
@@ -263,6 +269,10 @@ TABLES = {
     # rows, where the only address involved is this node's own wallet.
     # `amount_mu` is TEXT for the same reason every other balance in this schema is:
     # MU exceeds what SQLite stores as an integer.
+    # `peer_amount_mu` is the figure the peer is told, in the *peer's* MU. It is on the
+    # row because a resumed payment has to send the peer the same `Payable` the
+    # interrupted one would have sent, and it cannot be derived again from `amount_mu`
+    # once the rates have moved.
     # Tunnelled bytes relayed per local calendar day, so `host_limits.MAX_NET_GIB_PER_DAY`
     # is an allowance for the day rather than for the current run of the daemon: a
     # counter living only in memory would reset on every restart, which on a metered
@@ -306,7 +316,7 @@ TABLES = {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tx_id TEXT DEFAULT NULL,
             direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
-            status TEXT CHECK( status IN ('communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
+            status TEXT CHECK( status IN ('broadcast', 'confirmed', 'communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
             peer_id TEXT DEFAULT NULL,
             client_id TEXT DEFAULT NULL,
             deposit_token TEXT DEFAULT NULL,
@@ -319,6 +329,7 @@ TABLES = {
             token_id TEXT DEFAULT NULL,
             address TEXT DEFAULT NULL,
             amount_mu TEXT NOT NULL,
+            peer_amount_mu TEXT DEFAULT NULL,
             purpose TEXT DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
