@@ -248,12 +248,19 @@ TABLES = {
     # nobody indexed, because the ledger cannot map an address back to a peer id.
     #
     # `status` is what happened, not what we hoped:
-    #   broadcast     -- outgoing, the transaction is on the network and is not yet
-    #                    confirmed. Written at the broadcast, before the wait, so a
-    #                    daemon that stops during the wait still knows the money left.
+    #   signed        -- outgoing, the transaction is signed and its id known, and
+    #                    it is being sent. Written BEFORE the send, so a daemon that
+    #                    stops between the send and any later write still has the row:
+    #                    the id is what a resume looks the transaction up by.
+    #   broadcast     -- outgoing, the network took the transaction and it is not yet
+    #                    confirmed, so a daemon that stops during the wait still knows
+    #                    the money left.
     #   confirmed     -- outgoing, the transaction is confirmed and the peer has not
-    #                    been told yet. Both of these are resumed at startup (see
+    #                    been told yet. These three are resumed at startup (see
     #                    `payment_process.resume_outgoing_payments`).
+    #   failed        -- outgoing, the transaction never reached the chain: the network
+    #                    refused it, or a 'signed' one never showed up before its
+    #                    deposit token expired. No money moved.
     #   communicated  -- outgoing, the peer acknowledged our Payable call
     #   unacknowledged-- outgoing, the transaction was broadcast and the call failed.
     #                    Money left, credit never arrived. The row an operator needs.
@@ -316,7 +323,7 @@ TABLES = {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tx_id TEXT DEFAULT NULL,
             direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
-            status TEXT CHECK( status IN ('broadcast', 'confirmed', 'communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
+            status TEXT CHECK( status IN ('signed', 'broadcast', 'confirmed', 'communicated', 'unacknowledged', 'failed', 'accepted', 'rejected') ) NOT NULL,
             peer_id TEXT DEFAULT NULL,
             client_id TEXT DEFAULT NULL,
             deposit_token TEXT DEFAULT NULL,

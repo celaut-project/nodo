@@ -55,39 +55,46 @@ def _row(status="broadcast", age_seconds=30, peer_amount_mu="2000"):
     }
 
 
+class _Envs:
+    """One payment method whose contract reports its transaction as a real one does.
+
+    ``process`` stands for the contract: it gets the id reporter and the script it was
+    asked to pay, and either returns what `Payable` carries or raises.
+    """
+
+    DEMOS = ()
+
+    def __init__(self, process):
+        self._process = process
+        self.reporter = None
+        self.paid_into = []
+
+    def available_payment_process(self):
+        def process_payment(amount, deposit_token, ledger, script):
+            self.paid_into.append(script)
+            return self._process(self.reporter, script)
+        return {KEY: process_payment}
+
+    def check_sender_balances(self):
+        return {KEY: lambda amount: True}
+
+    def transaction_id_reporting(self, reporter, method=None):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def reporting():
+            self.reporter = reporter
+            yield
+        return reporting()
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class TimeoutAfterBroadcastTests(unittest.TestCase):
+class OutgoingPaymentStatesTests(unittest.TestCase):
 
-    def test_a_confirmation_that_did_not_arrive_is_resumed_not_paid_again(self):
-        paid_into = []
-
-        class _Envs:
-            DEMOS = ()
-
-            def __init__(self):
-                self.reporter = None
-
-            def available_payment_process(self):
-                def process_payment(amount, deposit_token, ledger, script):
-                    paid_into.append(script)
-                    self.reporter(TX_ID)
-                    raise TimeoutError(f"Can't verify the tx {TX_ID}")
-                return {KEY: process_payment}
-
-            def check_sender_balances(self):
-                return {KEY: lambda amount: True}
-
-            def transaction_id_reporting(self, reporter, method=None):
-                from contextlib import contextmanager
-
-                @contextmanager
-                def reporting():
-                    self.reporter = reporter
-                    yield
-                return reporting()
-
+    def _pay(self, process, communicated=True):
+        payment_envs = _Envs(process)
         connection = mock.MagicMock()
-        with mock.patch.object(payment_process, "_payment_envs", return_value=_Envs()), \
+        with mock.patch.object(payment_process, "_payment_envs", return_value=payment_envs), \
                 mock.patch.object(payment_process, "sc", connection), \
                 mock.patch.object(payment_process, "get_peer_contract_instances",
                                   return_value=iter([(SCRIPT, "ergo", "ERG"),
@@ -97,6 +104,8 @@ class TimeoutAfterBroadcastTests(unittest.TestCase):
                 mock.patch.object(payment_process, "_reputation_interface"), \
                 mock.patch.object(payment_process, "__obtain_deposit_token",
                                   return_value="deposit-token-1", create=True), \
+                mock.patch.object(payment_process, "__attempt_payment_communication",
+                                  return_value=communicated, create=True), \
                 mock.patch.object(payment_process, "resume_outgoing_payments") as resume:
             paid = getattr(payment_process, "__peer_payment_process")(
                 peer_id="peer-1",
@@ -105,15 +114,76 @@ class TimeoutAfterBroadcastTests(unittest.TestCase):
                     amount=1000, peer_amount=2000,
                 )],
             )
-
-        self.assertIsNone(paid)
-        # One transaction, not one per ledger: the second script was never paid.
-        self.assertEqual(paid_into, [SCRIPT])
-        self.assertEqual(connection.record_payment.call_args.kwargs["status"], "broadcast")
-        connection.set_outgoing_payment_status.assert_not_called()
-        resume.assert_called_once()
-        # Released, so the resume can claim it.
+        self.paid_into = payment_envs.paid_into
+        self.resume = resume
+        self.recorded = [call.kwargs["status"] for call in connection.record_payment.call_args_list]
+        self.statuses = [call.args for call in connection.set_outgoing_payment_status.call_args_list]
+        # Released in every case, so a resume can claim it.
         self.assertNotIn(TX_ID, payment_process._outgoing_in_flight)
+        return paid
+
+    def test_the_row_is_written_signed_before_the_send(self):
+        def process(report, script):
+            report(TX_ID, sent=False)
+            report(TX_ID, sent=True)
+            return celaut_pb2.Contract()
+
+        self.assertTrue(self._pay(process))
+
+        self.assertEqual(self.recorded, ["signed"])
+        self.assertEqual(self.statuses, [(TX_ID, "broadcast"), (TX_ID, "confirmed"),
+                                         (TX_ID, "communicated")])
+
+    def test_a_send_the_node_refused_is_failed_and_the_next_ledger_is_tried(self):
+        from src.payment_system.exceptions import DoubleSpendingAttempt
+
+        def process(report, script):
+            if script == SCRIPT:
+                report(TX_ID, sent=False)
+                # No ledger: with one, the exception writes a retry time to the real DB.
+                raise DoubleSpendingAttempt()
+            return celaut_pb2.Contract()
+
+        self.assertTrue(self._pay(process))
+
+        self.assertEqual(self.paid_into, [SCRIPT, OTHER_SCRIPT])
+        self.assertEqual(self.statuses[0], (TX_ID, "failed"))
+
+    def test_a_send_that_failed_without_saying_is_resumed_not_paid_again(self):
+        """An error from the send does not say whether the network took it."""
+        def process(report, script):
+            report(TX_ID, sent=False)
+            raise ConnectionError("the node did not answer")
+
+        self.assertIsNone(self._pay(process))
+
+        self.assertEqual(self.paid_into, [SCRIPT])
+        self.assertEqual(self.recorded, ["signed"])
+        self.assertEqual(self.statuses, [])
+        self.resume.assert_called_once()
+
+    def test_a_confirmation_that_did_not_arrive_is_resumed_not_paid_again(self):
+        def process(report, script):
+            report(TX_ID, sent=False)
+            report(TX_ID, sent=True)
+            raise TimeoutError(f"Can't verify the tx {TX_ID}")
+
+        self.assertIsNone(self._pay(process))
+
+        # One transaction, not one per ledger: the second script was never paid.
+        self.assertEqual(self.paid_into, [SCRIPT])
+        self.assertEqual(self.statuses, [(TX_ID, "broadcast")])
+        self.resume.assert_called_once()
+
+    def test_a_contract_that_reports_only_after_the_send_still_gets_its_row(self):
+        def process(report, script):
+            report(TX_ID)
+            return celaut_pb2.Contract()
+
+        self._pay(process)
+
+        self.assertEqual(self.recorded, ["broadcast"])
+        self.assertEqual(self.statuses[-1], (TX_ID, "communicated"))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -180,6 +250,22 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(self.told, [])
         self.assertEqual(self.statuses, [(TX_ID, "unacknowledged")])
 
+    def test_a_signed_payment_that_never_showed_up_is_failed(self):
+        """Never sent, or refused: no money moved, so it is not 'unacknowledged'."""
+        awaiter = mock.MagicMock(side_effect=TimeoutError("not found"))
+
+        self._resume([_row(status="signed", age_seconds=4000)], awaiter, ttl=3600)
+
+        self.assertEqual(self.told, [])
+        self.assertEqual(self.statuses, [(TX_ID, "failed")])
+
+    def test_a_signed_payment_that_confirmed_is_communicated(self):
+        awaiter = mock.MagicMock(return_value=celaut_pb2.Contract())
+
+        self._resume([_row(status="signed")], awaiter)
+
+        self.assertEqual(self.statuses, [(TX_ID, "confirmed"), (TX_ID, "communicated")])
+
     def test_a_late_refusal_is_not_held_against_the_peer(self):
         """Past the token's lifetime the delay was ours; the peer may have written it off."""
         awaiter = mock.MagicMock(return_value=celaut_pb2.Contract())
@@ -226,16 +312,19 @@ class PaymentRowStatesTests(unittest.TestCase):
             peer_amount_mu=2000,
         ))
 
-    def test_broadcast_and_confirmed_rows_are_the_ones_resumed(self):
+    def test_signed_broadcast_and_confirmed_rows_are_the_ones_resumed(self):
+        self._record("tx-signed", "signed")
         self._record("tx-broadcast", "broadcast")
         self._record("tx-confirmed", "confirmed")
         self._record("tx-done", "communicated")
         self._record("tx-lost", "unacknowledged")
+        self._record("tx-refused", "failed")
         self._record("tx-in", "accepted", direction="in")
 
         rows = self.sc.outgoing_payments_to_resume()
 
-        self.assertEqual([row["tx_id"] for row in rows], ["tx-broadcast", "tx-confirmed"])
+        self.assertEqual([row["tx_id"] for row in rows],
+                         ["tx-signed", "tx-broadcast", "tx-confirmed"])
         self.assertEqual(rows[0]["peer_amount_mu"], "2000")
         self.assertEqual(rows[0]["deposit_token"], "deposit-token-1")
         self.assertGreaterEqual(rows[0]["age_seconds"], 0)

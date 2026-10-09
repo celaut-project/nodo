@@ -2769,11 +2769,11 @@ class SQLConnection(metaclass=Singleton):
 
     # What a payment row is allowed to say happened. See the `payments` table in
     # migrate.py for what each one means.
-    PAYMENT_STATUSES = ('broadcast', 'confirmed', 'communicated', 'unacknowledged',
-                        'accepted', 'rejected')
+    PAYMENT_STATUSES = ('signed', 'broadcast', 'confirmed', 'communicated',
+                        'unacknowledged', 'failed', 'accepted', 'rejected')
     # The outgoing states a payment can be left in by a daemon that stopped: the money
-    # is on the network and the peer has not been told yet.
-    PAYMENT_RESUMABLE_STATUSES = ('broadcast', 'confirmed')
+    # may be on the network and the peer has not been told yet.
+    PAYMENT_RESUMABLE_STATUSES = ('signed', 'broadcast', 'confirmed')
 
     def record_payment(self, direction: str, status: str, amount_mu: int,
                        tx_id: Optional[str] = None, peer_id: Optional[str] = None,

@@ -115,5 +115,64 @@ class ConfirmationTests(unittest.TestCase):
         self.assertFalse(btc.needs_unspent_proof)
 
 
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class SignedBeforeSentTests(unittest.TestCase):
+    """The payer learns the txid before the relay, so its row exists before money moves."""
+
+    def test_core_reports_the_signed_txid_before_sendrawtransaction(self):
+        from src.payment_system.contracts.bitcoin.backend import ChainBackend
+
+        calls = []
+        answers = {
+            "createrawtransaction": "raw",
+            "fundrawtransaction": {"hex": "funded"},
+            "signrawtransactionwithwallet": {"hex": "signed", "complete": True},
+            "decoderawtransaction": {"txid": "tx-signed"},
+            "sendrawtransaction": "tx-signed",
+        }
+
+        def call(method, params=None, *, wallet_scoped=True):
+            calls.append(method)
+            return answers[method]
+
+        chain = ChainBackend("http://example.invalid", wallet="w")
+        chain._call = call  # type: ignore[assignment]
+        reported = []
+
+        txid = chain.send_to(ADDRESS, 30_000, op_return=b"token-1",
+                             on_signed=lambda signed: reported.append((signed, list(calls))))
+
+        self.assertEqual(txid, "tx-signed")
+        [(signed, calls_so_far)] = reported
+        self.assertEqual(signed, "tx-signed")
+        self.assertNotIn("sendrawtransaction", calls_so_far)
+
+    def test_the_payment_reports_signed_then_sent(self):
+        chain = mock.Mock()
+        chain.estimate_fee_rate.return_value = 5.0
+        chain.tx_status.return_value = {"confirmations": 1}
+
+        def send_to(*args, on_signed=None, **kwargs):
+            on_signed("tx-abc")
+            return "tx-abc"
+
+        chain.send_to.side_effect = send_to
+        reported = []
+        with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc.rate, "mu_per_satoshi", return_value=Decimal(1)), \
+                mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
+                mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: 1), \
+                mock.patch.object(btc, "MAX_FEE_RATE_SAT_VB", lambda: 100.0), \
+                mock.patch.object(btc, "sleep", lambda _: None), \
+                btc.transaction_id_reporting(
+                    lambda tx_id, sent=True: reported.append((tx_id, sent))):
+            btc.process_payment(
+                amount=1_000, deposit_token="deposit-token-1", ledger=LEDGER,
+                script=script_pubkey_from_address(ADDRESS),
+            )
+
+        self.assertEqual(reported, [("tx-abc", False), ("tx-abc", True)])
+
 if __name__ == "__main__":
     unittest.main()

@@ -129,6 +129,11 @@ def transaction_url_reporting(reporter):
 def transaction_id_reporting(reporter):
     """Temporarily report a submitted transaction's *id* to the caller.
 
+    Called twice per payment: ``reporter(tx_id, sent=False)`` once the transaction is
+    signed and before it is sent, and ``reporter(tx_id, sent=True)`` once the node took
+    it. The first call is what lets the payer write the payment down before any money
+    can move.
+
     Kept separate from the URL hook above rather than folded into it. The URL is
     presentation -- `nodo pay` prints a sigmaspace link for a human to click -- while
     the id is the record: it is what `payments.tx_id` stores and what `tx_history`
@@ -845,8 +850,19 @@ def _settle(amount: int, deposit_token: str, ledger: str,
             w_mnemonic = ergo.getMnemonic(wallet_mnemonic=WALLET_MNEMONIC(), mnemonic_password=None)[0]
             signed_tx = ergo.signTransaction(unsigned_tx, w_mnemonic, prover_index=0)
 
+            # The id is a hash of the signed transaction, so it is known before the
+            # send. Reported now, with `sent=False`, so the payer writes its row before
+            # the transaction can reach the network: a daemon that stops right after the
+            # send still has the id to resume by (#523).
+            tx_id = str(signed_tx.getId())
+            id_reporter = _transaction_id_reporter.get()
+            if id_reporter:
+                id_reporter(tx_id, sent=False)
+
             try:
-                tx_id = ergo.txId(signed_tx)
+                sent_id = ergo.txId(signed_tx)
+                if sent_id != tx_id:
+                    LOGGER(f"The node answered {sent_id} to the send of tx {tx_id}.")
                 LOGGER(
                     "Transaction submitted: "
                     f"https://sigmaspace.io/en/transaction/{tx_id} "
@@ -855,9 +871,8 @@ def _settle(amount: int, deposit_token: str, ledger: str,
                 reporter = _transaction_url_reporter.get()
                 if reporter:
                     reporter(f"https://sigmaspace.io/en/transaction/{tx_id}")
-                id_reporter = _transaction_id_reporter.get()
                 if id_reporter:
-                    id_reporter(tx_id)
+                    id_reporter(tx_id, sent=True)
             except Exception as e:
                 if "Double spending attempt" in str(e):
                     raise DoubleSpendingAttempt(LEDGER)
