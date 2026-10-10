@@ -57,6 +57,7 @@ Callers pass their own values and their own ``log`` callable.
 """
 
 import json
+import re
 import shlex
 import shutil
 import subprocess
@@ -72,6 +73,7 @@ Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
 NFT_FILTER_FAMILY = "inet"
 NFT_NAT_FAMILY = "ip"
 NFT_TABLE = "nodo"
+_NFT_TABLE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
 
 # Ahead of the standard filter chains (iptables-nft's compatibility table sits at
 # 0, firewalld's at 10). See the module docstring on what this does and does not
@@ -749,6 +751,25 @@ def _token_value(tokens: List[str], option: str) -> Optional[str]:
         if tokens[index] == option:
             return tokens[index + 1]
     return None
+
+
+def set_nft_table(name: str) -> None:
+    """Use ``name`` for nodo's own nft tables (``inet <name>`` and ``ip <name>``).
+
+    One per install. Two installs on one host that share a table also share its
+    rules, and each one prunes the other's: the gateway port accept that is not
+    its own, for one. A second install (a test node beside a real one) sets
+    ``virtualizers.ch.NFT_TABLE`` so that its rules never meet the first's.
+    ``ConfigManager`` calls this when the key is set; the default stays ``nodo``.
+    """
+    global NFT_TABLE
+    text = str(name or "").strip()
+    if not _NFT_TABLE_NAME.match(text):
+        raise FirewallError(
+            f"Invalid nft table name {name!r}: use a letter, then up to 31 letters, "
+            "digits, '_' or '-'."
+        )
+    NFT_TABLE = text
 
 
 def detect_backend(run: Optional[Runner] = None) -> FirewallBackend:
