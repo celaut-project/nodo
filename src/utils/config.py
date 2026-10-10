@@ -14,6 +14,7 @@ import yaml
 from mnemonic import Mnemonic
 
 from src.utils.network import get_free_port
+from src.utils.privileges import can_admin_network
 from src.utils.singleton import Singleton
 
 
@@ -610,20 +611,20 @@ class ConfigManager(metaclass=Singleton):
         the one thing the old candidate cache was for -- a port that stays the same
         between runs, so "open TCP 52285" is still true tomorrow.
 
-        Assignment still needs root, because it writes a firewall rule. An
-        unprivileged run leaves the sentinel alone rather than consuming it.
+        Assignment still needs root or CAP_NET_ADMIN, because it writes a firewall
+        rule. An unprivileged run leaves the sentinel alone rather than consuming it.
         """
         stored = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
         if coerce_gateway_port(stored) is not None:
             return
 
-        if os.geteuid() != 0:
+        if not can_admin_network():
             self._gateway_notice_unlocked(
                 "gateway port not assigned",
-                "network.GATEWAY_PORT is unassigned and this process is not root, so it\n"
-                "cannot open the port in the host firewall. Leaving it unassigned rather\n"
-                "than storing a port nothing can reach: run 'sudo nodo serve' once, or\n"
-                "set network.GATEWAY_PORT to a port you have opened yourself.",
+                "network.GATEWAY_PORT is unassigned and this process is not root and has no\n"
+                "CAP_NET_ADMIN, so it cannot open the port in the host firewall. Leaving it\n"
+                "unassigned rather than storing a port nothing can reach: run 'sudo nodo serve'\n"
+                "once, or set network.GATEWAY_PORT to a port you have opened yourself.",
             )
             return
 
