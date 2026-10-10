@@ -4,14 +4,16 @@
 # can be run on its own against an existing install.
 #
 # What it does, each step idempotent:
-#   1. creates the system user (and its group), adds it to group kvm;
+#   1. creates the system user (and its group, home /var/lib/<user>), adds it
+#      to group kvm;
 #   2. gives it a /etc/subuid and /etc/subgid range, for virtiofsd's namespace
 #      sandbox (chroot is root only);
 #   3. writes the keys a non-root daemon needs into config.yaml: main.SERVICE_USER,
 #      virtualizers.ch.CGROUPS_BASE_DIR (the unit's delegated cgroup) and
 #      virtualizers.ch.API_SOCKET_DIR (under the unit's RuntimeDirectory);
-#   4. gives the storage tree and config.yaml to that user (config.yaml 0660), and
-#      adds the operator to its group so they can still edit the config;
+#   4. gives the storage tree, the local packer's buildkit/ directory and
+#      config.yaml to that user (config.yaml 0660), and adds the operator to its
+#      group so they can still edit the config;
 #   5. renders bash/nodo-nosudo.service.template into /etc/systemd/system/<unit>.service.
 #
 # It does not start or enable the unit; the caller does. To go back to root, set
@@ -85,10 +87,21 @@ config_value() {
 }
 
 # --- 1. the user ------------------------------------------------------------
+# A home of its own: the local packer's buildctl writes ~/.docker.
+SERVICE_HOME="/var/lib/$SERVICE_USER"
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   printf 'Creating system user %s...\n' "$SERVICE_USER"
-  useradd --system --user-group --home-dir "$TARGET_DIR" --no-create-home \
+  useradd --system --user-group --home-dir "$SERVICE_HOME" --no-create-home \
     --shell /usr/sbin/nologin "$SERVICE_USER"
+fi
+SERVICE_HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
+if [ -n "$SERVICE_HOME" ] && [ "$SERVICE_HOME" != "/" ] && [ "$SERVICE_HOME" != "$TARGET_DIR" ]; then
+  mkdir -p "$SERVICE_HOME"
+  chown "$SERVICE_USER:$SERVICE_USER" "$SERVICE_HOME"
+  chmod 0750 "$SERVICE_HOME"
+else
+  printf 'Warning: the home of %s is %s; nodo pack --local needs a home it can write.\n' \
+    "$SERVICE_USER" "${SERVICE_HOME:-<none>}" >&2
 fi
 usermod -aG kvm "$SERVICE_USER"
 
@@ -155,6 +168,10 @@ STORAGE_DIR="$(config_value '.main.STORAGE' "$TARGET_DIR/storage")"
 # --- 4. ownership -------------------------------------------------------------
 mkdir -p "$STORAGE_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STORAGE_DIR"
+# The rootless BuildKit builder of `nodo pack --local` keeps its state here. Packing
+# writes the registry, which is now the service user's, so it packs as that user.
+mkdir -p "$TARGET_DIR/buildkit"
+chown -R "$SERVICE_USER:$SERVICE_USER" "$TARGET_DIR/buildkit"
 chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
 chmod 0660 "$CONFIG_FILE"
 for backup in "$TARGET_DIR"/config-*.yaml; do
