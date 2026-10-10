@@ -242,8 +242,12 @@ fi
 if [ ! -f "$TARGET_DIR/config.yaml" ]; then
   printf "Creating configuration file $TARGET_DIR/config.yaml...\n"
   cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
-  chmod a+w "$TARGET_DIR/config.yaml"
 fi
+# config.yaml holds the wallet mnemonics and names the binaries the root daemon runs,
+# so only its owner (the installing user, after the chown below) and its group may
+# read or write it. Also tightens an install made when it was world-writable.
+chmod 0660 "$TARGET_DIR/config.yaml"
+chmod o-rwx "$TARGET_DIR"/config-*.yaml 2>/dev/null || true
 
 # Keep paths aligned with TARGET_DIR, including local-source installs.
 sync_config_main_paths
