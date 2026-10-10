@@ -361,7 +361,7 @@ class KillClosesTunnelsTests(RegistryTestCase):
     def setUp(self):
         super().setUp()
         self.patches = [
-            patch.object(kill_command.os, "geteuid", return_value=0),
+            patch.object(kill_command, "can_admin_network", return_value=True),
             # `web` is the name; the tunnel recorded the id it resolved to.
             patch.object(kill_command, "resolve_instance_token",
                          return_value="abcdef0123456789"),
@@ -408,11 +408,25 @@ class KillClosesTunnelsTests(RegistryTestCase):
         self.assertIn("error", document)
         self.assertEqual([r["id"] for r in registry.list_tunnels()], ["mine0005"])
 
-    def test_kill_needs_root(self):
-        with patch.object(kill_command.os, "geteuid", return_value=1000):
+    def test_without_the_capability_the_daemon_stops_it(self):
+        """A CLI without root or CAP_NET_ADMIN cannot delete a tap; the daemon can."""
+        process = self.spawn()
+        registry.register(_record("mine0006", process.pid, instance="abcdef0123456789"))
+        with patch.object(kill_command, "can_admin_network", return_value=False), patch.object(
+            kill_command, "stop_instance", side_effect=AssertionError("stopped in-process")
+        ), patch.object(kill_command, "stop_through_daemon", return_value=True) as daemon:
+            ok, document = _run_json(kill_command.kill, "web")
+        self.assertTrue(ok)
+        daemon.assert_called_once_with("abcdef0123456789")
+        self.assertEqual(document["tunnels"], {"closed": ["mine0006"], "failed": []})
+
+    def test_without_the_capability_or_a_daemon_it_says_what_is_needed(self):
+        with patch.object(kill_command, "can_admin_network", return_value=False), patch.object(
+            kill_command, "stop_through_daemon", side_effect=ConnectionError("refused")
+        ):
             ok, document = _run_json(kill_command.kill, "web")
         self.assertFalse(ok)
-        self.assertIn("superuser", document["error"])
+        self.assertIn("CAP_NET_ADMIN", document["error"])
 
 
 class CompletionTests(RegistryTestCase):
