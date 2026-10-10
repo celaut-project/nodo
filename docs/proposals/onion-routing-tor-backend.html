@@ -1,0 +1,458 @@
+<title>Nodo sobre Tor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: single reading column (max 980px); phase strip as the spine; diagram and tables scroll inside their own boxes. */
+:root {
+  --bg: #f6f5f8;
+  --surface: #ffffff;
+  --ink: #1d1a24;
+  --muted: #5d586a;
+  --line: #dcd8e3;
+  --accent: #7a2e5c;
+  --accent-soft: #f3e6ee;
+  --ok: #1f7a5a;
+  --ok-soft: #e2f3ec;
+  --bad: #b3261e;
+  --bad-soft: #fbe7e5;
+  --warn: #8a5a00;
+  --warn-soft: #f8eed8;
+  --code-bg: #efedf3;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15131a; --surface: #1d1a24; --ink: #ece9f2; --muted: #a6a0b4; --line: #34303e;
+    --accent: #e08abb; --accent-soft: #3a2232; --ok: #5cc9a0; --ok-soft: #173329;
+    --bad: #ff8a80; --bad-soft: #3d1c1a; --warn: #e0b050; --warn-soft: #362a12; --code-bg: #24202c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15131a; --surface: #1d1a24; --ink: #ece9f2; --muted: #a6a0b4; --line: #34303e;
+  --accent: #e08abb; --accent-soft: #3a2232; --ok: #5cc9a0; --ok-soft: #173329;
+  --bad: #ff8a80; --bad-soft: #3d1c1a; --warn: #e0b050; --warn-soft: #362a12; --code-bg: #24202c;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--body); }
+.wrap { max-width: 980px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; display: grid; gap: 56px; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2rem, 5vw, 2.9rem); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 1.55rem; font-weight: 700; }
+h3 { font-size: 1.12rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+.eyebrow { font-family: var(--mono); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); }
+.muted { color: var(--muted); }
+section { display: grid; gap: 18px; min-width: 0; }
+.section-head { display: grid; gap: 6px; }
+
+/* header */
+header { display: grid; gap: 16px; }
+.lede { font-size: 1.08rem; color: var(--muted); max-width: 64ch; }
+.threats { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 500; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.chip.ok i { background: var(--ok); } .chip.warn i { background: var(--warn); } .chip.bad i { background: var(--bad); }
+
+/* phase strip */
+.strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.strip a { display: grid; gap: 4px; padding: 14px 14px 16px; color: inherit; text-decoration: none; border-right: 1px solid var(--line); min-width: 0; }
+.strip a:last-child { border-right: 0; }
+.strip a:hover, .strip a:focus-visible { background: var(--accent-soft); outline: none; }
+.strip b { font-family: var(--mono); font-size: 0.78rem; color: var(--accent); font-weight: 500; }
+.strip span { font-weight: 600; font-size: 0.92rem; line-height: 1.3; }
+.strip small { color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
+@media (max-width: 760px) {
+  .strip { grid-template-columns: 1fr; }
+  .strip a { border-right: 0; border-bottom: 1px solid var(--line); }
+  .strip a:last-child { border-bottom: 0; }
+}
+
+/* findings */
+.findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.finding { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.finding .where { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); overflow-wrap: anywhere; }
+.note { border-left: 3px solid var(--ok); padding: 4px 0 4px 14px; max-width: 72ch; }
+
+/* diagram */
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; }
+.figure svg { display: block; min-width: 760px; width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 0.82rem; color: var(--muted); padding: 10px 4px 2px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend svg { min-width: 0; width: 34px; height: 10px; display: inline; }
+svg text { font-family: var(--body); }
+.n-box { fill: var(--surface); stroke: var(--line); stroke-width: 1.4; }
+.n-host { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0.55; }
+.n-closed { fill: var(--bad-soft); stroke: var(--bad); stroke-width: 1.2; stroke-dasharray: 5 4; }
+.n-tor { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+.t-title { fill: var(--ink); font-size: 13.5px; font-weight: 600; }
+.t-sub { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+.t-col { fill: var(--muted); font-size: 11px; font-family: var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.t-edge { font-size: 11px; font-family: var(--mono); }
+.e-ok { stroke: var(--ok); stroke-width: 2; fill: none; }
+.e-bad { stroke: var(--bad); stroke-width: 2; fill: none; stroke-dasharray: 6 5; }
+.e-future { stroke: var(--accent); stroke-width: 2; fill: none; stroke-dasharray: 2 5; stroke-linecap: round; }
+.e-out { stroke: var(--muted); stroke-width: 1.6; fill: none; stroke-dasharray: 8 6; }
+.f-ok { fill: var(--ok); } .f-bad { fill: var(--bad); } .f-acc { fill: var(--accent); } .f-mut { fill: var(--muted); }
+
+/* code */
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.pair > div { display: grid; gap: 8px; align-content: start; min-width: 0; }
+pre { margin: 0; background: var(--code-bg); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font: 12.5px/1.6 var(--mono); }
+pre .c { color: var(--muted); } pre .k { color: var(--accent); } pre .s { color: var(--ok); }
+.caption { font-size: 0.86rem; color: var(--muted); }
+
+/* phases */
+.phase { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 20px; padding-top: 22px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+.phase:first-of-type { border-top: 0; padding-top: 0; }
+.phase-num { font-family: var(--display); font-size: 2.2rem; font-weight: 700; color: var(--accent); line-height: 1; }
+.phase-body { display: grid; gap: 12px; min-width: 0; }
+.goal { font-size: 0.98rem; }
+.tag { display: inline-block; font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; vertical-align: 2px; margin-left: 6px; }
+.tag.safe { color: var(--ok); background: var(--ok-soft); }
+.tag.core { color: var(--accent); background: var(--accent-soft); }
+.tag.open { color: var(--warn); background: var(--warn-soft); }
+@media (max-width: 600px) { .phase { grid-template-columns: 1fr; gap: 8px; } }
+
+.table-box { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { width: 100%; border-collapse: collapse; font-size: 0.88rem; min-width: 640px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--mono); font-weight: 500; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--code-bg); }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td .where { display: block; font-family: var(--mono); font-size: 0.76rem; color: var(--muted); overflow-wrap: anywhere; }
+.tests { font-size: 0.88rem; color: var(--muted); }
+.tests b { color: var(--ink); font-weight: 600; }
+
+.pill { display: inline-block; font-size: 0.78rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { color: var(--ok); background: var(--ok-soft); }
+.pill.bad { color: var(--bad); background: var(--bad-soft); }
+.pill.fut { color: var(--accent); background: var(--accent-soft); }
+
+/* scope + decisions */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.list { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; }
+.decisions { display: grid; gap: 10px; counter-reset: d; }
+.decision { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.decision::before { counter-increment: d; content: counter(d); font-family: var(--display); font-weight: 700; font-size: 1.3rem; color: var(--accent); }
+.decision div { display: grid; gap: 4px; }
+.rec { font-size: 0.88rem; color: var(--muted); }
+.rec b { color: var(--ok); font-weight: 600; }
+footer { font-size: 0.82rem; color: var(--muted); }
+a { color: var(--accent); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Plan de implementación · celaut-project/nodo</div>
+  <h1>Nodo sobre Tor</h1>
+  <p class="lede">Exponer el gateway de cada nodo como un onion service de Tor para que ningún par conozca su IP. La red de enrutamiento se declara en <code>Peer.Uri.transport</code> con tags, prose y formal (opción A), y cada red de servicio que necesite salir al exterior sin backend se rechaza.</p>
+  <div class="threats">
+    <span class="chip ok"><i></i>Nivel 1: ocultar la IP a los otros pares · fases 1–3</span>
+    <span class="chip warn"><i></i>Nivel 2: adversario estatal · parcial</span>
+    <span class="chip bad"><i></i>Fuera: salida propia del nodo y capa económica</span>
+  </div>
+</header>
+
+<nav class="strip" aria-label="Fases">
+  <a href="#f1"><b>F1</b><span>Backends y Tor para llamar</span><small>Cualquier nodo alcanza pares .onion</small></a>
+  <a href="#f2"><b>F2</b><span>Anunciar .onion y modo HIDDEN</span><small>La IP no sale hacia los pares</small></a>
+  <a href="#f3"><b>F3</b><span>Política de redes</span><small>Se rechaza la salida directa</small></a>
+  <a href="#f4"><b>F4</b><span>Redes por túnel</span><small>Miembros remotos vía ServiceTunnel</small></a>
+  <a href="#f5"><b>F5</b><span>Segundo backend</span><small>I2P, opcional</small></a>
+</nav>
+
+<section>
+  <div class="section-head">
+    <div class="eyebrow">Auditoría</div>
+    <h2>Lo que el código cambió del plan</h2>
+  </div>
+  <div class="findings">
+    <article class="finding">
+      <h3>La IP también se publica on-chain</h3>
+      <p>El anuncio guardado en el registro R9 de Ergo usa <code>PUBLIC_IP</code>. Es público y permanente. En modo oculto debe llevar la .onion o nada.</p>
+      <div class="where">ergo/transaction.py:197-247</div>
+    </article>
+    <article class="finding">
+      <h3>Un escaneo encuentra el certificado</h3>
+      <p>El gateway TLS escucha en <code>[::]</code> con un certificado ligado a la identidad. Shodan o Censys asociarían el peer id a la IP real. En modo oculto, el gateway escucha solo en loopback.</p>
+      <div class="where">src/serve.py:379</div>
+    </article>
+    <article class="finding">
+      <h3>Por Tor todo llega desde 127.0.0.1</h3>
+      <p>El gateway identifica a quien llama por su IP. Hay que auditar que ninguna ruta dé confianza o identidad de instancia a loopback.</p>
+      <div class="where">utils.py:167 · client_gate.py:169 · gateway.py:150,240</div>
+    </article>
+    <article class="finding">
+      <h3>Un único punto de salida</h3>
+      <p>Todas las conexiones a gateways de pares pasan por <code>grpc_transport.py</code>: la comprobación TLS previa y <code>secure_channel</code>. Si se enruta ahí, se cubre todo.</p>
+      <div class="where">src/identity/grpc_transport.py:90, 111</div>
+    </article>
+  </div>
+  <p class="note">Corrección: los slots UDP no se pierden. <code>ServiceTunnel</code> ya transporta datagramas dentro del stream gRPC (<code>tunnel_client.serve_udp</code>), así que funcionan sobre Tor.</p>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="eyebrow">Destino</div>
+    <h2>Un nodo en modo HIDDEN</h2>
+    <p class="muted">Qué conexiones existen cuando terminen las fases 2 y 3, y cuáles quedan cerradas.</p>
+  </div>
+  <div class="figure">
+    <svg viewBox="0 0 900 470" role="img" aria-labelledby="dg-t dg-d">
+      <title id="dg-t">Flujos de red de un nodo en modo oculto</title>
+      <desc id="dg-d">Un par remoto llega por la red Tor al onion service y al gateway en loopback. El puerto público está cerrado a escáneres. Las VMs hablan con el gateway del bridge; su salida directa a internet se rechaza; en la fase 4 saldrán por ServiceTunnel sobre Tor. La salida propia del nodo hacia las APIs de Ergo queda fuera de alcance.</desc>
+      <defs>
+        <marker id="m-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="f-ok"/></marker>
+        <marker id="m-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="f-bad"/></marker>
+        <marker id="m-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="f-acc"/></marker>
+        <marker id="m-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="f-mut"/></marker>
+      </defs>
+
+      <text class="t-col" x="105" y="22" text-anchor="middle">Exterior</text>
+      <text class="t-col" x="355" y="22" text-anchor="middle">Red Tor</text>
+      <text class="t-col" x="690" y="22" text-anchor="middle">Host del nodo · HIDDEN</text>
+
+      <rect class="n-host" x="500" y="36" width="380" height="420" rx="12"/>
+
+      <!-- exterior -->
+      <rect class="n-box" x="20" y="60" width="170" height="58" rx="8"/>
+      <text class="t-title" x="34" y="84">Par remoto</text>
+      <text class="t-sub" x="34" y="104">cualquier nodo con Tor</text>
+
+      <rect class="n-box" x="20" y="170" width="170" height="58" rx="8"/>
+      <text class="t-title" x="34" y="194">Escáner de internet</text>
+      <text class="t-sub" x="34" y="214">Shodan, Censys…</text>
+
+      <rect class="n-box" x="20" y="280" width="170" height="58" rx="8"/>
+      <text class="t-title" x="34" y="304">Internet directo</text>
+      <text class="t-sub" x="34" y="324">P2P de Ergo, DNS, "*"</text>
+
+      <rect class="n-box" x="20" y="380" width="170" height="58" rx="8"/>
+      <text class="t-title" x="34" y="404">APIs de Ergo</text>
+      <text class="t-sub" x="34" y="424">explorer, nodo</text>
+
+      <!-- tor -->
+      <rect class="n-tor" x="270" y="60" width="170" height="58" rx="8"/>
+      <text class="t-title" x="284" y="84">Rendezvous</text>
+      <text class="t-sub" x="284" y="104">6 saltos, sin IPs</text>
+
+      <!-- host -->
+      <rect class="n-box" x="520" y="60" width="150" height="58" rx="8"/>
+      <text class="t-title" x="534" y="84">tor del nodo</text>
+      <text class="t-sub" x="534" y="104">onion + HTTPTunnel</text>
+
+      <rect class="n-box" x="710" y="60" width="150" height="58" rx="8"/>
+      <text class="t-title" x="724" y="84">Gateway TLS</text>
+      <text class="t-sub" x="724" y="104">127.0.0.1 solo</text>
+
+      <rect class="n-closed" x="520" y="170" width="140" height="58" rx="8"/>
+      <text class="t-title" x="534" y="194">IP pública</text>
+      <text class="t-sub" x="534" y="214">sin listener</text>
+
+      <rect class="n-box" x="710" y="170" width="150" height="58" rx="8"/>
+      <text class="t-title" x="724" y="194">Gateway plaintext</text>
+      <text class="t-sub" x="724" y="214">bridge nodo-br-ch</text>
+
+      <rect class="n-box" x="710" y="280" width="150" height="58" rx="8"/>
+      <text class="t-title" x="724" y="304">VM de instancia</text>
+      <text class="t-sub" x="724" y="324">192.168.200.0/24</text>
+
+      <rect class="n-box" x="520" y="380" width="150" height="58" rx="8"/>
+      <text class="t-title" x="534" y="404">Salida propia</text>
+      <text class="t-sub" x="534" y="424">pagos, reputación</text>
+
+      <!-- edges: allowed -->
+      <line class="e-ok" x1="192" y1="89" x2="266" y2="89" marker-start="url(#m-ok)" marker-end="url(#m-ok)"/>
+      <line class="e-ok" x1="442" y1="89" x2="516" y2="89" marker-start="url(#m-ok)" marker-end="url(#m-ok)"/>
+      <line class="e-ok" x1="672" y1="89" x2="706" y2="89" marker-end="url(#m-ok)"/>
+      <line class="e-ok" x1="785" y1="278" x2="785" y2="232" marker-end="url(#m-ok)"/>
+      <text class="t-edge f-ok" x="795" y="260">local</text>
+
+      <!-- blocked -->
+      <line class="e-bad" x1="192" y1="199" x2="516" y2="199" marker-end="url(#m-bad)"/>
+      <text class="t-edge f-bad" x="300" y="190">sin respuesta</text>
+      <line class="e-bad" x1="706" y1="309" x2="194" y2="309" marker-end="url(#m-bad)"/>
+      <text class="t-edge f-bad" x="300" y="300">red rechazada · F3</text>
+
+      <!-- future tunnel -->
+      <polyline class="e-future" points="706,292 690,292 690,140 595,140 595,122" marker-end="url(#m-acc)"/>
+      <text class="t-edge f-acc" x="560" y="158">ServiceTunnel · F4</text>
+
+      <!-- out of scope -->
+      <line class="e-out" x1="516" y1="409" x2="194" y2="409" marker-end="url(#m-mut)"/>
+      <text class="t-edge f-mut" x="300" y="400">directa · fuera de alcance</text>
+    </svg>
+    <div class="legend">
+      <span><svg viewBox="0 0 34 10"><line class="e-ok" x1="0" y1="5" x2="34" y2="5"/></svg>Permitido</span>
+      <span><svg viewBox="0 0 34 10"><line class="e-bad" x1="0" y1="5" x2="34" y2="5"/></svg>Cerrado o rechazado</span>
+      <span><svg viewBox="0 0 34 10"><line class="e-future" x1="2" y1="5" x2="32" y2="5"/></svg>Fase 4</span>
+      <span><svg viewBox="0 0 34 10"><line class="e-out" x1="0" y1="5" x2="34" y2="5"/></svg>Revela la IP al operador del servicio, no a los pares</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="eyebrow">Modelo</div>
+    <h2>Descriptor y configuración</h2>
+  </div>
+  <div class="pair">
+    <div>
+      <pre><span class="k">Peer.Uri</span> {
+  ip:   <span class="s">"&lt;56 caracteres&gt;.onion"</span>
+  port: &lt;puerto virtual&gt;
+  transport: {
+    tags:   [<span class="s">"tor-onion-v3"</span>]   <span class="c"># nunca junto a "tcp"</span>
+    prose:  <span class="s">"TCP stream over a Tor v3 onion service"</span>
+    formal: <span class="s">"kind=stream\nport=per-address\nspec=rend-spec-v3"</span>
+  }
+  protocol_stack: [tls, http2, grpc, bee-rpc, celaut-gateway]
+}</pre>
+      <p class="caption">No cambia el digest de la firma: <code>_canonical_uri</code> ya firma ip, tags, formal y prose. Los nodos antiguos se saltan la URI porque ningún tag es tcp o udp.</p>
+    </div>
+    <div>
+      <pre><span class="k">routing:</span>
+  HIDDEN: <span class="s">false</span>             <span class="c"># modo estricto (F2)</span>
+  <span class="k">tor:</span>
+    ENABLED: <span class="s">auto</span>          <span class="c"># activo si hay binario</span>
+    BINARY: <span class="s">"tor"</span>
+    ANNOUNCE: <span class="s">false</span>        <span class="c"># publicar la .onion</span>
+    CLEARNET_VIA_EXIT: <span class="s">false</span></pre>
+      <p class="caption"><code>validate_routing_config</code>: con HIDDEN hace falta un backend con ANNOUNCE, y no se admiten <code>PUBLIC_IP</code> ni <code>ANNOUNCE_PRIVATE_ADDRESSES</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="eyebrow">Fases</div>
+    <h2>Orden de implementación</h2>
+  </div>
+
+  <div class="phase" id="f1">
+    <div class="phase-num">F1</div>
+    <div class="phase-body">
+      <h3>Abstracción de backends y Tor solo para llamar <span class="tag safe">segura de desplegar</span></h3>
+      <p class="goal">Cualquier nodo puede conectarse a pares .onion. Es lo que permite que existan nodos ocultos alcanzables, y no cambia lo que el nodo anuncia.</p>
+      <div class="table-box"><table>
+        <thead><tr><th>Pieza</th><th>Cambio</th></tr></thead>
+        <tbody>
+          <tr><td>Paquete nuevo<span class="where">src/routing/</span></td><td><code>RoutingBackend</code> con <code>transport_component()</code>, <code>start()</code>, <code>open_socket()</code>, <code>grpc_channel_options()</code> y <code>kinds</code>. Un registry elige el backend por tags de transporte o por sufijo de host.</td></tr>
+          <tr><td>Proceso Tor<span class="where">src/routing/tor.py</span></td><td>Tor gestionado por el nodo con <code>DataDirectory</code> en <code>storage/tor/</code>, SOCKSPort, HTTPTunnelPort y ControlPort con cookie en 127.0.0.1.</td></tr>
+          <tr><td>Comprobación TLS previa<span class="where">grpc_transport.py:90</span></td><td><code>socket.create_connection</code> pasa a <code>backend.open_socket()</code>: un HTTP CONNECT al HTTPTunnelPort, sin DNS local ni dependencias nuevas.</td></tr>
+          <tr><td>Canal gRPC<span class="where">grpc_transport.py:111</span></td><td>Opción <code>grpc.http_proxy</code> hacia el HTTPTunnelPort. El pinning TLS por peer id se mantiene igual.</td></tr>
+          <tr><td>Sondeo<span class="where">utils.py:393 is_open</span></td><td>Sondea a través del backend, con timeout y caché propios para Tor.</td></tr>
+          <tr><td>Ingesta<span class="where">manager.py:318</span></td><td>Guarda <code>transport="tor-onion-v3"</code> si el registry lo reconoce. Rechaza una URI con tags de dos familias.</td></tr>
+          <tr><td>Selección<span class="where">utils.py:367</span></td><td>Pasa de filtrar "vacío o tcp" a "transporte con backend activo", con clearnet primero si el nodo no está oculto.</td></tr>
+          <tr><td>Descriptor<span class="where">transport_stack.py:106</span></td><td><code>transport_component()</code> para cada backend; <code>nodo protocol</code> lo mostrará sin cambios.</td></tr>
+          <tr><td>Instalación<span class="where">install.sh</span></td><td>Paquete <code>tor</code> 0.4.8 o posterior, que trae vanguards-lite activo por defecto.</td></tr>
+        </tbody>
+      </table></div>
+      <p class="tests"><b>Tests:</b> registry, ingesta de la URI tor (con nodo antiguo simulado), CONNECT contra un proxy falso sin DNS, digest.</p>
+    </div>
+  </div>
+
+  <div class="phase" id="f2">
+    <div class="phase-num">F2</div>
+    <div class="phase-body">
+      <h3>Anunciar la .onion y modo HIDDEN estricto <span class="tag core">núcleo</span></h3>
+      <p class="goal">El gateway se expone por Tor y la IP no sale del nodo por ninguna vía hacia los pares.</p>
+      <div class="table-box"><table>
+        <thead><tr><th>Pieza</th><th>Cambio</th></tr></thead>
+        <tbody>
+          <tr><td>Onion service<span class="where">src/routing/tor.py</span></td><td><code>HiddenServiceDir</code> persistente en <code>storage/tor/gateway/</code>. La clave es independiente de la identidad del nodo y se respalda junto al mnemónico.</td></tr>
+          <tr><td>Anuncio<span class="where">gateway/utils.py:154</span></td><td>Una URI por backend con ANNOUNCE. Con HIDDEN, solo esas: nada de <code>_public_host()</code> ni interfaces.</td></tr>
+          <tr><td>On-chain<span class="where">ergo/transaction.py:197</span></td><td>En R9 va la URI onion con su transporte, nunca <code>PUBLIC_IP</code>.</td></tr>
+          <tr><td>Bind<span class="where">serve.py:379</span></td><td>Puerto TLS solo en 127.0.0.1. El plaintext del bridge se queda para las VMs locales.</td></tr>
+          <tr><td>Llamadas a pares<span class="where">utils.py:367 + grpc_transport</span></td><td>Todo sale por un backend. Clearnet por un exit solo con CLEARNET_VIA_EXIT. Nunca hay vuelta silenciosa a conexión directa.</td></tr>
+          <tr><td>URIs de instancia<span class="where">local_execution.py:367-415</span></td><td>Nada de <code>PUBLIC_IP</code> para quien llama desde fuera: <code>uri</code> vacía y se usa ServiceTunnel. Se fuerza <code>DELEGATION_TUNNEL_POLICY=always</code>.</td></tr>
+          <tr><td>Confianza por IP<span class="where">client_gate.py:169</span></td><td>Listener propio para la ingesta onion, de modo que el origen se distinga por puerto y no por IP.</td></tr>
+          <tr><td>Sondas y metadatos<span class="where">reachability.py · utils.py:388</span></td><td>Sin sondas de alcanzabilidad. <code>expiry_unix_timestamp=0</code> y el benchmark redondeado.</td></tr>
+        </tbody>
+      </table></div>
+      <p class="tests"><b>Tests:</b> ninguna IP en el anuncio, bind solo en loopback, R9 oculto, <code>uri</code> vacía, loopback sin identidad de instancia.</p>
+    </div>
+  </div>
+
+  <div class="phase" id="f3">
+    <div class="phase-num">F3</div>
+    <div class="phase-body">
+      <h3>Política de redes en modo oculto <span class="tag core">núcleo</span></h3>
+      <p class="goal">Una red que obliga a salir al exterior sin backend se rechaza con la <code>NetworkPolicyRejection</code> que ya existe, en <code>enforce_network_policy</code>. Las estimaciones de coste devuelven "no soportado" para que el balancer delegue en otro nodo.</p>
+      <div class="table-box"><table>
+        <thead><tr><th>Red</th><th>Hoy</th><th>Con HIDDEN</th></tr></thead>
+        <tbody>
+          <tr><td><code>"*"</code></td><td>Salida total y MASQUERADE del host</td><td><span class="pill bad">Rechazada</span></td></tr>
+          <tr><td><code>pow:&lt;chain&gt;</code></td><td>El host verifica con requests y la VM conecta directa</td><td><span class="pill bad">Rechazada</span></td></tr>
+          <tr><td>Tag DNS</td><td>Resolución A y conexión directa</td><td><span class="pill bad">Rechazada</span></td></tr>
+          <tr><td>Semillas externas</td><td>Conexión directa</td><td><span class="pill bad">Rechazada</span></td></tr>
+          <tr><td>Miembros locales</td><td>Tráfico dentro del bridge</td><td><span class="pill ok">Permitida</span></td></tr>
+          <tr><td>Miembros en otros nodos</td><td>Sin soporte</td><td><span class="pill fut">F4 · por túnel</span></td></tr>
+          <tr><td><code>ResolveNetwork</code> servido</td><td>Verifica candidatos desde la IP del host</td><td><span class="pill bad">Rechazado para pow</span></td></tr>
+        </tbody>
+      </table></div>
+      <p class="tests"><b>Tests:</b> matriz red × HIDDEN en <code>test_network_policy_enforcement.py</code>.</p>
+    </div>
+  </div>
+
+  <div class="phase" id="f4">
+    <div class="phase-num">F4</div>
+    <div class="phase-body">
+      <h3>Redes cuyos pares son instancias de otros nodos <span class="tag open">propuesta propia</span></h3>
+      <p class="goal">Los pares responden con <code>Instance</code> y <code>uri</code> vacía. El nodo reutiliza <code>delegated_endpoints.publish</code>: abre un listener local, reenvía por ServiceTunnel (ya sobre Tor gracias a F1) y da a la VM una regla de firewall solo hacia ese listener. La VM nunca sale al exterior.</p>
+      <p class="note">Pregunta abierta: ServiceTunnel se autentica con el token de la instancia. Un miembro de la red no es su padre. ¿Con qué credencial abre el túnel? Podría ser un token de red emitido por el nodo remoto.</p>
+    </div>
+  </div>
+
+  <div class="phase" id="f5">
+    <div class="phase-num">F5</div>
+    <div class="phase-body">
+      <h3>Segundo backend <span class="tag open">opcional</span></h3>
+      <p class="goal">I2P con <code>i2p-stream</code> e <code>i2p-datagram</code>, para comprobar que la abstracción no tiene forma de Tor.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="eyebrow">Alcance</div>
+    <h2>Fuera de alcance, documentado</h2>
+  </div>
+  <div class="cols">
+    <ul class="list">
+      <li>Salida propia del nodo: APIs de Ergo, Bitcoin, <code>internet_available</code>, medidor de energía. Revelan la IP al operador de esos servicios, no a los pares.</li>
+      <li>Capa económica: pagos y reputación on-chain pueden vincular al operador con su identidad.</li>
+    </ul>
+    <ul class="list">
+      <li>Una identidad que se anunció alguna vez en clearnet está quemada para el modo oculto. Puede haber un aviso si existe un R9 anterior con IP para esa clave.</li>
+      <li>Documentación: <code>docs/proposals/&lt;issue&gt;-onion-routing.md</code> en el formato de #78, <code>docs/ROUTING.md</code> y la sección <code>routing</code> en <code>CONFIG.md</code>.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <div class="eyebrow">Pendiente</div>
+    <h2>Decisiones antes de empezar</h2>
+  </div>
+  <div class="decisions">
+    <div class="decision"><div><h3>Número de issue</h3><p class="rec">Para la propuesta y la rama.</p></div></div>
+    <div class="decision"><div><h3>¿Tor gestionado por el nodo o Tor del sistema?</h3><p class="rec"><b>Recomendado:</b> gestionado, con DataDirectory propio, sin tocar /etc/tor y con el ciclo de vida atado al nodo.</p></div></div>
+    <div class="decision"><div><h3>¿Llamar a .onion activo por defecto en nodos normales?</h3><p class="rec"><b>Recomendado:</b> sí (<code>ENABLED: auto</code>). Si no, los nodos ocultos solo serán alcanzables por la minoría que active Tor.</p></div></div>
+    <div class="decision"><div><h3>¿CLEARNET_VIA_EXIT desactivado por defecto?</h3><p class="rec"><b>Recomendado:</b> sí. Muchos exits bloquean puertos no estándar, y la disponibilidad pasaría a depender del exit.</p></div></div>
+  </div>
+</section>
+
+<footer>Preparado a partir de una auditoría del código de <span class="mono">nodo</span> en la rama feat/execute-peers-before-source-app, 10 de octubre de 2026.</footer>
+
+</div>
