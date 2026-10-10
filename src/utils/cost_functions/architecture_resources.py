@@ -8,7 +8,10 @@ Two halves of one contract (#459, absorbing #454):
   operator's ``host_limits`` -- and this node's measured per-core ``benchmark`` scores for
   that architecture. Ceilings, not headroom: they describe the machine, so the signed
   announcement only changes when the machine, its caps or its scores do, and the
-  announcement cache (``gateway.utils._sign_peer``) keeps hitting.
+  announcement cache (``gateway.utils._sign_peer``) keeps hitting. A node with
+  ``network.EXECUTE_LOCALLY: false`` runs nothing itself, so it announces none: the
+  machine it sits on is not on offer, and every peer summing what it could reach
+  would otherwise count capacity this node refuses to use.
 
 * **What a node does with a peer's**: before asking a peer ``GetServiceEstimatedCost``
   or ``GetResourceAvailability``, check the last ``Peer`` it announced (kept verbatim in
@@ -26,8 +29,16 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 from protos import celaut_pb2 as celaut
 from src.utils import benchmark, host_limits, keyvalue, logger as log
 from src.utils.arch_guard import arch_from_tags
+from src.utils.config import ConfigManager
 
 CPU_PERIOD_US = host_limits.DEFAULT_CPU_PERIOD_US
+
+env_manager = ConfigManager()
+
+
+def executes_locally() -> bool:
+    """Whether this node runs work itself (``network.EXECUTE_LOCALLY``), or only delegates it."""
+    return bool(env_manager.get("network.EXECUTE_LOCALLY", True))
 
 
 def _cores_bytes_disk() -> Tuple[Optional[float], Optional[int], Optional[int]]:
@@ -57,7 +68,14 @@ def announced_resources(served: Optional[Iterable[Sequence[str]]] = None) -> Lis
     ``resources`` carries every ceiling that is known -- an unknown one is left unset,
     which a reader takes as "not stated", never as 0 -- and only the benchmark scores
     actually measured: a ``-1`` is absent, so a peer leaves that primitive to the call.
+
+    Empty when this node delegates only (``network.EXECUTE_LOCALLY: false``): its
+    ceilings would be capacity no one can get, since the execution balancer never
+    offers this node as a candidate. The change reaches known peers on its own --
+    ``src/manager/announcement_change.py`` re-sends any changed announcement.
     """
+    if not executes_locally():
+        return []
     cores, ram, disk = _cores_bytes_disk()
     entries = []
     for aliases in served_architectures() if served is None else served:

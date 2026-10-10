@@ -1,4 +1,5 @@
 import sys, os, subprocess
+from bee_rpc.client import MAX_BLOCK_NESTING
 from bee_rpc.utils import modify_env
 from src.commands.daemon import config_digest, is_serving, restart_after_config_write
 from src.manager.manager import resolve_instance_token
@@ -17,6 +18,27 @@ BLOCKDIR = env_manager.get("BLOCKDIR")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
+
+
+def _exit(code):
+    """End the process now, with what the command printed already on the wire.
+
+    Commands end in ``os._exit`` so that a thread still alive cannot hold the process
+    open -- the JVM that the Ergo commands start through jpype leaves non-daemon
+    threads behind (see the end of the dispatch). It skips interpreter shutdown, and
+    with it the flush of ``sys.stdout``: on a terminal Python line-buffers, so nothing
+    is lost, but through a pipe, a redirect or ``$(...)`` the buffer is dropped and the
+    caller reads an empty answer that looks like success (#489). Flush here, once,
+    rather than in every command.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            # A closed pipe must not turn into a traceback in place of the exit code.
+            pass
+    os._exit(code)
+
 
 def take_options(argv, *flags):
     """Split ``argv`` into its positionals and the values of the named options.
@@ -176,7 +198,9 @@ if __name__ == '__main__':
         cache_dir=CACHE,
         mem_manager=iobd.mem_manager,
         block_dir=BLOCKDIR,
-        block_depth=1
+        # Send every level of blocks framed, as deep as a receiver reads: a block
+        # that holds blocks then arrives in the form it is stored in (#524).
+        block_depth=MAX_BLOCK_NESTING
     )
 
     if len(sys.argv) == 1:
@@ -303,29 +327,29 @@ if __name__ == '__main__':
                 # Bare: follow forever. `-n <lines>` / `--json`: a bounded tail that exits.
                 from src.commands.logs import logs
                 ok = logs(main_dir=MAIN_DIR, argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "status":
                 # OVERVIEW as one report (`--json` for one object); bare `nodo` in prose.
                 from src.commands.status import status
                 ok = status(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "config":
                 # get/set/append/remove/profile -- the TUI's config transaction, scriptable.
                 from src.commands.config_edit import config_command
                 ok = config_command(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "docs":
                 from src.commands.docs import docs
                 ok = docs(main_dir=MAIN_DIR, argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "export":
                 if len(sys.argv) < 4:
                     print("Missing export dir. Usage: nodo export <service> <dir> [--raw]")
-                    os._exit(1)
+                    _exit(1)
 
                 if len(sys.argv) > 4 and sys.argv[4] == "--raw":
 
@@ -470,8 +494,12 @@ if __name__ == '__main__':
                         print("Error: --name requires a value", flush=True)
                         sys.exit(1)
 
+                # Without a terminal to ask on, or with --no-input, a missing env var
+                # is not asked for: a required one aborts, an optional one is reported.
+                no_input = "--no-input" in args and not args.remove("--no-input")
+
                 if len(args) != 1:
-                    print("Usage: nodo execute [--name instance-name] [-e key value] <service id|service tag|'.celaut' file path>", flush=True)
+                    print("Usage: nodo execute [--name instance-name] [-e key value] [--no-input] <service id|service tag|'.celaut' file path>", flush=True)
                     sys.exit(1)
 
                 try:
@@ -480,7 +508,13 @@ if __name__ == '__main__':
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                execute(service=arg, envs=envs, instance_name=instance_name)
+                execute(
+                    service=arg,
+                    envs=envs,
+                    instance_name=instance_name,
+                    check_envs=True,
+                    ask_envs=sys.stdin.isatty() and not no_input,
+                )
 
             case "force_execution":
                 # Testing/dev only: bypasses execution_balancer and delegates
@@ -514,10 +548,12 @@ if __name__ == '__main__':
                         print("Error: --name requires a value", flush=True)
                         sys.exit(1)
 
+                no_input = "--no-input" in args and not args.remove("--no-input")
+
                 if len(args) != 2:
                     print(
                         "Usage: nodo force_execution <peer_id> [--name instance-name] [-e key value] "
-                        "<service id|service tag|'.celaut' file path>",
+                        "[--no-input] <service id|service tag|'.celaut' file path>",
                         flush=True,
                     )
                     sys.exit(1)
@@ -528,7 +564,14 @@ if __name__ == '__main__':
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                force_execution(peer_id=args[0], service=service_arg, envs=envs, instance_name=instance_name)
+                force_execution(
+                    peer_id=args[0],
+                    service=service_arg,
+                    envs=envs,
+                    instance_name=instance_name,
+                    check_envs=True,
+                    ask_envs=sys.stdin.isatty() and not no_input,
+                )
 
             case "estimate":
                 from src.commands.estimate import estimate
@@ -541,7 +584,16 @@ if __name__ == '__main__':
                     sys.exit(1)
 
                 estimate(service=arg)
-                
+
+            case "service_envs":
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                if len(args) != 1:
+                    print("Usage: nodo service_envs <service id|service tag> [--json]", flush=True)
+                    _exit(1)
+                from src.commands.service_envs import service_envs_command
+                _exit(0 if service_envs_command(service=args[0], as_json=as_json) else 1)
+
             case "update":
                 if os.geteuid() != 0:
                     print("This script requires superuser privileges. Please run with sudo.")
@@ -554,9 +606,9 @@ if __name__ == '__main__':
                 as_json = "--json" in args and not args.remove("--json")
                 if len(args) != 1:
                     print("Usage: nodo kill <instance id> [--json]", flush=True)
-                    os._exit(1)
+                    _exit(1)
                 from src.commands.kill import kill
-                os._exit(0 if kill(instance=args[0], as_json=as_json) else 1)
+                _exit(0 if kill(instance=args[0], as_json=as_json) else 1)
 
             case "burnall":
                 from src.commands.burnall import burnall
@@ -637,7 +689,7 @@ if __name__ == '__main__':
                     # The same arguments, minus --detach/--json, for the background
                     # process; it registers itself and this one reports it.
                     child_args = [a for a in sys.argv[2:] if a not in ("--detach", "--json")]
-                    os._exit(0 if detach(child_args, as_json=as_json) else 1)
+                    _exit(0 if detach(child_args, as_json=as_json) else 1)
 
                 tunnel_kwargs = {
                     "instance": args[0],
@@ -651,7 +703,7 @@ if __name__ == '__main__':
                 if idle_timeout is not None:
                     tunnel_kwargs["idle_timeout"] = idle_timeout
 
-                os._exit(0 if tunnel(**tunnel_kwargs) else 1)
+                _exit(0 if tunnel(**tunnel_kwargs) else 1)
 
             case "tunnels":
                 from src.commands.tunnels import list_tunnels
@@ -667,7 +719,7 @@ if __name__ == '__main__':
                         print(usage, flush=True)
                         sys.exit(1)
                     from src.commands.tunnels import list_inbound
-                    os._exit(0 if list_inbound(as_json=as_json) else 1)
+                    _exit(0 if list_inbound(as_json=as_json) else 1)
                 instance = ""
                 if "--instance" in args:
                     index = args.index("--instance")
@@ -682,7 +734,7 @@ if __name__ == '__main__':
                 ok = list_tunnels(
                     reference=args[0] if args else "", as_json=as_json, instance=instance,
                 )
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "tunnel_close":
                 from src.commands.tunnels import close_tunnels
@@ -690,7 +742,7 @@ if __name__ == '__main__':
                 as_json = "--json" in args and not args.remove("--json")
                 close_all = "--all" in args and not args.remove("--all")
                 ok = close_tunnels(args, close_all=close_all, as_json=as_json)
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "increase_deposit":
                 from src.commands.modify_deposit import modify_instance_deposit
@@ -718,7 +770,7 @@ if __name__ == '__main__':
             case "services":
                 from src.commands.services import services_command
                 ok = services_command(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
             
             case "tag":
                 from src.commands.services import modify_tag
@@ -728,25 +780,30 @@ if __name__ == '__main__':
             case 'clients':
                 from src.commands.clients import clients_command
                 ok = clients_command(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
                 
             case "peers":
                 from src.commands.peers import peers_command
                 ok = peers_command(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
+
+            case "protocol":
+                from src.commands.protocol import protocol_command
+                ok = protocol_command(argv=sys.argv[2:])
+                _exit(0 if ok else 1)
 
             case "peer_reputation":
                 # The TUI's `+`/`-` on PEERS: move our local score of a peer, with an event.
                 peer_reputation_args = [a for a in sys.argv[2:] if a != "--json"]
                 if len(peer_reputation_args) != 2:
                     print("Usage: nodo peer_reputation <peer_id> <+N|-N> [--json]", flush=True)
-                    os._exit(1)
+                    _exit(1)
                 from src.commands.peers import adjust_peer_reputation
                 ok = adjust_peer_reputation(
                     peer_id=peer_reputation_args[0], delta=peer_reputation_args[1],
                     as_json="--json" in sys.argv[2:],
                 )
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "instances":
                 from src.commands.instances import list_instances
@@ -755,7 +812,11 @@ if __name__ == '__main__':
                 as_json = "--json" in args and not args.remove("--json")
                 search = " ".join(args)
                 ok = list_instances(groupable=groupable, search=search, as_json=as_json)
-                os._exit(0 if ok is not False else 1)
+                _exit(0 if ok is not False else 1)
+
+            case "refresh_peers":
+                from src.commands.peers import refresh_peers_command
+                _exit(0 if refresh_peers_command(sys.argv[2:]) else 1)
 
             case 'connect':
                 from src.commands.connect import connect
@@ -775,7 +836,7 @@ if __name__ == '__main__':
                     result: bool = submit_reputation(force_submit=True)
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
-                    os._exit(1)
+                    _exit(1)
                 if result:
                     print("Reputation proof submitted successfully.", flush=True)
                 else:
@@ -791,7 +852,7 @@ if __name__ == '__main__':
                     sync_reputation_proof_ownership()
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
-                    os._exit(1)
+                    _exit(1)
                 restart_after_config_write(config_before)
                 
             case 'refresh_ergo_nodes':
@@ -836,26 +897,34 @@ if __name__ == '__main__':
                 getattr(__import__(f"tests.{_t}", fromlist=[_t]), _t)()  # Import the test passed on param.
 
             case 'pack':
-                from src.commands.packer.zip_with_dockerfile.pack import pack
+                # A project directory (relative to the shell it was typed in) or an
+                # https git URL. Every pack is recorded under <main.STORAGE>/packs, so
+                # `nodo packs` and the TUI's PACKS page see it; --detach runs it in
+                # the background (src/commands/packs.py).
+                from src.commands.packs import pack_command
+                code = pack_command(sys.argv[2:])
+                sys.stdout.flush()
+                sys.stderr.flush()
+                _exit(code)
 
-                import os
-                import sys
+            case "packs":
+                from src.commands.packs import list_packs
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                active_only = "--active" in args and not args.remove("--active")
+                if len(args) > 1 or (args and args[0].startswith("--")):
+                    print("Usage: nodo packs [<pack id>] [--active] [--json]", flush=True)
+                    sys.exit(1)
+                ok = list_packs(reference=args[0] if args else "", as_json=as_json,
+                                active_only=active_only)
+                _exit(0 if ok else 1)
 
-                # Get the path provided by the user
-                user_path = sys.argv[2]
-
-                if "http" not in user_path[:4]:
-                    absolute_path = resolve_user_path(user_path)
-
-                    # Check if the directory exists
-                    if not os.path.exists(absolute_path):
-                        print(f"Error: The directory {absolute_path} does not exist")
-                        sys.exit(1)
-
-                else:
-                    absolute_path = user_path  # In case it's an external git repository
-
-                pack(directory=absolute_path)
+            case "pack_cancel":
+                from src.commands.packs import cancel_packs
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                ok = cancel_packs(args, as_json=as_json)
+                _exit(0 if ok else 1)
 
             case "tui":
                 # A binary built by CI for this host's target, when there was a
@@ -876,7 +945,14 @@ if __name__ == '__main__':
                         flush=True,
                     )
                     sys.exit(1)
-                sys.exit(subprocess.call([tui_binary]))
+                # The binary was compiled on a CI runner, so the checkout path it
+                # was built at does not exist here: tell it where config.yaml and
+                # docs/ really are.
+                tui_env = {
+                    **os.environ,
+                    "NODO_ROOT": os.path.dirname(os.path.abspath(__file__)),
+                }
+                sys.exit(subprocess.call([tui_binary], env=tui_env))
 
             case "ggconf":
                 from src.commands.ggconf import generate_gateway_config_dev
@@ -926,7 +1002,7 @@ if __name__ == '__main__':
                     tx_history(argv=sys.argv[2:])
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
-                    os._exit(1)
+                    _exit(1)
 
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
@@ -943,44 +1019,44 @@ if __name__ == '__main__':
             case "reputation":
                 from src.commands.reputation import reputation
                 ok = reputation(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "earnings":
                 from src.commands.history import earnings
                 ok = earnings(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "energy":
                 from src.commands.history import energy
                 ok = energy(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "schedule":
                 from src.commands.history import schedule
                 ok = schedule(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "donations":
                 from src.commands.donations import donations
                 ok = donations(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "resources":
                 from src.commands.resources import resources
                 ok = resources(argv=sys.argv[2:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "verify_reputation":
                 if len(sys.argv) < 3:
                     print("Usage: nodo verify_reputation <peer_id>", flush=True)
-                    os._exit(1)
+                    _exit(1)
                 try:
                     from src.commands.verify_reputation import verify_reputation
                     ok = verify_reputation(peer_id=sys.argv[2])
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
-                    os._exit(1)
-                os._exit(0 if ok else 1)
+                    _exit(1)
+                _exit(0 if ok else 1)
 
             case "pay":
                 # The amount is in the asset's own unit -- ERG for Ergo, BTC for
@@ -998,7 +1074,7 @@ if __name__ == '__main__':
                     )
                 except ValueError as e:
                     print(str(e), flush=True)
-                    os._exit(1)
+                    _exit(1)
                 if len(pay_args) < 2:
                     print(
                         "Usage: nodo pay <peer_id> <amount> "
@@ -1006,7 +1082,7 @@ if __name__ == '__main__':
                         "[--asset <symbol|token id>]",
                         flush=True,
                     )
-                    os._exit(1)
+                    _exit(1)
                 try:
                     from src.commands.pay import pay
                     ok = pay(
@@ -1017,8 +1093,8 @@ if __name__ == '__main__':
                     )
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
-                    os._exit(1)
-                os._exit(0 if ok else 1)
+                    _exit(1)
+                _exit(0 if ok else 1)
 
             case "chat":
                 # `nodo chat <peer_id> <message...>` sends; `nodo chat <peer_id>`
@@ -1032,7 +1108,7 @@ if __name__ == '__main__':
                     [a for a in sys.argv[2:] if a != "--json"], "--service")
                 if not chat_args:
                     print("Usage: nodo chat <peer_id> [message...] [--service <id|tag>]", flush=True)
-                    os._exit(1)
+                    _exit(1)
                 chat_peer_id, chat_words = chat_args[0], chat_args[1:]
                 if chat_words or chat_service:
                     from src.commands.chat import send_chat
@@ -1042,7 +1118,7 @@ if __name__ == '__main__':
                 else:
                     from src.commands.chat import show_chat
                     ok = show_chat(peer_id=chat_peer_id, as_json=chat_as_json)
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "chat_open":
                 # `--message` sends a real first message distinct from the topic
@@ -1056,7 +1132,7 @@ if __name__ == '__main__':
                         "[--service <id|tag>]",
                         flush=True,
                     )
-                    os._exit(1)
+                    _exit(1)
                 from src.commands.chat import open_thread
                 ok = open_thread(
                     peer_id=chat_open_args[0],
@@ -1065,7 +1141,7 @@ if __name__ == '__main__':
                     service=chat_open_opts.get("--service"),
                     as_json="--json" in sys.argv[2:],
                 )
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "chat_reply":
                 chat_reply_args, chat_reply_service = take_option(sys.argv[2:], "--service")
@@ -1074,14 +1150,14 @@ if __name__ == '__main__':
                         "Usage: nodo chat_reply <conversation_id> <message...> [--service <id|tag>]",
                         flush=True,
                     )
-                    os._exit(1)
+                    _exit(1)
                 from src.commands.chat import reply_in_thread
                 ok = reply_in_thread(
                     conversation_id=chat_reply_args[0],
                     body=" ".join(chat_reply_args[1:]),
                     service=chat_reply_service,
                 )
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "chat_threads":
                 # `nodo chat_threads` lists every conversation; `nodo chat_threads
@@ -1092,32 +1168,32 @@ if __name__ == '__main__':
                     peer_id=chat_threads_args[0] if chat_threads_args else None,
                     as_json="--json" in sys.argv[2:],
                 )
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "chat_thread":
                 # Singular: one conversation's own messages, not the list.
                 if len(sys.argv) < 3:
                     print("Usage: nodo chat_thread <conversation_id>", flush=True)
-                    os._exit(1)
+                    _exit(1)
                 from src.commands.chat import show_thread
                 ok = show_thread(conversation_id=sys.argv[2], as_json="--json" in sys.argv[3:])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "chat_close":
                 if len(sys.argv) < 3:
                     print("Usage: nodo chat_close <conversation_id>", flush=True)
-                    os._exit(1)
+                    _exit(1)
                 from src.commands.chat import close_thread
                 ok = close_thread(conversation_id=sys.argv[2])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "chat_reopen":
                 if len(sys.argv) < 3:
                     print("Usage: nodo chat_reopen <conversation_id>", flush=True)
-                    os._exit(1)
+                    _exit(1)
                 from src.commands.chat import reopen_thread
                 ok = reopen_thread(conversation_id=sys.argv[2])
-                os._exit(0 if ok else 1)
+                _exit(0 if ok else 1)
 
             case "local_builder":
                 # Run buildctl against nodo's rootless builder (the optional local
@@ -1166,7 +1242,7 @@ if __name__ == '__main__':
                 from src.commands.completion import main as completion_main
                 os.environ.setdefault("NODO_COMPLETION_DIR", MAIN_DIR)
                 os.environ.setdefault("NODO_COMPLETION_PY", sys.executable)
-                os._exit(completion_main(sys.argv[2:]))
+                _exit(completion_main(sys.argv[2:]))
 
             case other:
                 # Never a dead end: point at the catalogue, and at the command
@@ -1185,7 +1261,5 @@ if __name__ == '__main__':
     # start a JVM through jpype, whose non-daemon threads otherwise keep the
     # interpreter alive and hang the shell after the command has already done its
     # work. `serve` blocks in wait_for_termination() and never reaches here, and the
-    # codebase registers no atexit handlers, so flush the streams and exit hard.
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(0)
+    # codebase registers no atexit handlers, so exit hard; _exit flushes the streams.
+    _exit(0)

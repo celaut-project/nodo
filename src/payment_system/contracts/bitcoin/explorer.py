@@ -23,7 +23,7 @@ the excess is swept to ``payments.COLD_WALLET`` when that is set.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import requests
 
@@ -300,24 +300,28 @@ class ExplorerBackend:
     # ------------------------------------------------------------------ writes
     def send_to(self, address: str, amount_sat: int, *, op_return: Optional[bytes] = None,
                 fee_rate_sat_vb: float,
-                subtract_fee_from_amount: bool = False) -> str:
+                subtract_fee_from_amount: bool = False,
+                on_signed: Optional[Callable[[str], None]] = None) -> str:
         """Pay one address, optionally carrying ``op_return``. Returns the txid."""
         return self.send_many(
             [(address, amount_sat)], op_return=op_return,
             fee_rate_sat_vb=fee_rate_sat_vb,
             subtract_fee_from_outputs=[0] if subtract_fee_from_amount else None,
+            on_signed=on_signed,
         )
 
     def send_many(self, outputs: Sequence[Tuple[str, int]], *,
                   op_return: Optional[bytes] = None,
                   fee_rate_sat_vb: float,
-                  subtract_fee_from_outputs: Optional[Sequence[int]] = None) -> str:
+                  subtract_fee_from_outputs: Optional[Sequence[int]] = None,
+                  on_signed: Optional[Callable[[str], None]] = None) -> str:
         """Build, sign and relay one transaction paying every output. Returns the txid.
 
         One transaction, so a donation split across wallets costs one fee. Nothing is
         sent unless the whole transaction was built and every signature verified, and
         the explorer is believed about the txid only if it agrees with the one computed
-        here.
+        here. ``on_signed`` is called with that txid before the relay, so a payer can
+        write the payment down before any money moves.
         """
         if not outputs:
             raise BackendUnavailable("nothing to send: no outputs")
@@ -341,6 +345,8 @@ class ExplorerBackend:
         except ValueError as exc:
             raise BackendUnavailable(f"could not build the transaction: {exc}") from None
 
+        if on_signed is not None:
+            on_signed(built.txid)
         relayed = self._post("/tx", built.hex)
         if relayed.lower() != built.txid:
             # The transaction may well be on its way, which is exactly why this is not a

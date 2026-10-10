@@ -191,6 +191,123 @@ def _namespace_entry(namespace: str) -> NamespaceEntry:
     )
 
 
+# Every namespace and veth a probe creates starts with this, and nothing else nodo
+# makes does: ``nodofw<suffix>`` for the gateway probe, ``nodofw{c,p}<suffix>`` for
+# the guest-to-guest one, and their veths add one more letter after the tag.
+PROBE_PREFIX = "nodofw"
+
+# A probe holds its namespace for a few connect attempts, seconds in all. One
+# older than this was left behind by a process that died before its ``finally``
+# ran, and nothing will ever delete it.
+LEAKED_PROBE_AGE_S = 300.0
+
+
+def _probe_namespace_paths() -> dict:
+    """Name -> mount path of every probe namespace on this host, live or leaked."""
+    found: dict = {}
+    for directory in NETNS_MOUNT_DIRS:
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            continue
+        for name in names:
+            if name.startswith(PROBE_PREFIX) and name not in found:
+                found[name] = os.path.join(directory, name)
+    return found
+
+
+def probe_held_addresses(run: Optional[Runner] = None) -> Set[str]:
+    """The addresses that probe namespaces hold on the guest bridge right now.
+
+    A probe answers ARP for its address for as long as its namespace exists, so a
+    guest given the same address boots and is never reached: the bridge sends its
+    traffic to the probe's veth. The guest allocator must skip these, and it cannot
+    see them in its own records. Best-effort: a namespace it cannot look into
+    contributes nothing.
+    """
+    runner = run or _default_runner
+    held: Set[str] = set()
+    for name in _probe_namespace_paths():
+        entry = _namespace_entry(name)
+        proc = runner([*entry.ip_prefix, "-o", "-4", "addr", "show"])
+        if proc.returncode != 0:
+            continue
+        for token in (proc.stdout or "").split():
+            address = token.split("/")[0]
+            try:
+                parsed = ipaddress.ip_address(address)
+            except ValueError:
+                continue
+            if not parsed.is_loopback:
+                held.add(address)
+    return held
+
+
+def _owning_namespace(link: str) -> Optional[str]:
+    """The probe namespace a probe veth belongs to, from its name alone."""
+    rest = link[len(PROBE_PREFIX):]
+    if rest[:1] in ("a", "b"):                              # nodofw{a,b}<suffix>
+        return PROBE_PREFIX + rest[1:]
+    if rest[:1] in ("c", "p") and rest[1:2] in ("h", "g"):  # nodofw{c,p}{h,g}<suffix>
+        return PROBE_PREFIX + rest[:1] + rest[2:]
+    return None
+
+
+def sweep_leaked_probes(
+    run: Optional[Runner] = None,
+    *,
+    max_age_s: float = LEAKED_PROBE_AGE_S,
+    now: Callable[[], float] = time.time,
+) -> List[str]:
+    """Delete the probe namespaces and veths a dead process left behind. Root only.
+
+    A probe cleans up in a ``finally``, which a killed daemon or a reboot mid-probe
+    never reaches. What is left keeps answering ARP for an address the guest
+    allocator may hand to a VM. Only namespaces older than ``max_age_s`` are
+    deleted, so a probe that another process (``nodo doctor``) runs at this moment
+    is left alone. A host-side veth whose namespace is gone is deleted at any age:
+    a probe creates the namespace before the veth, so a live probe never has one.
+
+    Returns what was deleted, for the log.
+    """
+    runner = run or _default_runner
+    if os.geteuid() != 0:
+        return []
+
+    removed: List[str] = []
+    remaining = set()
+    for name, path in _probe_namespace_paths().items():
+        try:
+            age = now() - os.stat(path).st_mtime
+        except OSError:
+            continue
+        if age < max_age_s:
+            remaining.add(name)
+            continue
+        if runner(["ip", "netns", "del", name]).returncode == 0:
+            removed.append(name)
+        else:
+            remaining.add(name)
+
+    links = runner(["ip", "-o", "link", "show"])
+    if links.returncode == 0:
+        for line in (links.stdout or "").splitlines():
+            # "7: nodofwa1a7774@if6: <BROADCAST,...> ..." -- the name is field two.
+            fields = line.split()
+            if len(fields) < 2:
+                continue
+            link = fields[1].rstrip(":").split("@")[0]
+            if not link.startswith(PROBE_PREFIX):
+                continue
+            owner = _owning_namespace(link)
+            if owner is None or owner in remaining:
+                continue
+            if runner(["ip", "link", "del", link]).returncode == 0:
+                removed.append(link)
+
+    return removed
+
+
 def _addresses_in_use(run: Runner, bridge: str) -> Set[str]:
     in_use: Set[str] = set()
     for args in (

@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Optional, Tuple
 from protos import celaut_pb2
+from src.utils.ledger_descriptors import ergo_payment_ledger as _ergo_ledger
 import requests
 from hashlib import sha3_256
 from src.database import sql_connection
@@ -41,24 +42,12 @@ env_manager = ConfigManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 # Technical minimum box value the node must always retain / be able to build an output with.
 SAFE_MIN_BOX_VALUE = 1_000_000
-# This contract's ledger identity, declared here rather than imported from another
-# subsystem's constants. The TAG is the identity: it is what a `contract_instance` row
-# is keyed by, what `MethodKey` carries and what the check below compares. `PROSE` and
-# `FORMAL` are description -- they travel to peers in the advertised `Contract.Ledger`
-# and nothing on this side reads them back, which is precisely why they must not be
-# part of how a ledger is identified.
-LEDGER = "ergo"  # or "ergo-testnet" for Ergo testnet.
-PROSE = (
-    "Ergo system: PoW blockchain using Autolykos with verifiable eUTXO model, "
-    "non-Turing-complete Sigma scripts, finite emission with linear reduction, "
-    "on-chain miner-signaled governance, and cryptographic security via Merkle trees, "
-    "proof-of-work, and zero-knowledge proofs."
-)
-# No formal specification is published for the chain itself, so this is empty rather
-# than a placeholder that would claim one exists.
-FORMAL = b""
+# This contract's ledger tag: what a `contract_instance` row is keyed by and what
+# `MethodKey` carries. The full declaration peers receive -- chain, units, attributes,
+# how a payment is bound to its deposit token -- is `ledger()`, shared with the
+# reputation proofs (src/utils/ledger_descriptors.py).
+LEDGER = "ergo"
 
-ergo_ledger = celaut_pb2.Contract.Ledger(tags=[LEDGER], prose=PROSE, formal=FORMAL)
 # Stable, wallet-independent identity of the Ergo P2PK payment contract TYPE. Its sha3 is
 # the contract_hash used to match this kind of contract across nodes; the specific wallet
 # ErgoTree travels per-instance as the raw ``script`` xattr (propositionBytes).
@@ -112,8 +101,8 @@ def _cold_wallet_min_transfer_nanoerg() -> int:
     return erg_to_nanoerg(env_manager.get("ledgers.ergo.payments.COLD_WALLET_MIN_TRANSFER"))
 
 
-WAIT_TX_TIME = 240  # (each 5 seconds)
-WAT_TX_SLEEP_TIME = 5
+WAIT_TX_ATTEMPTS = 240
+WAIT_TX_SLEEP_TIME = 5  # seconds between attempts
 
 payment_lock = Lock()  # Ensures the same input box is not spent for more than it holds.
 _transaction_url_reporter: ContextVar = ContextVar(
@@ -140,6 +129,11 @@ def transaction_url_reporting(reporter):
 def transaction_id_reporting(reporter):
     """Temporarily report a submitted transaction's *id* to the caller.
 
+    Called twice per payment: ``reporter(tx_id, sent=False)`` once the transaction is
+    signed and before it is sent, and ``reporter(tx_id, sent=True)`` once the node took
+    it. The first call is what lets the payer write the payment down before any money
+    can move.
+
     Kept separate from the URL hook above rather than folded into it. The URL is
     presentation -- `nodo pay` prints a sigmaspace link for a human to click -- while
     the id is the record: it is what `payments.tx_id` stores and what `tx_history`
@@ -159,8 +153,9 @@ def __mu_to_nanoerg(amount: int) -> int:
 
     The rate lives in ``ledgers.ergo.payments.MU_PER_NANOERG`` (1 by default, which makes
     the conversion the identity). It is the single point where the node's unit of account
-    meets real money, and it is the same number peers are told as
-    ``ContractRate.mu_per_unit``, so payer and receiver compute the same figure.
+    meets real money, and it is the same number peers are told, per nanoERG, as
+    ``ContractRate.mu_per_unit`` (:func:`mu_per_base_unit`), so payer and receiver
+    compute the same figure.
 
     The old `GAS_PER_ERG` did this with a float reciprocal set to 1e58, which silently
     turned every real charge into zero nanoERG.
@@ -207,13 +202,16 @@ def unavailable_reason() -> Optional[str]:
     return None
 
 
+def mu_per_base_unit() -> int:
+    """MU per nanoERG: what travels to peers as ``ContractRate.mu_per_unit``."""
+    return rate.advertised_mu_per_nanoerg()
+
+
 def mu_per_unit() -> int:
     """MU bought by one **whole** unit of this ledger -- one ERG, not one nanoERG.
 
-    What travels to peers as ``ContractRate.mu_per_unit``, and the only thing that makes
-    a price quoted in MU actionable to whoever reads it. Whole units rather than base
-    units because both sides convert through the same figure (``mu_conversion``): the
-    convention only has to be *shared*, and a whole unit is the one a person can check.
+    For a person to read and type amounts in (``nodo pay`` takes ERG). Not what a peer
+    is told: ``ContractRate.mu_per_unit`` is per base unit (:func:`mu_per_base_unit`).
     """
     return rate.mu_per_erg()
 
@@ -221,10 +219,10 @@ def mu_per_unit() -> int:
 def ledger() -> celaut_pb2.Contract.Ledger:
     """The ledger message this contract settles on, as peers receive it.
 
-    A function rather than the module-level object it returns, so the registry can ask
-    every contract the same question without importing each one's constants.
+    The Ergo network as every place declares it, plus how a payment is made on it
+    (``ledger_descriptors.ergo_payment_ledger``).
     """
-    return ergo_ledger
+    return _ergo_ledger()
 
 
 def mu_to_native(amount: int) -> Decimal:
@@ -339,7 +337,7 @@ def init():
         _warn_if_tokens_cannot_be_moved(assets)
     sql = sql_connection.SQLConnection()
     for asset in (NATIVE_ASSET, *(a.token_id for a in assets)):
-        contract = celaut_pb2.Contract(ledger=ergo_ledger)
+        contract = celaut_pb2.Contract(ledger=_ergo_ledger())
         set_token_id(contract, asset)
         # Canonical value: raw ErgoTree/propositionBytes of the wallet's P2PK payment boxes.
         set_script(contract, proposition_bytes)
@@ -852,8 +850,19 @@ def _settle(amount: int, deposit_token: str, ledger: str,
             w_mnemonic = ergo.getMnemonic(wallet_mnemonic=WALLET_MNEMONIC(), mnemonic_password=None)[0]
             signed_tx = ergo.signTransaction(unsigned_tx, w_mnemonic, prover_index=0)
 
+            # The id is a hash of the signed transaction, so it is known before the
+            # send. Reported now, with `sent=False`, so the payer writes its row before
+            # the transaction can reach the network: a daemon that stops right after the
+            # send still has the id to resume by (#523).
+            tx_id = str(signed_tx.getId())
+            id_reporter = _transaction_id_reporter.get()
+            if id_reporter:
+                id_reporter(tx_id, sent=False)
+
             try:
-                tx_id = ergo.txId(signed_tx)
+                sent_id = ergo.txId(signed_tx)
+                if sent_id != tx_id:
+                    LOGGER(f"The node answered {sent_id} to the send of tx {tx_id}.")
                 LOGGER(
                     "Transaction submitted: "
                     f"https://sigmaspace.io/en/transaction/{tx_id} "
@@ -862,38 +871,56 @@ def _settle(amount: int, deposit_token: str, ledger: str,
                 reporter = _transaction_url_reporter.get()
                 if reporter:
                     reporter(f"https://sigmaspace.io/en/transaction/{tx_id}")
-                id_reporter = _transaction_id_reporter.get()
                 if id_reporter:
-                    id_reporter(tx_id)
+                    id_reporter(tx_id, sent=True)
             except Exception as e:
                 if "Double spending attempt" in str(e):
                     raise DoubleSpendingAttempt(LEDGER)
                 else:
                     raise e
 
-            for _ in range(0, WAIT_TX_TIME):
-                sleep(WAT_TX_SLEEP_TIME)
-                response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
-                if response.status_code != 200:
-                    if response.status_code != 404:
-                        LOGGER(f"{ergo.get_api_url()} tx {tx_id} check failed: {response.status_code}")
-                    continue
-
-                obj = response.json()
-                if obj["numConfirmations"] > 1:
-                    LOGGER(f"Tx {tx_id} verified.")
-                    contract = celaut_pb2.Contract(ledger=ergo_ledger)
-                    # Which asset was paid, so the peer files the credit against the
-                    # method it advertised rather than against this contract's default.
-                    set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
-                    set_script(contract, script)
-                    set_contract_type(contract, CONTRACT.encode("utf-8"))
-                    return contract
-
-            raise Exception(f"Can't verify the tx {tx_id}")
+            return _await_settlement(tx_id=tx_id, script=script, asset=asset, ergo=ergo)
 
         except Exception as e:
             raise e
+
+
+def await_payment(tx_id: str, script: bytes) -> celaut_pb2.Contract:
+    """Wait for an ERG payment already broadcast, and return what `Payable` carries."""
+    return _await_settlement(tx_id=tx_id, script=script, asset=None)
+
+
+def _await_settlement(tx_id: str, script: bytes, asset, ergo=None) -> celaut_pb2.Contract:
+    """Wait until ``tx_id`` has two confirmations; return the contract the peer is told.
+
+    The second half of `_settle`, kept apart so a payment the daemon stopped in the
+    middle of can be finished from its transaction id alone (#523). It needs no
+    `payment_lock`: it spends nothing, it only reads the chain. Raises when the wait
+    runs out, and the payment is then still on the network: the caller keeps it to
+    resume, it does not pay again.
+    """
+    if ergo is None:
+        ergo = __init_ergo()
+    for _ in range(0, WAIT_TX_ATTEMPTS):
+        sleep(WAIT_TX_SLEEP_TIME)
+        response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
+        if response.status_code != 200:
+            if response.status_code != 404:
+                LOGGER(f"{ergo.get_api_url()} tx {tx_id} check failed: {response.status_code}")
+            continue
+
+        obj = response.json()
+        if obj["numConfirmations"] > 1:
+            LOGGER(f"Tx {tx_id} verified.")
+            contract = celaut_pb2.Contract(ledger=_ergo_ledger())
+            # Which asset was paid, so the peer files the credit against the
+            # method it advertised rather than against this contract's default.
+            set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
+            set_script(contract, script)
+            set_contract_type(contract, CONTRACT.encode("utf-8"))
+            return contract
+
+    raise TimeoutError(f"Can't verify the tx {tx_id}")
 
 
 # Validate the payment by checking for an unspent box with the token in register R4 at the wallet.
@@ -1099,10 +1126,12 @@ def methods():
                                    symbol=asset.symbol, unit_name=asset.unit_name,
                                    calls={
             "mu_per_unit": partial(rate.mu_per_whole_unit, asset),
+            "mu_per_base_unit": partial(rate.advertised_mu_per_base_unit, asset),
             "settlement_floors_mu": partial(_token_settlement_floors_mu, asset),
             "mu_to_native": partial(rate.mu_to_base_units_exact, asset=asset),
             "check_sender_balance": partial(_token_check_sender_balance, asset=asset),
             "process_payment": partial(_settle, asset=asset),
+            "await_payment": partial(_await_settlement, asset=asset),
             "payment_process_validator": partial(_validate, asset=asset),
         }))
     return built

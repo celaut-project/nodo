@@ -397,6 +397,9 @@ if [ -f /newroot/.__nodo_virtiofs ]; then
     # Flatten each JSON object onto its own line (one {tag,path,ro} per line), then
     # iterate via redirect — NOT a pipe — so the loop runs in this shell and a
     # `fatal` actually halts init. Parsed with sed (no jq in the initramfs).
+    # The initramfs has no /tmp of its own (only /newroot/tmp, created below), and this
+    # redirect fails without it -- init then exits and the kernel panics.
+    mkdir -p /tmp
     tr '}' '\n' < /newroot/.__nodo_virtiofs > /tmp/.__nodo_virtiofs.lines
     while IFS= read -r obj; do
         case "$obj" in
@@ -444,6 +447,11 @@ fi
 # and untouched, kept or not by this path.
 if [ -f /newroot/.__nodo_envs ]; then
     log "applying guest environment variables from .__nodo_envs"
+    # No trace while the values pass through the shell. `set -x` prints every
+    # command with its arguments, so it would write each value, in base64 and
+    # decoded, into the serial log, and the node copies that log into its own
+    # when a launch fails (#497). Turned on again after the loop.
+    set +x
     # This script's own control variables (PATH -- needed by every command
     # below, including base64 in this very loop -- and ENTRYPOINT, read for
     # the exec check and switch_root just after) must survive this loop
@@ -465,6 +473,7 @@ if [ -f /newroot/.__nodo_envs ]; then
     PATH="$__nodo_init_path"
     ENTRYPOINT="$__nodo_init_entrypoint"
     unset __nodo_init_path __nodo_init_entrypoint
+    set -x
 fi
 
 [ -x "/newroot$ENTRYPOINT" ] || fatal "entrypoint is not executable: $ENTRYPOINT"

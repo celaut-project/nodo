@@ -38,7 +38,14 @@ from src.utils.filesystem_xattrs import (
     metadata_from_lstat,
     metadata_from_tarinfo,
 )
-from src.utils.shared_filesystems import declarations_for_filesystem
+from src.utils.shared_filesystems import (
+    ACCESS_XATTR_KEY,
+    GUEST_XATTR_KEY,
+    SHARE_ENV_XATTR_KEY,
+    SHARE_TAG_XATTR_KEY,
+    SHARED_XATTR_KEY,
+    declarations_for_filesystem,
+)
 from src.utils.verify import calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
@@ -75,6 +82,13 @@ DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile
 # and the manifest deliberately does not reach it. See docs/PACKING.md.
 READ_ONLY_FILESYSTEM_KEY = "read_only_filesystem"
 
+# `service.json` property that declares shared filesystems: a list of
+# {path, role, tag?, env?, access?}. It becomes the reserved xattrs of
+# src/utils/shared_filesystems.py on the directory's ItemBranch. See docs/PACKING.md.
+SHARED_FILESYSTEMS_KEY = "shared_filesystems"
+_SHARED_ROLE_XATTRS = {"shared": SHARED_XATTR_KEY, "guest": GUEST_XATTR_KEY}
+_SHARED_ENTRY_FIELDS = {"path", "role", "tag", "env", "access"}
+
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
     os.makedirs(CACHE, exist_ok=True)
@@ -91,6 +105,49 @@ def _normalize_tar_member_path(name: str) -> str:
     # "" and is filtered out by the caller — it has no corresponding branch.
     normalized = posixpath.normpath(name).lstrip("/")
     return "" if normalized == "." else normalized
+
+
+class ImageLinkEscapeError(RuntimeError):
+    """A symlink of the image points outside the image root."""
+
+
+def _link_escapes_image(image_path: str, target: str) -> bool:
+    # Resolve the target by its text alone, against the image root: an absolute
+    # target starts at that root, a relative one at the link's own directory.
+    # It escapes if a ".." climbs above the root. Nothing on the packing host
+    # is read, so the answer is the same on every host.
+    if target.startswith("/"):
+        parts = []
+    else:
+        parts = [p for p in posixpath.dirname(image_path).split("/") if p]
+    for segment in target.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if not parts:
+                return True
+            parts.pop()
+        else:
+            parts.append(segment)
+    return False
+
+
+def image_link_target(host_path: str, image_path: str) -> str:
+    # The link text exactly as the image has it. The guest resolves it against
+    # its own root at run time. Do not resolve it here: realpath follows an
+    # absolute target through the packing host's root, so the guest got the
+    # host's /etc/alternatives choices (awk -> gawk) and the host's usrmerge
+    # (/lib64/ld-linux-x86-64.so.2 -> /usr/lib/...), and the service id
+    # changed with the packing host (#485).
+    #
+    # A link whose target leaves the image root stops the pack: the service
+    # must not depend on, or point at, anything outside its own filesystem.
+    target = os.readlink(host_path)
+    if _link_escapes_image(image_path, target):
+        raise ImageLinkEscapeError(
+            f"Symlink '{image_path}' -> '{target}' points outside the image root."
+        )
+    return target
 
 
 # Every service carries these digests regardless of `hashing.HASH`, so any
@@ -297,6 +354,7 @@ class ZipContainerPacker:
         # Read for its side effect: a malformed declaration must be refused here,
         # in __init__, rather than after BuildKit has built the whole image.
         self._read_only_filesystem_requested()
+        self._shared_filesystems_declared()
         self._benchmarks()
         # Same reason, and one more: a `pow:` network's `formal` is parsed by the
         # very code that will read it at launch, so an ask that cannot resolve is
@@ -337,6 +395,104 @@ class ZipContainerPacker:
     # ------------------------------------------------------------------ #
     # read_only_filesystem
     # ------------------------------------------------------------------ #
+    def _shared_filesystems_declared(self) -> list:
+        """``service.json`` ``shared_filesystems``, type-checked, as a list of dicts.
+
+        Absent or empty is an empty list. Each entry is an object with a string
+        ``path`` (absolute, not ``/``) and a ``role`` of ``shared`` or ``guest``;
+        ``tag``, ``env`` and ``access`` are optional strings. Nothing is coerced
+        and unknown fields are refused: a misspelt ``acces`` silently dropped
+        would pack a share with the wrong mode.
+        """
+        if SHARED_FILESYSTEMS_KEY not in self.json:
+            return []
+
+        declared = self.json[SHARED_FILESYSTEMS_KEY]
+        where = f"service.json: '{SHARED_FILESYSTEMS_KEY}'"
+        if not isinstance(declared, list):
+            raise ValueError(
+                f"{where} must be a list of objects, got {type(declared).__name__} {declared!r}."
+            )
+
+        entries, seen_paths = [], set()
+        for index, entry in enumerate(declared):
+            at = f"{where}[{index}]"
+            if not isinstance(entry, dict):
+                raise ValueError(f"{at} must be an object, got {type(entry).__name__} {entry!r}.")
+            unknown = sorted(set(entry) - _SHARED_ENTRY_FIELDS)
+            if unknown:
+                raise ValueError(
+                    f"{at} has unknown field(s) {unknown}; "
+                    f"allowed: {sorted(_SHARED_ENTRY_FIELDS)}."
+                )
+            for field in ("tag", "env", "access", "path", "role"):
+                if field in entry and not isinstance(entry[field], str):
+                    raise ValueError(
+                        f"{at}.{field} must be a string, got "
+                        f"{type(entry[field]).__name__} {entry[field]!r}."
+                    )
+            if "path" not in entry or "role" not in entry:
+                raise ValueError(f"{at} requires both 'path' and 'role'.")
+            if entry["role"] not in _SHARED_ROLE_XATTRS:
+                raise ValueError(
+                    f"{at}.role must be 'shared' or 'guest', got {entry['role']!r}."
+                )
+            path = posixpath.normpath(entry["path"])
+            if not entry["path"].startswith("/") or path in ("/", "//"):
+                raise ValueError(
+                    f"{at}.path must be an absolute path to a directory other than "
+                    f"the root, got {entry['path']!r}."
+                )
+            if path in seen_paths:
+                raise ValueError(f"{at}.path {path!r} is declared twice.")
+            seen_paths.add(path)
+            entries.append({**entry, "path": path})
+        return entries
+
+    def _apply_shared_filesystems(
+        self,
+        root_filesystem: celaut.Service.Container.Filesystem,
+    ) -> None:
+        """Translate ``shared_filesystems`` into xattrs on the directories' branches.
+
+        The directory must already exist in the image: it is not created here, so
+        the author decides its owner, mode and content in the Dockerfile. Absent or
+        empty writes nothing, so no existing service gets a new id.
+
+        The result goes through ``declarations_for_filesystem`` so every rule of
+        ``src/utils/shared_filesystems.py`` (exclusivity, no nesting, unique names,
+        tag and env formats) applies unchanged.
+        """
+        entries = self._shared_filesystems_declared()
+        if not entries:
+            return
+
+        for entry in entries:
+            filesystem, branch = root_filesystem, None
+            for name in entry["path"].strip("/").split("/"):
+                branch = next((b for b in filesystem.branch if b.name == name), None)
+                if branch is None or not branch.HasField("filesystem"):
+                    raise ValueError(
+                        f"service.json: '{SHARED_FILESYSTEMS_KEY}' path {entry['path']!r} "
+                        f"is not a directory in the image. Create it in the Dockerfile "
+                        f"(e.g. RUN mkdir -p {entry['path']}); the packer does not."
+                    )
+                filesystem = branch.filesystem
+
+            keyvalue.set_value(branch.xattrs, _SHARED_ROLE_XATTRS[entry["role"]], b"true")
+            for field, key in (
+                ("tag", SHARE_TAG_XATTR_KEY),
+                ("env", SHARE_ENV_XATTR_KEY),
+                ("access", ACCESS_XATTR_KEY),
+            ):
+                if field in entry:
+                    keyvalue.set_value(branch.xattrs, key, entry[field].encode("utf-8"))
+
+        try:
+            declarations_for_filesystem(root_filesystem)
+        except ValueError as e:
+            raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
+
     def _read_only_filesystem_requested(self) -> bool:
         """Whether ``service.json`` asked for a read-only rootfs.
 
@@ -500,9 +656,9 @@ class ZipContainerPacker:
                     # It's a link.
                     if os.path.islink(branch_host_path):
                         branch.link.dst = directory + b_name
-                        branch.link.src = os.path.realpath(branch_host_path)[
-                                          len(host_dir):] if host_dir in os.path.realpath(
-                            branch_host_path) else os.path.realpath(branch_host_path)
+                        branch.link.src = image_link_target(
+                            branch_host_path, directory + b_name
+                        )
                     # Device node (block/char): represent as file placeholder and recover via xattrs in CH build.
                     elif branch_metadata.is_device:
                         branch.file = b""
@@ -559,6 +715,8 @@ class ZipContainerPacker:
             # filesystem block's id, and the service id above it, are the same as
             # they would be with every type spelled out.
             root_filesystem = recursive_parsing(directory="/")
+            # Before read_only: its refusal of an exported share reads these xattrs.
+            self._apply_shared_filesystems(root_filesystem)
             self._apply_read_only_filesystem(root_filesystem)
 
             self.filesystem_block = _install_as_block(
@@ -665,12 +823,12 @@ class ZipContainerPacker:
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
             celaut.Metadata.HashTag.AttrHashTag(
-                key=1,  # Container attr.
+                key=2,  # Service.container is field 2 (Service.prose is 1).
                 value=[
                     celaut.Metadata.HashTag(
                         attr_hashtag=[
                             celaut.Metadata.HashTag.AttrHashTag(
-                                key=2,  # Filesystem
+                                key=2,  # Service.Container.filesystem is field 2.
                                 value=[parseFilesys()]
                             )
                         ]

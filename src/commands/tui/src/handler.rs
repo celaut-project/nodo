@@ -60,6 +60,12 @@ pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<
                 }
             }
         }
+        // The env var form: only its eyes are clickable, never the page behind it.
+        InputMode::ExecuteEnvs => {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                app.click_env_form(mouse.column, mouse.row);
+            }
+        }
         // The scrollable overlay is the one modal with anything to scroll.
         InputMode::Details => match mouse.kind {
             MouseEventKind::ScrollUp => app.scroll_details(-1),
@@ -162,6 +168,29 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 (_, KeyCode::Char('a' | 'A')) => app.open_add_asset_prompt(),
                 (_, KeyCode::Char('d' | 'D') | KeyCode::Delete) => app.open_remove_asset_confirm(),
                 (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_input(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        // The env vars of a service about to run. Ctrl+R shows the focused value, as
+        // the eye at its right does with the mouse.
+        InputMode::ExecuteEnvs => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
+                    app.env_form_toggle_reveal(app.env_form.focus)
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('u')) => app.env_form_clear_field(),
+                (_, KeyCode::Esc) => app.cancel_env_form(),
+                (_, KeyCode::Tab | KeyCode::Down) => app.env_form_move(1),
+                (_, KeyCode::BackTab | KeyCode::Up) => app.env_form_move(-1),
+                (_, KeyCode::Enter) => app.env_form_enter(),
+                (_, KeyCode::Backspace) => app.env_form_backspace(),
+                (modifiers, KeyCode::Char(character))
+                    if !modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    app.env_form_type(character)
+                }
                 _ => {}
             }
             return Ok(());
@@ -327,6 +356,10 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
                 (_, KeyCode::Enter) => app.submit_input().await,
                 (_, KeyCode::Esc) => app.close_input(),
+                // The pack prompt completes folder names, like a shell.
+                (_, KeyCode::Tab) if app.input_mode == InputMode::NewPack => {
+                    app.complete_pack_input()
+                }
                 // ↑/↓ step a number, cycle an enum, or (with ←/→/Space) flip a
                 // checkbox — additive on top of typing for number/enum, the only
                 // way to change a checkbox (see the char/backspace guard below).
@@ -407,6 +440,19 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Down) => app.on_down(),
         (_, KeyCode::Right) => app.on_right(),
         (_, KeyCode::Left) => app.on_left(),
+        // On PEERS `r` asks every peer again over the network (`nodo refresh_peers`), the
+        // same as the ⟳ button, and so asks first: it is a round of connections to every
+        // peer. The list re-reads our own database every couple of seconds regardless.
+        (_, KeyCode::Char('r' | 'R')) if app.page() == Page::Peers => {
+            app.open_refresh_peers_confirm()
+        }
+        // These pages are re-read from the database every couple of seconds and have
+        // nothing slower for `r` to bring forward, so it is not offered there.
+        (KeyModifiers::NONE, KeyCode::Char('r'))
+            if matches!(
+                app.page(),
+                Page::Instances | Page::Tunnels | Page::Packs | Page::Clients | Page::Energy | Page::Logs
+            ) => {}
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
             app.toggle_instances_grouped()
@@ -429,6 +475,21 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Tunnels => {
             app.open_tunnel_details()
         }
+        // Packs: `n` here (or `p` on SERVICES, where the result lands) packs a folder
+        // or an https git URL in the background; `c` cancels, `i` shows the log. Every
+        // action is the `nodo pack --detach` / `nodo pack_cancel` an operator would type.
+        (KeyModifiers::NONE, KeyCode::Char('n')) if app.page() == Page::Packs => {
+            app.open_new_pack()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('p')) if app.page() == Page::Services => {
+            app.open_new_pack()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Packs => {
+            app.open_cancel_pack_confirm()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Packs => {
+            app.open_pack_details()
+        }
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()
         }
@@ -438,7 +499,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(-1)
         }
-        // Pricing mirrors the Peers page's +/- and Config's `e`: nudge in place, or open the
+        // Pricing mirrors the Peers page's +/- and All's `e`: nudge in place, or open the
         // ordinary editor for an exact figure.
         (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Pricing => {
             app.adjust_selected_price(1)
@@ -451,14 +512,14 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Pricing => app.open_payment_rate_editor("ergo"),
         (KeyModifiers::NONE, KeyCode::Char('b')) if app.page() == Page::Pricing => app.open_payment_rate_editor("bitcoin"),
-        // ENERGY mirrors Config's `e` and adds Enter, because the page is a list of
+        // ENERGY mirrors All's `e` and adds Enter, because the page is a list of
         // one-key decisions and Enter is what "work this row" means on every other
         // list in this interface (issue #395).
         (_, KeyCode::Enter) if app.page() == Page::Energy => app.open_energy_editor(),
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Energy => {
             app.open_energy_editor()
         }
-        // The CELL page: Enter works the selected lever, `e` reaches the keys behind
+        // The POLICIES page: Enter works the selected lever, `e` reaches the keys behind
         // it, `p` picks a posture and `d` says how this node differs from one.
         // The SCHEDULE page: ←/→ and ↑/↓ reach it through on_left/on_right/on_up, so
         // only the keys with no arrow of their own are here.
@@ -471,7 +532,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         // A schedule is a list of windows: `a` appends one (empty, so it refuses
         // nothing until its hours are moved), `d` removes the selected one, and
-        // `[`/`]` switch which window ←/→/↑/↓ act on. Mirrors Config's `a`/`d` on its
+        // `[`/`]` switch which window ←/→/↑/↓ act on. Mirrors All's `a`/`d` on its
         // own lists.
         (KeyModifiers::NONE, KeyCode::Char('a')) if app.page() == Page::Schedule => {
             app.add_schedule_window()

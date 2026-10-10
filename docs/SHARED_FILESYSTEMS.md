@@ -29,6 +29,9 @@ is no `Service.Network` involvement.
 | `share_tag=<tag>` | logical **name** of the share, used instead of the mount path |
 | `share_env=<ENV_VAR>` | environment variable whose **value** picks the concrete share |
 
+A packed service gets these xattrs from the `shared_filesystems` field of
+`service.json`; see [PACKING.md](PACKING.md#shared_filesystems).
+
 Everything decidable from a spec alone is rejected (`ValueError`) as soon as the
 node reads it, which is what makes it validatable at pack time:
 
@@ -191,9 +194,13 @@ devices reach the guest. Authorization is asked again there, from the same
 records: a backend that simply trusts what it is handed would be a single point of
 failure for the one rule only the node can enforce.
 
-1. One `virtiofsd` daemon per share on the host, exporting its directory over a
-   Unix socket keyed by the share id (`--sandbox chroot`, deny-by-default). The
-   exporting parent and every co-located child reuse it.
+1. One `virtiofsd` daemon **per VM and share**, exporting the share's directory
+   over a Unix socket keyed by both (`--sandbox chroot`, deny-by-default). A
+   `virtiofsd` serves a single vhost-user client: a second VM connected to the
+   same socket is queued by the kernel and never answered, so its hypervisor waits
+   in the handshake and the guest never boots, and the daemon exits when its one
+   client disconnects. So the exporting parent and each co-located child get a
+   daemon of their own, all exporting the one host directory (#480).
 2. The first materialization of an export **seeds** its directory with the
    exporter's own packaged subtree at that path, read out of the offline image
    with `debugfs rdump` (rootless, like every other image access), so mounting
@@ -204,15 +211,19 @@ failure for the one rule only the node can enforce.
    `vhost-user-fs` wiring from the same mount state.
 4. A guest mount plan (`/.__nodo_virtiofs`, a JSON list of `{tag, path, ro}`)
    injected into the rootfs; guest init mounts each entry (`-o ro` for `ro`). The
-   daemon is always read-write; `ro` is applied guest-side.
+   daemon of a guest that asked for `ro` also runs `--readonly`, so the host
+   refuses its writes: the guest's `-o ro` alone is a choice the guest could undo,
+   since it is root in its own VM and can remount the device read-write. The
+   exporter's daemon is always read-write.
 5. **Lifecycle by ownership.** A share's own state file records who is using it
    and which instance exports it, written *before* the VM that will use it is
    built. A share ends when its **exporter** leaves — it is that instance's
    storage, so nothing is left to hold it up or to be charged for it — and its
    guests then lose the directory, which is the whole of what being a guest
    means. If the exporter is already gone, the last user out ends what remains,
-   so nothing outlives everyone. A guest leaving while the exporter runs changes
-   nothing. A handed-over rundev directory is released but never deleted.
+   so nothing outlives everyone. A guest leaving while the exporter runs stops its
+   own daemon and changes nothing else. Ending a share stops every daemon still
+   serving it. A handed-over rundev directory is released but never deleted.
 
    A guest that loses its share mid-run keeps running with a mount point whose
    accesses fail. Nothing can be unmounted from outside the guest, so the choice
@@ -224,6 +235,58 @@ failure for the one rule only the node can enforce.
 Write concurrency between participants is the application's problem, as it would
 be over NFS; the node arbitrates nothing beyond the mount mode each guest asked
 for.
+
+### Host requirement: the Rust virtiofsd
+
+The node starts the daemon with the flags of the Rust
+[virtiofsd](https://gitlab.com/virtio-fs/virtiofsd) (`--socket-path`,
+`--shared-dir`, `--sandbox`, `--cache`). `virtualizers.ch.VIRTIOFSD_BINARY` names
+it. Two things do not work:
+
+- The old C daemon from QEMU, `/usr/lib/qemu/virtiofsd` (from
+  `qemu-system-common` up to 7.x). It does not accept these flags.
+- A binary that only your user can find. The node runs as root, so
+  `~/.cargo/bin` is not on its `PATH`. Use an absolute path.
+
+There is no distro package for the Rust daemon on Ubuntu 22.04.
+
+**The installer** puts virtiofsd 1.14.0 at `<MAIN_DIR>/bin/virtiofsd` and writes
+that absolute path to `VIRTIOFSD_BINARY` (`bash/lib_virtiofsd.sh`):
+
+- x86_64: the static binary that upstream attaches to the release. The zip and
+  the binary in it are pinned by SHA-256.
+- arm64 (upstream publishes no binary), or when the download fails:
+  `cargo install virtiofsd --version =1.14.0 --locked`, in the node's own Rust
+  toolchain (`dependencies.rust.RUNTIME_ROOT`), after it installs
+  `libcap-ng-dev`, `libseccomp-dev` and `pkg-config` (`libcap-ng-devel`,
+  `libseccomp-devel` and `pkgconf-pkg-config` on Fedora).
+
+If `VIRTIOFSD_BINARY` is already a path of your own, the installer does not
+change it and installs nothing. If the installer cannot get the daemon, the
+install still completes, and only services with shared directories cannot run.
+
+**By hand:**
+
+```bash
+sudo apt-get install -y libcap-ng-dev libseccomp-dev pkg-config
+cargo install virtiofsd --locked
+sudo install -m 0755 ~/.cargo/bin/virtiofsd /nodo/bin/virtiofsd
+sudo nodo config set virtualizers.ch.VIRTIOFSD_BINARY=/nodo/bin/virtiofsd
+```
+
+**Check it** with `sudo nodo doctor`. The `virtiofsd (shared filesystems)` part
+gives the resolved path and says if it is the Rust daemon, the old QEMU daemon, or
+missing. A missing daemon is a `[WARN]`, not a failure, because only services
+with shared directories need it.
+
+**At launch**, the node probes the daemon (`--version`) for a service that
+declares shared or guest directories, before it charges the client or builds a
+rootfs (`src/virtualizers/microvm/virtiofsd.py`). If the daemon is missing or is
+the old one:
+
+- a service with a `guest` directory is refused. It can only run on this node.
+- a service that only exports (`shared`) is not run on this node. A peer can
+  still take it. If no peer does, the launch error gives the reason.
 
 ### Accounting
 

@@ -98,12 +98,11 @@ Below is a breakdown of **Nodo** feature support across different operating syst
 
 | Functionality         | Linux     | Windows          | Mac              |
 |---------------------- |---------- |------------------|------------------|
-| Local execution       | 🟢 Beta  | 🟢 Beta          | 🔴 Not supported |
-| Packaging             | 🟢 Beta  | 🟢 Beta          | 🔴 Not supported |
+| Local execution       | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
+| Packaging             | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
 | Local network         | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
 | Trustless network     | 🟡 Alpha | 🟡 Alpha         | 🔴 Not supported |
 
-* 🟢 **Beta**: Functionality implemented and relatively stable.
 * 🟡 **Alpha**: Functionality under active development and subject to change.
 * 🔴 **Not supported**: Functionality not available on this platform.
 
@@ -130,3 +129,4 @@ document to ensure you are fully aware of your responsibilities and the limitati
 All payments, reputation submissions, and service remunerations are handled decentralized on the Ergo blockchain.
 Check how and why Nodo uses [Ergo](docs/ERGO.md).
 How a peer's score is computed when work is delegated: [Reputation](docs/REPUTATION.md).
+How a request delegated from node to node is kept from looping back or growing without bound, and why a peer would honour that: [Recursion guard](docs/RECURSION_GUARD.md). Design documents and studies for specific issues are indexed in [docs/proposals](docs/proposals/README.md).

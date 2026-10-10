@@ -66,7 +66,10 @@ virtualizers:
     # Keep this path short to avoid Unix socket SUN_LEN limits.
     API_SOCKET_DIR: "/tmp/nodo-ch"
     # virtiofsd daemon for shared filesystems (parent -> child inheritance).
-    # Only invoked for services that declare shared/guest directories.
+    # Only invoked for services that declare shared/guest directories. It must be
+    # the Rust virtiofsd, not the old QEMU one in /usr/lib/qemu. The installer
+    # puts it in ${main.MAIN_DIR}/bin and writes that absolute path here, unless
+    # this is already set to a path of your own. `nodo doctor` checks it.
     VIRTIOFSD_BINARY: "virtiofsd"
     NETWORK_MODE: "tap_bridge"
     NETWORK_BRIDGE_NAME: "nodo-br-ch"
@@ -406,16 +409,19 @@ network:
   EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
   PUBLIC_TCP_PORT: ""  # Optional external TCP port to advertise for the gateway (GATEWAY_PORT), in case your router forwards a different port than the one this node listens on. Leave empty to advertise GATEWAY_PORT itself.
   PUBLIC_UDP_PORT: ""  # Optional external UDP port to advertise, for when a peer-facing feature that listens on UDP exists. Nothing in nodo does yet -- GATEWAY_PORT is TCP-only (gRPC).
-  # Re-send this node's address to every already-known peer (IntroducePeer) as soon as
-  # it is seen to change -- e.g. moving from a LAN to a mobile connection, or a dynamic
-  # public IP being renewed. Without this, peers keep the stale address until their own
-  # refresh happens to fail and they re-fetch it, and in the meantime they penalise this
-  # node's reputation for being unreachable at an address it no longer holds.
-  REANNOUNCE_ON_NETWORK_CHANGE: true
-  # How often (seconds) the manager loop checks whether this node's announced address
+  # Re-send this node's announcement (its signed Peer) to every already-known peer
+  # (IntroducePeer) as soon as it is seen to change: its address (moving from a LAN to a
+  # mobile connection, a dynamic public IP being renewed), the resources it offers (none
+  # under EXECUTE_LOCALLY: false), its rates, payment contracts, reputation proofs or
+  # benchmark scores. Without this, peers keep the stale announcement until their own
+  # refresh happens to re-fetch it -- penalising this node as unreachable at an address
+  # it no longer holds, or counting resources it no longer offers.
+  # (Formerly REANNOUNCE_ON_NETWORK_CHANGE, which is still read when this is absent.)
+  REANNOUNCE_ON_CHANGE: true
+  # How often (seconds) the manager loop checks whether this node's announcement
   # changed. Detection only, not the announcement itself -- cheap, so a short interval
-  # is fine.
-  NETWORK_CHANGE_CHECK_INTERVAL_SECONDS: 60
+  # is fine. (Formerly NETWORK_CHANGE_CHECK_INTERVAL_SECONDS.)
+  ANNOUNCEMENT_CHECK_INTERVAL_SECONDS: 60
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
@@ -453,6 +459,10 @@ network:
   # which is the point; client.ACCEPT_NEW_DEPOSITS is the separate question of whether
   # they may open an account at all.
   #
+  # Off, this node announces no resources (Peer.resources is empty): peers stop counting
+  # its machine in what they could reach, and the changed announcement is pushed to
+  # every known peer (see REANNOUNCE_ON_CHANGE).
+  #
   # One exception, and it is a physical one rather than a carve-out: a service that
   # inherits a directory from its parent (a `guest=true` xattr) is materialized from
   # that parent's own rootfs and cannot run anywhere else. With this off there is no
@@ -463,6 +473,26 @@ network:
   # refuses every launch. That is a coherent thing to ask for -- a node that is only a
   # wallet and a peer directory -- and nothing stops you, but it is worth meaning.
   EXECUTE_LOCALLY: true
+  # How many nodes one StartService tree may span (issue #456): a StartService and every
+  # peer it is delegated to in turn. Counted from the node the request starts at -- or the
+  # first node that gets it without a count, which is what a peer predating the field
+  # sends. Each node passing it on sends one less; one given none left refuses it, and one
+  # with a single hop left runs it itself or not at all. A count from a peer is clamped to
+  # this, never raised by it. Cycles (A -> B -> A) are refused regardless, by the request's
+  # token. Cost quotes and availability probes carry none of this: they are answered from
+  # the cache below. See docs/RECURSION_GUARD.md.
+  RECURSION_MAX_HOPS: 16
+  # Answers to the two read-only queries (GetServiceEstimatedCost, GetResourceAvailability)
+  # are remembered by the content of the question (issue #456), so the same question is
+  # computed once, and one still being computed is waited for rather than computed twice;
+  # it is refused with "retry" only if the wait runs out, or if it came back to the node
+  # computing it (a loop). The same memory keeps what peers answered us, so a peer is not
+  # asked the same thing twice. A TTL of 0 turns it off for that query.
+  QUERY_CACHE_TTL_SECONDS: 30  # How long a quote's price is remembered. Whether there is room for it is checked on every answer.
+  QUERY_CACHE_PEER_TTL_SECONDS: 10  # How long a quote got from a peer is reused. Shorter: the peer may have served it from its own cache.
+  QUERY_CACHE_AVAILABILITY_TTL_SECONDS: 5  # How long an availability answer is remembered. Short: it moves fast. A local start, stop or resize forgets it at once.
+  QUERY_CACHE_WAIT_SECONDS: 5  # How long a question waits for the same one already being computed before it is refused with "retry".
+  QUERY_CACHE_MAX_ENTRIES: 4096  # Questions remembered at once; the least recently used go first.
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
@@ -656,7 +686,9 @@ free_tier:
 # What the operator reads and types. Purely presentational: changing it never changes
 # what anybody is charged.
 ui:
-  # "erg" (default), "mu", or "btc" once ledgers.bitcoin.payments.MU_PER_SATOSHI is set.
+  # "mu" (default), "erg", or "btc" once ledgers.bitcoin.payments.MU_PER_SATOSHI is set.
+  # MU is the node's own accounting unit, not money held anywhere: it is the default so
+  # nobody mistakes the figures for real ERG. Pick "erg"/"btc" to read them as that asset.
   # "erg" and "btc" derive their rate from their own ledger, so they stay correct if you
   # change MU_PER_NANOERG / MU_PER_SATOSHI.
   #
@@ -668,7 +700,7 @@ ui:
   # picker over exactly the units above; picking "custom..." there asks for a new name
   # and its MU_PER_UNIT together, since one without the other is a display unit the node
   # refuses to start against.
-  DISPLAY_UNIT: erg
+  DISPLAY_UNIT: mu
   # UNITS:
   #   usd:
   #     MU_PER_UNIT: 500000000
@@ -911,6 +943,14 @@ timing:
   CLIENT_EXPIRATION_TIME: 1200
   EXTERNAL_COST_TIMEOUT: 10
   START_SERVICE_ON_PEER_TIMEOUT: 120
+  # Asking a peer for a service it holds (`GetService`; `nodo execute` and `nodo get` do
+  # it before the source-application). The first is a silence: the call is given up once
+  # the peer sends nothing for this many seconds, however long the transfer has run. The
+  # second caps the whole transfer. 0 turns either off. A peer that hits either loses
+  # reputation (`get_service_timed_out`); one that sends a service other than the one
+  # asked for loses ten times as much (`get_service_wrong_hash`).
+  GET_SERVICE_IDLE_TIMEOUT: 30
+  GET_SERVICE_TIMEOUT: 1800
 
 communication:
   # The most components a Peer.signature_scheme may declare before this node refuses
@@ -1165,8 +1205,13 @@ energy:
 
 publisher:
   PROVIDER: "github"
+  # `nodo publish` uploads the .celaut.bee as an asset of a GitHub Release of this
+  # repository, tagged celaut-<service id>. Nothing is committed to the repository. It must
+  # be public (the published URL is https://github.com/<repo>/releases/download/...) and
+  # have at least one commit for the tag to point at.
   REPOSITORY: "owner/repo"
-  BRANCH: "main"
+  # Branch the release tag is created on. Empty: the repository's default branch.
+  BRANCH: ""
   SOURCE_APPLICATION_WEB_PAGE: "https://reputation-systems.github.io/source-application?tab=add"
   # How a freshly-published source gets registered, resolved across four levels:
   #   1. AUTO_PUBLISH_TX true + SOURCE_PROFILE_BOX_ID set + a configured "source-application"
@@ -1199,15 +1244,22 @@ publisher:
   # Formats can be file extensions (tags) or ergo box ids that define the format uniquely.
   CONTENT_FORMAT: ".grpcbb"
   RAW_FORMAT: ".celaut"
-  # Direct token in config (optional).
+  # Direct token in config (optional). It must be allowed to create releases:
+  # 'Contents: Read and write' on REPOSITORY for a fine-grained token, or the 'repo'
+  # ('public_repo' for a public repository) scope for a classic one.
   TOKEN: ""
   # Environment variable names read by ConfigManager-based scripts (optional).
   TOKEN_ENV_VAR: "CLOUD_TOKEN"
   # Optional direct fallback token.
   FALLBACK_TOKEN: ""
   FALLBACK_TOKEN_ENV_VAR: "GITHUB_TOKEN"
-  CHUNK_SIZE_MB: 24
-  UPLOADS_PREFIX: "uploads"
+  # A file above SPLIT_SIZE_MB is uploaded as parts of PART_SIZE_MB, plus a `manifest`
+  # asset that lists the part URLs; the manifest URL is then the source URL. At or below
+  # it, the file is one asset and its own URL is the source URL. Both at most 2047: GitHub
+  # refuses an asset of 2 GiB or more. (CHUNK_SIZE_MB and UPLOADS_PREFIX are not read any
+  # more: they set the old upload through commits.)
+  SPLIT_SIZE_MB: 2000
+  PART_SIZE_MB: 1000
   TIMEOUT_SECONDS: 300
   MAX_RETRY: 3
   BACKOFF_SECONDS: 2

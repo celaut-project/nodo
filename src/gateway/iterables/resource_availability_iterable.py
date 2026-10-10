@@ -6,6 +6,7 @@ from src.utils import activity_window
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.cost_functions.resource_availability import get_architecture_availability
 from src.utils.logger import LOGGER as logger
+from src.utils.tools.query_cache import QueryCache, availability_ttl, canonical_key
 
 
 class GetResourceAvailabilityIterable:
@@ -20,6 +21,12 @@ class GetResourceAvailabilityIterable:
     The answer is `get_architecture_availability`'s, verbatim: the same admission gate a
     real StartService goes through locally, so a peer is told exactly what this node
     would decide about itself and nothing more.
+
+    The answer depends only on the question, so it is remembered by the content of the
+    question for `network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS` (#456), and one asked
+    while it is being computed waits for that answer. Availability moves fast, which is
+    why that TTL is short, and every local start, stop or resize forgets these answers
+    at once; 0 turns the cache off. See `src/utils/tools/query_cache.py`.
     """
 
     def __init__(self, request_iterator, context):
@@ -34,14 +41,20 @@ class GetResourceAvailabilityIterable:
             # than refused -- the same shape get_resource_availability itself gives an
             # unset `at_most`.
             request, client_id = parse_with_client(
-                self.request_iterator, payload_type=celaut_pb2.ArchitectureResources
+                self.request_iterator, method="GetResourceAvailability"
             )
             require_caller(self.context, client_id)
             if request is None:
                 request = celaut_pb2.ArchitectureResources()
 
-            availability = get_architecture_availability(request)
+            availability = QueryCache().get_or_compute(
+                canonical_key("GetResourceAvailability", request),
+                availability_ttl(),
+                lambda: get_architecture_availability(request),
+            )
 
+            # After the cache, so the hours always win over a remembered answer.
+            #
             # Outside `activity_window` the answer is no, whatever the resources say.
             # A peer probing this node's capacity is asking whether it could place a
             # workload here, and after hours it could not -- reporting the room this

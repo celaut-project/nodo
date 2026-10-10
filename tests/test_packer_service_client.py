@@ -22,10 +22,13 @@ from src.commands.packer.zip_with_dockerfile.packer_service_client import (
     resolve_and_upload_dependencies,
 )
 
+# A block id is a hex digest of the block content (see src/utils/block_tree.py).
+BLOCK_ID = "b10c" * 16
+
 
 def _make_registry(tmp):
     """Create REGISTRY/METADATA/BLOCKS dirs with one packed dependency 'depABC'
-    (referencing block 'blkzzz') and return the three dir paths."""
+    (referencing block BLOCK_ID) and return the three dir paths."""
     services = os.path.join(tmp, "registry")
     metadata = os.path.join(tmp, "metadata")
     blocks = os.path.join(tmp, "blocks")
@@ -35,12 +38,12 @@ def _make_registry(tmp):
     svc = os.path.join(services, "depABC")
     os.makedirs(svc, exist_ok=True)
     with open(os.path.join(svc, "_.json"), "w") as f:
-        json.dump([["blkzzz"], "inline0"], f)
+        json.dump([[BLOCK_ID], "inline0"], f)
     with open(os.path.join(svc, "inline0"), "wb") as f:
         f.write(b"chunkbytes")
     with open(os.path.join(metadata, "depABC"), "wb") as f:
         f.write(b"meta")
-    with open(os.path.join(blocks, "blkzzz"), "wb") as f:
+    with open(os.path.join(blocks, BLOCK_ID), "wb") as f:
         f.write(b"blockbytes")
     return services, metadata, blocks
 
@@ -129,7 +132,20 @@ class BundleTests(unittest.TestCase):
         self.assertIn("service/_.json", names)
         self.assertIn("service/inline0", names)
         self.assertIn("metadata", names)
-        self.assertIn("blocks/blkzzz", names)
+        self.assertIn("blocks/" + BLOCK_ID, names)
+
+    def test_bundle_file_service(self):
+        # A service without blocks is stored as one file, not a directory.
+        tmp = tempfile.mkdtemp()
+        services, metadata, blocks = _make_registry(tmp)
+        with open(os.path.join(services, "fileDEF"), "wb") as f:
+            f.write(b"servicebytes")
+        data = build_dependency_bundle("fileDEF", services, metadata, blocks)
+        import io
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+            self.assertEqual(tf.getnames(), ["service"])
+            self.assertTrue(tf.getmember("service").isfile())
+            self.assertEqual(tf.extractfile("service").read(), b"servicebytes")
 
     def test_bundle_missing_service_raises(self):
         tmp = tempfile.mkdtemp()
@@ -178,6 +194,16 @@ class ResolveUploadTests(unittest.TestCase):
         import io
         with tarfile.open(fileobj=io.BytesIO(_Recorder.posted[0][1]), mode="r:gz") as tf:
             self.assertIn("service/_.json", tf.getnames())
+
+    def test_uploads_file_service_dep(self):
+        with open(os.path.join(self.services, "fileDEF"), "wb") as f:
+            f.write(b"servicebytes")
+        _write_pack_config(self.project, {"DEP": "fileDEF"})
+        summary = self._resolve()
+        self.assertEqual(summary["uploaded"], ["fileDEF"])
+        import io
+        with tarfile.open(fileobj=io.BytesIO(_Recorder.posted[0][1]), mode="r:gz") as tf:
+            self.assertTrue(tf.getmember("service").isfile())
 
     def test_skips_when_already_present(self):
         _Recorder.present_ids = {"depABC"}

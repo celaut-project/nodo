@@ -80,6 +80,20 @@ class AnnouncedResourcesTests(unittest.TestCase):
             [e.SerializeToString() for e in self._announce()],
         )
 
+    def test_a_node_that_delegates_only_announces_nothing(self):
+        # network.EXECUTE_LOCALLY: false -- the balancer never offers this node, so
+        # its ceilings would be capacity no peer could ever be granted.
+        with patch.object(ar, "executes_locally", return_value=False):
+            self.assertEqual(self._announce(served=(AMD64, ARM64)), [])
+
+    def test_executes_locally_reads_the_policy_defaulting_to_on(self):
+        for configured, expected in ((False, False), (True, True), (None, True)):
+            with patch.object(
+                ar.env_manager, "get",
+                side_effect=lambda key, default=None: default if configured is None else configured,
+            ):
+                self.assertIs(ar.executes_locally(), expected, configured)
+
 
 def _announced(arch_tags=AMD64, **at_most):
     entry = celaut.ArchitectureResources()

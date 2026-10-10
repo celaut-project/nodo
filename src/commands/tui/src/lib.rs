@@ -6,7 +6,7 @@ pub mod alerts;
 /// Ubuntu terminal this node is overwhelmingly installed from.
 pub mod theme;
 
-/// The CELL page: policy levers and profiles.
+/// The POLICIES page: policy levers and profiles.
 pub mod cell;
 
 /// The SCHEDULE page: the hours this node works, and the arithmetic of a window that
@@ -29,11 +29,17 @@ pub mod clients;
 /// The TUNNELS page: the `nodo tunnel` processes running on this host.
 pub mod tunnels;
 
+/// The PACKS page: the `nodo pack` runs on this host, current and recent.
+pub mod packs;
+
 /// The CHAT page: free-text conversations with peer operators (issue #431).
 pub mod chat;
 
 /// Right-click menus: an element's actions, as the keys that already do them.
 pub mod context_menu;
+
+/// The env vars a service asks for, filled in before `nodo execute`.
+pub mod env_form;
 
 /// The DOCS page: the installation's `docs/` folder, indexed and rendered.
 pub mod docs;

@@ -400,5 +400,58 @@ class RestoreTests(unittest.TestCase):
         publish_mock.assert_not_called()
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CloseOrphanedTests(unittest.TestCase):
+    """Issue #522: a stop in another process leaves the daemon's listeners bound."""
+
+    TOKEN = "orphan-token"
+
+    def setUp(self):
+        self.port_patch = patch.object(
+            delegated_endpoints.env_manager,
+            "get",
+            side_effect=lambda key, default=None: (
+                [{"START": 45000, "END": 45999}]
+                if key == "network.FREE_PORTS_RANGE"
+                else default
+            ),
+        )
+        self.port_patch.start()
+        rewritten = delegated_endpoints.publish(
+            token=self.TOKEN,
+            peer_gateway="10.9.9.9:8090",
+            instance=_peer_instance(8080),
+            bind_ip="127.0.0.1",
+        )
+        self.local_port = rewritten.uri_slot[0].uri[0].port
+
+    def tearDown(self):
+        delegated_endpoints.close(token=self.TOKEN)
+        self.port_patch.stop()
+
+    def _close_orphaned(self, rows, grace_s=0.0) -> int:
+        with patch.object(delegated_endpoints.sc, "get_delegated_instances", return_value=rows):
+            return delegated_endpoints.close_orphaned(grace_s=grace_s)
+
+    def test_a_token_without_a_row_is_closed(self):
+        self.assertEqual(self._close_orphaned([]), 1)
+
+        self.assertEqual(delegated_endpoints.endpoint_count(self.TOKEN), 0)
+        with self.assertRaises(OSError):
+            socket.create_connection(("127.0.0.1", self.local_port), timeout=1).close()
+
+    def test_a_token_with_a_row_is_kept(self):
+        self.assertEqual(self._close_orphaned([{"token": self.TOKEN}]), 0)
+
+        self.assertEqual(delegated_endpoints.endpoint_count(self.TOKEN), 1)
+        socket.create_connection(("127.0.0.1", self.local_port), timeout=5).close()
+
+    def test_a_fresh_token_is_kept_until_its_row_can_exist(self):
+        """A delegation publishes before it writes the row."""
+        self.assertEqual(self._close_orphaned([], grace_s=3600.0), 0)
+
+        self.assertEqual(delegated_endpoints.endpoint_count(self.TOKEN), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -246,6 +246,12 @@ class ServiceTunnelInboundListTests(unittest.TestCase):
             from src.tunneling import inbound
             live = [s for s in inbound.snapshot() if s["id"] == stream["id"]][0]
             self.assertEqual(live["bytes_out"], len(first))
+            # What the caller sent is counted by the thread that pumps it, which can be
+            # a moment behind the first byte coming back.
+            deadline = time.monotonic() + 2.0
+            while live["bytes_in"] != 4 and time.monotonic() < deadline:
+                time.sleep(0.01)
+                live = [s for s in inbound.snapshot() if s["id"] == stream["id"]][0]
             self.assertEqual(live["bytes_in"], 4)
 
             self.assertEqual(first + b"".join(relay), b"ping")
@@ -621,3 +627,32 @@ class ServiceTunnelSerializationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class RespondWithOnlyBytesTests(unittest.TestCase):
+    """ServiceTunnel answers with its own table, ``out:0=bytes``.
+
+    With only index 0, bee_rpc gets the index from the first message with an unguarded
+    ``next()``. BeeClient.respond reads that message first, so a relay that closes with
+    no reply gives an empty stream, not a RuntimeError.
+    """
+
+    def setUp(self):
+        from protos.gateway_bee import rpc_output
+        from src.utils.bee_client import BeeClient
+        self.respond = BeeClient.respond
+        self.indices = rpc_output("ServiceTunnel")
+
+    def test_the_table_has_only_index_zero(self):
+        self.assertEqual(self.indices, {0: bytes})
+
+    def test_a_relay_with_no_reply_is_an_empty_stream(self):
+        self.assertEqual(list(self.respond(message_iterator=iter([]), indices=self.indices)), [])
+
+    def test_bytes_go_out_at_index_zero(self):
+        buffers = list(self.respond(message_iterator=iter([b"ab", b"cd"]), indices=self.indices))
+        parsed = list(bee.parse_from_buffer(
+            iter(buffers), indices={0: bytes}, partitions_message_mode={0: True}
+        ))
+        self.assertEqual(parsed, [b"ab", b"cd"])

@@ -101,10 +101,14 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
             check_resource_availability_on_peer,
         )
         uri = target or f"127.0.0.1:{self.port}"
+        # Every RPC but GenerateClient carries a client_id (#428). Minting one needs a
+        # known, available peer, which this node asking itself is not.
         with patch.object(
             grpc_transport,
             "generate_uris_by_peer_id",
             side_effect=lambda peer_id: iter([uri]),
+        ), patch(
+            "src.manager.manager.get_client_id_on_other_peer", return_value="client-1"
         ):
             return check_resource_availability_on_peer(
                 peer_id or get_node_public_key_hex(), resources

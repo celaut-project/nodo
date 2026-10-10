@@ -38,6 +38,18 @@ class DuplicateKeyError(ValueError):
     """A key list that should name each key once names one twice."""
 
 
+
+def _is_repeated(field) -> bool:
+    """Whether a field descriptor is repeated.
+
+    ``label`` was removed in protobuf 7 in favour of ``is_repeated``; older runtimes only
+    have ``label``.
+    """
+    is_repeated = getattr(field, "is_repeated", None)
+    if is_repeated is None:
+        is_repeated = field.label == field.LABEL_REPEATED
+    return bool(is_repeated)
+
 def _assign(entry: Any, value: Any) -> None:
     if isinstance(value, Message):
         entry.value.CopyFrom(value)
@@ -270,7 +282,7 @@ def json_objects_to_entries(document: Any, descriptor: Any, path: str = "") -> A
         here = f"{path}.{key}" if path else str(key)
         if field.message_type.full_name in _ENTRY_MESSAGES:
             converted[key] = _entries_from_json(value, here)
-        elif field.label == field.LABEL_REPEATED and isinstance(value, list):
+        elif _is_repeated(field) and isinstance(value, list):
             converted[key] = [
                 json_objects_to_entries(item, field.message_type, f"{here}[{i}]")
                 for i, item in enumerate(value)
@@ -321,7 +333,7 @@ def _entries_to_objects(document: Any, descriptor: Any) -> Any:
                     entry_value = _entries_to_objects(entry_value, value_field.message_type)
                 entries[item.get("key", "")] = entry_value
             converted[key] = entries
-        elif field.label == field.LABEL_REPEATED and isinstance(value, list):
+        elif _is_repeated(field) and isinstance(value, list):
             converted[key] = [_entries_to_objects(item, field.message_type) for item in value]
         else:
             converted[key] = _entries_to_objects(value, field.message_type)

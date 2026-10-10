@@ -47,7 +47,9 @@ GROUPS: List[Group] = [
         "Services",
         "the local registry: what this node can run",
         [
-            ("pack <project dir>", "package a project (a dir, or a git URL)"),
+            ("pack <dir | https url>", "package a project (--local, --detach, --json)"),
+            ("packs [<pack>]", "list/inspect recent packs (--active, --json)"),
+            ("pack_cancel <pack>", "stop a running or queued pack"),
             ("download <url> [-o <dir>]", "fetch a published service from its manifest"),
             ("get <service> [--now]", "ask peers for one not held locally"),
             ("import <path>", "read a packaged '.celaut' file in"),
@@ -65,7 +67,8 @@ GROUPS: List[Group] = [
         None,
         [
             ("estimate <service>", "what an execution would cost, before paying for it"),
-            ("execute <service>", "run it (--name <name>, -e <key> <value>)"),
+            ("execute <service>", "run it (--name <n>, -e <key> <value>, --no-input)"),
+            ("service_envs <service>", "the env vars it asks for (--json)"),
             ("instances [<search>]", "list what is running (--grouped, --json)"),
             ("observe <instance>", "watch an instance live (--save <path> records it)"),
             ("tunnel <instance> <slot>", "reach its port from here (--detach, --udp, …)"),
@@ -81,6 +84,8 @@ GROUPS: List[Group] = [
         None,
         [
             ("peers [<peer>]", "list peers, or one with its payments (--json)"),
+            ("refresh_peers [<peer>]", "re-fetch all peers and our balance there (--json)"),
+            ("protocol [<peer>]", "ours, or compare a peer's (adds a client there)"),
             ("peer_reputation <peer> <N>", "move our local score of a peer (+/-)"),
             ("resources", "what this node announces it can run (--json)"),
             ("connect <ip:port>", "introduce this node to a peer"),
@@ -101,7 +106,7 @@ GROUPS: List[Group] = [
     ),
     (
         "Money",
-        "amounts in ui.DISPLAY_UNIT, ERG by default",
+        "amounts in ui.DISPLAY_UNIT, MU by default",
         [
             ("earnings", "money taken in, by network (--json)"),
             ("donations", "who we fund, who we count (--json)"),

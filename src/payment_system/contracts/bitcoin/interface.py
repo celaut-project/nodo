@@ -42,6 +42,7 @@ from time import sleep
 from typing import Optional, Tuple
 
 from protos import celaut_pb2
+from src.utils.ledger_descriptors import bitcoin_payment_ledger as _bitcoin_ledger
 from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
 from src.payment_system.contracts.bitcoin import backend as core_backend
@@ -71,18 +72,9 @@ CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 LEDGER = "bitcoin"
 NATIVE_ASSET = "BTC"
 
-# The TAG is this ledger's identity: it is what a `contract_instance` row is keyed by,
-# what `MethodKey` carries and what the check in `payment_process_validator` compares.
-# `PROSE` and `FORMAL` are description -- they travel to peers in the advertised
-# `Contract.Ledger` and nothing on this side reads them back, which is exactly why they
-# must not be part of how a ledger is identified.
-PROSE = (
-    "Bitcoin: PoW blockchain with a UTXO model, script-based spending conditions, "
-    "a fixed supply schedule, and settlement finality measured in confirmations."
-)
-# No formal specification is published for the chain itself, so this is empty rather
-# than a placeholder that would claim one exists.
-FORMAL = b""
+# The ledger tag: what a `contract_instance` row is keyed by and what `MethodKey`
+# carries. The full declaration peers receive is `ledger()`
+# (src/utils/ledger_descriptors.py).
 
 # The proof of an incoming payment is a *confirmed transaction*, not an unspent output,
 # so nothing here breaks if the receiving outputs are spent. That is what keeps this
@@ -139,9 +131,13 @@ def vsize_estimate(outputs: int = 1, *, op_return: bool = False, inputs: int = 1
 # makes this ledger's floors a moving number rather than a constant.
 VSIZE_ESTIMATE = vsize_estimate(outputs=1, op_return=True)  # 184 vB
 
-# How long to wait for the payer's confirmation, and how often to look.
-WAIT_TX_TIME = 240  # attempts
+# How long to wait for the payer's confirmation, and how often to look. A count of
+# checks, not seconds: the wait is the two multiplied, about an hour.
+WAIT_TX_ATTEMPTS = 240
 WAIT_TX_SLEEP_TIME = 15  # seconds between them -- a block is ~10 minutes
+# While the backend cannot be read, log one failed check in this many. Every check would
+# be a line each `WAIT_TX_SLEEP_TIME` for as long as the backend stays down.
+WAIT_TX_LOG_EVERY = 20
 
 payment_lock = Lock()  # Ensures the same UTXO is not spent for more than it holds.
 
@@ -300,8 +296,6 @@ def can_pay() -> bool:
         return False
 
 
-bitcoin_ledger = celaut_pb2.Contract.Ledger(tags=[LEDGER], prose=PROSE, formal=FORMAL)
-
 _transaction_url_reporter: ContextVar = ContextVar("bitcoin_transaction_url_reporter", default=None)
 _transaction_id_reporter: ContextVar = ContextVar("bitcoin_transaction_id_reporter", default=None)
 
@@ -321,7 +315,9 @@ def transaction_id_reporting(reporter):
     """Temporarily report a submitted transaction's *id* to the caller.
 
     Kept apart from the URL hook for the same reason Ergo does: the URL is
-    presentation, the id is the record `payments.tx_id` stores.
+    presentation, the id is the record `payments.tx_id` stores. Called twice, as on
+    Ergo: with ``sent=False`` once the transaction is signed, and with ``sent=True``
+    once it was relayed.
     """
     token = _transaction_id_reporter.set(reporter)
     try:
@@ -358,11 +354,16 @@ def unavailable_reason() -> Optional[str]:
 
 def ledger() -> celaut_pb2.Contract.Ledger:
     """The ledger message this contract settles on, as peers receive it."""
-    return bitcoin_ledger
+    return _bitcoin_ledger()
+
+
+def mu_per_base_unit() -> int:
+    """MU per satoshi: what travels to peers as ``ContractRate.mu_per_unit``."""
+    return rate.advertised_mu_per_satoshi()
 
 
 def mu_per_unit() -> int:
-    """MU bought by one whole BTC. What peers are told as ``ContractRate.mu_per_unit``."""
+    """MU bought by one whole BTC, for a person (``nodo pay`` amounts in BTC)."""
     return rate.mu_per_unit()
 
 
@@ -555,7 +556,7 @@ def init():
     if script is None:
         raise ValueError(f"{address} is not a segwit address, so it has no scriptPubKey")
 
-    contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
+    contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
     set_token_id(contract, NATIVE_ASSET)
     # Canonical value: the raw scriptPubKey a payer builds its output against.
     set_script(contract, script)
@@ -626,6 +627,7 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
             )
 
         chain = backend()
+        id_reporter = _transaction_id_reporter.get()
         tx_id = chain.send_to(
             address,
             amount_sat,
@@ -633,45 +635,70 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
             # transaction to the deposit the receiver is expecting.
             op_return=deposit_token.encode("utf-8"),
             fee_rate_sat_vb=_fee_rate_sat_vb(),
+            # Signed and not yet sent: the payer writes its row now, so a daemon that
+            # stops right after the send still has the id to resume by (#523).
+            on_signed=(lambda signed_id: id_reporter(signed_id, sent=False))
+            if id_reporter else None,
         )
         url = f"https://mempool.space/tx/{tx_id}"
         LOGGER(f"Transaction submitted: {url} for token {deposit_token}")
         reporter = _transaction_url_reporter.get()
         if reporter:
             reporter(url)
-        id_reporter = _transaction_id_reporter.get()
         if id_reporter:
-            id_reporter(tx_id)
+            id_reporter(tx_id, sent=True)
 
-        wanted = MIN_CONFIRMATIONS()
-        for _ in range(WAIT_TX_TIME):
-            sleep(WAIT_TX_SLEEP_TIME)
-            try:
-                status = chain.tx_status(tx_id)
-            except BackendUnavailable as e:
-                LOGGER(f"Could not read tx {tx_id} yet: {e}")
-                continue
-            confirmations = int(status.get("confirmations", 0) or 0)
-            if confirmations < 0:
-                # Core says the transaction was replaced or reorged out. That is not
-                # "not yet confirmed": waiting longer cannot make it true again.
-                raise ValueError(
-                    f"Transaction {tx_id} was replaced or left the chain "
-                    f"({confirmations} confirmations); nothing was credited."
-                )
-            if confirmations >= wanted:
-                LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
-                contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
-                set_token_id(contract, NATIVE_ASSET)
-                set_script(contract, script)
-                set_contract_type(contract, CONTRACT.encode("utf-8"))
-                return contract
+    # Outside the lock. It guards the choice of inputs, and that is over once the
+    # transaction is relayed: the wallet now counts those inputs as spent. Held through
+    # the wait, it would stop every other payment, the donation payout and the cold
+    # sweep for as long as this one takes to confirm.
+    return await_payment(tx_id=tx_id, script=script, chain=chain)
 
-        raise TimeoutError(
-            f"Transaction {tx_id} did not reach {wanted} confirmation(s) in "
-            f"{WAIT_TX_TIME * WAIT_TX_SLEEP_TIME // 60} minutes. The money is on-chain; "
-            "the peer has not been told."
-        )
+
+def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
+    """Wait until ``tx_id`` has ``MIN_CONFIRMATIONS``; return the contract the peer is told.
+
+    The second half of `process_payment`, kept apart so a payment the daemon stopped in
+    the middle of can be finished from its transaction id alone (#523). It spends
+    nothing, so it needs no `payment_lock`.
+    """
+    if chain is None:
+        chain = backend()
+    wanted = MIN_CONFIRMATIONS()
+    failed = 0  # Checks in a row the backend could not answer.
+    for _ in range(WAIT_TX_ATTEMPTS):
+        sleep(WAIT_TX_SLEEP_TIME)
+        try:
+            status = chain.tx_status(tx_id)
+        except BackendUnavailable as e:
+            if failed % WAIT_TX_LOG_EVERY == 0:
+                LOGGER(f"Could not read tx {tx_id} yet ({failed + 1} failed check(s)): {e}")
+            failed += 1
+            continue
+        if failed:
+            LOGGER(f"Read tx {tx_id} again after {failed} failed check(s).")
+            failed = 0
+        confirmations = int(status.get("confirmations", 0) or 0)
+        if confirmations < 0:
+            # Core says the transaction was replaced or reorged out. That is not
+            # "not yet confirmed": waiting longer cannot make it true again.
+            raise ValueError(
+                f"Transaction {tx_id} was replaced or left the chain "
+                f"({confirmations} confirmations); nothing was credited."
+            )
+        if confirmations >= wanted:
+            LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
+            contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
+            set_token_id(contract, NATIVE_ASSET)
+            set_script(contract, script)
+            set_contract_type(contract, CONTRACT.encode("utf-8"))
+            return contract
+
+    raise TimeoutError(
+        f"Transaction {tx_id} did not reach {wanted} confirmation(s) in "
+        f"{WAIT_TX_ATTEMPTS * WAIT_TX_SLEEP_TIME // 60} minutes. The money is on-chain; "
+        "the peer has not been told."
+    )
 
 
 def _op_return_tokens(transaction: dict) -> list:

@@ -300,6 +300,22 @@ pub(crate) fn overlays() -> Vec<(&'static str, Page, Box<dyn Fn(&mut App)>)> {
             app.asset_form.error = Some("the rate must be a positive number".to_string());
             app.input_mode = InputMode::AddAsset;
         })),
+        ("execute-envs", Page::Services, Box::new(|app: &mut App| {
+            let spec = |name: &str, required: bool| crate::env_form::EnvSpec {
+                name: name.to_string(),
+                tags: vec!["text".to_string()],
+                prose: "a fairly long explanation of what the variable is for 🦀 東京".to_string(),
+                required,
+                networks: if required { vec!["pow:ergo".to_string()] } else { Vec::new() },
+            };
+            let mut specs = vec![spec("A_VERY_LONG_VARIABLE_NAME_INDEED", true)];
+            specs.extend((0..10).map(|n| spec(&format!("VAR_{n}"), false)));
+            app.env_form = crate::env_form::EnvForm::new("svc".to_string(), "svc".to_string(), specs);
+            app.env_form.values[0] = "x".repeat(200);
+            app.env_form.revealed = true;
+            app.env_form.error = Some("A_VERY_LONG_VARIABLE_NAME_INDEED is required".to_string());
+            app.input_mode = InputMode::ExecuteEnvs;
+        })),
         ("chat-peer", Page::Chat, Box::new(|app: &mut App| {
             app.input_mode = InputMode::PickChatPeer;
         })),
@@ -487,6 +503,7 @@ fn hit_areas_are_on_the_page(app: &App, buffer: &Buffer) -> Result<(), String> {
     areas.extend(app.chat_card_buttons.iter().map(|(_, rect)| ("card button", *rect)));
     areas.push(("attach", app.chat_attach_area));
     areas.push(("send", app.chat_send_area));
+    areas.push(("peers refresh", app.peers_refresh_area));
     areas.extend(app.energy_row_areas.iter().map(|(_, rect)| ("energy row", *rect)));
     areas.extend(app.price_bar_areas.iter().map(|(_, rect)| ("price bar", *rect)));
     areas.extend(app.payment_rate_areas.iter().map(|(_, rect)| ("payment rate", *rect)));

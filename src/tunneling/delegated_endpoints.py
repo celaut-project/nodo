@@ -41,6 +41,7 @@ the client was actually given.
 import random
 import socket
 import threading
+import time
 from typing import Dict, List, Optional, Tuple
 
 import netifaces as ni
@@ -60,6 +61,11 @@ LOG_PREFIX = "[TUNNEL][DELEGATED]"
 
 # How long close() waits for a serving thread to notice it should stop.
 ENDPOINT_JOIN_TIMEOUT_S = 2.0
+
+# How long a freshly published token is left alone by close_orphaned(). A
+# delegation publishes its endpoints before it writes the delegated_instances
+# row, so for a moment a live token has no row yet.
+ORPHAN_GRACE_S = 60.0
 
 POLICY_AUTO = "auto"
 POLICY_ALWAYS = "always"
@@ -114,6 +120,8 @@ class _Endpoint:
 
 # token as the peer knows it -> its local endpoints.
 _endpoints: Dict[str, List[_Endpoint]] = {}
+# token -> time.monotonic() of its last publish, under _endpoints_lock.
+_published_at: Dict[str, float] = {}
 _endpoints_lock = threading.Lock()
 
 # Per-token publish locks. publish() opens listeners *outside* _endpoints_lock,
@@ -453,6 +461,7 @@ def _publish_locked(
         with _endpoints_lock:
             # close() above already cleared any prior generation, so replace.
             _endpoints[token] = opened
+            _published_at[token] = time.monotonic()
 
     return rewritten
 
@@ -467,12 +476,43 @@ def close(token: str) -> None:
     """Close every local endpoint standing in for ``token``."""
     with _endpoints_lock:
         endpoints = _endpoints.pop(token, [])
+        _published_at.pop(token, None)
 
     for endpoint in endpoints:
         endpoint.close()
 
     if endpoints:
         logger(f"{LOG_PREFIX} Closed {len(endpoints)} endpoint(s) for {token}.")
+
+
+def close_orphaned(grace_s: float = ORPHAN_GRACE_S) -> int:
+    """Close the endpoints whose token no longer has a delegated_instances row.
+
+    close() acts on the endpoints of the process that calls it, and the listeners
+    live in the daemon. A delegated instance stopped from another process --
+    ``nodo kill`` stops it in the CLI process -- purges the row but leaves the
+    daemon's listeners bound (issue #522). The daemon calls this on its
+    maintenance tick to close them.
+
+    Tokens published less than ``grace_s`` ago are skipped: their row may not be
+    written yet. Returns the number of tokens closed.
+    """
+    now = time.monotonic()
+    with _endpoints_lock:
+        candidates = [
+            token for token in _endpoints
+            if now - _published_at.get(token, 0.0) >= grace_s
+        ]
+    if not candidates:
+        return 0
+
+    # Read after the snapshot: a row written in between only keeps a token open.
+    known = {row.get('token') for row in sc.get_delegated_instances()}
+    orphaned = [token for token in candidates if token not in known]
+    for token in orphaned:
+        logger(f"{LOG_PREFIX} {token} has no delegated instance any more; closing its endpoints.")
+        close(token=token)
+    return len(orphaned)
 
 
 def restore() -> int:

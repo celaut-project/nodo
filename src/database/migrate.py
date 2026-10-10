@@ -248,6 +248,19 @@ TABLES = {
     # nobody indexed, because the ledger cannot map an address back to a peer id.
     #
     # `status` is what happened, not what we hoped:
+    #   signed        -- outgoing, the transaction is signed and its id known, and
+    #                    it is being sent. Written BEFORE the send, so a daemon that
+    #                    stops between the send and any later write still has the row:
+    #                    the id is what a resume looks the transaction up by.
+    #   broadcast     -- outgoing, the network took the transaction and it is not yet
+    #                    confirmed, so a daemon that stops during the wait still knows
+    #                    the money left.
+    #   confirmed     -- outgoing, the transaction is confirmed and the peer has not
+    #                    been told yet. These three are resumed at startup (see
+    #                    `payment_process.resume_outgoing_payments`).
+    #   failed        -- outgoing, the transaction never reached the chain: the network
+    #                    refused it, or a 'signed' one never showed up before its
+    #                    deposit token expired. No money moved.
     #   communicated  -- outgoing, the peer acknowledged our Payable call
     #   unacknowledged-- outgoing, the transaction was broadcast and the call failed.
     #                    Money left, credit never arrived. The row an operator needs.
@@ -263,6 +276,10 @@ TABLES = {
     # rows, where the only address involved is this node's own wallet.
     # `amount_mu` is TEXT for the same reason every other balance in this schema is:
     # MU exceeds what SQLite stores as an integer.
+    # `peer_amount_mu` is the figure the peer is told, in the *peer's* MU. It is on the
+    # row because a resumed payment has to send the peer the same `Payable` the
+    # interrupted one would have sent, and it cannot be derived again from `amount_mu`
+    # once the rates have moved.
     # Tunnelled bytes relayed per local calendar day, so `host_limits.MAX_NET_GIB_PER_DAY`
     # is an allowance for the day rather than for the current run of the daemon: a
     # counter living only in memory would reset on every restart, which on a metered
@@ -306,7 +323,7 @@ TABLES = {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tx_id TEXT DEFAULT NULL,
             direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
-            status TEXT CHECK( status IN ('communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
+            status TEXT CHECK( status IN ('signed', 'broadcast', 'confirmed', 'communicated', 'unacknowledged', 'failed', 'accepted', 'rejected') ) NOT NULL,
             peer_id TEXT DEFAULT NULL,
             client_id TEXT DEFAULT NULL,
             deposit_token TEXT DEFAULT NULL,
@@ -319,6 +336,7 @@ TABLES = {
             token_id TEXT DEFAULT NULL,
             address TEXT DEFAULT NULL,
             amount_mu TEXT NOT NULL,
+            peer_amount_mu TEXT DEFAULT NULL,
             purpose TEXT DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -649,6 +667,7 @@ def create_tables(cursor):
     })
     retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
+    forget_peer_rates_per_whole_unit(cursor)
 
 
 def retire_slot_table(cursor) -> None:
@@ -705,6 +724,42 @@ def ensure_peer_address_uniqueness(cursor) -> None:
         )
     except sqlite3.Error as e:
         print(f"Error enforcing peer address uniqueness: {e}")
+
+
+def forget_peer_rates_per_whole_unit(cursor) -> None:
+    """Clear every peer's stored ``contract_instance.mu_per_unit``, once.
+
+    ``ContractRate.mu_per_unit`` used to be MU per whole unit (1e9 per ERG by default)
+    and is now MU per base unit (nanoERG, satoshi, a token's smallest unit). Nothing on
+    the wire marked the change, so a stored peer rate cannot be told apart from a new
+    one: read as per base unit, an old one is wrong by 10^9 (10^8 on Bitcoin). They are
+    set to NULL -- "no rate known", which every reader already handles -- and each peer's
+    next announcement stores its rate again; one from a node that still announces per
+    whole unit is refused, as it declares no ledger (``manager._accept_contract``).
+
+    This node's own rows (``peer_id = 'LOCAL'``) are not touched: they are written from
+    its own config at startup. Run once, recorded in ``applied_migrations``: after it, a
+    stored rate is per base unit and must survive a restart.
+    """
+    name = "peer_mu_per_unit_is_per_base_unit"
+    try:
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS applied_migrations "
+            "(name TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+        )
+        cursor.execute("SELECT 1 FROM applied_migrations WHERE name = ?", (name,))
+        if cursor.fetchone():
+            return
+        cursor.execute(
+            "UPDATE contract_instance SET mu_per_unit = NULL WHERE peer_id != 'LOCAL'"
+        )
+        cleared = cursor.rowcount
+        cursor.execute("INSERT INTO applied_migrations (name) VALUES (?)", (name,))
+        if cleared:
+            print(f"Cleared {cleared} peer rate(s) stored per whole unit; "
+                  "peers announce them again per base unit.")
+    except sqlite3.Error as e:
+        print(f"Error clearing peer rates stored per whole unit: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:

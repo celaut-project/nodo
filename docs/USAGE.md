@@ -42,11 +42,21 @@ Every command an agent needs is non-interactive and most have a `--json` form; s
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--name <instance-name>] [-e key value] <service id | service tag | '.celaut.bee' file path>`**  
-  Launches a service instance. The address it prints is reachable from this host only; use `nodo tunnel` to reach the instance from elsewhere. Use `--name` to assign a human-readable instance name. Use `-e` to add service enviroment variables.  
+- **execute `[--name <instance-name>] [-e key value] [--no-input] <service id | service tag | '.celaut.bee' file path>`**  
+  Launches a service instance. The address it prints is reachable from this host only; use `nodo tunnel` to reach the instance from elsewhere. Use `--name` to assign a human-readable instance name. Use `-e` to add service environment variables.  
+  `execute` compares the `-e` values with the env vars that the service declares (see `nodo service_envs`). A var that a network of the service uses as `${VAR}` is required. All other declared vars are optional.  
+  - In a terminal, `execute` asks for each missing var. It asks for a required var again until the var has a value. Press Enter to skip an optional var.  
+  - Without a terminal, or with `--no-input`, `execute` does not ask. A missing required var stops the launch. A missing optional var is reported, and the instance starts without it.  
+  `execute` never prints the values, only the names.  
   **Example:**  
   `nodo execute 1234567890abcdef`
   `nodo execute -e workers 8 -e timeout 20 1234567890abcdef`
+  `nodo execute --no-input -e BLOCK_ID 9a3f… my_service_tag`
+
+- **service_envs `<service id | service tag>` `[--json]`**  
+  Lists the env vars that the service asks for: name, format tags, prose, and whether the var is required (and by which network). If the service is not on this node, it is acquired first, as `execute` does.  
+  **Example:**  
+  `nodo service_envs my_service_tag --json`
 
 - **estimate `<service id | service tag | '.celaut.bee' file path>`**  
   Estimates service execution cost without launching it.  
@@ -296,14 +306,14 @@ These are the most commonly used commands for daily tasks:
   `nodo tunnel_close --all`
 
 - **increase_deposit `<instance id> <amount>`**  
-  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
+  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (MU by default).  
   **Example:**  
-  `nodo increase_deposit abcdef1234567890 0.01`
+  `nodo increase_deposit abcdef1234567890 10000000`
 
 - **decrease_deposit `<instance id> <amount>`**  
   Takes back part of a service instance's deposit.  
   **Example:**  
-  `nodo decrease_deposit abcdef1234567890 0.005`
+  `nodo decrease_deposit abcdef1234567890 5000000`
 
 - **services `[<service id | tag>] [--json] [--limit N]`**  
   Lists all available services on the node. With a service, shows its reputation
@@ -323,9 +333,15 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
-- **pack `<project directory>`**  
-  Packages a project into a service. There are two backends, selected by
-  `packer.local` in `config.yaml`:
+- **pack `<project directory | https git URL[#subdir]> [--local] [--detach] [--json]`**  
+  Packages a project into a service. The source is a local directory (relative
+  paths are read from the shell you typed in) or an **https** git URL, optionally
+  with `#<subdir>` for a project inside the repository. `http://` is refused (the
+  code would be sealed as it arrived, and over plain http it can be changed on the
+  way), and so are `ssh://` / `git@…` URLs (the repository is cloned without
+  credentials: clone it yourself and pack the folder). Exits `1` when the source is
+  refused or the pack produces no service. There are two backends, selected by
+  `packer.local` in `config.yaml`, or by `--local` for one run:
 
   **Default (`packer.local: false`) — packer-service:** nodo does **not** build
   locally. It sends the project to an external **packer-service** (a microVM that
@@ -348,16 +364,84 @@ These are the most commonly used commands for daily tasks:
   The builder runs as your own user, so packing never asks for sudo. Tune it with
   `packer.buildkit.*` and `dependencies.buildkit.*` in `config.yaml`.  
 
-  **Example:**  
-  `nodo pack /path/to/project`
+  **`--local` — local packer for this run only:** use the local rootless packer
+  for this pack, and also for the dependencies that it packs. The `config.yaml`
+  file does not change.
+
+  **If the packer service is not available** (`packer.local: false`):
+  - In a terminal, nodo asks you to enable the local packer. If you answer yes,
+    nodo writes `packer.local: true` to `config.yaml` and continues the pack.
+  - Without a terminal (a script, CI or an AI agent), nodo does not ask. The pack
+    fails and nodo shows a hint.
+
+  **For AI agents and scripts:** if `nodo pack` fails because the packer service
+  is not available, run the same command again with `--local`. The first local
+  pack can install BuildKit with `bash/install_buildkit.sh`. This install can ask
+  for sudo one time. Do not use `--local` if the operator wants packs to stay off
+  this host.
+
+  Every pack records itself in `<main.STORAGE>/packs/<id>.json` while it runs and
+  keeps the record afterwards with its outcome, so `nodo packs` and the TUI's PACKS
+  page see packs started anywhere — a terminal, a script, the TUI. **`--detach`**
+  runs the pack in the background and returns at once with its id; its output goes
+  to `<main.STORAGE>/packs/<id>.log`. That is the form for scripts, agents and the
+  TUI, none of which can hold a terminal open for a build that takes minutes. A
+  detached pack with the local packer that finds another pack using the builder
+  waits for it (`queued`) instead of failing, as one in a terminal does.
+  `--json` prints one object: with `--detach`, the pack as it started
+  ```json
+  {"pack": {"id": "3f9a0c12", "pid": 41872, "source": "/home/me/hello", "kind": "dir",
+   "packer": "local", "status": "running", "stage": "starting", "detached": true,
+   "log": "/nodo/storage/packs/3f9a0c12.log", "started_at": 1791051095,
+   "finished_at": null, "service_id": null, "error": null}}
+  ```
+  and in the foreground, the same record once it finished (the packer's own output
+  goes to stderr). A source that is refused is `{"error": "Error: …"}` with exit `1`.  
+  **Examples:**  
+  `nodo pack /path/to/project`  
+  `nodo pack https://github.com/celaut-basics/demo-service.git#hello --detach`  
+  `nodo pack /path/to/project --local`  
+  `nodo pack ./my-service --detach --json`
   > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
   > reference for the project layout, `pack_config.json`, `service.json`, and the
   > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
   > is declared in `service.json → init.entry_path`). Do not guess the format.
 
+- **packs `[<pack id>] [--active] [--json]`**  
+  Lists the packs on record, newest first: id, status, source, the service id it
+  produced (or the stage a running one is at, or why one failed), age and how long
+  it took. `--active` keeps only the `queued`/`running` ones. A pack id (or an
+  unambiguous prefix) shows that pack with the last lines of its log. Statuses:
+  `queued` (waiting for another local pack to release the builder), `running`,
+  `done`, `failed`, `cancelled`. A record that says running but whose process is
+  gone (killed with -9, or the host restarted) is reported — and rewritten — as
+  `failed` with `error` saying so. The newest 20 finished packs are kept; older
+  records and their logs are pruned.
+  JSON: `{"packs": [pack, …]}` / `{"pack": {…, "log_tail": ["…"]}}`, with `pack` as
+  above plus `age_secs`, `duration_secs` and `last_line` (the last line of its log).
+  `stage` is one of `starting`, `waiting for another pack`, `starting the builder`,
+  `starting the packer service`, `cloning`, `copying the project`,
+  `waiting for the packer service`, `uploading dependencies`, `zipping the project`,
+  `building`, `building in the packer service`, `importing`; `null` once finished.  
+  **Examples:**  
+  `nodo packs`  
+  `nodo packs 3f9a --json`
+
+- **pack_cancel `<pack id>… [--json]`**  
+  Stops a queued or running pack. It is sent SIGTERM and unwinds through the
+  packer's own cleanup — stops nodo's rootless builder, removes the clone or copy,
+  releases the pack lock — and records itself `cancelled`. One still alive after
+  30 s is killed, with its whole process group when it was started with `--detach`
+  (the `git` / `buildctl` it was waiting on live there). What it cannot stop: a
+  build already sent to a packer **service** keeps running inside that VM until it
+  finishes; its result is just never imported. Exits `1` if a pack is unknown, not
+  running, or another user's.
+  JSON: `{"cancelled": ["3f9a0c12"], "failed": []}` (+ `"error"` when `failed` is
+  not empty).
+
 - **tui**  
   Launches the terminal user interface for monitoring and managing the node. Its
-  Config page is **the** place to change a setting: it validates the value, backs the
+  All page is **the** place to change a setting: it validates the value, backs the
   file up, writes it, and restarts the node in one step ([`CONFIG.md`](CONFIG.md)).  
   **Example:**  
   `nodo tui`
@@ -396,16 +480,16 @@ These are the most commonly used commands for daily tasks:
   `nodo import /service/path`
 
 - **publish `<service id | service tag>`**  
-  Exports a local service and publishes it in chunks to the configured GitHub repository.
+  Exports a local service and uploads it as an asset of a GitHub Release (tag `celaut-<service id>`) of the configured repository. A file above `publisher.SPLIT_SIZE_MB` is uploaded as parts plus a `manifest` asset. It prints the artifact URL (or the manifest URL) and the matching `nodo download` command. Publishing the same service again reuses its release. See `publisher.*` in [CONFIG.md](CONFIG.md).
   **Examples:**  
   `nodo publish 1234567890abcdef`  
   `nodo publish my_service_tag`
 
 - **download `<manifest url | .celaut.bee https url>`**  
-  Downloads a published service and imports it locally (the service id is recomputed from content on import). Accepts either a manifest URL listing chunk URLs (one per line, `nodo publish`'s default output) or a direct HTTPS link to a `.celaut.bee` artifact, downloaded in a single request.
+  Downloads a published service and imports it locally (the service id is recomputed from content on import). Accepts either a manifest URL listing chunk URLs (one per line; `nodo publish` gives one for a file above `publisher.SPLIT_SIZE_MB`) or a direct HTTPS link to a `.celaut.bee` artifact (what `nodo publish` gives for a smaller file), downloaded in a single request.
   **Examples:**  
-  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
-  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`  
+  `nodo download https://github.com/user/repo/releases/download/celaut-<service_hash>/<service_hash>.celaut.bee`  
+  `nodo download https://github.com/user/repo/releases/download/celaut-<service_hash>/manifest -o /tmp/services`  
   `nodo download https://example.com/path/to/service.celaut.bee`
 
 - **get `<service id | service tag> [--now]`**  
@@ -479,6 +563,19 @@ These commands offer extended management and exploration features:
   `nodo peers`  
   `nodo peers <peer id> --json`
 
+- **protocol `[<peer id> | <ip:port>] [--json] [--no-prose]`**  
+  Without an argument, prints the protocol this node announces on every address:
+  the signature scheme, the transport and the stack of layers (tls, http2, grpc,
+  bee-rpc, celaut-gateway), each with its `formal` parameters and its prose. With a
+  peer, asks it for its announcement and compares it with this node's, layer by layer,
+  naming every `formal` key that differs. A layer is `compatible` when it differs
+  only by message fields or RPCs that one side declares and the other does not:
+  protobuf and gRPC let the two nodes talk. Exits 0 when the peer speaks this node's
+  protocol on at least one address.  
+  **Example:**  
+  `nodo protocol`  
+  `nodo protocol <peer id> --json`
+
 - **peer_reputation `<peer id> <+N|-N>` `[--json]`**  
   Moves this node's local reputation score of a peer and records why
   (`operator_adjustment`) — the TUI's `+`/`-` on PEERS.  
@@ -486,14 +583,14 @@ These commands offer extended management and exploration features:
   `nodo peer_reputation <peer id> -1`
 
 - **credit_client `<client id> <amount>`**  
-  Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
+  Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (MU by default).  
   **Example:**  
-  `nodo credit_client abcdef1234567890 0.01`
+  `nodo credit_client abcdef1234567890 10000000`
 
 - **debit_client `<client id> <amount>`**  
   Takes back part of a client's balance.  
   **Example:**  
-  `nodo debit_client abcdef1234567890 0.005`
+  `nodo debit_client abcdef1234567890 5000000`
 
 ---
 
@@ -577,7 +674,8 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo migrate`
 
-- **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]`**  
+- **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]` `[--no-input]`**  
+  Asks for missing env vars, or refuses them, the same way as `execute`.  
   Testing/dev only. `execute` always picks the peer through `execution_balancer`
   (cheapest local-or-connected-peer candidate, tried in cost order). This command
   skips that entirely and delegates straight to `peer_id` — no comparison against
@@ -816,7 +914,7 @@ pages, peer reputation adjustment, the detail cards) are commands now too.
 - **`--limit N`** bounds the history rows in a detail view (default 50; the TUI
   shows 8).
 
-Commands with `--json`: `status`, `services`, `instances`, `peers`, `clients`,
+Commands with `--json`: `status`, `services`, `instances`, `peers`, `protocol`, `clients`,
 `peer_reputation`, `config` (all subcommands), `earnings`, `energy`, `schedule`,
 `logs -n`, `docs`, `chat <peer>` (reading), `chat_open`, `chat_threads`,
 `chat_thread`, `reputation`, `donations`, `resources`, `tx_history`, `kill`, `tunnel`,
@@ -897,7 +995,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
   ```
 
 - **config profile `[<profile>] [--apply] [--json]`**
-  The CELL page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
+  The POLICIES page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
   `workbench` (most closed to most open). No argument lists them with how far this
   node is from each and which is closest (ties go to the more closed one). A
   profile name lists exactly which keys differ (`from` → `to`); `--apply` writes
@@ -1016,9 +1114,13 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | SERVICES: list | — | `nodo services [--json]` (new `--json`) |
 | SERVICES: reputation card | — | `nodo services <service> [--json]` (new) |
 | SERVICES: details | `i` | `nodo inspect <service>` |
-| SERVICES: execute | `e` | `nodo execute <service>` |
+| SERVICES: execute (y/N, then a form for the env vars; values masked, Ctrl+R or 👁 shows one) | `e` | `nodo service_envs <service> --json`, then `nodo execute --no-input [-e key value]… <service>` (new `service_envs`, `--no-input`) |
 | SERVICES: delete | `d` | `nodo remove <service>` |
 | SERVICES: get from peers | — | `nodo get <service>` |
+| SERVICES / PACKS: pack a folder or an https git URL | `p` / `n` | `nodo pack <dir \| https URL[#subdir]> --detach [--json]` (new `--detach`, `--json`) |
+| PACKS: table, card (current and recent packs) | — | `nodo packs [--active] [--json]` (new) |
+| PACKS: details + log tail | `i` | `nodo packs <pack id> [--json]` (new) |
+| PACKS: cancel (y/N) | `c` | `nodo pack_cancel <pack id> [--json]` (new) |
 | PEERS: table | — | `nodo peers [--json]` (new `--json`) |
 | PEERS: payments + reputation events card | — | `nodo peers <peer> [--json]` (new) |
 | PEERS: connect | `c` | `nodo connect <host:port>` |
@@ -1033,11 +1135,11 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | EARNINGS: money per network and window | — | `nodo earnings [--json]` (new) |
 | EARNINGS: reputation staked, proofs | `r` | `nodo reputation [--json]` |
 | EARNINGS: donations | — | `nodo donations [--json]` |
-| CELL: closest profile, deviations | `d` | `nodo config profile [<profile>] [--json]` (new) |
-| CELL: apply a profile | `p` | `nodo config profile <profile> --apply` (new) |
-| CELL: move a lever / edit its keys | Enter / `e` | `nodo config set <key>=<value> …` (new; one call per lever, all its keys) |
-| CELL: Ergo accepted tokens add/remove | `a` / `d` | `nodo config append ledgers.ergo.payments.ASSETS '{…}'` / `nodo config remove ledgers.ergo.payments.ASSETS[n]` (new) |
-| CELL: router steps | `n` | `nodo nat-guide` |
+| POLICIES: closest profile, deviations | `d` | `nodo config profile [<profile>] [--json]` (new) |
+| POLICIES: apply a profile | `p` | `nodo config profile <profile> --apply` (new) |
+| POLICIES: move a lever / edit its keys | Enter / `e` | `nodo config set <key>=<value> …` (new; one call per lever, all its keys) |
+| POLICIES: Ergo accepted tokens add/remove | `a` / `d` | `nodo config append ledgers.ergo.payments.ASSETS '{…}'` / `nodo config remove ledgers.ergo.payments.ASSETS[n]` (new) |
+| POLICIES: router steps | `n` | `nodo nat-guide` |
 | PRICING: prices, nudge ±10 % | `+` / `-`, `e` | `nodo config get pricing --json` / `nodo config set pricing.…=<value>` (new) |
 | ENERGY: settings | `e`, Enter | `nodo config get energy` / `nodo config set energy.…` (new) |
 | ENERGY: history chart, today/7d/30d | — | `nodo energy [--json] [--hours N]` (new) |
@@ -1056,7 +1158,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 
 Not ported, deliberately: themes, layout and mouse handling (presentation only);
 in-page search and link following on DOCS (an agent reads the Markdown directly);
-the CELL page's *lever catalogue* — the named one-row decisions and their
+the POLICIES page's *lever catalogue* — the named one-row decisions and their
 explanations. Every lever is a set of config keys, so `nodo config set` can put a
 node in any state a lever can, but the human-readable names and wording live only
 in `cell.rs`. The profile catalogue *is* ported, because "which posture is this
@@ -1175,11 +1277,11 @@ running on this host.
   with the tail of its log. The INBOUND table under the card lists the streams this
   node relays for others (`nodo tunnels --inbound`); it is read-only.
 - On Services, `e` executes the selected service and `d` deletes it.
-- On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
+- On All, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
   preserved, and each write snapshots the previous file to
   `config-<timestamp>-<nnnn>.yaml` — one snapshot per write, not per second.
-- On Cell, the node's policies are laid out as a cell: Right/Left move between organelles,
+- On Policies, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
   "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where

@@ -195,7 +195,7 @@ def _self_network_data() -> str:
     sign_peer_payload,
 )
     from src.utils.network import get_local_ip, resolve_public_host, uri_expiry
-    from src.identity.transport_stack import share_prose_on_ledger
+    from src.identity.transport_stack import declare_transport, share_prose_on_ledger
 
     try:
         outbound_ip = get_local_ip()
@@ -217,7 +217,7 @@ def _self_network_data() -> str:
     uri = peer.uri.add()
     uri.ip = host
     uri.port = public_port
-    uri.transport.tags.append("tcp")
+    declare_transport(uri, prose=share_prose_on_ledger())
 
     public_key_hex = get_node_public_key_hex()
     if public_key_hex:

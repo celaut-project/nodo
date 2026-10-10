@@ -26,6 +26,7 @@ from src.commands.execute import (
     DEV_CLIENT_FUNDING_MU,
     launch_via_gateway,
     acquire_service,
+    complete_envs,
     print_endpoints,
     resolve_service_hash,
 )
@@ -90,6 +91,8 @@ def force_execution(
     service: str,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
+    check_envs: bool = False,
+    ask_envs: bool = False,
 ):
     if not sc.peer_exists(peer_id):
         print(f"❌ Peer '{peer_id}' is not connected. Check `nodo peers`.")
@@ -105,6 +108,11 @@ def force_execution(
         return
 
     service = resolved
+
+    if check_envs:
+        envs = complete_envs(service_hash=service, envs=envs, interactive=ask_envs)
+        if envs is None:
+            return
 
     try:
         matching_payment_system(peer_id, connection=sc)

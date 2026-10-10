@@ -14,6 +14,7 @@ from src.utils import logger as log
 from src.utils import keyvalue
 from src.utils.config import ConfigManager
 from src.identity.transport_stack import (
+    declare_transport,
     declare_transport_stack,
     share_prose_on_get_peer_info,
 )
@@ -180,8 +181,6 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
         public_port = _public_port(_gateway_port())
         uris.append(celaut.Instance.Uri(ip=public_host, port=public_port))
         log.LOGGER(f'Announcing public host {public_host}:{public_port}')
-    else:
-        log.LOGGER('No public address to announce (set network.PUBLIC_IP if behind NAT).')
 
     announce_private = bool(env_manager.get("network.ANNOUNCE_PRIVATE_ADDRESSES", False))
     private: List[celaut.Instance.Uri] = []
@@ -381,15 +380,27 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
+    peer = _unsigned_peer(uris)
+    _sign_peer(peer)
+    return peer
+
+
+def _unsigned_peer(uris: List[celaut.Instance.Uri], *, quiet: bool = False) -> celaut_pb2.Peer:
+    """Everything this node announces at ``uris``, before it is signed.
+
+    ``quiet`` drops the per-build log lines, for a caller that builds the announcement
+    on a timer only to see whether it changed (``announcement_digest``).
+    """
     peer = celaut_pb2.Peer()
 
     # Every address this node serves its gateway at. The transport rides on the
     # address itself rather than on a separate slot: tcp:8080 and udp:9000 would be
     # different endpoints, so a reader needs to know which without matching the two
     # by port number.
+    prose = share_prose_on_get_peer_info()
     for uri in uris:
         announced = peer.uri.add(ip=uri.ip, port=uri.port)
-        announced.transport.tags.append("tcp")
+        declare_transport(announced, prose=prose)
         # What the endpoint actually speaks, spelled out rather than named: the tags
         # alone would let two nodes both write "tls" while disagreeing on the extension
         # OID, on what the signature covers or on which RPCs exist, and neither could
@@ -397,11 +408,12 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
         # comparison reads; the prose is there so a reader can implement the thing (see
         # src/identity/transport_stack.py). Covered by the signature below, so a relay can
         # neither strip the declaration nor edit a parameter out of it.
-        declare_transport_stack(announced, prose=share_prose_on_get_peer_info())
+        declare_transport_stack(announced, prose=prose)
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not
-    # here: that is what GetServiceEstimatedCost is for. Values are ceilings; see
+    # here: that is what GetServiceEstimatedCost is for. Values are base prices (the
+    # node scales RAM, CPU and disk up to scarcity_max_multiplier); see
     # node_advertised_rates(). Node-wide rather than per-address, because a node's
     # rates do not depend on which of its addresses you reach it through.
     #
@@ -415,7 +427,8 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     })
 
     payment_contracts = _local_payment_contracts()
-    log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
+    if not quiet:
+        log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
     if payment_contracts:
         peer.payment_contracts.extend(payment_contracts)
 
@@ -434,10 +447,9 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     from src.reputation_system.fetch import local_proofs
 
     reputation_proofs = list(local_proofs())
-    log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')
+    if not quiet:
+        log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')
     peer.reputation_proofs.extend(reputation_proofs)
-
-    _sign_peer(peer)
     return peer
 
 
@@ -525,13 +537,40 @@ def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     return _build_peer([_uri_for_network(network)])
 
 
-def generate_full_node_peer_info() -> celaut_pb2.Peer:
+def generate_full_node_peer_info(fresh: bool = False) -> celaut_pb2.Peer:
     """A Peer advertising every address this node is reachable at, signed with its
     identity key. Used for peer-to-peer discovery (GetPeerInfo, IntroducePeer
     self-announce) -- see :func:`generate_node_peer_info` for the single-network form.
+
+    ``fresh`` signs it now rather than re-serving a cached signature. A peer only stores
+    an announcement whose ``ts`` is newer than the last one it accepted
+    (``manager._passes_anti_replay``), and the cache is keyed on content: an
+    announcement that changed *back* -- an address that left and returned, a policy
+    turned off and on again -- would otherwise come out of it with a ``ts`` older than
+    the one in between, and be dropped as stale by exactly the peers it is pushed to.
     """
     log.LOGGER('Generating gateway instance for all reachable interfaces')
+    if fresh:
+        with _SIGNED_PEER_LOCK:
+            _signed_peers.clear()
     return _build_peer(_uris_for_all_interfaces())
+
+
+def announcement_digest() -> str:
+    """A digest of what :func:`generate_full_node_peer_info` would announce right now.
+
+    The same ``canonical_peer_content_digest`` the signed-announcement cache keys on,
+    over the same content -- addresses, rates, payment contracts, resources, reputation
+    proofs, the declared signature scheme -- so two calls agree exactly when the
+    announcement a peer would receive has not changed. Nothing is signed: this is what
+    ``src/manager/announcement_change.py`` polls to decide whether known peers must be
+    told, and a signature would be spent on every poll for no one.
+    """
+    from src.identity.node_identity import canonical_peer_content_digest, declare_signature_scheme
+
+    peer = _unsigned_peer(_uris_for_all_interfaces(), quiet=True)
+    declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
+    return canonical_peer_content_digest(peer)
 
 
 # If the service is not on the registry, save it.
@@ -556,4 +595,22 @@ def save_service(
                 return False
         return True
 
-    return os.path.exists(os.path.join(REGISTRY, service_hash)) or __save()
+    if os.path.exists(os.path.join(REGISTRY, service_hash)):
+        return True
+    if not __save():
+        return False
+    _split_oversized_filesystem_block(service_hash)
+    return True
+
+
+def _split_oversized_filesystem_block(service_hash: str):
+    """Right after a service is received: a peer may have sent its filesystem block
+    with more inline than a message can be parsed from. Done here so the block is
+    stored small from the start; the build does the same check again
+    (`load_container_filesystem`), so a failure here only costs the time."""
+    from src.utils.container_filesystem import split_oversized_filesystem_block
+    from src.utils.utils import load_service_from_disk
+    try:
+        split_oversized_filesystem_block(load_service_from_disk(service_hash))
+    except Exception as e:
+        log.LOGGER(f'Could not give the filesystem block of {service_hash} sub-blocks: {e}')

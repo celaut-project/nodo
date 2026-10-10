@@ -23,9 +23,13 @@ from typing import List, Optional
 
 
 def _cores(entry) -> Optional[float]:
+    """``cpu_quota / cpu_period``, with the kernel's default period when none is given
+    (Sysresources.cpu_period). None when no quota is given."""
+    from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_US
+
     at_most = entry.resources
-    if at_most.HasField("cpu_quota") and at_most.HasField("cpu_period") and at_most.cpu_period:
-        return at_most.cpu_quota / at_most.cpu_period
+    if at_most.cpu_quota:
+        return at_most.cpu_quota / (at_most.cpu_period or _DEFAULT_CPU_PERIOD_US)
     return None
 
 
@@ -34,7 +38,12 @@ def _print_report(entries) -> None:
     from src.utils.arch_guard import arch_from_tags
 
     if not entries:
-        print("This node announces no resources.")
+        from src.utils.cost_functions.architecture_resources import executes_locally
+
+        if not executes_locally():
+            print("This node announces no resources: it delegates only (network.EXECUTE_LOCALLY: false).")
+        else:
+            print("This node announces no resources.")
         return
     print("What this node announces to its peers (ceilings, not free capacity):")
     for entry in entries:

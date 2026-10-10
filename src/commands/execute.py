@@ -22,6 +22,8 @@ from src.utils import keyvalue
 from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
 from src.utils.instance_names import inject_instance_name
 from src.utils.registry_errors import ServiceRegistryError
+from src.utils import service_envs
+from src.utils.utils import load_service_from_disk
 
 env_manager = ConfigManager()
 
@@ -278,22 +280,103 @@ def print_host_exposure_note(response) -> None:
     )
 
 
+def _describe_env(spec: service_envs.EnvSpec) -> str:
+    if spec.required:
+        need = f"required by network {'; '.join(spec.networks)}"
+    else:
+        need = "optional, Enter to skip"
+    lines = [f"  {spec.name} ({need})"]
+    if spec.tags:
+        lines.append(f"    format: {', '.join(spec.tags)}")
+    if spec.prose:
+        lines.append(f"    {spec.prose}")
+    return "\n".join(lines)
+
+
+def complete_envs(
+    service_hash: str,
+    envs: dict[str, str] | None,
+    interactive: bool,
+) -> dict[str, str] | None:
+    """``envs`` plus whatever the service declares and the caller left out, or None to abort.
+
+    Interactive: asks for each missing variable; a required one is asked again until it
+    has a value, an optional one is skipped on Enter. Otherwise nothing is asked: a
+    missing required variable aborts the launch and a missing optional one is reported.
+
+    Values are never printed, only names: one of them may be a secret.
+    """
+    envs = dict(envs or {})
+    try:
+        specs = service_envs.env_specs(load_service_from_disk(service_hash=service_hash))
+    except ServiceRegistryError:
+        # The launch reports why the spec cannot be read; the check has nothing to say.
+        return envs
+
+    missing = service_envs.missing_envs(specs, envs)
+    if not missing:
+        return envs
+
+    if not interactive:
+        required = [spec.name for spec in missing if spec.required]
+        if required:
+            print(
+                f"❌ Missing required env var{'s' if len(required) > 1 else ''}: "
+                f"{', '.join(required)}. Give each with -e <key> <value>.",
+                flush=True,
+            )
+            return None
+        print(
+            f"⚠️  Optional env vars not given, so not set: "
+            f"{', '.join(spec.name for spec in missing)}. Give them with -e <key> <value>.",
+            flush=True,
+        )
+        return envs
+
+    print("The service declares env vars that were not given with -e:", flush=True)
+    for spec in missing:
+        print(_describe_env(spec), flush=True)
+        while True:
+            try:
+                value = input(f"  {spec.name} = ")
+            except (EOFError, KeyboardInterrupt):
+                print("\n❌ Cancelled.", flush=True)
+                return None
+            candidate = {**envs, spec.name: value}
+            if value == "" and not spec.required:
+                break
+            if service_envs.is_answered(spec, candidate):
+                envs = candidate
+                break
+            print(f"  {spec.name} is required and needs a value on one line.", flush=True)
+    return envs
+
+
 def execute(
     service: str,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
-    silent: bool = False
+    silent: bool = False,
+    check_envs: bool = False,
+    ask_envs: bool = False,
 ):
+    """Launch ``service`` through this node's gateway.
+
+    ``check_envs`` compares ``envs`` with the variables the service declares
+    (:func:`complete_envs`), asking for the missing ones when ``ask_envs`` is set. Both
+    are off by default so a programmatic caller (``core_services.runtime``) launches
+    exactly as before; ``nodo execute`` turns them on.
+    """
     sink = open(os.devnull, "w") if silent else None
 
     try:
         resolved = resolve_service_hash(service)
         if not resolved:
-            # The service isn't in the local registry. Before refusing, try to acquire it
-            # through the 'source-application' core service: it maps the requested service id
-            # to its published sources and downloads it via the existing download/import path.
-            # This only succeeds when a trusted source-application is configured in
-            # 'core_services'; otherwise it's a no-op and we fall through to the error below.
+            # The service isn't in the local registry. Before refusing, try to acquire it:
+            # first from the known peers, then through the 'source-application' core
+            # service, which maps the requested service id to its published sources and
+            # downloads it via the existing download/import path. If neither provides it,
+            # we fall through to the error below.
             if acquire_service(service):
                 resolved = resolve_service_hash(service)
 
@@ -302,6 +385,11 @@ def execute(
             return
 
         service = resolved
+
+        if check_envs:
+            envs = complete_envs(service_hash=service, envs=envs, interactive=ask_envs)
+            if envs is None:
+                return
 
         response = launch_via_gateway(
             service=service,

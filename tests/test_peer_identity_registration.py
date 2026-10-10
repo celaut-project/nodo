@@ -20,6 +20,7 @@ try:
     from src.database import migrate
     from src.database.sql_connection import SQLConnection
     from src.identity import node_identity as ni
+    from src.identity.transport_stack import declare_transport_stack
     from src.reputation_system.bip_wallet_verification import (
         bip_schnorr_sign,
         derive_compressed_pubkey,
@@ -84,9 +85,15 @@ class _PeerFixture:
         for ip, port in uris:
             uri = peer.uri.add(ip=ip, port=port)
             uri.transport.tags.append(transport)
+            # Every node declares what each address speaks; one that declares nothing
+            # is not spoken to (transport_stack.speaks_our_transport_stack).
+            declare_transport_stack(uri, prose=False)
         mu_per_unit = peer.payment_contracts.add()
         mu_per_unit.contract.ledger.formal = contract
         mu_per_unit.mu_per_unit.n = "1"
+        # Every node declares its scheme; a test about the scheme rewrites it in
+        # ``prepare``, before signing.
+        ni.declare_signature_scheme(peer)
         if prepare:
             prepare(peer)
         if signed:
@@ -180,9 +187,7 @@ class PeerIdentityRegistrationTests(_PeerFixture, unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
 
     def test_a_peer_declaring_our_signature_scheme_is_registered(self):
-        # The cryptography a node speaks, spelled out rather than assumed. Declaring
-        # it must be the same announcement as declaring nothing, or upgrading would
-        # split the network in two.
+        # The cryptography a node speaks, spelled out rather than assumed.
         peer = self._peer([("10.0.0.1", 9999)], prepare=ni.declare_signature_scheme)
         self.assertEqual(manager.add_peer_instance(peer), self.pubkey)
 
@@ -191,6 +196,7 @@ class PeerIdentityRegistrationTests(_PeerFixture, unittest.TestCase):
         # refused, because the peer says those bytes are something this node cannot
         # verify. Accepting it would mean trusting a signature nobody checked.
         def _other_scheme(peer):
+            peer.ClearField("signature_scheme")
             peer.signature_scheme.components.add(tags=["ed25519"])
             peer.signature_scheme.components.add(tags=["ed25519ph"])
 
@@ -232,6 +238,7 @@ class PeerIdentityRegistrationTests(_PeerFixture, unittest.TestCase):
         # part of what a descriptor says (Peer.SignatureScheme.components is explicitly
         # unordered).
         def _reversed(peer):
+            peer.ClearField("signature_scheme")
             for declared in reversed(ni.SIGNATURE_SCHEME_COMPONENTS):
                 peer.signature_scheme.components.add(
                     tags=list(declared.tags), prose=declared.prose, formal=declared.formal
@@ -290,12 +297,12 @@ class PeerIdentityRegistrationTests(_PeerFixture, unittest.TestCase):
             self.assertEqual(component.formal, declared.formal)
         self.assertTrue(ni.same_signature_scheme(scheme, ni.node_signature_scheme()))
 
-    def test_an_announcement_without_a_scheme_still_verifies(self):
-        # What every node sent before the field existed. It has exactly one meaning,
-        # so it keeps it -- an empty descriptor is the default, never a wildcard.
-        peer = self._peer([("10.0.0.1", 9999)])
+    def test_an_announcement_without_a_scheme_is_refused(self):
+        # A signature whose scheme the announcement does not state cannot be checked,
+        # and there is no older default to read it as.
+        peer = self._peer([("10.0.0.1", 9999)], prepare=lambda p: p.ClearField("signature_scheme"))
         self.assertFalse(peer.HasField("signature_scheme"))
-        self.assertEqual(manager.verified_peer_public_key(peer), self.pubkey)
+        self.assertIsNone(manager.verified_peer_public_key(peer))
 
     def test_every_stored_peer_id_is_a_public_key(self):
         for signed in (False, True):

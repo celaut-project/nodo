@@ -16,8 +16,12 @@ pub struct Theme {
     pub name: &'static str,
     /// Selected tabs, focused borders, the node's own identity.
     pub accent: Color,
-    /// Labels, dividers and help text: there to be read past rather than read.
+    /// Borders, dividers and help text: there to be read past rather than read.
     pub muted: Color,
+    /// The name beside a value (`Status`, `Address`). Lighter than `muted`, which in
+    /// the ubuntu palette is a purple only a little brighter than its own
+    /// background: fine for a border, too faint for a word the operator has to read.
+    pub label: Color,
     /// Working, healthy, running, local.
     pub good: Color,
     /// Worth a look, not yet a problem.
@@ -50,6 +54,7 @@ pub const UBUNTU: Theme = Theme {
     name: "ubuntu",
     accent: Color::Rgb(0xE9, 0x54, 0x20),
     muted: Color::Rgb(0x77, 0x21, 0x6F),
+    label: Color::Rgb(0xC8, 0xA2, 0xC8),
     good: Color::Rgb(0x4E, 0x9A, 0x06),
     warn: Color::Rgb(0xC4, 0xA0, 0x00),
     bad: Color::Rgb(0xCC, 0x00, 0x00),
@@ -72,6 +77,7 @@ pub const DARK: Theme = Theme {
     name: "dark",
     accent: Color::Cyan,
     muted: Color::DarkGray,
+    label: Color::Gray,
     good: Color::Green,
     warn: Color::Yellow,
     bad: Color::Red,
@@ -96,6 +102,7 @@ pub const LIGHT: Theme = Theme {
     name: "light",
     accent: Color::Blue,
     muted: Color::Gray,
+    label: Color::DarkGray,
     good: Color::Green,
     warn: Color::Rgb(0xB0, 0x70, 0x00),
     bad: Color::Red,
@@ -116,6 +123,7 @@ pub const MONO: Theme = Theme {
     name: "mono",
     accent: Color::White,
     muted: Color::DarkGray,
+    label: Color::Gray,
     good: Color::White,
     warn: Color::White,
     bad: Color::White,
@@ -131,10 +139,10 @@ pub const MONO: Theme = Theme {
     series: [Color::White, Color::Gray, Color::White, Color::Gray],
 };
 
-/// Every theme, in the order the CONFIG page offers them.
+/// Every theme, in the order the ALL page offers them.
 pub const ALL: [Theme; 4] = [UBUNTU, DARK, LIGHT, MONO];
 
-/// The names `ui.THEME` accepts, for the CONFIG page's picker and for an error
+/// The names `ui.THEME` accepts, for the ALL page's picker and for an error
 /// message that can list them.
 pub const NAMES: [&str; 5] = ["default", "ubuntu", "dark", "light", "mono"];
 
@@ -269,6 +277,17 @@ mod tests {
         assert_eq!(UBUNTU.text, Color::Rgb(0xFF, 0xFF, 0xFF));
     }
 
+
+    /// A label that is no easier to read than a border is the failure `label` was
+    /// added to fix.
+    #[test]
+    fn a_label_is_set_apart_from_a_border() {
+        for theme in [UBUNTU, DARK, LIGHT, MONO] {
+            assert_ne!(theme.label, theme.background, "{}", theme.name);
+        }
+        assert_ne!(UBUNTU.label, UBUNTU.muted);
+        assert_ne!(DARK.label, DARK.muted);
+    }
 
     #[test]
     fn every_theme_is_reachable_by_its_name() {

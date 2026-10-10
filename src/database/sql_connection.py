@@ -144,15 +144,15 @@ LOCAL_PEER_ID = "LOCAL"
 PAYMENT_INSERT = """
     INSERT INTO payments (
         tx_id, direction, status, peer_id, client_id, deposit_token,
-        ledger, contract_hash, token_id, address, amount_mu, purpose
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ledger, contract_hash, token_id, address, amount_mu, peer_amount_mu, purpose
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
 def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
                           peer_id=None, client_id=None, deposit_token=None,
                           ledger=None, contract_hash=None, token_id=None, address=None,
-                          purpose=None) -> tuple:
+                          peer_amount_mu=None, purpose=None) -> tuple:
     """Bind one payment row for :data:`PAYMENT_INSERT`, in its column order.
 
     Shared so a donation payout can write its rows in the *same* transaction that
@@ -164,7 +164,8 @@ def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
     one tick paying two assets on one contract would otherwise be indistinguishable.
     """
     return (tx_id, direction, status, peer_id, client_id, deposit_token,
-            ledger, contract_hash, token_id, address, str(int(amount_mu)), purpose)
+            ledger, contract_hash, token_id, address, str(int(amount_mu)),
+            None if peer_amount_mu is None else str(int(peer_amount_mu)), purpose)
 
 
 def _normalized_asset(asset) -> str:
@@ -206,17 +207,30 @@ def _plain(value: Decimal) -> str:
 
 def _ensure_traceability_tables(connection) -> None:
     try:
-        from src.database.migrate import ensure_columns, ensure_tables
+        from src.database.migrate import (
+            ensure_columns,
+            ensure_tables,
+            forget_peer_rates_per_whole_unit,
+        )
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
         for table, columns in TRACEABILITY_COLUMNS.items():
             ensure_columns(cursor, table, columns)
+        # The restart after pulling new code is the only upgrade path (see above), so
+        # the one-shot rate migration runs here too, not only from `migrate`.
+        forget_peer_rates_per_whole_unit(cursor)
         connection.commit()
     except Exception as e:
         # A read-only or otherwise unusable database is the node's problem to report
         # elsewhere; it must not stop this constructor, which runs at import time.
         logger.LOGGER(f'Could not ensure the traceability tables exist: {e}')
+
+
+def _local_capacity_changed() -> None:
+    """A local instance started, stopped or was resized: the room this node reported is stale."""
+    from src.utils.tools.query_cache import QueryCache
+    QueryCache().invalidate("GetResourceAvailability")
 
 
 class SQLConnection(metaclass=Singleton):
@@ -561,6 +575,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
               serialized_instance, service_id, virtualizer, envs, arch))
+        _local_capacity_changed()
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def set_local_instance_definition(self, id: str, serialized_instance) -> bool:
@@ -647,6 +662,7 @@ class SQLConnection(metaclass=Singleton):
                 f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ?",
                 tuple(params),
             )
+            _local_capacity_changed()
             return True
         except:
             return False
@@ -979,6 +995,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM local_instances WHERE id = ?
         ''', (id,))
+        _local_capacity_changed()
         # Drop the burn-rate row and its in-memory window together with the instance,
         # so a later instance that reuses this id never inherits a stale rate.
         self._execute('''
@@ -2752,13 +2769,18 @@ class SQLConnection(metaclass=Singleton):
 
     # What a payment row is allowed to say happened. See the `payments` table in
     # migrate.py for what each one means.
-    PAYMENT_STATUSES = ('communicated', 'unacknowledged', 'accepted', 'rejected')
+    PAYMENT_STATUSES = ('signed', 'broadcast', 'confirmed', 'communicated',
+                        'unacknowledged', 'failed', 'accepted', 'rejected')
+    # The outgoing states a payment can be left in by a daemon that stopped: the money
+    # may be on the network and the peer has not been told yet.
+    PAYMENT_RESUMABLE_STATUSES = ('signed', 'broadcast', 'confirmed')
 
     def record_payment(self, direction: str, status: str, amount_mu: int,
                        tx_id: Optional[str] = None, peer_id: Optional[str] = None,
                        client_id: Optional[str] = None, deposit_token: Optional[str] = None,
                        ledger: Optional[str] = None, contract_hash: Optional[str] = None,
                        token_id: Optional[str] = None, address: Optional[str] = None,
+                       peer_amount_mu: Optional[int] = None,
                        purpose: Optional[str] = None) -> bool:
         """Write down one payment. Returns whether the row landed.
 
@@ -2779,12 +2801,59 @@ class SQLConnection(metaclass=Singleton):
                 tx_id=tx_id, direction=direction, status=status, peer_id=peer_id,
                 client_id=client_id, deposit_token=deposit_token, ledger=ledger,
                 contract_hash=contract_hash, token_id=token_id, address=address,
-                amount_mu=amount_mu, purpose=purpose,
+                amount_mu=amount_mu, peer_amount_mu=peer_amount_mu, purpose=purpose,
             ))
             return True
         except Exception as e:
             logger.LOGGER(f'Failed to record the {direction} payment of {amount_mu} MU: {e}')
             return False
+
+    def set_outgoing_payment_status(self, tx_id: str, status: str) -> bool:
+        """Move the outgoing payment of ``tx_id`` to ``status``. Returns whether a row moved.
+
+        Keyed by the transaction id because that is what the contract reports at the
+        broadcast, and it is unique per payment. Never raises, for the same reason
+        `record_payment` does not: the money has already moved.
+        """
+        if status not in SQLConnection.PAYMENT_STATUSES:
+            logger.LOGGER(f"Refusing to set a payment status {status!r}.")
+            return False
+        try:
+            cursor = self._execute(
+                "UPDATE payments SET status = ? WHERE direction = 'out' AND tx_id = ?",
+                (status, tx_id),
+            )
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.LOGGER(f'Failed to set the payment of tx {tx_id} to {status}: {e}')
+            return False
+
+    def outgoing_payments_to_resume(self) -> List[dict]:
+        """Outgoing payments a stopped daemon left between the broadcast and `Payable`.
+
+        Oldest first, so the payment closest to its deposit token's expiry is resumed
+        first. ``age_seconds`` is computed by SQLite, against the same clock that wrote
+        ``created_at``.
+        """
+        placeholders = ", ".join("?" for _ in SQLConnection.PAYMENT_RESUMABLE_STATUSES)
+        try:
+            rows = self._execute(
+                f"""
+                SELECT tx_id, status, peer_id, deposit_token, ledger, contract_hash,
+                       token_id, address, amount_mu, peer_amount_mu,
+                       CAST(strftime('%s', 'now') - strftime('%s', created_at) AS INTEGER)
+                           AS age_seconds
+                FROM payments
+                WHERE direction = 'out' AND tx_id IS NOT NULL
+                  AND status IN ({placeholders})
+                ORDER BY created_at, id
+                """,
+                SQLConnection.PAYMENT_RESUMABLE_STATUSES,
+            ).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the outgoing payments to resume: {e}')
+            return []
+        return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------ donations
     # A donation debt is money this node owes but has not moved yet, and it is keyed by

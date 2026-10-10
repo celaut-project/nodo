@@ -288,7 +288,7 @@ nodo export <service id|tag> /export/dir
 # --raw → a raw .celaut for HASH VERIFICATION ONLY (NOT importable):
 nodo export <service id|tag> /export/dir --raw
 
-# Publish a local service in chunks to the configured repository (see publisher.* in config)
+# Publish a local service as a GitHub Release asset of the configured repository (see publisher.* in config)
 nodo publish <service id|tag>
 
 # Download a published service and import it locally (the service id is recomputed from content on import).
@@ -335,8 +335,12 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  ```bash
  nodo execute 1234567890abcdef
  nodo execute -e workers 8 -e timeout 20 my_service_tag
- # signature: execute [--name <instance-name>] [-e key value]... <service id | tag | '.celaut.bee' path>
+ # signature: execute [--name <instance-name>] [-e key value]... [--no-input] <service id | tag | '.celaut.bee' path>
  ```
+ A var that a network of the service uses as `${VAR}` is required. Without a
+ terminal, or with `--no-input`, a missing required var stops the launch, and a
+ missing optional var is only reported. In a terminal, `execute` asks for the
+ missing vars, so an agent always passes `--no-input`.
  `execute` launches the instance; read its id (which is also its token) and API
  address from `nodo instances` — `execute` itself prints the `nodo inspect` dump
  and the available `http` endpoints, not an id, token, or address (see
@@ -353,8 +357,8 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  nodo instances --grouped        # grouped by parent service
 
  # Adjust the deposit of a running workload (amounts in ERG)
- nodo increase_deposit <instance id> 0.01   # in ui.DISPLAY_UNIT (ERG by default)
- nodo decrease_deposit <instance id> 0.005
+ nodo increase_deposit <instance id> 10000000   # in ui.DISPLAY_UNIT (MU by default)
+ nodo decrease_deposit <instance id> 5000000
 
  # Stop a running instance (requires root)
  sudo nodo kill <instance id>
@@ -499,7 +503,7 @@ sudo nodo update
 1. **Terminal-First CLI Execution:** Execute all interactions with Celaut via standard bash terminal commands.
 2. **Idempotency Setup Check:** Prior to executing installation scripts, run `command -v nodo` to verify if the node binary is already available in PATH.
 3. **Sudo Privileges Handling:** Automated installation, system daemon management (`daemon`, `doctor`, `update`), and instance/service teardown (`kill`, `remove`) require root elevation. Ensure non-interactive execution (`sudo -n true`) is permitted or handle prompt elevation safely.
-4. **Strict Environment Variable Declaration:** When preparing `nodo execute -e <key> <value>`, **never guess environment variables**. Always run `nodo inspect <service>` first to determine the exact environment variables declared and supported by the service package.
+4. **Strict Environment Variable Declaration:** When preparing `nodo execute -e <key> <value>`, **never guess environment variables**. Always run `nodo service_envs <service> --json` first to get the exact environment variables that the service declares, and which of them are required.
 5. **MicroVM Execution Awareness:** Understand that services execute inside isolated microVMs (`ch`). Do not attempt to use Docker commands to inspect running service instances; Docker is used only for the `nodo pack` build phase (and only locally in the opt-in `packer.local` mode) — never for execution.
 6. **Pre-flight Estimation:** Always run `nodo estimate <service>` before deploying unknown workloads to verify memory guard limits (`resources.at_most.mem_limit`) and ensure a sufficient balance.
 7. **Problem-First Discovery:** When seeking AI capabilities, query Unstoppable Skills **through the read-only MCP server** (start with `load_skills`, then `load_skill_tree`) to evaluate comparative `Results` and verifiable `Coverage` before selecting a service id. There is no `nodo` CLI for Skills; publishing (if ever needed) uses the `reputation-system` library, not this agent path.

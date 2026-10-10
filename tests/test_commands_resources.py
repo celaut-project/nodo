@@ -60,6 +60,13 @@ class ResourcesCommandTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(base64.b64decode(json.loads(out)["peer"]), b"")
 
+    def test_the_printed_form_says_a_delegating_node_announces_nothing_on_purpose(self):
+        with patch.object(ar, "announced_resources", return_value=[]), \
+                patch.object(ar, "executes_locally", return_value=False):
+            ok, out = _run([])
+        self.assertTrue(ok)
+        self.assertIn("delegates only", out)
+
     def test_a_failure_is_still_one_json_line(self):
         with patch.object(ar, "announced_resources", side_effect=RuntimeError("no psutil")):
             ok, out = _run(["--json"])

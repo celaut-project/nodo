@@ -32,6 +32,9 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 # Rust + the prebuilt tui, shared with setup_linux_x86.sh (issue #375).
 # shellcheck source=bash/lib_rust.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_rust.sh"
+# virtiofsd for shared filesystems, shared with the other setup script (#478).
+# shellcheck source=bash/lib_virtiofsd.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_virtiofsd.sh"
 CH_ARCH_TAG="linux/arm64"
 # The arch this host cannot run under KVM, and therefore the one QEMU emulates.
 # Its guest assets are installed too (see provision_guest_assets_for_arch).
@@ -459,6 +462,10 @@ fi
 
 # The tui binary, and a Rust toolchain only if this host has to build one.
 provision_rust_and_tui
+
+# The daemon for shared filesystems. After the Rust step, so a build from source
+# reuses the toolchain that step installed.
+provision_virtiofsd
 
 echo "Running Python database migrations..."
 migration_output="$(mktemp)"

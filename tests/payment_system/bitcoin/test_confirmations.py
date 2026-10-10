@@ -41,7 +41,7 @@ class ConfirmationTests(unittest.TestCase):
                 mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: min_conf), \
                 mock.patch.object(btc, "MAX_FEE_RATE_SAT_VB", lambda: 100.0), \
                 mock.patch.object(btc, "WAIT_TX_SLEEP_TIME", 0), \
-                mock.patch.object(btc, "WAIT_TX_TIME", len(statuses)), \
+                mock.patch.object(btc, "WAIT_TX_ATTEMPTS", len(statuses)), \
                 mock.patch.object(btc, "sleep", lambda _: None):
             contract = btc.process_payment(
                 amount=amount_mu, deposit_token="deposit-token-1", ledger=LEDGER,
@@ -72,6 +72,50 @@ class ConfirmationTests(unittest.TestCase):
     def test_it_gives_up_rather_than_polling_for_ever(self):
         with self.assertRaisesRegex(TimeoutError, "did not reach"):
             self._pay(statuses=(0, 0))
+
+    def test_the_wait_does_not_hold_the_payment_lock(self):
+        """The lock guards the choice of inputs, which is over at the relay.
+
+        Held through the wait, one payment waiting for its confirmation would stop every
+        other payment, the donation payout and the cold sweep for up to an hour.
+        """
+        locked = []
+        chain = mock.Mock()
+        chain.send_to.return_value = "tx-abc"
+        chain.estimate_fee_rate.return_value = 5.0
+
+        def tx_status(tx_id):
+            locked.append(btc.payment_lock.locked())
+            return {"confirmations": 1}
+
+        chain.tx_status.side_effect = tx_status
+        with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc.rate, "mu_per_satoshi", return_value=Decimal(1)), \
+                mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
+                mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: 1), \
+                mock.patch.object(btc, "MAX_FEE_RATE_SAT_VB", lambda: 100.0), \
+                mock.patch.object(btc, "sleep", lambda _: None):
+            btc.process_payment(
+                amount=1_000, deposit_token="deposit-token-1", ledger=LEDGER,
+                script=script_pubkey_from_address(ADDRESS),
+            )
+        self.assertEqual(locked, [False])
+
+    def test_a_backend_that_stays_down_is_not_logged_on_every_check(self):
+        chain = mock.Mock()
+        chain.tx_status.side_effect = [BackendUnavailable("down")] * 45 + [{"confirmations": 1}]
+        logged = []
+        with mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: 1), \
+                mock.patch.object(btc, "WAIT_TX_ATTEMPTS", 46), \
+                mock.patch.object(btc, "WAIT_TX_LOG_EVERY", 20), \
+                mock.patch.object(btc, "sleep", lambda _: None), \
+                mock.patch.object(btc, "LOGGER", logged.append):
+            btc.await_payment(tx_id="tx-abc", script=script_pubkey_from_address(ADDRESS),
+                              chain=chain)
+        failures = [line for line in logged if line.startswith("Could not read")]
+        # Checks 1, 21 and 41 of the 45 that failed, then one line for the recovery.
+        self.assertEqual(len(failures), 3)
+        self.assertIn("Read tx tx-abc again after 45 failed check(s).", logged)
 
     def test_an_amount_below_the_dust_threshold_is_refused_before_broadcasting(self):
         with self.assertRaisesRegex(ValueError, "dust threshold"):
@@ -114,6 +158,65 @@ class ConfirmationTests(unittest.TestCase):
         # tightly than its own confirmation time.
         self.assertFalse(btc.needs_unspent_proof)
 
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class SignedBeforeSentTests(unittest.TestCase):
+    """The payer learns the txid before the relay, so its row exists before money moves."""
+
+    def test_core_reports_the_signed_txid_before_sendrawtransaction(self):
+        from src.payment_system.contracts.bitcoin.backend import ChainBackend
+
+        calls = []
+        answers = {
+            "createrawtransaction": "raw",
+            "fundrawtransaction": {"hex": "funded"},
+            "signrawtransactionwithwallet": {"hex": "signed", "complete": True},
+            "decoderawtransaction": {"txid": "tx-signed"},
+            "sendrawtransaction": "tx-signed",
+        }
+
+        def call(method, params=None, *, wallet_scoped=True):
+            calls.append(method)
+            return answers[method]
+
+        chain = ChainBackend("http://example.invalid", wallet="w")
+        chain._call = call  # type: ignore[assignment]
+        reported = []
+
+        txid = chain.send_to(ADDRESS, 30_000, op_return=b"token-1",
+                             on_signed=lambda signed: reported.append((signed, list(calls))))
+
+        self.assertEqual(txid, "tx-signed")
+        [(signed, calls_so_far)] = reported
+        self.assertEqual(signed, "tx-signed")
+        self.assertNotIn("sendrawtransaction", calls_so_far)
+
+    def test_the_payment_reports_signed_then_sent(self):
+        chain = mock.Mock()
+        chain.estimate_fee_rate.return_value = 5.0
+        chain.tx_status.return_value = {"confirmations": 1}
+
+        def send_to(*args, on_signed=None, **kwargs):
+            on_signed("tx-abc")
+            return "tx-abc"
+
+        chain.send_to.side_effect = send_to
+        reported = []
+        with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc.rate, "mu_per_satoshi", return_value=Decimal(1)), \
+                mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
+                mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: 1), \
+                mock.patch.object(btc, "MAX_FEE_RATE_SAT_VB", lambda: 100.0), \
+                mock.patch.object(btc, "sleep", lambda _: None), \
+                btc.transaction_id_reporting(
+                    lambda tx_id, sent=True: reported.append((tx_id, sent))):
+            btc.process_payment(
+                amount=1_000, deposit_token="deposit-token-1", ledger=LEDGER,
+                script=script_pubkey_from_address(ADDRESS),
+            )
+
+        self.assertEqual(reported, [("tx-abc", False), ("tx-abc", True)])
 
 if __name__ == "__main__":
     unittest.main()

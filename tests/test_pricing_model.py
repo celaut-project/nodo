@@ -106,10 +106,17 @@ class TheThreeUnitsTests(unittest.TestCase):
 
     def test_the_ledger_rate_rescales_what_an_mu_is_worth(self):
         """The rate belongs to the payment contract, not to MU."""
+        with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "1000"}):
+            # A finer MU: one nanoERG is now a thousand MU.
+            self.assertEqual(mu_per_erg(), 1_000_000_000_000)
+            self.assertEqual(mu_to_nanoerg(1_000_000), 1_000)
+
+    def test_a_rate_coarser_than_the_base_unit_is_refused(self):
+        # Peers are told MU per nanoERG as an integer (ContractRate.mu_per_unit), so an
+        # MU worth more than a nanoERG cannot be expressed.
         with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "0.001"}):
-            # A coarser MU: one MU is now a thousand nanoERG.
-            self.assertEqual(mu_per_erg(), 1_000_000)
-            self.assertEqual(mu_to_nanoerg(1_000), 1_000_000)
+            with self.assertRaises(ValueError):
+                mu_per_erg()
 
     def test_a_rate_that_does_not_divide_an_erg_is_refused(self):
         with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "0.0000000003"}):
@@ -131,6 +138,29 @@ class TheThreeUnitsTests(unittest.TestCase):
         with _config(**{"ui.DISPLAY_UNIT": "mu"}):
             self.assertEqual(format_mu(14_582), "14582 MU")
             self.assertEqual(parse_to_mu("14582"), 14_582)
+
+    def test_large_mu_figures_get_a_suffix_but_never_lose_digits(self):
+        with _config(**{"ui.DISPLAY_UNIT": "mu"}):
+            self.assertEqual(format_mu(5_100_000), "5.1M MU")
+            self.assertEqual(format_mu(10_000_000), "10M MU")
+            self.assertEqual(format_mu(1_500), "1.5K MU")
+            self.assertEqual(format_mu(-2_500_000), "-2.5M MU")
+            # No suffix says these exactly in two decimals, so they stay whole.
+            self.assertEqual(format_mu(5_123_456), "5123456 MU")
+            self.assertEqual(format_mu(999), "999 MU")
+
+    def test_what_is_shown_in_mu_can_be_typed_back(self):
+        with _config(**{"ui.DISPLAY_UNIT": "mu"}):
+            self.assertEqual(parse_to_mu("5.1M"), 5_100_000)
+            self.assertEqual(parse_to_mu("10m"), 10_000_000)
+            self.assertEqual(parse_to_mu("1.5K"), 1_500)
+            self.assertEqual(parse_to_mu("14582"), 14_582)
+            with self.assertRaises(ValueError):
+                parse_to_mu("0.0001K")  # 0.1 MU
+
+    def test_erg_has_no_suffixes(self):
+        with _config():
+            self.assertEqual(format_mu(5_100_000), "0.0051 ERG")
 
     def test_a_custom_unit_can_be_declared(self):
         """The hook for showing a fiat figure later. Static rate, never refreshed."""
@@ -170,7 +200,7 @@ class TheThreeUnitsTests(unittest.TestCase):
 
         with _config():
             self.assertIn("erg", monetary.contract_display_units())
-            self.assertEqual(monetary.default_display_unit_name(), "erg")
+            self.assertEqual(monetary.default_display_unit_name(), "mu")
 
     def test_a_node_with_no_payment_contract_falls_back_to_raw_mu(self):
         """The honest answer when nothing can say what an MU is worth.

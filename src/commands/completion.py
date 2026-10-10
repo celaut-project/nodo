@@ -28,6 +28,7 @@ from typing import Dict, List, Optional
 SERVICE_COMMANDS = [
     "execute",
     "estimate",
+    "service_envs",
     "inspect",
     "remove",
     "publish",
@@ -53,7 +54,9 @@ PEER_COMMANDS = [
     "chat_open",
     "chat_threads",
     "peers",
+    "refresh_peers",
     "peer_reputation",
+    "protocol",
 ]
 
 # Commands whose first positional argument is a client id.
@@ -61,6 +64,9 @@ CLIENT_COMMANDS = ["credit_client", "debit_client", "clients"]
 
 # Commands whose first positional argument is a running tunnel's id.
 TUNNEL_COMMANDS = ["tunnels", "tunnel_close"]
+
+# Commands whose first positional argument is a pack's id (`<storage>/packs`).
+PACK_COMMANDS = ["packs", "pack_cancel"]
 
 # Commands whose first positional argument is a filesystem path (a project dir,
 # a .bee file, a config dir, …). These get file/dir completion, not an id list.
@@ -93,6 +99,7 @@ COMMANDS = sorted(
         "execute",
         "force_execution",
         "estimate",
+        "service_envs",
         "update",
         "kill",
         "burnall",
@@ -109,6 +116,8 @@ COMMANDS = sorted(
         "tag",
         "clients",
         "peers",
+        "refresh_peers",
+        "protocol",
         "instances",
         "connect",
         "disconnect",
@@ -124,6 +133,8 @@ COMMANDS = sorted(
         "storage:prune_blocks",
         "test",
         "pack",
+        "packs",
+        "pack_cancel",
         "tui",
         "ggconf",
         "nat-guide",
@@ -276,6 +287,21 @@ def tunnel_candidates(storage: Optional[str]) -> List[str]:
     return [name[: -len(".json")] for name in names if name.endswith(".json")]
 
 
+def pack_candidates(storage: Optional[str]) -> List[str]:
+    """Ids of the packs recorded under ``<storage>/packs`` (see
+    ``src/utils/pack_registry.py``)."""
+    directory = os.environ.get("NODO_PACKS_DIR") or (
+        os.path.join(storage, "packs") if storage else None
+    )
+    if not directory:
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    return [name[: -len(".json")] for name in names if name.endswith(".json")]
+
+
 def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> List[str]:
     """Return completion candidates for a ``kind`` requested by the shell."""
     if kind == "commands":
@@ -297,6 +323,8 @@ def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> L
         return client_candidates(paths.get("database"))
     if kind == "tunnels":
         return tunnel_candidates(paths.get("storage"))
+    if kind == "packs":
+        return pack_candidates(paths.get("storage"))
     if kind == "refs":
         return (
             service_candidates(paths.get("registry"), paths.get("metadata"))
@@ -350,6 +378,7 @@ _nodo_completion() {{
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
+            {"|".join(PACK_COMMANDS)}) kind="packs" ;;
             {"|".join(PATH_COMMANDS)}) _nodo_paths; return 0 ;;
             daemon)
                 COMPREPLY=( $(compgen -W "{_quote_words(DAEMON_SUBCOMMANDS)}" -- "$cur") )
@@ -409,6 +438,7 @@ _nodo() {{
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
+            {"|".join(PACK_COMMANDS)}) kind="packs" ;;
             {"|".join(PATH_COMMANDS)}) _files; return ;;
             daemon)
                 items=({_quote_words(DAEMON_SUBCOMMANDS)})

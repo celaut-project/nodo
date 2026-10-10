@@ -17,6 +17,7 @@ use crate::ui::{fitted_column_x, fitted_table, TextCell,
 };
 use prost::Message;
 use ratatui::prelude::*;
+use ratatui::widgets::Paragraph;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use std::path::Path;
 
@@ -60,7 +61,7 @@ pub struct Peer {
 
 /// One `contract_instance` row: the ledger a peer settles on, the contract it
 /// charges through, the address it gets paid at, and what one of its units is worth.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PeerContract {
     /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
     /// ledger row can't be resolved or carries no tag.
@@ -297,6 +298,23 @@ impl App {
         }
     }
 
+    /// Ask before re-fetching every peer's announcement and our balance there
+    /// (`nodo refresh_peers`): it opens a connection to each peer, which is a lot of
+    /// network and disk I/O. Reached by `r`, and by clicking the ⟳ button.
+    pub fn open_refresh_peers_confirm(&mut self) {
+        if self.page() != crate::app::Page::Peers {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let count = self.peers.items.len();
+        self.input_mode = crate::app::InputMode::Confirm;
+        self.input_title = format!("Refresh all {count} peers from the network? Heavy on I/O (y/N)");
+        self.pending_action = Some(PendingAction::RefreshPeers);
+    }
+
     /// Increase or decrease the selected peer's local reputation score.
     pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
         if self.page() != crate::app::Page::Peers {
@@ -381,6 +399,9 @@ impl App {
         });
     }
 }
+
+/// The refresh button: a clockwise open-circle arrow.
+const REFRESH_BUTTON: &str = "[ \u{27f3} ]";
 
 /// The PEERS table's columns (issue #453): the id, then what this node holds there
 /// and the peer's standing, outlast where it is reached and what it announced --
@@ -468,6 +489,20 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     // Where the id column was actually drawn, after any narrower columns gave way.
     app.id_column_x = fitted_column_x(split[0], &columns, 0, has_selection);
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
+    // The ⟳ button sits on the table's top border, right-aligned. Clicking it asks the
+    // same confirmation as `r`.
+    let button_width = REFRESH_BUTTON.chars().count() as u16;
+    if split[0].width > button_width + 4 {
+        let area = Rect::new(split[0].right() - button_width - 2, split[0].y, button_width, 1);
+        app.peers_refresh_area = area;
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                REFRESH_BUTTON,
+                Style::default().fg(accent()).add_modifier(Modifier::BOLD),
+            )),
+            area,
+        );
+    }
 
     // A query that failed takes the card, not a corner of it. `0 connected` is the
     // screen a new node draws, so an unreadable table that merely looked empty was
@@ -598,6 +633,32 @@ fn announced_resources_summary(resources: &Announced) -> String {
 ///
 /// `compact` collapses each contract onto one line for terminals too short for the
 /// full card.
+/// A peer's advertised rate, as a person reads it.
+///
+/// On the wire (`ContractRate.mu_per_unit`) the rate is MU per BASE unit -- per nanoERG,
+/// per satoshi, per smallest unit of a token -- because between nodes nothing else is
+/// needed. A person thinks in whole ERG or BTC, so a native asset's rate is shown per
+/// whole unit: the base rate followed by as many zeros as the asset has decimals, which
+/// is exact for any size of number. A token's decimals are not on the wire, so its rate
+/// stays per base unit and says so.
+fn rate_for_a_person(contract: &PeerContract) -> String {
+    let rate = contract.mu_per_unit.trim();
+    if rate.is_empty() {
+        return "rate —".to_string();
+    }
+    let native = match (contract.asset.as_str(), contract.ledger.as_str()) {
+        ("ERG", _) | ("", "ergo") => Some(("ERG", 9)),
+        ("BTC", _) | ("", "bitcoin") => Some(("BTC", 8)),
+        _ => None,
+    };
+    match native {
+        Some((symbol, decimals)) if rate.chars().all(|c| c.is_ascii_digit()) && rate != "0" => {
+            format!("1 {} = {}{} MU", symbol, rate, "0".repeat(decimals))
+        }
+        _ => format!("1 base unit = {} MU", rate),
+    }
+}
+
 fn peer_detail_lines(
     money: &Money,
     peer: Option<&Peer>,
@@ -732,12 +793,11 @@ fn peer_detail_lines(
                 Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
                 Span::styled(
                     format!(
-                        "  {}  {}  {}  1 {} = {} MU",
+                        "  {}  {}  {}  {}",
                         asset,
                         shorten(&contract.contract_hash, 14),
                         shorten(nonempty(&contract.address, "—"), 14),
-                        asset,
-                        nonempty(&contract.mu_per_unit, "—")
+                        rate_for_a_person(contract)
                     ),
                     Style::default().fg(text_colour()),
                 ),
@@ -762,10 +822,10 @@ fn peer_detail_lines(
         lines.push(Line::from(vec![
             Span::styled("      rate     ", Style::default().fg(muted())),
             Span::styled(
-                // What this peer says one unit of its ledger buys in ITS MU. This is
-                // what makes a price it quotes convertible into money we understand,
-                // so it is stated as an equation rather than as a bare number.
-                format!("1 {} = {} MU", asset, nonempty(&contract.mu_per_unit, "—")),
+                // What this peer says its money buys in ITS MU. This is what makes a
+                // price it quotes convertible into money we understand, so it is
+                // stated as an equation rather than as a bare number.
+                rate_for_a_person(contract),
                 Style::default().fg(text_colour()),
             ),
         ]));
@@ -867,6 +927,25 @@ mod tests {
         assert_eq!(contract.address, "addr-1");
         assert_eq!(contract.mu_per_unit, "500");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_native_rate_is_shown_per_whole_unit_and_a_token_rate_per_base_unit() {
+        // The wire carries MU per base unit; a person reads whole ERG / BTC.
+        let contract = |ledger: &str, asset: &str, rate: &str| PeerContract {
+            ledger: ledger.to_string(),
+            asset: asset.to_string(),
+            mu_per_unit: rate.to_string(),
+            ..Default::default()
+        };
+        assert_eq!(rate_for_a_person(&contract("ergo", "ERG", "1")), "1 ERG = 1000000000 MU");
+        assert_eq!(rate_for_a_person(&contract("bitcoin", "BTC", "1400000")), "1 BTC = 140000000000000 MU");
+        assert_eq!(rate_for_a_person(&contract("ergo", "", "2")), "1 ERG = 2000000000 MU");
+        assert_eq!(
+            rate_for_a_person(&contract("ergo", &"ab".repeat(32), "20000000")),
+            "1 base unit = 20000000 MU"
+        );
+        assert_eq!(rate_for_a_person(&contract("ergo", "ERG", "")), "rate —");
     }
 
     #[test]

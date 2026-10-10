@@ -67,8 +67,8 @@ pub struct ArchOffer {
     /// Canonical tag (see [`canonical_arch`]).
     pub arch: String,
     /// `cpu_quota / cpu_period` in thousandths of a core, so the total is integer
-    /// arithmetic and two halves sum to exactly one. `None` when the pair is missing
-    /// or either half is 0 -- "not stated", never 0 cores.
+    /// arithmetic and two halves sum to exactly one. `None` when the quota is missing
+    /// or 0 -- "not stated", never 0 cores. A missing period is the default period.
     pub millicores: Option<u64>,
     pub mem_bytes: Option<u64>,
     pub disk_bytes: Option<u64>,
@@ -98,12 +98,18 @@ pub enum Announced {
     Declared(Vec<ArchOffer>),
 }
 
-/// `cpu_quota / cpu_period` in millicores, or `None` when either half is absent or
-/// zero. u128 inside, so a hostile quota near `u64::MAX` cannot overflow the
-/// multiplication; the result saturates rather than wraps.
+/// The CFS period the kernel uses when a Sysresources gives a quota but no period
+/// (Sysresources.cpu_period in celaut.proto).
+const DEFAULT_CPU_PERIOD_US: u64 = 100_000;
+
+/// `cpu_quota / cpu_period` in millicores, or `None` when the quota is absent or zero.
+/// An absent or zero period is the default period. u128 inside, so a hostile quota
+/// near `u64::MAX` cannot overflow the multiplication; the result saturates rather
+/// than wraps.
 pub fn millicores(period: Option<u64>, quota: Option<u64>) -> Option<u64> {
-    match (period, quota) {
-        (Some(period), Some(quota)) if period > 0 && quota > 0 => {
+    let period = period.filter(|period| *period > 0).unwrap_or(DEFAULT_CPU_PERIOD_US);
+    match quota {
+        Some(quota) if quota > 0 => {
             let milli = (quota as u128 * 1000) / period as u128;
             Some(u64::try_from(milli).unwrap_or(u64::MAX))
         }
@@ -385,9 +391,10 @@ pub(crate) mod tests {
         assert_eq!(millicores(Some(100_000), Some(50_000)), Some(500));
         assert_eq!(millicores(Some(3), Some(1)), Some(333));
         // Either half missing or zero is "not stated", not zero cores.
-        assert_eq!(millicores(None, Some(100_000)), None);
+        // No period is the default period, 100000 microseconds.
+        assert_eq!(millicores(None, Some(100_000)), Some(1000));
         assert_eq!(millicores(Some(100_000), None), None);
-        assert_eq!(millicores(Some(0), Some(100_000)), None);
+        assert_eq!(millicores(Some(0), Some(200_000)), Some(2000));
         assert_eq!(millicores(Some(100_000), Some(0)), None);
         // quota * 1000 overflows u64; the u128 path does not, and the result saturates.
         assert_eq!(millicores(Some(1), Some(u64::MAX)), Some(u64::MAX));

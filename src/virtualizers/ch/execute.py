@@ -46,7 +46,7 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     save_runtime_state,
 )
-from src.virtualizers.microvm.shares import materialize_shares
+from src.virtualizers.microvm.shares import NO_SHARES, materialize_shares, release_shares
 from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 
 env_manager = ConfigManager()
@@ -160,6 +160,33 @@ def _kernel_cmdline(vm_ip: str, netmask: str, rootfs_format: str = ROOTFS_FORMAT
     return " ".join(cmdline_parts)
 
 
+def _ch_memory_arg(mem_mib: int, shared: bool) -> str:
+    """Value for cloud-hypervisor ``--memory``.
+
+    A guest with a virtio-fs device talks to its virtiofsd over vhost-user, which
+    shares the guest's memory with that process, and cloud-hypervisor refuses to start
+    one without ``shared=on`` ("Using vhost-user requires using shared memory or huge
+    pages"). Only guests that have shares pay for shared memory.
+    """
+    return f"size={mem_mib}M,shared=on" if shared else f"size={mem_mib}M"
+
+
+def _ch_disk_args(rootfs_arg: str, metadata_disk_path: Optional[Path]) -> List[str]:
+    """cloud-hypervisor ``--disk`` argv: one option, then one value per disk.
+
+    cloud-hypervisor declares ``--disk <disk>...`` as one option with many
+    values, and refuses it when it is given two times ("cannot be used multiple
+    times"), as with ``--fs`` (#479). The rootfs comes first, so it is
+    /dev/vda. The metadata disk comes second, so it is /dev/vdb. /init mounts
+    it there, copies the three files onto the overlay, and unmounts it before
+    switch_root, so the service never sees this device.
+    """
+    values = [rootfs_arg]
+    if metadata_disk_path is not None:
+        values.append(f"path={metadata_disk_path},image_type=raw,readonly=on")
+    return ["--disk", *values]
+
+
 def _build_ch_process_args(start_command: List[str], vmachine_id: str) -> List[str]:
     """Rename the hypervisor process so a recycled PID cannot impersonate this VM.
 
@@ -219,6 +246,8 @@ def execute(
     stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
     serial_log_path: Optional[Path] = None
     resolved_entrypoint: Optional[str] = None
+    # What the failure path gives back if the launch fails after shares are up.
+    shares = NO_SHARES
 
     try:
         log.LOGGER(f"[CH][{vmachine_id}] event=start")
@@ -461,25 +490,16 @@ def execute(
             bundle["kernel_path"],
             "--initramfs",
             bundle["initramfs_path"],
-            "--disk",
-            disk_arg,
+            *_ch_disk_args(disk_arg, metadata_disk_path),
             "--cpus",
             f"boot={vcpus}",
             "--memory",
-            f"size={mem_mib}M",
+            _ch_memory_arg(mem_mib, shared=bool(shares.fs_device_args)),
             "--net",
             f"tap={tap_name},mac={mac}",
             "--cmdline",
             kernel_cmdline,
         ]
-        if metadata_disk_path is not None:
-            # Second --disk, so it lands as /dev/vdb: the rootfs is declared first
-            # and CH assigns the devices in argument order. /init mounts it there,
-            # copies the three files onto the overlay, and unmounts it before
-            # switch_root, so the service never sees this device.
-            start_command.extend(
-                ["--disk", f"path={metadata_disk_path},image_type=raw,readonly=on"]
-            )
         start_command.extend(shares.fs_device_args)
         start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
@@ -683,6 +703,10 @@ def execute(
             if process.poll() is None:
                 log.LOGGER(f"[CH][{vmachine_id}] killing cloud-hypervisor process pid={process.pid}")
                 process.kill()
+
+        # The process is gone, so its daemons have no client left: release this VM's
+        # shares, which no runtime state will hand to a kill.
+        release_shares(vmachine_id, shares, log_prefix)
 
         if tap_name:
             log.LOGGER(f"[CH][{vmachine_id}] deleting TAP interface: {tap_name}")

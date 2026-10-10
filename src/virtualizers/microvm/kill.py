@@ -134,11 +134,11 @@ def kill(hypervisor: Hypervisor, vmachine_id: str) -> bool:
     except Exception as e:
         log.LOGGER(hypervisor.log(vmachine_id, f"failed removing runtime directory: {e}"))
 
-    # Release the shared filesystems this VM used. Each share's own state says
-    # who else is still using it: its daemon is stopped and its directory removed
-    # when this VM was the last user, and not before -- which covers both a
-    # parent leaving while a child still holds the share and a child outliving
-    # the parent that created it.
+    # Release the shared filesystems this VM used. The state of each share
+    # decides if the share ends: it ends when its exporter leaves, also if guests
+    # still use it, or when its last user leaves. When a share ends, its daemon
+    # stops and its directory is removed. A guest that leaves while the exporter
+    # runs changes nothing.
     virtiofs_mounts = state.get("virtiofs") or []
     if virtiofs_mounts:
         try:

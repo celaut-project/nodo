@@ -90,7 +90,9 @@ class ForceDelegateTests(unittest.TestCase):
         with patch.object(launch_service_mod.sc, "peer_exists", return_value=True), patch.object(
             launch_service_mod, "service_requires_parent_colocation", return_value=False
         ), patch.object(
-            launch_service_mod, "estimate_cost_on_peer", return_value=self.cost
+            # autospec: the call must match the real signature of
+            # estimate_cost_on_peer, so a removed parameter fails here.
+            launch_service_mod, "estimate_cost_on_peer", autospec=True, return_value=self.cost
         ), patch.object(launch_service_mod, "spend_mu", return_value=True), patch.object(
             launch_service_mod, "delegate_execution", return_value=instance
         ) as mock_delegate, patch.object(

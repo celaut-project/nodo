@@ -272,7 +272,7 @@ DATA_GENERATOR=def456hashvalue
 #### `blocks_directory`
 - **Type:** `string`
 - **Required:** No
-- **Description:** Directory name where block files referenced by dependencies will be stored. Blocks are resolved automatically from each dependency's `_.json` manifest.
+- **Description:** Directory name where block files referenced by dependencies will be stored. Blocks are resolved automatically from each dependency's `_.json` manifest, at every depth: a block that is a multiblock directory brings the blocks that its own `_.json` names. The service needs all of them to send the dependency to a node that does not have it.
 
 ```json
 {
@@ -710,6 +710,41 @@ gate exists for trees produced by other packers and for services packed before t
 metadata contract existed. The packer asserts it anyway before setting the xattr, so
 that if that ever stops being true it says so rather than shipping a service every
 node would refuse.
+
+---
+
+#### `shared_filesystems`
+- **Type:** `array` of objects
+- **Required:** No
+- **Default:** absent (nothing is written)
+- **Description:** Declares directories this service **exports** to the children it launches (`role: "shared"`) or **inherits** from the parent that launched it (`role: "guest"`). The packer writes the reserved xattrs described in [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md) on the directory's `ItemBranch`, and the node reads them at launch.
+
+```json
+"shared_filesystems": [
+  { "path": "/shared", "role": "shared", "tag": "demo-share", "env": "SHARE_ID", "access": "rw" }
+]
+```
+
+```json
+"shared_filesystems": [
+  { "path": "/mnt/from-parent", "role": "guest", "tag": "demo-share", "env": "SHARE_ID", "access": "rw" }
+]
+```
+
+| Field | Required | Becomes | Meaning |
+|---|---|---|---|
+| `path` | yes | (selects the branch) | Absolute path of the directory, not `/`. |
+| `role` | yes | `shared=true` or `guest=true` | `shared` exports, `guest` inherits. |
+| `tag` | no | `share_tag` | Logical name of the share, used instead of the path. |
+| `env` | no | `share_env` | Environment variable whose value picks the concrete share. |
+| `access` | no | `access` | `ro` or `rw` (default `rw`). |
+
+- The directory **must already exist** in the image. The packer does not create it: if it is missing the pack fails and tells you to create it in the Dockerfile (`RUN mkdir -p /shared`), so owner, mode and content stay your decision.
+- Types are checked strictly, as with `read_only_filesystem`: a list of objects, a `role` of `shared` or `guest`, strings where strings are expected. Unknown fields and a repeated `path` are refused. This is checked when `service.json` is read, before the image is built.
+- The result goes through the same validation the node applies, so `shared` and `guest` are exclusive, declarations cannot nest, names (`tag`, or the path) cannot repeat on one side, `tag` must match `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, and `env` must be a POSIX variable name.
+- Absent or empty writes **nothing**, so no existing service gets a new id.
+- `read_only_filesystem: true` together with a `shared` entry is refused at pack time (see above). A `guest` entry is fine.
+- An exported directory counts toward the **exporter's** `resources.at_init.disk_space` and `at_most.disk_space`; its guests are charged nothing for it. See [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#accounting).
 
 ---
 

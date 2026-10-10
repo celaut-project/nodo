@@ -153,8 +153,15 @@ class VerifyGatewayPortTests(unittest.TestCase):
 class GuestBridgeTests(unittest.TestCase):
     """The probe needs somewhere to probe from, and it needs it before it runs."""
 
+    def setUp(self):
+        # Root on a dev box would otherwise sweep the real host's namespaces.
+        patcher = patch.object(serve_module, "_sweep_leaked_probes")
+        self.sweep = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_the_bridge_is_brought_up_before_the_port_is_touched(self):
         order = []
+        self.sweep.side_effect = lambda: order.append("sweep")
         with patch.object(
             serve_module, "_ensure_guest_bridge", side_effect=lambda: order.append("bridge")
         ):
@@ -170,7 +177,9 @@ class GuestBridgeTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError):
                         serve_module.serve()
 
-        self.assertEqual(order, ["bridge", "port"])
+        # Leaked probes go first: the gateway probe that follows draws from the
+        # same addresses (#493).
+        self.assertEqual(order, ["sweep", "bridge", "port"])
 
     def test_the_start_path_asks_for_the_assignment_itself(self):
         # It is no longer a side effect of loading the config, so the daemon has to

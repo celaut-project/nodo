@@ -363,9 +363,10 @@ def requested_disk_space_bytes(service: celaut_pb2.Service) -> Optional[int]:
             continue
         try:
             value = int(getattr(scope, "disk_space", 0) or 0)
-            return value if value > 0 else None  # if disk_space is set in at_init, we use it directly as the requested size
         except Exception:
             value = 0
+        if value > 0 and scope_name == "at_init":
+            return value  # if disk_space is set in at_init, we use it directly as the requested size
         if value > requested_bytes:
             requested_bytes = value
 

@@ -37,7 +37,7 @@ group is open, and only those:
 ┌ NODO   operations console  running ────────────────────────────────┐
 │ OVERVIEW │ WORKLOAD │ EARNINGS │ LOGS │ SETTINGS │ DOCS                │
 └────────────────────────────────────────────────────────┘
- CELL │ PRICING │ SCHEDULE │ ENERGY │ CONFIG
+ POLICIES │ PRICING │ SCHEDULE │ ENERGY │ ALL
 ```
 
 The bands existed before this as a heavier `┃` rule inside a single row of twelve
@@ -54,19 +54,20 @@ already-selected title says nothing and costs the page below it a line.
 
 | Page | Purpose |
 |---|---|
-| **Overview** | Node status/version/address, host CPU and RAM, current and reserved instance resources, disk usage, nodo storage size, peer/client counts, service count, reputation proof, and wallet balances — plus compact summaries of what this node has earned, the hours it works, and what it costs to run. The ENERGY summary adds what today has drawn and cost so far, and the worst hour of the last two days, once a sample has landed. An `ACTION REQUIRED` banner appears above everything when the gateway port needs opening or Java is missing, and takes no space at all when there is nothing to say. |
+| **Overview** | A status bar (state, version, peer/client/instance counts, power) when the terminal has a spare row; the cards are weighted — NODE, WALLETS and HOST CAPACITY rounded and accented, EARNINGS/SCHEDULE/ENERGY unboxed summaries — with meters for disk and instance memory, and a sparkline of hourly peak power. Node status/version/address, host CPU and RAM, current and reserved instance resources, disk usage, nodo storage size, peer/client counts, service count, reputation proof, and wallet balances — plus compact summaries of what this node has earned, the hours it works, and what it costs to run. The ENERGY summary adds what today has drawn and cost so far, and the worst hour of the last two days, once a sample has landed. An `ACTION REQUIRED` banner appears above everything when the gateway port needs opening or Java is missing, and takes no space at all when there is nothing to say. |
 | **Instances** | Running instances with service, endpoint, virtualizer, balance, and what each one is *using* rather than only what it was allocated: live CPU%, memory used against its limit, and network rates. The detail card adds the vCPU allowance the CPU% is measured against, cumulative disk and network totals, the disk allocation, and how many tunnels reach the instance; a table under the card lists them (listen, slot, id, via, age), the relationship `nodo tunnels --instance <id>` prints. `t` opens a new tunnel to the selected instance: type the slot (and optionally `--listen <port>`, `--udp`, `--host`, `--peer`, `--idle`), confirm the y/N that states the fee (each connection spends `pricing.TUNNEL_OPEN_MU` of the instance's balance), and it runs `nodo tunnel <instance> <slot> … --detach`. |
 | **Tunnels** | The `nodo tunnel` processes running on this host — opened here, from INSTANCES, or in any shell — read from the registry each one keeps under `<main.STORAGE>/tunnels/` while it runs: where it listens, the slot and instance token it reaches, through which node, its pid and age; the card adds the gateway, its log file, the fee each connection spends, and whether the node reopens it after a restart (detached tunnels are, until closed on purpose). `n` opens one (`<instance> <slot> [flags]`, then the same fee y/N), `d` closes the selected one after a confirmation (`nodo tunnel_close`), and `i` shows it with the tail of its log. Under the card, the INBOUND table lists the `ServiceTunnel` streams this node is relaying for others (caller, instance, slot, protocol, bytes in/out, age) from the daemon's `inbound.snapshot` — `nodo tunnels --inbound`; it is list-only. |
+| **Packs** | The `nodo pack` runs on this host, current and recent — started here, from SERVICES, or in any shell — read from the records each pack keeps under `<main.STORAGE>/packs/`: source (a folder or an https git URL), status (`queued`, `running`, `done`, `failed`, `cancelled`), the stage a running one is at or the service id / error it ended with, age and duration. The card adds the packer (this host's rootless builder or a packer service), the pid, the last line of its log and the log file. `n` (or `p` on SERVICES) opens a prompt for a folder or an `https://…git[#subdir]` URL: it says under the line what will be packed or why it can't be (missing folder, `http://`, ssh URLs), Tab completes folder names (relative ones from the shell `nodo tui` was started in), and Enter runs `nodo pack <source> --detach --json` and switches to PACKS. `c` cancels the selected running pack after a y/N (`nodo pack_cancel`), `i` shows the record with the tail of its log (`nodo packs <id>`). A pack whose process vanished without finishing is shown as failed. |
 | **Services** | Locally available services, metadata tag, content ID, stored size, and execution action. The detail card carries the service's reputation — accumulated over every instance of it that has run here, since an instance is gone minutes after it misbehaves — and the events behind it. |
-| **Peers** | Who we talk to: endpoints, our balance with each, reputation, and the payment contracts and rates a peer declares. The detail card adds every payment we have made to the selected peer — including one broadcast that the peer never acknowledged — and the reputation events behind its score, each with the reason that produced it. Peers can be connected (`c`) and forgotten (`d`) from here. |
+| **Peers** | Who we talk to: endpoints, our balance with each, reputation, and the payment contracts and rates a peer declares. The detail card adds every payment we have made to the selected peer — including one broadcast that the peer never acknowledged — and the reputation events behind its score, each with the reason that produced it. Peers can be connected (`c`), forgotten (`d`) and all re-fetched from the network (`r` or the ⟳ button, after a confirmation) from here. |
 | **Clients** | Who pays us: balance, last usage, and whether the client is metered at all. The detail card lists what it has paid, the deposit tokens it holds and what became of them, and the instances it started here. A client cannot be resolved to a peer and the page does not pretend otherwise (see issue #178). Balance can be credited/debited with `+`/`-`. |
 | **Chat** | Free-text conversations with peer operators (issue #431), for coordinating when something is wrong outside any service execution. One table, not two: `←`/`→` toggles between threads this node opened and threads opened by one of its clients reaching out to it — the same "us / them" split PEERS/CLIENTS already draw as separate pages, here a toggle on one. The detail card is the selected thread's own messages. `o` opens a new conversation (`<peer_id> <topic...>`, sent as the opening message); Enter replies in the selected one; `c`/`R` close and reopen it — closing is local bookkeeping only, and reversible, so neither asks for confirmation. Reading is direct from `peer_chat_conversations`/`peer_chat_messages`; writing goes through `nodo chat_open`/`chat_reply`/`chat_close`/`chat_reopen`, the same commands the CLI uses. |
 | **Earnings** | What this node earned by being up, in both currencies it earns in, each drawn as the kind of quantity it is: money per payment network over the last day/week/month/year, because money is a flow; and what the network stakes on this node as a standing, with the ERG sunk behind it, because a chain that re-dates an opinion whenever its proof republishes cannot say when reputation was earned. Underneath, every proof that has staked something on this node. |
-| **Cell** | The node's policies as a set of named decisions, laid out as a cell: what it lets in, what work it takes, what it says to the network, what it distrusts, how it charges, and what it keeps. One row is one decision, and moving it writes every key that decision spans. Postures ("just me", "cautious renter", …) apply a whole set at once, and the page says which one this node is closest to. |
+| **Policies** | The node's policies as a set of named decisions, laid out as a cell: what it lets in, what work it takes, what it says to the network, what it distrusts, how it charges, and what it keeps. One row is one decision, and moving it writes every key that decision spans. Postures ("just me", "cautious renter", …) apply a whole set at once, and the page says which one this node is closest to. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
-| **Energy** | The `energy:` block — whether the node measures its own electricity, what a kWh costs, the idle/load coefficients of the fallback model, and the five places a real reading can come from (metering plug, IPMI, hwmon, NVML, RAPL). Every one of these keys is editable on Config too; what this page adds is the paragraph beside each one, which is the part a YAML tree cannot show. `IDLE_WATTS` has to be *measured with a plug-in meter* rather than guessed, and NVML *adds* to a partial reading where every other source replaces it — neither is guessable from the key name, and both change what the number on Overview means. Below the three config sections, a HISTORY chart folds `energy_consumption` into local hours over the last month: peak watts per hour and cost per hour (once a tariff is set) for as much of that as the terminal is wide, the peak and total of exactly that window underneath, and — at three horizons, today/7d/30d — the median hour's cost, so a handful of spike hours cannot stand in for what a typical hour actually costs. Informational throughout: energy never feeds MU pricing (issue #258). |
+| **Energy** | The `energy:` block — whether the node measures its own electricity, what a kWh costs, the idle/load coefficients of the fallback model, and the five places a real reading can come from (metering plug, IPMI, hwmon, NVML, RAPL). Every one of these keys is editable on All too; what this page adds is the paragraph beside each one, which is the part a YAML tree cannot show. `IDLE_WATTS` has to be *measured with a plug-in meter* rather than guessed, and NVML *adds* to a partial reading where every other source replaces it — neither is guessable from the key name, and both change what the number on Overview means. Below the three config sections, a HISTORY chart folds `energy_consumption` into local hours over the last month: peak watts per hour and cost per hour (once a tariff is set) for as much of that as the terminal is wide, the peak and total of exactly that window underneath, and — at three horizons, today/7d/30d — the median hour's cost, so a handful of spike hours cannot stand in for what a typical hour actually costs. Informational throughout: energy never feeds MU pricing (issue #258). |
 | **Schedule** | The hours this node takes work in (`activity_window`), drawn as the day it is: every configured window's open stretch as its own run of blocks, a marker at the current hour, and what closing time does to work already running. Underneath, on the same axis, a month of demand folded onto the 24 hours of a clock — peak instances held, and the work refused because the schedule was shut. A night shift and a weekday lunch break are two windows, added and removed with `a`/`d` (or a click), each edited by moving an edge rather than by typing a time, so an unusable hour cannot be expressed. Every element answers the mouse as well as the keyboard: click an edge to select it, `[x]` to remove a window, `+ add window`, or the on/off and closing-time lines to toggle them. |
-| **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited, and list elements can be added and removed. |
+| **All** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited, and list elements can be added and removed. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
 | **Docs** | This installation's `docs/` folder, read in place: an index of every Markdown page (subfolders included) beside the selected page rendered to the pane's width, with search, and links between pages that can be followed and walked back. See [Docs](#docs). |
 
@@ -153,12 +154,18 @@ would otherwise wonder where that stake went.
 ## Live instance usage
 
 The Instances page reads each instance's usage from the same places `nodo observe` does, on
-every two-second sweep: `cpu.stat`, `memory.current` and `io.stat` inside the instance's
+every two-second sweep: `cpu.stat`, `memory.current`/`memory.stat` and `io.stat` inside the instance's
 cgroup (`<virtualizers.ch.CGROUPS_BASE_DIR>/nodo-ch/<id>`), and the byte counters of its tap
 interface under `/sys/class/net`. The tap name is re-derived from the instance id rather than
 stored, so it cannot drift from the one the virtualizer programmed. CPU% and the network rates
 are deltas between consecutive sweeps, which is why they read `—` for one tick after an
 instance appears.
+
+Memory is the cgroup's raw `memory.current`, page cache included, like `nodo instances` and
+`nodo observe`: an instance's figure is everything the VM takes from the host. Only the OVERVIEW
+daemon figure (`nodo.service`'s own cgroup) is the **working set** -- `memory.current` minus the
+`inactive_file` it reports in `memory.stat` (what `docker stats` and cAdvisor show) -- because the
+daemon reads gigabytes of microVM rootfs images that would otherwise show up as reclaimable cache.
 
 CPU% follows `nodo observe`'s convention: **cumulative core time, not normalised by the vCPU
 count**, so an instance saturating two vCPUs reads `200%`. The detail card states the
@@ -174,7 +181,7 @@ common case.
 
 ## Themes
 
-`ui.THEME` in `config.yaml`, editable from the Config page (it is a picker, not a
+`ui.THEME` in `config.yaml`, editable from the All page (it is a picker, not a
 text field) or overridden for one run with `nodo tui --theme <name>` / `NODO_TUI_THEME`.
 The flag exists so two themes can be compared without a config write and the node
 restart that carries — a heavy price for looking at a colour.
@@ -217,24 +224,26 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 
 | Key | Action |
 |---|---|
-| `↑` / `↓` | Select table row, move through the Config tree, or pick which edge of the working day the arrows move on Schedule |
-| `→` / `←` | Enter/leave a Config branch (see below), move between Cell organelles, move the selected edge of the working day by 30 min on Schedule; ignored by the other pages |
-| `r` | Force a refresh (on Earnings, re-reads the chain as well) |
-| `c` | Connect a peer, from Peers; on Schedule, what closing time does (refuse / stop) |
-| `a` | Config: append an element to the selected list |
-| `d` | Delete the selected service, forget the selected peer on Peers, close the selected tunnel on Tunnels, remove the selected Config list element, or show how this node deviates from its closest profile on Cell |
+| `↑` / `↓` | Select table row, move through the All tree, or pick which edge of the working day the arrows move on Schedule |
+| `→` / `←` | Enter/leave a All branch (see below), move between Policies sections, move the selected edge of the working day by 30 min on Schedule; ignored by the other pages |
+| `r` | Force a refresh (on Earnings, re-reads the chain as well). On Peers, ask every peer again for its announcement and for our balance there (`nodo refresh_peers`) after a confirmation; the ⟳ button does the same |
+| `c` | Connect a peer, from Peers; on Schedule, what closing time does (refuse / stop); on Packs, cancel the selected pack (`nodo pack_cancel`) |
+| `R` | Chat: reopen the selected thread |
+| `a` | All: append an element to the selected list |
+| `d` | Delete the selected service, forget the selected peer on Peers, close the selected tunnel on Tunnels, remove the selected All list element, or show how this node deviates from its closest profile on Policies |
 | `k` | Kill the selected instance (`nodo kill`, which also closes the tunnels to it; the confirmation says how many) |
 | `t` | Instances: open a tunnel to the selected instance (`nodo tunnel … --detach`) |
 | `g` | Instances: dependency tree / flat list |
-| `i` | Service details, or the selected tunnel with its log on Tunnels |
-| `e` | Execute the selected service, or edit the selected Config, Pricing, Cell or Energy value |
-| `p` | Cell: apply a profile |
+| `i` | Service details, the selected tunnel with its log on Tunnels, or the selected pack with its log on Packs |
+| `e` | Execute the selected service, or edit the selected All, Pricing, Policies or Energy value |
+| `p` | Policies: apply a profile; Services: pack a folder or an https git URL (`nodo pack … --detach`) |
 | `+` / `-` | Adjust peer reputation on Peers, the selected price by 10 % on Pricing, or open a credit/debit amount modal on Clients |
-| `n` | Cell: the router steps (`nodo nat-guide`); Tunnels: open a new tunnel |
+| `n` | Policies: the router steps (`nodo nat-guide`); Tunnels: open a new tunnel; Packs: pack a folder or an https git URL |
+| `Tab` | In the pack prompt: complete the folder name being typed (elsewhere: next page) |
 | `w` | Schedule: enforce the hours, or stop enforcing them |
-| `/` | Filter Config paths/values |
-| `x` | Clear the Config filter |
-| `Enter` / `Space` | Expand/collapse the selected Config section, move the selected Cell lever to its next position, apply the edited working day on Schedule, or edit the selected Energy key |
+| `/` | Filter All paths/values |
+| `x` | Clear the All filter |
+| `Enter` / `Space` | Expand/collapse the selected All section, move the selected Policies lever to its next position, apply the edited working day on Schedule, or edit the selected Energy key |
 | `Enter` / `Esc` | Save/cancel a modal. On Schedule, `Esc` gives up an unapplied edit before it gives up the interface: a second `Esc` still quits |
 | `Ctrl+U` | Clear modal input |
 | `q` or `Ctrl+C` | Exit |
@@ -330,8 +339,8 @@ gets a page that says where it looked, not a crash.
 
 ## Applying a change
 
-Every configuration change made in this TUI — a raw key on Config, a price on Pricing,
-a lever or a profile on Cell, the working day on Schedule, an electricity setting on
+Every configuration change made in this TUI — a raw key on All, a price on Pricing,
+a lever or a profile on Policies, the working day on Schedule, an electricity setting on
 Energy — is applied as one transaction:
 
 1. `config.yaml` is snapshotted to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it (the ten
@@ -369,7 +378,7 @@ This pair is also why a config edit can look as though one particular key has be
 singled out for a sudo prompt while its neighbours have not. It never is. `config.yaml`
 is `chmod a+w` by `install.sh`, `chown`ed to the installing user and rewritten `0o666`
 on every save, and every editor on every page — the ENERGY page's `PRICE_PER_KWH`, a
-price nudge, a CELL profile, a raw Config row — goes through the one
+price nudge, a POLICIES profile, a raw All row — goes through the one
 `write_config_value` funnel into the one transaction above. The file is never the
 obstacle and the key is never the obstacle; the restart is. What varies is only
 **whether something is serving**, so the same edit is refused on a running node and
@@ -386,28 +395,27 @@ expression, so nothing typed here can be read as yq syntax. `env()` rather than
 `strenv()` means a value keeps its YAML type: `true` stays a bool, `2.0` a float,
 `["*"]` a list.
 
-## Cell
+## Policies
 
-The Config page is the whole YAML tree, ordered by where a key lives in the file.
-That is what you want when you already know the key. The Cell page is the other half:
+The All page is the whole YAML tree, ordered by where a key lives in the file.
+That is what you want when you already know the key. The Policies page is the other half:
 a closed catalogue of *decisions*, each named by the question it answers.
 
-The layout is a cell because the anatomy carries the grouping — the part of a cell
-responsible for something is the part of the config responsible for it too:
+The page groups the decisions by what they govern, one section per concern:
 
-| Organelle | What it decides |
+| Section | What it decides |
 |---|---|
-| `CHANNELS · reach` | The gateway port, whether this node publishes its address, whether an instance gets a port of its own |
-| `RIBOSOMES · work` | Whether outside work is taken at all, foreign architectures, descendant admission, spare-capacity work |
-| `VESICLES · voice` | Delegating work to peers and paying for it, announcing to peers, how much an announcement carries |
-| `NUCLEUS · identity & wallet` | Three headed runs. GENERAL: the identity mnemonic and whether payments are real. ERGO and BITCOIN: each chain's wallet mnemonic (replacing one first shows what it holds and that peers may know its address), cold wallet, hot limit and price rate (MU per nanoERG / per satoshi); Ergo also has `assets`, the tokens accepted besides ERG (`a` opens a form to add one, `d` removes the highlighted) |
-| `IMMUNE · trust` | Service egress, child isolation, integrity checks, device nodes, manifest claims |
-| `WALL · footprint & hours` | How much of this machine may be held at once (CPU, RAM, disk, network), and the hours of the day work is taken in |
-| `MITOCHONDRIA · money` | The scarcity surcharge, the free tier, instance debt, the display unit — and a link to Pricing, which owns the prices themselves |
-| `VACUOLE · upkeep` | Debug logging, failure retention, downloaded files |
+| `NETWORK · reach` | The gateway port, whether this node publishes its address, whether an instance gets a port of its own |
+| `WORKLOAD · services offered` | Whether outside work is taken at all, foreign architectures, descendant admission, spare-capacity work |
+| `PUBLISHING · announcements` | Delegating work to peers and paying for it, announcing to peers, how much an announcement carries |
+| `IDENTITY · keys & wallets` | Three headed runs. GENERAL: the identity mnemonic and whether payments are real. ERGO and BITCOIN: each chain's wallet mnemonic (replacing one first shows what it holds and that peers may know its address), cold wallet, hot limit and price rate (MU per nanoERG / per satoshi); Ergo also has `assets`, the tokens accepted besides ERG (`a` opens a form to add one, `d` removes the highlighted) |
+| `SECURITY · trust` | Service egress, child isolation, integrity checks, device nodes, manifest claims |
+| `RESOURCES · footprint & hours` | How much of this machine may be held at once (CPU, RAM, disk, network), and the hours of the day work is taken in |
+| `PAYMENTS · pricing & earnings` | The scarcity surcharge, the free tier, instance debt, the display unit — and a link to Pricing, which owns the prices themselves |
+| `STORAGE · disk & upkeep` | Debug logging, failure retention, downloaded files |
 
 A wide terminal draws all eight; a narrow one collapses to one column with the
-focused organelle open. The keys are the same either way. A box shorter than its own
+focused section open. The keys are the same either way. A box shorter than its own
 list of levers scrolls to whatever is selected, so nothing in it becomes unreachable.
 
 ### Levers
@@ -421,7 +429,7 @@ and paying for it are separately answerable.
   change, and only writing on `y`.
 - `e` opens the ordinary value editor on a single-key lever, or lists the keys behind
   a multi-key one so you can see exactly what one named position stands for. The
-  Config page remains the place to break them apart.
+  All page remains the place to break them apart.
 - A row marked `⁓ custom` means the keys are set to a combination the catalogue has
   no name for. That is reported rather than rounded to the nearest position: the page
   will not misdescribe what your node is doing. `e` shows the keys; `Enter` moves it
@@ -457,7 +465,7 @@ same key, and no profile can leave a lever in a state the page cannot name.
 
 ## Configuration editor
 
-The Config page operates on the full YAML tree instead of a small hard-coded allowlist. For
+The All page operates on the full YAML tree instead of a small hard-coded allowlist. For
 example, list values appear as `core_services[1].id` and nested values as
 `virtualizers.ch.MIN_MEM_MIB`. It is the node's only configuration editor — the
 `nodo config` wizard it replaced has been removed ([`docs/CONFIG.md`](../../../docs/CONFIG.md)).

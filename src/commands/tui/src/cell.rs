@@ -1,12 +1,12 @@
-//! The CELL page's catalogue: the policies an operator actually chooses between,
+//! The POLICIES page's catalogue: the policies an operator actually chooses between,
 //! and what each choice writes into `config.yaml`.
 //!
-//! The Config page edits the YAML tree, ordered by where a key lives. That helps
+//! The All page edits the YAML tree, ordered by where a key lives. That helps
 //! someone who already knows which key they want. This is the other half: a closed
 //! catalogue of *decisions*, each named by the question it answers.
 //!
 //! One primitive at three scales -- a **lever state** is a small set of writes, a
-//! **profile** a whole posture of twenty-odd keys, and the Config page the same
+//! **profile** a whole posture of twenty-odd keys, and the All page the same
 //! thing at one key.
 //!
 //! Nothing records which state or profile is active: it is **derived** by asking
@@ -60,29 +60,29 @@ impl Organelle {
 
     pub fn title(self) -> &'static str {
         match self {
-            Organelle::Channels => "CHANNELS",
-            Organelle::Ribosomes => "RIBOSOMES",
-            Organelle::Vesicles => "VESICLES",
-            Organelle::Nucleus => "NUCLEUS",
-            Organelle::Immune => "IMMUNE",
-            Organelle::Wall => "WALL",
-            Organelle::Mitochondria => "MITOCHONDRIA",
-            Organelle::Vacuole => "VACUOLE",
+            Organelle::Channels => "NETWORK",
+            Organelle::Ribosomes => "WORKLOAD",
+            Organelle::Vesicles => "PUBLISHING",
+            Organelle::Nucleus => "IDENTITY",
+            Organelle::Immune => "SECURITY",
+            Organelle::Wall => "RESOURCES",
+            Organelle::Mitochondria => "PAYMENTS",
+            Organelle::Vacuole => "STORAGE",
         }
     }
 
     /// What the organelle governs, in the operator's words. Rendered beside the
-    /// title, because "CHANNELS" alone tells nobody anything.
+    /// title, because "NETWORK" alone tells nobody anything.
     pub fn subtitle(self) -> &'static str {
         match self {
             Organelle::Channels => "reach",
-            Organelle::Ribosomes => "work",
-            Organelle::Vesicles => "voice",
-            Organelle::Nucleus => "identity & wallet",
+            Organelle::Ribosomes => "services offered",
+            Organelle::Vesicles => "announcements",
+            Organelle::Nucleus => "keys & wallets",
             Organelle::Immune => "trust",
             Organelle::Wall => "footprint & hours",
-            Organelle::Mitochondria => "money",
-            Organelle::Vacuole => "upkeep",
+            Organelle::Mitochondria => "pricing & earnings",
+            Organelle::Vacuole => "disk & upkeep",
         }
     }
 
@@ -521,7 +521,7 @@ static LEVERS: &[Lever] = &[
         organelle: Organelle::Ribosomes,
         label: "run work here",
         question: "Does this machine run services itself, or only hand them to peers?",
-        consequence: "Delegate only makes this node an orchestrator: it prices nothing for itself, so work no peer will take fails instead of running here. Needs `delegate work` on, or nothing can run at all.",
+        consequence: "Delegate only makes this node an orchestrator: it prices nothing for itself and announces no resources to its peers, so work no peer will take fails instead of running here. Needs `delegate work` on, or nothing can run at all.",
         kind: LeverKind::Cycle(&[
             LeverState {
                 label: "delegate only",
@@ -962,7 +962,7 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
-    // --- WALL · footprint & hours ------------------------------------------
+    // --- RESOURCES · footprint & hours ------------------------------------------
     //
     // Nothing else on this page can say "not with my whole machine". Scarcity pricing
     // makes a busy host expensive and `spare capacity` gates only the opportunistic
@@ -988,7 +988,7 @@ static LEVERS: &[Lever] = &[
     },
     // The three shares are cycles rather than typed numbers because the decision is
     // "roughly how much of my PC", not a figure anyone measures. Any other value set on
-    // the Config page still applies -- the row simply reads `custom`, which is the whole
+    // the All page still applies -- the row simply reads `custom`, which is the whole
     // point of deriving the state instead of storing it.
     Lever {
         id: "cpu-ceiling",
@@ -2203,7 +2203,7 @@ mod tests {
 
         /// The two decisions the WALL organelle exists for, read back off a document.
         /// Both write more than one key, which is the reason they are levers rather
-        /// than something to find on the Config page: an operator who set
+        /// than something to find on the All page: an operator who set
         /// `activity_window.ENABLED` and left `ON_CLOSE` alone would have a window
         /// whose closing behaviour they never chose.
         #[test]
@@ -2236,7 +2236,7 @@ mod tests {
             assert_eq!(status(lever, Some(&uncapped)).label(lever), "no cap");
             let half = document("host_limits:\n  MAX_RAM_SHARE: 0.5\n");
             assert_eq!(status(lever, Some(&half)).label(lever), "half");
-            // A figure typed on the Config page is reported as unnamed rather than
+            // A figure typed on the All page is reported as unnamed rather than
             // rounded to the nearest position.
             let typed = document("host_limits:\n  MAX_RAM_SHARE: 0.6\n");
             assert_eq!(status(lever, Some(&typed)), LeverStatus::Custom);

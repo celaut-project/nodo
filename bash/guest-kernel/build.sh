@@ -102,7 +102,8 @@ assert_config() {
 for symbol in CONFIG_VIRTIO_BLK CONFIG_VIRTIO_NET CONFIG_VIRTIO_PCI CONFIG_VIRTIO_FS \
               CONFIG_FUSE_FS CONFIG_OVERLAY_FS CONFIG_EXT4_FS CONFIG_DEVTMPFS_MOUNT \
               CONFIG_BLK_DEV_INITRD CONFIG_VETH CONFIG_BRIDGE CONFIG_NF_NAT CONFIG_SECCOMP \
-              CONFIG_SQUASHFS CONFIG_EROFS_FS; do
+              CONFIG_SQUASHFS CONFIG_EROFS_FS CONFIG_BPF_SYSCALL CONFIG_CGROUP_BPF \
+              CONFIG_IP_NF_RAW; do
     assert_config "$symbol" y
 done
 assert_config CONFIG_MODULES n
@@ -113,6 +114,8 @@ if [ "$TARGET_ARCH" = "arm64" ]; then
     assert_config CONFIG_EFI_ZBOOT n
 else
     assert_config CONFIG_SERIAL_8250_CONSOLE y
+    # Without it, a guest sees one CPU on Cloud Hypervisor (#486).
+    assert_config CONFIG_X86_X2APIC y
 fi
 echo "Config assertions OK."
 

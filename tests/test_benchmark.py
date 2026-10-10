@@ -88,7 +88,11 @@ class WireTests(unittest.TestCase):
         # replaced (see tests/test_keyvalue_wire.py); the field itself moved from 6 to 99.
         field = celaut.Sysresources.DESCRIPTOR.fields_by_name["benchmark"]
         self.assertEqual(field.number, 99)
-        self.assertEqual(field.label, field.LABEL_REPEATED)
+        # `label` was removed in protobuf 7 in favour of `is_repeated`.
+        repeated = getattr(field, "is_repeated", None)
+        if repeated is None:
+            repeated = field.label == field.LABEL_REPEATED
+        self.assertTrue(repeated)
         entry = field.message_type
         self.assertEqual(entry.full_name, "celaut.Uint64KeyValue")
         self.assertFalse(entry.GetOptions().map_entry)

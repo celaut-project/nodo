@@ -134,14 +134,26 @@ def _donation_accrual():
 
 
 def _ledger_tag(ledger) -> Optional[str]:
-    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire.
+    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire, if it is ours.
 
     Only for the incoming side, where a peer sends the whole advertised message. The
     payer's own side already works in tags: that is what a `contract_instance` row
     holds and what `get_peer_contract_instances` yields.
+
+    None unless the message declares the same ledger this node settles on
+    (``ledger_descriptors.payment_ledger``, compared on a non-empty `formal` by
+    ``node_identity.same_declaration``): a payer that means another network, other
+    units or another way to bind a deposit token -- or that does not say -- is not
+    paying into this node's ledger, whatever its tag says.
     """
+    from src.identity.node_identity import same_declaration
+    from src.utils.ledger_descriptors import payment_ledger
+
     tags = getattr(ledger, "tags", None)
-    return tags[0] if tags else None
+    if not tags:
+        return None
+    ours = payment_ledger(tags[0])
+    return tags[0] if ours is not None and same_declaration(ledger, ours) else None
 
 
 def _address_of(script) -> Optional[str]:
@@ -277,6 +289,52 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                 # carry the value back through the context manager.
                 submitted_tx: list = []
 
+                def record(status: str):
+                    sc.record_payment(
+                        direction='out',
+                        status=status,
+                        amount_mu=amount,
+                        tx_id=submitted_tx[-1] if submitted_tx else None,
+                        peer_id=peer_id,
+                        deposit_token=deposit_token,
+                        ledger=ledger or plan.ledger_tag,
+                        contract_hash=contract_hash,
+                        # Which asset paid it: `amount_mu` is ledger-neutral, and one
+                        # contract settles in several assets at several rates.
+                        token_id=plan.asset,
+                        address=_address_of(script),
+                        # What `Payable` tells the peer, so a resumed payment can
+                        # tell it the same thing.
+                        peer_amount_mu=peer_amount,
+                    )
+
+                def set_status(status: str):
+                    # The row written at the broadcast moves on. A contract that
+                    # reported no transaction (the simulated one) has no such row, and
+                    # neither has one whose broadcast row failed to land: both get a
+                    # row now, so the outcome is never lost.
+                    if not (submitted_tx and
+                            sc.set_outgoing_payment_status(submitted_tx[-1], status)):
+                        record(status)
+
+                # Whether the network took the transaction. Until it did, a refusal
+                # means no money moved.
+                sent_tx: list = []
+
+                def on_transaction_id(tx_id: str, sent: bool = True):
+                    # Reported twice by a contract: once signed and not yet sent, so the
+                    # row exists before any money can move, and once the network took
+                    # it. A daemon that stops at any point after the first leaves this
+                    # row behind, and `resume_outgoing_payments` finishes it (#523).
+                    if sent:
+                        sent_tx.append(tx_id)
+                    if submitted_tx and submitted_tx[-1] == tx_id:
+                        set_status('broadcast')
+                        return
+                    submitted_tx.append(tx_id)
+                    _claim_outgoing(tx_id)
+                    record('broadcast' if sent else 'signed')
+
                 try:
                     # Reported against *this* contract: with two payment systems, a
                     # hook resolved from another one would attach a transaction id to
@@ -289,7 +347,7 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                     )
                     report_id = getattr(payment_envs, "transaction_id_reporting", None)
                     id_context = (
-                        report_id(submitted_tx.append, method=method)
+                        report_id(on_transaction_id, method=method)
                         if callable(report_id)
                         else nullcontext()
                     )
@@ -306,12 +364,34 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         # update_reputation(=ledger, amount=1)  # TODO On envs.
                 except DoubleSpendingAttempt as e:
                     _l.LOGGER(str(e))
+                    if submitted_tx:
+                        # The node refused the send, so the transaction never existed
+                        # on the chain and the next ledger may be tried.
+                        set_status('failed')
+                        _release_outgoing(submitted_tx[-1])
                     # Internally, the exception updates the wait time to retry the ledger. 
                     # It is not necessary to update its reputation at this point.
                     continue
                 except Exception as e:
                     _l.LOGGER(f"Error processing payment for contract {contract_hash}: {str(e)}")
-                    
+
+                    if submitted_tx:
+                        # The transaction is signed, and may be on the network: either
+                        # its confirmation did not arrive in time, or the send failed in
+                        # a way that does not say whether the network took it. It is NOT
+                        # a failed payment: trying the next ledger would pay a second
+                        # time against the same deposit token. The row keeps its state
+                        # and the resume carries on waiting, then tells the peer -- or,
+                        # for a 'signed' one that never shows up, marks it 'failed'.
+                        state = 'broadcast' if sent_tx else 'signed'
+                        _l.LOGGER(
+                            f"Tx {submitted_tx[-1]} is {state} and not confirmed yet; "
+                            "it will be resumed instead of paid again."
+                        )
+                        _release_outgoing(submitted_tx[-1])
+                        resume_outgoing_payments()
+                        return None
+
                     # TODO
                     # In case of failure, we need to handle attempts to retry x times
                     # and if it still fails, leave it until after x time or something similar.
@@ -328,42 +408,29 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         # update_reputation(=ledger, amount=-10)  # TODO On envs.
                     continue
 
-
                 # Past this point the payment exists on the ledger, whatever the peer
-                # does next, so both branches below write it down. The failing one is
-                # the row that matters most: money left this wallet and no balance
+                # does next, so both outcomes below are written down. The failing one
+                # is the row that matters most: money left this wallet and no balance
                 # arrived, and until now that left no trace an operator could read.
-                def record(status: str):
-                    sc.record_payment(
-                        direction='out',
-                        status=status,
-                        amount_mu=amount,
-                        tx_id=submitted_tx[-1] if submitted_tx else None,
-                        peer_id=peer_id,
-                        deposit_token=deposit_token,
-                        ledger=ledger or plan.ledger_tag,
-                        contract_hash=contract_hash,
-                        # Which asset paid it: `amount_mu` is ledger-neutral, and one
-                        # contract settles in several assets at several rates.
-                        token_id=plan.asset,
-                        address=_address_of(script),
+                communicated = False
+                try:
+                    if submitted_tx:
+                        set_status('confirmed')
+                    communicated = _communicate_outgoing(
+                        peer_id, peer_amount, deposit_token, contract_ledger,
+                        contract_hash, set_status,
                     )
-
-                # Handle communication attempts to peer
-                if __attempt_payment_communication(peer_id, peer_amount, deposit_token, contract_ledger):
-                    record('communicated')
-                    _reputation_interface().update_peer_reputation(
-                        peer_id=peer_id, amount=10,  # TODO On envs.
-                        reason=Reason.PAYMENT_COMMUNICATED
-                    )
+                except Exception as e:
+                    _l.LOGGER(f"Error communicating the payment for contract {contract_hash}: {e}")
+                finally:
+                    if submitted_tx:
+                        _release_outgoing(submitted_tx[-1])
+                if communicated:
                     return plan
-                else:
-                    _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
-                    record('unacknowledged')
-                    _reputation_interface().update_peer_reputation(
-                        peer_id=peer_id, amount=-100,  # TODO On envs.
-                        reason=Reason.PAYMENT_UNACKNOWLEDGED
-                    )
+                if submitted_tx:
+                    # Money left for this deposit token. Paying again through the next
+                    # ledger would be a second payment for one deposit.
+                    return None
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except JavaDependencyMissing:
@@ -376,6 +443,157 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
 
     _l.LOGGER("No payment system settled this deposit.")
     return None
+
+
+def _communicate_outgoing(peer_id: str, peer_amount: int, deposit_token: str,
+                          contract_ledger: celaut_pb2.Contract, contract_hash: str,
+                          set_status, penalize: bool = True) -> bool:
+    """Tell the peer about a confirmed payment, and write down how that went.
+
+    Shared by a payment made now and by one resumed after a restart, so both end in the
+    same two states. ``penalize`` is False for a resumed payment past its deposit
+    token's lifetime: the peer may have written the token off by then, and the delay
+    was this node's, not the peer's.
+    """
+    if __attempt_payment_communication(peer_id, peer_amount, deposit_token, contract_ledger):
+        set_status('communicated')
+        _reputation_interface().update_peer_reputation(
+            peer_id=peer_id, amount=10,  # TODO On envs.
+            reason=Reason.PAYMENT_COMMUNICATED
+        )
+        return True
+    _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
+    set_status('unacknowledged')
+    if penalize:
+        _reputation_interface().update_peer_reputation(
+            peer_id=peer_id, amount=-100,  # TODO On envs.
+            reason=Reason.PAYMENT_UNACKNOWLEDGED
+        )
+    return False
+
+
+# Transactions some thread of this process is already waiting on. A payment being made
+# now has a 'broadcast' row too, and a resume that picked it up as well would send the
+# peer a second `Payable` for it. Empty at startup, which is what lets every row a
+# stopped daemon left behind be resumed.
+_outgoing_in_flight: set = set()
+_outgoing_in_flight_lock = Lock()
+
+# How long a resume waits between two failed reads of the chain (an explorer or a
+# backend that is down), so it does not spin until the deposit token expires.
+RESUME_RETRY_DELAY = 60
+
+
+def _claim_outgoing(tx_id: str) -> bool:
+    """Mark ``tx_id`` as waited on by this thread. False if another thread has it."""
+    with _outgoing_in_flight_lock:
+        if tx_id in _outgoing_in_flight:
+            return False
+        _outgoing_in_flight.add(tx_id)
+        return True
+
+
+def _release_outgoing(tx_id: str) -> None:
+    with _outgoing_in_flight_lock:
+        _outgoing_in_flight.discard(tx_id)
+
+
+def resume_outgoing_payments() -> int:
+    """Finish the outgoing payments left between the broadcast and `Payable` (#523).
+
+    A payment is two steps: the transaction goes on the network, and once it is
+    confirmed the peer is told with `Payable`. Its row is written as 'signed' before
+    the send, so even a stop right after the send leaves the id behind. The wait in between is long (up to
+    twenty minutes on Ergo, an hour on Bitcoin), and a daemon that stopped in it --
+    restart, upgrade, crash -- used to lose the payment: the money was on-chain and
+    the peer never credited it. The row is written at the broadcast now, so it can be
+    finished here: wait for the confirmation, then send the `Payable` the interrupted
+    payment would have sent.
+
+    One thread per payment, because each one may wait for a long time. Returns how
+    many it started. Called at startup, and by a payment whose own wait ran out.
+    """
+    started = 0
+    for row in sc.outgoing_payments_to_resume():
+        tx_id = row.get('tx_id')
+        if not tx_id or not _claim_outgoing(tx_id):
+            continue
+        _l.LOGGER(f"Resuming the outgoing payment of tx {tx_id} ({row.get('status')}).")
+        Thread(target=_resume_outgoing_payment, args=(row,), daemon=True).start()
+        started += 1
+    return started
+
+
+def _resume_outgoing_payment(row: dict) -> None:
+    """Wait for one broadcast payment, then tell the peer. Releases its claim on exit.
+
+    The wait is retried until the deposit token's lifetime has passed. After that the
+    peer has written the token off, so a payment still not confirmed is marked
+    'unacknowledged': the row an operator looks for when money left and nothing was
+    credited. A payment confirmed late is still communicated -- the peer may yet accept
+    it, and asking costs nothing -- but a refusal then is not held against the peer.
+    """
+    from src.payment_system.contracts.registry import MethodKey
+
+    tx_id = row['tx_id']
+    started = monotonic()
+
+    def age() -> float:
+        return float(row.get('age_seconds') or 0) + (monotonic() - started)
+
+    def set_status(status: str):
+        sc.set_outgoing_payment_status(tx_id, status)
+
+    try:
+        payment_envs = _payment_envs()
+        key = MethodKey(row.get('ledger') or "", row.get('contract_hash') or "",
+                        row.get('token_id') or "")
+        ttl = payment_envs.deposit_token_ttls().get(key, DEFAULT_DEPOSIT_TOKEN_TTL)
+        awaiter = payment_envs.payment_awaiters().get(key)
+        if awaiter is None or row.get('peer_amount_mu') is None:
+            _l.LOGGER(
+                f"Cannot resume tx {tx_id}: its payment method {key} is not offered "
+                "by this node now, or the row has no amount for the peer."
+            )
+            if age() > ttl:
+                set_status('unacknowledged')
+            return
+
+        script = bytes.fromhex(row.get('address') or "")
+        contract_ledger = None
+        while contract_ledger is None:
+            try:
+                contract_ledger = awaiter(tx_id=tx_id, script=script)
+            except JavaDependencyMissing:
+                log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
+                return
+            except Exception as e:
+                if age() > ttl:
+                    # A 'signed' transaction may never have reached the network: the
+                    # daemon stopped before the send, or the send failed. One that has
+                    # not shown up by now is taken as never sent, and no money moved.
+                    final = 'failed' if row.get('status') == 'signed' else 'unacknowledged'
+                    _l.LOGGER(
+                        f"Tx {tx_id} is still not confirmed after the deposit token's "
+                        f"lifetime ({ttl}s): {e}. Marked {final}."
+                    )
+                    set_status(final)
+                    return
+                _l.LOGGER(f"Tx {tx_id} is not confirmed yet ({e}); waiting again.")
+                sleep(RESUME_RETRY_DELAY)
+
+        if row.get('status') != 'confirmed':
+            set_status('confirmed')
+        if _communicate_outgoing(
+            row['peer_id'], int(row['peer_amount_mu']), row['deposit_token'],
+            contract_ledger, row.get('contract_hash') or "", set_status,
+            penalize=age() <= ttl,
+        ):
+            _l.LOGGER(f"Resumed payment of tx {tx_id} communicated to {row['peer_id']}.")
+    except Exception as e:
+        _l.LOGGER(f"Failed to resume the outgoing payment of tx {tx_id}: {e}")
+    finally:
+        _release_outgoing(tx_id)
 
 
 # Helper function for payment communication retries
@@ -391,11 +609,18 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
                 _l.LOGGER(f"Failed to get gRPC stub for peer {peer_id}")
                 return False
 
+            # The same client the deposit token was issued to (__obtain_deposit_token):
+            # stored by then, so this reads it back rather than minting another.
+            client_id = _manager_module().get_client_id_on_other_peer(peer_id=peer_id)
+            if not client_id:
+                _l.LOGGER(f"No client_id at peer {peer_id} to communicate the payment with.")
+                return False
+
             BeeClient.payable(channel, celaut_pb2.Payment(
                 amount=to_amount(peer_amount),
                 deposit_token=deposit_token,
                 contract=contract_ledger,
-            ))
+            ), client_id=client_id)
 
             _l.LOGGER(f"Payment of {peer_amount} (peer MU) to {peer_id} communicated successfully.")
             return True
@@ -667,9 +892,9 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
     """
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
-    # The wire carries the whole `Contract.Ledger` a peer advertises; the tag is the
-    # only part of it anything reads, so it is taken here, once, and everything below
-    # this line works in tags. `prose` and `formal` are description and are dropped.
+    # The wire carries the whole `Contract.Ledger` a peer advertises. It is checked
+    # against this node's own declaration of that ledger and reduced to its tag here,
+    # once; everything below this line works in tags.
     ledger_tag: str = _ledger_tag(ledger) or ""
     # Resolved once, up front, because the payment record needs it whichever way the
     # validation goes -- a deposit we refused is exactly the one a client will ask about.
@@ -901,3 +1126,12 @@ def init_interfaces():
                 _l.LOGGER(f"Exception on init interface {key}. {str(e)}")
         else:
             _l.LOGGER(f"Warning: {_init} is not callable.")
+    # After the contracts are up, because finishing a payment reads their chain. Soon
+    # after start rather than on the manager tick: the peer writes off a deposit token
+    # after `deposit_token_ttl()`, and a `Payable` sent after that is refused.
+    try:
+        resumed = resume_outgoing_payments()
+        if resumed:
+            _l.LOGGER(f"Resuming {resumed} outgoing payment(s) left by a previous run.")
+    except Exception as e:
+        _l.LOGGER(f"Could not resume the outgoing payments: {e}")

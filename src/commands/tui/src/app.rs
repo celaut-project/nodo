@@ -82,6 +82,10 @@ pub enum Page {
     /// what it reaches. Opened here or with `t` on INSTANCES; see `tunnels.rs`.
     Tunnels,
     Services,
+    /// The `nodo pack` runs on this host, current and recent: what each packs, where
+    /// it is, and the service id it produced. Launched here or with `p` on SERVICES;
+    /// see `packs.rs`.
+    Packs,
     /// Peers we talk to, and what we have paid them.
     Peers,
     /// Clients that talk to us, and what they have paid.
@@ -102,7 +106,7 @@ pub enum Page {
     /// two separate fields cannot say so.
     Schedule,
     /// What the machine costs to run, as watts and as money (`energy:`). Its own page
-    /// rather than a branch of Config because the block is a dozen keys spread over
+    /// rather than a branch of All because the block is a dozen keys spread over
     /// five mutually exclusive measurement sources, and the comments that say which
     /// one applies to a given machine are the whole difference between a reading and
     /// a number somebody invented (issue #395).
@@ -217,7 +221,7 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 15] = [
+    pub const ALL: [Page; 16] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
@@ -227,6 +231,8 @@ impl Page {
         Page::Tunnels,
         Page::Peers,
         Page::Services,
+        // Beside Services: a pack is how a service gets into the registry.
+        Page::Packs,
         Page::Clients,
         // Beside Clients: both are "who is on the other end", and Chat is often
         // reached from noticing something worth telling that operator about.
@@ -256,15 +262,16 @@ impl Page {
             Page::Instances => "INSTANCES",
             Page::Tunnels => "TUNNELS",
             Page::Services => "SERVICES",
+            Page::Packs => "PACKS",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
             Page::Chat => "CHAT",
             Page::Earnings => "EARNINGS",
-            Page::Cell => "CELL",
+            Page::Cell => "POLICIES",
             Page::Pricing => "PRICING",
             Page::Schedule => "SCHEDULE",
             Page::Energy => "ENERGY",
-            Page::Config => "CONFIG",
+            Page::Config => "ALL",
             Page::Logs => "LOGS",
             Page::Docs => "DOCS",
         }
@@ -278,15 +285,16 @@ impl Page {
             Page::Instances => "INST",
             Page::Tunnels => "TUNL",
             Page::Services => "SERV",
+            Page::Packs => "PACK",
             Page::Peers => "PEERS",
             Page::Clients => "CLNT",
             Page::Chat => "CHAT",
             Page::Earnings => "EARN",
-            Page::Cell => "CELL",
+            Page::Cell => "POLICY",
             Page::Pricing => "PRICE",
             Page::Schedule => "SCHED",
             Page::Energy => "ENERGY",
-            Page::Config => "CONFIG",
+            Page::Config => "ALL",
             Page::Logs => "LOGS",
             Page::Docs => "DOCS",
         }
@@ -302,6 +310,7 @@ impl Page {
             | Page::Tunnels
             | Page::Peers
             | Page::Services
+            | Page::Packs
             | Page::Clients
             | Page::Chat => PageGroup::Activity,
             Page::Earnings => PageGroup::Money,
@@ -474,7 +483,7 @@ pub enum InputMode {
     AcceptKya,
     Connect,
     EditConfig,
-    /// A new element for the list the Config page's selection points at.
+    /// A new element for the list the All page's selection points at.
     AddConfigItem,
     FilterConfig,
     /// Amount entry for crediting/debiting the selected client's balance.
@@ -483,12 +492,12 @@ pub enum InputMode {
     Confirm,
     /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
     Details,
-    /// Profile picker on the CELL page: choose a posture, then confirm its diff.
+    /// Profile picker on the POLICIES page: choose a posture, then confirm its diff.
     PickProfile,
-    /// Which of the config keys behind one CELL lever to edit (issue #414).
+    /// Which of the config keys behind one POLICIES lever to edit (issue #414).
     ///
     /// A lever stands for several keys, and used to answer `e` with a read-only
-    /// list that ended by sending the operator to the Config page. This is that
+    /// list that ended by sending the operator to the All page. This is that
     /// list made actionable, over exactly the same keys.
     PickLeverKey,
     /// Confirmation showing every key a lever or profile would change, before any
@@ -501,14 +510,17 @@ pub enum InputMode {
     /// (`src/utils/monetary.py::display_unit` refuses one with none), so this does
     /// not just set `ui.DISPLAY_UNIT` -- it takes a name and a MU-per-unit ratio
     /// together and writes both `ui.DISPLAY_UNIT` and `ui.UNITS.<name>.MU_PER_UNIT`
-    /// in the one transaction, the same way a CELL profile writes a dozen keys
+    /// in the one transaction, the same way a POLICIES profile writes a dozen keys
     /// rather than leaving the node to run on a partial edit.
     AddCustomUnit,
-    /// The tokens this node accepts besides ERG, reached from the CELL page's
+    /// The tokens this node accepts besides ERG, reached from the POLICIES page's
     /// `assets` lever: the list, with `a` to add one and `d` to remove the selected.
     EditAssets,
     /// The form for one new asset, inside the assets modal (see [`AssetForm`]).
     AddAsset,
+    /// The env vars of a service whose execution was just confirmed
+    /// (see [`crate::env_form`]).
+    ExecuteEnvs,
     /// CHAT page, new-chat wizard step 1: pick which peer to start a chat with,
     /// narrowed by typing (issue: TUI chat/peers/clients redesign).
     PickChatPeer,
@@ -528,6 +540,9 @@ pub enum InputMode {
     /// A new tunnel: `<slot> [flags]` from INSTANCES (`t`, to the selected
     /// instance) or `<instance> <slot> [flags]` from TUNNELS (`n`).
     NewTunnel,
+    /// PACKS page (`n`) or SERVICES (`p`): a folder or an https git URL to pack. Tab
+    /// completes folder names.
+    NewPack,
     /// CHAT page, a step of `ComposeChatMessage`: which of this node's services to
     /// attach to the message as a card (issue #438). Esc goes back to the message
     /// rather than dropping it.
@@ -656,6 +671,9 @@ pub enum PendingAction {
     /// moment it launches, and goes on burning MU until something stops it.
     ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Re-fetch every peer and our balance there. Confirmed because it contacts all of
+    /// them, which is heavy on network and disk I/O.
+    RefreshPeers,
     /// Stop a running tunnel. Confirmed because whatever is connected through it is
     /// cut off, and reopening it may not get the same local port back.
     CloseTunnel { id: String, label: String },
@@ -663,6 +681,8 @@ pub enum PendingAction {
     /// connection through it spends `pricing.TUNNEL_OPEN_MU` of the instance's balance;
     /// the question says how much.
     OpenTunnel { label: String, args: Vec<String> },
+    /// Stop a running pack. Confirmed because the build so far is thrown away.
+    CancelPack { id: String, label: String },
     /// Remove one element from a list in config.yaml. Confirmed like the others
     /// because dropping an entry from, say, a network policy loosens it silently.
     DeleteConfigItem {
@@ -700,12 +720,15 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         }
         PendingAction::ExecuteService { id, label } => Some((
             format!("Execute service {label}"),
-            vec!["execute".to_string(), id],
+            crate::env_form::execute_args(&id, &[]),
         )),
         PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
         )),
+        PendingAction::RefreshPeers => {
+            Some(("Refresh peers".to_string(), vec!["refresh_peers".to_string()]))
+        }
         PendingAction::CloseTunnel { id, label } => Some((
             format!("Close tunnel {label}"),
             vec!["tunnel_close".to_string(), id, "--json".to_string()],
@@ -713,6 +736,10 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         PendingAction::DeleteConfigItem { .. } => None,
         PendingAction::ApplyWrites { .. } => None,
         PendingAction::OpenTunnel { label, args } => Some((label, args)),
+        PendingAction::CancelPack { id, label } => Some((
+            format!("Cancel pack {label}"),
+            vec!["pack_cancel".to_string(), id, "--json".to_string()],
+        )),
         PendingAction::EditLever { .. } => None,
     }
 }
@@ -1091,6 +1118,12 @@ pub(crate) enum CommandKind {
     /// `nodo tunnel --detach --json` / `nodo tunnel_close --json`: the status comes
     /// from the one JSON object, whose `error` is on stdout (`tunnels::outcome_status`).
     Tunnel,
+    /// `nodo pack --detach --json` / `nodo pack_cancel --json`, read the same way
+    /// (`packs::outcome_status`).
+    Pack,
+    /// `nodo service_envs <id> --json` for a confirmed execution: opens the env var
+    /// form, or runs `nodo execute` when the service asks for none.
+    ServiceEnvs { id: String, label: String },
 }
 
 /// Result of a background `nodo` invocation.
@@ -2037,6 +2070,31 @@ mod cpu_breakdown_tests {
     /// No cores reported (an `App` built before the first `sys.refresh_cpu()`, say)
     /// must not divide by zero.
     #[test]
+    fn root_is_found_when_the_compiled_path_does_not_exist() {
+        use super::locate_root;
+        let base = std::env::temp_dir().join(format!("nodo-tui-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let install = base.join("install");
+        std::fs::create_dir_all(install.join("bin")).unwrap();
+        std::fs::write(install.join("config.yaml"), "main: {}\n").unwrap();
+        let ghost = base.join("home/runner/work/nodo");
+
+        // Explicit variable wins.
+        assert_eq!(
+            locate_root(Some(install.clone()), &ghost, None, None),
+            install
+        );
+        // Otherwise it is found from the binary's own location.
+        assert_eq!(
+            locate_root(None, &ghost, Some(install.join("bin/tui")), None),
+            install
+        );
+        // Nothing matches: the compiled root, as before.
+        assert_eq!(locate_root(None, &ghost, None, None), ghost);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn zero_cores_does_not_panic() {
         let breakdown = cpu_breakdown(&stats(0, 0, 0.0, 0.0));
 
@@ -2062,12 +2120,55 @@ pub struct Paths {
     pub yq: PathBuf,
 }
 
+/// Names the nodo checkout explicitly. `nodo.py` sets it when it launches the TUI,
+/// because the path this crate was compiled at is the CI runner's
+/// (`/home/runner/work/nodo/...`) in a released binary and does not exist on the
+/// operator's machine.
+pub const ROOT_ENV: &str = "NODO_ROOT";
+
+/// Whether `dir` is a nodo checkout: it has the config or the docs tree.
+fn is_nodo_root(dir: &Path) -> bool {
+    dir.join("config.yaml").is_file() || dir.join("docs").join("KyA.md").is_file()
+}
+
+/// The directory `config.yaml` and `docs/` are resolved against.
+///
+/// In order: the explicit variable (taken at its word when it is a directory); the
+/// compile-time root when it still looks like a checkout (a local build); then the
+/// first ancestor of the executable or working directory that does. When nothing
+/// matches, the compile-time root is returned, as before.
+pub fn locate_root(
+    explicit: Option<PathBuf>,
+    compiled: &Path,
+    executable: Option<PathBuf>,
+    working_dir: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(dir) = explicit.filter(|dir| dir.is_dir()) {
+        return dir;
+    }
+    if is_nodo_root(compiled) {
+        return compiled.to_path_buf();
+    }
+    for start in [executable, working_dir].into_iter().flatten() {
+        if let Some(found) = start.ancestors().find(|dir| is_nodo_root(dir)) {
+            return found.to_path_buf();
+        }
+    }
+    compiled.to_path_buf()
+}
+
 impl Paths {
     pub fn discover() -> Self {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
-            .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."));
+        let compiled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let compiled = compiled.canonicalize().unwrap_or(compiled);
+        let root = locate_root(
+            std::env::var_os(ROOT_ENV)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from),
+            &compiled,
+            std::env::current_exe().ok(),
+            std::env::current_dir().ok(),
+        );
         let config = root.join("config.yaml");
         let document = read_yaml(&config).ok();
 
@@ -2175,8 +2276,33 @@ fn exact_pow10(value: f64) -> Option<u32> {
     ((candidate - value).abs() < f64::EPSILON * candidate.max(1.0)).then_some(exponent as u32)
 }
 
+/// `5100000` -> `5.1M`: the figure itself when no suffix can say it exactly.
+///
+/// The same rule as `abbreviate_mu` in `src/utils/monetary.py`. Never rounds: a suffix is
+/// used only when it needs at most two decimals, so what is shown is the exact amount.
+/// `digits` is a non-negative integer with no leading zeros (empty for zero).
+fn abbreviate_mu(digits: &str) -> String {
+    for (suffix, zeros) in [("G", 9usize), ("M", 6), ("K", 3)] {
+        // Needs at least one digit above the scale, and the last `zeros - 2` digits zero
+        // (the two before them are the decimals the suffix may show).
+        if digits.len() <= zeros || !digits.ends_with(&"0".repeat(zeros - 2)) {
+            continue;
+        }
+        let kept = &digits[..digits.len() - (zeros - 2)];
+        let (whole, fraction) = kept.split_at(kept.len() - 2);
+        let fraction = fraction.trim_end_matches('0');
+        return if fraction.is_empty() {
+            format!("{whole}{suffix}")
+        } else {
+            format!("{whole}.{fraction}{suffix}")
+        };
+    }
+    digits.to_string()
+}
+
 impl Money {
-    /// Resolve the display unit from `config.yaml`, falling back to ERG.
+    /// Resolve the display unit from `config.yaml`, falling back to MU: what the node
+    /// counts in, not money anyone holds (see `ui.DISPLAY_UNIT`).
     pub fn load(config: &Path) -> Self {
         let document = read_yaml(config).ok();
         let mu_per_nanoerg = yaml_scalar(
@@ -2188,7 +2314,7 @@ impl Money {
         .unwrap_or(1.0);
 
         let name = yaml_string(document.as_ref(), &["ui", "DISPLAY_UNIT"])
-            .unwrap_or_else(|| "erg".to_string())
+            .unwrap_or_else(|| "mu".to_string())
             .trim()
             .to_lowercase();
 
@@ -2279,7 +2405,7 @@ impl Money {
         }
 
         let text = match self.mu_per_unit_pow10 {
-            Some(0) => digits.trim_start_matches('0').to_string(),
+            Some(0) => abbreviate_mu(digits.trim_start_matches('0')),
             Some(shift) => {
                 let shift = shift as usize;
                 let padded = format!("{digits:0>width$}", width = shift + 1);
@@ -2900,7 +3026,7 @@ impl<T: Identifiable> StatefulList<T> {
     }
 }
 
-/// Where the cursor is on the CELL page, and where the page last drew things so a
+/// Where the cursor is on the POLICIES page, and where the page last drew things so a
 /// click can be resolved back to them.
 ///
 /// (organelle, lever) rather than a flat index: ←/→ move between boxes while ↑/↓
@@ -2950,6 +3076,8 @@ pub struct App {
     /// The instance a `t` on INSTANCES opened the new-tunnel prompt for; `None` when
     /// the prompt came from TUNNELS and the instance is typed.
     pub tunnel_instance: Option<String>,
+    /// The PACKS page: `nodo pack` runs, newest first, read from the registry.
+    pub packs: StatefulList<crate::packs::Pack>,
     /// The CHAT sidebar (issue #431): every conversation, both directions, plus each
     /// peer's topic-less bucket, merged and sorted by recency -- see `chat::ChatEntry`.
     pub conversations: StatefulList<ChatEntry>,
@@ -2963,7 +3091,7 @@ pub struct App {
     /// or `["servers", "[1]", "id"]` for a sequence element), which lets the tree
     /// keep its expanded sections and selection stable across refreshes and edits.
     pub config_tree_state: TreeState<String>,
-    /// Cursor and hit-test geometry for the CELL page.
+    /// Cursor and hit-test geometry for the POLICIES page.
     pub cell: CellState,
     /// config.yaml as a parsed document, from which every cell lever's position is
     /// derived. Cached and refreshed with the rest of the data rather than read per
@@ -3029,6 +3157,8 @@ pub struct App {
     pub assets_index: usize,
     /// The new-asset form, while `AddAsset` is open.
     pub asset_form: AssetForm,
+    /// The env vars of the service about to run ([`InputMode::ExecuteEnvs`]).
+    pub env_form: crate::env_form::EnvForm,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -3147,8 +3277,12 @@ pub struct App {
     /// Where each service card's buttons, and the compose box's Attach button,
     /// were drawn this frame -- the same lifecycle as `id_copy_areas`.
     pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
+    /// The eye at the right of each env var field, by field index, as last drawn.
+    pub env_form_eye_buttons: Vec<(usize, Rect)>,
     pub chat_attach_area: Rect,
     pub chat_send_area: Rect,
+    /// The ⟳ button on the PEERS table's border; `Rect::ZERO` when not drawn.
+    pub peers_refresh_area: Rect,
     /// The open right-click menu, while `input_mode` is `ContextMenu`.
     pub context_menu: Option<crate::context_menu::ContextMenu>,
     /// The DOCS page: its index, the page open in it, and where both were drawn.
@@ -3158,7 +3292,7 @@ pub struct App {
     pub status: String,
     /// Where the tab bar and the current page's selectable table were last drawn, so a
     /// click can be mapped back to a tab or a row. Written by the draw path each frame;
-    /// `list_area` stays empty on pages with no table (Overview, Logs, Config — the
+    /// `list_area` stays empty on pages with no table (Overview, Logs, All — the
     /// config tree tracks its own rendered area).
     pub tabs_area: Rect,
     /// Where the second row — the pages inside the open group — was last drawn, so a
@@ -3226,6 +3360,9 @@ impl Default for App {
             )),
             inbound_tunnels: crate::tunnels::read_inbound(&crate::tunnels::tunnels_dir(&paths.storage)),
             tunnel_instance: None,
+            packs: StatefulList::with_items(crate::packs::read_packs(&crate::packs::packs_dir(
+                &paths.storage,
+            ))),
             conversations: StatefulList::with_items(
                 crate::chat::load_entries(&paths.database).unwrap_or_default(),
             ),
@@ -3256,6 +3393,7 @@ impl Default for App {
             lever_key_index: 0,
             assets_index: 0,
             asset_form: AssetForm::default(),
+            env_form: crate::env_form::EnvForm::default(),
             now_minute: local_minute_of_day(),
             last_clock_refresh: now,
             demand: DemandByHour::default(),
@@ -3309,12 +3447,16 @@ impl Default for App {
             chat_attachment: None,
             chat_service_index: 0,
             chat_card_buttons: Vec::new(),
+            env_form_eye_buttons: Vec::new(),
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
+            peers_refresh_area: Rect::ZERO,
             context_menu: None,
             docs: crate::docs::DocsState::default(),
             details: None,
-            status: "Press r to refresh • q to quit".to_string(),
+            // Nothing to report until something happens: the footer's first line
+            // already lists `r` and `q`, and saying them twice was noise.
+            status: String::new(),
             tabs_area: Rect::ZERO,
             page_tabs_area: Rect::ZERO,
             too_small: false,
@@ -3538,6 +3680,7 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
             Page::Tunnels => self.tunnels.previous(),
+            Page::Packs => self.packs.previous(),
             Page::Services => {
                 self.services.previous();
                 self.load_selection_details();
@@ -3576,6 +3719,7 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
             Page::Tunnels => self.tunnels.next(),
+            Page::Packs => self.packs.next(),
             Page::Services => {
                 self.services.next();
                 self.load_selection_details();
@@ -3639,6 +3783,10 @@ impl App {
             .cloned()
         {
             self.copy_to_clipboard(&id);
+            return;
+        }
+        if self.page() == Page::Peers && self.peers_refresh_area.contains(position) {
+            self.open_refresh_peers_confirm();
             return;
         }
         // The config tree remembers where it drew each node, so it can resolve the
@@ -3885,6 +4033,7 @@ impl App {
         match self.page() {
             Page::Instances => self.instances.select_visible(visible),
             Page::Tunnels => self.tunnels.select_visible(visible),
+            Page::Packs => self.packs.select_visible(visible),
             Page::Services => {
                 self.services.select_visible(visible);
                 self.load_selection_details();
@@ -3944,7 +4093,7 @@ impl App {
     }
 
     /// Expand or collapse the selected configuration section (Enter/Space on the
-    /// Config page). A no-op on a scalar leaf, which has nothing to expand.
+    /// All page). A no-op on a scalar leaf, which has nothing to expand.
     pub fn toggle_selected_config_node(&mut self) {
         self.config_tree_state.toggle_selected();
     }
@@ -4316,12 +4465,14 @@ impl App {
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
             InputMode::AddCustomUnit => self.save_custom_unit(),
             InputMode::AddAsset => self.save_new_asset(),
+            InputMode::ExecuteEnvs => self.submit_env_form(),
             InputMode::PickChatPeer => self.submit_chat_peer_pick(),
             InputMode::PickChatTopic => self.submit_chat_topic_pick(),
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
             InputMode::GetService => self.submit_get_service(),
             InputMode::NewTunnel => self.submit_new_tunnel(),
+            InputMode::NewPack => self.submit_new_pack(),
             InputMode::PickChatService => self.submit_chat_service_pick(),
             InputMode::SearchDocs => self.submit_docs_search(),
             // The writes confirmation answers y/n, never Enter: Enter on a
@@ -4481,7 +4632,7 @@ impl App {
         self.config_follow_up = write.follow_up.clone();
         // Said once, here, on the way in: this is the single funnel every config
         // write in the interface passes through, so one line covers the ENERGY
-        // page's kWh price, a cell profile, a price nudge and a raw Config row
+        // page's kWh price, a cell profile, a price nudge and a raw All row
         // alike. It was previously learned by watching a value be written and then
         // silently put back.
         if let Some(hint) = self.config_write_root_hint() {
@@ -4521,7 +4672,7 @@ impl App {
     ///
     /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
     /// by the same `write_config_value` as every price, every cell lever and every
-    /// raw Config row; there is one writer and one transaction. It is a property of
+    /// raw All row; there is one writer and one transaction. It is a property of
     /// **whether something is serving**, which is why the same edit succeeds
     /// silently on a stopped node and is refused on a running one -- and why it
     /// looked arbitrary.
@@ -4573,6 +4724,7 @@ impl App {
 
         self.paths = Paths::discover();
         self.reload_after_config_write();
+        self.forget_node_info_from_before(&transaction.result);
 
         match transaction.result {
             Ok(applied) => {
@@ -4603,6 +4755,46 @@ impl App {
         self.refresh_local(true);
     }
 
+    /// Whether the node serves, as the operator alerts must read it.
+    ///
+    /// `None` while a configuration transaction is in flight. That transaction
+    /// restarts the node, so the gateway port is closed for a time on purpose, and
+    /// "nothing is listening" is not a fact to report in that window.
+    pub(crate) fn serving_for_alerts(&self) -> Option<bool> {
+        if self.config_task.is_some() {
+            return None;
+        }
+        match self.node_info.service_status.as_str() {
+            "running" => Some(true),
+            "not running" => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Make `node_info` agree with the node that a configuration transaction left.
+    ///
+    /// `nodo info` runs on its own 60 s timer. A run that fell in the restart
+    /// probed a closed port and reported "not running". Without this, that stale
+    /// answer stays until the next run. The alerts then read the new port with no
+    /// notice beside it, and show "nothing is listening" for up to a minute on a
+    /// node that serves.
+    ///
+    /// A run still in flight is dropped for the same reason: it can have probed
+    /// the port before the node opened it. Then the next tick starts a new run.
+    fn forget_node_info_from_before(&mut self, result: &Result<Applied, String>) {
+        if let Some(task) = self.wallet_task.take() {
+            task.abort();
+        }
+        let now = Instant::now();
+        self.last_wallet_refresh = now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now);
+        // `wait_until_serving` proved the new port answers before it returned
+        // `Restarted`. The other results leave the state unknown until `nodo info`
+        // answers again.
+        if matches!(result, Ok(Applied::Restarted)) {
+            self.node_info.service_status = "running".to_string();
+        }
+    }
+
     // --- Cell ---------------------------------------------------------------
 
     /// What the selected lever is set to right now.
@@ -4616,7 +4808,7 @@ impl App {
         cell::closest_profile(self.config_document.as_ref())
     }
 
-    /// Route a click on the CELL page: a lever row selects it, anywhere else in an
+    /// Route a click on the POLICIES page: a lever row selects it, anywhere else in an
     /// organelle's box moves the cursor into that box.
     fn click_cell(&mut self, position: Position) {
         if let Some((organelle, lever, _)) = self
@@ -4660,7 +4852,7 @@ impl App {
                 if let Some(index) = Page::ALL.iter().position(|candidate| *candidate == page) {
                     self.tabs.index = index;
                     self.status =
-                        format!("{} is edited here — or `e` on the CELL row for one key", lever.label);
+                        format!("{} is edited here — or `e` on the POLICIES row for one key", lever.label);
                 }
             }
             LeverKind::Scalar { .. } => self.open_lever_editor(),
@@ -4699,7 +4891,7 @@ impl App {
     ///
     /// A cycle lever has no single key to edit, so `e` there lists the keys it owns
     /// instead: the operator gets to see exactly which settings one named position
-    /// stands for, and the Config page remains the place to break them apart.
+    /// stands for, and the All page remains the place to break them apart.
     /// `e` on the selected lever: edit one of the keys behind it, here.
     ///
     /// A scalar lever is one key, so it opens straight into the editor. Anything
@@ -4786,7 +4978,7 @@ impl App {
             infer_edit_kind(path, value_type)
         };
         // A secret opens empty, so the plaintext is never on screen -- the same rule
-        // the Config editor follows.
+        // the All editor follows.
         self.input = if lever.secret { String::new() } else { current };
         self.status = if wallet_mnemonic_ledger(path).is_some() {
             "12 or 24 words • \"\" has the node generate a fresh one • Esc cancels".to_string()
@@ -5152,7 +5344,7 @@ impl App {
     ///
     /// Wraps because the catalogue is short and fully visible: with fourteen rows on
     /// screen at once, stopping at the end is a keypress that does nothing for no
-    /// reason the operator can see. Same behaviour the CELL page's lever cursor has.
+    /// reason the operator can see. Same behaviour the POLICIES page's lever cursor has.
     pub fn move_energy_selection(&mut self, delta: i32) {
         let count = energy::entries().len();
         if count == 0 {
@@ -5177,7 +5369,7 @@ impl App {
 
     /// Open the ordinary config editor on the selected energy key (issue #395).
     ///
-    /// The same popup, path and transaction the Config page uses. This page
+    /// The same popup, path and transaction the All page uses. This page
     /// contributes the catalogue and the explanation beside it, and nothing else: a
     /// second way to write YAML would be a second set of quoting rules.
     ///
@@ -5747,8 +5939,28 @@ impl App {
                     self.spawn_command(CommandKind::Tunnel, label, args);
                 }
             }
+            PendingAction::RefreshPeers => {
+                if let Some((label, args)) = pending_command(PendingAction::RefreshPeers) {
+                    self.spawn_command(CommandKind::Report, label, args);
+                }
+            }
             PendingAction::OpenTunnel { label, args } => {
                 self.spawn_command(CommandKind::Tunnel, label, args);
+            }
+            PendingAction::CancelPack { id, label } => {
+                if let Some((label, args)) = pending_command(PendingAction::CancelPack { id, label }) {
+                    self.spawn_command(CommandKind::Pack, label, args);
+                }
+            }
+            // The spend is confirmed; what the service asks for is read next, and
+            // answered in a form before it runs (`env_form`).
+            PendingAction::ExecuteService { id, label } => {
+                let args = vec!["service_envs".to_string(), id.clone(), "--json".to_string()];
+                self.spawn_command(
+                    CommandKind::ServiceEnvs { id, label: label.clone() },
+                    format!("Read env vars of {label}"),
+                    args,
+                );
             }
             other => {
                 if let Some((label, args)) = pending_command(other) {
@@ -5776,7 +5988,7 @@ impl App {
     pub fn close_details(&mut self) {
         self.details = None;
         self.input_mode = InputMode::Normal;
-        self.status = "Press r to refresh • q to quit".to_string();
+        self.status.clear();
     }
 
     /// Spawn a `nodo` command in the background so the UI stays responsive.
@@ -5845,6 +6057,14 @@ impl App {
                     format!("{} failed: {}", outcome.label, first_line(&outcome.stderr))
                 };
             }
+            CommandKind::Pack => {
+                self.status = crate::packs::outcome_status(
+                    &outcome.label,
+                    outcome.success,
+                    &outcome.stdout,
+                    &outcome.stderr,
+                );
+            }
             CommandKind::Tunnel => {
                 self.status = crate::tunnels::outcome_status(
                     &outcome.label,
@@ -5852,6 +6072,16 @@ impl App {
                     &outcome.stdout,
                     &outcome.stderr,
                 );
+            }
+            CommandKind::ServiceEnvs { id, label } => {
+                let envs = if outcome.success {
+                    crate::env_form::parse_service_envs(&outcome.stdout)
+                } else {
+                    Err(crate::env_form::parse_service_envs(&outcome.stdout)
+                        .err()
+                        .unwrap_or_else(|| first_line(&outcome.stderr)))
+                };
+                self.on_service_envs(id, label, envs);
             }
             CommandKind::Generic => {
                 self.status = if outcome.success {
@@ -5945,7 +6175,7 @@ impl App {
         self.demand = get_demand_by_hour(&self.paths.database, DEMAND_HISTORY_DAYS)
             .unwrap_or_default();
         self.paths = Paths::discover();
-        // Picks up an edit made on the Config page, or in a shell, so the cell's
+        // Picks up an edit made on the All page, or in a shell, so the cell's
         // levers describe the file as it is rather than as it was at start-up.
         self.config_document = read_yaml(&self.paths.config).ok();
 
@@ -5962,6 +6192,7 @@ impl App {
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.refresh_tunnels();
+        self.refresh_packs();
         self.refresh_chat();
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
@@ -5979,11 +6210,7 @@ impl App {
             // "running but unreachable" -- the state no local check can see --
             // rather than only "not reachable". `None` until the first `nodo info`
             // answers, which is what the third wording is for.
-            let serving = match self.node_info.service_status.as_str() {
-                "running" => Some(true),
-                "not running" => Some(false),
-                _ => None,
-            };
+            let serving = self.serving_for_alerts();
             self.alerts
                 .poll(&self.paths.config, self.config_document.as_ref(), serving);
         }
@@ -6033,7 +6260,7 @@ impl App {
             .filter_map(|instance| instance.usage.cpu_percent)
             .sum();
         self.stats.daemon_memory_used =
-            read_u64(&daemon_cgroup_dir(&self.paths).join("memory.current")).unwrap_or(0);
+            read_cgroup_memory_working_set(&daemon_cgroup_dir(&self.paths)).unwrap_or(0);
         self.stats.daemon_cpu_percent = self.derive_daemon_cpu_rate(Instant::now());
     }
 
@@ -6379,7 +6606,9 @@ async fn fetch_node_info() -> Result<NodeInfo, String> {
     // lines ahead of them are simply ignored.
     let output = tokio::time::timeout(
         Duration::from_secs(20),
-        Command::new("nodo").output(),
+        // A run that is aborted (see `forget_node_info_from_before`) must not leave
+        // its `nodo` process behind.
+        Command::new("nodo").kill_on_drop(true).output(),
     )
     .await
     .map_err(|_| "nodo timed out after 20 seconds".to_string())?
@@ -7643,7 +7872,7 @@ fn yaml_edit_value(value: &Value) -> String {
 }
 
 /// Which editor widget a key gets: the closed value set some keys document, else
-/// the widget for its YAML type. Shared by the Config page and the cell levers, so
+/// the widget for its YAML type. Shared by the All page and the cell levers, so
 /// one key is edited the same way whichever page opened it.
 fn infer_edit_kind(path: &str, value_type: &str) -> EditKind {
     if let Some(options) = known_enum_values(path) {
@@ -7775,7 +8004,7 @@ const SERVICE_MANIFEST: &str = "_.json";
 /// figure it shows. A Python helper would mean an interpreter spawn per service on
 /// every refresh, four times a second, to re-read files the TUI has open anyway.
 ///
-/// Mirrors `bee_rpc.utils.getsize` as pinned (bee-rpc-over-grpc-py v0.0.1), which is
+/// Mirrors `bee_rpc.utils.getsize` as pinned (bee-rpc-over-grpc-py v0.0.2), which is
 /// what `nodo services` prints (issue #438): an integer entry is a local part, a
 /// list entry is `[block_id, ...]` and contributes the block's whole expansion
 /// (`get_expanded_block_length`) -- a block file's full length, or for a multiblock
@@ -7919,6 +8148,22 @@ fn read_cgroup_keyed_u64(path: &Path, key: &str) -> Option<u64> {
         }
         fields.next()?.parse().ok()
     })
+}
+
+/// A cgroup's working set: `memory.current` minus the `inactive_file` it reports in
+/// `memory.stat`, the figure `docker stats` and cAdvisor show.
+///
+/// `memory.current` charges the page cache to whoever faulted it in, so a daemon that
+/// has just read a few GiB of microVM rootfs images carries all of it -- a reading
+/// that once put `nodo.service` at 29% of host RAM while its own anonymous memory was
+/// 230 MiB. Inactive file pages are the first thing the kernel reclaims, so they are
+/// not memory the cgroup is holding onto. A missing `memory.stat` (or key) subtracts
+/// nothing rather than hiding the reading.
+fn read_cgroup_memory_working_set(cgroup: &Path) -> Option<u64> {
+    let current = read_u64(&cgroup.join("memory.current"))?;
+    let inactive_file =
+        read_cgroup_keyed_u64(&cgroup.join("memory.stat"), "inactive_file").unwrap_or(0);
+    Some(current.saturating_sub(inactive_file))
 }
 
 /// Cumulative block-IO from cgroup v2 `io.stat`, summed over every backing device.
@@ -8343,6 +8588,7 @@ mod tests {
                     Page::Tunnels,
                     Page::Peers,
                     Page::Services,
+                    Page::Packs,
                     Page::Clients,
                     Page::Chat,
                     Page::Earnings,
@@ -9531,7 +9777,8 @@ mod tests {
     mod usage {
         use super::super::{
             counter_rate, format_bytes_compact, format_rate_compact, read_cgroup_io_bytes,
-            read_cgroup_keyed_u64, read_cpu_max_allowance, tap_ifname_for_instance, vcpu_allowance,
+            read_cgroup_keyed_u64, read_cgroup_memory_working_set, read_cpu_max_allowance,
+            tap_ifname_for_instance, vcpu_allowance,
             App, Instance,
             InstanceUsage,
         };
@@ -9753,6 +10000,29 @@ mod tests {
         }
 
         #[test]
+        fn memory_working_set_excludes_inactive_page_cache() {
+            let dir = TempDir::new("memory-working-set");
+            dir.write("memory.current", "4251078656\n");
+            dir.write(
+                "memory.stat",
+                "anon 241487872\nfile 3945881600\nactive_file 13598720\ninactive_file 3932282880\n",
+            );
+            assert_eq!(
+                read_cgroup_memory_working_set(&dir.path("")),
+                Some(4_251_078_656 - 3_932_282_880)
+            );
+        }
+
+        #[test]
+        fn memory_working_set_without_stat_falls_back_to_current() {
+            let dir = TempDir::new("memory-working-set-no-stat");
+            dir.write("memory.current", "1048576\n");
+            assert_eq!(read_cgroup_memory_working_set(&dir.path("")), Some(1_048_576));
+            let empty = TempDir::new("memory-working-set-absent");
+            assert_eq!(read_cgroup_memory_working_set(&empty.path("")), None);
+        }
+
+        #[test]
         fn io_stat_sums_every_backing_device() {
             let dir = TempDir::new("io-stat");
             let path = dir.write(
@@ -9888,6 +10158,13 @@ mod tests {
                 mu_per_nanoerg: 1.0,
             };
             assert_eq!(money.format_raw("14582"), "14582 MU");
+        assert_eq!(money.format_raw("5100000"), "5.1M MU");
+        assert_eq!(money.format_raw("10000000"), "10M MU");
+        assert_eq!(money.format_raw("1500"), "1.5K MU");
+        assert_eq!(money.format_raw("-2500000"), "-2.5M MU");
+        assert_eq!(money.format_raw("5123456"), "5123456 MU");
+        assert_eq!(money.format_raw("1000"), "1K MU");
+        assert_eq!(money.format_raw("999"), "999 MU");
         }
 
         #[test]
@@ -10386,7 +10663,7 @@ ergo: Cold Wallet: 9cold\n";
         app.config_all = vec![entry];
     }
 
-    /// An app on the Config page whose tree is the real `flatten_yaml` reading of
+    /// An app on the All page whose tree is the real `flatten_yaml` reading of
     /// `yaml`, so a list is a leaf or a section here for exactly the reason it is one
     /// on screen.
     fn on_config_page(yaml: &str) -> App {
@@ -10952,7 +11229,7 @@ ergo: Cold Wallet: 9cold\n";
         assert_eq!(percent(1, 0), 0);
     }
 
-    /// ←/→ walk the Config tree; pages are cycled with Tab/Shift+Tab only.
+    /// ←/→ walk the All tree; pages are cycled with Tab/Shift+Tab only.
     /// Editing the working day: what the keys move, and what reaches config.yaml.
     ///
     /// The arithmetic of a window lives in `crate::schedule` and is tested there. What
@@ -11429,7 +11706,7 @@ ergo: Cold Wallet: 9cold\n";
 
         #[test]
         fn the_arrows_never_change_page() {
-            // They used to be page navigation; a stray ← on Config must no longer
+            // They used to be page navigation; a stray ← on All must no longer
             // throw the operator onto another page mid-edit.
             let mut app = on_config_page();
             app.config_tree_state.select(vec!["network".to_string()]);
@@ -12008,7 +12285,8 @@ ergo: Cold Wallet: 9cold\n";
             })
             .expect("executing a service is a `nodo` invocation");
 
-            assert_eq!(args, vec!["execute".to_string(), "svc-abc".to_string()]);
+            // --no-input: `nodo` inherits this terminal, and must not ask on it.
+            assert_eq!(args, vec!["execute", "--no-input", "svc-abc"]);
             assert_eq!(label, "Execute service hello-world");
         }
 
@@ -12474,7 +12752,7 @@ energy:
         }
 
         /// Nothing edits config.yaml while a transaction holds its backup: the same
-        /// guard the Config and Pricing editors have, for the same reason.
+        /// guard the All and Pricing editors have, for the same reason.
         #[tokio::test]
         async fn the_editor_refuses_to_open_while_a_change_is_being_applied() {
             let mut app = app_on_energy();
@@ -12799,6 +13077,85 @@ mod restart_state_regressions {
         });
         assert!(tokio::time::timeout(Duration::from_secs(2), wait_until_serving(&config)).await.unwrap());
         assign.await.unwrap();
+    }
+
+    /// A finished transaction whose result `poll_config_task` can take at once.
+    async fn finished_transaction(result: Result<Applied, String>) -> JoinHandle<ConfigTransaction> {
+        let task = tokio::spawn(async move {
+            ConfigTransaction {
+                label: "network.GATEWAY_PORT".to_string(),
+                result,
+            }
+        });
+        while !task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        task
+    }
+
+    /// A `nodo info` that never answers: a run still in flight.
+    fn node_info_in_flight() -> JoinHandle<Result<NodeInfo, String>> {
+        tokio::spawn(async {
+            std::future::pending::<()>().await;
+            unreachable!()
+        })
+    }
+
+    /// The restart closes the gateway port on purpose. While the transaction is in
+    /// flight, the alerts must not read that as "nothing is listening".
+    #[tokio::test]
+    async fn a_restart_in_flight_does_not_report_the_port_as_closed() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.config_task = Some(tokio::spawn(async {
+            std::future::pending::<()>().await;
+            unreachable!()
+        }));
+
+        assert_eq!(app.serving_for_alerts(), None);
+    }
+
+    /// The bug: a gateway port moved to a port that peers can reach. A `nodo info`
+    /// run in the restart reported "not running", and the Overview then showed
+    /// "nothing is listening" for up to 60 s on a node that served.
+    #[tokio::test]
+    async fn a_restart_that_came_back_clears_a_stale_not_running() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.last_wallet_refresh = Instant::now();
+        let stale = node_info_in_flight();
+        let stale_abort = stale.abort_handle();
+        app.wallet_task = Some(stale);
+        app.config_task = Some(finished_transaction(Ok(Applied::Restarted)).await);
+
+        app.poll_config_task().await;
+
+        assert_eq!(app.node_info.service_status, "running");
+        assert_eq!(app.serving_for_alerts(), Some(true));
+        assert!(app.wallet_task.is_none(), "a stale nodo info run is still in flight");
+        tokio::task::yield_now().await;
+        assert!(stale_abort.is_finished(), "the stale nodo info run was not aborted");
+        assert!(
+            app.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL,
+            "the next tick does not ask nodo info again"
+        );
+    }
+
+    /// A failed transaction proves nothing about the port. The status stays as it
+    /// was, and a new `nodo info` is due at once.
+    #[tokio::test]
+    async fn a_failed_restart_asks_nodo_info_again_without_a_guess() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.last_wallet_refresh = Instant::now();
+        app.wallet_task = Some(node_info_in_flight());
+        app.config_task = Some(finished_transaction(Err("restart failed".to_string())).await);
+
+        app.poll_config_task().await;
+
+        assert_eq!(app.node_info.service_status, "not running");
+        assert!(app.wallet_task.is_none());
+        assert!(app.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL);
     }
 }
 

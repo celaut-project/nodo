@@ -225,3 +225,33 @@ class ShareAccountingTest(unittest.TestCase):
                  patch.object(shares.paths, "cache_root", return_value=root):
                 self.assertIsNone(shares.resolved_disk_bytes("vm-plain"))
                 self.assertEqual(shares.exported_disk_bytes("vm-plain"), 0)
+
+
+@unittest.skipIf(IMPORT_ERROR, f"imports unavailable: {IMPORT_ERROR}")
+class FailedLaunchReleaseTest(unittest.TestCase):
+    """A VM that fails to start keeps no runtime state for a kill to read its shares
+    from, so the launcher gives them back itself (release_shares)."""
+
+    def test_nothing_to_release_for_an_ordinary_service(self):
+        with patch.object(shares, "teardown_virtiofs_for_vm") as teardown:
+            shares.release_shares("vm-1", shares.NO_SHARES, "[t]")
+        teardown.assert_not_called()
+
+    def test_the_shares_of_a_failed_launch_are_released(self):
+        mounts_state = [{"share_id_hex": "a" * 64, "pid": 7}]
+        setup = shares.ShareSetup([], mounts_state, [])
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(shares.paths, "cache_root", return_value=root), \
+             patch.object(shares, "teardown_virtiofs_for_vm") as teardown:
+            shares.release_shares("vm-1", setup, "[t]")
+        teardown.assert_called_once()
+        self.assertEqual(teardown.call_args.kwargs["vmachine_id"], "vm-1")
+        self.assertEqual(teardown.call_args.kwargs["mounts_state"], mounts_state)
+
+    def test_a_release_that_fails_does_not_mask_the_launch_error(self):
+        setup = shares.ShareSetup([], [{"share_id_hex": "a" * 64}], [])
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(shares.paths, "cache_root", return_value=root), \
+             patch.object(shares, "teardown_virtiofs_for_vm", side_effect=OSError("boom")):
+            shares.release_shares("vm-1", setup, "[t]")   # must not raise
+
