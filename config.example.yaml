@@ -75,6 +75,11 @@ virtualizers:
     NETWORK_BRIDGE_NAME: "nodo-br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
     NETWORK_GATEWAY_IP: "192.168.200.1"
+    # nodo's own nftables tables: `inet <NFT_TABLE>` (filter) and `ip <NFT_TABLE>`
+    # (NAT). Change it only for a second install on the same host, together with
+    # NETWORK_BRIDGE_NAME and NETWORK_SUBNET: two installs that share a table prune
+    # each other's rules.
+    NFT_TABLE: "nodo"
     # Whether nodo may write into the iptables compatibility table when something
     # else on this host filters the forward hook. nodo accepts guest traffic in its
     # own nftables table at priority -5, which does not survive a later DROP: with
