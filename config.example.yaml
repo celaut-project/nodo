@@ -71,6 +71,9 @@ virtualizers:
     # puts it in ${main.MAIN_DIR}/bin and writes that absolute path here, unless
     # this is already set to a path of your own. `nodo doctor` checks it.
     VIRTIOFSD_BINARY: "virtiofsd"
+    # virtiofsd --sandbox mode. auto: chroot when the daemon is root, namespace
+    # (needs uidmap and a /etc/subuid range) when it runs as SERVICE_USER.
+    VIRTIOFSD_SANDBOX: "auto"
     NETWORK_MODE: "tap_bridge"
     NETWORK_BRIDGE_NAME: "nodo-br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
