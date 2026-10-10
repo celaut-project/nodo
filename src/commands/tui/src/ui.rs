@@ -182,6 +182,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
         InputMode::EditAssets => draw_assets_popup(frame, app),
         InputMode::AddAsset => draw_asset_form_popup(frame, app),
+        InputMode::ExecuteEnvs => crate::env_form::draw(frame, app),
         InputMode::PickChatPeer => crate::chat::draw_peer_picker(frame, app),
         InputMode::PickChatTopic => crate::chat::draw_topic_picker(frame, app),
         InputMode::PickChatService => crate::chat::draw_service_picker(frame, app),

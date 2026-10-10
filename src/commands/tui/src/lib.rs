@@ -38,6 +38,9 @@ pub mod chat;
 /// Right-click menus: an element's actions, as the keys that already do them.
 pub mod context_menu;
 
+/// The env vars a service asks for, filled in before `nodo execute`.
+pub mod env_form;
+
 /// The DOCS page: the installation's `docs/` folder, indexed and rendered.
 pub mod docs;
 

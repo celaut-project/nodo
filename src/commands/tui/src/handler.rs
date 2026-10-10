@@ -60,6 +60,12 @@ pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<
                 }
             }
         }
+        // The env var form: only its eyes are clickable, never the page behind it.
+        InputMode::ExecuteEnvs => {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                app.click_env_form(mouse.column, mouse.row);
+            }
+        }
         // The scrollable overlay is the one modal with anything to scroll.
         InputMode::Details => match mouse.kind {
             MouseEventKind::ScrollUp => app.scroll_details(-1),
@@ -162,6 +168,29 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 (_, KeyCode::Char('a' | 'A')) => app.open_add_asset_prompt(),
                 (_, KeyCode::Char('d' | 'D') | KeyCode::Delete) => app.open_remove_asset_confirm(),
                 (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_input(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        // The env vars of a service about to run. Ctrl+R shows the focused value, as
+        // the eye at its right does with the mouse.
+        InputMode::ExecuteEnvs => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
+                    app.env_form_toggle_reveal(app.env_form.focus)
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('u')) => app.env_form_clear_field(),
+                (_, KeyCode::Esc) => app.cancel_env_form(),
+                (_, KeyCode::Tab | KeyCode::Down) => app.env_form_move(1),
+                (_, KeyCode::BackTab | KeyCode::Up) => app.env_form_move(-1),
+                (_, KeyCode::Enter) => app.env_form_enter(),
+                (_, KeyCode::Backspace) => app.env_form_backspace(),
+                (modifiers, KeyCode::Char(character))
+                    if !modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    app.env_form_type(character)
+                }
                 _ => {}
             }
             return Ok(());
