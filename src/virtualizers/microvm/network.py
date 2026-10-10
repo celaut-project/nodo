@@ -20,6 +20,7 @@ reads them. See ``docs/BACKENDS.md``.
 """
 import hashlib
 import ipaddress
+import os
 import shutil
 import time
 from pathlib import Path
@@ -283,7 +284,13 @@ def create_tap(vmachine_id: str) -> str:
     if run(["ip", "link", "show", "dev", tap_name], check=False).returncode == 0:
         run(["ip", "link", "del", tap_name], check=False)
 
-    run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
+    # Owned by the user the hypervisor runs as, which is this process's: a tap with
+    # no owner can be opened by any local user (/dev/net/tun is 0666), and one owned
+    # by somebody else makes the hypervisor's TUNSETIFF fail with EPERM. Brought UP
+    # below, before the hypervisor starts, because a hypervisor without
+    # CAP_NET_ADMIN cannot bring it up itself (SIOCSIFFLAGS). Both are measured in
+    # docs/proposals/rootless-nodo.md.
+    run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap", "user", str(os.geteuid())])
     run(["ip", "link", "set", tap_name, "master", NETWORK_BRIDGE_NAME])
     # An isolated bridge port can only exchange frames with the bridge itself,
     # never with another isolated port, so a guest reaches its neighbours through
