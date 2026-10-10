@@ -131,9 +131,13 @@ def vsize_estimate(outputs: int = 1, *, op_return: bool = False, inputs: int = 1
 # makes this ledger's floors a moving number rather than a constant.
 VSIZE_ESTIMATE = vsize_estimate(outputs=1, op_return=True)  # 184 vB
 
-# How long to wait for the payer's confirmation, and how often to look.
-WAIT_TX_TIME = 240  # attempts
+# How long to wait for the payer's confirmation, and how often to look. A count of
+# checks, not seconds: the wait is the two multiplied, about an hour.
+WAIT_TX_ATTEMPTS = 240
 WAIT_TX_SLEEP_TIME = 15  # seconds between them -- a block is ~10 minutes
+# While the backend cannot be read, log one failed check in this many. Every check would
+# be a line each `WAIT_TX_SLEEP_TIME` for as long as the backend stays down.
+WAIT_TX_LOG_EVERY = 20
 
 payment_lock = Lock()  # Ensures the same UTXO is not spent for more than it holds.
 
@@ -644,7 +648,11 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
         if id_reporter:
             id_reporter(tx_id, sent=True)
 
-        return await_payment(tx_id=tx_id, script=script, chain=chain)
+    # Outside the lock. It guards the choice of inputs, and that is over once the
+    # transaction is relayed: the wallet now counts those inputs as spent. Held through
+    # the wait, it would stop every other payment, the donation payout and the cold
+    # sweep for as long as this one takes to confirm.
+    return await_payment(tx_id=tx_id, script=script, chain=chain)
 
 
 def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
@@ -657,13 +665,19 @@ def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
     if chain is None:
         chain = backend()
     wanted = MIN_CONFIRMATIONS()
-    for _ in range(WAIT_TX_TIME):
+    failed = 0  # Checks in a row the backend could not answer.
+    for _ in range(WAIT_TX_ATTEMPTS):
         sleep(WAIT_TX_SLEEP_TIME)
         try:
             status = chain.tx_status(tx_id)
         except BackendUnavailable as e:
-            LOGGER(f"Could not read tx {tx_id} yet: {e}")
+            if failed % WAIT_TX_LOG_EVERY == 0:
+                LOGGER(f"Could not read tx {tx_id} yet ({failed + 1} failed check(s)): {e}")
+            failed += 1
             continue
+        if failed:
+            LOGGER(f"Read tx {tx_id} again after {failed} failed check(s).")
+            failed = 0
         confirmations = int(status.get("confirmations", 0) or 0)
         if confirmations < 0:
             # Core says the transaction was replaced or reorged out. That is not
@@ -682,7 +696,7 @@ def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
 
     raise TimeoutError(
         f"Transaction {tx_id} did not reach {wanted} confirmation(s) in "
-        f"{WAIT_TX_TIME * WAIT_TX_SLEEP_TIME // 60} minutes. The money is on-chain; "
+        f"{WAIT_TX_ATTEMPTS * WAIT_TX_SLEEP_TIME // 60} minutes. The money is on-chain; "
         "the peer has not been told."
     )
 

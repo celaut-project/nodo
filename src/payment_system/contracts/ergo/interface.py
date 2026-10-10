@@ -101,8 +101,8 @@ def _cold_wallet_min_transfer_nanoerg() -> int:
     return erg_to_nanoerg(env_manager.get("ledgers.ergo.payments.COLD_WALLET_MIN_TRANSFER"))
 
 
-WAIT_TX_TIME = 240  # (each 5 seconds)
-WAT_TX_SLEEP_TIME = 5
+WAIT_TX_ATTEMPTS = 240
+WAIT_TX_SLEEP_TIME = 5  # seconds between attempts
 
 payment_lock = Lock()  # Ensures the same input box is not spent for more than it holds.
 _transaction_url_reporter: ContextVar = ContextVar(
@@ -901,8 +901,8 @@ def _await_settlement(tx_id: str, script: bytes, asset, ergo=None) -> celaut_pb2
     """
     if ergo is None:
         ergo = __init_ergo()
-    for _ in range(0, WAIT_TX_TIME):
-        sleep(WAT_TX_SLEEP_TIME)
+    for _ in range(0, WAIT_TX_ATTEMPTS):
+        sleep(WAIT_TX_SLEEP_TIME)
         response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
         if response.status_code != 200:
             if response.status_code != 404:
