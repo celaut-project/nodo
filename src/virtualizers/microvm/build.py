@@ -4,10 +4,11 @@ import os
 import stat
 import shutil
 import subprocess
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, List, Sequence, Set, Tuple
+from typing import Any, Dict, Optional, List, Sequence, Set, Tuple
 import tempfile
 
 import warnings
@@ -536,6 +537,11 @@ def _assert_inode_matches_metadata_type(
 
 
 def _apply_chown(path: Path, uid: int, gid: int, follow_symlinks: bool, rel_path: str) -> None:
+    deferred = _DEFERRED_OWNERS.get()
+    if deferred is not None:
+        deferred[os.fspath(path)] = (uid, gid)
+        return
+
     try:
         current = os.stat(path) if follow_symlinks else os.lstat(path)
     except OSError as e:
@@ -999,30 +1005,134 @@ def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> int:
 # the thing the metadata gate was added to guarantee. And no fakeroot: the node
 # builds rootless on purpose (docs/ROOTLESS.md -- `mkfs.ext4 -d` plus `debugfs`,
 # never a loop mount), and these two tools need no more privilege than that one.
+#
+# Except for one step: staging a declared uid/gid is a chown, and chown to another
+# user needs root (CAP_CHOWN). A daemon that runs as a service user (docs/
+# ROOTLESS.md) stages every node as itself instead, records the owner each one
+# should have -- the declared one, or root for a node that declares none, which
+# is what a root build leaves it with -- and writes those owners into the image
+# once it is built: `debugfs sif` for ext4, and for squashfs a pseudo-file `m`
+# line for every node plus `-root-uid`/`-root-gid` for the root inode (not
+# `-all-root`, which overrides the `m` owners). The result is the same image a
+# root build makes. mkfs.erofs has no per-file override, so such a build picks
+# squashfs.
+
+# Set by `build` when this process is not root: staged path -> declared (uid, gid).
+_DEFERRED_OWNERS: ContextVar[Optional[Dict[str, Tuple[int, int]]]] = ContextVar(
+    "_DEFERRED_OWNERS", default=None
+)
 
 
-def _mksquashfs(rootfs_dir: Path, image_path: Path) -> int:
+def _owners_are_deferred() -> bool:
+    return os.geteuid() != 0
+
+
+def _staged_owners(
+    rootfs_dir: Path, declared: Dict[str, Tuple[int, int]]
+) -> List[Tuple[str, int, int, int]]:
+    """``(guest path, uid, gid, lstat mode)`` for every node of the staged tree."""
+    nodes = [rootfs_dir]
+    for dirpath, dirnames, filenames in os.walk(rootfs_dir):
+        nodes.extend(Path(dirpath) / name for name in dirnames + filenames)
+    entries = []
+    for node in nodes:
+        uid, gid = declared.get(os.fspath(node), (0, 0))
+        guest_path = "/" if node == rootfs_dir else "/" + node.relative_to(rootfs_dir).as_posix()
+        entries.append((guest_path, uid, gid, os.lstat(node).st_mode))
+    return entries
+
+
+def _write_owners_ext4(image_path: Path, entries: List[Tuple[str, int, int, int]]) -> None:
+    """Give each inode of a built ext4 image its recorded owner, with ``debugfs sif``."""
+    me = (os.geteuid(), os.getegid())
+    commands = []
+    for guest_path, uid, gid, _mode in entries:
+        if (uid, gid) == me:
+            continue
+        if '"' in guest_path or "\n" in guest_path:
+            raise RuntimeError(
+                f"Cannot set the owner of {guest_path!r} without root: debugfs cannot "
+                "quote that name."
+            )
+        commands.append(f'sif "{guest_path}" uid {uid}')
+        commands.append(f'sif "{guest_path}" gid {gid}')
+    if not commands:
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".debugfs", delete=False) as script:
+        script.write("\n".join(commands) + "\n")
+    try:
+        proc = subprocess.run(
+            ["debugfs", "-w", "-f", script.name, str(image_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    finally:
+        os.unlink(script.name)
+    # debugfs exits 0 when a command inside the script fails; its errors are the
+    # stderr lines other than the version banner.
+    errors = [
+        line for line in (proc.stderr or "").splitlines()
+        if line.strip() and not line.startswith("debugfs ")
+    ]
+    if proc.returncode != 0 or errors:
+        raise RuntimeError(
+            "debugfs could not set the owners in the rootfs image: "
+            + "; ".join(errors[:5] or [f"exit {proc.returncode}"])
+        )
+
+
+def _squashfs_owner_pseudo_file(entries: List[Tuple[str, int, int, int]]) -> str:
+    """Pseudo-file ``m`` lines (mode and owner) for every node but the root."""
+    lines = []
+    for guest_path, uid, gid, mode in entries:
+        if guest_path == "/":
+            continue
+        name = guest_path.lstrip("/").replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'"{name}" m {stat.S_IMODE(mode):o} {uid} {gid}')
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _mksquashfs(
+    rootfs_dir: Path,
+    image_path: Path,
+    owners: Optional[List[Tuple[str, int, int, int]]] = None,
+) -> int:
     """Build an immutable squashfs image of ``rootfs_dir``; return its size.
 
     No size argument, which is the point of the read-only path: the image is
     exactly as large as what went into it, compressed, with no slack to reserve
     and nothing to retry when a fixed size turns out too small.
+
+    ``owners`` is given by a build that could not stage them (not root): see the
+    note above ``_DEFERRED_OWNERS``.
     """
+    command = [
+        "mksquashfs",
+        str(rootfs_dir),
+        str(image_path),
+        # A fresh image every time. Without it mksquashfs APPENDS to an
+        # existing file, so a rebuild over a stale path produces an image
+        # holding both trees.
+        "-noappend",
+        # The recovery file is a crash-safety artifact for the append case
+        # this build never takes, written next to the image and left behind
+        # in the bundle directory.
+        "-no-recovery",
+    ]
+    pseudo_path = None
+    if owners is not None:
+        with tempfile.NamedTemporaryFile("w", suffix=".pseudo", delete=False) as pseudo:
+            pseudo.write(_squashfs_owner_pseudo_file(owners))
+        pseudo_path = pseudo.name
+        command += ["-pf", pseudo_path]
+        root_uid, root_gid = next(
+            ((uid, gid) for path, uid, gid, _ in owners if path == "/"), (0, 0)
+        )
+        command += ["-root-uid", str(root_uid), "-root-gid", str(root_gid)]
     try:
-        subprocess.run(
-            [
-                "mksquashfs",
-                str(rootfs_dir),
-                str(image_path),
-                # A fresh image every time. Without it mksquashfs APPENDS to an
-                # existing file, so a rebuild over a stale path produces an image
-                # holding both trees.
-                "-noappend",
-                # The recovery file is a crash-safety artifact for the append case
-                # this build never takes, written next to the image and left behind
-                # in the bundle directory.
-                "-no-recovery",
-            ],
+        proc = subprocess.run(
+            command,
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1039,6 +1149,16 @@ def _mksquashfs(rootfs_dir: Path, image_path: Path) -> int:
         raise RuntimeError(
             f"mksquashfs failed: {stderr or stdout or 'unknown error'}"
         ) from e
+    finally:
+        if pseudo_path:
+            os.unlink(pseudo_path)
+
+    # mksquashfs skips a pseudo-file line it cannot apply and still exits 0.
+    ignored = [line for line in (proc.stderr or "").splitlines() if "Ignoring" in line]
+    if pseudo_path and ignored:
+        raise RuntimeError(
+            "mksquashfs could not set the owners in the rootfs image: " + "; ".join(ignored[:5])
+        )
 
     return int(image_path.stat().st_size)
 
@@ -1098,6 +1218,22 @@ def _select_read_only_format() -> str:
     make a node that lacks that one package reject a service it is perfectly able
     to run.
     """
+    if _owners_are_deferred():
+        # Only squashfs can take the owners of a tree staged without root.
+        if ROOTFS_READ_ONLY_FORMAT not in ("auto", "", ROOTFS_FORMAT_SQUASHFS):
+            raise RuntimeError(
+                f"virtualizers.ch.ROOTFS_READ_ONLY_FORMAT is '{ROOTFS_READ_ONLY_FORMAT}', "
+                "but this node does not run as root and only squashfs can carry the "
+                "declared owners of a tree staged without root. Use 'auto' or "
+                f"'{ROOTFS_FORMAT_SQUASHFS}'."
+            )
+        if shutil.which(_READ_ONLY_BUILDERS[ROOTFS_FORMAT_SQUASHFS][0]):
+            return ROOTFS_FORMAT_SQUASHFS
+        raise RuntimeError(
+            "This service declares read_mode=ro and this node does not run as root, "
+            "which needs mksquashfs (squashfs-tools) to build the read-only rootfs."
+        )
+
     if ROOTFS_READ_ONLY_FORMAT not in ("auto", ""):
         if ROOTFS_READ_ONLY_FORMAT not in _READ_ONLY_BUILDERS:
             raise RuntimeError(
@@ -1125,12 +1261,17 @@ def _build_read_only_rootfs(
     rootfs_dir: Path,
     bundle_dir: Path,
     rootfs_format: str,
+    owners: Optional[List[Tuple[str, int, int, int]]] = None,
 ) -> Tuple[Path, int]:
     """Write the read-only image for ``rootfs_format``; return its path and size."""
     _, builder = _READ_ONLY_BUILDERS[rootfs_format]
     image_path = bundle_dir / ROOTFS_IMAGE_NAMES[rootfs_format]
     if image_path.exists():
         image_path.unlink()
+    if owners is not None:
+        if rootfs_format != ROOTFS_FORMAT_SQUASHFS:
+            raise RuntimeError(f"{rootfs_format} cannot carry owners staged without root.")
+        return image_path, _mksquashfs(rootfs_dir, image_path, owners)
     return image_path, builder(rootfs_dir, image_path)
 
 
@@ -1322,16 +1463,23 @@ def build(
 
     symlinks: List[_PendingSymlink] = []
     legacy_regular_files: Set[Path] = set()
-    _write_fs(
-        fs_element=fs,
-        root_dir=rootfs_dir,
-        parent_rel_path="/",
-        symlinks=symlinks,
-        legacy_regular_files=legacy_regular_files,
-        security_context=security_context,
-        hash_types=fs_hash_types,
+    deferred_owners: Optional[Dict[str, Tuple[int, int]]] = (
+        {} if _owners_are_deferred() else None
     )
-    _apply_symlinks(symlinks, rootfs_dir, security_context)
+    deferring = _DEFERRED_OWNERS.set(deferred_owners)
+    try:
+        _write_fs(
+            fs_element=fs,
+            root_dir=rootfs_dir,
+            parent_rel_path="/",
+            symlinks=symlinks,
+            legacy_regular_files=legacy_regular_files,
+            security_context=security_context,
+            hash_types=fs_hash_types,
+        )
+        _apply_symlinks(symlinks, rootfs_dir, security_context)
+    finally:
+        _DEFERRED_OWNERS.reset(deferring)
     entrypoint = (
         service.container.init.entry_path[0]
         if len(service.container.init.entry_path) == 1
@@ -1351,6 +1499,9 @@ def build(
 
     total_bytes = _dir_size_bytes(rootfs_dir)
     requested_disk_space_bytes = limits.requested_disk_space_bytes(service)
+    owners = (
+        _staged_owners(rootfs_dir, deferred_owners) if deferred_owners is not None else None
+    )
 
     try:
         if read_only:
@@ -1369,6 +1520,7 @@ def build(
                 rootfs_dir=rootfs_dir,
                 bundle_dir=bundle_dir,
                 rootfs_format=rootfs_format,
+                owners=owners,
             )
             logger(
                 f"[build][{service_id}] read_mode=ro: built {rootfs_format} image of "
@@ -1385,6 +1537,8 @@ def build(
                 total_bytes=total_bytes,
             )
             size_bytes = _mkfs_ext4(rootfs_dir, rootfs_path, initial_size_bytes)
+            if owners is not None:
+                _write_owners_ext4(rootfs_path, owners)
     finally:
         shutil.rmtree(rootfs_dir, ignore_errors=True)
 

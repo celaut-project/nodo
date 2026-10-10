@@ -4654,10 +4654,10 @@ impl App {
 
     /// Whether a configuration change made right now would need root to land.
     ///
-    /// **This is not about the file.** `config.yaml` is `chmod a+w` at install time
-    /// (`install.sh`) and rewritten `0o666` by `ConfigManager._atomic_write`, it is
-    /// `chown`ed to the installing user, and `yq -i` writes it through a rename in
-    /// the same directory. An unprivileged operator can write every key in it, and
+    /// **This is not about the file.** `config.yaml` is `chmod 0660` at install time
+    /// (`install.sh`) and `chown`ed to the installing user, `ConfigManager._atomic_write`
+    /// keeps that owner and mode, and `yq -i` writes it through a rename in the same
+    /// directory. The operator who installed the node can write every key in it, and
     /// the backup beside it, without ever being asked for a password.
     ///
     /// What needs root is the **restart**. `apply_config_change` is a transaction:

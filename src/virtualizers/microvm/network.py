@@ -20,6 +20,7 @@ reads them. See ``docs/BACKENDS.md``.
 """
 import hashlib
 import ipaddress
+import os
 import shutil
 import time
 from pathlib import Path
@@ -39,7 +40,7 @@ from src.virtualizers.firewall import (
 )
 from src.virtualizers.microvm import serial
 from src.virtualizers.microvm.errors import MicroVMError
-from src.virtualizers.microvm.host import ensure_command_available, run
+from src.virtualizers.microvm.host import ensure_command_available, run, write_sysctl
 from src.virtualizers.microvm.runtime_state import list_runtime_states
 
 env_manager = ConfigManager()
@@ -198,7 +199,7 @@ def preflight() -> ipaddress.IPv4Network:
 
     network = ensure_guest_bridge()
 
-    run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+    write_sysctl("net.ipv4.ip_forward", "1")
     ensure_guest_l2_isolation()
     # Not fatal, on purpose. This is the one thing nodo writes into a table it does
     # not own, and a host that refuses it -- or an operator who turned it off -- has
@@ -256,7 +257,7 @@ def ensure_guest_l2_isolation() -> None:
         (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.proxy_arp_pvlan", "1"),
         (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.send_redirects", "0"),
     ):
-        run(["sysctl", "-w", f"{key}={value}"])
+        write_sysctl(key, value)
 
 
 def ensure_masquerade(network: ipaddress.IPv4Network) -> None:
@@ -283,7 +284,13 @@ def create_tap(vmachine_id: str) -> str:
     if run(["ip", "link", "show", "dev", tap_name], check=False).returncode == 0:
         run(["ip", "link", "del", tap_name], check=False)
 
-    run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
+    # Owned by the user the hypervisor runs as, which is this process's: a tap with
+    # no owner can be opened by any local user (/dev/net/tun is 0666), and one owned
+    # by somebody else makes the hypervisor's TUNSETIFF fail with EPERM. Brought UP
+    # below, before the hypervisor starts, because a hypervisor without
+    # CAP_NET_ADMIN cannot bring it up itself (SIOCSIFFLAGS). Both are measured in
+    # docs/proposals/rootless-nodo.md.
+    run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap", "user", str(os.geteuid())])
     run(["ip", "link", "set", tap_name, "master", NETWORK_BRIDGE_NAME])
     # An isolated bridge port can only exchange frames with the bridge itself,
     # never with another isolated port, so a guest reaches its neighbours through

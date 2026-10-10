@@ -1,0 +1,31 @@
+[Unit]
+Description=Nodo Serve (as {{SERVICE_USER}}, no root)
+After=network.target
+
+[Service]
+Type=simple
+# No root: see docs/ROOTLESS.md and docs/proposals/rootless-nodo.md.
+User={{SERVICE_USER}}
+Group={{SERVICE_USER}}
+SupplementaryGroups=kvm
+# The one capability the runtime needs: taps, the guest bridge, nftables and the
+# net.* sysctls. cloud-hypervisor, QEMU and virtiofsd are started without it.
+# No CapabilityBoundingSet: it would also bound the setuid newuidmap/newgidmap
+# that virtiofsd --sandbox namespace and the rootless packer run.
+AmbientCapabilities=CAP_NET_ADMIN
+# The unit's cgroup is owned by {{SERVICE_USER}}; the per-VM cgroups go under it
+# (virtualizers.ch.CGROUPS_BASE_DIR).
+Delegate=yes
+# Control sockets (virtualizers.ch.API_SOCKET_DIR) live under /run/{{RUNTIME_DIR_NAME}}.
+RuntimeDirectory={{RUNTIME_DIR_NAME}}
+RuntimeDirectoryMode=0750
+WorkingDirectory={{MAIN_DIR}}
+Environment=JAVA_HOME={{JAVA_HOME}}
+Environment=PATH={{JAVA_HOME}}/bin:{{PYTHON_RUNTIME_BIN_DIR}}:{{MAIN_DIR}}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/bin/bash -c 'source {{MAIN_DIR}}/venv/bin/activate && exec {{PYTHON_VENV_BIN}} {{MAIN_DIR}}/nodo.py serve'
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

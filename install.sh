@@ -23,6 +23,7 @@ CH_VERSION="v51.1"
 # Guest kernel + busybox published by .github/workflows/guest-kernel.yml; bumped independently
 # of nodo releases so a kernel fix does not require cutting a node release.
 GUEST_KERNEL_VERSION="guest-kernel"
+SERVICE_USER=""
 
 print_usage() {
   cat <<EOF
@@ -33,6 +34,10 @@ Options:
   --target-dir <path>  Install/clone into this directory (default: /nodo).
   --repo-url <url>     Repository URL for clone/pull.
   --branch <name>      Git branch for clone/pull (default: stable).
+  --service-user <name>
+                       Run the daemon as this system user, with CAP_NET_ADMIN
+                       only, instead of root (created if missing). Opt-in; see
+                       docs/ROOTLESS.md.
   -h, --help           Show this help message.
 EOF
 }
@@ -71,6 +76,14 @@ while [ $# -gt 0 ]; do
       fi
       BRANCH="$2"
       BRANCH_EXPLICIT=true
+      shift 2
+      ;;
+    --service-user)
+      if [ -z "$2" ]; then
+        printf "Error: --service-user requires a user name.\n" >&2
+        exit 1
+      fi
+      SERVICE_USER="$2"
       shift 2
       ;;
     -h|--help)
@@ -242,8 +255,12 @@ fi
 if [ ! -f "$TARGET_DIR/config.yaml" ]; then
   printf "Creating configuration file $TARGET_DIR/config.yaml...\n"
   cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
-  chmod a+w "$TARGET_DIR/config.yaml"
 fi
+# config.yaml holds the wallet mnemonics and names the binaries the root daemon runs,
+# so only its owner (the installing user, after the chown below) and its group may
+# read or write it. Also tightens an install made when it was world-writable.
+chmod 0660 "$TARGET_DIR/config.yaml"
+chmod o-rwx "$TARGET_DIR"/config-*.yaml 2>/dev/null || true
 
 # Keep paths aligned with TARGET_DIR, including local-source installs.
 sync_config_main_paths
@@ -298,6 +315,14 @@ JAVA_HOME_PATH="$(read_config_path_or_default '.dependencies.java.JAVA_HOME' "$T
 PYTHON_RUNTIME_BIN_PATH="$(read_config_path_or_default '.dependencies.python.RUNTIME_BIN' "$TARGET_DIR/runtime/python/current/bin/python3")"
 PYTHON_VENV_BIN_PATH="$(read_config_path_or_default '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
 PYTHON_RUNTIME_BIN_DIR_PATH="$(dirname "$PYTHON_RUNTIME_BIN_PATH")"
+
+# A node set up with --service-user stays that way on 'nodo update', which re-runs
+# this script without the flag. To go back to root, set main.SERVICE_USER to ""
+# in config.yaml and run the installer again.
+if [ -z "$SERVICE_USER" ]; then
+  SERVICE_USER="$(read_config_path_or_default '.main.SERVICE_USER' '')"
+fi
+[ "$SERVICE_USER" != "root" ] || SERVICE_USER=""
 
 # TEMPORARY: install the portable Java runtime by default, unless it is already
 # there. This is provisional, only until the Ergo service is ready (it will then
@@ -379,7 +404,11 @@ create_service_file() {
   printf "Systemd daemon reloaded and nodo service started/enabled.\n"
 }
 
-create_service_file
+# A --service-user install gets its unit from bash/setup_service_user.sh instead,
+# after the chown below: that chown would otherwise take the storage tree back.
+if [ -z "$SERVICE_USER" ]; then
+  create_service_file
+fi
 
 create_wrapper_script() {
   WRAPPER_SCRIPT="/usr/local/bin/nodo"
@@ -483,6 +512,15 @@ assign_gateway_port() {
 assign_gateway_port
 
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
+
+if [ -n "$SERVICE_USER" ]; then
+  /bin/bash "$TARGET_DIR/bash/setup_service_user.sh" \
+    --target-dir "$TARGET_DIR" --user "$SERVICE_USER" --operator "$SCRIPT_USER" \
+    --java-home "$JAVA_HOME_PATH" \
+    --python-runtime-bin-dir "$PYTHON_RUNTIME_BIN_DIR_PATH" \
+    --python-venv-bin "$PYTHON_VENV_BIN_PATH" || exit 1
+  systemctl enable nodo.service
+fi
 
 if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
   printf "Restarting nodo.service...\n"

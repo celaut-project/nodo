@@ -42,6 +42,7 @@ from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm.host import ensure_private_dir
 from src.virtualizers.microvm.bundle_formats import (
     ROOTFS_FORMAT_EXT4,
     ROOTFS_IMAGE_NAMES,
@@ -67,6 +68,7 @@ from src.virtualizers.qemu.config import (
 )
 from src.virtualizers.qemu.hotplug import settle_boot_balloon
 from src.utils.firewall import policy as fw_policy
+from src.utils.privileges import exec_without_capabilities
 from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 env_manager = ConfigManager()
@@ -459,7 +461,7 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] deterministic networking: ip={vm_ip}, mac={mac}")
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        qmp_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(qmp_socket_path.parent)
         log.LOGGER(f"[QEMU][{vmachine_id}] QMP socket dir prepared: {qmp_socket_path.parent}")
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
         log.LOGGER(f"[QEMU][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
@@ -637,6 +639,7 @@ def execute(
                 executable=qemu_binary,
                 stdout=stdout_file,
                 stderr=stderr_file,
+                preexec_fn=exec_without_capabilities,
             )
         log.LOGGER(
             f"[QEMU][{vmachine_id}] process started: pid={process.pid}, visible_name={process_args[0]}"

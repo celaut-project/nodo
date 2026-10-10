@@ -19,8 +19,8 @@ The asymmetry that made it look arbitrary is that the same edit against a
 These tests pin the two facts that root cause rests on, so a future change that
 moves the privileged step cannot quietly invalidate the warning the TUI now shows:
 
-1. config.yaml itself is writable by an ordinary user -- the file is not the
-   obstacle.
+1. config.yaml itself is writable by the user who installed the node -- the file
+   is not the obstacle.
 2. `nodo daemon restart` is the step that refuses without root.
 """
 
@@ -37,27 +37,26 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class TheFileIsNotTheObstacle(unittest.TestCase):
-    """config.yaml is deliberately writable by the installing user.
+    """config.yaml stays writable by the installing user, and by nobody else.
 
-    `install.sh` does `chmod a+w` on it at creation, and every save through
-    `ConfigManager._atomic_write` re-applies `0o666` -- explicitly so that
-    `sudo nodo update` and an ordinary user can both write it. A permissions theory
-    of the sudo prompt has to survive this, and does not.
+    `install.sh` sets it `0660` and `chown`s it to the installing user, and every
+    save through `ConfigManager._atomic_write` keeps the owner's and group's bits
+    and the owner itself. It used to be `0666`, which let every local user choose
+    the binaries a root daemon runs; the owner's write access is what a
+    permissions theory of the sudo prompt has to survive, and it still does.
     """
 
-    def test_install_sh_makes_the_config_world_writable(self):
+    def test_install_sh_makes_the_config_owner_and_group_only(self):
         with open(os.path.join(_ROOT, "install.sh"), "r") as handle:
             install = handle.read()
 
-        self.assertIn('chmod a+w "$TARGET_DIR/config.yaml"', install)
+        self.assertIn('chmod 0660 "$TARGET_DIR/config.yaml"', install)
+        self.assertNotIn('chmod a+w "$TARGET_DIR/config.yaml"', install)
 
-    def test_every_save_re_applies_a_world_writable_mode(self):
-        """Not just at install: a save must not quietly tighten the file.
-
-        `_atomic_write` replaces config.yaml with a fresh temp file, which is created
-        `0600` by `mkstemp`. Without the chmod, the first write by root would leave
-        an unprivileged operator unable to edit anything -- and *that* would be a
-        real per-file sudo requirement.
+    def test_a_save_keeps_the_owner_writable_and_others_out(self):
+        """`_atomic_write` replaces config.yaml with a fresh temp file, which is created
+        `0600` by `mkstemp`. A save must neither lock the owner out nor give the
+        file back to other users.
         """
         from src.utils.config import ConfigManager
 
@@ -65,6 +64,7 @@ class TheFileIsNotTheObstacle(unittest.TestCase):
             config_path = os.path.join(directory, "config.yaml")
             with open(config_path, "w") as handle:
                 handle.write("energy:\n  PRICE_PER_KWH: 0.0\n")
+            os.chmod(config_path, 0o666)
 
             manager = ConfigManager.__new__(ConfigManager)
             manager.config_path = config_path
@@ -72,10 +72,28 @@ class TheFileIsNotTheObstacle(unittest.TestCase):
 
             self.assertTrue(written)
             mode = stat.S_IMODE(os.stat(config_path).st_mode)
-            self.assertTrue(
-                mode & stat.S_IWOTH,
-                f"config.yaml came back as {oct(mode)}, which an ordinary user cannot edit",
-            )
+            self.assertEqual(mode, 0o660, f"config.yaml came back as {oct(mode)}")
+
+    def test_a_root_save_keeps_the_installing_user_as_owner(self):
+        """Without the chown, the first save by root would hand the file to root."""
+        from src.utils import config as config_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = os.path.join(directory, "config.yaml")
+            tmp_path = os.path.join(directory, ".config-x.yaml")
+            for path in (target, tmp_path):
+                with open(path, "w") as handle:
+                    handle.write("a: 1\n")
+            os.chmod(target, 0o660)
+            owner = os.stat(target)
+
+            with mock.patch.object(config_module.os, "geteuid", return_value=0), mock.patch.object(
+                config_module.os, "chown"
+            ) as chown:
+                config_module._match_config_file(tmp_path, target)
+
+            chown.assert_called_once_with(tmp_path, owner.st_uid, owner.st_gid)
+            self.assertEqual(stat.S_IMODE(os.stat(tmp_path).st_mode), 0o660)
 
     def test_the_write_lands_without_any_privileged_call(self):
         """The YAML write itself spawns nothing and asks nobody.
