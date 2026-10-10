@@ -3,6 +3,7 @@ import os
 import random
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import threading
@@ -14,6 +15,7 @@ import yaml
 from mnemonic import Mnemonic
 
 from src.utils.network import get_free_port
+from src.utils.privileges import can_admin_network
 from src.utils.singleton import Singleton
 
 
@@ -201,6 +203,39 @@ def _prune_config_backups(directory: str, retention: int) -> None:
             pass
 
 
+# config.yaml holds the wallet mnemonics and names the binaries the daemon runs
+# (cloud-hypervisor, virtiofsd, qemu). It used to be rewritten 0o666 so that root
+# and the installing user could both edit it, which also let every other local
+# user edit it -- and through it choose what a root daemon executes. Owner and
+# group keep read and write; everybody else gets nothing.
+CONFIG_FILE_MODE = 0o660
+
+
+def config_file_mode(path: str) -> int:
+    """The mode a rewrite of ``path`` gets: its current owner and group bits, never other."""
+    try:
+        current = stat.S_IMODE(os.stat(path).st_mode)
+    except OSError:
+        return CONFIG_FILE_MODE
+    return (current & CONFIG_FILE_MODE) | stat.S_IRUSR | stat.S_IWUSR
+
+
+def _match_config_file(tmp_path: str, target: str) -> None:
+    """Give the replacement file the mode and, under root, the owner of ``target``.
+
+    ``mkstemp`` creates the file ``0600`` and owned by whoever writes it. Without the
+    ``chown``, the first save by a root process would hand config.yaml to root and
+    lock the installing user out of it; the old 0o666 hid that.
+    """
+    os.chmod(tmp_path, config_file_mode(target))
+    if os.geteuid() == 0:
+        try:
+            info = os.stat(target)
+        except OSError:
+            return
+        os.chown(tmp_path, info.st_uid, info.st_gid)
+
+
 def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTION) -> Optional[str]:
     """Snapshot config_path to config-<YYYYMMDDHHMMSS>-<nnnn>.yaml beside it, then
     prune to the newest `retention`. Timestamps are UTC so the filename sorts the same
@@ -217,6 +252,10 @@ def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTIO
     stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
     backup_path = os.path.join(directory, f"config-{stamp}-{random.randrange(10_000):04d}.yaml")
     shutil.copy2(config_path, backup_path)
+    try:
+        os.chmod(backup_path, config_file_mode(config_path))
+    except OSError:
+        pass
     _prune_config_backups(directory, retention)
     return backup_path
 
@@ -610,20 +649,20 @@ class ConfigManager(metaclass=Singleton):
         the one thing the old candidate cache was for -- a port that stays the same
         between runs, so "open TCP 52285" is still true tomorrow.
 
-        Assignment still needs root, because it writes a firewall rule. An
-        unprivileged run leaves the sentinel alone rather than consuming it.
+        Assignment still needs root or CAP_NET_ADMIN, because it writes a firewall
+        rule. An unprivileged run leaves the sentinel alone rather than consuming it.
         """
         stored = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
         if coerce_gateway_port(stored) is not None:
             return
 
-        if os.geteuid() != 0:
+        if not can_admin_network():
             self._gateway_notice_unlocked(
                 "gateway port not assigned",
-                "network.GATEWAY_PORT is unassigned and this process is not root, so it\n"
-                "cannot open the port in the host firewall. Leaving it unassigned rather\n"
-                "than storing a port nothing can reach: run 'sudo nodo serve' once, or\n"
-                "set network.GATEWAY_PORT to a port you have opened yourself.",
+                "network.GATEWAY_PORT is unassigned and this process is not root and has no\n"
+                "CAP_NET_ADMIN, so it cannot open the port in the host firewall. Leaving it\n"
+                "unassigned rather than storing a port nothing can reach: run 'sudo nodo serve'\n"
+                "once, or set network.GATEWAY_PORT to a port you have opened yourself.",
             )
             return
 
@@ -903,7 +942,7 @@ class ConfigManager(metaclass=Singleton):
             )
             with os.fdopen(fd, "w") as f:
                 yaml.safe_dump(safe_config, f, indent=2, default_flow_style=False)
-            os.chmod(tmp_path, 0o666)  # To allow sudo nodo update and still be writable
+            _match_config_file(tmp_path, target)
             os.replace(tmp_path, target)
             return True
         except OSError:
@@ -916,7 +955,7 @@ class ConfigManager(metaclass=Singleton):
 
     def _chmod_config(self):
         try:
-            os.chmod(self.config_path, 0o666)  # To allow sudo nodo update and still be writable
+            os.chmod(self.config_path, config_file_mode(self.config_path))
         except Exception:
             pass
 

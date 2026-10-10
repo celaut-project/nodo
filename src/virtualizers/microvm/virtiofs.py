@@ -50,6 +50,7 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 
 from src.utils.shared_filesystems import ShareRef
 from src.virtualizers.microvm import paths
+from src.virtualizers.microvm.host import ensure_private_dir
 
 # Guest metadata file injected into the rootfs: a JSON list of the virtiofs
 # mounts the guest init should perform ({tag, path, ro}). Kept alongside the
@@ -353,7 +354,7 @@ def ensure_share_backend(
     if not mount.external:
         os.chmod(share_state_dir(base_dir, sid), 0o700)
         os.chmod(export_dir, 0o700)
-    Path(socket_dir).mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(socket_dir)
 
     if first_materialization and mount.exported and not mount.external and seed_fn:
         logger_fn(f"[virtiofs] share={sid} seeding from packaged {mount.guest_path}")
