@@ -122,8 +122,29 @@ for kind in uid gid; do
     usermod "--add-sub${kind}s" "$start-$((start + 65535))" "$SERVICE_USER"
   fi
 done
-command -v newuidmap >/dev/null && command -v newgidmap >/dev/null \
-  || printf 'Warning: newuidmap/newgidmap not found (package uidmap): services with shared directories will not start.\n' >&2
+
+# newuidmap/newgidmap for that sandbox, and mksquashfs for read-only rootfs
+# images: mkfs.erofs cannot carry the owners of a tree staged without root.
+# shellcheck source=bash/lib_pkg.sh
+. "$TARGET_DIR/bash/lib_pkg.sh"
+missing=()
+command -v newuidmap >/dev/null && command -v newgidmap >/dev/null || missing+=(uidmap)
+command -v mksquashfs >/dev/null || missing+=(squashfs-tools)
+if [ "${#missing[@]}" -gt 0 ]; then
+  detect_pkg_mgr
+  packages=()
+  for name in "${missing[@]}"; do
+    case "$PKG_MGR:$name" in
+      dnf:uidmap) packages+=(shadow-utils) ;;
+      *) packages+=("$name") ;;
+    esac
+  done
+  printf 'Installing %s...\n' "${packages[*]}"
+  case "$PKG_MGR" in
+    apt) DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}" ;;
+    dnf) dnf install -y "${packages[@]}" ;;
+  esac || fail "could not install ${packages[*]}."
+fi
 
 # --- 3. config keys ---------------------------------------------------------
 STORAGE_DIR="$(config_value '.main.STORAGE' "$TARGET_DIR/storage")"
