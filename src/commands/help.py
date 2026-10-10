@@ -67,7 +67,8 @@ GROUPS: List[Group] = [
         None,
         [
             ("estimate <service>", "what an execution would cost, before paying for it"),
-            ("execute <service>", "run it (--name <name>, -e <key> <value>)"),
+            ("execute <service>", "run it (--name <n>, -e <key> <value>, --no-input)"),
+            ("service_envs <service>", "the env vars it asks for (--json)"),
             ("instances [<search>]", "list what is running (--grouped, --json)"),
             ("observe <instance>", "watch an instance live (--save <path> records it)"),
             ("tunnel <instance> <slot>", "reach its port from here (--detach, --udp, …)"),

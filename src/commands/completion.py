@@ -28,6 +28,7 @@ from typing import Dict, List, Optional
 SERVICE_COMMANDS = [
     "execute",
     "estimate",
+    "service_envs",
     "inspect",
     "remove",
     "publish",
@@ -98,6 +99,7 @@ COMMANDS = sorted(
         "execute",
         "force_execution",
         "estimate",
+        "service_envs",
         "update",
         "kill",
         "burnall",

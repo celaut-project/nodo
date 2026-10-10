@@ -491,8 +491,12 @@ if __name__ == '__main__':
                         print("Error: --name requires a value", flush=True)
                         sys.exit(1)
 
+                # Without a terminal to ask on, or with --no-input, a missing env var
+                # is not asked for: a required one aborts, an optional one is reported.
+                no_input = "--no-input" in args and not args.remove("--no-input")
+
                 if len(args) != 1:
-                    print("Usage: nodo execute [--name instance-name] [-e key value] <service id|service tag|'.celaut' file path>", flush=True)
+                    print("Usage: nodo execute [--name instance-name] [-e key value] [--no-input] <service id|service tag|'.celaut' file path>", flush=True)
                     sys.exit(1)
 
                 try:
@@ -501,7 +505,13 @@ if __name__ == '__main__':
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                execute(service=arg, envs=envs, instance_name=instance_name)
+                execute(
+                    service=arg,
+                    envs=envs,
+                    instance_name=instance_name,
+                    check_envs=True,
+                    ask_envs=sys.stdin.isatty() and not no_input,
+                )
 
             case "force_execution":
                 # Testing/dev only: bypasses execution_balancer and delegates
@@ -535,10 +545,12 @@ if __name__ == '__main__':
                         print("Error: --name requires a value", flush=True)
                         sys.exit(1)
 
+                no_input = "--no-input" in args and not args.remove("--no-input")
+
                 if len(args) != 2:
                     print(
                         "Usage: nodo force_execution <peer_id> [--name instance-name] [-e key value] "
-                        "<service id|service tag|'.celaut' file path>",
+                        "[--no-input] <service id|service tag|'.celaut' file path>",
                         flush=True,
                     )
                     sys.exit(1)
@@ -549,7 +561,14 @@ if __name__ == '__main__':
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                force_execution(peer_id=args[0], service=service_arg, envs=envs, instance_name=instance_name)
+                force_execution(
+                    peer_id=args[0],
+                    service=service_arg,
+                    envs=envs,
+                    instance_name=instance_name,
+                    check_envs=True,
+                    ask_envs=sys.stdin.isatty() and not no_input,
+                )
 
             case "estimate":
                 from src.commands.estimate import estimate
@@ -562,7 +581,16 @@ if __name__ == '__main__':
                     sys.exit(1)
 
                 estimate(service=arg)
-                
+
+            case "service_envs":
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                if len(args) != 1:
+                    print("Usage: nodo service_envs <service id|service tag> [--json]", flush=True)
+                    _exit(1)
+                from src.commands.service_envs import service_envs_command
+                _exit(0 if service_envs_command(service=args[0], as_json=as_json) else 1)
+
             case "update":
                 if os.geteuid() != 0:
                     print("This script requires superuser privileges. Please run with sudo.")
