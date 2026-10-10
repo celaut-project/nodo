@@ -906,7 +906,21 @@ class ConfigManager(metaclass=Singleton):
                 self.log("Dynamic values were processed, saving configuration...")
                 self._save_config_unlocked()
 
+            self._apply_nft_table()
             self._loaded = True
+
+    def _apply_nft_table(self) -> None:
+        """Point the firewall backend at this install's own nft table, when one is set.
+
+        Only imported when the key names a table other than the default, so a
+        normal install keeps the firewall package off its import path.
+        """
+        table = self._get_nested(self._config, ["virtualizers", "ch", "NFT_TABLE"])
+        if table is None or str(table).strip() in ("", "nodo"):
+            return
+        from src.utils.firewall.backends import set_nft_table
+
+        set_nft_table(str(table))
 
     def _save_config_unlocked(self):
         """Internal save method without locking (assumes caller holds lock)."""
