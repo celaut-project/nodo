@@ -6,6 +6,10 @@ main:
   METADATA_REGISTRY: "${main.STORAGE}/__metadata__/"
   BLOCKDIR: "${main.STORAGE}/__block__/"
   DATABASE_FILE: "${main.STORAGE}/database.sqlite"
+  # The system user the daemon runs as. Empty: root (the default). Set by
+  # `sudo ./install.sh --service-user <name>`, which also creates the user, gives it
+  # the storage tree and installs a unit with CAP_NET_ADMIN only (docs/ROOTLESS.md).
+  SERVICE_USER: ""
 
 dependencies:
   java:
