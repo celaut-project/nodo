@@ -399,7 +399,12 @@ class BeeClient:
         )
 
     @staticmethod
-    def get_service(channel, hash_message: celaut_pb2.Metadata.HashTag.Hash, client_id: str = ""):
+    def get_service(
+            channel,
+            hash_message: celaut_pb2.Metadata.HashTag.Hash,
+            client_id: str = "",
+            timeout: Optional[float] = None,
+    ):
         """Streamed, and the response can be large (a whole packed service), so this
         returns the raw generator -- iterate it -- rather than collapsing it into one
         message the way ``call_one`` does for everything else here.
@@ -427,6 +432,7 @@ class BeeClient:
             # not need to send (issue #371). Ignored by a peer that does not
             # honour it, in which case the response arrives in full as before.
             block_skip=True,
+            timeout=timeout,
         )
 
     @staticmethod

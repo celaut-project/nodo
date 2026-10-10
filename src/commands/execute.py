@@ -289,11 +289,11 @@ def execute(
     try:
         resolved = resolve_service_hash(service)
         if not resolved:
-            # The service isn't in the local registry. Before refusing, try to acquire it
-            # through the 'source-application' core service: it maps the requested service id
-            # to its published sources and downloads it via the existing download/import path.
-            # This only succeeds when a trusted source-application is configured in
-            # 'core_services'; otherwise it's a no-op and we fall through to the error below.
+            # The service isn't in the local registry. Before refusing, try to acquire it:
+            # first from the known peers, then through the 'source-application' core
+            # service, which maps the requested service id to its published sources and
+            # downloads it via the existing download/import path. If neither provides it,
+            # we fall through to the error below.
             if acquire_service(service):
                 resolved = resolve_service_hash(service)
 
