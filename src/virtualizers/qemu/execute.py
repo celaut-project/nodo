@@ -68,6 +68,7 @@ from src.virtualizers.qemu.config import (
 )
 from src.virtualizers.qemu.hotplug import settle_boot_balloon
 from src.utils.firewall import policy as fw_policy
+from src.utils.privileges import exec_without_capabilities
 from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 env_manager = ConfigManager()
@@ -638,6 +639,7 @@ def execute(
                 executable=qemu_binary,
                 stdout=stdout_file,
                 stderr=stderr_file,
+                preexec_fn=exec_without_capabilities,
             )
         log.LOGGER(
             f"[QEMU][{vmachine_id}] process started: pid={process.pid}, visible_name={process_args[0]}"
