@@ -3454,7 +3454,9 @@ impl Default for App {
             context_menu: None,
             docs: crate::docs::DocsState::default(),
             details: None,
-            status: "Press r to refresh • q to quit".to_string(),
+            // Nothing to report until something happens: the footer's first line
+            // already lists `r` and `q`, and saying them twice was noise.
+            status: String::new(),
             tabs_area: Rect::ZERO,
             page_tabs_area: Rect::ZERO,
             too_small: false,
@@ -5986,7 +5988,7 @@ impl App {
     pub fn close_details(&mut self) {
         self.details = None;
         self.input_mode = InputMode::Normal;
-        self.status = "Press r to refresh • q to quit".to_string();
+        self.status.clear();
     }
 
     /// Spawn a `nodo` command in the background so the UI stays responsive.
