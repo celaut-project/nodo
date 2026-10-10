@@ -215,6 +215,32 @@ def _resolve_admin_group() -> str:
     return "root"
 
 
+def _configured_service_user(raw: dict) -> str:
+    """``main.SERVICE_USER``: the user a no-sudo install runs the daemon as, or ""."""
+    value = _get_nested_config(raw, "main.SERVICE_USER", "")
+    text = str(value or "").strip()
+    return "" if text == "root" else text
+
+
+def _service_template_name(main_dir: str) -> str:
+    """The unit template this install was set up from.
+
+    A ``--service-user`` install renders ``nodo-nosudo.service.template``
+    (``bash/setup_service_user.sh``). Comparing its unit against the root template
+    would report it as wrong and "fix" it back to ``User=root``.
+    """
+    import yaml
+
+    config_path = os.path.join(main_dir, "config.yaml")
+    raw = {}
+    if os.path.isfile(config_path):
+        with open(config_path, "r") as f:
+            raw = yaml.safe_load(f) or {}
+    if _configured_service_user(raw):
+        return "nodo-nosudo.service.template"
+    return "nodo.service.template"
+
+
 def _render_service_template(template_content: str, main_dir: str) -> str:
     """Render nodo.service.template using the same config keys as install.sh."""
     import yaml
@@ -256,6 +282,9 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         "{{PYTHON_RUNTIME_BIN_DIR}}": os.path.dirname(python_runtime_bin),
         "{{PYTHON_VENV_BIN}}": python_venv_bin,
         "{{ADMIN_GROUP}}": _resolve_admin_group(),
+        # Only in nodo-nosudo.service.template, rendered by bash/setup_service_user.sh.
+        "{{SERVICE_USER}}": _configured_service_user(raw),
+        "{{RUNTIME_DIR_NAME}}": "nodo",
     }
 
     rendered = template_content
@@ -1212,7 +1241,7 @@ def doctor_command(main_dir):
 
     service_name = "nodo.service"
     service_file_path = f"/etc/systemd/system/{service_name}"
-    template_file = os.path.join(main_dir, "bash", "nodo.service.template")
+    template_file = os.path.join(main_dir, "bash", _service_template_name(main_dir))
 
     if not os.path.exists(template_file):
         print(f"Error: Template file {template_file} not found.", flush=True)
