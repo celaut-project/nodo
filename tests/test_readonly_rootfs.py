@@ -241,7 +241,16 @@ class MetadataCompletenessGateTests(unittest.TestCase):
 
 @unittest.skipIf(BUILD_IMPORT_ERROR is not None, f"Missing runtime dependencies: {BUILD_IMPORT_ERROR}")
 class ReadOnlyFormatSelectionTests(unittest.TestCase):
-    """Which mkfs runs is the node's choice, and a missing tool says so."""
+    """Which mkfs runs is the node's choice, and a missing tool says so.
+
+    As a root node. A node that runs as a service user always picks squashfs
+    (tests/test_nosudo_p2.py).
+    """
+
+    def setUp(self):
+        patcher = patch.object(ch_build, "_owners_are_deferred", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_erofs_is_preferred_when_both_are_available(self):
         with patch.object(ch_build, "ROOTFS_READ_ONLY_FORMAT", "auto"), \
