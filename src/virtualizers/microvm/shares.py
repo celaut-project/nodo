@@ -19,6 +19,7 @@ database and of the rootfs image, so its mounts and lifecycle can be unit-tested
 on their own; the pieces that read the parent's records and the guest's image are
 here.
 """
+import os
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
@@ -45,6 +46,29 @@ from src.virtualizers.microvm.virtiofs import (
 # Read under the `ch` key for both backends: it names the one virtiofsd binary
 # the host has, not a per-hypervisor choice.
 VIRTIOFSD_BINARY = ConfigManager().get("virtualizers.ch.VIRTIOFSD_BINARY", "virtiofsd")
+VIRTIOFSD_SANDBOX = ConfigManager().get("virtualizers.ch.VIRTIOFSD_SANDBOX", "auto")
+VIRTIOFSD_SANDBOX_MODES = ("chroot", "namespace", "none")
+
+
+def virtiofsd_sandbox(configured=None) -> str:
+    """The ``--sandbox`` mode virtiofsd gets: ``chroot`` under root, else ``namespace``.
+
+    ``chroot`` is virtiofsd's tightest mode and the only one root needs, but it
+    refuses to start as any other user ("can only be used by root"). A daemon
+    that runs as a service user confines virtiofsd with a user and mount
+    namespace instead, which needs ``newuidmap``/``newgidmap`` (package
+    ``uidmap``) and a ``/etc/subuid`` range for that user. ``none`` is accepted
+    when set explicitly, never chosen: it does not confine virtiofsd at all.
+    """
+    mode = str(VIRTIOFSD_SANDBOX if configured is None else configured).strip().lower() or "auto"
+    if mode == "auto":
+        return "chroot" if os.geteuid() == 0 else "namespace"
+    if mode not in VIRTIOFSD_SANDBOX_MODES:
+        raise MicroVMError(
+            f"virtualizers.ch.VIRTIOFSD_SANDBOX is {mode!r}; use auto, "
+            + ", ".join(VIRTIOFSD_SANDBOX_MODES) + "."
+        )
+    return mode
 
 
 class ShareSetup(NamedTuple):
@@ -138,6 +162,7 @@ def materialize_shares(
         base_dir=base_dir,
         socket_dir=str(paths.control_socket_dir()),
         virtiofsd_binary=VIRTIOFSD_BINARY,
+        sandbox=virtiofsd_sandbox(),
         # A new export starts out holding what the exporter packaged at that
         # path, read straight out of its own image, so the mount does not hide
         # the content the service shipped.
