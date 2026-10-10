@@ -177,12 +177,9 @@ def require_caller(context, client_id: str = "") -> str:
     if local_instance:
         return local_instance
 
-    # Shape-check before the DB: free for an attacker to get right, but it costs
-    # nothing to check either, and it is what keeps a flood of plainly-fabricated
-    # strings (empty, wrong length, non-hex) from reaching sc.client_exists at all.
-    # A client_id that does look like a UUID4 still costs one indexed read -- the
-    # same one ModifyServiceSystemResources already pays per call -- because there is
-    # no way to tell a minted id from a guessed one without it.
+    # One indexed read decides: there is no way to tell a minted id from a guessed one
+    # without it, and no shape check in front of it any more -- the read is the same one
+    # ModifyServiceSystemResources already pays per call.
     if not sc.client_exists(client_id=client_id):
         raise ClientRequired(
             f"This RPC requires a client_id minted by GenerateClient first. Wrong or missing client_id: {client_id!r}"

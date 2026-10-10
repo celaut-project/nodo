@@ -303,7 +303,9 @@ def get_network_name(direction: str) -> Optional[str]:
     direction = _extract_direction_host(direction)
 
     # If is localhost
-    if "::1" in direction or '0.0.0.0' == direction:
+    # Exactly the loopback address: `"::1" in direction` also matched `5B::1`, a real
+    # address whose last group happens to be 1.
+    if direction.split("%", 1)[0] in ("::1", "0:0:0:0:0:0:0:1", "0.0.0.0"):
         return "localhost"
 
     #  https://stackoverflow.com/questions/819355/how-can-i-check-if-an-ip-is-in-a-network-in-python

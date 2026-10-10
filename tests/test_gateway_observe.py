@@ -59,7 +59,7 @@ def _drive_conntrack_stream(should_stop, *, include_packets=False,
             mock.patch.object(observe, "read_conntrack_events",
                               return_value=(conntrack_events, None)), \
             mock.patch.object(observe, "build_instance_index", return_value={}), \
-            mock.patch.object(observe, "resolve_tag", return_value=None):
+            mock.patch.object(observe, "_resolve_service_tag", return_value=None):
         return list(observe.observe_event_stream(
             "inst", include_packets=include_packets, should_stop=should_stop))
 

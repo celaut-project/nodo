@@ -87,23 +87,13 @@ class RequireCallerTests(unittest.TestCase):
         with self.assertRaises(ClientRequired):
             require_caller(_Context(), uuid4().hex)
 
-    def test_a_malformed_client_id_is_refused_without_touching_the_database(self):
-        # The shape check is pure string work; nothing here should need a DB read to
-        # reject an id that could not possibly have been minted.
+    def test_a_malformed_client_id_is_refused(self):
+        # There is no shape check any more (f0dcd349): the one indexed read decides, so
+        # an id that could not have been minted is refused because no client has it.
         for bad in ("", "not-a-uuid", "x" * 32, uuid4().hex.upper(), uuid4().hex + "0"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ClientRequired):
                     require_caller(_Context(), bad)
-        self.existence_patcher.stop()
-        try:
-            with patch.object(
-                client_gate.sc, "client_exists",
-                side_effect=AssertionError("client_exists should not have been called"),
-            ):
-                with self.assertRaises(ClientRequired):
-                    require_caller(_Context(), "still-not-a-uuid")
-        finally:
-            self.existence_patcher.start()
 
     def test_a_known_client_id_is_accepted(self):
         client_id = self._new_client()
