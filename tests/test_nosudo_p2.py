@@ -240,5 +240,88 @@ class UnitTemplateTests(unittest.TestCase):
         self.assertIn(".main.SERVICE_USER", install)
 
 
+class RootfsWithoutRootTests(unittest.TestCase):
+    """A service user cannot chown; the owners go into the image afterwards."""
+
+    def setUp(self):
+        from src.virtualizers.microvm import build
+
+        self.build = build
+        self.tree = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tree, ignore_errors=True))
+        (self.tree / "etc").mkdir()
+        (self.tree / "etc" / "shadow").write_text("x")
+        (self.tree / "bin").write_text("y")
+        os.symlink("bin", self.tree / "sh")
+
+    def test_a_deferred_chown_is_recorded_not_applied(self):
+        target = self.tree / "etc" / "shadow"
+        owners = {}
+        token = self.build._DEFERRED_OWNERS.set(owners)
+        try:
+            self.build._apply_chown(target, 0, 42, follow_symlinks=False, rel_path="/etc/shadow")
+        finally:
+            self.build._DEFERRED_OWNERS.reset(token)
+        self.assertEqual(owners, {os.fspath(target): (0, 42)})
+        self.assertEqual(os.lstat(target).st_uid, os.geteuid())
+
+    def test_undeclared_nodes_default_to_root(self):
+        declared = {os.fspath(self.tree / "etc" / "shadow"): (0, 42)}
+        entries = {path: (uid, gid) for path, uid, gid, _ in self.build._staged_owners(self.tree, declared)}
+        self.assertEqual(entries["/etc/shadow"], (0, 42))
+        self.assertEqual(entries["/"], (0, 0))
+        self.assertEqual(entries["/bin"], (0, 0))
+        self.assertEqual(entries["/sh"], (0, 0))
+
+    def test_ext4_owners_go_through_one_debugfs_script(self):
+        entries = [("/", 0, 0, 0o40755), ("/etc/shadow", 0, 42, 0o100640)]
+        seen = {}
+
+        def fake_run(command, **kwargs):
+            seen["command"] = command
+            with open(command[3]) as handle:
+                seen["script"] = handle.read()
+            return mock.Mock(returncode=0, stdout="", stderr="debugfs 1.46.5 (30-Dec-2021)\n")
+
+        with mock.patch.object(self.build.subprocess, "run", side_effect=fake_run), mock.patch.object(
+            self.build.os, "geteuid", return_value=996
+        ), mock.patch.object(self.build.os, "getegid", return_value=996):
+            self.build._write_owners_ext4(Path("/img"), entries)
+
+        self.assertEqual(seen["command"][:3], ["debugfs", "-w", "-f"])
+        self.assertIn('sif "/etc/shadow" gid 42', seen["script"])
+        self.assertIn('sif "/" uid 0', seen["script"])
+
+    def test_a_debugfs_error_that_exits_zero_is_a_failure(self):
+        result = mock.Mock(returncode=0, stdout="", stderr="sif: File not found by ext2_lookup\n")
+        with mock.patch.object(self.build.subprocess, "run", return_value=result):
+            with self.assertRaises(RuntimeError):
+                self.build._write_owners_ext4(Path("/img"), [("/x", 0, 0, 0o100644)])
+
+    def test_squashfs_gets_a_line_per_node_and_quotes_names(self):
+        text = self.build._squashfs_owner_pseudo_file([
+            ("/", 0, 0, 0o40755),
+            ("/etc/shadow", 0, 42, 0o100640),
+            ('/odd "name"', 0, 0, 0o100644),
+            ("/sh", 0, 0, 0o120777),
+        ])
+        self.assertEqual(text.splitlines(), [
+            '"etc/shadow" m 640 0 42',
+            '"odd \\"name\\"" m 644 0 0',
+            '"sh" m 777 0 0',
+        ])
+
+    def test_a_service_user_builds_read_only_images_as_squashfs(self):
+        with mock.patch.object(self.build.os, "geteuid", return_value=996), mock.patch.object(
+            self.build.shutil, "which", return_value="/usr/bin/x"
+        ), mock.patch.object(self.build, "ROOTFS_READ_ONLY_FORMAT", "auto"):
+            self.assertEqual(self.build._select_read_only_format(), self.build.ROOTFS_FORMAT_SQUASHFS)
+        with mock.patch.object(self.build.os, "geteuid", return_value=996), mock.patch.object(
+            self.build, "ROOTFS_READ_ONLY_FORMAT", self.build.ROOTFS_FORMAT_EROFS
+        ):
+            with self.assertRaises(RuntimeError):
+                self.build._select_read_only_format()
+
+
 if __name__ == "__main__":
     unittest.main()
