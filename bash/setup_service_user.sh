@@ -7,7 +7,9 @@
 #   1. creates the system user (and its group, home /var/lib/<user>), adds it
 #      to group kvm;
 #   2. gives it a /etc/subuid and /etc/subgid range, for virtiofsd's namespace
-#      sandbox (chroot is root only);
+#      sandbox (chroot is root only), installs uidmap and squashfs-tools, and on
+#      hosts that restrict unprivileged user namespaces with AppArmor, a profile
+#      that lets virtiofsd create one;
 #   3. writes the keys a non-root daemon needs into config.yaml: main.SERVICE_USER,
 #      virtualizers.ch.CGROUPS_BASE_DIR (the unit's delegated cgroup) and
 #      virtualizers.ch.API_SOCKET_DIR (under the unit's RuntimeDirectory);
@@ -157,6 +159,35 @@ if [ "${#missing[@]}" -gt 0 ]; then
     apt) DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}" ;;
     dnf) dnf install -y "${packages[@]}" ;;
   esac || fail "could not install ${packages[*]}."
+fi
+
+# Ubuntu 23.10+ confines a process that creates a user namespace without
+# privilege (kernel.apparmor_restrict_unprivileged_userns=1), and virtiofsd then
+# fails "Error entering sandbox: CleanMount(... Permission denied)". The fix
+# Ubuntu itself uses for crun, podman and lxc: a profile that allows userns for
+# that one binary and confines nothing else.
+VIRTIOFSD_PATH="$(config_value '.virtualizers.ch.VIRTIOFSD_BINARY' "$TARGET_DIR/bin/virtiofsd")"
+case "$VIRTIOFSD_PATH" in /*) ;; *) VIRTIOFSD_PATH="$(command -v "$VIRTIOFSD_PATH" || true)" ;; esac
+if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
+  if [ -n "$VIRTIOFSD_PATH" ] && command -v apparmor_parser >/dev/null; then
+    profile="/etc/apparmor.d/$UNIT-virtiofsd"
+    printf 'Allowing user namespaces for %s (%s)...\n' "$VIRTIOFSD_PATH" "$profile"
+    cat > "$profile" <<PROFILE
+# Installed by nodo bash/setup_service_user.sh: lets virtiofsd --sandbox namespace
+# create its user namespace under kernel.apparmor_restrict_unprivileged_userns.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile $UNIT-virtiofsd $VIRTIOFSD_PATH flags=(unconfined) {
+  userns,
+
+  include if exists <local/$UNIT-virtiofsd>
+}
+PROFILE
+    apparmor_parser -r "$profile" || fail "could not load $profile."
+  else
+    printf 'Warning: unprivileged user namespaces are restricted by AppArmor and virtiofsd or apparmor_parser was not found: services with shared directories will not start.\n' >&2
+  fi
 fi
 
 # --- 3. config keys ---------------------------------------------------------
