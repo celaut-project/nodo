@@ -518,6 +518,9 @@ pub enum InputMode {
     EditAssets,
     /// The form for one new asset, inside the assets modal (see [`AssetForm`]).
     AddAsset,
+    /// The env vars of a service whose execution was just confirmed
+    /// (see [`crate::env_form`]).
+    ExecuteEnvs,
     /// CHAT page, new-chat wizard step 1: pick which peer to start a chat with,
     /// narrowed by typing (issue: TUI chat/peers/clients redesign).
     PickChatPeer,
@@ -717,7 +720,7 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         }
         PendingAction::ExecuteService { id, label } => Some((
             format!("Execute service {label}"),
-            vec!["execute".to_string(), id],
+            crate::env_form::execute_args(&id, &[]),
         )),
         PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
@@ -1118,6 +1121,9 @@ pub(crate) enum CommandKind {
     /// `nodo pack --detach --json` / `nodo pack_cancel --json`, read the same way
     /// (`packs::outcome_status`).
     Pack,
+    /// `nodo service_envs <id> --json` for a confirmed execution: opens the env var
+    /// form, or runs `nodo execute` when the service asks for none.
+    ServiceEnvs { id: String, label: String },
 }
 
 /// Result of a background `nodo` invocation.
@@ -3151,6 +3157,8 @@ pub struct App {
     pub assets_index: usize,
     /// The new-asset form, while `AddAsset` is open.
     pub asset_form: AssetForm,
+    /// The env vars of the service about to run ([`InputMode::ExecuteEnvs`]).
+    pub env_form: crate::env_form::EnvForm,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -3269,6 +3277,8 @@ pub struct App {
     /// Where each service card's buttons, and the compose box's Attach button,
     /// were drawn this frame -- the same lifecycle as `id_copy_areas`.
     pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
+    /// The eye at the right of each env var field, by field index, as last drawn.
+    pub env_form_eye_buttons: Vec<(usize, Rect)>,
     pub chat_attach_area: Rect,
     pub chat_send_area: Rect,
     /// The ⟳ button on the PEERS table's border; `Rect::ZERO` when not drawn.
@@ -3383,6 +3393,7 @@ impl Default for App {
             lever_key_index: 0,
             assets_index: 0,
             asset_form: AssetForm::default(),
+            env_form: crate::env_form::EnvForm::default(),
             now_minute: local_minute_of_day(),
             last_clock_refresh: now,
             demand: DemandByHour::default(),
@@ -3436,6 +3447,7 @@ impl Default for App {
             chat_attachment: None,
             chat_service_index: 0,
             chat_card_buttons: Vec::new(),
+            env_form_eye_buttons: Vec::new(),
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
             peers_refresh_area: Rect::ZERO,
@@ -4451,6 +4463,7 @@ impl App {
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
             InputMode::AddCustomUnit => self.save_custom_unit(),
             InputMode::AddAsset => self.save_new_asset(),
+            InputMode::ExecuteEnvs => self.submit_env_form(),
             InputMode::PickChatPeer => self.submit_chat_peer_pick(),
             InputMode::PickChatTopic => self.submit_chat_topic_pick(),
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
@@ -5937,6 +5950,16 @@ impl App {
                     self.spawn_command(CommandKind::Pack, label, args);
                 }
             }
+            // The spend is confirmed; what the service asks for is read next, and
+            // answered in a form before it runs (`env_form`).
+            PendingAction::ExecuteService { id, label } => {
+                let args = vec!["service_envs".to_string(), id.clone(), "--json".to_string()];
+                self.spawn_command(
+                    CommandKind::ServiceEnvs { id, label: label.clone() },
+                    format!("Read env vars of {label}"),
+                    args,
+                );
+            }
             other => {
                 if let Some((label, args)) = pending_command(other) {
                     self.spawn_command(CommandKind::Generic, label, args);
@@ -6047,6 +6070,16 @@ impl App {
                     &outcome.stdout,
                     &outcome.stderr,
                 );
+            }
+            CommandKind::ServiceEnvs { id, label } => {
+                let envs = if outcome.success {
+                    crate::env_form::parse_service_envs(&outcome.stdout)
+                } else {
+                    Err(crate::env_form::parse_service_envs(&outcome.stdout)
+                        .err()
+                        .unwrap_or_else(|| first_line(&outcome.stderr)))
+                };
+                self.on_service_envs(id, label, envs);
             }
             CommandKind::Generic => {
                 self.status = if outcome.success {
@@ -12250,7 +12283,8 @@ ergo: Cold Wallet: 9cold\n";
             })
             .expect("executing a service is a `nodo` invocation");
 
-            assert_eq!(args, vec!["execute".to_string(), "svc-abc".to_string()]);
+            // --no-input: `nodo` inherits this terminal, and must not ask on it.
+            assert_eq!(args, vec!["execute", "--no-input", "svc-abc"]);
             assert_eq!(label, "Execute service hello-world");
         }
 
