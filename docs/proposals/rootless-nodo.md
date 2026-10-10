@@ -3,6 +3,15 @@
 Working document answering *"how can we avoid the sudo requirement?"*. It is a
 **proposal**, not a change: nothing here ships with this PR.
 
+> **Status (2026-10-10): implemented as opt-in, in two stacked PRs.** Phase 0 is
+> [#532](https://github.com/celaut-project/nodo/pull/532); phase 2 (the daemon as a
+> service user with `CAP_NET_ADMIN` only, `sudo ./install.sh --service-user nodo`)
+> is [#533](https://github.com/celaut-project/nodo/pull/533), with the one part of
+> phase 1 it needs (`nodo kill` through the daemon). A root install is unchanged.
+> Running it found five things this document did not predict; they are fixed in
+> #533 and listed, with the test results, in **§9**. §1–§8 are the proposal as
+> written on 2026-10-03, with corrections marked *Update*.
+
 It builds on [`ROOTLESS.md`](../ROOTLESS.md), the audit of 2026-08-02 against
 `stable` @ `043d00a7`, and does three things that document does not:
 
@@ -147,7 +156,7 @@ tap has the same requirement (docs, not verified here).
 | `AF_PACKET` raw socket (`nodo observe` capture) | fails | fails | needs `CAP_NET_RAW` only — **verified OK** with just that cap |
 | `unshare -Urn` | `write /proc/self/uid_map: Operation not permitted` | — | `kernel.apparmor_restrict_unprivileged_userns=1` |
 | virtiofsd `--sandbox chroot` | `sandbox mode 'chroot' can only be used by root` | — | nodo's default, `virtiofs.py:146` |
-| virtiofsd `--sandbox namespace` | OK once `uidmap` is installed and the user has a `/etc/subuid` range | — | same prerequisite the rootless packer already provisions |
+| virtiofsd `--sandbox namespace` | OK once `uidmap` is installed and the user has a `/etc/subuid` range | — | same prerequisite the rootless packer already provisions. *Update:* virtiofsd 1.14 on Ubuntu 24.04 fails here with `CleanMount(Permission denied)` under `kernel.apparmor_restrict_unprivileged_userns=1`; it needs an AppArmor profile that allows `userns` (§9.3) |
 | virtiofsd `--sandbox none` | OK | — | no confinement; not recommended |
 
 **Transient unit = the Phase 2 unit, verified end to end.** A
@@ -197,6 +206,10 @@ were removed afterwards.
 | virtiofsd `--sandbox chroot` as non-root | root only | **confirmed** root only |
 | virtiofsd `--sandbox namespace` | needed `uidmap` + a subuid range | **differs:** listened even with no subuid range for the user (`newuidmap` already installed); also with one |
 | `unshare -Urn` (unprivileged userns) | blocked by `apparmor_restrict_unprivileged_userns=1` | **differs:** allowed — the WSL kernel has no such sysctl |
+
+*Update (2026-10-10):* since this run, `dev` requires virtiofsd >= 1.13 (it
+passes `--readonly`), the node runs the pinned virtiofsd 1.14.0, and the guest
+kernel and initramfs are the #509 pins. The phase 2 test in §9 used those.
 
 **WSL-specific notes.** systemd delegation behaves exactly as on native Linux, so
 the Phase 2 unit works on WSL as written; nft and iptables-nft are available and
@@ -252,6 +265,12 @@ call sites under `src/` (plus the firewall backend's generated argv), and 16
 come from `network.FREE_PORTS_RANGE` (50000–60000), so `CAP_NET_BIND_SERVICE` is
 never needed. **Rootfs building** needs nothing (ROOTLESS.md: `mkfs.ext4 -d`,
 `debugfs`, no `mount`/loop) — re-checked: no `mount`/`losetup` argv in `src/`.
+
+*Update (2026-10-10): wrong.* The build stages each node with its declared
+uid/gid (`os.chown`, `src/virtualizers/microvm/build.py` `_apply_chown`) before
+`mkfs.ext4 -d` / `mksquashfs` copy them into the image, and a service user cannot
+chown to root. The first no-sudo launch failed on it. Fixed in #533 without
+privilege (§9.3).
 
 ---
 
@@ -311,6 +330,11 @@ never needed. **Rootfs building** needs nothing (ROOTLESS.md: `mkfs.ext4 -d`,
 `doctor --fix`, and `observe` packet capture. Nothing else.
 
 ### Phase 2 — the daemon stops being root (M)
+
+*Update:* the unit that #533 ships is `bash/nodo-nosudo.service.template` (§9.1).
+It has no `CapabilityBoundingSet`: that would also bound the setuid
+`newuidmap`/`newgidmap` that virtiofsd's namespace sandbox and the rootless packer
+run. The `Protect*` hardening below is a follow-up.
 
 ```ini
 [Service]
@@ -440,3 +464,123 @@ out of nftables. Not recommended before Phases 1–2 ship.
    merges; the probe script is ~150 lines and can be attached.
 6. Should ROOTLESS.md's Route A step 3 be corrected in place (§2.1)? This PR only
    points to it.
+
+---
+
+## 9. Implementation and test results (2026-10-10)
+
+### 9.1 What shipped
+
+Opt-in. A node installed without `--service-user` keeps `User=root` and the same
+code paths (every change below is a no-op under uid 0, except the `config.yaml`
+mode and the socket directory default).
+
+| PR | Phase | What |
+|---|---|---|
+| [#532](https://github.com/celaut-project/nodo/pull/532) | 0 | `write_sysctl()` reads the value back (§2.2); `src/utils/privileges.py` (`CapEff`) replaces `geteuid() == 0` in the network guards (rows 8, 9); `API_SOCKET_DIR` default `/run/nodo/ch`, created `0700` and refused if another user owns it (row 13); `config.yaml` `0660` and owner-preserving saves (row 15) |
+| [#533](https://github.com/celaut-project/nodo/pull/533) | 2 (+ the part of 1 it needs) | taps `user <euid>` and UP before the hypervisor (§2.3); CH, QEMU and virtiofsd exec'd with the ambient set cleared; `VIRTIOFSD_SANDBOX: auto` (namespace when not root, row 12); per-VM cgroups under the unit's delegated cgroup, daemon in a `supervisor/` leaf (row 10); `nodo kill` through `StopService` when the CLI has no `CAP_NET_ADMIN` (row 16); `install.sh --service-user <name>` → `bash/setup_service_user.sh` + `bash/nodo-nosudo.service.template`, and `nodo doctor` renders that template when `main.SERVICE_USER` is set; `virtualizers.ch.NFT_TABLE` for a second install on one host; the five fixes of §9.3 |
+
+The unit (`bash/nodo-nosudo.service.template`, rendered):
+
+```ini
+[Service]
+User=nodo
+Group=nodo
+SupplementaryGroups=kvm
+AmbientCapabilities=CAP_NET_ADMIN
+Delegate=yes
+RuntimeDirectory=nodo
+RuntimeDirectoryMode=0750
+# + WorkingDirectory, Environment, ExecStart, Restart as in nodo.service.template
+```
+
+### 9.2 Test setups
+
+* **aarch64**: Ubuntu 24.04.4 VM (kernel 6.8.0-117, systemd 255, AppArmor
+  `apparmor_restrict_unprivileged_userns=1`) with nested KVM on Apple
+  Virtualization, the same setup as §2. A fresh install of #533 at `1c50795a` with
+  the real installer: `sudo bash install.sh --source-dir /nodo --service-user nodo`.
+  cloud-hypervisor v51.1, virtiofsd 1.14.0, mksquashfs 4.6.1, e2fsprogs 1.47.0.
+  No peers; empty wallets; nothing paid.
+* **x86_64**: *pending* — the Alienware WSL2 node was offline on 2026-10-10. The
+  plan: a second install beside the live root node (own user, directory, unit,
+  storage, bridge, subnet, nft table and gateway ports), run as the service user.
+
+### 9.3 What running it found
+
+1. **The rootfs build chowns.** Staging gives each node its declared uid/gid
+   before `mkfs.ext4 -d` / `mksquashfs`; a service user gets
+   `Failed to apply ownership to '/mnt': uid=0, gid=0 … EPERM` (§3 "Not a
+   requirement" was wrong). Fix: a non-root build records the owners (declared,
+   or root for undeclared nodes, as a root build leaves them) and writes them
+   into the built image — `debugfs sif` for ext4; for squashfs one pseudo-file
+   `m` line per node plus `-root-uid/-root-gid`. Not `-all-root`: measured, it
+   overrides the `m` owners. Both tools exit 0 when one of their lines fails, so
+   stderr is checked. `mkfs.erofs` has no per-file override, so a non-root build
+   picks squashfs. Checked: the built ext4 image of gateway-proxy has `0:0`
+   everywhere (the service user is uid 996); the squashfs image of pdf keeps its
+   declared `0/42`, `42/0` owners.
+2. **No `CapabilityBoundingSet`.** It would also bound the setuid
+   `newuidmap`/`newgidmap` that virtiofsd's namespace sandbox and the rootless
+   packer run. The daemon's bounding set stays full; that only matters for
+   setuid/file-capability programs, which any unprivileged user can run anyway.
+3. **`uidmap` and `squashfs-tools`** are not installed by the base installer;
+   `setup_service_user.sh` installs them.
+4. **`nodo pack --local` as the service user** needs `$MAIN_DIR/buildkit` and a
+   writable `$HOME` (buildctl writes `~/.docker`). The user gets
+   `/var/lib/<user>` as its home and `buildkit/`.
+5. **virtiofsd's namespace sandbox on Ubuntu 23.10+.** With
+   `kernel.apparmor_restrict_unprivileged_userns=1`, virtiofsd 1.14 run as the
+   service user fails `Error entering sandbox: CleanMount(Permission denied)`
+   (the AppArmor `unprivileged_userns` profile denies it the capabilities in its
+   new namespace). `setup_service_user.sh` installs a profile that allows
+   `userns` for the configured virtiofsd binary only — what Ubuntu ships for
+   `crun` and `podman`. With it: listening, `--sandbox namespace --readonly`,
+   no capabilities.
+
+### 9.4 Capabilities, measured (`/proc/<pid>/status`)
+
+| Process | root mode (`nodo.service`) | no-sudo mode, aarch64 | no-sudo mode, x86_64 |
+|---|---|---|---|
+| daemon | uid 0; `CapEff = 0x1ffffffffff` (all) | uid `nodo`; `CapEff = CapPrm = CapAmb = 0x1000` (`CAP_NET_ADMIN` only) | *pending* |
+| cloud-hypervisor | uid 0; `CapEff = 0x1ffffffffff` (all) | uid `nodo`; `CapEff = CapPrm = CapAmb = 0` | *pending* |
+| virtiofsd (spawn path) | uid 0; `CapEff = 0x1ffffffffff` (all) | uid `nodo`; `CapEff = CapPrm = CapAmb = 0` | *pending* |
+
+`CapInh` of the children stays `0x1000`: harmless for a program without file
+capabilities, which is what the hypervisor and virtiofsd are.
+
+### 9.5 Results per service (aarch64)
+
+| Service | How it got there | Result |
+|---|---|---|
+| gateway-proxy `eb1aeb…` (release v1, arm64) | `nodo import` as `nodo` | launched in 6 s; through the slot: `GenerateClient` OK, `GetPeerInfo` OK (signed `Peer`) |
+| gateway-proxy `9ac0f9…` (arm64 tree) | `nodo pack arm64 --local` as `nodo` (rootless BuildKit) | packed, `Service id validated correctly`; launched; both RPCs OK |
+| file-as-service pdf `34e94d…` (release v1, arm64, read-only squashfs rootfs) | `nodo import` as `nodo` | launched in 10 s; `/health` 200; `GET /page?n=1` and `?n=2` → 200 `image/png` |
+| virtiofsd | nodo's own spawn path (`build_virtiofsd_command` + `_default_spawn`) as `nodo` | see 9.3 item 5. Neither capsule above has a shared directory, so no guest mounted a share. |
+
+After each `nodo kill` (as `nodo`, through the daemon): no tap on the bridge, no
+`nodo;vm=` rule, no per-VM cgroup, no hypervisor or virtiofsd process, no
+socket. `nodo doctor` (as root) on the no-sudo install: every check OK, the unit
+reported as correctly configured, and the guest-reachability probes pass (they
+need `CAP_SYS_ADMIN`, which only doctor has; the daemon reports them as "not
+proven" at startup instead of failing).
+
+### 9.6 What remains
+
+* **Phase 1 rest:** `remove`, `prune`, `burnall`, `daemon start/stop/restart`
+  (polkit or a `Restart` RPC, §8 q1), `config set` restart, `tunnels close` of
+  the daemon's tunnels — still root.
+* **Packing as an operator:** the registry belongs to the service user, so
+  `nodo pack` runs as that user today. Group-writable storage (setgid dirs,
+  umask 002) or a pack RPC would let an operator in group `nodo` pack.
+* **Hardening of the unit:** `ProtectSystem=strict`, `ReadWritePaths`,
+  `PrivateTmp`, `ProtectHome` (§5) — each needs a run to surface the writes it
+  blocks.
+* **Not tested without root:** the QEMU backend (foreign-arch guests), device
+  nodes in an image (`mknod` needs root; the ext4 path could use `debugfs
+  mknod`), erofs, `nodo observe` packet capture (`CAP_NET_RAW`), a guest that
+  mounts a virtiofs share end to end (needs a parent that exports one, e.g.
+  demo-service `sharefs`).
+* **Uninstall** does not remove the service user, its subuid range or the
+  AppArmor profile yet.
+* **Phase 3** (`nodo-netd`) and **phase 4** (passt), unchanged.
