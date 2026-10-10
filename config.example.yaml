@@ -943,6 +943,14 @@ timing:
   CLIENT_EXPIRATION_TIME: 1200
   EXTERNAL_COST_TIMEOUT: 10
   START_SERVICE_ON_PEER_TIMEOUT: 120
+  # Asking a peer for a service it holds (`GetService`; `nodo execute` and `nodo get` do
+  # it before the source-application). The first is a silence: the call is given up once
+  # the peer sends nothing for this many seconds, however long the transfer has run. The
+  # second caps the whole transfer. 0 turns either off. A peer that hits either loses
+  # reputation (`get_service_timed_out`); one that sends a service other than the one
+  # asked for loses ten times as much (`get_service_wrong_hash`).
+  GET_SERVICE_IDLE_TIMEOUT: 30
+  GET_SERVICE_TIMEOUT: 1800
 
 communication:
   # The most components a Peer.signature_scheme may declare before this node refuses

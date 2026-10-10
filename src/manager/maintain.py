@@ -1,7 +1,11 @@
 from time import sleep
 import os
+import shutil
+import threading
 import time
 import traceback
+
+import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.manager.energy import energy_tick
@@ -24,7 +28,8 @@ from src.utils.utils import peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.monetary import format_mu
-from src.utils.hashing import get_configured_hash_id
+from src.utils.hashing import get_configured_hash_id, get_configured_hash_spec, hash_stream
+from src.utils.service_content import read_service_content
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
 from src.virtualizers.microvm.shares import resolved_disk_bytes
@@ -120,7 +125,108 @@ def drain_wanted_inbox():
 def check_wanted_service(wanted: str):
     log.LOGGER(f"Check wanted service {wanted}")
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
-    
+    if not fetch_service_from_peers(wanted):
+        wanted_services_retry.add(wanted)
+
+
+# How long a peer's `GetService` may send nothing before it is given up on, in seconds
+# (0: never). A silence, not a deadline: a large service takes long to arrive from a
+# peer that is still sending, and must not read as one that stopped.
+GET_SERVICE_IDLE_TIMEOUT = float(env_manager.get("GET_SERVICE_IDLE_TIMEOUT", 30))
+# The ceiling on the whole transfer, in seconds (0: none), so a peer that keeps sending
+# a byte now and then cannot hold the caller -- `nodo execute` among them -- forever.
+GET_SERVICE_TIMEOUT = float(env_manager.get("GET_SERVICE_TIMEOUT", 1800))
+
+# A peer that stalls costs what an unreachable one does (`PEER_REFRESH_FAILED`); one that
+# sends other bytes under the id asked for costs ten times that: it is not down, it is
+# wrong, and what it sent would have run had it not been hashed.
+GET_SERVICE_TIMEOUT_PENALTY = -100
+GET_SERVICE_WRONG_HASH_PENALTY = -1000
+
+# (peer, service, reason) already scored. `wanted_services_retry` asks again every long
+# interval for as long as no peer has the service, so without this one peer that stalls
+# would lose points every few minutes, forever, for the same request.
+_get_service_penalised = set()
+
+
+def _penalise_get_service_once(peer_id: str, wanted: str, amount: int, reason: str):
+    if (peer_id, wanted, reason) in _get_service_penalised:
+        return
+    _get_service_penalised.add((peer_id, wanted, reason))
+    _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=amount, reason=reason)
+
+
+class _IdleWatchdog(grpc.StreamStreamClientInterceptor):
+    """Cancels the call it intercepts once ``idle_s`` seconds pass with no response.
+
+    Every response message counts, so a large service sent in many chunks keeps the
+    call alive for as long as the chunks keep coming. ``fired`` tells a cancel by this
+    watchdog apart from any other end of the call.
+    """
+
+    def __init__(self, idle_s: float):
+        self.idle_s = idle_s
+        self.fired = False
+        self._last = time.monotonic()
+        self._done = threading.Event()
+
+    def intercept_stream_stream(self, continuation, client_call_details, request_iterator):
+        call = continuation(client_call_details, request_iterator)
+        self._last = time.monotonic()
+        threading.Thread(target=self._watch, args=(call,), daemon=True).start()
+
+        def responses():
+            try:
+                for response in call:
+                    self._last = time.monotonic()
+                    yield response
+            finally:
+                self._done.set()
+
+        return responses()
+
+    def _watch(self, call):
+        while not self._done.wait(min(self.idle_s, 1.0)):
+            if time.monotonic() - self._last >= self.idle_s:
+                self.fired = True
+                call.cancel()
+                return
+
+
+def _get_service_channel(peer: str):
+    """The channel to ask ``peer`` for a service on, and its watchdog (None if off)."""
+    channel = peer_channel(peer)
+    if GET_SERVICE_IDLE_TIMEOUT <= 0:
+        return channel, None
+    watchdog = _IdleWatchdog(GET_SERVICE_IDLE_TIMEOUT)
+    return grpc.intercept_channel(channel, watchdog), watchdog
+
+
+def _is_timeout(e: Exception, watchdog) -> bool:
+    if watchdog is not None and watchdog.fired:
+        return True
+    return isinstance(e, grpc.RpcError) and e.code() == grpc.StatusCode.DEADLINE_EXCEEDED
+
+
+def _peer_sent_wanted(service_dir: str, wanted: str) -> bool:
+    """Whether what a peer sent hashes to ``wanted``, the id the registry stores it under."""
+    try:
+        computed = hash_stream(read_service_content(service_dir), get_configured_hash_spec(env_manager)).hex()
+    except Exception as e:
+        log.LOGGER(f"Could not hash the service received for {wanted}: {e}")
+        return False
+    return computed == wanted
+
+
+def fetch_service_from_peers(wanted: str) -> bool:
+    """Ask each known peer's `GetService` for ``wanted``; True once one is in the registry.
+
+    A peer is only trusted with the bytes, not with the id: what it sends is stored
+    only if it hashes to ``wanted``, otherwise it is dropped, the peer penalised, and
+    the next peer asked. A peer that goes ``GET_SERVICE_IDLE_TIMEOUT`` seconds without
+    sending anything, or does not finish within ``GET_SERVICE_TIMEOUT``, is penalised
+    too, and the next one asked.
+    """
     _hash = celaut_pb2.Metadata.HashTag.Hash(
             type=CONFIGURED_HASH_ID,
             value=bytes.fromhex(wanted)
@@ -139,29 +245,59 @@ def check_wanted_service(wanted: str):
                                                                         'balance.')
         """
         log.LOGGER(f"Taking the service {wanted} using peer {peer}")
+        watchdog = None
         try:
             client_id = get_client_id_on_other_peer(peer_id=peer)
-            # TODO A timeout should be implemented when requesting a service.
-            for b in BeeClient.get_service(peer_channel(peer), _hash, client_id=client_id):
+            metadata = None
+            service_dir = None
+            channel, watchdog = _get_service_channel(peer)
+            for b in BeeClient.get_service(
+                    channel, _hash, client_id=client_id,
+                    timeout=GET_SERVICE_TIMEOUT if GET_SERVICE_TIMEOUT > 0 else None,
+            ):
                 if  type(b) == Dir:
                     log.LOGGER(f"    type of dir {b.type}")
 
                 if type(b) == celaut_pb2.Metadata:
-                    log.LOGGER("Store the metadata.")
-                    with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
-                        f.write(b.SerializeToString())
+                    metadata = b
                 elif type(b) == Dir and b.type == celaut_pb2.Service:
-                    log.LOGGER(f"Store the service {b.dir}")
-                    os.system(f"mv {b.dir} {REGISTRY}{wanted}")
-                    
+                    service_dir = b.dir
+
+            if not service_dir:
+                log.LOGGER(f"Peer {peer} sent no service for {wanted}.")
+                continue
+            if not _peer_sent_wanted(service_dir, wanted):
+                log.LOGGER(f"Peer {peer} sent a service that does not hash to {wanted}; dropped.")
+                _penalise_get_service_once(
+                    peer, wanted, GET_SERVICE_WRONG_HASH_PENALTY, Reason.GET_SERVICE_WRONG_HASH
+                )
+                if os.path.isdir(service_dir):
+                    shutil.rmtree(service_dir, ignore_errors=True)
+                elif os.path.exists(service_dir):
+                    os.remove(service_dir)
+                continue
+
+            log.LOGGER(f"Store the service {service_dir}")
+            shutil.move(service_dir, f"{REGISTRY}{wanted}")
+            if metadata is not None:
+                log.LOGGER("Store the metadata.")
+                with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
+                    f.write(metadata.SerializeToString())
+
             log.LOGGER(f"Wanted service {wanted} stored successfully.")
-            return
-        
+            return True
+
         except Exception as e:
+            if _is_timeout(e, watchdog):
+                log.LOGGER(f"Peer {peer} timed out sending the service {wanted}.")
+                _penalise_get_service_once(
+                    peer, wanted, GET_SERVICE_TIMEOUT_PENALTY, Reason.GET_SERVICE_TIMED_OUT
+                )
+                continue
             log.LOGGER(f"Exception on peer {peer} getting the service {wanted}. {str(e)}.")
             continue
     log.LOGGER(f"Any peer was able to get the service {wanted}. (maybe there are not peers available)")
-    wanted_services_retry.add(wanted)
+    return False
             
 
 

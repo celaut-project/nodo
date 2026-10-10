@@ -25,6 +25,14 @@ class Reason:
     PEER_REFRESH_FAILED = "peer_refresh_failed"
     """The peer could not answer `GetPeerInfo` at any address we hold for it."""
 
+    GET_SERVICE_TIMED_OUT = "get_service_timed_out"
+    """The peer's `GetService` went silent, or did not finish in time, while sending us
+    a service. Scored once per service asked for, not once per retry."""
+
+    GET_SERVICE_WRONG_HASH = "get_service_wrong_hash"
+    """The peer answered `GetService` with a service that does not hash to the id we
+    asked for. Dropped, never stored; scored far below a timeout."""
+
     # Services.
     INSTANCE_LOST = "instance_lost"
     """The instance's virtual machine no longer exists and had to be pruned."""

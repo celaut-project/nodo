@@ -75,6 +75,13 @@ class ParseSourcesTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class AcquireServiceTests(unittest.TestCase):
+    """The source-application path; the peers are asked first and stood in for as empty."""
+
+    def setUp(self):
+        patcher = patch.object(sa, "_acquire_from_peers", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_returns_false_when_not_configured(self):
         out = io.StringIO()
         with patch.object(sa, "get_core_service_id", return_value=None):
@@ -115,6 +122,42 @@ class AcquireServiceTests(unittest.TestCase):
             sa, "download_from_manifest_url", return_value={"service_id": None}
         ):
             self.assertFalse(sa.acquire_service("svc"))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class AcquireFromPeersFirstTests(unittest.TestCase):
+    HASH = "ab" * 32
+
+    def test_a_service_a_peer_provides_skips_the_source_application(self):
+        with patch(
+            "src.manager.maintain.fetch_service_from_peers", return_value=True
+        ) as mock_peers, patch.object(sa, "get_core_service_id") as mock_sa_id:
+            self.assertTrue(sa.acquire_service(self.HASH))
+        mock_peers.assert_called_once_with(self.HASH)
+        mock_sa_id.assert_not_called()
+
+    def test_the_source_application_is_asked_when_no_peer_provides_it(self):
+        with patch(
+            "src.manager.maintain.fetch_service_from_peers", return_value=False
+        ), patch.object(sa, "get_core_service_id", return_value="sa-id"), patch.object(
+            sa, "__lookup_sources", return_value=["https://h/m"]
+        ), patch.object(
+            sa, "download_from_manifest_url", return_value={"service_id": self.HASH}
+        ) as mock_dl:
+            self.assertTrue(sa.acquire_service(self.HASH))
+        mock_dl.assert_called_once_with("https://h/m")
+
+    def test_a_peer_failure_falls_through_to_the_source_application(self):
+        with patch(
+            "src.manager.maintain.fetch_service_from_peers", side_effect=RuntimeError("boom")
+        ), patch.object(sa, "get_core_service_id", return_value=None):
+            self.assertFalse(sa.acquire_service(self.HASH))
+
+    def test_a_tag_is_not_asked_of_the_peers(self):
+        with patch("src.manager.maintain.fetch_service_from_peers") as mock_peers, \
+                patch.object(sa, "get_core_service_id", return_value=None):
+            self.assertFalse(sa.acquire_service("some-tag"))
+        mock_peers.assert_not_called()
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

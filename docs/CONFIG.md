@@ -639,6 +639,8 @@ maintenance-loop timing and client slot/expiration policy.
 
 | Key | Default | Meaning |
 |---|---|---|
+| `timing.GET_SERVICE_IDLE_TIMEOUT` | `30` | Seconds a peer's `GetService` may send nothing before this node gives up on it and asks the next peer. A silence, not a deadline: a large service still arriving is not cut. `0` disables. |
+| `timing.GET_SERVICE_TIMEOUT` | `1800` | Ceiling, in seconds, on a whole `GetService` transfer from one peer, so a peer that trickles bytes cannot hold `nodo execute` forever. `0` disables. Either timeout costs the peer 100 reputation (`get_service_timed_out`); a service that does not hash to the id asked for is dropped and costs it 1000 (`get_service_wrong_hash`). Each is scored once per peer and service, not per retry. |
 | `client.ACCEPT_NEW_DEPOSITS` | `true` | Set `false` to stop `GenerateDepositToken` for every client (local or peer): no one can open a new deposit, so no one can acquire MU beyond what they already hold. Existing balances keep spending normally -- this only closes the door on new top-ups. Use to stop onboarding new demand, or to cap growth even while demand exists. |
 
 ## `host_limits` — how much of this machine nodo may take
