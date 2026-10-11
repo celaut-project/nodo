@@ -252,8 +252,10 @@ def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTIO
     stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
     backup_path = os.path.join(directory, f"config-{stamp}-{random.randrange(10_000):04d}.yaml")
     shutil.copy2(config_path, backup_path)
+    # Same mode and owner as config.yaml: a backup taken under sudo would otherwise
+    # be root's, and 0660 no longer lets the installing user read it.
     try:
-        os.chmod(backup_path, config_file_mode(config_path))
+        _match_config_file(backup_path, config_path)
     except OSError:
         pass
     _prune_config_backups(directory, retention)

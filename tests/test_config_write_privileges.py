@@ -95,6 +95,25 @@ class TheFileIsNotTheObstacle(unittest.TestCase):
             chown.assert_called_once_with(tmp_path, owner.st_uid, owner.st_gid)
             self.assertEqual(stat.S_IMODE(os.stat(tmp_path).st_mode), 0o660)
 
+    def test_a_root_backup_keeps_the_installing_user_as_owner(self):
+        """A backup taken under sudo is 0660 too, so it must not be left to root."""
+        from src.utils import config as config_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = os.path.join(directory, "config.yaml")
+            with open(target, "w") as handle:
+                handle.write("a: 1\n")
+            os.chmod(target, 0o666)
+            owner = os.stat(target)
+
+            with mock.patch.object(config_module.os, "geteuid", return_value=0), mock.patch.object(
+                config_module.os, "chown"
+            ) as chown:
+                backup = config_module.backup_config_file(target)
+
+            chown.assert_called_once_with(backup, owner.st_uid, owner.st_gid)
+            self.assertEqual(stat.S_IMODE(os.stat(backup).st_mode), 0o660)
+
     def test_the_write_lands_without_any_privileged_call(self):
         """The YAML write itself spawns nothing and asks nobody.
 

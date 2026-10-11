@@ -8376,9 +8376,30 @@ fn backup_config(config: &Path) -> io::Result<PathBuf> {
         backup_nonce(),
     ));
     fs::copy(config, &backup)?;
+    keep_config_owner(config, &backup);
     prune_config_backups(config)?;
     Ok(backup)
 }
+
+/// Give `copy` the owner of `config` when this TUI runs under sudo.
+///
+/// `fs::copy` keeps the mode (0660) but not the owner, so a backup taken as root
+/// would be root's and the installing user could no longer read it. Same rule as
+/// `_match_config_file` in src/utils/config.py. Best effort: the backup exists
+/// either way.
+#[cfg(unix)]
+fn keep_config_owner(config: &Path, copy: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    if !is_root() {
+        return;
+    }
+    if let Ok(meta) = fs::metadata(config) {
+        let _ = std::os::unix::fs::chown(copy, Some(meta.uid()), Some(meta.gid()));
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_config_owner(_config: &Path, _copy: &Path) {}
 
 /// Four random digits for a backup filename.
 ///
