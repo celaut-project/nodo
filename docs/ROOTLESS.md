@@ -5,6 +5,20 @@ much work it would take to run without `sudo`. For the diagnostic command see
 `nodo doctor` in [`USAGE.md`](USAGE.md); for the privileged install steps see
 [`INSTALL.md`](INSTALL.md).
 
+> **Follow-up (2026-10-03):** [`proposals/rootless-nodo.md`](proposals/rootless-nodo.md)
+> re-audits this against `dev`, answers the open questions below by measurement
+> (Cloud Hypervisor boots with no capabilities given a pre-created, user-owned, UP
+> tap), and corrects Route A step 3: `CAP_NET_ADMIN` *does* allow writing `net.*`
+> sysctls.
+>
+> **Implemented (2026-10-10), opt-in:** `sudo ./install.sh --service-user nodo`
+> runs the daemon as a system user with `CAP_NET_ADMIN` only; cloud-hypervisor,
+> QEMU and virtiofsd run with no capabilities (#532, #533; results in §9 of the
+> proposal). Two statements below turned out wrong when it ran: the rootfs build
+> *does* need a privilege (it chowns the staged tree; #533 writes the owners into
+> the image instead), and virtiofsd's namespace sandbox needs an AppArmor
+> `userns` profile on Ubuntu 23.10+.
+
 > **Audited against** `stable` @ `043d00a7` on 2026-08-02. Empirical checks were
 > run on Ubuntu 24.04.4 LTS, x86_64, 16 threads, cgroup v2, as a non-root user
 > in group `sudo`. Results marked *verified* were measured on that host; results
