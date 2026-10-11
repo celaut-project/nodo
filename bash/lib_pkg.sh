@@ -149,6 +149,47 @@ pkg_install_host_dependencies() {
     esac
 }
 
+# Whether the host already has what <alias> provides. An install without root
+# cannot install packages, so it asks for the missing ones only.
+host_alias_present() {
+    local alias_name="$1"
+
+    case "$alias_name" in
+        compiler)   { command -v cc || command -v gcc; } >/dev/null 2>&1 && command -v make >/dev/null 2>&1 ;;
+        procps)     command -v ps >/dev/null 2>&1 && command -v sysctl >/dev/null 2>&1 ;;
+        iproute)    command -v ip >/dev/null 2>&1 ;;
+        e2fsprogs)  command -v debugfs >/dev/null 2>&1 && command -v mkfs.ext4 >/dev/null 2>&1 ;;
+        ca-certificates)
+            [ -s /etc/ssl/certs/ca-certificates.crt ] || [ -s /etc/pki/tls/certs/ca-bundle.crt ] ;;
+        locale)     locale -a 2>/dev/null | grep -Eiq '^en_US\.utf-?8$' ;;
+        clang|cpio|gzip|zip|curl|git|ping|iptables)
+                    command -v "$alias_name" >/dev/null 2>&1 ;;
+        *)          fail "Unknown package alias '${alias_name}'." ;;
+    esac
+}
+
+# The host packages this node needs and does not have yet, space-separated.
+missing_host_packages() {
+    local alias_name
+    local packages=()
+
+    for alias_name in "${NODO_HOST_PACKAGE_ALIASES[@]}"; do
+        host_alias_present "$alias_name" && continue
+        # shellcheck disable=SC2207
+        packages+=($(pkg_for "$alias_name"))
+    done
+    printf '%s\n' "${packages[*]}"
+}
+
+# The command an operator runs to install <packages...>, for an install that has
+# no root to run it itself.
+pkg_install_command() {
+    case "$PKG_MGR" in
+        apt) printf 'sudo apt-get update && sudo apt-get install -y --no-install-recommends %s\n' "$*" ;;
+        dnf) printf 'sudo dnf install -y %s\n' "$*" ;;
+    esac
+}
+
 # qemu-system for an architecture this host does NOT run natively, so the node can
 # execute foreign-arch services under TCG (see `virtualizers.qemu` in config.yaml).
 # Debian ships the aarch64 emulator inside qemu-system-arm; Fedora splits it per
@@ -179,6 +220,18 @@ install_foreign_arch_emulator() {
         return 0
     fi
 
+    if [ "${NODO_UNPRIVILEGED:-}" = 1 ]; then
+        local emulator
+        case "$arch_tag" in
+            linux/arm64) emulator="qemu-system-aarch64" ;;
+            linux/amd64) emulator="qemu-system-x86_64" ;;
+        esac
+        command -v "$emulator" >/dev/null 2>&1 && return 0
+        priv_record "Optional: ${packages[*]}, so this node can also run ${arch_tag} services under emulation" \
+            "$(pkg_install_command "${packages[@]}")"
+        return 0
+    fi
+
     echo "Installing ${packages[*]} so this node can execute ${arch_tag} services under emulation..."
     case "$PKG_MGR" in
         apt)
@@ -204,6 +257,15 @@ install_virtiofsd_build_deps() {
         dnf) packages=(libcap-ng-devel libseccomp-devel pkgconf-pkg-config) ;;
     esac
 
+    if [ "${NODO_UNPRIVILEGED:-}" = 1 ]; then
+        if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libcap-ng libseccomp; then
+            return 0
+        fi
+        priv_record "Libraries to build virtiofsd (only services with shared directories need it; run the installer again afterwards)" \
+            "$(pkg_install_command "${packages[@]}")"
+        return 1
+    fi
+
     echo "Installing virtiofsd build dependencies: ${packages[*]}"
     case "$PKG_MGR" in
         apt)
@@ -216,6 +278,8 @@ install_virtiofsd_build_deps() {
 }
 
 ensure_utf8_locale() {
+    # Without root, install.sh asked for the locale with the other prerequisites.
+    [ "${NODO_UNPRIVILEGED:-}" = 1 ] && return 0
     echo "Ensuring UTF-8 locale support..."
     # Debian generates locales on demand; on Fedora (and most others) the
     # langpack package is all there is, so there is nothing to generate.

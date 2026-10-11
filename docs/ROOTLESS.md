@@ -18,6 +18,24 @@ much work it would take to run without `sudo`. For the diagnostic command see
 > *does* need a privilege (it chowns the staged tree; #533 writes the owners into
 > the image instead), and virtiofsd's namespace sandbox needs an AppArmor
 > `userns` profile on Ubuntu 23.10+.
+>
+> **Install without sudo (#533):** `./install.sh` run as an ordinary user installs
+> into `~/.local/share/nodo` and runs the daemon as that user, with the same unit
+> (`CAP_NET_ADMIN` only). What needs root is collected by `bash/lib_privileged.sh`
+> and asked for only when it is missing: host packages, a `/etc/subuid` range,
+> the systemd unit, and on Ubuntu 23.10+ a root-owned copy of virtiofsd at
+> `/usr/local/libexec/nodo/virtiofsd` with the AppArmor profile that lets that copy
+> (and nothing else) create a user namespace. The profile never follows
+> `virtualizers.ch.VIRTIOFSD_BINARY`: config.yaml is writable by the daemon's user.
+>
+> **Ports and the firewall.** Starting and stopping an instance opens and closes
+> its rules in nodo's own nftables tables, and creates and deletes its tap. All of
+> it needs `CAP_NET_ADMIN`, which the daemon holds, so no step needs sudo. Without
+> that capability none of it is possible: even a set created in advance needs it
+> to add an element. The paths to a daemon with no capability at all are the
+> proposal's phase 3 (a small privileged helper, `nodo-netd`) and phase 4
+> (user-mode networking). The host firewall (ufw, firewalld) is opened once, for
+> the gateway port, and nodo prints that command; it never writes to them.
 
 > **Audited against** `stable` @ `043d00a7` on 2026-08-02. Empirical checks were
 > run on Ubuntu 24.04.4 LTS, x86_64, 16 threads, cgroup v2, as a non-root user

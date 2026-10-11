@@ -222,6 +222,20 @@ def _configured_service_user(raw: dict) -> str:
     return "" if text == "root" else text
 
 
+def _configured_service_group(raw: dict) -> str:
+    """The primary group of ``main.SERVICE_USER``, as the installers render it."""
+    user = _configured_service_user(raw)
+    if not user:
+        return ""
+    try:
+        import grp
+        import pwd
+
+        return grp.getgrgid(pwd.getpwnam(user).pw_gid).gr_name
+    except (ImportError, KeyError):
+        return user
+
+
 def _service_template_name(main_dir: str) -> str:
     """The unit template this install was set up from.
 
@@ -284,6 +298,7 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         "{{ADMIN_GROUP}}": _resolve_admin_group(),
         # Only in nodo-nosudo.service.template, rendered by bash/setup_service_user.sh.
         "{{SERVICE_USER}}": _configured_service_user(raw),
+        "{{SERVICE_GROUP}}": _configured_service_group(raw),
         "{{RUNTIME_DIR_NAME}}": "nodo",
     }
 
