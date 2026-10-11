@@ -130,11 +130,22 @@ class PrivateDirTests(unittest.TestCase):
             self.assertEqual(info.st_uid, os.geteuid())
             self.assertEqual(stat.S_IMODE(info.st_mode) & 0o022, 0)
 
-    def test_tightens_a_world_writable_directory_it_owns(self):
+    def test_refuses_a_writable_directory_it_owns_and_leaves_it_alone(self):
+        """API_SOCKET_DIR may be /tmp itself: chmodding it would break every user."""
+        for mode in (0o1777, 0o775):
+            with tempfile.TemporaryDirectory() as base:
+                os.chmod(base, mode)
+                with self.assertRaises(MicroVMError) as caught:
+                    host.ensure_private_dir(base)
+                self.assertIn("API_SOCKET_DIR", str(caught.exception))
+                self.assertEqual(stat.S_IMODE(os.stat(base).st_mode), mode)
+                os.chmod(base, 0o700)
+
+    def test_accepts_an_existing_directory_only_it_can_write(self):
         with tempfile.TemporaryDirectory() as base:
-            os.chmod(base, 0o777)
+            os.chmod(base, 0o755)
             host.ensure_private_dir(base)
-            self.assertEqual(stat.S_IMODE(os.stat(base).st_mode) & 0o022, 0)
+            self.assertEqual(stat.S_IMODE(os.stat(base).st_mode), 0o755)
 
     def test_refuses_a_directory_another_user_owns(self):
         with tempfile.TemporaryDirectory() as base:
