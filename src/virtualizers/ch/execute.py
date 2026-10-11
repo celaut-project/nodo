@@ -32,6 +32,7 @@ from src.virtualizers.firewall import resolve_slot_transport_protocols, remove_v
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import guest as microvm_guest
 from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm.host import ensure_private_dir
 from src.virtualizers.microvm.bundle_formats import (
     ROOTFS_FORMAT_EXT4,
     ROOTFS_IMAGE_NAMES,
@@ -290,7 +291,7 @@ def execute(
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
         log.LOGGER(f"[CH][{vmachine_id}] runtime dir prepared: {runtime_dir}")
-        api_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(api_socket_path.parent)
         log.LOGGER(f"[CH][{vmachine_id}] API socket dir prepared: {api_socket_path.parent}")
 
         try:

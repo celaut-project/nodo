@@ -4654,10 +4654,10 @@ impl App {
 
     /// Whether a configuration change made right now would need root to land.
     ///
-    /// **This is not about the file.** `config.yaml` is `chmod a+w` at install time
-    /// (`install.sh`) and rewritten `0o666` by `ConfigManager._atomic_write`, it is
-    /// `chown`ed to the installing user, and `yq -i` writes it through a rename in
-    /// the same directory. An unprivileged operator can write every key in it, and
+    /// **This is not about the file.** `config.yaml` is `chmod 0660` at install time
+    /// (`install.sh`) and `chown`ed to the installing user, `ConfigManager._atomic_write`
+    /// keeps that owner and mode, and `yq -i` writes it through a rename in the same
+    /// directory. The operator who installed the node can write every key in it, and
     /// the backup beside it, without ever being asked for a password.
     ///
     /// What needs root is the **restart**. `apply_config_change` is a transaction:
@@ -8376,9 +8376,30 @@ fn backup_config(config: &Path) -> io::Result<PathBuf> {
         backup_nonce(),
     ));
     fs::copy(config, &backup)?;
+    keep_config_owner(config, &backup);
     prune_config_backups(config)?;
     Ok(backup)
 }
+
+/// Give `copy` the owner of `config` when this TUI runs under sudo.
+///
+/// `fs::copy` keeps the mode (0660) but not the owner, so a backup taken as root
+/// would be root's and the installing user could no longer read it. Same rule as
+/// `_match_config_file` in src/utils/config.py. Best effort: the backup exists
+/// either way.
+#[cfg(unix)]
+fn keep_config_owner(config: &Path, copy: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    if !is_root() {
+        return;
+    }
+    if let Ok(meta) = fs::metadata(config) {
+        let _ = std::os::unix::fs::chown(copy, Some(meta.uid()), Some(meta.gid()));
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_config_owner(_config: &Path, _copy: &Path) {}
 
 /// Four random digits for a backup filename.
 ///
