@@ -8,8 +8,8 @@
 #      to group kvm;
 #   2. gives it a /etc/subuid and /etc/subgid range, for virtiofsd's namespace
 #      sandbox (chroot is root only), installs uidmap and squashfs-tools, and on
-#      hosts that restrict unprivileged user namespaces with AppArmor, a profile
-#      that lets virtiofsd create one;
+#      hosts that restrict unprivileged user namespaces with AppArmor, a
+#      root-owned copy of virtiofsd and a profile that lets that copy create one;
 #   3. writes the keys a non-root daemon needs into config.yaml: main.SERVICE_USER,
 #      virtualizers.ch.CGROUPS_BASE_DIR (the unit's delegated cgroup) and
 #      virtualizers.ch.API_SOCKET_DIR (under the unit's RuntimeDirectory);
@@ -88,47 +88,37 @@ config_value() {
   expand_main_dir "$value"
 }
 
+# shellcheck source=bash/lib_pkg.sh
+. "$TARGET_DIR/bash/lib_pkg.sh"
+# shellcheck source=bash/lib_privileged.sh
+. "$TARGET_DIR/bash/lib_privileged.sh"
+
 # --- 1. the user ------------------------------------------------------------
-# A home of its own: the local packer's buildctl writes ~/.docker.
-SERVICE_HOME="/var/lib/$SERVICE_USER"
+# A system user gets a home of its own: the local packer's buildctl writes
+# ~/.docker. A login user (an install made without sudo runs the daemon as the
+# operator, and `sudo nodo update` comes back here) keeps the home it has: it is
+# theirs, not this script's, to chown or chmod.
+SYSTEM_HOME="/var/lib/$SERVICE_USER"
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   printf 'Creating system user %s...\n' "$SERVICE_USER"
-  useradd --system --user-group --home-dir "$SERVICE_HOME" --no-create-home \
+  useradd --system --user-group --home-dir "$SYSTEM_HOME" --no-create-home \
     --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 SERVICE_HOME="$(getent passwd "$SERVICE_USER" | cut -d: -f6)"
-if [ -n "$SERVICE_HOME" ] && [ "$SERVICE_HOME" != "/" ] && [ "$SERVICE_HOME" != "$TARGET_DIR" ]; then
+# The user's primary group: the one useradd made for a system user, and whatever
+# a login user has (not always a group of the same name).
+SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
+if [ "$SERVICE_HOME" = "$SYSTEM_HOME" ]; then
   mkdir -p "$SERVICE_HOME"
-  chown "$SERVICE_USER:$SERVICE_USER" "$SERVICE_HOME"
+  chown "$SERVICE_USER:$SERVICE_GROUP" "$SERVICE_HOME"
   chmod 0750 "$SERVICE_HOME"
-else
+elif [ -z "$SERVICE_HOME" ] || [ "$SERVICE_HOME" = "/" ] || [ ! -d "$SERVICE_HOME" ]; then
   printf 'Warning: the home of %s is %s; nodo pack --local needs a home it can write.\n' \
     "$SERVICE_USER" "${SERVICE_HOME:-<none>}" >&2
 fi
 usermod -aG kvm "$SERVICE_USER"
 
 # --- 2. subordinate ids, for virtiofsd --sandbox namespace --------------------
-# Same allocation as bash/install_buildkit.sh: a 65536-wide range past every
-# range already allocated, because usermod does not check for overlaps.
-next_free_subid_start() {
-  local file="$1" size=65536 start=100000
-  [ -r "$file" ] || { printf '%s' "$start"; return 0; }
-  awk -F: -v start="$start" -v size="$size" '
-    BEGIN { n = 0 }
-    NF >= 3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { s[n]=$2; c[n]=$3; n++ }
-    END {
-      for (i = 1; i < n; i++) {
-        ks = s[i]; kc = c[i]; j = i - 1
-        while (j >= 0 && s[j] > ks) { s[j+1]=s[j]; c[j+1]=c[j]; j-- }
-        s[j+1]=ks; c[j+1]=kc
-      }
-      for (i = 0; i < n; i++) {
-        if (start + size - 1 < s[i]) break
-        if (start < s[i] + c[i]) start = s[i] + c[i]
-      }
-      print start
-    }' "$file"
-}
 for kind in uid gid; do
   file="/etc/sub$kind"
   if ! grep -q "^$SERVICE_USER:" "$file" 2>/dev/null; then
@@ -140,8 +130,6 @@ done
 
 # newuidmap/newgidmap for that sandbox, and mksquashfs for read-only rootfs
 # images: mkfs.erofs cannot carry the owners of a tree staged without root.
-# shellcheck source=bash/lib_pkg.sh
-. "$TARGET_DIR/bash/lib_pkg.sh"
 missing=()
 command -v newuidmap >/dev/null && command -v newgidmap >/dev/null || missing+=(uidmap)
 command -v mksquashfs >/dev/null || missing+=(squashfs-tools)
@@ -166,27 +154,21 @@ fi
 # fails "Error entering sandbox: CleanMount(... Permission denied)". The fix
 # Ubuntu itself uses for crun, podman and lxc: a profile that allows userns for
 # that one binary and confines nothing else.
-VIRTIOFSD_PATH="$(config_value '.virtualizers.ch.VIRTIOFSD_BINARY' "$TARGET_DIR/bin/virtiofsd")"
-case "$VIRTIOFSD_PATH" in /*) ;; *) VIRTIOFSD_PATH="$(command -v "$VIRTIOFSD_PATH" || true)" ;; esac
-if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "1" ]; then
-  if [ -n "$VIRTIOFSD_PATH" ] && command -v apparmor_parser >/dev/null; then
-    profile="/etc/apparmor.d/$UNIT-virtiofsd"
-    printf 'Allowing user namespaces for %s (%s)...\n' "$VIRTIOFSD_PATH" "$profile"
-    cat > "$profile" <<PROFILE
-# Installed by nodo bash/setup_service_user.sh: lets virtiofsd --sandbox namespace
-# create its user namespace under kernel.apparmor_restrict_unprivileged_userns.
-abi <abi/4.0>,
-include <tunables/global>
-
-profile $UNIT-virtiofsd $VIRTIOFSD_PATH flags=(unconfined) {
-  userns,
-
-  include if exists <local/$UNIT-virtiofsd>
-}
-PROFILE
-    apparmor_parser -r "$profile" || fail "could not load $profile."
+#
+# The profile names a root-owned copy at a fixed path, never the path in
+# config.yaml: the service user can write config.yaml, and a profile that follows
+# it would grant userns to whatever binary it names (/usr/bin/unshare, or a glob).
+VIRTIOFSD_SOURCE="$TARGET_DIR/bin/virtiofsd"
+if apparmor_restricts_userns; then
+  if [ -x "$VIRTIOFSD_SOURCE" ] && command -v apparmor_parser >/dev/null; then
+    printf 'Allowing user namespaces for %s (%s)...\n' "$NODO_VIRTIOFSD_SYSTEM_PATH" "$NODO_VIRTIOFSD_APPARMOR_PROFILE"
+    install -D -o root -g root -m 0755 "$VIRTIOFSD_SOURCE" "$NODO_VIRTIOFSD_SYSTEM_PATH"
+    render_virtiofsd_apparmor_profile > "$NODO_VIRTIOFSD_APPARMOR_PROFILE"
+    apparmor_parser -r "$NODO_VIRTIOFSD_APPARMOR_PROFILE" || fail "could not load $NODO_VIRTIOFSD_APPARMOR_PROFILE."
+    VIRTIOFSD_PATH="$NODO_VIRTIOFSD_SYSTEM_PATH" "$YQ" -i \
+      '.virtualizers.ch.VIRTIOFSD_BINARY = strenv(VIRTIOFSD_PATH)' "$CONFIG_FILE"
   else
-    printf 'Warning: unprivileged user namespaces are restricted by AppArmor and virtiofsd or apparmor_parser was not found: services with shared directories will not start.\n' >&2
+    printf 'Warning: unprivileged user namespaces are restricted by AppArmor and %s or apparmor_parser was not found: services with shared directories will not start.\n' "$VIRTIOFSD_SOURCE" >&2
   fi
 fi
 
@@ -198,21 +180,21 @@ STORAGE_DIR="$(config_value '.main.STORAGE' "$TARGET_DIR/storage")"
 
 # --- 4. ownership -------------------------------------------------------------
 mkdir -p "$STORAGE_DIR"
-chown -R "$SERVICE_USER:$SERVICE_USER" "$STORAGE_DIR"
+chown -R "$SERVICE_USER:$SERVICE_GROUP" "$STORAGE_DIR"
 # The rootless BuildKit builder of `nodo pack --local` keeps its state here. Packing
 # writes the registry, which is now the service user's, so it packs as that user.
 mkdir -p "$TARGET_DIR/buildkit"
-chown -R "$SERVICE_USER:$SERVICE_USER" "$TARGET_DIR/buildkit"
-chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
+chown -R "$SERVICE_USER:$SERVICE_GROUP" "$TARGET_DIR/buildkit"
+chown "$SERVICE_USER:$SERVICE_GROUP" "$CONFIG_FILE"
 chmod 0660 "$CONFIG_FILE"
 for backup in "$TARGET_DIR"/config-*.yaml; do
   [ -e "$backup" ] || continue
-  chown "$SERVICE_USER:$SERVICE_USER" "$backup"
+  chown "$SERVICE_USER:$SERVICE_GROUP" "$backup"
   chmod 0660 "$backup"
 done
-if [ -n "$OPERATOR" ] && [ "$OPERATOR" != "root" ]; then
-  usermod -aG "$SERVICE_USER" "$OPERATOR"
-  printf 'Added %s to group %s (log in again for it to apply).\n' "$OPERATOR" "$SERVICE_USER"
+if [ -n "$OPERATOR" ] && [ "$OPERATOR" != "root" ] && [ "$OPERATOR" != "$SERVICE_USER" ]; then
+  usermod -aG "$SERVICE_GROUP" "$OPERATOR"
+  printf 'Added %s to group %s (log in again for it to apply).\n' "$OPERATOR" "$SERVICE_GROUP"
 fi
 
 # --- 5. the unit ----------------------------------------------------------------
@@ -230,6 +212,7 @@ sed \
   -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$(escape_for_sed "$PYTHON_RUNTIME_BIN_DIR_PATH")|g" \
   -e "s|{{PYTHON_VENV_BIN}}|$(escape_for_sed "$PYTHON_VENV_BIN_PATH")|g" \
   -e "s|{{SERVICE_USER}}|$SERVICE_USER|g" \
+  -e "s|{{SERVICE_GROUP}}|$SERVICE_GROUP|g" \
   -e "s|{{RUNTIME_DIR_NAME}}|$UNIT|g" \
   "$TEMPLATE" > "$rendered"
 if grep -q '{{[A-Z_][A-Z_]*}}' "$rendered"; then

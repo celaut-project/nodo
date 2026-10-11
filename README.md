@@ -46,9 +46,18 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
   Fedora (including Fedora Asahi Remix on Apple Silicon). Other package managers need one entry
   added to `bash/lib_pkg.sh`.
 
-- **Sudo Usage**: The installation script requires `sudo` privileges for system-level setup. Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
+- **Sudo Usage**: Run with `sudo`, the script does the system-level setup itself and the daemon runs as root. Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
 
-- **Installation without sudo**: For a manual installation without directly executing the script with sudo, please follow the [manual guide](docs/INSTALL.md).
+- **Installation without sudo**: run the script as yourself:
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | bash
+  ```
+  It installs into `~/.local/share/nodo`, does everything that needs no root as you, and lists
+  the few steps that do (missing packages, subordinate ids, the systemd unit) as exact commands.
+  It saves them to `install-privileged.sh` and runs them with sudo only if you say so
+  (`--no-input` only prints them). The daemon then runs as you, with `CAP_NET_ADMIN` only.
+  See [`docs/ROOTLESS.md`](docs/ROOTLESS.md). For a fully manual installation, follow the
+  [manual guide](docs/INSTALL.md).
 
 - **Configurable binary paths**: Java, Python, and `yq` binaries can be customized in `config.yaml` under `dependencies.*`.
   

@@ -36,6 +36,10 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 # virtiofsd for shared filesystems, shared with the other setup script (#478).
 # shellcheck source=bash/lib_virtiofsd.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_virtiofsd.sh"
+# What an install without root (NODO_UNPRIVILEGED=1, set by install.sh) asks the
+# operator to run instead of running it.
+# shellcheck source=bash/lib_privileged.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_privileged.sh"
 CH_ARCH_TAG="linux/amd64"
 # The arch this host cannot run under KVM, and therefore the one QEMU emulates.
 # Its guest assets are installed too (see provision_guest_assets_for_arch).
@@ -373,16 +377,20 @@ provision_cloud_hypervisor_assets() {
 echo "Detecting package manager..."
 detect_pkg_mgr
 
-echo "Updating package lists..."
-pkg_update
+# Without root, install.sh has already asked for the missing packages, and
+# verify_host_tools below says which are still missing.
+if [ "${NODO_UNPRIVILEGED:-}" != 1 ]; then
+    echo "Updating package lists..."
+    pkg_update
 
-pkg_install_host_dependencies
+    pkg_install_host_dependencies
 
-# The WSL image is a Debian rootfs exported by docs/RELEASING.md: it needs an
-# init system of its own so `nodo daemon` and nodo.service work once it boots.
-if [ "$PKG_MGR" = "apt" ]; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv \
-        || fail "Failed to install systemd."
+    # The WSL image is a Debian rootfs exported by docs/RELEASING.md: it needs an
+    # init system of its own so `nodo daemon` and nodo.service work once it boots.
+    if [ "$PKG_MGR" = "apt" ]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv \
+            || fail "Failed to install systemd."
+    fi
 fi
 
 ensure_utf8_locale
@@ -486,7 +494,11 @@ default=root
 WSLCONF
 }
 
-echo "Configuring systemd service and WSL boot..."
-configure_systemd_service
+# The release rootfs is built as root. Without root, install.sh renders the unit
+# itself and asks the operator to install it.
+if [ "${NODO_UNPRIVILEGED:-}" != 1 ]; then
+    echo "Configuring systemd service and WSL boot..."
+    configure_systemd_service
+fi
 
 echo "All steps completed."

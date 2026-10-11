@@ -595,11 +595,21 @@ if __name__ == '__main__':
                 _exit(0 if service_envs_command(service=args[0], as_json=as_json) else 1)
 
             case "update":
-                if os.geteuid() != 0:
+                # A node installed without sudo runs as its operator and updates the
+                # same way: install.sh then asks for the root steps it needs. The
+                # directory is passed on, or install.sh would update its default.
+                import getpass
+                import shlex
+
+                from src.utils.config import ConfigManager
+
+                service_user = str(ConfigManager().get("main.SERVICE_USER", "") or "")
+                if os.geteuid() != 0 and service_user != getpass.getuser():
                     print("This script requires superuser privileges. Please run with sudo.")
                 else:
-                    os.system(f"/bin/bash {MAIN_DIR}/bash/restore_source.sh {MAIN_DIR}")
-                    os.system(f"/bin/bash {MAIN_DIR}/install.sh")
+                    main_dir = shlex.quote(MAIN_DIR)
+                    os.system(f"/bin/bash {main_dir}/bash/restore_source.sh {main_dir}")
+                    os.system(f"/bin/bash {main_dir}/install.sh --target-dir {main_dir}")
 
             case "kill":
                 args = sys.argv[2:]

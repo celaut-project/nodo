@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-if [ "$(id -u)" -ne 0 ]; then
-    echo "Please run this script as root or with sudo."
+if [ "$(id -u)" -ne 0 ] && [ "${NODO_UNPRIVILEGED:-}" != 1 ]; then
+    echo "Please run this script as root or with sudo, or through ./install.sh without sudo."
     exit 1
 fi
 
@@ -35,6 +35,10 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 # virtiofsd for shared filesystems, shared with the other setup script (#478).
 # shellcheck source=bash/lib_virtiofsd.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_virtiofsd.sh"
+# What an install without root (NODO_UNPRIVILEGED=1, set by install.sh) asks the
+# operator to run instead of running it.
+# shellcheck source=bash/lib_privileged.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_privileged.sh"
 CH_ARCH_TAG="linux/arm64"
 # The arch this host cannot run under KVM, and therefore the one QEMU emulates.
 # Its guest assets are installed too (see provision_guest_assets_for_arch).
@@ -112,6 +116,13 @@ report_gateway_port() {
     # main.USE_PRINT the reason is in there rather than in app.log.
     local migration_log="${1:-}"
     local port storage
+
+    # Without root the migration cannot open the port (it needs CAP_NET_ADMIN);
+    # the daemon assigns it when the unit starts it with that capability.
+    if [ "${NODO_UNPRIVILEGED:-}" = 1 ]; then
+        GATEWAY_PORT_ASSIGNED="yes"
+        return 0
+    fi
     port="$(read_config_path_or_default '.network.GATEWAY_PORT' "")"
 
     case "$port" in
@@ -412,10 +423,14 @@ provision_cloud_hypervisor_assets() {
 echo "Detecting package manager..."
 detect_pkg_mgr
 
-echo "Updating package lists..."
-pkg_update
+# Without root, install.sh has already asked for the missing packages, and
+# verify_host_tools below says which are still missing.
+if [ "${NODO_UNPRIVILEGED:-}" != 1 ]; then
+    echo "Updating package lists..."
+    pkg_update
 
-pkg_install_host_dependencies
+    pkg_install_host_dependencies
+fi
 ensure_utf8_locale
 verify_host_tools
 
