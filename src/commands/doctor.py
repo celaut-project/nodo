@@ -29,16 +29,36 @@ def _parse_unit_user(unit_content: str) -> str:
     return "root"
 
 
+def _parse_unit_supplementary_groups(unit_content: str) -> list:
+    """``SupplementaryGroups=`` of the unit. An empty assignment resets the list, as in systemd."""
+    groups = []
+    for match in re.finditer(r"^\s*SupplementaryGroups\s*=(.*)$", unit_content, flags=re.MULTILINE):
+        value = match.group(1).split()
+        groups = groups + value if value else []
+    return groups
+
+
 def _run_quiet(command):
     return subprocess.run(command, capture_output=True, text=True)
 
 
-def _can_access_kvm_as_user(username: str) -> bool:
+def _can_access_kvm_as_user(username: str, supplementary_groups=()) -> bool:
     test_cmd = ["test", "-r", "/dev/kvm", "-a", "-w", "/dev/kvm"]
     runner_variants = [
         ["runuser", "-u", username, "--"] + test_cmd,
         ["su", "-s", "/bin/sh", username, "-c", "test -r /dev/kvm -a -w /dev/kvm"],
     ]
+    # The unit can give the user a group it is not a member of (an install without
+    # sudo adds kvm this way): test with the groups the daemon actually gets.
+    if supplementary_groups:
+        try:
+            primary = grp.getgrgid(pwd.getpwnam(username).pw_gid).gr_name
+            supp_args = [arg for group in supplementary_groups for arg in ("-G", group)]
+            runner_variants.insert(
+                0, ["runuser", "-u", username, "-g", primary] + supp_args + ["--"] + test_cmd
+            )
+        except (KeyError, OverflowError):
+            pass
     for command in runner_variants:
         try:
             result = _run_quiet(command)
@@ -70,7 +90,7 @@ def _user_in_kvm_group(username: str) -> bool:
     return "kvm" in user_groups
 
 
-def _doctor_kvm_checks(service_user: str):
+def _doctor_kvm_checks(service_user: str, supplementary_groups=()):
     print("\nVirtualization checks (Cloud Hypervisor/KVM):", flush=True)
 
     vmx_count = 0
@@ -115,12 +135,12 @@ def _doctor_kvm_checks(service_user: str):
         print("[OK] Service user is root; /dev/kvm access is usually available.", flush=True)
         return
 
-    if _can_access_kvm_as_user(service_user):
+    if _can_access_kvm_as_user(service_user, supplementary_groups):
         print(f"[OK] Service user '{service_user}' can read/write /dev/kvm.", flush=True)
         return
 
     print(f"[FAIL] Service user '{service_user}' cannot read/write /dev/kvm.", flush=True)
-    if not _user_in_kvm_group(service_user):
+    if not _user_in_kvm_group(service_user) and "kvm" not in supplementary_groups:
         print(
             f"  Suggestion: add '{service_user}' to group 'kvm' and restart session/service.",
             flush=True,
@@ -1276,10 +1296,12 @@ def doctor_command(main_dir):
         print(f"Service file {service_file_path} does not exist.", flush=True)
         needs_fix = True
         current_service_user = expected_service_user
+        current_unit = expected_content
     else:
         with open(service_file_path, "r") as f:
             current_content = f.read()
         current_service_user = _parse_unit_user(current_content)
+        current_unit = current_content
 
         if current_content.strip() != expected_content.strip():
             print("Service file content differs from expected configuration.", flush=True)
@@ -1304,8 +1326,9 @@ def doctor_command(main_dir):
         print(f"[OK] {service_name} has been fixed and enabled.", flush=True)
         print("  Run 'nodo daemon start' to start the service.", flush=True)
         current_service_user = expected_service_user
+        current_unit = expected_content
 
     print(f"Service runtime user for checks: {current_service_user}", flush=True)
-    _doctor_kvm_checks(current_service_user)
+    _doctor_kvm_checks(current_service_user, _parse_unit_supplementary_groups(current_unit))
     _doctor_cloud_hypervisor(main_dir)
     _doctor_network_checks()
