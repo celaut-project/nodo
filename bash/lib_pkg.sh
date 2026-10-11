@@ -142,6 +142,8 @@ pkg_install_host_dependencies() {
                   rm -rf /var/cache/dnf/*.solv /var/cache/dnf/*.solvx
                   sleep $((attempt * 5))
               done
+              dnf install -y "${dnf_opts[@]}" "${packages[@]}" \
+                  || fail "Failed to install host dependencies. See the dnf output above."
               ;;
 
     esac
