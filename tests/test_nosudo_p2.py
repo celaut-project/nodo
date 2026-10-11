@@ -240,6 +240,45 @@ class UnitTemplateTests(unittest.TestCase):
         self.assertIn(".main.SERVICE_USER", install)
 
 
+class DoctorKvmAccessTests(unittest.TestCase):
+    """The unit gives the daemon kvm; the operator's own groups may not have it."""
+
+    def test_the_unit_supplementary_groups_are_read(self):
+        from src.commands import doctor
+
+        _, rendered = UnitTemplateTests._render(self, "nodo")
+        self.assertEqual(doctor._parse_unit_supplementary_groups(rendered), ["kvm"])
+        self.assertEqual(doctor._parse_unit_supplementary_groups("[Service]\nUser=root\n"), [])
+        self.assertEqual(
+            doctor._parse_unit_supplementary_groups(
+                "SupplementaryGroups=kvm\nSupplementaryGroups=\nSupplementaryGroups=a b\n"
+            ),
+            ["a", "b"],
+        )
+
+    def test_kvm_access_is_tested_with_the_unit_groups(self):
+        from src.commands import doctor
+
+        calls = []
+
+        def run(command):
+            calls.append(command)
+            return mock.Mock(returncode=0 if "-G" in command else 1)
+
+        user = mock.Mock(pw_gid=1000)
+        group = mock.Mock(gr_name="operator")
+        with mock.patch.object(doctor, "_run_quiet", side_effect=run), \
+                mock.patch.object(doctor.pwd, "getpwnam", return_value=user), \
+                mock.patch.object(doctor.grp, "getgrgid", return_value=group):
+            self.assertTrue(doctor._can_access_kvm_as_user("operator", ["kvm"]))
+            self.assertEqual(
+                calls[0][:7], ["runuser", "-u", "operator", "-g", "operator", "-G", "kvm"]
+            )
+            calls.clear()
+            self.assertFalse(doctor._can_access_kvm_as_user("operator"))
+            self.assertTrue(all("-G" not in command for command in calls))
+
+
 class RootfsWithoutRootTests(unittest.TestCase):
     """A service user cannot chown; the owners go into the image afterwards."""
 
