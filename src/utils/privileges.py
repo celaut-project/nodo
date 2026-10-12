@@ -17,6 +17,7 @@ imports this module, and ``ConfigManager`` imports the firewall package.
 
 import ctypes
 import os
+import re
 import sys
 from typing import Optional
 
@@ -65,6 +66,64 @@ def can_admin_network() -> bool:
 def can_create_network_namespace() -> bool:
     """``ip netns add`` needs ``CAP_SYS_ADMIN`` on top of ``CAP_NET_ADMIN``."""
     return has_capability(CAP_SYS_ADMIN) and has_capability(CAP_NET_ADMIN)
+
+
+# Who the daemon runs as when it is not root. Root's file, written by the
+# installers (bash/lib_privileged.sh). A command that runs as root reads it from
+# here and never from config.yaml: that user can write config.yaml.
+SERVICE_USER_RECORD = "/etc/nodo/service-user"
+NODO_UNIT_FILE = "/etc/systemd/system/nodo.service"
+_USER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9._-]{0,31}")
+_UNIT_USER = re.compile(r"^\s*User\s*=\s*(\S+)\s*$", re.MULTILINE)
+
+
+def valid_user_name(name: str) -> bool:
+    return bool(_USER_NAME.fullmatch(name or ""))
+
+
+def read_service_user_record(path: str = SERVICE_USER_RECORD) -> str:
+    """The user in the record, or ``""`` when there is none.
+
+    Raises ``ValueError`` when the record, or its directory, can be written by
+    anyone but root, or when it does not hold one user name.
+    """
+    if not os.path.lexists(path):
+        return ""
+    for item in (path, os.path.dirname(path)):
+        info = os.stat(item)
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError(f"{item} must be owned by root and writable only by root.")
+    with open(path, "r", encoding="utf-8") as handle:
+        name = handle.read().rstrip("\n")
+    if not valid_user_name(name):
+        raise ValueError(f"{path} does not hold a valid user name: {name!r}.")
+    return name
+
+
+def unit_user(unit_content: str) -> str:
+    """The last ``User=`` of a unit (the one systemd uses), or ``""``."""
+    users = _UNIT_USER.findall(unit_content or "")
+    return users[-1] if users else ""
+
+
+def installed_service_user(
+    record: str = SERVICE_USER_RECORD, unit_file: str = NODO_UNIT_FILE
+) -> str:
+    """The user the daemon runs as, from root's sources only; ``""`` for root.
+
+    The record first, else the ``User=`` of the installed unit (a node set up
+    before the record existed). Same rule as ``installed_service_user`` in
+    ``bash/lib_privileged.sh``.
+    """
+    name = read_service_user_record(record)
+    if not name and os.path.isfile(unit_file):
+        with open(unit_file, "r", encoding="utf-8") as handle:
+            name = unit_user(handle.read())
+    if name == "root":
+        return ""
+    if name and not valid_user_name(name):
+        raise ValueError(f"The User= of {unit_file} is not a valid user name: {name!r}.")
+    return name
 
 
 def _load_prctl():

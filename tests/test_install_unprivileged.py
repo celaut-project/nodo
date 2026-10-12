@@ -101,7 +101,7 @@ class InstallWithoutSudoTests(unittest.TestCase):
         self.assertIn("--no-input)", self.install)
 
     def test_the_daemon_runs_as_the_installing_user(self):
-        self.assertIn('[ "$UNPRIVILEGED" != true ] || SERVICE_USER="$SCRIPT_USER"', self.install)
+        self.assertIn('if [ "$UNPRIVILEGED" = true ]; then\n  # Without sudo there is no other user to run it as.\n  SERVICE_USER="$SCRIPT_USER"', self.install)
         self.assertIn("nodo-nosudo.service.template", self.install)
         self.assertIn('-e "s|{{SERVICE_USER}}|$SCRIPT_USER|g"', self.install)
 

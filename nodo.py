@@ -601,9 +601,13 @@ if __name__ == '__main__':
                 import getpass
                 import shlex
 
-                from src.utils.config import ConfigManager
+                from src.utils.privileges import installed_service_user
 
-                service_user = str(ConfigManager().get("main.SERVICE_USER", "") or "")
+                try:
+                    service_user = installed_service_user()
+                except (OSError, ValueError) as e:
+                    print(f"Error: {e}")
+                    sys.exit(1)
                 if os.geteuid() != 0 and service_user != getpass.getuser():
                     print("This script requires superuser privileges. Please run with sudo.")
                 else:

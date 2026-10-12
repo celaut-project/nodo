@@ -16,6 +16,7 @@ from pathlib import Path
 # why the per-arch tables below come from `utils.arch_guard` and not from
 # `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
 from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
+from src.utils.privileges import installed_service_user
 from src.virtualizers.ch import vgic as ch_vgic
 from src.virtualizers.microvm import initramfs as ch_initramfs
 from src.virtualizers.microvm import guest as ch_guest
@@ -235,48 +236,32 @@ def _resolve_admin_group() -> str:
     return "root"
 
 
-def _configured_service_user(raw: dict) -> str:
-    """``main.SERVICE_USER``: the user a no-sudo install runs the daemon as, or ""."""
-    value = _get_nested_config(raw, "main.SERVICE_USER", "")
-    text = str(value or "").strip()
-    return "" if text == "root" else text
-
-
-def _configured_service_group(raw: dict) -> str:
-    """The primary group of ``main.SERVICE_USER``, as the installers render it."""
-    user = _configured_service_user(raw)
-    if not user:
+def _service_group(service_user: str) -> str:
+    """The primary group of the service user, as the installers render it."""
+    if not service_user:
         return ""
     try:
-        import grp
-        import pwd
-
-        return grp.getgrgid(pwd.getpwnam(user).pw_gid).gr_name
-    except (ImportError, KeyError):
-        return user
+        return grp.getgrgid(pwd.getpwnam(service_user).pw_gid).gr_name
+    except KeyError:
+        return service_user
 
 
-def _service_template_name(main_dir: str) -> str:
-    """The unit template this install was set up from.
+def _service_template_name(service_user: str) -> str:
+    """The unit template for a daemon that runs as ``service_user`` ("" = root).
 
-    A ``--service-user`` install renders ``nodo-nosudo.service.template``
-    (``bash/setup_service_user.sh``). Comparing its unit against the root template
-    would report it as wrong and "fix" it back to ``User=root``.
+    A service user gets ``nodo-nosudo.service.template``, as
+    ``bash/setup_service_user.sh`` renders it. Comparing its unit against the root
+    template would report it as wrong and "fix" it back to ``User=root``.
     """
-    import yaml
-
-    config_path = os.path.join(main_dir, "config.yaml")
-    raw = {}
-    if os.path.isfile(config_path):
-        with open(config_path, "r") as f:
-            raw = yaml.safe_load(f) or {}
-    if _configured_service_user(raw):
-        return "nodo-nosudo.service.template"
-    return "nodo.service.template"
+    return "nodo-nosudo.service.template" if service_user else "nodo.service.template"
 
 
-def _render_service_template(template_content: str, main_dir: str) -> str:
-    """Render nodo.service.template using the same config keys as install.sh."""
+def _render_service_template(template_content: str, main_dir: str, service_user: str = "") -> str:
+    """Render a unit template using the same config keys as install.sh.
+
+    ``service_user`` comes from root's record (``installed_service_user``), never
+    from config.yaml.
+    """
     import yaml
 
     config_path = os.path.join(main_dir, "config.yaml")
@@ -317,8 +302,8 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         "{{PYTHON_VENV_BIN}}": python_venv_bin,
         "{{ADMIN_GROUP}}": _resolve_admin_group(),
         # Only in nodo-nosudo.service.template, rendered by bash/setup_service_user.sh.
-        "{{SERVICE_USER}}": _configured_service_user(raw),
-        "{{SERVICE_GROUP}}": _configured_service_group(raw),
+        "{{SERVICE_USER}}": service_user,
+        "{{SERVICE_GROUP}}": _service_group(service_user),
         "{{RUNTIME_DIR_NAME}}": "nodo",
     }
 
@@ -1276,7 +1261,12 @@ def doctor_command(main_dir):
 
     service_name = "nodo.service"
     service_file_path = f"/etc/systemd/system/{service_name}"
-    template_file = os.path.join(main_dir, "bash", _service_template_name(main_dir))
+    try:
+        service_user = installed_service_user(unit_file=service_file_path)
+    except (OSError, ValueError) as e:
+        print(f"Error: {e}", flush=True)
+        return
+    template_file = os.path.join(main_dir, "bash", _service_template_name(service_user))
 
     if not os.path.exists(template_file):
         print(f"Error: Template file {template_file} not found.", flush=True)
@@ -1284,7 +1274,7 @@ def doctor_command(main_dir):
 
     with open(template_file, "r") as f:
         try:
-            expected_content = _render_service_template(f.read(), main_dir)
+            expected_content = _render_service_template(f.read(), main_dir, service_user)
         except ValueError as e:
             print(f"Error: {e}", flush=True)
             return

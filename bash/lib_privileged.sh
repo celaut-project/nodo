@@ -27,6 +27,69 @@ fi
 NODO_VIRTIOFSD_SYSTEM_PATH="/usr/local/libexec/nodo/virtiofsd"
 NODO_VIRTIOFSD_APPARMOR_PROFILE="/etc/apparmor.d/nodo-virtiofsd"
 
+# The user the daemon runs as, when it is not root. Root's file, and the only
+# place a step that runs as root reads it from: config.yaml is writable by that
+# user, and a value there that says "root" would make the next `sudo nodo update`
+# or `sudo nodo doctor` install a root unit for it.
+NODO_SERVICE_USER_RECORD="/etc/nodo/service-user"
+
+valid_user_name() {
+    local pattern='^[A-Za-z_][A-Za-z0-9._-]{0,31}$'
+    [[ "$1" =~ $pattern ]]
+}
+
+require_user_name() {
+    # require_user_name <what> <value>
+    valid_user_name "$2" || fail "$1 is not a valid user or group name: $(printf '%q' "$2")."
+}
+
+read_service_user_record() {
+    # The user in NODO_SERVICE_USER_RECORD, or nothing when there is no record.
+    # Fails when the record is not root's alone, or does not hold one user name.
+    local file="$NODO_SERVICE_USER_RECORD" path owner mode name
+    [ -e "$file" ] || return 0
+    for path in "$file" "$(dirname "$file")"; do
+        read -r owner mode < <(stat -c '%u %a' -- "$path")
+        [ "$owner" = 0 ] && (( (8#$mode & 8#022) == 0 )) \
+            || fail "$path must be owned by root and writable only by root."
+    done
+    name="$(cat -- "$file")"
+    require_user_name "$file" "$name"
+    printf '%s' "$name"
+}
+
+write_service_user_record() {
+    # write_service_user_record <user>: an empty user removes the record (root).
+    if [ -z "$1" ]; then
+        rm -f -- "$NODO_SERVICE_USER_RECORD"
+        return 0
+    fi
+    require_user_name "service user" "$1"
+    install -d -o root -g root -m 0755 "$(dirname "$NODO_SERVICE_USER_RECORD")"
+    printf '%s' "$1" > "$NODO_SERVICE_USER_RECORD.tmp"
+    chown root:root "$NODO_SERVICE_USER_RECORD.tmp"
+    chmod 0644 "$NODO_SERVICE_USER_RECORD.tmp"
+    mv -f "$NODO_SERVICE_USER_RECORD.tmp" "$NODO_SERVICE_USER_RECORD"
+}
+
+unit_user() {
+    # unit_user <unit file>: its last User=, or nothing when it has none.
+    [ -f "$1" ] || return 0
+    sed -n 's/^[[:space:]]*User[[:space:]]*=[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "$1" | tail -n 1
+}
+
+installed_service_user() {
+    # The user the daemon runs as, from root's sources only: the record, else the
+    # User= of the installed unit (a node set up before the record existed).
+    # Nothing means root.
+    local name
+    name="$(read_service_user_record)" || exit 1
+    [ -n "$name" ] || name="$(unit_user "${1:-/etc/systemd/system/nodo.service}")"
+    [ "$name" != root ] || name=""
+    [ -z "$name" ] || require_user_name "the User= of the nodo unit" "$name"
+    printf '%s' "$name"
+}
+
 priv_record() {
     # priv_record <description> <command>
     local file="${NODO_PRIV_FILE:-}"

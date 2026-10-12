@@ -54,7 +54,8 @@ Options:
   --service-user <name>
                        Run the daemon as this system user, with CAP_NET_ADMIN
                        only, instead of root (created if missing). Opt-in; see
-                       docs/ROOTLESS.md. Needs sudo.
+                       docs/ROOTLESS.md. Needs sudo. 'nodo update' keeps it;
+                       --service-user root goes back to a root daemon.
   --no-input           Without sudo: print the root steps, do not offer to run them.
   -h, --help           Show this help message.
 EOF
@@ -341,6 +342,28 @@ esac
 # shellcheck source=bash/lib_privileged.sh
 . "$TARGET_DIR/bash/lib_privileged.sh"
 
+if [ "$UNPRIVILEGED" = true ]; then
+  SCRIPT_USER="$(id -un)"
+else
+  SCRIPT_USER="${SUDO_USER:-}"
+  if [ -z "$SCRIPT_USER" ]; then
+    SCRIPT_USER="$(logname 2>/dev/null || echo root)"
+  fi
+fi
+
+# Who the daemon runs as. --service-user names it (root: back to a root daemon).
+# Without the flag, as on 'nodo update', the node keeps what it has, read from
+# root's own record (bash/lib_privileged.sh) and never from config.yaml, which
+# that user can write.
+if [ "$UNPRIVILEGED" = true ]; then
+  # Without sudo there is no other user to run it as.
+  SERVICE_USER="$SCRIPT_USER"
+elif [ -z "$SERVICE_USER" ]; then
+  SERVICE_USER="$(installed_service_user "$SERVICE_FILE")" || exit 1
+elif [ "$SERVICE_USER" = root ]; then
+  SERVICE_USER=""
+fi
+
 PRIVILEGED_SCRIPT="$TARGET_DIR/install-privileged.sh"
 if [ "$UNPRIVILEGED" = true ]; then
   NODO_PRIV_FILE="$(mktemp)"
@@ -386,15 +409,6 @@ fi
 # No local Docker setup: nodo runs services under Cloud Hypervisor and delegates
 # packing to the external packer-service. Docker is never installed on this host.
 
-if [ "$UNPRIVILEGED" = true ]; then
-  SCRIPT_USER="$(id -un)"
-else
-  SCRIPT_USER="${SUDO_USER:-}"
-  if [ -z "$SCRIPT_USER" ]; then
-    SCRIPT_USER="$(logname 2>/dev/null || echo root)"
-  fi
-fi
-
 expand_main_dir_placeholder() {
   printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
 }
@@ -421,16 +435,6 @@ JAVA_HOME_PATH="$(read_config_path_or_default '.dependencies.java.JAVA_HOME' "$T
 PYTHON_RUNTIME_BIN_PATH="$(read_config_path_or_default '.dependencies.python.RUNTIME_BIN' "$TARGET_DIR/runtime/python/current/bin/python3")"
 PYTHON_VENV_BIN_PATH="$(read_config_path_or_default '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
 PYTHON_RUNTIME_BIN_DIR_PATH="$(dirname "$PYTHON_RUNTIME_BIN_PATH")"
-
-# A node set up with --service-user stays that way on 'nodo update', which re-runs
-# this script without the flag. To go back to root, set main.SERVICE_USER to ""
-# in config.yaml and run the installer again.
-if [ -z "$SERVICE_USER" ]; then
-  SERVICE_USER="$(read_config_path_or_default '.main.SERVICE_USER' '')"
-fi
-[ "$SERVICE_USER" != "root" ] || SERVICE_USER=""
-# Without sudo there is no other user to run it as.
-[ "$UNPRIVILEGED" != true ] || SERVICE_USER="$SCRIPT_USER"
 
 # TEMPORARY: install the portable Java runtime by default, unless it is already
 # there. This is provisional, only until the Ergo service is ready (it will then
@@ -514,7 +518,6 @@ prepare_unprivileged_service() {
   local unit="$staging/nodo.service"
   local start
 
-  "$yq_bin" -i ".main.SERVICE_USER = \"$SCRIPT_USER\"" "$config_file"
   "$yq_bin" -i '.virtualizers.ch.CGROUPS_BASE_DIR = "/sys/fs/cgroup/system.slice/nodo.service"' "$config_file"
   "$yq_bin" -i '.virtualizers.ch.API_SOCKET_DIR = "/run/nodo/ch"' "$config_file"
 
@@ -531,6 +534,13 @@ prepare_unprivileged_service() {
   fi
 
   mkdir -p "$staging"
+
+  # Where 'sudo nodo update' and 'sudo nodo doctor' learn who the daemon runs as.
+  if [ "$(cat "$NODO_SERVICE_USER_RECORD" 2>/dev/null)" != "$SCRIPT_USER" ]; then
+    printf '%s' "$SCRIPT_USER" > "$staging/service-user"
+    priv_record "Record, in a file only root can write, that nodo runs as $SCRIPT_USER" \
+      "sudo install -D -o root -g root -m 0644 $(printf '%q' "$staging/service-user") $NODO_SERVICE_USER_RECORD"
+  fi
 
   # Ubuntu 23.10+: a root-owned copy of virtiofsd, and the profile that lets that
   # copy (and nothing else) create a user namespace. See bash/lib_privileged.sh.
@@ -579,6 +589,7 @@ prepare_unprivileged_service() {
 if [ "$UNPRIVILEGED" = true ]; then
   prepare_unprivileged_service
 elif [ -z "$SERVICE_USER" ]; then
+  write_service_user_record ""
   create_service_file
 fi
 
