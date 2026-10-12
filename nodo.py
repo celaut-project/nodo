@@ -18,6 +18,10 @@ BLOCKDIR = env_manager.get("BLOCKDIR")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
+# The install this file belongs to. `update` and `doctor` run install.sh and
+# render the unit from here, as root, and not from main.MAIN_DIR: on a node whose
+# daemon is a service user, that user can write config.yaml.
+INSTALL_DIR = os.path.dirname(os.path.realpath(__file__))
 
 
 def _exit(code):
@@ -611,7 +615,7 @@ if __name__ == '__main__':
                 if os.geteuid() != 0 and service_user != getpass.getuser():
                     print("This script requires superuser privileges. Please run with sudo.")
                 else:
-                    main_dir = shlex.quote(MAIN_DIR)
+                    main_dir = shlex.quote(INSTALL_DIR)
                     os.system(f"/bin/bash {main_dir}/bash/restore_source.sh {main_dir}")
                     os.system(f"/bin/bash {main_dir}/install.sh --target-dir {main_dir}")
 
@@ -1240,7 +1244,7 @@ if __name__ == '__main__':
 
             case "doctor":
                 from src.commands.doctor import doctor_command
-                doctor_command(main_dir=MAIN_DIR)
+                doctor_command(main_dir=INSTALL_DIR)
 
             case "nat-guide":
                 from src.commands.nat_guide import nat_guide
