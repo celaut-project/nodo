@@ -156,6 +156,67 @@ service_storage_dir() {
     printf '%s' "$real"
 }
 
+# The config.yaml keys whose paths a step that runs as root executes, or installs
+# to: the runtimes, yq, buildkit, and the virtiofsd it asks for its version.
+NODO_ROOT_TRUSTED_CONFIG_KEYS=(
+    .dependencies.yq.BIN
+    .dependencies.java.RUNTIME_ROOT
+    .dependencies.java.JAVA_HOME
+    .dependencies.python.RUNTIME_ROOT
+    .dependencies.python.RUNTIME_BIN
+    .dependencies.python.VENV_BIN
+    .dependencies.rust.RUNTIME_ROOT
+    .dependencies.buildkit.BIN
+    .dependencies.buildkit.DAEMON_BIN
+    .virtualizers.ch.VIRTIOFSD_BINARY
+)
+
+take_config_from_service_user() {
+    # take_config_from_service_user <target dir> <service user> <operator>
+    #
+    # On a node whose daemon is <service user>, config.yaml is that user's to
+    # write, and the steps of an install run as root. Before any of them reads it:
+    #   1. config.yaml becomes a new file that only root can read or write. A new
+    #      inode, so a descriptor the user already holds no longer reaches it.
+    #      bash/setup_service_user.sh gives it back at the end of the install.
+    #   2. a path in NODO_ROOT_TRUSTED_CONFIG_KEYS that the user can change (it is
+    #      theirs, or under a directory of theirs such as the storage tree) stops
+    #      the install: root would run it, or install to it.
+    # Nothing to do when the daemon is root, or is the operator: either one can
+    # already run anything as root.
+    local target="$1" user="$2" operator="$3" config="$1/config.yaml" yq="$1/bin/yq"
+    local tmp key value path
+    [ -n "$user" ] && [ "$user" != "$operator" ] && id -- "$user" >/dev/null 2>&1 || return 0
+    [ -f "$config" ] || return 0
+
+    tmp="$(mktemp "$target/.config-root.XXXXXX")"
+    cat -- "$config" > "$tmp"
+    chown root:root "$tmp"
+    chmod 0600 "$tmp"
+    mv -f -- "$tmp" "$config"
+    printf 'config.yaml is root'"'"'s until this install gives it back to %s.\n' "$user"
+
+    [ -x "$yq" ] || return 0
+    for key in "${NODO_ROOT_TRUSTED_CONFIG_KEYS[@]}"; do
+        value="$("$yq" -r "$key // \"\"" "$config")" || fail "could not read $key from $config."
+        case "$value" in
+            *$'\n'*|*\\*) fail "$key in $config holds a newline or a backslash: $(printf '%q' "$value")." ;;
+        esac
+        value="${value//\$\{main.MAIN_DIR\}/$target}"
+        # A bare name is looked up in root's PATH, not in anything the user owns.
+        case "$value" in
+            ""|null) continue ;;
+            /*) path="$value" ;;
+            */*) path="$target/$value" ;;
+            *) continue ;;
+        esac
+        if path_writable_by "$path" "$user"; then
+            fail "$key in $config is $(printf '%q' "$value"), which $user can change, and this step runs as root.
+Point it at a path only root or the operator can write, or remove the key for the default."
+        fi
+    done
+}
+
 installed_service_user() {
     # The user the daemon runs as, from root's sources only: the record, else the
     # User= of the installed unit (a node set up before the record existed).
