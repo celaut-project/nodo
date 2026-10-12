@@ -497,5 +497,15 @@ class RestartWarningTests(unittest.TestCase):
         self.assertIn("A restart stops the VMs", (_ROOT / "docs" / "ROOTLESS.md").read_text())
 
 
+class OneUnitNameTests(unittest.TestCase):
+    """Review of #533: --unit renamed the runtime dir and cgroup; doctor did not follow."""
+
+    def test_setup_service_user_has_no_unit_option(self):
+        script = (_ROOT / "bash" / "setup_service_user.sh").read_text()
+        self.assertNotIn("--unit", script)
+        self.assertIn('SERVICE_FILE="/etc/systemd/system/nodo.service"', script)
+        self.assertIn('-e "s|{{RUNTIME_DIR_NAME}}|nodo|g"', script)
+
+
 if __name__ == "__main__":
     unittest.main()

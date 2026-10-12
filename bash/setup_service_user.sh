@@ -19,7 +19,7 @@
 #   4. gives the storage tree, the local packer's buildkit/ directory and
 #      config.yaml to that user (config.yaml 0660), and adds the operator to its
 #      group so they can still edit the config;
-#   5. renders bash/nodo-nosudo.service.template into /etc/systemd/system/<unit>.service.
+#   5. renders bash/nodo-nosudo.service.template into /etc/systemd/system/nodo.service.
 #
 # It does not start or enable the unit; the caller does. To go back to root, run
 # `sudo ./install.sh --service-user root`: it removes the record and renders the
@@ -29,7 +29,6 @@ set -euo pipefail
 
 TARGET_DIR="/nodo"
 SERVICE_USER=""
-UNIT="nodo"
 OPERATOR=""
 JAVA_HOME_PATH=""
 PYTHON_RUNTIME_BIN_DIR_PATH=""
@@ -41,7 +40,6 @@ Usage: sudo bash setup_service_user.sh --user <name> [options]
 
   --user <name>                   System user the daemon runs as (created if missing).
   --target-dir <path>             nodo install directory (default: /nodo).
-  --unit <name>                   systemd unit name without .service (default: nodo).
   --operator <login>              Login user to add to the service user's group.
   --java-home <path>              JAVA_HOME for the unit (default: from config.yaml).
   --python-runtime-bin-dir <dir>  Python runtime bin dir (default: from config.yaml).
@@ -55,7 +53,6 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --user) SERVICE_USER="${2:-}"; shift 2 ;;
     --target-dir) TARGET_DIR="${2:-}"; shift 2 ;;
-    --unit) UNIT="${2:-}"; shift 2 ;;
     --operator) OPERATOR="${2:-}"; shift 2 ;;
     --java-home) JAVA_HOME_PATH="${2:-}"; shift 2 ;;
     --python-runtime-bin-dir) PYTHON_RUNTIME_BIN_DIR_PATH="${2:-}"; shift 2 ;;
@@ -75,7 +72,6 @@ done
 [ -n "$SERVICE_USER" ] || { usage >&2; fail "--user is required."; }
 [ "$SERVICE_USER" != "root" ] || fail "--user root is the default mode; run install.sh without --service-user."
 require_user_name "--user" "$SERVICE_USER"
-printf '%s' "$UNIT" | grep -Eq '^[A-Za-z0-9_-]{1,64}$' || fail "invalid unit name: $UNIT"
 if [ -n "$OPERATOR" ] && [ "$OPERATOR" != "root" ] && ! id "$OPERATOR" >/dev/null 2>&1; then
   fail "no such operator user: $OPERATOR"
 fi
@@ -86,7 +82,9 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 take_config_from_service_user "$TARGET_DIR" "$SERVICE_USER" "$OPERATOR"
 TEMPLATE="$TARGET_DIR/bash/nodo-nosudo.service.template"
 YQ="$TARGET_DIR/bin/yq"
-SERVICE_FILE="/etc/systemd/system/$UNIT.service"
+# One unit name, as in install.sh and doctor: the runtime directory, the cgroup
+# and the socket directory below all follow it.
+SERVICE_FILE="/etc/systemd/system/nodo.service"
 [ -f "$CONFIG_FILE" ] || fail "$CONFIG_FILE not found."
 [ -f "$TEMPLATE" ] || fail "$TEMPLATE not found."
 [ -x "$YQ" ] || fail "$YQ not found; run install.sh first."
@@ -184,8 +182,8 @@ fi
 # --- 3. config keys ---------------------------------------------------------
 STORAGE_DIR="$(config_value '.main.STORAGE' "$TARGET_DIR/storage")"
 write_service_user_record "$SERVICE_USER"
-"$YQ" -i ".virtualizers.ch.CGROUPS_BASE_DIR = \"/sys/fs/cgroup/system.slice/$UNIT.service\"" "$CONFIG_FILE"
-"$YQ" -i ".virtualizers.ch.API_SOCKET_DIR = \"/run/$UNIT/ch\"" "$CONFIG_FILE"
+"$YQ" -i '.virtualizers.ch.CGROUPS_BASE_DIR = "/sys/fs/cgroup/system.slice/nodo.service"' "$CONFIG_FILE"
+"$YQ" -i '.virtualizers.ch.API_SOCKET_DIR = "/run/nodo/ch"' "$CONFIG_FILE"
 
 # --- 4. ownership -------------------------------------------------------------
 # The storage tree is given to the user with a chown -R that runs as root, and
@@ -233,7 +231,7 @@ sed \
   -e "s|{{PYTHON_VENV_BIN}}|$(escape_for_sed "$PYTHON_VENV_BIN_PATH")|g" \
   -e "s|{{SERVICE_USER}}|$SERVICE_USER|g" \
   -e "s|{{SERVICE_GROUP}}|$SERVICE_GROUP|g" \
-  -e "s|{{RUNTIME_DIR_NAME}}|$UNIT|g" \
+  -e "s|{{RUNTIME_DIR_NAME}}|nodo|g" \
   "$TEMPLATE" > "$rendered"
 if grep -q '{{[A-Z_][A-Z_]*}}' "$rendered"; then
   grep -o '{{[A-Z_][A-Z_]*}}' "$rendered" | sort -u >&2
@@ -243,6 +241,6 @@ fi
 install -m 0644 "$rendered" "$SERVICE_FILE"
 rm -f "$rendered"
 systemctl daemon-reload
-printf '%s runs as %s with CAP_NET_ADMIN only. Start it with: systemctl restart %s.service\n' \
-  "$SERVICE_FILE" "$SERVICE_USER" "$UNIT"
+printf '%s runs as %s with CAP_NET_ADMIN only. Start it with: systemctl restart nodo.service\n' \
+  "$SERVICE_FILE" "$SERVICE_USER"
 printf 'A restart stops every VM the node runs: they run inside the unit (Delegate=yes).\n'
