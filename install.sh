@@ -365,6 +365,7 @@ elif [ "$SERVICE_USER" = root ]; then
 fi
 # From here on, steps run as root and read config.yaml.
 if [ "$UNPRIVILEGED" != true ] && [ -n "$SERVICE_USER" ]; then
+  trap 'give_config_back "$TARGET_DIR" "$SERVICE_USER"' EXIT
   take_config_from_service_user "$TARGET_DIR" "$SERVICE_USER" "$SCRIPT_USER"
 fi
 

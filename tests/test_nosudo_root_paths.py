@@ -416,6 +416,25 @@ class TakeConfigTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("newline or a backslash", result.stderr)
 
+    def test_an_install_that_stops_gives_it_back(self):
+        """A refused (or failed) root step must not leave a daemon without its config."""
+        config = 'dependencies:\n  python:\n    VENV_BIN: "${main.MAIN_DIR}/storage/evil"\n'
+        Path(f"{self.target}/config.yaml").write_text(config)
+        result = _bash(
+            f'trap \'give_config_back "$T" {self.user}\' EXIT; '
+            f'take_config_from_service_user "$T" {self.user} operator',
+            T=self.target,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        info = os.stat(f"{self.target}/config.yaml")
+        self.assertEqual((info.st_uid, info.st_mode & 0o777), (self.uid, 0o660))
+
+    def test_both_scripts_set_the_trap_before_they_take_it(self):
+        for path in ("install.sh", "bash/setup_service_user.sh"):
+            with self.subTest(path=path):
+                text = (_ROOT / path).read_text()
+                self.assertLess(text.index("give_config_back"), text.index("take_config_from_service_user \""))
+
     def test_nothing_is_taken_when_the_daemon_is_the_operator(self):
         result = _bash(f'take_config_from_service_user "$T" {self.user} {self.user}', T=self.target)
         self.assertEqual(result.returncode, 0)
