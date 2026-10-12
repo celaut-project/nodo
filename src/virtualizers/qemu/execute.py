@@ -48,7 +48,12 @@ from src.virtualizers.microvm.bundle_formats import (
     ROOTFS_IMAGE_NAMES,
     is_read_only_format,
 )
-from src.virtualizers.microvm.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
+from src.virtualizers.microvm.cgroups import (
+    apply_cpu_limit,
+    apply_memory_limit,
+    ensure_vm_cgroup,
+    leave_delegated_base,
+)
 from src.virtualizers.microvm.errors import MicroVMError
 from src.virtualizers.microvm.members import QEMU as QEMU_HYPERVISOR
 from src.virtualizers.microvm.process import generate_vmachine_id
@@ -634,6 +639,8 @@ def execute(
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
             stderr_path, "w", encoding="utf-8"
         ) as stderr_file:
+            # Before the VM exists, as in src/virtualizers/ch/execute.py.
+            leave_delegated_base()
             process = subprocess.Popen(
                 process_args,
                 executable=qemu_binary,
