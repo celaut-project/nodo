@@ -217,6 +217,18 @@ Point it at a path only root or the operator can write, or remove the key for th
     done
 }
 
+warn_restart_stops_vms() {
+    # warn_restart_stops_vms <service user>: before nodo.service is restarted.
+    # The unit of a daemon that is not root has Delegate=yes, and its VMs run in
+    # the unit's cgroup: a restart stops every one of them. A root daemon's VMs
+    # are in /nodo-ch/, outside the unit, and keep running.
+    local count
+    count="$(pgrep -c -f '^nodo-(ch|qemu)-' 2>/dev/null || true)"
+    printf '\nWarning: nodo runs as %s, and its VMs run inside nodo.service (Delegate=yes).\n' "$1"
+    printf 'Restarting it stops every one of them%s; their clients have to start them again.\n\n' \
+        "$([ "${count:-0}" -gt 0 ] 2>/dev/null && printf ' (%s running now)' "$count")"
+}
+
 installed_service_user() {
     # The user the daemon runs as, from root's sources only: the record, else the
     # User= of the installed unit (a node set up before the record existed).

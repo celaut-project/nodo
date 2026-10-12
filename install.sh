@@ -596,7 +596,10 @@ prepare_unprivileged_service() {
       "sudo install -m 0644 $unit $SERVICE_FILE && sudo systemctl daemon-reload && sudo systemctl enable nodo.service"
   fi
   # Last, so the node starts on everything above, and on the code just installed.
-  priv_record "Start nodo (or restart it on the new code)" "sudo systemctl restart nodo.service"
+  if systemctl is-active --quiet nodo.service 2>/dev/null; then
+    warn_restart_stops_vms "$SCRIPT_USER"
+  fi
+  priv_record "Restart nodo on the new code (this stops every VM it runs)" "sudo systemctl restart nodo.service"
 }
 
 # A --service-user install gets its unit from bash/setup_service_user.sh instead,
@@ -757,6 +760,9 @@ if [ -n "$SERVICE_USER" ]; then
 fi
 
 if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
+  if [ -n "$SERVICE_USER" ]; then
+    warn_restart_stops_vms "$SERVICE_USER"
+  fi
   printf "Restarting nodo.service...\n"
   systemctl restart nodo.service || systemctl start nodo.service
 else
