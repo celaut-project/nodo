@@ -229,6 +229,17 @@ warn_restart_stops_vms() {
         "$([ "${count:-0}" -gt 0 ] 2>/dev/null && printf ' (%s running now)' "$count")"
 }
 
+give_config_back() {
+    # give_config_back <target dir> <service user>: config.yaml back to the user,
+    # as bash/setup_service_user.sh leaves it. On the exit of a root step that
+    # took it (take_config_from_service_user), so an install that stops early
+    # does not leave a daemon that cannot read its config on the next start.
+    local config="$1/config.yaml" user="$2" group
+    [ -n "$user" ] && [ -f "$config" ] && id -- "$user" >/dev/null 2>&1 || return 0
+    group="$(id -gn -- "$user")"
+    chown "$user:$group" "$config" && chmod 0660 "$config"
+}
+
 installed_service_user() {
     # The user the daemon runs as, from root's sources only: the record, else the
     # User= of the installed unit (a node set up before the record existed).
