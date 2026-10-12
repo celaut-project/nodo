@@ -207,12 +207,13 @@ class UnitTemplateTests(unittest.TestCase):
 
         main_dir = tempfile.mkdtemp()
         self.addCleanup(lambda: __import__("shutil").rmtree(main_dir, ignore_errors=True))
+        # What config.yaml says about the user does not matter: it is the user's file.
         with open(os.path.join(main_dir, "config.yaml"), "w") as handle:
-            handle.write(f'main:\n  SERVICE_USER: "{service_user}"\n')
-        name = doctor._service_template_name(main_dir)
+            handle.write('main:\n  SERVICE_USER: ""\n')
+        name = doctor._service_template_name(service_user)
         template = (_ROOT / "bash" / name).read_text()
         with mock.patch.object(doctor, "_resolve_admin_group", return_value="sudo"):
-            return name, doctor._render_service_template(template, main_dir)
+            return name, doctor._render_service_template(template, main_dir, service_user)
 
     def test_a_root_install_keeps_the_root_unit(self):
         name, rendered = self._render("")
@@ -248,7 +249,8 @@ class UnitTemplateTests(unittest.TestCase):
         install = (_ROOT / "install.sh").read_text()
         self.assertIn("--service-user)", install)
         self.assertIn("bash/setup_service_user.sh", install)
-        self.assertIn(".main.SERVICE_USER", install)
+        self.assertIn('SERVICE_USER="$(installed_service_user "$SERVICE_FILE")"', install)
+        self.assertNotIn(".main.SERVICE_USER", install)
 
 
 class DoctorKvmAccessTests(unittest.TestCase):

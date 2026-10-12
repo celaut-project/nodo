@@ -10,7 +10,9 @@
 #      sandbox (chroot is root only), installs uidmap and squashfs-tools, and on
 #      hosts that restrict unprivileged user namespaces with AppArmor, a
 #      root-owned copy of virtiofsd and a profile that lets that copy create one;
-#   3. writes the keys a non-root daemon needs into config.yaml: main.SERVICE_USER,
+#   3. records the user in /etc/nodo/service-user (root's file: config.yaml is
+#      the user's to write, so no step that runs as root reads it from there), and
+#      writes the keys a non-root daemon needs into config.yaml:
 #      virtualizers.ch.CGROUPS_BASE_DIR (the unit's delegated cgroup) and
 #      virtualizers.ch.API_SOCKET_DIR (under the unit's RuntimeDirectory);
 #   4. gives the storage tree, the local packer's buildkit/ directory and
@@ -18,8 +20,8 @@
 #      group so they can still edit the config;
 #   5. renders bash/nodo-nosudo.service.template into /etc/systemd/system/<unit>.service.
 #
-# It does not start or enable the unit; the caller does. To go back to root, set
-# main.SERVICE_USER to "" in config.yaml and run install.sh again: it renders the
+# It does not start or enable the unit; the caller does. To go back to root, run
+# `sudo ./install.sh --service-user root`: it removes the record and renders the
 # root unit again.
 
 set -euo pipefail
@@ -174,7 +176,7 @@ fi
 
 # --- 3. config keys ---------------------------------------------------------
 STORAGE_DIR="$(config_value '.main.STORAGE' "$TARGET_DIR/storage")"
-"$YQ" -i ".main.SERVICE_USER = \"$SERVICE_USER\"" "$CONFIG_FILE"
+write_service_user_record "$SERVICE_USER"
 "$YQ" -i ".virtualizers.ch.CGROUPS_BASE_DIR = \"/sys/fs/cgroup/system.slice/$UNIT.service\"" "$CONFIG_FILE"
 "$YQ" -i ".virtualizers.ch.API_SOCKET_DIR = \"/run/$UNIT/ch\"" "$CONFIG_FILE"
 
