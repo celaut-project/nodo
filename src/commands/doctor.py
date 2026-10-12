@@ -419,7 +419,7 @@ def _doctor_ch_binary(ch_binary: str):
     # Get version
     try:
         result = subprocess.run(
-            [ch_binary, "--version"], capture_output=True, text=True, timeout=10
+            [*_RUN_AS_DAEMON, ch_binary, "--version"], capture_output=True, text=True, timeout=10
         )
         version_text = (result.stdout or "").strip() or (result.stderr or "").strip()
         if version_text:
@@ -630,8 +630,14 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
             return
 
         cmdline = f"root=/dev/vda rw console={ch_guest.serial_device()}"
+        if _RUN_AS_DAEMON:
+            # The VM runs as the daemon's user: its disk, socket and serial log too.
+            uid, gid = _DAEMON_IDS
+            for path in (tmpdir, rootfs_path):
+                os.chown(path, uid, gid)
 
         cmd = [
+            *_RUN_AS_DAEMON,
             ch_binary,
             "--api-socket", api_socket,
             "--kernel", kernel_path,
@@ -807,7 +813,7 @@ def _doctor_virtiofsd(virtiofsd_binary: str):
     """
     print("\nvirtiofsd (shared filesystems):", flush=True)
 
-    result = microvm_virtiofsd.probe(virtiofsd_binary)
+    result = microvm_virtiofsd.probe(virtiofsd_binary, run_as=_RUN_AS_DAEMON)
     if result.usable:
         print(f"[OK] {result.detail}", flush=True)
         return result
@@ -1286,6 +1292,29 @@ def _compat_state(bridge):
 
 SERVICE_FILE_PATH = "/etc/systemd/system/nodo.service"
 
+# How doctor runs the binaries config.yaml names (cloud-hypervisor, virtiofsd): as
+# the user the unit runs the daemon as, with the groups the unit gives it and no
+# capability. Empty for a root daemon. On a node whose daemon is a service user,
+# that user can write config.yaml, and doctor runs as root.
+_RUN_AS_DAEMON: list = []
+_DAEMON_IDS = (0, 0)
+
+
+def _run_as_daemon_prefix(username: str, supplementary_groups=()) -> list:
+    if not username or username == "root":
+        return []
+    user = pwd.getpwnam(username)
+    groups = ",".join(supplementary_groups) if supplementary_groups else ""
+    return [
+        "setpriv",
+        f"--reuid={user.pw_uid}",
+        f"--regid={user.pw_gid}",
+        f"--groups={groups}" if groups else "--clear-groups",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--",
+    ]
+
 
 def _confirm_user_change(service_name: str, current: str, expected: str) -> bool:
     """Ask before a rewrite changes who the unit runs as; never without a terminal."""
@@ -1380,6 +1409,21 @@ def doctor_command(main_dir):
         current_unit = expected_content
 
     print(f"Service runtime user for checks: {current_service_user}", flush=True)
-    _doctor_kvm_checks(current_service_user, _parse_unit_supplementary_groups(current_unit))
+    supplementary_groups = _parse_unit_supplementary_groups(current_unit)
+    _doctor_kvm_checks(current_service_user, supplementary_groups)
+    global _RUN_AS_DAEMON, _DAEMON_IDS
+    try:
+        _RUN_AS_DAEMON = _run_as_daemon_prefix(current_service_user, supplementary_groups)
+        if _RUN_AS_DAEMON:
+            info = pwd.getpwnam(current_service_user)
+            _DAEMON_IDS = (info.pw_uid, info.pw_gid)
+    except KeyError:
+        print(
+            f"[FAIL] {service_name} runs as {current_service_user}, who does not exist. "
+            "Skipping the checks that run the configured binaries.",
+            flush=True,
+        )
+        _doctor_network_checks()
+        return
     _doctor_cloud_hypervisor(main_dir)
     _doctor_network_checks()
