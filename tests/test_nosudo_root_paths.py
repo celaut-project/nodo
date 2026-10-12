@@ -483,5 +483,19 @@ class DoctorRunsBinariesAsTheDaemonTests(unittest.TestCase):
         self.assertEqual(calls[1], prefix + [binary.name, "--version"])
 
 
+class RestartWarningTests(unittest.TestCase):
+    """Review of #533, item 2: with Delegate=yes a restart stops the VMs."""
+
+    def test_the_installer_warns_before_it_restarts(self):
+        install = (_ROOT / "install.sh").read_text()
+        self.assertLess(install.index('warn_restart_stops_vms "$SERVICE_USER"'), install.index('printf "Restarting nodo.service...'))
+        self.assertIn('warn_restart_stops_vms "$SCRIPT_USER"', install)
+        result = _bash("warn_restart_stops_vms nodo")
+        self.assertIn("stops every one of them", result.stdout)
+
+    def test_the_docs_say_it(self):
+        self.assertIn("A restart stops the VMs", (_ROOT / "docs" / "ROOTLESS.md").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

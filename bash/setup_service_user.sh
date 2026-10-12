@@ -245,3 +245,4 @@ rm -f "$rendered"
 systemctl daemon-reload
 printf '%s runs as %s with CAP_NET_ADMIN only. Start it with: systemctl restart %s.service\n' \
   "$SERVICE_FILE" "$SERVICE_USER" "$UNIT"
+printf 'A restart stops every VM the node runs: they run inside the unit (Delegate=yes).\n'

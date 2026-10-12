@@ -28,6 +28,26 @@ much work it would take to run without `sudo`. For the diagnostic command see
 > (and nothing else) create a user namespace. The profile never follows
 > `virtualizers.ch.VIRTIOFSD_BINARY`: config.yaml is writable by the daemon's user.
 >
+> **A restart stops the VMs.** With a service user, and in the install without
+> sudo, the unit has `Delegate=yes` and the VMs run inside its cgroup
+> (`nodo.service/nodo-ch/<vm>`). So `systemctl restart nodo.service`, and with it
+> `nodo update` and `nodo daemon restart`, stops every running VM; their clients
+> have to start them again. On a root install the VMs are in `/nodo-ch/`, outside
+> the unit, and keep running. The installer says so before it restarts the unit.
+>
+> **What root takes from the service user, and what it does not.** The daemon's
+> user can write config.yaml, and `sudo nodo update`, `sudo nodo doctor` and
+> `bash/setup_service_user.sh` run as root. None of them lets that file decide
+> what root does: the user comes from `/etc/nodo/service-user` (root's file; to
+> go back to root, `sudo ./install.sh --service-user root`), every value that
+> goes into the unit must be a plain absolute path (no newline, backslash, quote,
+> `$`, `%`, `:` or `;`), the storage that gets chowned must be
+> `<install dir>/storage`, the installer takes config.yaml back (root-only) before
+> its root steps read it and refuses a runtime, yq, buildkit or virtiofsd path the
+> user can change, `update` and `doctor` run from the install they belong to and
+> not from `main.MAIN_DIR`, doctor runs cloud-hypervisor and virtiofsd as the
+> daemon's user, and it asks before a rewrite changes the unit's `User=`.
+>
 > **Ports and the firewall.** Starting and stopping an instance opens and closes
 > its rules in nodo's own nftables tables, and creates and deletes its tap. All of
 > it needs `CAP_NET_ADMIN`, which the daemon holds, so no step needs sudo. Without
