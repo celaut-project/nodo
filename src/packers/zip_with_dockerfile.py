@@ -42,6 +42,7 @@ from src.utils.shared_filesystems import (
     ACCESS_XATTR_KEY,
     GUEST_XATTR_KEY,
     SHARE_ENV_XATTR_KEY,
+    SHARE_NETWORK_XATTR_KEY,
     SHARE_TAG_XATTR_KEY,
     SHARED_XATTR_KEY,
     declarations_for_filesystem,
@@ -87,7 +88,10 @@ READ_ONLY_FILESYSTEM_KEY = "read_only_filesystem"
 # src/utils/shared_filesystems.py on the directory's ItemBranch. See docs/PACKING.md.
 SHARED_FILESYSTEMS_KEY = "shared_filesystems"
 _SHARED_ROLE_XATTRS = {"shared": SHARED_XATTR_KEY, "guest": GUEST_XATTR_KEY}
-_SHARED_ENTRY_FIELDS = {"path", "role", "tag", "env", "access"}
+# A network share (#268) is not a side of a parent share: its role names no xattr
+# of its own, and its `network` field becomes `share_network`.
+_NETWORK_ROLE = "network"
+_SHARED_ENTRY_FIELDS = {"path", "role", "tag", "env", "access", "network"}
 
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
@@ -399,8 +403,10 @@ class ZipContainerPacker:
         """``service.json`` ``shared_filesystems``, type-checked, as a list of dicts.
 
         Absent or empty is an empty list. Each entry is an object with a string
-        ``path`` (absolute, not ``/``) and a ``role`` of ``shared`` or ``guest``;
-        ``tag``, ``env`` and ``access`` are optional strings. Nothing is coerced
+        ``path`` (absolute, not ``/``) and a ``role`` of ``shared``, ``guest`` or
+        ``network``; ``tag``, ``env`` and ``access`` are optional strings. A
+        ``network`` role requires a ``network`` string, the tag of an entry of the
+        service's ``network``, and no other role takes one. Nothing is coerced
         and unknown fields are refused: a misspelt ``acces`` silently dropped
         would pack a share with the wrong mode.
         """
@@ -425,7 +431,7 @@ class ZipContainerPacker:
                     f"{at} has unknown field(s) {unknown}; "
                     f"allowed: {sorted(_SHARED_ENTRY_FIELDS)}."
                 )
-            for field in ("tag", "env", "access", "path", "role"):
+            for field in ("tag", "env", "access", "path", "role", "network"):
                 if field in entry and not isinstance(entry[field], str):
                     raise ValueError(
                         f"{at}.{field} must be a string, got "
@@ -433,9 +439,27 @@ class ZipContainerPacker:
                     )
             if "path" not in entry or "role" not in entry:
                 raise ValueError(f"{at} requires both 'path' and 'role'.")
-            if entry["role"] not in _SHARED_ROLE_XATTRS:
+            if entry["role"] not in (*_SHARED_ROLE_XATTRS, _NETWORK_ROLE):
                 raise ValueError(
-                    f"{at}.role must be 'shared' or 'guest', got {entry['role']!r}."
+                    f"{at}.role must be 'shared', 'guest' or 'network', got {entry['role']!r}."
+                )
+            if entry["role"] == _NETWORK_ROLE:
+                if not entry.get("network"):
+                    raise ValueError(
+                        f"{at} has role 'network' and requires a 'network': the tag of "
+                        f"the service network that scopes the share."
+                    )
+                declared_tags = {t for n in self._parsed_networks() for t in n.tags}
+                if entry["network"].strip() not in declared_tags:
+                    raise ValueError(
+                        f"{at}.network {entry['network']!r} is not a tag of any entry "
+                        f"of the service's 'network'. A network share is a channel "
+                        f"inside that network, so the service must declare it."
+                    )
+            elif "network" in entry:
+                raise ValueError(
+                    f"{at}.network is only valid with role 'network', got role "
+                    f"{entry['role']!r}."
                 )
             path = posixpath.normpath(entry["path"])
             if not entry["path"].startswith("/") or path in ("/", "//"):
@@ -479,8 +503,10 @@ class ZipContainerPacker:
                     )
                 filesystem = branch.filesystem
 
-            keyvalue.set_value(branch.xattrs, _SHARED_ROLE_XATTRS[entry["role"]], b"true")
+            if entry["role"] != _NETWORK_ROLE:
+                keyvalue.set_value(branch.xattrs, _SHARED_ROLE_XATTRS[entry["role"]], b"true")
             for field, key in (
+                ("network", SHARE_NETWORK_XATTR_KEY),
                 ("tag", SHARE_TAG_XATTR_KEY),
                 ("env", SHARE_ENV_XATTR_KEY),
                 ("access", ACCESS_XATTR_KEY),
@@ -544,9 +570,13 @@ class ZipContainerPacker:
         # a squashfs/erofs image, and seeding from nothing would hide the content
         # the service shipped behind an empty directory. The same condition is
         # checked here, on the same declarations, so the operator finds out while
-        # packing rather than after publishing a service that cannot start.
+        # packing rather than after publishing a service that cannot start. A
+        # network share counts too: its first member seeds it the same way.
         try:
-            exported = [d for d in declarations_for_filesystem(root_filesystem) if d.shared]
+            exported = [
+                d for d in declarations_for_filesystem(root_filesystem)
+                if d.shared or d.network
+            ]
         except ValueError as e:
             raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
 
@@ -554,8 +584,9 @@ class ZipContainerPacker:
             paths = ", ".join(sorted(d.path for d in exported))
             raise ValueError(
                 f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' is true and this service "
-                f"exports {len(exported)} shared filesystem(s) ({paths}). A share is "
-                f"seeded from the exporter's own image, which the node reads with "
+                f"exports or shares {len(exported)} shared filesystem(s) ({paths}). A "
+                f"share is seeded from the image of its exporter or first member, which "
+                f"the node reads with "
                 f"debugfs -- an ext4 reader that cannot open the squashfs/erofs image "
                 f"a read-only service is built into. Drop "
                 f"'{READ_ONLY_FILESYSTEM_KEY}' or drop the shared declaration."

@@ -1,4 +1,4 @@
-"""VirtioFS backend for shared filesystems (parent -> child inheritance).
+"""VirtioFS backend for shared filesystems (parent -> child, and network shares).
 
 The *semantics* of shared filesystems live in ``src/utils/shared_filesystems.py``
 and their *authorization* in ``src/manager/shares.py``. This module is the
@@ -25,7 +25,9 @@ For each share (identified by ``shared_filesystems.share_id``) it provides:
    the device read-write.
 3. **Seeding.** The first time an export is materialized its directory is filled
    with what the exporter packaged at that path, so the mount does not hide the
-   content the service shipped.
+   content the service shipped. A network share has no exporter: its first member
+   seeds it, under the share's lock, so two members that start together cannot
+   both seed it.
 4. **Lifecycle by reservation.** A share's own state file records who is using it,
    written *before* the VM that will use it is built. Ownership lives there and
    not in the state of whichever VM happens to leave last, so neither of the two
@@ -72,6 +74,8 @@ class SharedMount(NamedTuple):
     exported: bool = False  # this VM is the share's exporter, not a guest of it
     external: bool = False  # the host directory is someone else's (rundev): never
                             # seeded, never deleted
+    network: bool = False   # a network share (#268): no owner, seeded by its
+                            # first member, removed with its last
 
 
 # --------------------------------------------------------------------------- #
@@ -130,13 +134,15 @@ def mount_for(
     *,
     exported: bool,
     host_dir: Optional[str] = None,
+    network: bool = False,
 ) -> SharedMount:
     """The mount that realizes one authorized share for this VM.
 
     An exporter always mounts read-write, whatever the declaration asked for:
     writes have to land on the host directory its children will read. ``host_dir``
     overrides where the share lives, which is how a rundev sandbox hands over a
-    directory of the developer's own.
+    directory of the developer's own. A member of a network share mounts it the
+    way it declared.
     """
     return SharedMount(
         share_id_hex=ref.share_id,
@@ -146,6 +152,7 @@ def mount_for(
         host_dir=host_dir or str(shared_dir(base_dir, ref.share_id)),
         exported=exported,
         external=bool(host_dir),
+        network=network,
     )
 
 
@@ -241,19 +248,39 @@ def reserve_share(
     """
     path = share_state_path(base_dir, mount.share_id_hex)
     with _lock_for(path):
-        state = load_share_state(base_dir, mount.share_id_hex) or {
-            "share_id_hex": mount.share_id_hex,
-            "users": [],
-            "external": mount.external,
-            "host_dir": mount.host_dir,
-        }
-        users = [u for u in state.get("users") or [] if u != vmachine_id]
-        users.append(vmachine_id)
-        state["users"] = users
-        if mount.exported:
-            state["owner"] = vmachine_id
-        _save_share_state(path, state)
-        return state
+        return _reserve_locked(path, base_dir, mount, vmachine_id)
+
+
+def _reserve_locked(
+    path: Path, base_dir: str, mount: SharedMount, vmachine_id: str
+) -> dict:
+    """:func:`reserve_share` for a caller that already holds the share's lock."""
+    state = load_share_state(base_dir, mount.share_id_hex) or {
+        "share_id_hex": mount.share_id_hex,
+        "users": [],
+        "external": mount.external,
+        "host_dir": mount.host_dir,
+    }
+    users = [u for u in state.get("users") or [] if u != vmachine_id]
+    users.append(vmachine_id)
+    state["users"] = users
+    if mount.exported:
+        state["owner"] = vmachine_id
+    if mount.network:
+        state["network"] = True
+    _save_share_state(path, state)
+    return state
+
+
+def holds_network_share(base_dir: str, share_id_hex: str) -> bool:
+    """Whether this node holds the network share ``share_id_hex`` now.
+
+    Held means a state file that marks it as a network share and lists at least
+    one user. A parent share is never reported: its id is the parent's business,
+    and no instance on another node can join it.
+    """
+    state = load_share_state(base_dir, share_id_hex) or {}
+    return bool(state.get("network")) and bool(state.get("users"))
 
 
 def release_share(base_dir: str, share_id_hex: str, vmachine_id: str) -> dict:
@@ -344,25 +371,50 @@ def ensure_share_backend(
     present, is reused.
 
     ``seed_fn(mount, export_dir)`` fills the directory the first time an export
-    is materialized. It runs before the daemon binds, only for the exporter, and
-    never for a directory the node does not own (a rundev sandbox's).
+    is materialized. It runs before the daemon binds, only for the exporter -- or,
+    for a network share, for the member that materializes it first -- and never
+    for a directory the node does not own (a rundev sandbox's).
+
+    For a network share, the check for a first materialization, the seed and the
+    reservation run under the share's lock. Two members that start together would
+    otherwise both see no directory and both seed it, and a member that starts
+    while the last one stops could reserve a directory that is then removed.
     """
     sid = mount.share_id_hex
     export_dir = Path(mount.host_dir)
     socket_path = virtiofs_socket_path(socket_dir, sid, vmachine_id)
+    path = share_state_path(base_dir, sid)
 
-    first_materialization = not export_dir.exists()
-    export_dir.mkdir(parents=True, exist_ok=True)
-    if not mount.external:
-        os.chmod(share_state_dir(base_dir, sid), 0o700)
-        os.chmod(export_dir, 0o700)
+    def materialize() -> bool:
+        first = not export_dir.exists()
+        export_dir.mkdir(parents=True, exist_ok=True)
+        if not mount.external:
+            os.chmod(share_state_dir(base_dir, sid), 0o700)
+            os.chmod(export_dir, 0o700)
+        return first
+
     ensure_private_dir(socket_dir)
-
-    if first_materialization and mount.exported and not mount.external and seed_fn:
-        logger_fn(f"[virtiofs] share={sid} seeding from packaged {mount.guest_path}")
-        seed_fn(mount, export_dir)
-
-    state = reserve_share(base_dir, mount, vmachine_id)
+    if mount.network:
+        with _lock_for(path):
+            if materialize() and not mount.external and seed_fn:
+                logger_fn(
+                    f"[virtiofs] share={sid} first member; seeding from its packaged "
+                    f"{mount.guest_path}"
+                )
+                try:
+                    seed_fn(mount, export_dir)
+                except Exception:
+                    # A half-seeded directory would be taken as seeded by the next
+                    # member. Remove it so the next one seeds it again.
+                    shutil.rmtree(share_state_dir(base_dir, sid), ignore_errors=True)
+                    raise
+            state = _reserve_locked(path, base_dir, mount, vmachine_id)
+    else:
+        first_materialization = materialize()
+        if first_materialization and mount.exported and not mount.external and seed_fn:
+            logger_fn(f"[virtiofs] share={sid} seeding from packaged {mount.guest_path}")
+            seed_fn(mount, export_dir)
+        state = reserve_share(base_dir, mount, vmachine_id)
     attached = {
         "share_id_hex": sid,
         "tag": mount.tag,
@@ -371,6 +423,7 @@ def ensure_share_backend(
         "readonly": mount.readonly,
         "guest_path": mount.guest_path,
         "external": mount.external,
+        "network": mount.network,
     }
 
     # This VM's daemon, if it is already running (the same VM ensured twice).
@@ -399,7 +452,6 @@ def ensure_share_backend(
         release_share(base_dir, sid, vmachine_id)
         raise
 
-    path = share_state_path(base_dir, sid)
     with _lock_for(path):
         stored = load_share_state(base_dir, sid) or state
         daemons = dict(stored.get("daemons") or {})
@@ -537,13 +589,27 @@ def teardown_virtiofs_for_vm(
             logger_fn(f"[virtiofs] share={sid} released; external directory kept.")
             continue
         disk_dir = share_state_dir(base_dir, sid)
-        try:
-            shutil.rmtree(disk_dir, ignore_errors=False)
-            logger_fn(f"[virtiofs] share={sid} directory removed ({disk_dir}).")
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            logger_fn(f"[virtiofs] share={sid} error removing directory {disk_dir}: {e}")
+        # Under the share's lock, and only if nobody reserved it again after it was
+        # spent: a network share can get a new member at any time, and that member
+        # must not lose the directory it just reserved.
+        with _lock_for(share_state_path(base_dir, sid)):
+            if (load_share_state(base_dir, sid) or {}).get("users"):
+                logger_fn(
+                    f"[virtiofs] share={sid} reserved again before its removal; keeping it."
+                )
+                continue
+            try:
+                shutil.rmtree(disk_dir, ignore_errors=False)
+                logger_fn(f"[virtiofs] share={sid} directory removed ({disk_dir}).")
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger_fn(f"[virtiofs] share={sid} error removing directory {disk_dir}: {e}")
+
+
+def share_users(base_dir: str, share_id_hex: str) -> int:
+    """How many VMs use the share now, from its state file (0 if it has none)."""
+    return len((load_share_state(base_dir, share_id_hex) or {}).get("users") or [])
 
 
 def share_bytes(base_dir: str, share_ids: List[str]) -> int:

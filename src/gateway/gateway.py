@@ -166,6 +166,29 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
         yield from BeeClient.respond(resolution)
 
+    def LocateShare(self, request_iterator, context, **kwargs):
+        """Say whether this node holds a network share now (#268).
+
+        A node that launches a member of a network share asks its peers this
+        before it places the member, and runs it where the share already is: the
+        directory is on one host, and a member on another node would get an empty
+        one under the same id.
+
+        The answer reveals only that a share id is in use here. Computing the id
+        takes the network tag, its ``formal`` and the share's name and value, which
+        is what joining the share takes anyway. A parent share is never reported.
+        """
+        request, client_id = parse_with_client(request_iterator, method="LocateShare")
+        require_caller(context, client_id)
+        share_id = (request.share_id if request else "").strip().lower()
+        if len(share_id) != 64 or any(c not in "0123456789abcdef" for c in share_id):
+            raise Exception("LocateShare needs the hex id of a network share.")
+
+        from src.virtualizers.microvm.shares import holds_network_share_locally
+        held = holds_network_share_locally(share_id)
+        log.LOGGER(f"Locate share request by {context.peer()}: share={share_id} held={held}")
+        yield from BeeClient.respond(celaut_pb2.ShareLocation(held=held))
+
     def IntroducePeer(self, request_iterator, context, **kwargs):
         # DDOS protection (issue #428): the signature check below already stops a
         # forged announcement, but minting a fresh Ed25519 keypair is free, so it

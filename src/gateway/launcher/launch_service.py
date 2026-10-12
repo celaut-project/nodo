@@ -17,7 +17,8 @@ from src.utils.cost_functions.resource_availability import get_resource_availabi
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.utils.network_policy import enforce_network_policy
-from src.manager.shares import ShareAuthorizationError, authorize_shares
+from src.manager.shares import ShareAuthorizationError, authorize_network_shares, authorize_shares
+from src.manager.share_location import LOCAL, ShareLocationConflict, locate_network_shares
 from src.utils.shared_filesystems import declarations_for_service, service_requires_parent_colocation
 from src.virtualizers.microvm import virtiofsd
 
@@ -90,6 +91,7 @@ def _force_delegate(
         father_id: str,
         father_ip: str,
         recursion_guard_token: str,
+        share_node: Optional[str] = None,
 ) -> celaut_pb2.ServiceInstance:
     """`nodo force_execution`'s bypass: delegate straight to `forced_peer`, with
     no comparison against `local` or any other peer, and no cheapest-first
@@ -106,6 +108,12 @@ def _force_delegate(
             f"force_execution: service {service_id} inherits a shared filesystem from "
             f"its parent and must run on the local node; it cannot be forced onto peer "
             f"'{forced_peer}'."
+        )
+
+    if share_node and share_node != forced_peer:
+        raise Exception(
+            f"force_execution: service {service_id} is a member of a network share "
+            f"held on {share_node}; it cannot be forced onto peer '{forced_peer}'."
         )
 
     log.LOGGER(f"force_execution: bypassing the balancer, delegating straight to peer {forced_peer}.")
@@ -255,11 +263,27 @@ def launch_service(
         # `_detect_local_preflight_failure`, which reports a *local* failure worth
         # trying another candidate for. There is no other candidate: the export is
         # materialized from the parent's own rootfs, on the parent's own node.
+        #
+        # A network share (#268) needs no exporter, but it is held on one node: a
+        # member placed anywhere else would get an empty directory under the same
+        # id. So the node that holds it is found here, before the balancer, and the
+        # member runs there. When no node holds it yet, placement is free.
         try:
             authorize_shares(service=service, father_id=father_id, config=configuration)
-        except ShareAuthorizationError as e:
+            network_shares = authorize_network_shares(
+                service=service, father_id=father_id, config=configuration
+            )
+            share_node = locate_network_shares(
+                network_shares, ignore_network=utils.get_network_name(direction=father_ip)
+            )
+        except (ShareAuthorizationError, ShareLocationConflict) as e:
             log.LOGGER(f"Refusing to launch service {service_id}: {e}")
             raise Exception(f"Unable to launch service {service_id}: {e}") from e
+        if share_node:
+            log.LOGGER(
+                f"Service {service_id} is a member of a network share held on "
+                f"{share_node}; pinning execution there."
+            )
 
         # Every share is served by a virtiofsd on this host, so check it here too,
         # before anything is charged or built (#478). A service with a `guest`
@@ -272,7 +296,7 @@ def launch_service(
             try:
                 virtiofsd.require_usable()
             except virtiofsd.VirtiofsdUnavailable as e:
-                if any(d.guest for d in share_declarations):
+                if any(d.guest for d in share_declarations) or share_node == LOCAL:
                     log.LOGGER(f"Refusing to launch service {service_id}: {e}")
                     raise Exception(f"Unable to launch service {service_id}: {e}") from e
                 log.LOGGER(f"Service {service_id} cannot run on this node: {e}")
@@ -288,6 +312,11 @@ def launch_service(
         # forced.
         forced_peer = sc.pop_forced_execution_peer(recursion_guard_token) if recursion_guard_token else None
         pin_local = forced_peer == FORCED_LOCAL
+        if pin_local and share_node and share_node != LOCAL:
+            raise Exception(
+                f"Unable to launch service {service_id}: it is pinned to the local node, "
+                f"but it is a member of a network share held on peer {share_node}."
+            )
         if pin_local:
             log.LOGGER(f"Service {service_id} is pinned to the local node (no delegation).")
         elif forced_peer:
@@ -300,6 +329,7 @@ def launch_service(
                 father_id=father_id,
                 father_ip=father_ip,
                 recursion_guard_token=recursion_guard_token,
+                share_node=share_node,
             )
 
         local_preflight_failure = _detect_local_preflight_failure(
@@ -347,6 +377,11 @@ def launch_service(
                     continue
                 if pin_local and peer != 'local':
                     log.LOGGER(f"Skipping peer {peer}: this launch is pinned to the local node.")
+                    continue
+                if share_node and peer != share_node:
+                    log.LOGGER(
+                        f"Skipping peer {peer}: the network share is held on {share_node}."
+                    )
                     continue
                 if local_virtiofsd_failure and peer == 'local':
                     launch_failures.append(f"local: {local_virtiofsd_failure}")
@@ -425,6 +460,13 @@ def launch_service(
                 "co-location: service inherits a shared filesystem from its parent "
                 "but the local node could not execute it, and delegation is not "
                 "allowed for parent-inherited filesystems."
+            )
+
+        if share_node and not any(f.startswith(f"{share_node}:") for f in launch_failures) \
+                and not (share_node == LOCAL and local_attempted):
+            launch_failures.append(
+                f"network share: the share is held on {share_node}, and the balancer "
+                f"did not offer that node as a candidate."
             )
 
         _err_msg = _format_launch_failure(

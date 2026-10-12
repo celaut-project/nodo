@@ -53,7 +53,13 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     save_runtime_state,
 )
-from src.virtualizers.microvm.shares import NO_SHARES, materialize_shares, release_shares
+from src.virtualizers.microvm.shares import (
+    NO_SHARES,
+    materialize_shares,
+    network_share_bytes,
+    network_share_ids,
+    release_shares,
+)
 from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 
 env_manager = ConfigManager()
@@ -438,6 +444,8 @@ def execute(
         disk_b += share_bytes(
             str(shared_fs_base_dir(paths.cache_root())), shares.exported_share_ids
         )
+        # A network share has no owner: this instance is counted its part of it.
+        disk_b += network_share_bytes(network_share_ids(shares.mounts_state))
         resolved_resources = celaut.Sysresources(
             cpu_period=cpu_period,
             cpu_quota=cpu_quota,
