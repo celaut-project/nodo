@@ -7,7 +7,8 @@
 #   1. creates the system user (and its group, home /var/lib/<user>), adds it
 #      to group kvm;
 #   2. gives it a /etc/subuid and /etc/subgid range, for virtiofsd's namespace
-#      sandbox (chroot is root only), installs uidmap and squashfs-tools, and on
+#      sandbox (chroot is root only), installs uidmap, squashfs-tools and
+#      util-linux (setpriv) when they are missing, and on
 #      hosts that restrict unprivileged user namespaces with AppArmor, a
 #      root-owned copy of virtiofsd and a profile that lets that copy create one;
 #   3. records the user in /etc/nodo/service-user (root's file: config.yaml is
@@ -139,6 +140,8 @@ done
 missing=()
 command -v newuidmap >/dev/null && command -v newgidmap >/dev/null || missing+=(uidmap)
 command -v mksquashfs >/dev/null || missing+=(squashfs-tools)
+# setpriv starts the hypervisors and virtiofsd without the daemon's capability.
+command -v setpriv >/dev/null || missing+=(util-linux)
 if [ "${#missing[@]}" -gt 0 ]; then
   detect_pkg_mgr
   packages=()

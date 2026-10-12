@@ -26,8 +26,8 @@ detect_pkg_mgr() {
     else
         fail "No supported package manager found (looked for apt-get and dnf).
 Install these tools by hand and re-run: a C compiler + make, clang, cpio, gzip,
-zip, curl, ca-certificates, git, procps, iproute, ping, iptables, e2fsprogs, and
-an en_US.UTF-8 locale. See docs/INSTALL.md."
+zip, curl, ca-certificates, git, procps, iproute, ping, iptables, e2fsprogs,
+util-linux (setpriv), and an en_US.UTF-8 locale. See docs/INSTALL.md."
     fi
 }
 
@@ -46,6 +46,7 @@ pkg_for() {
         ping)       case "$PKG_MGR" in apt) echo "iputils-ping" ;;  dnf) echo "iputils" ;; esac ;;
         iptables)   case "$PKG_MGR" in apt) echo "iptables" ;;      dnf) echo "iptables-nft" ;; esac ;;
         locale)     case "$PKG_MGR" in apt) echo "locales" ;;       dnf) echo "glibc-langpack-en" ;; esac ;;
+        setpriv)    echo "util-linux" ;;
         cpio|gzip|zip|curl|git|e2fsprogs|ca-certificates) echo "$alias_name" ;;
         *)          fail "Unknown package alias '${alias_name}'." ;;
     esac
@@ -59,6 +60,8 @@ pkg_for() {
 #   curl/ca-certificates/git  fetch runtimes and sources
 #   procps/iproute/ping/iptables/e2fsprogs  execute preflight (src/virtualizers/microvm/network.py)
 #   zip                       packing
+#   setpriv                   start the hypervisors and virtiofsd without the
+#                             daemon's capability (src/utils/privileges.py)
 NODO_HOST_PACKAGE_ALIASES=(
     compiler
     clang
@@ -74,6 +77,7 @@ NODO_HOST_PACKAGE_ALIASES=(
     iptables
     e2fsprogs
     locale
+    setpriv
 )
 
 pkg_update() {
@@ -162,7 +166,7 @@ host_alias_present() {
         ca-certificates)
             [ -s /etc/ssl/certs/ca-certificates.crt ] || [ -s /etc/pki/tls/certs/ca-bundle.crt ] ;;
         locale)     locale -a 2>/dev/null | grep -Eiq '^en_US\.utf-?8$' ;;
-        clang|cpio|gzip|zip|curl|git|ping|iptables)
+        clang|cpio|gzip|zip|curl|git|ping|iptables|setpriv)
                     command -v "$alias_name" >/dev/null 2>&1 ;;
         *)          fail "Unknown package alias '${alias_name}'." ;;
     esac

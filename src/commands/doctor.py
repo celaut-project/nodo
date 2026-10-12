@@ -1316,6 +1316,24 @@ def _run_as_daemon_prefix(username: str, supplementary_groups=()) -> list:
     ]
 
 
+def _doctor_setpriv(service_user: str):
+    """A daemon that is not root starts its hypervisors through setpriv."""
+    if not service_user or service_user == "root":
+        return
+    print("\nDropping capabilities for the hypervisors:", flush=True)
+    path = shutil.which("setpriv")
+    if path:
+        print(f"[OK] setpriv found: {path}", flush=True)
+    else:
+        print(
+            "[FAIL] setpriv not found. The daemon runs as "
+            f"{service_user} and starts cloud-hypervisor, QEMU and virtiofsd through it; "
+            "without it no service starts.",
+            flush=True,
+        )
+        print("  Suggestion: install util-linux (apt/dnf install util-linux).", flush=True)
+
+
 def _confirm_user_change(service_name: str, current: str, expected: str) -> bool:
     """Ask before a rewrite changes who the unit runs as; never without a terminal."""
     if not sys.stdin.isatty():
@@ -1411,6 +1429,7 @@ def doctor_command(main_dir):
     print(f"Service runtime user for checks: {current_service_user}", flush=True)
     supplementary_groups = _parse_unit_supplementary_groups(current_unit)
     _doctor_kvm_checks(current_service_user, supplementary_groups)
+    _doctor_setpriv(current_service_user)
     global _RUN_AS_DAEMON, _DAEMON_IDS
     try:
         _RUN_AS_DAEMON = _run_as_daemon_prefix(current_service_user, supplementary_groups)

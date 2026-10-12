@@ -15,21 +15,17 @@ Kept free of ``src.utils.config`` and ``src.utils.logger``: the firewall package
 imports this module, and ``ConfigManager`` imports the firewall package.
 """
 
-import ctypes
+import errno
 import os
 import re
-import sys
-from typing import Optional
+import shutil
+from typing import List, Optional, Sequence, Tuple
 
 CAP_NET_ADMIN = 12
 CAP_NET_RAW = 13
 CAP_SYS_ADMIN = 21
 
 _STATUS_FILE = "/proc/self/status"
-
-# prctl(2): PR_CAP_AMBIENT, and its PR_CAP_AMBIENT_CLEAR_ALL operation.
-_PR_CAP_AMBIENT = 47
-_PR_CAP_AMBIENT_CLEAR_ALL = 4
 
 
 def effective_capabilities(status_file: str = _STATUS_FILE) -> Optional[int]:
@@ -126,35 +122,46 @@ def installed_service_user(
     return name
 
 
-def _load_prctl():
-    if not sys.platform.startswith("linux"):
-        return None
-    try:
-        return ctypes.CDLL(None, use_errno=True).prctl
-    except (OSError, AttributeError):
-        return None
+# setpriv (util-linux): clears the inheritable and ambient sets, then execs.
+SETPRIV_DROP_ALL = ("--inh-caps=-all", "--ambient-caps=-all", "--")
 
 
-# Resolved here, in the parent, so the child does not have to dlopen anything
-# between fork and exec.
-_PRCTL = _load_prctl()
-
-
-def exec_without_capabilities() -> None:
-    """``preexec_fn`` that makes the exec'd program start with no capabilities.
+def without_capabilities(
+    argv: Sequence[str], executable: Optional[str] = None
+) -> Tuple[List[str], Optional[str]]:
+    """``(args, executable)`` for ``Popen`` that start a program with no capabilities.
 
     A daemon that systemd starts with ``AmbientCapabilities=CAP_NET_ADMIN`` passes
     that capability to every program it execs. cloud-hypervisor, QEMU and
     virtiofsd do not need it: the daemon creates each tap owned by its own user
-    and brings it UP first, so the hypervisor only opens it. Clearing the ambient
-    set before exec leaves a non-root child with empty permitted and effective
-    sets (a program without file capabilities gets only the ambient ones).
+    and brings it UP first, so the hypervisor only opens it. ``setpriv`` clears the
+    inheritable and ambient sets before it execs the program, which then starts
+    with empty permitted and effective sets (it has no file capabilities). Not a
+    ``preexec_fn``: the daemon runs gRPC threads, and Python does not support one
+    in a process with threads (the child can deadlock before it execs).
 
-    A no-op under root: an exec by uid 0 gets every capability whatever the
+    ``argv[0]`` is kept when it differs from ``executable``: the node names each
+    hypervisor process by it (``src/virtualizers/microvm/process.py``), and
+    setpriv execs its first argument as given, so bash's ``exec -a`` sets it.
+
+    Unchanged under root: an exec by uid 0 gets every capability whatever the
     ambient set says, so a root install runs its children exactly as before.
+    Raises ``OSError`` when setpriv is missing, rather than start the program
+    with the daemon's capability.
     """
-    if os.geteuid() == 0 or _PRCTL is None:
-        return
-    if _PRCTL(_PR_CAP_AMBIENT, _PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, f"prctl(PR_CAP_AMBIENT_CLEAR_ALL) failed: {os.strerror(error)}")
+    args = list(argv)
+    if os.geteuid() == 0:
+        return args, executable
+    setpriv = shutil.which("setpriv")
+    if not setpriv:
+        raise OSError(
+            errno.ENOENT,
+            "setpriv (util-linux) is not installed; the node will not start "
+            f"{executable or args[0]} with its own CAP_NET_ADMIN. Install util-linux.",
+        )
+    if executable is None or executable == args[0]:
+        return [setpriv, *SETPRIV_DROP_ALL, *args], None
+    return [
+        setpriv, *SETPRIV_DROP_ALL,
+        "/bin/bash", "-c", 'exec -a "$0" "$@"', args[0], executable, *args[1:],
+    ], None

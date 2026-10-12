@@ -27,7 +27,7 @@ from protos import celaut_pb2 as celaut
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.firewall import policy as fw_policy
-from src.utils.privileges import exec_without_capabilities
+from src.utils.privileges import without_capabilities
 from src.virtualizers.ch import vgic
 from src.virtualizers.firewall import resolve_slot_transport_protocols, remove_vm_rules as vm_remove_vm_rules
 from src.virtualizers.microvm import bundle as microvm_bundle
@@ -524,12 +524,12 @@ def execute(
             # creates it, and nothing can move it out. Born in the base, it would
             # keep the base from giving its children controllers (EBUSY).
             leave_delegated_base()
+            args, executable = without_capabilities(process_args, ch_binary)
             process = subprocess.Popen(
-                process_args,
-                executable=ch_binary,
+                args,
+                executable=executable,
                 stdout=stdout_file,
                 stderr=stderr_file,
-                preexec_fn=exec_without_capabilities,
             )
         log.LOGGER(
             f"[CH][{vmachine_id}] process started: pid={process.pid}, visible_name={process_args[0]}, "
