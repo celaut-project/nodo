@@ -210,7 +210,7 @@ clone_repo() {
 }
 
 escape_for_sed() {
-  printf '%s' "$1" | sed 's/[&|]/\\&/g'
+  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
 sync_config_main_paths() {
@@ -461,6 +461,11 @@ create_service_file() {
   local escaped_java_home
   local escaped_python_runtime_bin_dir
   local escaped_python_venv_bin
+  require_unit_paths "the install directory=$TARGET_DIR" \
+    "dependencies.java.JAVA_HOME=$JAVA_HOME_PATH" \
+    "dependencies.python.RUNTIME_BIN=$PYTHON_RUNTIME_BIN_DIR_PATH" \
+    "dependencies.python.VENV_BIN=$PYTHON_VENV_BIN_PATH"
+  require_user_name "the admin group" "$ADMIN_GROUP"
   expected_file="$(mktemp)"
   escaped_target="$(escape_for_sed "$TARGET_DIR")"
   escaped_java_home="$(escape_for_sed "$JAVA_HOME_PATH")"
@@ -562,6 +567,12 @@ prepare_unprivileged_service() {
     fi
   fi
 
+  require_unit_paths "the install directory=$TARGET_DIR" \
+    "dependencies.java.JAVA_HOME=$JAVA_HOME_PATH" \
+    "dependencies.python.RUNTIME_BIN=$PYTHON_RUNTIME_BIN_DIR_PATH" \
+    "dependencies.python.VENV_BIN=$PYTHON_VENV_BIN_PATH"
+  require_user_name "your user name" "$SCRIPT_USER"
+  require_user_name "your primary group" "$(id -gn)"
   sed \
     -e "s|{{MAIN_DIR}}|$(escape_for_sed "$TARGET_DIR")|g" \
     -e "s|{{JAVA_HOME}}|$(escape_for_sed "$JAVA_HOME_PATH")|g" \

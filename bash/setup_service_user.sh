@@ -65,9 +65,15 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || fail "run this with sudo."
+[ -f "$TARGET_DIR/bash/lib_privileged.sh" ] || fail "$TARGET_DIR is not a nodo install."
+# shellcheck source=bash/lib_pkg.sh
+. "$TARGET_DIR/bash/lib_pkg.sh"
+# shellcheck source=bash/lib_privileged.sh
+. "$TARGET_DIR/bash/lib_privileged.sh"
+
 [ -n "$SERVICE_USER" ] || { usage >&2; fail "--user is required."; }
 [ "$SERVICE_USER" != "root" ] || fail "--user root is the default mode; run install.sh without --service-user."
-printf '%s' "$SERVICE_USER" | grep -Eq '^[a-z_][a-z0-9_-]{0,31}$' || fail "invalid user name: $SERVICE_USER"
+require_user_name "--user" "$SERVICE_USER"
 printf '%s' "$UNIT" | grep -Eq '^[A-Za-z0-9_-]{1,64}$' || fail "invalid unit name: $UNIT"
 if [ -n "$OPERATOR" ] && [ "$OPERATOR" != "root" ] && ! id "$OPERATOR" >/dev/null 2>&1; then
   fail "no such operator user: $OPERATOR"
@@ -89,11 +95,6 @@ config_value() {
   [ -n "$value" ] && [ "$value" != "null" ] || value="$2"
   expand_main_dir "$value"
 }
-
-# shellcheck source=bash/lib_pkg.sh
-. "$TARGET_DIR/bash/lib_pkg.sh"
-# shellcheck source=bash/lib_privileged.sh
-. "$TARGET_DIR/bash/lib_privileged.sh"
 
 # --- 1. the user ------------------------------------------------------------
 # A system user gets a home of its own: the local packer's buildctl writes
@@ -206,7 +207,15 @@ if [ -z "$PYTHON_RUNTIME_BIN_DIR_PATH" ]; then
 fi
 [ -n "$PYTHON_VENV_BIN_PATH" ] || PYTHON_VENV_BIN_PATH="$(config_value '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
 
-escape_for_sed() { printf '%s' "$1" | sed 's/[&|]/\\&/g'; }
+# Every value that goes into the unit, checked: the defaults come from
+# config.yaml, which the service user can write. A newline there would add a
+# directive (a second User=), and a backslash would continue a line.
+require_unit_paths "the install directory=$TARGET_DIR" \
+  "dependencies.java.JAVA_HOME=$JAVA_HOME_PATH" \
+  "dependencies.python.RUNTIME_BIN=$PYTHON_RUNTIME_BIN_DIR_PATH" \
+  "dependencies.python.VENV_BIN=$PYTHON_VENV_BIN_PATH"
+require_user_name "the service group" "$SERVICE_GROUP"
+escape_for_sed() { printf '%s' "$1" | sed 's/[&|\\]/\\&/g'; }
 rendered="$(mktemp)"
 sed \
   -e "s|{{MAIN_DIR}}|$(escape_for_sed "$TARGET_DIR")|g" \
