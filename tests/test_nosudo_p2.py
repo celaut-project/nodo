@@ -142,6 +142,17 @@ class DelegatedCgroupTests(unittest.TestCase):
         moved = self._run("/user.slice/session-1.scope", self.unit)
         self.assertEqual(moved, [])
 
+    def test_the_daemon_leaves_the_base_before_it_starts_a_hypervisor(self):
+        # On x86 KVM attaches a kernel thread of a new VM to the cgroup of the
+        # process that creates it, and user space cannot move it. Started from
+        # the base, it pins the base and +cpu +memory there fails with EBUSY.
+        for rel in ("src/virtualizers/ch/execute.py", "src/virtualizers/qemu/execute.py"):
+            source = (_ROOT / rel).read_text(encoding="utf-8")
+            leave = source.find("leave_delegated_base()")
+            spawn = source.find("subprocess.Popen(")
+            self.assertGreater(leave, 0, rel)
+            self.assertLess(leave, spawn, rel)
+
 
 class NftTableTests(unittest.TestCase):
     def tearDown(self):
