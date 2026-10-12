@@ -519,7 +519,9 @@ create_service_file() {
 
 # The install without sudo: the daemon runs as the installing user. Everything
 # under TARGET_DIR is already theirs, so what is left is what only root can do,
-# and each step is asked for only when it is not done already.
+# and each step is asked for only when it is not done already. Each path in a
+# recorded command is quoted with printf %q: the steps run through bash -c, and
+# a home can hold a space.
 prepare_unprivileged_service() {
   local yq_bin="$TARGET_DIR/bin/yq"
   local config_file="$TARGET_DIR/config.yaml"
@@ -539,7 +541,7 @@ prepare_unprivileged_service() {
     local gstart
     gstart="$(next_free_subid_start /etc/subgid)"
     priv_record "Subordinate ids for $SCRIPT_USER (virtiofsd's sandbox and the local packer)" \
-      "sudo usermod --add-subuids $start-$((start + 65535)) --add-subgids $gstart-$((gstart + 65535)) $SCRIPT_USER"
+      "sudo usermod --add-subuids $start-$((start + 65535)) --add-subgids $gstart-$((gstart + 65535)) $(printf '%q' "$SCRIPT_USER")"
   fi
 
   mkdir -p "$staging"
@@ -548,7 +550,7 @@ prepare_unprivileged_service() {
   if [ "$(cat "$NODO_SERVICE_USER_RECORD" 2>/dev/null)" != "$SCRIPT_USER" ]; then
     printf '%s' "$SCRIPT_USER" > "$staging/service-user"
     priv_record "Record, in a file only root can write, that nodo runs as $SCRIPT_USER" \
-      "sudo install -D -o root -g root -m 0644 $(printf '%q' "$staging/service-user") $NODO_SERVICE_USER_RECORD"
+      "sudo install -D -o root -g root -m 0644 $(printf '%q' "$staging/service-user") $(printf '%q' "$NODO_SERVICE_USER_RECORD")"
   fi
 
   # Ubuntu 23.10+: a root-owned copy of virtiofsd, and the profile that lets that
@@ -557,12 +559,12 @@ prepare_unprivileged_service() {
     if command -v apparmor_parser >/dev/null 2>&1; then
       if ! cmp -s "$TARGET_DIR/bin/virtiofsd" "$NODO_VIRTIOFSD_SYSTEM_PATH"; then
         priv_record "A root-owned copy of virtiofsd, the one binary the AppArmor profile below lets create a user namespace" \
-          "sudo install -D -o root -g root -m 0755 $TARGET_DIR/bin/virtiofsd $NODO_VIRTIOFSD_SYSTEM_PATH"
+          "sudo install -D -o root -g root -m 0755 $(printf '%q' "$TARGET_DIR/bin/virtiofsd") $(printf '%q' "$NODO_VIRTIOFSD_SYSTEM_PATH")"
       fi
       render_virtiofsd_apparmor_profile > "$staging/nodo-virtiofsd.apparmor"
       if ! cmp -s "$staging/nodo-virtiofsd.apparmor" "$NODO_VIRTIOFSD_APPARMOR_PROFILE"; then
         priv_record "The AppArmor profile for that copy (this host restricts unprivileged user namespaces)" \
-          "sudo install -m 0644 $staging/nodo-virtiofsd.apparmor $NODO_VIRTIOFSD_APPARMOR_PROFILE && sudo apparmor_parser -r $NODO_VIRTIOFSD_APPARMOR_PROFILE"
+          "sudo install -m 0644 $(printf '%q' "$staging/nodo-virtiofsd.apparmor") $(printf '%q' "$NODO_VIRTIOFSD_APPARMOR_PROFILE") && sudo apparmor_parser -r $(printf '%q' "$NODO_VIRTIOFSD_APPARMOR_PROFILE")"
       fi
       VIRTIOFSD_PATH="$NODO_VIRTIOFSD_SYSTEM_PATH" "$yq_bin" -i \
         '.virtualizers.ch.VIRTIOFSD_BINARY = strenv(VIRTIOFSD_PATH)' "$config_file"
@@ -593,7 +595,7 @@ prepare_unprivileged_service() {
   fi
   if ! cmp -s "$unit" "$SERVICE_FILE"; then
     priv_record "The systemd unit: runs nodo as $SCRIPT_USER with CAP_NET_ADMIN only, and starts it at boot" \
-      "sudo install -m 0644 $unit $SERVICE_FILE && sudo systemctl daemon-reload && sudo systemctl enable nodo.service"
+      "sudo install -m 0644 $(printf '%q' "$unit") $(printf '%q' "$SERVICE_FILE") && sudo systemctl daemon-reload && sudo systemctl enable nodo.service"
   fi
   # Last, so the node starts on everything above, and on the code just installed.
   if systemctl is-active --quiet nodo.service 2>/dev/null; then

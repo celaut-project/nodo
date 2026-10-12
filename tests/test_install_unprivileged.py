@@ -165,5 +165,36 @@ class PackageStepsTests(unittest.TestCase):
                 self.assertIn("lib_privileged.sh", content)
 
 
+class QuotedRootStepsTests(unittest.TestCase):
+    """Review of #533: unquoted paths in the root steps broke on a home with a space."""
+
+    def test_every_path_in_a_recorded_command_is_quoted(self):
+        install = INSTALL.read_text()
+        body = install.split("prepare_unprivileged_service() {")[1].split("\n}\n")[0]
+        joined = re.sub(r"\\\n\s*", " ", body)
+        commands = re.findall(r'priv_record "(?:[^"\\]|\\.)*" +(".*")', joined)
+        self.assertGreaterEqual(len(commands), 5)
+        for command in commands:
+            with self.subTest(command=command[:70]):
+                for variable in re.findall(r"\$\{?([A-Za-z_]+)", command):
+                    if variable in ("start", "gstart"):
+                        continue
+                    self.assertRegex(command, r"printf '%q' \"\$\{?" + variable)
+
+    def test_a_space_in_the_path_survives_bash_c(self):
+        with tempfile.TemporaryDirectory(prefix="a b ") as directory:
+            source = os.path.join(directory, "x y")
+            Path(source).write_text("ok")
+            target = os.path.join(directory, "copied file")
+            command = f"cp $(printf '%q' \"$S\") $(printf '%q' \"$T\")"
+            rendered = subprocess.run(
+                ["bash", "-c", f'printf "%s" "{command}"'],
+                env={"S": source, "T": target, "PATH": os.environ.get("PATH", "")},
+                capture_output=True, text=True,
+            ).stdout
+            subprocess.run(["bash", "-c", rendered], check=True)
+            self.assertEqual(Path(target).read_text(), "ok")
+
+
 if __name__ == "__main__":
     unittest.main()
