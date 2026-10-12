@@ -7,8 +7,10 @@ what root does: who the unit runs as comes from a root-owned record, and every
 value that goes into a unit or a root step is checked first.
 """
 
+import getpass
 import os
 import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -188,6 +190,79 @@ class UnitValueTests(unittest.TestCase):
         for path in ("install.sh", "bash/setup_service_user.sh"):
             with self.subTest(path=path):
                 self.assertIn("""sed 's/[&|\\\\]/\\\\&/g'""", (_ROOT / path).read_text())
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "GNU realpath and stat")
+class StorageTests(unittest.TestCase):
+    """Review of #533, item 1: setup_service_user.sh chowned whatever STORAGE named."""
+
+    def setUp(self):
+        self.target = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.target, ignore_errors=True))
+        self.outside = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.outside, ignore_errors=True))
+
+    def _storage(self, storage, user="nobody"):
+        return _bash(f'service_storage_dir "$T" "$S" "{user}"', T=self.target, S=storage)
+
+    def test_the_storage_inside_the_install_is_accepted(self):
+        result = self._storage(f"{self.target}/storage")
+        self.assertEqual((result.returncode, result.stdout), (0, f"{self.target}/storage"))
+        self.assertTrue(os.path.isdir(f"{self.target}/storage"))
+
+    def test_a_path_outside_the_install_is_refused(self):
+        for storage in ("/etc", "/", f"{self.target}/storage/../../etc", self.outside, f"{self.target}"):
+            with self.subTest(storage=storage):
+                result = self._storage(storage)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("must be", result.stderr)
+
+    def test_another_directory_of_the_install_is_refused(self):
+        for name in ("bin", "venv", "bash", "storage/sub"):
+            with self.subTest(name=name):
+                self.assertNotEqual(self._storage(f"{self.target}/{name}").returncode, 0)
+
+    def test_a_symlink_cannot_lead_the_chown_out(self):
+        os.symlink("/etc", f"{self.target}/link")
+        for storage in (f"{self.target}/link", f"{self.target}/link/../storage/x"):
+            with self.subTest(storage=storage):
+                self.assertNotEqual(self._storage(storage).returncode, 0)
+        # ".." is taken as written, not through the symlink: this is <install>/storage.
+        result = self._storage(f"{self.target}/link/../storage")
+        self.assertEqual(result.stdout, f"{self.target}/storage")
+
+    def test_the_operators_symlink_to_another_disk_is_followed(self):
+        os.symlink(self.outside, f"{self.target}/storage")
+        result = self._storage(f"{self.target}/storage")
+        self.assertEqual((result.returncode, result.stdout), (0, self.outside))
+
+    def test_an_install_dir_the_user_can_change_is_refused(self):
+        result = self._storage(f"{self.target}/storage", user=getpass.getuser())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("can be changed by", result.stderr)
+
+    def test_the_operators_own_install_is_accepted_when_the_daemon_is_the_operator(self):
+        me = getpass.getuser()
+        result = _bash(f'service_storage_dir "$T" "$T/storage" "{me}" "{me}"', T=self.target)
+        self.assertEqual((result.returncode, result.stdout), (0, f"{self.target}/storage"))
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "GNU realpath and stat")
+class PathWritableByTests(unittest.TestCase):
+    def _writable(self, path, user):
+        return _bash(f'path_writable_by "$P" "{user}"', P=path).returncode == 0
+
+    def test_owner_group_other_and_missing_parts(self):
+        me = getpass.getuser()
+        mine = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(mine, ignore_errors=True))
+        self.assertTrue(self._writable(f"{mine}/missing/bin", me))
+        self.assertTrue(self._writable("/tmp/surely-missing-nodo/bin", "nobody"))
+        self.assertFalse(self._writable("/usr/bin/env", "nobody"))
+        self.assertFalse(self._writable("/usr/bin/env", "no-such-user-nodo"))
+        os.symlink(mine, f"{mine}.link")
+        self.addCleanup(os.unlink, f"{mine}.link")
+        self.assertTrue(self._writable(f"{mine}.link/x", me))
 
 
 if __name__ == "__main__":

@@ -98,6 +98,64 @@ unit_user() {
     sed -n 's/^[[:space:]]*User[[:space:]]*=[[:space:]]*\([^[:space:]]*\)[[:space:]]*$/\1/p' "$1" | tail -n 1
 }
 
+path_writable_by() {
+    # path_writable_by <path> <user>: true when <user> can change what <path>
+    # names: the file is theirs, or a directory on the way to it lets them
+    # replace it. Both the path as written and the one its symlinks resolve to
+    # are walked. A missing part counts as whatever its nearest existing
+    # directory allows: whoever can create it there can choose it.
+    local path="$1" user="$2" uid groups walk p owner group mode found
+    uid="$(id -u -- "$user" 2>/dev/null)" || return 1
+    groups=" $(id -G -- "$user") "
+    for walk in "$(realpath -ms -- "$path")" "$(realpath -m -- "$path")"; do
+        p="$walk"
+        found=0
+        while :; do
+            if [ -e "$p" ] && [ ! -L "$p" ]; then
+                read -r owner group mode < <(stat -c '%u %g %a' -- "$p")
+                mode=$((8#$mode))
+                [ "$owner" != "$uid" ] || return 0
+                # A sticky directory keeps others from replacing an entry that
+                # exists; it does not keep them from creating a missing one.
+                if ! { [ "$found" = 1 ] && (( mode & 8#1000 )); }; then
+                    (( (mode & 8#002) == 0 )) || return 0
+                    if (( mode & 8#020 )) && [[ "$groups" == *" $group "* ]]; then
+                        return 0
+                    fi
+                fi
+                found=1
+            fi
+            [ "$p" != / ] || break
+            p="$(dirname -- "$p")"
+        done
+    done
+    return 1
+}
+
+service_storage_dir() {
+    # service_storage_dir <target dir> <main.STORAGE> <service user> [operator]
+    #
+    # The storage directory to give to the service user, created if missing and
+    # printed with its symlinks resolved. main.STORAGE comes from config.yaml,
+    # which that user can write, and the chown -R that follows runs as root:
+    # STORAGE: /etc would give it /etc, and a path elsewhere inside the install
+    # (bin/, venv/) the binaries root runs. So it must be <target dir>/storage. A
+    # symlink there, which only the operator can make, may point at another disk.
+    # When the daemon is the operator (an install without sudo), the install
+    # directory is theirs, and that is expected.
+    local target="$1" storage="$2" user="$3" operator="${4:-}" path real
+    path="$(realpath -ms -- "$storage")"
+    [ "$path" = "$(realpath -ms -- "$target")/storage" ] \
+        || fail "main.STORAGE is $(printf '%q' "$storage"); with a service user it must be $target/storage (make that a symlink to keep the data elsewhere)."
+    if [ "$user" != "$operator" ] && path_writable_by "$(dirname "$path")" "$user"; then
+        fail "$(dirname "$path") can be changed by $user; it must be root's or the operator's."
+    fi
+    mkdir -p -- "$path"
+    real="$(realpath -e -- "$path")"
+    [ "$real" != / ] || fail "$path resolves to /."
+    printf '%s' "$real"
+}
+
 installed_service_user() {
     # The user the daemon runs as, from root's sources only: the record, else the
     # User= of the installed unit (a node set up before the record existed).
