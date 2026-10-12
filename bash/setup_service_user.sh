@@ -182,8 +182,11 @@ write_service_user_record "$SERVICE_USER"
 "$YQ" -i ".virtualizers.ch.API_SOCKET_DIR = \"/run/$UNIT/ch\"" "$CONFIG_FILE"
 
 # --- 4. ownership -------------------------------------------------------------
-mkdir -p "$STORAGE_DIR"
-chown -R "$SERVICE_USER:$SERVICE_GROUP" "$STORAGE_DIR"
+# The storage tree is given to the user with a chown -R that runs as root, and
+# main.STORAGE comes from config.yaml, which that user can write: see
+# service_storage_dir in bash/lib_privileged.sh.
+STORAGE_REAL="$(service_storage_dir "$TARGET_DIR" "$STORAGE_DIR" "$SERVICE_USER" "$OPERATOR")" || exit 1
+chown -R "$SERVICE_USER:$SERVICE_GROUP" "$STORAGE_REAL"
 # The rootless BuildKit builder of `nodo pack --local` keeps its state here. Packing
 # writes the registry, which is now the service user's, so it packs as that user.
 mkdir -p "$TARGET_DIR/buildkit"
