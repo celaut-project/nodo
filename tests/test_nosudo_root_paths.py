@@ -428,5 +428,17 @@ class TakeConfigTests(unittest.TestCase):
         self.assertLess(script.index("take_config_from_service_user"), script.index("config_value '"))
 
 
+class InstallDirTests(unittest.TestCase):
+    """main.MAIN_DIR is in config.yaml: `sudo nodo update` ran $MAIN_DIR/install.sh."""
+
+    def test_update_and_doctor_use_the_running_install(self):
+        nodo = (_ROOT / "nodo.py").read_text()
+        self.assertIn("INSTALL_DIR = os.path.dirname(os.path.realpath(__file__))", nodo)
+        self.assertIn("main_dir = shlex.quote(INSTALL_DIR)", nodo)
+        self.assertIn("doctor_command(main_dir=INSTALL_DIR)", nodo)
+        self.assertNotIn("shlex.quote(MAIN_DIR)", nodo)
+        self.assertNotIn("doctor_command(main_dir=MAIN_DIR)", nodo)
+
+
 if __name__ == "__main__":
     unittest.main()
