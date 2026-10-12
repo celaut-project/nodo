@@ -440,5 +440,48 @@ class InstallDirTests(unittest.TestCase):
         self.assertNotIn("doctor_command(main_dir=MAIN_DIR)", nodo)
 
 
+class DoctorRunsBinariesAsTheDaemonTests(unittest.TestCase):
+    """config.yaml names the binaries doctor runs: as root they would be a way in."""
+
+    def test_the_prefix_drops_to_the_unit_user_and_its_groups(self):
+        from src.commands import doctor
+
+        user = types.SimpleNamespace(pw_uid=995, pw_gid=994)
+        with mock.patch.object(doctor.pwd, "getpwnam", return_value=user):
+            self.assertEqual(
+                doctor._run_as_daemon_prefix("nodo", ["kvm"]),
+                ["setpriv", "--reuid=995", "--regid=994", "--groups=kvm",
+                 "--inh-caps=-all", "--ambient-caps=-all", "--"],
+            )
+            self.assertIn("--clear-groups", doctor._run_as_daemon_prefix("nodo", []))
+        self.assertEqual(doctor._run_as_daemon_prefix("root"), [])
+        self.assertEqual(doctor._run_as_daemon_prefix(""), [])
+
+    def test_the_version_checks_use_it(self):
+        from src.commands import doctor
+        from src.virtualizers.microvm import virtiofsd
+
+        prefix = ["setpriv", "--reuid=995", "--"]
+        binary = tempfile.NamedTemporaryFile(delete=False)
+        binary.close()
+        os.chmod(binary.name, 0o755)
+        self.addCleanup(os.unlink, binary.name)
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            return mock.Mock(returncode=0, stdout="x 1.0", stderr="")
+
+        with mock.patch.object(doctor, "_RUN_AS_DAEMON", prefix), mock.patch.object(
+            doctor.subprocess, "run", side_effect=run
+        ), mock.patch.object(virtiofsd.subprocess, "run", side_effect=run), mock.patch(
+            "builtins.print"
+        ):
+            doctor._doctor_ch_binary(binary.name)
+            doctor._doctor_virtiofsd(binary.name)
+        self.assertEqual(calls[0], prefix + [binary.name, "--version"])
+        self.assertEqual(calls[1], prefix + [binary.name, "--version"])
+
+
 if __name__ == "__main__":
     unittest.main()
