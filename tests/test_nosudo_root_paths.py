@@ -353,5 +353,80 @@ class DoctorUnitUserTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+@unittest.skipUnless(
+    sys.platform.startswith("linux") and os.geteuid() == 0 and __import__("shutil").which("yq"),
+    "root, GNU tools and yq",
+)
+class TakeConfigTests(unittest.TestCase):
+    """A root install step never runs or installs to a path the service user can change."""
+
+    def setUp(self):
+        import pwd
+        import shutil
+
+        self.user = "nobody"
+        self.uid = pwd.getpwnam(self.user).pw_uid
+        self.target = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(self.target, ignore_errors=True))
+        os.chmod(self.target, 0o755)
+        os.makedirs(f"{self.target}/bin")
+        shutil.copy(shutil.which("yq"), f"{self.target}/bin/yq")
+        os.makedirs(f"{self.target}/storage")
+        os.chown(f"{self.target}/storage", self.uid, -1)
+
+    def _take(self, config: str):
+        path = f"{self.target}/config.yaml"
+        Path(path).write_text(config)
+        os.chown(path, self.uid, -1)
+        os.chmod(path, 0o660)
+        return _bash(f'take_config_from_service_user "$T" {self.user} operator', T=self.target)
+
+    def test_the_default_paths_pass_and_config_becomes_roots(self):
+        before = os.stat(f"{self.target}/config.yaml").st_ino if os.path.exists(f"{self.target}/config.yaml") else None
+        result = self._take(
+            'dependencies:\n  python:\n    VENV_BIN: "${main.MAIN_DIR}/venv/bin/python"\n'
+            'virtualizers:\n  ch:\n    VIRTIOFSD_BINARY: "virtiofsd"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        info = os.stat(f"{self.target}/config.yaml")
+        self.assertEqual((info.st_uid, info.st_mode & 0o777), (0, 0o600))
+        self.assertNotEqual(info.st_ino, before)
+
+    def test_a_path_in_the_users_storage_is_refused(self):
+        for key, value in (
+            ("python:\n    VENV_BIN", "${main.MAIN_DIR}/storage/evil"),
+            ("yq:\n    BIN", "/tmp/nodo-test-yq"),
+            ("java:\n    JAVA_HOME", "storage/java"),
+            ("python:\n    RUNTIME_ROOT", "${main.MAIN_DIR}/storage/../storage/py"),
+        ):
+            with self.subTest(value=value):
+                result = self._take(f'dependencies:\n  {key}: "{value}"\n')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("which nobody can change", result.stderr)
+
+    def test_a_symlink_into_the_storage_is_refused(self):
+        os.symlink(f"{self.target}/storage", f"{self.target}/data")
+        result = self._take('virtualizers:\n  ch:\n    VIRTIOFSD_BINARY: "${main.MAIN_DIR}/data/virtiofsd"\n')
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_a_newline_or_backslash_is_refused(self):
+        for value in ("/usr/bin/x\\nUser=root", "/usr/bin/x\\\\"):
+            with self.subTest(value=value):
+                result = self._take(f'dependencies:\n  java:\n    JAVA_HOME: "{value}"\n')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("newline or a backslash", result.stderr)
+
+    def test_nothing_is_taken_when_the_daemon_is_the_operator(self):
+        result = _bash(f'take_config_from_service_user "$T" {self.user} {self.user}', T=self.target)
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(os.path.exists(f"{self.target}/config.yaml"))
+
+    def test_install_and_the_setup_script_take_it_before_reading_it(self):
+        install = (_ROOT / "install.sh").read_text()
+        self.assertLess(install.index("take_config_from_service_user"), install.index('/bin/bash "$SETUP_SCRIPT"'))
+        script = (_ROOT / "bash" / "setup_service_user.sh").read_text()
+        self.assertLess(script.index("take_config_from_service_user"), script.index("config_value '"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -80,6 +80,9 @@ if [ -n "$OPERATOR" ] && [ "$OPERATOR" != "root" ] && ! id "$OPERATOR" >/dev/nul
 fi
 
 CONFIG_FILE="$TARGET_DIR/config.yaml"
+[ -f "$CONFIG_FILE" ] || fail "$CONFIG_FILE not found."
+# Before anything below reads it: see take_config_from_service_user.
+take_config_from_service_user "$TARGET_DIR" "$SERVICE_USER" "$OPERATOR"
 TEMPLATE="$TARGET_DIR/bash/nodo-nosudo.service.template"
 YQ="$TARGET_DIR/bin/yq"
 SERVICE_FILE="/etc/systemd/system/$UNIT.service"

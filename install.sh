@@ -363,6 +363,10 @@ elif [ -z "$SERVICE_USER" ]; then
 elif [ "$SERVICE_USER" = root ]; then
   SERVICE_USER=""
 fi
+# From here on, steps run as root and read config.yaml.
+if [ "$UNPRIVILEGED" != true ] && [ -n "$SERVICE_USER" ]; then
+  take_config_from_service_user "$TARGET_DIR" "$SERVICE_USER" "$SCRIPT_USER"
+fi
 
 PRIVILEGED_SCRIPT="$TARGET_DIR/install-privileged.sh"
 if [ "$UNPRIVILEGED" = true ]; then
