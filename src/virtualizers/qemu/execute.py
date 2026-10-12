@@ -73,7 +73,7 @@ from src.virtualizers.qemu.config import (
 )
 from src.virtualizers.qemu.hotplug import settle_boot_balloon
 from src.utils.firewall import policy as fw_policy
-from src.utils.privileges import exec_without_capabilities
+from src.utils.privileges import without_capabilities
 from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 env_manager = ConfigManager()
@@ -641,12 +641,12 @@ def execute(
         ) as stderr_file:
             # Before the VM exists, as in src/virtualizers/ch/execute.py.
             leave_delegated_base()
+            args, executable = without_capabilities(process_args, qemu_binary)
             process = subprocess.Popen(
-                process_args,
-                executable=qemu_binary,
+                args,
+                executable=executable,
                 stdout=stdout_file,
                 stderr=stderr_file,
-                preexec_fn=exec_without_capabilities,
             )
         log.LOGGER(
             f"[QEMU][{vmachine_id}] process started: pid={process.pid}, visible_name={process_args[0]}"

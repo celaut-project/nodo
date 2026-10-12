@@ -4,7 +4,7 @@ The daemon keeps CAP_NET_ADMIN only; the hypervisor and virtiofsd get none. What
 that needs from the code, pinned here:
 
 * taps owned by the daemon's user, so a hypervisor without capabilities can open them;
-* children exec'd with the ambient set cleared;
+* children exec'd through setpriv with the inheritable and ambient sets cleared;
 * virtiofsd confined with a namespace sandbox when chroot is not available;
 * per-VM cgroups under the unit's delegated cgroup;
 * an nft table of its own for a second install on one host;
@@ -45,35 +45,68 @@ class TapOwnerTests(unittest.TestCase):
         self.assertEqual(calls[-1], ["ip", "link", "set", tap, "up"])
 
 
-class ExecWithoutCapabilitiesTests(unittest.TestCase):
+class WithoutCapabilitiesTests(unittest.TestCase):
+    """setpriv clears the sets before exec; no preexec_fn in a process with threads."""
+
+    def _call(self, euid, argv, executable=None, setpriv="/usr/bin/setpriv"):
+        from src.utils import privileges
+
+        with mock.patch.object(privileges.os, "geteuid", return_value=euid), mock.patch.object(
+            privileges.shutil, "which", return_value=setpriv
+        ):
+            return privileges.without_capabilities(argv, executable)
+
     def test_a_root_daemon_leaves_its_children_alone(self):
-        from src.utils import privileges
+        self.assertEqual(
+            self._call(0, ["nodo-ch-1", "--kernel", "k"], "/nodo/bin/cloud-hypervisor"),
+            (["nodo-ch-1", "--kernel", "k"], "/nodo/bin/cloud-hypervisor"),
+        )
 
-        prctl = mock.Mock(return_value=0)
-        with mock.patch.object(privileges, "_PRCTL", prctl), mock.patch.object(
-            privileges.os, "geteuid", return_value=0
+    def test_a_service_user_starts_it_through_setpriv(self):
+        self.assertEqual(
+            self._call(995, ["/nodo/bin/virtiofsd", "--socket-path", "s"]),
+            (["/usr/bin/setpriv", "--inh-caps=-all", "--ambient-caps=-all", "--",
+              "/nodo/bin/virtiofsd", "--socket-path", "s"], None),
+        )
+
+    def test_the_visible_name_is_kept(self):
+        args, executable = self._call(995, ["nodo-ch-1", "--kernel", "k"], "/nodo/bin/cloud-hypervisor")
+        self.assertIsNone(executable)
+        self.assertEqual(
+            args[4:],
+            ["/bin/bash", "-c", 'exec -a "$0" "$@"', "nodo-ch-1", "/nodo/bin/cloud-hypervisor", "--kernel", "k"],
+        )
+
+    def test_without_setpriv_nothing_starts(self):
+        with self.assertRaises(OSError):
+            self._call(995, ["virtiofsd"], setpriv=None)
+
+    def test_no_launcher_uses_preexec_fn(self):
+        for path in (
+            "src/virtualizers/ch/execute.py",
+            "src/virtualizers/qemu/execute.py",
+            "src/virtualizers/microvm/virtiofs.py",
         ):
-            privileges.exec_without_capabilities()
-        prctl.assert_not_called()
+            with self.subTest(path=path):
+                content = (_ROOT / path).read_text()
+                self.assertNotIn("preexec_fn", content)
+                self.assertIn("without_capabilities(", content)
 
-    def test_a_service_user_clears_the_ambient_set(self):
+    @unittest.skipUnless(sys.platform.startswith("linux") and __import__("shutil").which("setpriv"), "setpriv")
+    def test_the_child_really_has_no_capabilities_and_keeps_its_name(self):
+        """Run for real: the name in /proc/<pid>/cmdline and the inheritable set."""
         from src.utils import privileges
+        import subprocess
 
-        prctl = mock.Mock(return_value=0)
-        with mock.patch.object(privileges, "_PRCTL", prctl), mock.patch.object(
-            privileges.os, "geteuid", return_value=995
-        ):
-            privileges.exec_without_capabilities()
-        prctl.assert_called_once_with(47, 4, 0, 0, 0)
-
-    def test_a_failed_clear_stops_the_exec(self):
-        from src.utils import privileges
-
-        with mock.patch.object(privileges, "_PRCTL", mock.Mock(return_value=-1)), mock.patch.object(
-            privileges.os, "geteuid", return_value=995
-        ):
-            with self.assertRaises(OSError):
-                privileges.exec_without_capabilities()
+        with mock.patch.object(privileges.os, "geteuid", return_value=995):
+            args, executable = privileges.without_capabilities(
+                ["nodo-test-1", "-c", "grep -E '^Cap(Inh|Amb)' /proc/self/status; tr '\\0' ' ' < /proc/$$/cmdline"],
+                "/bin/sh",
+            )
+        out = subprocess.run(args, executable=executable, capture_output=True, text=True).stdout
+        self.assertIn("CapInh:\t0000000000000000", out)
+        self.assertIn("CapAmb:\t0000000000000000", out)
+        self.assertTrue(out.strip().splitlines()[-1].startswith("nodo-test-1 "), out)
 
 
 class VirtiofsdSandboxTests(unittest.TestCase):
