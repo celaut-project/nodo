@@ -16,7 +16,7 @@ from pathlib import Path
 # why the per-arch tables below come from `utils.arch_guard` and not from
 # `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
 from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
-from src.utils.privileges import installed_service_user
+from src.utils.privileges import installed_service_user, valid_user_name
 from src.virtualizers.ch import vgic as ch_vgic
 from src.virtualizers.microvm import initramfs as ch_initramfs
 from src.virtualizers.microvm import guest as ch_guest
@@ -202,6 +202,21 @@ def _resolve_config_paths(main_dir: str):
     }
 
 
+# A path that goes into a systemd unit: the same rule as valid_unit_path in
+# bash/lib_privileged.sh. No newline, backslash, quote, '$', '`', '%', ':' or ';'.
+_UNIT_PATH = re.compile(r"/[A-Za-z0-9 ._+@,/-]*")
+
+
+def _valid_unit_path(value) -> bool:
+    return isinstance(value, str) and bool(_UNIT_PATH.fullmatch(value))
+
+
+def _config_path(raw, path: str, default):
+    """A path from config.yaml, or ``default`` when it is unset or empty, as in install.sh."""
+    value = _get_nested_config(raw, path, None)
+    return default if value is None or value == "" else value
+
+
 def _get_nested_config(raw, path: str, default):
     value = raw
     for key in path.split("."):
@@ -271,7 +286,7 @@ def _render_service_template(template_content: str, main_dir: str, service_user:
             raw = yaml.safe_load(f) or {}
 
     java_home = _expand_main_dir_placeholder(
-        _get_nested_config(
+        _config_path(
             raw,
             "dependencies.java.JAVA_HOME",
             os.path.join(main_dir, "runtime", "java", "current"),
@@ -279,7 +294,7 @@ def _render_service_template(template_content: str, main_dir: str, service_user:
         main_dir,
     )
     python_runtime_bin = _expand_main_dir_placeholder(
-        _get_nested_config(
+        _config_path(
             raw,
             "dependencies.python.RUNTIME_BIN",
             os.path.join(main_dir, "runtime", "python", "current", "bin", "python3"),
@@ -287,7 +302,7 @@ def _render_service_template(template_content: str, main_dir: str, service_user:
         main_dir,
     )
     python_venv_bin = _expand_main_dir_placeholder(
-        _get_nested_config(
+        _config_path(
             raw,
             "dependencies.python.VENV_BIN",
             os.path.join(main_dir, "venv", "bin", "python"),
@@ -306,6 +321,20 @@ def _render_service_template(template_content: str, main_dir: str, service_user:
         "{{SERVICE_GROUP}}": _service_group(service_user),
         "{{RUNTIME_DIR_NAME}}": "nodo",
     }
+
+    # config.yaml is the service user's to write on a no-sudo node, and this unit is
+    # written by root: a newline in a value would add a directive (a second User=).
+    for placeholder in ("{{MAIN_DIR}}", "{{JAVA_HOME}}", "{{PYTHON_RUNTIME_BIN_DIR}}", "{{PYTHON_VENV_BIN}}"):
+        if not _valid_unit_path(replacements[placeholder]):
+            raise ValueError(
+                f"{placeholder} would be {replacements[placeholder]!r}, which cannot go into "
+                "the systemd unit. Use an absolute path made only of letters, digits, "
+                "spaces and . _ + @ , / - (check dependencies.* in config.yaml)."
+            )
+    for placeholder in ("{{ADMIN_GROUP}}", "{{SERVICE_USER}}", "{{SERVICE_GROUP}}"):
+        value = replacements[placeholder]
+        if value and not valid_user_name(value):
+            raise ValueError(f"{placeholder} would be {value!r}, which is not a valid name.")
 
     rendered = template_content
     for placeholder, value in replacements.items():

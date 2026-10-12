@@ -19,10 +19,13 @@ Delegate=yes
 # Control sockets (virtualizers.ch.API_SOCKET_DIR) live under /run/{{RUNTIME_DIR_NAME}}.
 RuntimeDirectory={{RUNTIME_DIR_NAME}}
 RuntimeDirectoryMode=0750
+# The paths are quoted: an install without sudo lives under a home that may hold
+# a space. The installers and doctor refuse any other character that systemd or
+# bash would read (bash/lib_privileged.sh valid_unit_path).
 WorkingDirectory={{MAIN_DIR}}
-Environment=JAVA_HOME={{JAVA_HOME}}
-Environment=PATH={{JAVA_HOME}}/bin:{{PYTHON_RUNTIME_BIN_DIR}}:{{MAIN_DIR}}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/bin/bash -c 'source {{MAIN_DIR}}/venv/bin/activate && exec {{PYTHON_VENV_BIN}} {{MAIN_DIR}}/nodo.py serve'
+Environment="JAVA_HOME={{JAVA_HOME}}"
+Environment="PATH={{JAVA_HOME}}/bin:{{PYTHON_RUNTIME_BIN_DIR}}:{{MAIN_DIR}}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/bin/bash -c 'source "{{MAIN_DIR}}/venv/bin/activate" && exec "{{PYTHON_VENV_BIN}}" "{{MAIN_DIR}}/nodo.py" serve'
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

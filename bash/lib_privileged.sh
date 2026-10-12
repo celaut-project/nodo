@@ -43,6 +43,26 @@ require_user_name() {
     valid_user_name "$2" || fail "$1 is not a valid user or group name: $(printf '%q' "$2")."
 }
 
+# A path that goes into a systemd unit. Only characters that neither systemd nor
+# the unit's `bash -c` give a meaning to: no newline (a new directive), no
+# backslash (an escape, or a line continuation), no quote, '$' or '`' (the
+# shell), no '%' (a systemd specifier), no ':' (the PATH separator) and no ';'.
+# The same rule as _UNIT_PATH in src/commands/doctor.py.
+valid_unit_path() {
+    local pattern='^/[A-Za-z0-9 ._+@,/-]*$'
+    [[ "$1" =~ $pattern ]]
+}
+
+require_unit_paths() {
+    # require_unit_paths "<what>=<value>"...: fails on the first value that
+    # cannot go into a unit, and names it.
+    local pair
+    for pair in "$@"; do
+        valid_unit_path "${pair#*=}" || fail "${pair%%=*} cannot go into the systemd unit: $(printf '%q' "${pair#*=}").
+Use an absolute path made only of letters, digits, spaces and . _ + @ , / -"
+    done
+}
+
 read_service_user_record() {
     # The user in NODO_SERVICE_USER_RECORD, or nothing when there is no record.
     # Fails when the record is not root's alone, or does not hold one user name.
