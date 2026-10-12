@@ -301,6 +301,23 @@ class BeeClient:
         )
 
     @staticmethod
+    def locate_share(
+            channel, share_id: str, client_id: str, timeout: Optional[float] = None,
+    ) -> Optional[celaut_pb2.ShareLocation]:
+        """``Client & ShareLocationRequest -> ShareLocation``: does the peer hold this
+        network share now (#268)?"""
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).LocateShare,
+            input=[
+                celaut_pb2.ShareLocationRequest(share_id=share_id),
+                celaut_pb2.Client(client_id=client_id),
+            ],
+            indices_serializer=rpc_input("LocateShare"),
+            indices_parser=rpc_output("LocateShare"),
+            timeout=timeout,
+        )
+
+    @staticmethod
     def get_metrics(channel, token: str) -> celaut_pb2.Metrics:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetMetrics,

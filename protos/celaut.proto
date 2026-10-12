@@ -619,6 +619,20 @@ message ResourceAvailability {
     string reason = 2;
 }
 
+// The request of LocateShare.
+message ShareLocationRequest {
+    // The id of a network share: hex of H("network", tag, formal, name, share_env,
+    // value). See docs/SHARED_FILESYSTEMS.md.
+    string share_id = 1;
+}
+
+// The answer of LocateShare.
+message ShareLocation {
+    // True if the node holds the network share now: it has the directory, and at
+    // least one instance of the node uses it.
+    bool held = 1;
+}
+
 // The answer of StopService.
 message Refund {
     // The balance that the instance did not use, in MU. The node gives it back to the
@@ -1082,6 +1096,12 @@ service Gateway {
     // its service declares. The node then also opens the addresses in the firewall of
     // that instance.
     rpc ResolveNetwork(stream buffer.Buffer) returns (stream buffer.Buffer) {}
+    // Takes a ShareLocationRequest with the id of a network share. Returns a
+    // ShareLocation that tells if the node holds that share now. The node does not ask
+    // other nodes. A node that launches a member of a network share asks its peers, and
+    // runs the member on the node that holds the share. Only a network share is
+    // reported, never a share from a parent to its children.
+    rpc LocateShare(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Sends the Peer of the caller, with a Client. The node returns a RecursionGuard.
     // Its token is the peer id (the public key) of the caller if the node knows the
     // caller now, or "REFUSED".

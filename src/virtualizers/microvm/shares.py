@@ -1,7 +1,7 @@
 """Materializing a guest's shared filesystems, for whichever hypervisor boots it.
 
-Both backends do the same thing with a service's ``shared``/``guest``
-declarations -- resolve which shares this instance takes part in, reserve and
+Both backends do the same thing with a service's ``shared``/``guest``/
+``share_network`` declarations -- resolve which shares this instance takes part in, reserve and
 start their backends, seed a new export from the image, and inject the guest's
 mount plan -- and differ only in how the resulting devices reach the guest:
 cloud-hypervisor takes the ``--fs`` arguments built here, QEMU builds its own
@@ -24,7 +24,11 @@ from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
 from protos import celaut_pb2 as celaut
-from src.manager.shares import authorize_shares, rundev_host_dirs
+from src.manager.shares import (
+    authorize_network_shares,
+    authorize_shares,
+    rundev_host_dirs,
+)
 from src.utils import logger as log
 from src.utils import keyvalue
 from src.utils.config import ConfigManager
@@ -37,8 +41,10 @@ from src.virtualizers.microvm.virtiofs import (
     attach_virtiofs_backends,
     build_guest_mount_plan,
     load_share_state,
+    holds_network_share,
     mount_for,
     share_bytes,
+    share_users,
     shared_fs_base_dir,
     teardown_virtiofs_for_vm,
 )
@@ -118,7 +124,10 @@ def materialize_shares(
 
     exports = exported_refs(service, vmachine_id, env_values)
     inherited = authorize_shares(service=service, father_id=father_id, config=config)
-    if not exports and not inherited:
+    in_network = authorize_network_shares(
+        service=service, father_id=father_id, config=config
+    )
+    if not exports and not inherited and not in_network:
         return NO_SHARES
 
     # Exporting a share means seeding its host directory with what the exporter
@@ -132,13 +141,16 @@ def materialize_shares(
     # time: `read_mode=ro` and `shared=true` are each legitimate on their own, and
     # a node that later grows an unpacker for these formats lifts this without the
     # service being repacked.
-    if exports and metadata is not None and metadata.read_only:
+    #
+    # A member of a network share can be the first one, and then it seeds the
+    # share the same way, so the same rule applies to it.
+    if (exports or in_network) and metadata is not None and metadata.read_only:
         raise MicroVMError(
-            f"{log_prefix} this service declares read_mode=ro and exports "
-            f"{len(exports)} shared filesystem(s). A share is seeded from the "
-            "exporter's own image, which the node reads with debugfs -- an ext4 "
-            "reader that cannot open a squashfs/erofs image. Pack it read_mode=rw "
-            "(the default) or drop the shared declaration."
+            f"{log_prefix} this service declares read_mode=ro and exports or shares "
+            f"{len(exports) + len(in_network)} shared filesystem(s). A share is seeded "
+            "from the image of its exporter or first member, which the node reads with "
+            "debugfs -- an ext4 reader that cannot open a squashfs/erofs image. Pack it "
+            "read_mode=rw (the default) or drop the shared declaration."
         )
 
     # A rundev sandbox exports directories of the developer's own rather than
@@ -150,11 +162,13 @@ def materialize_shares(
             mount_for(ref, base_dir, exported=False, host_dir=host_dirs.get(ref.share_id))
             for ref in inherited
         ]
+        + [mount_for(ref, base_dir, exported=False, network=True) for ref in in_network]
     )
 
     log.LOGGER(
         f"{log_prefix} shared filesystems: {len(exports)} exported, "
-        f"{len(inherited)} inherited from father={father_id}"
+        f"{len(inherited)} inherited from father={father_id}, "
+        f"{len(in_network)} shared in a network"
     )
     fs_device_args, mounts_state = attach_virtiofs_backends(
         mounts,
@@ -163,9 +177,9 @@ def materialize_shares(
         socket_dir=str(paths.control_socket_dir()),
         virtiofsd_binary=VIRTIOFSD_BINARY,
         sandbox=virtiofsd_sandbox(),
-        # A new export starts out holding what the exporter packaged at that
-        # path, read straight out of its own image, so the mount does not hide
-        # the content the service shipped.
+        # A new export, or a network share's first member, starts out holding
+        # what that instance packaged at that path, read straight out of its own
+        # image, so the mount does not hide the content the service shipped.
         seed_fn=lambda mount, dest: rootfs.debugfs_rdump(
             rootfs_path, mount.guest_path, dest
         ),
@@ -236,10 +250,41 @@ def exported_disk_bytes(vmachine_id: str) -> int:
     return share_bytes(str(shared_fs_base_dir(paths.cache_root())), exported)
 
 
+def holds_network_share_locally(share_id_hex: str) -> bool:
+    """Whether this node holds the network share now (see ``LocateShare``)."""
+    return holds_network_share(str(shared_fs_base_dir(paths.cache_root())), share_id_hex)
+
+
+def network_share_ids(mounts_state: List[Dict[str, object]]) -> List[str]:
+    """The network shares in a VM's mount state."""
+    return [
+        str(m["share_id_hex"]) for m in mounts_state or []
+        if m.get("network") and m.get("share_id_hex")
+    ]
+
+
+def network_share_bytes(share_ids: List[str]) -> int:
+    """This VM's part of the bytes its network shares hold.
+
+    A network share has no owner, so no single member's storage is the whole of
+    it. Each member is counted an equal part of it, from the users the share has
+    now: the parts of the current members add up to the directory, so the host's
+    disk ceiling sees it once, not once per member. The part changes when members
+    join or leave, and the maintenance sweep re-derives it.
+    """
+    base_dir = str(shared_fs_base_dir(paths.cache_root()))
+    total = 0
+    for sid in share_ids or []:
+        users = max(share_users(base_dir, sid), 1)
+        total += share_bytes(base_dir, [sid]) // users
+    return total
+
+
 def resolved_disk_bytes(vmachine_id: str) -> Optional[int]:
     """What this instance actually occupies: its rootfs image plus its shares.
 
-    ``None`` for an instance that exports nothing, which is the ordinary case and
+    ``None`` for an instance that exports nothing and is a member of no network
+    share, which is the ordinary case and
     the one that must cost nothing to ask about -- its recorded disk is already
     exactly its image.
 
@@ -254,12 +299,15 @@ def resolved_disk_bytes(vmachine_id: str) -> Optional[int]:
     """
     state = load_runtime_state(vmachine_id) or {}
     exported = state.get("exported_shares") or []
-    if not exported:
+    in_network = network_share_ids(state.get("virtiofs") or [])
+    if not exported and not in_network:
         return None
     try:
         rootfs_bytes = int(Path(str(state.get("rootfs_path") or "")).stat().st_size)
     except OSError:
         return None
-    return rootfs_bytes + share_bytes(
-        str(shared_fs_base_dir(paths.cache_root())), exported
+    return (
+        rootfs_bytes
+        + share_bytes(str(shared_fs_base_dir(paths.cache_root())), exported)
+        + network_share_bytes(in_network)
     )

@@ -717,7 +717,7 @@ node would refuse.
 - **Type:** `array` of objects
 - **Required:** No
 - **Default:** absent (nothing is written)
-- **Description:** Declares directories this service **exports** to the children it launches (`role: "shared"`) or **inherits** from the parent that launched it (`role: "guest"`). The packer writes the reserved xattrs described in [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md) on the directory's `ItemBranch`, and the node reads them at launch.
+- **Description:** Declares directories this service **exports** to the children it launches (`role: "shared"`), **inherits** from the parent that launched it (`role: "guest"`), or **shares** with the members of one of its networks (`role: "network"`). The packer writes the reserved xattrs described in [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md) on the directory's `ItemBranch`, and the node reads them at launch.
 
 ```json
 "shared_filesystems": [
@@ -731,10 +731,20 @@ node would refuse.
 ]
 ```
 
+```json
+"network": [
+  { "tags": ["hdfs"], "prose": "HDFS cluster", "formal": { "cluster": "${HDFS_CLUSTER}" } }
+],
+"shared_filesystems": [
+  { "path": "/data", "role": "network", "network": "hdfs", "tag": "hdfs-data" }
+]
+```
+
 | Field | Required | Becomes | Meaning |
 |---|---|---|---|
 | `path` | yes | (selects the branch) | Absolute path of the directory, not `/`. |
-| `role` | yes | `shared=true` or `guest=true` | `shared` exports, `guest` inherits. |
+| `role` | yes | `shared=true`, `guest=true`, or nothing for `network` | `shared` exports, `guest` inherits, `network` shares with the members of a network. |
+| `network` | with `role: "network"` only | `share_network` | Tag of an entry of the service's `network`. The packer refuses a tag that no entry carries. |
 | `tag` | no | `share_tag` | Logical name of the share, used instead of the path. |
 | `env` | no | `share_env` | Environment variable whose value picks the concrete share. |
 | `access` | no | `access` | `ro` or `rw` (default `rw`). |
@@ -743,8 +753,8 @@ node would refuse.
 - Types are checked strictly, as with `read_only_filesystem`: a list of objects, a `role` of `shared` or `guest`, strings where strings are expected. Unknown fields and a repeated `path` are refused. This is checked when `service.json` is read, before the image is built.
 - The result goes through the same validation the node applies, so `shared` and `guest` are exclusive, declarations cannot nest, names (`tag`, or the path) cannot repeat on one side, `tag` must match `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, and `env` must be a POSIX variable name.
 - Absent or empty writes **nothing**, so no existing service gets a new id.
-- `read_only_filesystem: true` together with a `shared` entry is refused at pack time (see above). A `guest` entry is fine.
-- An exported directory counts toward the **exporter's** `resources.at_init.disk_space` and `at_most.disk_space`; its guests are charged nothing for it. See [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#accounting).
+- `read_only_filesystem: true` together with a `shared` or `network` entry is refused at pack time (see above). A `guest` entry is fine.
+- An exported directory counts toward the **exporter's** `resources.at_init.disk_space` and `at_most.disk_space`; its guests are charged nothing for it. Each member of a network share is charged an equal part of it. See [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#accounting).
 
 ---
 

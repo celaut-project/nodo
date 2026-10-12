@@ -1,4 +1,4 @@
-# Shared filesystems — a parent → child capability
+# Shared filesystems — a parent → child capability, or a network one
 
 A shared directory is a **communication channel**. If an instance that is not a
 child of the exporter could mount it, two instances the Networks model keeps in
@@ -6,6 +6,13 @@ separate communication domains would exchange data over disk: the isolation
 `Service.Network` provides only means something if share gating is at least as
 strict. Nothing cryptographic enforces this — only the node can — so it is a
 node-conformance property, verifiable and punishable through reputation.
+
+There are two kinds of share. A **parent share** (`shared` / `guest`) goes from
+an instance to the children it launches; the instance tree is its scope. A
+**network share** (`share_network`, #268) is for instances with no common parent;
+a `Service.Network` is its scope. Network shares are described in
+[their own section](#network-shares--no-common-parent); the other sections are
+about parent shares, unless they say otherwise.
 
 ### The invariant (normative)
 
@@ -18,8 +25,8 @@ node-conformance property, verifiable and punishable through reputation.
 
 ### Declaration
 
-Reserved xattrs on directories in `Container.Filesystem.ItemBranch.xattrs`. There
-is no `Service.Network` involvement.
+Reserved xattrs on directories in `Container.Filesystem.ItemBranch.xattrs`. A
+parent share does not involve `Service.Network`; a network share does.
 
 | xattr | meaning |
 | --- | --- |
@@ -28,6 +35,7 @@ is no `Service.Network` involvement.
 | `access=ro\|rw` | requested mount mode for a `guest` dir (default `rw`) |
 | `share_tag=<tag>` | logical **name** of the share, used instead of the mount path |
 | `share_env=<ENV_VAR>` | environment variable whose **value** picks the concrete share |
+| `share_network=<tag>` | shared with the members of the network with that tag (a [network share](#network-shares--no-common-parent)) |
 
 A packed service gets these xattrs from the `shared_filesystems` field of
 `service.json`; see [PACKING.md](PACKING.md#shared_filesystems).
@@ -37,7 +45,8 @@ node reads it, which is what makes it validatable at pack time:
 
 - `shared` and `guest` are mutually exclusive on one directory, and both are only
   valid on directories;
-- `share_tag` / `share_env` are meaningless without one of them;
+- `share_network` excludes both of them;
+- `share_tag` / `share_env` are meaningless without one of the three;
 - **a share declaration cannot be nested inside another.** A `shared` inside a
   `guest` subtree is the re-export the invariant forbids, and two overlapping
   declarations are two mounts covering one path with the winner decided by the
@@ -56,8 +65,10 @@ node reads it, which is what makes it validatable at pack time:
 ```
 name          = share_tag        if declared, else the exported path
 discriminator = env[share_env]   if share_env is declared, else ""
-share_id      = H(parent_instance_id, name, share_env, discriminator)
+share_id      = H("parent", parent_instance_id, name, share_env, discriminator)
 ```
+
+The first field keeps parent shares and network shares in separate id spaces.
 
 The fields are **length-prefixed**, not separator-joined: two of them carry text
 the spec chose, so with a separator a child could reach a share it was never
@@ -186,6 +197,136 @@ content-addressed, so keeping the dataset out of the specification is what keeps
 it one service id, one cached image and one accruing reputation instead of a
 repack per dataset.
 
+### Network shares — no common parent
+
+A parent share needs an instance that is the parent of every participant. Two
+instances that are launched independently — for example, six services that a
+script launches one by one — have no such instance. For them, the scope is a
+**network**: two instances share a directory only when both declare the same
+`Service.Network` and the same share.
+
+The network is the correct scope because a share is a communication channel.
+Instances that declare the same network, with the same `formal` values, can
+already reach each other over TCP (`local_network_instances` gives them as peers).
+A network share gives them no channel that the network does not give them. An
+instance that does not declare the network cannot join the share.
+
+#### Declaring a network share
+
+```
+/data   share_network=hdfs, share_tag=hdfs-data, share_env=HDFS_CLUSTER
+```
+
+- `share_network=<tag>` names the entry of `Service.network` that carries that
+  tag. The service must declare that network; a spec that does not is refused
+  when the node reads it, and at pack time.
+- `share_tag`, `share_env` and `access` work as for a parent share.
+- A network share is **symmetric**: there is no `shared` or `guest` side, and it
+  cannot be combined with either.
+- In `service.json`: `{"path": "/data", "role": "network", "network": "hdfs",
+  "tag": "hdfs-data"}`. See [PACKING.md](PACKING.md#shared_filesystems).
+
+#### Identity of a network share
+
+```
+formal    = the network's formal, with every ${VAR} substituted ("" if none)
+share_id  = H("network", tag, formal, name, share_env, discriminator)
+```
+
+- The network takes the place of the parent instance id. Every member that
+  declares the same tag, `formal`, name, variable and value derives the same id,
+  whichever node and whichever parent it runs under.
+- A tag is enough. When the network has a `formal`, it is part of the id after
+  substitution, so `cluster=${HDFS_CLUSTER}` gives one share per cluster.
+- An unanswered `${VAR}` refuses the launch. The id is not complete without it,
+  and a guess would put the instance in the share of another domain.
+- The id does **not** use `match_networks`. That relation is not transitive (one
+  common tag is enough), so it cannot give one id. A member whose network has a
+  `formal` and a member whose network has none are in **two different shares**,
+  also when `match_networks` says that the networks are the same.
+
+#### Authorizing a network share
+
+There is no exporter to ask. A network share is granted when the instance is in
+the network:
+
+- the operator's `service_networks` policy allows the network. `launch_service`
+  enforces it on every declared network before the shares are checked;
+- for an instance that a local instance launches, every ancestor declares the
+  network (`filter_networks_with_ancestors`). An instance whose parent cannot
+  reach a domain cannot open a channel into it over disk.
+
+The check is `authorize_network_shares` (`src/manager/shares.py`). It runs in
+`launch_service` before the balancer, and again on the materialization path.
+
+#### Placement: `Gateway.LocateShare`
+
+A network share is a directory on one host. A member that runs on another node
+would derive the same id there and get a new, empty directory. So before a member
+is placed, the node finds which node holds the share
+(`src/manager/share_location.py`):
+
+1. It looks at its own share state.
+2. It asks each peer with `Gateway.LocateShare(share_id)`. A peer answers
+   `held=true` when it has the directory and at least one instance uses it. A
+   parent share is never reported.
+3. If one node holds the share, the balancer runs the member **only on that
+   node**. If no node holds it, placement is free, and the node that runs the
+   member creates the share.
+
+With `network.DELEGATE_EXECUTION` off, no peer is asked. A peer that cannot answer
+(unreachable, timed out, or older than `LocateShare`) is taken as not holding the
+share.
+
+`LocateShare` tells a caller only that a share id is in use. To calculate the id,
+the caller must know the tag, the `formal` and the share's name and value — which
+is what joining the share takes anyway.
+
+#### Known limit: two nodes can create one share
+
+The lookup is not consensus. If two members of a new share are placed at the
+same time on two nodes, both nodes can create the share: one name, two
+directories. Data cannot be merged after that without moving it, so the node
+does not hide it. A later launch that finds the share on more than one node is
+refused, and the message gives every location. The operator stops the members on
+all nodes but one. A member whose shares are held on two different nodes is
+refused the same way, because one instance cannot run on two nodes.
+
+#### Lifecycle of a network share
+
+- **No owner.** The first member that materializes the share seeds it with its
+  own packaged subtree at its path. The check, the seed and the reservation run
+  under the share's lock, so two members that start together cannot both seed it.
+  If the seed fails, the directory is removed, and the next member seeds it again.
+- **It ends with its last member.** A member that stops removes only itself. When
+  the last member stops, the directory is removed. A member that reserves the
+  share while the last one stops keeps it: the directory is removed only if
+  nobody reserved it again.
+- It is **not durable**: a share with no members has no data.
+- A read-only image (`read_mode=ro`) cannot be a member, for the same reason it
+  cannot export: the first member seeds the share from its image with `debugfs`.
+
+#### Accounting of a network share
+
+A network share has no owner, so no single member's storage is the whole of it.
+Each member is counted an **equal part** of the share's bytes, from the number of
+members it has now. The parts of the current members add up to the directory, so
+the host's disk ceiling counts it one time. The part changes when members join or
+leave, and the maintenance tick calculates it again.
+
+#### Example: six services, no common parent
+
+```
+# coordinator, namenode and four datanodes, each launched by a script
+network:  tags=[hdfs], formal="cluster=${HDFS_CLUSTER}"
+/data     share_network=hdfs, share_tag=hdfs-data
+```
+
+Launched with `HDFS_CLUSTER=prod`, the first instance creates the share on the
+node that runs it. Each next instance finds the share there with `LocateShare`
+and runs on that node. The same images with `HDFS_CLUSTER=test` make a second,
+separate share.
+
 ### Materialization (VirtioFS — implementation detail)
 
 `src/virtualizers/microvm/shares.py` is where both hypervisors materialize a
@@ -231,6 +372,11 @@ failure for the one rule only the node can enforce.
    makes it acceptable is that it cannot happen quietly at launch — a child whose
    exporter is already gone is refused before it starts, because authorization is
    asked again on the materialization path.
+
+A member of a network share is materialized the same way, with these
+differences: its daemon follows the `access` it declared, the first member seeds
+the directory, and the share's state records no owner (see
+[Lifecycle of a network share](#lifecycle-of-a-network-share)).
 
 Write concurrency between participants is the application's problem, as it would
 be over NFS; the node arbitrates nothing beyond the mount mode each guest asked
@@ -314,6 +460,9 @@ exporter's disk is the one figure that is **re-derived** on each tick — the si
 of the image plus the size of the directories — and written back to its row when
 it moved. An instance that exports nothing is never measured and its row is never
 touched.
+
+A network share is counted differently: each member pays an equal part (see
+[Accounting of a network share](#accounting-of-a-network-share)).
 
 There is no separate reservation per share, and no ceiling a guest could exceed
 on its own: a guest cannot make the share grow beyond what its exporter is
