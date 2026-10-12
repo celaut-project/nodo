@@ -19,7 +19,11 @@ from src.utils import pack_registry as registry
 #: Log lines an inspect shows.
 LOG_TAIL_LINES = 20
 
-USAGE = "Usage: nodo pack <project directory | https git URL[#subdir]> [--local] [--detach] [--json]"
+USAGE = ("Usage: nodo pack <project directory | https git URL[#subdir]> [--local] "
+         "[--fast | --optimize] [--detach] [--json]")
+
+FAST_IGNORED = ("--fast only affects the local packer; the packer service ignores it "
+                "and packs normally.")
 
 NODO_PY = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nodo.py"))
 
@@ -32,6 +36,19 @@ def _age(seconds: Any) -> str:
         if seconds >= size:
             return f"{seconds // size}{unit}"
     return f"{seconds}s"
+
+
+def _fast(fast_flag: bool, optimize_flag: bool) -> bool:
+    """`--fast` / `--optimize` for this run, else ``packer.fast`` (default false)."""
+    if fast_flag or optimize_flag:
+        return fast_flag
+    try:
+        from src.utils.config import ConfigManager
+
+        return bool(ConfigManager().get("packer.fast", False))
+    except Exception as e:  # An unreadable config must not stop a pack; say so.
+        print(f"Could not read packer.fast ({e!r}); packing normally.", file=sys.stderr)
+        return False
 
 
 def _packer_kind(local: bool = False) -> str:
@@ -115,7 +132,8 @@ def render_one(record: Dict[str, Any], log_lines: List[str]) -> str:
 
 
 def pack_command(argv: List[str]) -> int:
-    """``nodo pack <source> [--local] [--detach] [--json]``; returns the exit status.
+    """``nodo pack <source> [--local] [--fast | --optimize] [--detach] [--json]``; returns
+    the exit status.
 
     1 when the source is refused or the pack produced no service (it used to exit 0
     either way, which a script could not tell from success).
@@ -124,6 +142,14 @@ def pack_command(argv: List[str]) -> int:
     as_json = "--json" in args and not args.remove("--json")
     detached = "--detach" in args and not args.remove("--detach")
     local = "--local" in args and not args.remove("--local")
+    # --fast: inline the whole rootfs into a single filesystem block (local packer
+    # only). --optimize: force the normal per-file blocks even when packer.fast
+    # makes fast the default.
+    fast_flag = "--fast" in args and not args.remove("--fast")
+    optimize_flag = "--optimize" in args and not args.remove("--optimize")
+    if fast_flag and optimize_flag:
+        emit_error(as_json, "Error: --fast and --optimize are mutually exclusive.")
+        return 1
     if len(args) != 1 or args[0].startswith("--"):
         return 0 if emit_error(as_json, USAGE) else 1
 
@@ -135,15 +161,25 @@ def pack_command(argv: List[str]) -> int:
         emit_error(as_json, f"Error: {e}")
         return 1
 
+    fast = _fast(fast_flag, optimize_flag)
     if detached:
-        return 0 if detach(source, as_json=as_json, local=local) else 1
-    return 0 if foreground(source, kind, as_json=as_json, local=local) else 1
+        # pack() warns that the packer service ignores --fast, but a detached
+        # child's output only reaches its log: say it here, where it is seen.
+        if fast and _packer_kind(local) == "service":
+            print(FAST_IGNORED, file=sys.stderr)
+        # The child re-runs `nodo pack` and resolves packer.fast itself, so it gets
+        # the flags as typed rather than the resolved value.
+        mode = ["--fast"] if fast_flag else ["--optimize"] if optimize_flag else []
+        return 0 if detach(source, as_json=as_json, local=local, options=mode) else 1
+    return 0 if foreground(source, kind, as_json=as_json, local=local, fast=fast) else 1
 
 
 def detach(source: str, as_json: bool = False, timeout_s: float = registry.DETACH_TIMEOUT_S,
-           command: Optional[List[str]] = None, local: bool = False) -> bool:
+           command: Optional[List[str]] = None, local: bool = False,
+           options: Optional[List[str]] = None) -> bool:
+    options = (["--local"] if local else []) + list(options or [])
     record, error = registry.spawn_detached(source, NODO_PY, timeout_s=timeout_s, command=command,
-                                            options=["--local"] if local else None)
+                                            options=options or None)
     if record is None:
         return emit_error(as_json, error)
     if as_json:
@@ -157,7 +193,8 @@ def detach(source: str, as_json: bool = False, timeout_s: float = registry.DETAC
     return True
 
 
-def foreground(source: str, kind: str, as_json: bool = False, local: bool = False) -> bool:
+def foreground(source: str, kind: str, as_json: bool = False, local: bool = False,
+               fast: bool = False) -> bool:
     """Pack here, registered so `nodo packs` and the TUI see it while it runs.
 
     With ``--json`` the packer's chatter goes to stderr and stdout carries only the
@@ -172,7 +209,7 @@ def foreground(source: str, kind: str, as_json: bool = False, local: bool = Fals
         os.dup2(2, 1)
     try:
         service_id, pack_id = registry.run(
-            source, kind, _packer_kind(local), lambda: pack(directory=source, local=local)
+            source, kind, _packer_kind(local), lambda: pack(directory=source, local=local, fast=fast)
         )
     finally:
         if saved_stdout is not None:
