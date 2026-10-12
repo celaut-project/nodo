@@ -5,6 +5,7 @@ import grp
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -1283,13 +1284,32 @@ def _compat_state(bridge):
         return None
 
 
+SERVICE_FILE_PATH = "/etc/systemd/system/nodo.service"
+
+
+def _confirm_user_change(service_name: str, current: str, expected: str) -> bool:
+    """Ask before a rewrite changes who the unit runs as; never without a terminal."""
+    if not sys.stdin.isatty():
+        return False
+    print(
+        f"{service_name} runs nodo as {current}; the unit this install renders runs it as "
+        f"{expected}.",
+        flush=True,
+    )
+    try:
+        answer = input(f"Rewrite {service_name} to run as {expected}? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes", "s", "si", "sí")
+
+
 def doctor_command(main_dir):
     if os.geteuid() != 0:
         print("This script requires superuser privileges. Please run with sudo.")
         return
 
     service_name = "nodo.service"
-    service_file_path = f"/etc/systemd/system/{service_name}"
+    service_file_path = SERVICE_FILE_PATH
     try:
         service_user = installed_service_user(unit_file=service_file_path)
     except (OSError, ValueError) as e:
@@ -1327,6 +1347,18 @@ def doctor_command(main_dir):
             needs_fix = True
         else:
             print(f"[OK] {service_name} is correctly configured.", flush=True)
+
+    if needs_fix and current_service_user != expected_service_user and os.path.exists(service_file_path):
+        # A change of the user the node runs as is the operator's decision, not a fix.
+        if not _confirm_user_change(service_name, current_service_user, expected_service_user):
+            needs_fix = False
+            print(
+                f"[FAIL] {service_name} runs nodo as {current_service_user}, and this install "
+                f"says {expected_service_user}. Left unchanged. To choose, run "
+                "'sudo ./install.sh --service-user <name>' (root: --service-user root), or "
+                "'sudo nodo doctor' in a terminal and confirm.",
+                flush=True,
+            )
 
     if needs_fix:
         print(f"Fixing {service_name}...", flush=True)
