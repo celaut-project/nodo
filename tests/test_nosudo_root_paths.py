@@ -265,5 +265,93 @@ class PathWritableByTests(unittest.TestCase):
         self.assertTrue(self._writable(f"{mine}.link/x", me))
 
 
+class DoctorUnitUserTests(unittest.TestCase):
+    """Review of #533, item 1: doctor rewrote and enabled a User=root unit, no prompt."""
+
+    def setUp(self):
+        from src.commands import doctor
+
+        self.doctor = doctor
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.dir, ignore_errors=True))
+        self.main_dir = os.path.join(self.dir, "nodo")
+        os.makedirs(os.path.join(self.main_dir, "bash"))
+        for name in ("nodo.service.template", "nodo-nosudo.service.template"):
+            Path(self.main_dir, "bash", name).write_text((_ROOT / "bash" / name).read_text())
+        # What a compromised daemon writes: no user, and a newline-free but
+        # otherwise ordinary config.
+        Path(self.main_dir, "config.yaml").write_text('main:\n  SERVICE_USER: ""\n')
+        self.unit = os.path.join(self.dir, "nodo.service")
+        self.calls = []
+
+    def _render(self, user):
+        name = self.doctor._service_template_name(user)
+        template = Path(self.main_dir, "bash", name).read_text()
+        with mock.patch.object(self.doctor, "_resolve_admin_group", return_value="sudo"):
+            return self.doctor._render_service_template(template, self.main_dir, user)
+
+    def _run(self, record_user, tty=False, answer="n"):
+        stdin = mock.Mock()
+        stdin.isatty.return_value = tty
+        patches = [
+            mock.patch.object(self.doctor, "SERVICE_FILE_PATH", self.unit),
+            mock.patch.object(self.doctor.os, "geteuid", return_value=0),
+            mock.patch.object(self.doctor, "installed_service_user", return_value=record_user),
+            mock.patch.object(self.doctor, "_resolve_admin_group", return_value="sudo"),
+            mock.patch.object(self.doctor, "_doctor_kvm_checks"),
+            mock.patch.object(self.doctor, "_doctor_cloud_hypervisor"),
+            mock.patch.object(self.doctor, "_doctor_network_checks"),
+            mock.patch.object(self.doctor.subprocess, "run", side_effect=lambda c, **k: self.calls.append(c)),
+            mock.patch.object(self.doctor.sys, "stdin", stdin),
+            mock.patch("builtins.input", return_value=answer),
+            mock.patch("builtins.print"),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.doctor.doctor_command(self.main_dir)
+
+    def test_the_service_users_unit_is_kept_whatever_config_says(self):
+        Path(self.unit).write_text(self._render("nodo"))
+        before = Path(self.unit).read_text()
+        self._run("nodo")
+        self.assertEqual(Path(self.unit).read_text(), before)
+        self.assertEqual(self.calls, [])
+
+    def test_a_user_change_is_not_made_without_a_terminal(self):
+        Path(self.unit).write_text(self._render("nodo"))
+        before = Path(self.unit).read_text()
+        self._run("")
+        self.assertEqual(Path(self.unit).read_text(), before)
+        self.assertNotIn(["systemctl", "enable", "nodo.service"], self.calls)
+        self.assertNotIn(["systemctl", "stop", "nodo.service"], self.calls)
+
+    def test_a_user_change_is_not_made_when_the_operator_says_no(self):
+        Path(self.unit).write_text(self._render("nodo"))
+        before = Path(self.unit).read_text()
+        self._run("", tty=True, answer="")
+        self.assertEqual(Path(self.unit).read_text(), before)
+
+    def test_a_confirmed_user_change_is_made(self):
+        Path(self.unit).write_text(self._render("nodo"))
+        self._run("", tty=True, answer="y")
+        self.assertIn("User=root", Path(self.unit).read_text().splitlines())
+        self.assertIn(["systemctl", "enable", "nodo.service"], self.calls)
+
+    def test_a_drifted_unit_of_the_same_user_is_still_fixed(self):
+        Path(self.unit).write_text(self._render("nodo").replace("Delegate=yes", "Delegate=no"))
+        self._run("nodo")
+        self.assertIn("Delegate=yes", Path(self.unit).read_text().splitlines())
+
+    def test_an_injected_value_is_not_written(self):
+        Path(self.main_dir, "config.yaml").write_text(
+            'dependencies:\n  java:\n    JAVA_HOME: "/x\\nUser=root"\n'
+        )
+        Path(self.unit).write_text("[Service]\nUser=nodo\n")
+        self._run("nodo")
+        self.assertEqual(Path(self.unit).read_text(), "[Service]\nUser=nodo\n")
+        self.assertEqual(self.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
