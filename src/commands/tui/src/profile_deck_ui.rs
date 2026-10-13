@@ -776,18 +776,34 @@ fn bar(value: u8, accent: Color) -> Vec<Span<'static>> {
     spans
 }
 
-/// Remove blank lines, last first, until `lines` fits in `height`.
-fn fit_lines(mut lines: Vec<Line<'static>>, height: usize) -> Vec<Line<'static>> {
+/// The parts of the data panel, so that a short panel can say what gives way first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Blank,
+    Tagline,
+    Blurb,
+    Bar,
+    Trait,
+    Status,
+}
+
+/// Cut `lines` to `height`, giving up the least important things first: the gaps,
+/// then the line of the character, then the traits from the last one. What the
+/// profile is for, the bars and the count of changes are never cut: a card without
+/// "N keys will change" does not say what choosing it does.
+fn fit_lines(mut lines: Vec<(Part, Line<'static>)>, height: usize) -> Vec<Line<'static>> {
     while lines.len() > height {
-        let blank = lines.iter().rposition(|line| line.width() == 0);
-        match blank {
+        let gives_way = [Part::Blank, Part::Tagline, Part::Trait]
+            .into_iter()
+            .find_map(|part| lines.iter().rposition(|(kind, _)| *kind == part));
+        match gives_way {
             Some(position) => {
                 lines.remove(position);
             }
             None => break,
         }
     }
-    lines
+    lines.into_iter().map(|(_, line)| line).collect()
 }
 
 fn render_data(
@@ -818,19 +834,29 @@ fn render_data(
         return;
     }
     let stats = profile_deck::stats(profile);
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        persona.tagline,
-        Style::default().fg(accent).add_modifier(Modifier::ITALIC),
-    )));
-    lines.push(Line::from(""));
-
-    // The blurb is wrapped by hand, so the number of lines is known before the
-    // panel is filled.
-    for text in wrap(profile.blurb, text_width as usize) {
-        lines.push(Line::from(Span::styled(text, Style::default().fg(TEXT))));
+    let mut lines: Vec<(Part, Line<'static>)> = Vec::new();
+    let blank = || (Part::Blank, Line::from(""));
+    // The tagline and the blurb are wrapped by hand, so the number of lines is known
+    // before the panel is filled. A tagline left to the paragraph would take two
+    // rows that were never counted, and the last line would be the one cut.
+    for text in wrap(persona.tagline, text_width as usize) {
+        lines.push((
+            Part::Tagline,
+            Line::from(Span::styled(
+                text,
+                Style::default().fg(accent).add_modifier(Modifier::ITALIC),
+            )),
+        ));
     }
-    lines.push(Line::from(""));
+    lines.push(blank());
+
+    for text in wrap(profile.blurb, text_width as usize) {
+        lines.push((
+            Part::Blurb,
+            Line::from(Span::styled(text, Style::default().fg(TEXT))),
+        ));
+    }
+    lines.push(blank());
 
     for (label, value) in stats.bars() {
         let mut spans = vec![Span::styled(
@@ -842,33 +868,39 @@ fn render_data(
             format!(" {value}/{STAT_MAX}"),
             Style::default().fg(MUTED),
         ));
-        lines.push(Line::from(spans));
+        lines.push((Part::Bar, Line::from(spans)));
     }
-    lines.push(Line::from(""));
+    lines.push(blank());
 
     for text in profile_deck::traits(profile) {
-        lines.push(Line::from(vec![
-            Span::styled("▸ ", Style::default().fg(accent)),
-            Span::styled(text, Style::default().fg(TEXT)),
-        ]));
+        lines.push((
+            Part::Trait,
+            Line::from(vec![
+                Span::styled("▸ ", Style::default().fg(accent)),
+                Span::styled(text, Style::default().fg(TEXT)),
+            ]),
+        ));
     }
-    lines.push(Line::from(""));
+    lines.push(blank());
 
-    lines.push(if current {
-        Line::from(Span::styled(
-            "You are here: nothing would change",
-            Style::default().fg(GOOD).add_modifier(Modifier::BOLD),
-        ))
-    } else {
-        let count = report.deviations.len();
-        Line::from(Span::styled(
-            format!(
-                "{count} {} will change",
-                if count == 1 { "key" } else { "keys" }
-            ),
-            Style::default().fg(WARN).add_modifier(Modifier::BOLD),
-        ))
-    });
+    lines.push((
+        Part::Status,
+        if current {
+            Line::from(Span::styled(
+                "You are here: nothing would change",
+                Style::default().fg(GOOD).add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            let count = report.deviations.len();
+            Line::from(Span::styled(
+                format!(
+                    "{count} {} will change",
+                    if count == 1 { "key" } else { "keys" }
+                ),
+                Style::default().fg(WARN).add_modifier(Modifier::BOLD),
+            ))
+        },
+    ));
 
     let lines = fit_lines(lines, area.height.saturating_sub(2) as usize);
     let panel_height = (lines.len() as u16 + 2).min(area.height);
@@ -923,6 +955,15 @@ mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    /// The position of a profile on the dial: the tests name a profile, not a number,
+    /// so a profile added before it moves nothing.
+    fn index_of(id: &str) -> usize {
+        cell::profiles()
+            .iter()
+            .position(|profile| profile.id == id)
+            .unwrap()
+    }
 
     fn contains(outer: Rect, inner: Rect) -> bool {
         inner.x >= outer.x
@@ -1001,7 +1042,7 @@ mod tests {
 
     #[test]
     fn a_click_lands_on_the_part_it_is_over() {
-        let layout = layout(Rect::new(0, 0, 100, 32), 5, true).unwrap();
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
         let at = |rect: Rect| Position::new(rect.x + rect.width / 2, rect.y + rect.height / 2);
         assert_eq!(hit(&layout, at(layout.choose)), Some(Hit::Choose));
         assert_eq!(hit(&layout, at(layout.skip)), Some(Hit::Skip));
@@ -1298,7 +1339,12 @@ mod tests {
     #[test]
     fn the_confirmation_fits_in_the_modal_and_its_buttons_do_not_overlap() {
         for (width, height) in [(80, 26), (100, 34), (200, 60)] {
-            let deck = layout(Rect::new(0, 0, width, height), 5, false).unwrap();
+            let deck = layout(
+                Rect::new(0, 0, width, height),
+                cell::profiles().len(),
+                false,
+            )
+            .unwrap();
             for lines in [1, 5, 40, 500] {
                 let confirm = confirm_layout(&deck, lines);
                 for zone in [confirm.panel, confirm.body, confirm.apply, confirm.back] {
@@ -1320,13 +1366,13 @@ mod tests {
 
     #[test]
     fn a_short_list_gets_a_short_panel() {
-        let deck = layout(Rect::new(0, 0, 100, 40), 5, false).unwrap();
+        let deck = layout(Rect::new(0, 0, 100, 40), cell::profiles().len(), false).unwrap();
         assert!(confirm_layout(&deck, 3).panel.height < confirm_layout(&deck, 30).panel.height);
     }
 
     #[test]
     fn a_click_on_a_button_is_told_from_one_beside_it() {
-        let deck = layout(Rect::new(0, 0, 100, 34), 5, false).unwrap();
+        let deck = layout(Rect::new(0, 0, 100, 34), cell::profiles().len(), false).unwrap();
         let confirm = confirm_layout(&deck, 10);
         let at = |rect: Rect| Position::new(rect.x + rect.width / 2, rect.y);
         assert_eq!(
@@ -1345,7 +1391,7 @@ mod tests {
 
     fn confirm_screen(mode: ColorMode) -> (Buffer, ConfirmLayout) {
         let mut app = App::default();
-        app.cell.profile = 1;
+        app.cell.profile = index_of("cautious");
         app.config_document = None;
         app.details = Some(crate::app::DetailsView {
             title: "Profile CAUTIOUS RENTER? (y/N)".to_string(),
@@ -1405,7 +1451,7 @@ mod tests {
     #[test]
     fn the_modal_is_centred() {
         let area = Rect::new(0, 0, 100, 30);
-        let layout = layout(area, 5, true).unwrap();
+        let layout = layout(area, cell::profiles().len(), true).unwrap();
         assert_eq!(layout.modal.x, 1);
         assert_eq!(layout.modal.y, 1);
         assert_eq!(layout.modal.width, 98);
@@ -1439,10 +1485,73 @@ mod tests {
 
     #[test]
     fn the_key_traits_and_the_change_count_show_at_the_smallest_size() {
-        let (buffer, _) = screen(MIN_WIDTH, MIN_HEIGHT, 1);
+        let (buffer, _) = screen(MIN_WIDTH, MIN_HEIGHT, index_of("cautious"));
         let text = text_of(&buffer);
         assert!(text.contains("will change"), "{text}");
         assert!(text.contains("▸ Tunnel only"), "{text}");
+    }
+
+    /// On every card, at the smallest size, the last line is the count of changes and
+    /// all five bars are there: whatever has to give way, it is not those. A new
+    /// profile with a longer text is held to the same.
+    #[test]
+    fn every_card_keeps_its_bars_and_its_change_count_at_the_smallest_size() {
+        for (index, profile) in cell::profiles().iter().enumerate() {
+            let (buffer, _) = screen(MIN_WIDTH, MIN_HEIGHT, index);
+            let text = text_of(&buffer);
+            assert!(text.contains("will change"), "{}:\n{text}", profile.id);
+            for label in ["EXPOSURE", "INCOME", "OPENNESS", "ISOLATION", "RISK"] {
+                assert!(
+                    text.contains(label),
+                    "{} lacks {label}:\n{text}",
+                    profile.id
+                );
+            }
+            assert!(text.contains(profile.label), "{}", profile.id);
+        }
+    }
+
+    #[test]
+    fn a_short_panel_gives_up_the_gaps_then_the_tagline_then_the_traits() {
+        let line = |text: &str| Line::from(text.to_string());
+        let lines = vec![
+            (Part::Tagline, line("tag")),
+            (Part::Blank, line("")),
+            (Part::Blurb, line("blurb")),
+            (Part::Blank, line("")),
+            (Part::Bar, line("bar")),
+            (Part::Blank, line("")),
+            (Part::Trait, line("t1")),
+            (Part::Trait, line("t2")),
+            (Part::Blank, line("")),
+            (Part::Status, line("status")),
+        ];
+        let text = |lines: Vec<Line<'static>>| -> Vec<String> {
+            lines.iter().map(|line| line.to_string()).collect()
+        };
+        // Nothing is cut when it fits.
+        assert_eq!(fit_lines(lines.clone(), 10).len(), 10);
+        // The gaps go first.
+        assert_eq!(
+            text(fit_lines(lines.clone(), 6)),
+            ["tag", "blurb", "bar", "t1", "t2", "status"]
+        );
+        // Then the tagline.
+        assert_eq!(
+            text(fit_lines(lines.clone(), 5)),
+            ["blurb", "bar", "t1", "t2", "status"]
+        );
+        // Then the traits, the last first.
+        assert_eq!(
+            text(fit_lines(lines.clone(), 4)),
+            ["blurb", "bar", "t1", "status"]
+        );
+        assert_eq!(
+            text(fit_lines(lines.clone(), 3)),
+            ["blurb", "bar", "status"]
+        );
+        // Never the meaning, the bars or the count.
+        assert_eq!(text(fit_lines(lines, 1)), ["blurb", "bar", "status"]);
     }
 
     /// The popup paints every cell it covers.
@@ -1450,7 +1559,7 @@ mod tests {
     fn the_deck_repaints_every_cell_of_the_modal() {
         let (buffer, _) = screen(100, 32, 2);
         let area = Rect::new(0, 0, 100, 32);
-        let layout = layout(area, 5, true).unwrap();
+        let layout = layout(area, cell::profiles().len(), true).unwrap();
         for y in layout.modal.y..layout.modal.y + layout.modal.height {
             for x in layout.modal.x..layout.modal.x + layout.modal.width {
                 assert_ne!(buffer.get(x, y).bg, Color::Reset, "({x},{y})");
@@ -1468,7 +1577,7 @@ mod tests {
     #[test]
     fn the_dots_mark_the_open_card() {
         let (buffer, _) = screen(100, 32, 3);
-        let layout = layout(Rect::new(0, 0, 100, 32), 5, true).unwrap();
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
         for (position, dot) in layout.dots.iter().enumerate() {
             let symbol = buffer.get(dot.x, dot.y).symbol();
             assert_eq!(symbol, if position == 3 { "●" } else { "○" });

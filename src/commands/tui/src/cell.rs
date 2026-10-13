@@ -1428,6 +1428,50 @@ static PROFILES: &[Profile] = &[
         ],
     },
     Profile {
+        id: "remote-only",
+        label: "REMOTE ONLY",
+        blurb: "I run nothing here. Every service runs on other nodes, and I pay for it.",
+        writes: &[
+            ("client.ACCEPT_NEW_DEPOSITS", "false"),
+            ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
+            ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
+            ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
+            // This node runs nothing itself. Turning that off without turning delegation
+            // on would leave a node that can run nothing anywhere, so the two travel
+            // together, and a test holds every profile to that.
+            ("network.EXECUTE_LOCALLY", "false"),
+            ("network.DELEGATE_EXECUTION", "true"),
+            ("network.DELEGATION_TUNNEL_POLICY", "always"),
+            // A node that only consumes has no income to pay with, and an empty deposit on
+            // the peer makes the launch fail. This is the one profile besides OPEN RENTER
+            // that spends on its own, and the list of changes shows it.
+            ("deposits.AUTOMATIC_REFILL", "true"),
+            ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
+            ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+            ("service_networks.blacklist", "[]"),
+            ("service_networks.whitelist", "[]"),
+            ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
+            ("pricing.SCARCITY_CURVE", "1.0"),
+            ("free_tier.FREE_WHILE_SCARCITY_BELOW", "0.0"),
+            ("free_tier.CREDIT_MU_PER_NEW_CLIENT", "0"),
+            ("costs.ALLOW_DEBT", "false"),
+            ("misc.VALIDATE_ON_IMPORT", "true"),
+            ("hashing.CHECK_INTEGRITY_ON_SERVE", "false"),
+            ("virtualizers.qemu.ENABLE", "false"),
+            ("workload_admission.POLICY", "fail_fast"),
+            ("workload_admission.ON_UNSATISFIABLE", "reject"),
+            // The low-demand fallback is launched like any service, so with nothing
+            // running here it would be delegated, and paid for.
+            ("low_demand.ENABLED", "false"),
+            ("host_limits.ENABLED", "true"),
+            ("general_flags.SIMULATE_PAYMENTS", "false"),
+            ("logs.DEBUG_MODE", "false"),
+            ("logs.MEMORY_LOGS", "false"),
+            ("logs.TUNNEL_LOGS", "false"),
+        ],
+    },
+    Profile {
         id: "cautious",
         label: "CAUTIOUS RENTER",
         blurb: "I will rent this machine out, but on a short leash.",
@@ -1986,7 +2030,7 @@ mod tests {
         fn every_profile_keeps_local_launches_off_the_host_interface() {
             let key = "network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE";
             assert_eq!(lever("dev-on-host").unwrap().paths(), vec![key]);
-            assert_eq!(profiles().len(), 5);
+            assert_eq!(profiles().len(), 6);
             for profile in profiles() {
                 assert!(
                     profile.writes.contains(&(key, "false")),
@@ -2307,6 +2351,84 @@ mod tests {
 
     mod postures {
         use super::*;
+
+        fn value_of(profile: &Profile, key: &str) -> Option<&'static str> {
+            profile
+                .writes
+                .iter()
+                .find(|(path, _)| *path == key)
+                .map(|(_, value)| *value)
+        }
+
+        /// A node that runs nothing here and delegates nothing can run nothing
+        /// anywhere: `launch_service` raises "no eligible local executor or peer". So a
+        /// profile may turn local execution off only together with delegation.
+        #[test]
+        fn a_profile_that_runs_nothing_locally_delegates() {
+            for profile in profiles() {
+                if value_of(profile, "network.EXECUTE_LOCALLY") == Some("false") {
+                    assert_eq!(
+                        value_of(profile, "network.DELEGATE_EXECUTION"),
+                        Some("true"),
+                        "{} runs nothing anywhere",
+                        profile.id
+                    );
+                }
+            }
+        }
+
+        /// REMOTE ONLY is the one profile that stops local execution, and it keeps the
+        /// rest of what a node that only consumes needs: it pays, tunnels what comes
+        /// back, and does not take outside work or offer the low-demand fallback.
+        #[test]
+        fn remote_only_is_the_only_profile_that_runs_nothing_locally() {
+            let off: Vec<&str> = profiles()
+                .iter()
+                .filter(|profile| value_of(profile, "network.EXECUTE_LOCALLY") == Some("false"))
+                .map(|profile| profile.id)
+                .collect();
+            assert_eq!(off, vec!["remote-only"]);
+
+            let profile = profiles().iter().find(|p| p.id == "remote-only").unwrap();
+            for (key, value) in [
+                ("network.DELEGATE_EXECUTION", "true"),
+                ("deposits.AUTOMATIC_REFILL", "true"),
+                ("network.DELEGATION_TUNNEL_POLICY", "always"),
+                ("low_demand.ENABLED", "false"),
+                ("client.ACCEPT_NEW_DEPOSITS", "false"),
+                ("general_flags.SIMULATE_PAYMENTS", "false"),
+                ("costs.ALLOW_DEBT", "false"),
+            ] {
+                assert_eq!(value_of(profile, key), Some(value), "{key}");
+            }
+        }
+
+        /// The dial runs from the most closed to the most open. REMOTE ONLY is closed
+        /// to the outside, like JUST ME, so it comes right after it.
+        #[test]
+        fn remote_only_comes_right_after_just_me() {
+            let ids: Vec<&str> = profiles().iter().map(|profile| profile.id).collect();
+            assert_eq!(&ids[..2], &["just-me", "remote-only"]);
+        }
+
+        /// A document that sets the keys of REMOTE ONLY reads as REMOTE ONLY, and the
+        /// lever for local execution reads "off" on it: the only profile that can
+        /// tell a node that runs nothing here from the others.
+        #[test]
+        fn a_node_set_up_as_remote_only_is_recognised() {
+            let mut document = example_config();
+            let profile = profiles().iter().find(|p| p.id == "remote-only").unwrap();
+            for (path, value) in profile.writes {
+                write_into(&mut document, path, parsed(value));
+            }
+            assert_eq!(closest_profile(Some(&document)).profile.id, "remote-only");
+            let run_locally = lever("run-locally").unwrap();
+            assert_eq!(
+                status(run_locally, Some(&document)),
+                LeverStatus::State(0),
+                "local execution should read off"
+            );
+        }
 
         #[test]
         fn profile_ids_and_labels_are_unique() {

@@ -1038,8 +1038,8 @@ nodo tunnel_close <tunnel id> --json       # and close one
   ```
 
 - **config profile `[<profile>] [--apply] [--json]`**
-  The POLICIES page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
-  `workbench` (most closed to most open). No argument lists them with how far this
+  The POLICIES page's postures — `just-me`, `remote-only`, `cautious`, `open-renter`,
+  `lan-lab`, `workbench` (most closed to most open). No argument lists them with how far this
   node is from each and which is closest (ties go to the more closed one). A
   profile name lists exactly which keys differ (`from` → `to`); `--apply` writes
   those keys in one transaction. A profile writes policy only — never an identity,
@@ -1330,7 +1330,7 @@ running on this host.
 - On Policies, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
-  "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where
+  "remote only", "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where
   this node differs from the one it is closest to. `n` prints the router steps.
 - **Every configuration change from the TUI backs up `config.yaml`, writes it, and restarts
   nodo — and puts the backup straight back if the node does not come up on it.** So the

@@ -373,6 +373,7 @@ Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) 
 
 | Key | Default | Meaning |
 |---|---|---|
+| `network.EXECUTE_LOCALLY` | `true` | Set `false` and this node never runs a service itself: the balancer stops pricing local execution and only selects a peer, so a service no peer will take fails instead of being run here. The mirror image of `DELEGATE_EXECUTION`, for a node that orchestrates rather than computes. The node then announces no resources, and the changed announcement is sent to every known peer. A peer that asks anyway gets a refusal with the reason: `GetServiceEstimatedCost` fails, and `GetResourceAvailability` answers that it cannot run the service. Workload admission does not count this machine either. A service that inherits a directory from its parent (`guest=true`) cannot run anywhere else, so it fails. With `DELEGATE_EXECUTION` also `false`, no launch can succeed. The `remote-only` profile sets this key to `false`, and turns delegation on. |
 | `network.DELEGATE_EXECUTION` | `true` | Set `false` and this node never asks a peer to run a service for it: the balancer stops polling peers for prices and only ever selects `local`, so a service it cannot run itself fails rather than being delegated. The automatic peer-deposit refill stops too — a deposit buys execution on that peer and nothing else. `nodo pay`, `nodo increase_peer_deposit` and `nodo force_execution` still work, since an operator typing the command overrides the default on purpose. |
 | `network.RECURSION_MAX_HOPS` | `16` | How many nodes one StartService tree (a StartService and everything it is delegated to) may span when it starts here or arrives without a hop count. Each node that passes the request on sends one hop less; a node given none left refuses it, and a node with one left runs it itself or fails rather than delegating. A count sent by a peer is clamped to this, never raised by it. Quotes and availability probes do not carry it: they use the query cache below. See [`RECURSION_GUARD.md`](RECURSION_GUARD.md). |
 | `network.QUERY_CACHE_TTL_SECONDS` | `30` | Seconds the price of a quote (`GetServiceEstimatedCost`) is remembered, keyed by the content of the question: the same service, configuration and metadata is priced once. Whether this node has room for it is not remembered: it is checked on every answer, so a full node never serves a remembered offer and a node that freed room never serves a remembered "no". `0` turns it off. Because the price is remembered, a change of price or network policy can show up up to this late. |
@@ -387,6 +388,7 @@ The two directions are separate settings, and neither implies the other:
 |---|---|
 | Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
+| Don't run services **here** at all (remote-only) | `network.EXECUTE_LOCALLY: false`, with `network.DELEGATE_EXECUTION: true` |
 | Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
 
 ### The plaintext gateway
