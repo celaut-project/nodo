@@ -10,7 +10,7 @@ use crate::app::App;
 use crate::cell::{self, Profile};
 use crate::profile_deck::{self, Persona, STAT_MAX};
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
@@ -128,6 +128,49 @@ pub fn layout(area: Rect, count: usize, first_run: bool) -> Option<DeckLayout> {
         choose,
         skip,
     })
+}
+
+/// What a click on the deck landed on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hit {
+    Prev,
+    Next,
+    /// The dot of the profile at this index.
+    Dot(usize),
+    Choose,
+    Skip,
+    /// Anywhere on the card: the same as the choose button.
+    Card,
+}
+
+/// What `position` lands on, if anything. Buttons first, then the arrows, then the
+/// dots, and last the card, so the small targets win over the big one.
+///
+/// A dot is one cell wide to draw but three wide to hit: nobody can click a single
+/// cell reliably.
+pub fn hit(layout: &DeckLayout, position: Position) -> Option<Hit> {
+    if layout.choose.contains(position) {
+        return Some(Hit::Choose);
+    }
+    if layout.skip.contains(position) {
+        return Some(Hit::Skip);
+    }
+    if layout.prev.contains(position) {
+        return Some(Hit::Prev);
+    }
+    if layout.next.contains(position) {
+        return Some(Hit::Next);
+    }
+    for (index, dot) in layout.dots.iter().enumerate() {
+        let target = Rect::new(dot.x.saturating_sub(1), dot.y, dot.width + 2, dot.height);
+        if target.contains(position) {
+            return Some(Hit::Dot(index));
+        }
+    }
+    if layout.card.contains(position) {
+        return Some(Hit::Card);
+    }
+    None
 }
 
 /// Draw the whole deck for the profile `app.cell.profile`.
@@ -537,6 +580,37 @@ mod tests {
             }
             assert_eq!(layout.dots.len(), count);
         }
+    }
+
+    #[test]
+    fn a_click_lands_on_the_part_it_is_over() {
+        let layout = layout(Rect::new(0, 0, 100, 32), 5, true).unwrap();
+        let at = |rect: Rect| Position::new(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        assert_eq!(hit(&layout, at(layout.choose)), Some(Hit::Choose));
+        assert_eq!(hit(&layout, at(layout.skip)), Some(Hit::Skip));
+        assert_eq!(hit(&layout, at(layout.prev)), Some(Hit::Prev));
+        assert_eq!(hit(&layout, at(layout.next)), Some(Hit::Next));
+        assert_eq!(hit(&layout, at(layout.card)), Some(Hit::Card));
+        for (index, dot) in layout.dots.iter().enumerate() {
+            assert_eq!(hit(&layout, at(*dot)), Some(Hit::Dot(index)));
+        }
+        // The cells beside the first and the last dot hit them too.
+        let first = layout.dots[0];
+        let last = layout.dots[layout.dots.len() - 1];
+        assert_eq!(
+            hit(&layout, Position::new(first.x - 1, first.y)),
+            Some(Hit::Dot(0))
+        );
+        assert_eq!(
+            hit(&layout, Position::new(last.x + 1, last.y)),
+            Some(Hit::Dot(layout.dots.len() - 1))
+        );
+        // The border and the space outside are not parts of the deck.
+        assert_eq!(hit(&layout, Position::new(0, 0)), None);
+        assert_eq!(
+            hit(&layout, Position::new(layout.modal.x, layout.modal.y)),
+            None
+        );
     }
 
     #[test]

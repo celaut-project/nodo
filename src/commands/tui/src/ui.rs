@@ -186,8 +186,14 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 cell::profiles().len(),
                 app.profile_first_run,
             ) {
-                Some(layout) => crate::profile_deck_ui::draw(frame, app, &layout),
-                None => draw_profile_popup(frame, app),
+                Some(layout) => {
+                    crate::profile_deck_ui::draw(frame, app, &layout);
+                    app.deck_zones = Some(layout);
+                }
+                None => {
+                    app.deck_zones = None;
+                    draw_profile_popup(frame, app)
+                }
             }
         }
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),

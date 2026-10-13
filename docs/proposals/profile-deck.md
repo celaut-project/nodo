@@ -1,6 +1,6 @@
 # Profile deck: first-run profile picker in the TUI
 
-Status: phases 1 to 3 (state, data, static render) are implemented. Phases 4 to 6 are not.
+Status: phases 1 to 4 (state, data, static render, navigation) are implemented. Phases 5 and 6 are not.
 
 ## Goal
 

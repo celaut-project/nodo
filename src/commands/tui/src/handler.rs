@@ -66,6 +66,20 @@ pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<
                 app.click_env_form(mouse.column, mouse.row);
             }
         }
+        // The profile deck: the wheel turns the cards, a click acts on the part it is
+        // over. The page behind is not clickable.
+        InputMode::PickProfile => match mouse.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollLeft => {
+                app.move_profile_selection(-1)
+            }
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollRight => {
+                app.move_profile_selection(1)
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                app.click_deck(Position::new(mouse.column, mouse.row))
+            }
+            _ => {}
+        },
         // The scrollable overlay is the one modal with anything to scroll.
         InputMode::Details => match mouse.kind {
             MouseEventKind::ScrollUp => app.scroll_details(-1),
@@ -229,13 +243,29 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             return Ok(());
         }
         // Profile picker: choose a posture, then see its diff.
+        //
+        // The deck and the plain list share these keys: the arrows of a card are
+        // left and right, the arrows of a list are up and down, and each works in
+        // both.
         InputMode::PickProfile => {
             match (key.modifiers, key.code) {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
-                (_, KeyCode::Up) => app.move_profile_selection(-1),
-                (_, KeyCode::Down) => app.move_profile_selection(1),
+                (_, KeyCode::Up | KeyCode::Left | KeyCode::BackTab | KeyCode::Char('h')) => {
+                    app.move_profile_selection(-1)
+                }
+                (_, KeyCode::Down | KeyCode::Right | KeyCode::Tab | KeyCode::Char('l')) => {
+                    app.move_profile_selection(1)
+                }
+                (_, KeyCode::Home) => app.select_profile(0),
+                (_, KeyCode::End) => {
+                    app.select_profile(crate::cell::profiles().len().saturating_sub(1))
+                }
+                // `1` is the first profile.
+                (_, KeyCode::Char(digit @ '1'..='9')) => {
+                    app.select_profile(digit as usize - '1' as usize)
+                }
                 (_, KeyCode::Enter) => app.submit_input().await,
-                (_, KeyCode::Esc | KeyCode::Char('q')) => app.skip_profile_picker(),
+                (_, KeyCode::Esc | KeyCode::Char('q' | 's')) => app.skip_profile_picker(),
                 _ => {}
             }
             return Ok(());

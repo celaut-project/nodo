@@ -3324,6 +3324,9 @@ pub struct App {
     /// True while the picker is open as the first-run step, not from POLICIES. Then
     /// Esc skips and records the marker instead of just closing.
     pub profile_first_run: bool,
+    /// Where each part of the profile deck was drawn last, for clicks. `None` when
+    /// the picker is not open or the terminal showed the plain list instead.
+    pub deck_zones: Option<crate::profile_deck_ui::DeckLayout>,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -3526,6 +3529,7 @@ impl Default for App {
             poll_alerts: false,
             profile_gate: false,
             profile_first_run: false,
+            deck_zones: None,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
             paths,
@@ -5450,6 +5454,30 @@ impl App {
         }
         let current = self.cell.profile as i32;
         self.cell.profile = (current + delta).rem_euclid(count as i32) as usize;
+    }
+
+    /// Go to the profile at `index`, if there is one: a dot or a number key.
+    pub fn select_profile(&mut self, index: usize) {
+        if index < cell::profiles().len() {
+            self.cell.profile = index;
+        }
+    }
+
+    /// A left click on the deck. Does nothing when the deck is not on screen, as when
+    /// the plain list is shown instead.
+    pub fn click_deck(&mut self, position: Position) {
+        use crate::profile_deck_ui::{hit, Hit};
+        let Some(zones) = self.deck_zones.as_ref() else {
+            return;
+        };
+        match hit(zones, position) {
+            Some(Hit::Prev) => self.move_profile_selection(-1),
+            Some(Hit::Next) => self.move_profile_selection(1),
+            Some(Hit::Dot(index)) => self.select_profile(index),
+            Some(Hit::Choose | Hit::Card) => self.submit_profile_selection(),
+            Some(Hit::Skip) => self.skip_profile_picker(),
+            None => {}
+        }
     }
 
     /// Confirm the selected profile, showing every key it would change.
@@ -13231,6 +13259,243 @@ ergo: Cold Wallet: 9cold\n";
 
             assert!(app.running);
             assert!(app.status.contains("shown again"), "{}", app.status);
+        }
+
+        /// An app with the picker open and the deck "drawn" at a known size.
+        fn deck_app(install: &Install) -> App {
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            app.cell.profile = 0;
+            app.deck_zones = crate::profile_deck_ui::layout(
+                ratatui::layout::Rect::new(0, 0, 100, 32),
+                cell::profiles().len(),
+                true,
+            );
+            assert!(app.deck_zones.is_some());
+            app
+        }
+
+        async fn click(app: &mut App, x: u16, y: u16) {
+            use crate::handler::handle_mouse_events;
+            use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+            handle_mouse_events(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                },
+                app,
+            )
+            .await
+            .unwrap();
+        }
+
+        async fn wheel(app: &mut App, kind: crossterm::event::MouseEventKind) {
+            use crate::handler::handle_mouse_events;
+            use crossterm::event::MouseEvent;
+            handle_mouse_events(
+                MouseEvent {
+                    kind,
+                    column: 50,
+                    row: 10,
+                    modifiers: KeyModifiers::NONE,
+                },
+                app,
+            )
+            .await
+            .unwrap();
+        }
+
+        fn centre(rect: ratatui::layout::Rect) -> (u16, u16) {
+            (rect.x + rect.width / 2, rect.y + rect.height / 2)
+        }
+
+        #[tokio::test]
+        async fn the_arrow_keys_turn_the_cards_and_wrap() {
+            let install = Install::new("keys-arrows");
+            let mut app = deck_app(&install);
+            let count = cell::profiles().len();
+
+            send(&mut app, KeyCode::Right).await;
+            assert_eq!(app.cell.profile, 1);
+            send(&mut app, KeyCode::Left).await;
+            send(&mut app, KeyCode::Left).await;
+            assert_eq!(app.cell.profile, count - 1, "left of the first wraps");
+            send(&mut app, KeyCode::Right).await;
+            assert_eq!(app.cell.profile, 0, "right of the last wraps");
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        #[tokio::test]
+        async fn h_l_tab_and_shift_tab_do_the_same() {
+            let install = Install::new("keys-vi");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('l')).await;
+            send(&mut app, KeyCode::Tab).await;
+            assert_eq!(app.cell.profile, 2);
+            send(&mut app, KeyCode::Char('h')).await;
+            send(&mut app, KeyCode::BackTab).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        /// The plain list shown on a small terminal keeps its keys.
+        #[tokio::test]
+        async fn up_and_down_still_move_the_list() {
+            let install = Install::new("keys-updown");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Down).await;
+            assert_eq!(app.cell.profile, 1);
+            send(&mut app, KeyCode::Up).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        #[tokio::test]
+        async fn number_keys_home_and_end_jump() {
+            let install = Install::new("keys-jump");
+            let mut app = deck_app(&install);
+            let count = cell::profiles().len();
+
+            send(&mut app, KeyCode::Char('3')).await;
+            assert_eq!(app.cell.profile, 2);
+            send(&mut app, KeyCode::End).await;
+            assert_eq!(app.cell.profile, count - 1);
+            send(&mut app, KeyCode::Home).await;
+            assert_eq!(app.cell.profile, 0);
+            // A number with no profile behind it changes nothing.
+            send(&mut app, KeyCode::Char('9')).await;
+            assert_eq!(app.cell.profile, 0);
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        #[tokio::test]
+        async fn s_skips_like_escape() {
+            let install = Install::new("keys-s");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('s')).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn a_click_on_an_arrow_turns_the_card() {
+            let install = Install::new("mouse-arrows");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let (x, y) = centre(zones.next);
+            click(&mut app, x, y).await;
+            assert_eq!(app.cell.profile, 1);
+            let (x, y) = centre(zones.prev);
+            click(&mut app, x, y).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        #[tokio::test]
+        async fn a_click_on_a_dot_goes_to_that_card() {
+            let install = Install::new("mouse-dots");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let dot = zones.dots[3];
+            click(&mut app, dot.x, dot.y).await;
+
+            assert_eq!(app.cell.profile, 3);
+        }
+
+        #[tokio::test]
+        async fn a_click_on_the_card_or_the_choose_button_chooses() {
+            for target in ["card", "choose"] {
+                let install = Install::new(&format!("mouse-choose-{target}"));
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                let zones = app.deck_zones.clone().unwrap();
+
+                let (x, y) = centre(if target == "card" { zones.card } else { zones.choose });
+                click(&mut app, x, y).await;
+
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{target}");
+                assert!(app.paths.profile_marker().exists(), "{target}");
+            }
+        }
+
+        #[tokio::test]
+        async fn a_click_on_skip_skips() {
+            let install = Install::new("mouse-skip");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let (x, y) = centre(zones.skip);
+            click(&mut app, x, y).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.paths.profile_marker().exists());
+            assert!(app.pending_action.is_none());
+        }
+
+        /// A click on the frame, or on the page behind it, does nothing: the deck is
+        /// a modal, and a click that fell through would act on a page nobody sees.
+        #[tokio::test]
+        async fn a_click_outside_the_parts_does_nothing() {
+            let install = Install::new("mouse-outside");
+            let mut app = deck_app(&install);
+            let page = app.page();
+
+            click(&mut app, 0, 0).await;
+            click(&mut app, 99, 31).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert_eq!(app.cell.profile, 0);
+            assert_eq!(app.page(), page);
+        }
+
+        #[tokio::test]
+        async fn the_wheel_turns_the_cards() {
+            use crossterm::event::MouseEventKind::{ScrollDown, ScrollLeft, ScrollRight, ScrollUp};
+            let install = Install::new("mouse-wheel");
+            let mut app = deck_app(&install);
+
+            wheel(&mut app, ScrollDown).await;
+            wheel(&mut app, ScrollRight).await;
+            assert_eq!(app.cell.profile, 2);
+            wheel(&mut app, ScrollUp).await;
+            wheel(&mut app, ScrollLeft).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        /// On a small terminal the plain list is shown, and nothing was drawn to click.
+        #[tokio::test]
+        async fn without_a_drawn_deck_a_click_does_nothing() {
+            let install = Install::new("mouse-list");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+
+            click(&mut app, 50, 16).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        /// Drawing the picker records where its parts are, and drawing the list in
+        /// its place forgets them.
+        #[test]
+        fn drawing_records_the_zones_and_the_list_forgets_them() {
+            use ratatui::backend::TestBackend;
+            use ratatui::Terminal;
+            let install = Install::new("zones");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+
+            let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+            terminal.draw(|frame| crate::ui::render(&mut app, frame)).unwrap();
+            assert!(app.deck_zones.is_some(), "a big terminal draws the deck");
+
+            let mut terminal = Terminal::new(TestBackend::new(70, 20)).unwrap();
+            terminal.draw(|frame| crate::ui::render(&mut app, frame)).unwrap();
+            assert!(app.deck_zones.is_none(), "a small terminal draws the list");
         }
 
         /// The gate is applied in `main.rs`, after the KyA gate. Read off the source
