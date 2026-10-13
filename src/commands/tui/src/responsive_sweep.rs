@@ -176,6 +176,25 @@ pub(crate) fn populated_app() -> App {
             .collect(),
     );
     app.clients = StatefulList::with_items(ids.iter().map(|id| client(id)).collect());
+    app.dead = StatefulList::with_items(
+        ids.iter()
+            .enumerate()
+            .map(|(n, id)| crate::dead::DeadInstance {
+                id: id.clone(),
+                name: if n % 2 == 0 { format!("worker-{n} 🦀") } else { String::new() },
+                local: n % 3 != 0,
+                peer_id: if n % 3 == 0 { ids[0].clone() } else { String::new() },
+                father_id: ids[(n + 1) % ids.len()].clone(),
+                service: format!("tag-{id}"),
+                service_id: id.clone(),
+                balance: "5000".to_string(),
+                launched_at: Some("2026-09-30 12:00:00".to_string()),
+                killed_at: "2026-09-30 13:00:00".to_string(),
+                lived_secs: Some(3600.0),
+                reason: "guest_panic".to_string(),
+            })
+            .collect(),
+    );
     app.own_resources.announced = Some(own_announcement());
     app.conversations = StatefulList::with_items(
         ids.iter()
@@ -231,6 +250,7 @@ pub(crate) fn on_page(page: Page) -> App {
     app.services.next();
     app.peers.next();
     app.clients.next();
+    app.dead.next();
     app.conversations.next();
     app.prices.next();
     if page == Page::Docs {
@@ -572,7 +592,7 @@ fn every_page_draws_at_every_size() {
 #[test]
 fn the_selected_row_stays_visible_at_every_size() {
     let mut failures = Vec::new();
-    for page in [Page::Instances, Page::Services, Page::Peers, Page::Clients, Page::Chat, Page::Pricing] {
+    for page in [Page::Instances, Page::Dead, Page::Services, Page::Peers, Page::Clients, Page::Chat, Page::Pricing] {
         let build = move || {
             let mut app = on_page(page);
             for _ in 0..6 {
@@ -580,6 +600,7 @@ fn the_selected_row_stays_visible_at_every_size() {
                 app.services.next();
                 app.peers.next();
                 app.clients.next();
+                app.dead.next();
                 app.conversations.next();
                 app.prices.next();
             }
@@ -686,6 +707,7 @@ fn columns_give_way_by_priority() {
         ("services", crate::ui::SERVICE_COLUMNS.to_vec()),
         ("peers", crate::peers::PEER_COLUMNS.to_vec()),
         ("clients", crate::clients::CLIENT_COLUMNS.to_vec()),
+        ("dead", crate::dead::DEAD_COLUMNS.to_vec()),
         ("chat", crate::chat::SIDEBAR_COLUMNS.to_vec()),
     ];
     for (name, columns) in tables {
@@ -731,7 +753,7 @@ fn each_table_keeps_its_most_important_columns() {
         let buffer = draw(&mut app, width, 30);
         row_text(&buffer, app.list_area.y + 1)
     };
-    let cases: [(Page, u16, &[&str], &[&str]); 8] = [
+    let cases: [(Page, u16, &[&str], &[&str]); 10] = [
         (Page::Instances, 40, &["Name", "Instance", "Service", "CPU%"], &["VM", "Burn", "Net", "Up"]),
         (Page::Instances, 80, &["Name", "Loca", "Instance", "Service", "CPU%", "Left", "RAM now"], &["VM", "Burn/h", "Net"]),
         (Page::Peers, 40, &["Peer ID", "Rep"], &["Reputation"]),
@@ -740,6 +762,8 @@ fn each_table_keeps_its_most_important_columns() {
         (Page::Clients, 40, &["Client ID", "Balance"], &["Metering"]),
         (Page::Clients, 80, &["Client ID", "Balance", "Last usage", "Metering"], &[]),
         (Page::Chat, 40, &["Chat", "Topic"], &[]),
+        (Page::Dead, 40, &["Name", "Reason"], &["Launched", "Loc"]),
+        (Page::Dead, 80, &["Name", "Reason", "Killed", "Service"], &["Launched"]),
     ];
     for (page, width, shown, hidden) in cases {
         let header = header(page, width);

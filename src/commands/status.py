@@ -79,10 +79,14 @@ def _counts(database_file: str, registry: str) -> Dict[str, Optional[int]]:
                            ("delegated_instances", "delegated_instances"),
                            ("peers", "peer"), ("clients", "clients")):
             if table_exists(connection, table):
-                counts[key] = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                counts[key] = connection.execute(
+                    f"SELECT COUNT(*) FROM {table}"
+                    + (" WHERE killed_at IS NULL" if table.endswith("_instances") else "")
+                ).fetchone()[0]
         if table_exists(connection, "local_instances"):
             mem, disk = connection.execute(
-                "SELECT COALESCE(SUM(mem_limit), 0), COALESCE(SUM(disk_space), 0) FROM local_instances"
+                "SELECT COALESCE(SUM(mem_limit), 0), COALESCE(SUM(disk_space), 0) FROM local_instances "
+                "WHERE killed_at IS NULL"
             ).fetchone()
             counts["reserved_mem_bytes"], counts["reserved_disk_bytes"] = int(mem), int(disk)
     except sqlite3.Error:

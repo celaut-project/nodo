@@ -43,6 +43,10 @@ SERVICE_COMMANDS = [
 # Commands whose first positional argument is an instance id.
 INSTANCE_COMMANDS = ["kill", "observe", "increase_deposit", "decrease_deposit", "tunnel"]
 
+# Commands whose first positional argument is a dead local instance (its saved
+# logs). `logs` takes no argument otherwise, so the instance is optional.
+DEAD_INSTANCE_COMMANDS = ["logs"]
+
 # Commands whose first positional argument is a peer id.
 PEER_COMMANDS = [
     "disconnect",
@@ -259,7 +263,14 @@ def _sqlite_column(database: Optional[str], query: str) -> List[str]:
 
 def instance_candidates(database: Optional[str]) -> List[str]:
     """Instance ids and their human-friendly names."""
-    return _sqlite_column(database, "SELECT id, name FROM local_instances")
+    return _sqlite_column(database, "SELECT id, name FROM local_instances WHERE killed_at IS NULL")
+
+
+def dead_instance_candidates(database: Optional[str]) -> List[str]:
+    """Ids and names of the dead local instances, for `nodo logs`."""
+    return _sqlite_column(
+        database, "SELECT id, name FROM local_instances WHERE killed_at IS NOT NULL"
+    )
 
 
 def peer_candidates(database: Optional[str]) -> List[str]:
@@ -318,6 +329,8 @@ def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> L
         return service_candidates(paths.get("registry"), paths.get("metadata"))
     if kind == "instances":
         return instance_candidates(paths.get("database"))
+    if kind == "dead_instances":
+        return dead_instance_candidates(paths.get("database"))
     if kind == "peers":
         return peer_candidates(paths.get("database"))
     if kind == "clients":
@@ -376,6 +389,7 @@ _nodo_completion() {{
         case "$cmd" in
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
+            {"|".join(DEAD_INSTANCE_COMMANDS)}) kind="dead_instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
@@ -436,6 +450,7 @@ _nodo() {{
         case $cmd in
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
+            {"|".join(DEAD_INSTANCE_COMMANDS)}) kind="dead_instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;

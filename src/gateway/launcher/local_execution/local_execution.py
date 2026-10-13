@@ -12,7 +12,7 @@ from src.manager.manager import (
     reserve_instance_name,
 )
 from src.utils import utils, logger as log
-from src.utils import keyvalue
+from src.utils import dead_instances, keyvalue
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
@@ -359,8 +359,8 @@ def local_execution(
         # that is not running: the backend has already torn the VM down, so the row
         # would be billed for a machine nobody can reach.
         if registered_id:
-            log.LOGGER(f"Launch failed after registering {registered_id}; purging its row.")
-            sc.purge_internal(id=registered_id)
+            log.LOGGER(f"Launch failed after registering {registered_id}; marking it dead.")
+            sc.mark_local_killed(id=registered_id, reason=dead_instances.LAUNCH_FAILED)
         raise
     log.LOGGER(f"Virtualizer execute returned: vmachine_id={vmachine_id}, vmachine_ip={vmachine_ip}")
 

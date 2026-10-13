@@ -95,6 +95,10 @@ These are the most commonly used commands for daily tasks:
     nothing. Entries older than `virtualizers.ch.FAILURE_RETENTION_DAYS` (7 by
     default) are reclaimable; `--all` takes them regardless of age.
 
+  It also deletes the dead instances that are past the limits of
+  [`instances` in CONFIG.md](CONFIG.md), with their saved logs. The node does
+  the same once per hour. `--all` deletes every dead instance.
+
   Orphaned VMs are torn down through `kill`, not deleted outright, so the tap device,
   cgroup, API socket and firewall rules go with the disk. Every entry is printed with
   its size and its reason — including the ones that were **kept** and why — and the
@@ -466,6 +470,13 @@ These are the most commonly used commands for daily tasks:
   `nodo logs`  
   `nodo logs -n 200`
 
+- **logs `<instance> [--stream stdout|stderr|serial] [-n <lines>] [--json]`**  
+  Shows the logs that the node saved when a local instance died. The instance
+  can be an id or a name. If two dead instances have the same name, the newest
+  one is used. A live instance has no saved logs.  
+  **Example:**  
+  `nodo logs web --stream serial -n 100`
+
 - **export `<service> <dir> [--raw]`**  
   Exports a service into the specified directory. Two modes:
   - **`nodo export <service> <dir>`** (default) → writes `<service>.celaut.bee`, a beerpc-framed package. This is the **importable / transmittable** artifact — share it and feed it to `nodo import`.
@@ -516,6 +527,14 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo instances`  
   `nodo instances web --json`
+
+- **instances `--dead` | `--all`**  
+  A dead instance is not deleted at once. Its row stays, with the time and the
+  reason of its death. `--dead` lists only the dead instances. `--all` lists the
+  live ones and then the dead ones. The node deletes old dead instances (see
+  [`instances` in CONFIG.md](CONFIG.md)). A dead instance never starts again.  
+  **Example:**  
+  `nodo instances --dead --json`
 
 - **instances --grouped**  
   Lists running instances grouped by their parent service.  
@@ -1123,6 +1142,8 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | OVERVIEW: earnings / donations summary | — | `nodo earnings`, `nodo donations --json` |
 | OVERVIEW: energy / schedule summary | — | `nodo energy`, `nodo schedule` (new) |
 | INSTANCES: table, live CPU/RAM/net | — | `nodo instances --json` (new `--json`, live counters); `nodo observe <id>` (interactive stream) |
+| DEAD: table, detail card (instances that died, newest first) | — | `nodo instances --dead [--json]` (new) |
+| DEAD: saved logs of the selected local instance | `s` (stream), `PgUp`/`PgDn`, `Home`/`End` | `nodo logs <instance> [--stream stdout\|stderr\|serial] [-n <lines>] [--json]` (new) |
 | INSTANCES: dependency tree | `g` | `nodo instances --grouped`; `parent_id` in `--json` |
 | INSTANCES: kill (closes its tunnels too) | `k` | `nodo kill <instance> [--json]` (new: closes its tunnels; `--json`) |
 | INSTANCES: open a tunnel to the selected instance (y/N with the fee) | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`; fee in `open_fee_mu`) |

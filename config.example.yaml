@@ -256,6 +256,17 @@ virtualizers:
     # readiness timeout before declaring the guest network dead.
     GUEST_NETWORK_READY_TIMEOUT_S: 120
 
+instances:
+  # A dead instance keeps its row in the database and its logs on disk, so the
+  # operator can see what happened. The node deletes a dead instance when it is
+  # older than DEAD_RETENTION_DAYS, or when more than DEAD_MAX_ROWS dead instances
+  # exist (the oldest go first). Local and delegated instances count separately.
+  # A value of 0 turns that limit off.
+  DEAD_RETENTION_DAYS: 14
+  DEAD_MAX_ROWS: 200
+  # Keep at most this many bytes (the last ones) of each guest log at death.
+  DEAD_LOG_MAX_BYTES: 1048576
+
 builder:
   WAIT_FOR_CONTAINER: 60
   WAIT_FOR_UNLOCK_MEMORY: 60

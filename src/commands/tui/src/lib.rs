@@ -29,6 +29,9 @@ pub mod clients;
 /// The TUNNELS page: the `nodo tunnel` processes running on this host.
 pub mod tunnels;
 
+/// The DEAD page: instances that were killed or died, with the logs the node saved.
+pub mod dead;
+
 /// The PACKS page: the `nodo pack` runs on this host, current and recent.
 pub mod packs;
 

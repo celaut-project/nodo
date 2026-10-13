@@ -839,12 +839,20 @@ if __name__ == '__main__':
                 _exit(0 if ok else 1)
 
             case "instances":
-                from src.commands.instances import list_instances
+                from src.commands.instances import list_dead_instances, list_instances
                 args = sys.argv[2:]
                 groupable = "--grouped" in args and not args.remove("--grouped")
                 as_json = "--json" in args and not args.remove("--json")
+                dead = "--dead" in args and not args.remove("--dead")
+                everything = "--all" in args and not args.remove("--all")
                 search = " ".join(args)
-                ok = list_instances(groupable=groupable, search=search, as_json=as_json)
+                ok = list_instances(
+                    groupable=groupable, search=search, as_json=as_json,
+                    dead=dead, include_dead=everything,
+                )
+                if everything and not as_json and not dead:
+                    print("\nDead instances:\n")
+                    list_dead_instances(search=search)
                 _exit(0 if ok is not False else 1)
 
             case "refresh_peers":

@@ -64,7 +64,7 @@ class DatabaseCandidateTests(unittest.TestCase):
         conn = sqlite3.connect(path)
         try:
             conn.execute(
-                "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT)"
+                "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, killed_at DATETIME)"
             )
             conn.executemany(
                 "INSERT INTO local_instances (id, name) VALUES (?, ?)",
@@ -86,6 +86,19 @@ class DatabaseCandidateTests(unittest.TestCase):
             self.assertIn("inst-aaa", result)
             self.assertIn("alpha", result)
             self.assertIn("inst-ccc", result)  # id present even with NULL name
+
+    def test_dead_instance_candidates_hold_only_dead_instances(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "db.sqlite")
+            self._build_db(db)
+            conn = sqlite3.connect(db)
+            conn.execute("UPDATE local_instances SET killed_at = '2026-01-01 00:00:00' WHERE id = 'inst-bbb'")
+            conn.commit()
+            conn.close()
+            self.assertEqual(sorted(completion.dead_instance_candidates(db)), ["beta", "inst-bbb"])
+            self.assertNotIn("inst-bbb", completion.instance_candidates(db))
+            self.assertEqual(completion.candidates("dead_instances", {"database": db}),
+                             completion.dead_instance_candidates(db))
 
     def test_peer_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:

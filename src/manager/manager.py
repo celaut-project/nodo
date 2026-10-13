@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
@@ -10,6 +11,7 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.tunneling import delegated_endpoints
 
 from src.utils import logger as log
+from src.utils import dead_instances
 from src.utils import utils
 from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
@@ -1234,7 +1236,25 @@ def return_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, c
         )
 
 
-def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+def _death_record(token: str, father_id: Optional[str], reason: str, leftover_mu: int) -> dict:
+    """What `death.json` says about a local instance. Read it before the row is marked dead.
+
+    A field that cannot be read is left out. The record must never stop the stop.
+    """
+    record = {'id': token, 'father_id': father_id, 'reason': reason, 'leftover_mu': leftover_mu}
+    for key, read in (
+        ('name', sc.get_internal_name),
+        ('service_id', sc.get_service_id_by_container_id),
+        ('virtualizer', sc.get_internal_virtualizer),
+    ):
+        try:
+            record[key] = read(id=token)
+        except Exception as e:
+            log.LOGGER(f"Could not read {key} of {token} for its death record: {e}")
+    return record
+
+
+def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.MANUAL_KILL) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     """Stop an instance and hand its unspent deposit back, returning that figure.
 
     Both kinds of instance settle the same way, and the figure is always in this
@@ -1255,6 +1275,10 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
     before their children and so cannot let each child pay its own father, whose row
     is already gone by then. Every other caller stops one instance whose father is
     still there, and wants the default.
+
+    ``reason`` says why the instance dies. It is recorded in `death_reason`. The
+    row stays in the database with `killed_at` set, and a dead instance never
+    becomes alive again. A stop on an instance that is already dead does nothing.
     """
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
@@ -1270,7 +1294,7 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             context=f"stop-instance:before-kill token={token} reserved_mem_limit={reserved_mem_limit}"
         )
         
-        kill(vmachine_id=token)
+        kill(vmachine_id=token, archive=True)
         
         father_id = sc.get_internal_father_id(id=token)
         serialized_instance = sc.get_internal_instance(id=token)
@@ -1282,7 +1306,13 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
                 IOBigData().log_snapshot(
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )
-            sc.purge_internal(id=token)
+            death_record = _death_record(token, father_id, reason, refund)
+            if not sc.mark_local_killed(id=token, reason=reason):
+                # Another stop already killed it and settled the leftover.
+                log.LOGGER(f"Instance {token} is already dead.")
+                return None
+            death_record['killed_at'] = datetime.now(timezone.utc).isoformat()
+            dead_instances.write_death_record(token, death_record)
 
             # The child's unspent deposit goes back to whoever paid it in, and it goes
             # back *after* the row is gone.
@@ -1301,8 +1331,8 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             #
             # Crediting first, before the DELETE, would look safer and is not: the
             # amount is already in `refund`, a local read, so nothing about it depends
-            # on the row still existing. What does depend on the DELETE is whether this
-            # stop can happen twice. A `purge_internal` that raises leaves the row
+            # on the row still existing. What does depend on the kill mark is whether this
+            # stop can happen twice. A `mark_local_killed` that raises leaves the row
             # alive with its balance intact, and `maintain_vmachines` calls
             # `stop_instance` again on the next tick -- so a credit issued before it
             # would be issued again, and again, manufacturing MU out of a balance
@@ -1363,7 +1393,9 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             # if StopService raised we must keep the row so the stop can be
             # retried and the (remote-computed) refund reconciled, rather than
             # orphaning an instance the peer may still be running.
-            sc.purgue_delegated(token=external_token)
+            if not sc.mark_delegated_killed(token=external_token, reason=reason):
+                log.LOGGER(f"Delegated instance {token} is already dead.")
+                return None
 
             # And credit after the DELETE, for the reason spelled out on the
             # internal branch: this stop is retried while the row survives, and a

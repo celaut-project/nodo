@@ -127,6 +127,11 @@ TABLES = {
             UNIQUE (address, ledger, contract_hash, token_id, peer_id)
         )
     ''',
+    # A row with `killed_at` set is a dead instance, kept so the operator can read
+    # what happened. A row with `killed_at` NULL is alive. A dead row never becomes
+    # alive again (see TRIGGERS). `name` is unique among live rows only (see INDEXES),
+    # so the name of a dead instance can be used again.
+    #
     # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
     # maintenance tick prices an instance by, so all four have to be here: the tick
     # reads this row, not the service's manifest. Storing memory and disk but not
@@ -134,7 +139,7 @@ TABLES = {
     "local_instances": '''
         CREATE TABLE IF NOT EXISTS local_instances (
             id TEXT PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
             ip TEXT,
             father_id TEXT,
             balance_mu TEXT,
@@ -147,7 +152,9 @@ TABLES = {
             virtualizer TEXT DEFAULT NULL,
             envs TEXT DEFAULT NULL,
             arch TEXT DEFAULT NULL,
-            launched_at DATETIME DEFAULT NULL
+            launched_at DATETIME DEFAULT NULL,
+            killed_at DATETIME DEFAULT NULL,
+            death_reason TEXT DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -177,7 +184,9 @@ TABLES = {
             service_id TEXT,
             balance_mu TEXT,
             peer_balance_mu TEXT,
-            launched_at DATETIME DEFAULT NULL
+            launched_at DATETIME DEFAULT NULL,
+            killed_at DATETIME DEFAULT NULL,
+            death_reason TEXT DEFAULT NULL
         )
     ''',
     "deposit_tokens": '''
@@ -544,6 +553,19 @@ TABLES = {
 # tx-id lookup `tx_history` does per explorer transaction. The TUI runs the first on
 # every redraw of a selected peer.
 INDEXES = (
+    # Live instances are the hot path. The partial indexes hold live rows only, so
+    # the queries that filter on `killed_at IS NULL` do not read dead rows.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_local_instances_name_alive "
+    "ON local_instances (name) WHERE killed_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_local_instances_father_alive "
+    "ON local_instances (father_id) WHERE killed_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_delegated_instances_father_alive "
+    "ON delegated_instances (father_id) WHERE killed_at IS NULL",
+    # The retention sweep and the dead-instance lists read dead rows by age.
+    "CREATE INDEX IF NOT EXISTS idx_local_instances_killed "
+    "ON local_instances (killed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_delegated_instances_killed "
+    "ON delegated_instances (killed_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_peer ON payments (peer_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (client_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_tx ON payments (tx_id)",
@@ -570,6 +592,21 @@ INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_peer_chat_conversations_peer "
     "ON peer_chat_conversations (peer_id, opened_by_us, opened_at)",
 )
+
+
+def _dead_row_triggers(table: str) -> tuple:
+    """Triggers that make a dead row final: it cannot be revived or changed."""
+    return (
+        f"CREATE TRIGGER IF NOT EXISTS trg_{table}_no_revive "
+        f"BEFORE UPDATE ON {table} WHEN OLD.killed_at IS NOT NULL "
+        f"BEGIN SELECT RAISE(ABORT, 'dead instance cannot be changed'); END",
+    )
+
+
+# A dead instance is never revived. The trigger rejects any UPDATE of a dead row,
+# so a bug in the code cannot clear `killed_at` or spend the balance of a dead row.
+# Only DELETE (the retention sweep) is allowed.
+TRIGGERS = _dead_row_triggers("local_instances") + _dead_row_triggers("delegated_instances")
 
 
 def ensure_tables(cursor, names) -> None:
@@ -605,6 +642,12 @@ def create_tables(cursor):
             cursor.execute(index_sql)
         except sqlite3.Error as e:
             print(f"Error creating index: {e}")
+
+    for trigger_sql in TRIGGERS:
+        try:
+            cursor.execute(trigger_sql)
+        except sqlite3.Error as e:
+            print(f"Error creating trigger: {e}")
 
     # Additive column migrations for databases created before a column existed.
     # `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns

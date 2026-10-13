@@ -451,7 +451,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('r'))
             if matches!(
                 app.page(),
-                Page::Instances | Page::Tunnels | Page::Packs | Page::Clients | Page::Energy | Page::Logs
+                Page::Instances | Page::Tunnels | Page::Dead | Page::Packs | Page::Clients | Page::Energy | Page::Logs
             ) => {}
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
@@ -475,6 +475,14 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Tunnels => {
             app.open_tunnel_details()
         }
+        // Dead: read-only. `s` picks which saved log to read, the paging keys scroll it.
+        (KeyModifiers::NONE, KeyCode::Char('s')) if app.page() == Page::Dead => {
+            app.cycle_dead_stream()
+        }
+        (_, KeyCode::PageUp) if app.page() == Page::Dead => app.scroll_dead_log(10),
+        (_, KeyCode::PageDown) if app.page() == Page::Dead => app.scroll_dead_log(-10),
+        (_, KeyCode::Home) if app.page() == Page::Dead => app.scroll_dead_log(i64::MAX),
+        (_, KeyCode::End) if app.page() == Page::Dead => app.scroll_dead_log(i64::MIN),
         // Packs: `n` here (or `p` on SERVICES, where the result lands) packs a folder
         // or an https git URL in the background; `c` cancels, `i` shows the log. Every
         // action is the `nodo pack --detach` / `nodo pack_cancel` an operator would type.

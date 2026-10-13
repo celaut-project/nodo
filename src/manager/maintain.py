@@ -21,7 +21,7 @@ from src.payment_system.mu_conversion import matching_payment_system
 from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
 from src.tunneling import delegated_endpoints
-from src.utils import activity_window, demand_history
+from src.utils import activity_window, dead_instances, demand_history
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import peers_id_iterator
@@ -318,11 +318,11 @@ def _penalise_instance_once(vmachine_id: str, amount: int, reason: str):
 
 
 def maintain_vmachines(debug_mode: bool=False):
-    def remove_and_penalize_vmachine(vmachine_id: str):
+    def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
         _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
         log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
         try:
-            stop_instance(token=vmachine_id)
+            stop_instance(token=vmachine_id, reason=reason)
         except Exception as e:
             log.LOGGER(f"Error prunning container {vmachine_id}: {e}")
     
@@ -409,7 +409,7 @@ def maintain_vmachines(debug_mode: bool=False):
                     vmachine_id, -10, Reason.INSTANCE_OUT_OF_BALANCE
                 )
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
-                stop_instance(token=vmachine_id)
+                stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
@@ -488,7 +488,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
                     f"{vmachine_id} ({e}); stopping it here too."
                 )
                 try:
-                    stop_instance(token=vmachine_id)
+                    stop_instance(token=vmachine_id, reason=dead_instances.PEER_STOPPED)
                 except Exception as stop_error:
                     log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
             elif debug_mode:
@@ -532,7 +532,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
             # then only the part the deposit could not reach.
             sc.update_delegated_balance(token=token, balance_mu=0)
             try:
-                stop_instance(token=vmachine_id)
+                stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
                 log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {e}")
             continue
@@ -589,7 +589,7 @@ def enforce_activity_window(debug_mode: bool = False):
             f"window and activity_window.ON_CLOSE is 'stop'."
         )
         try:
-            stop_instance(token=vmachine_id)
+            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
         except Exception as e:
             log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
 
@@ -881,6 +881,40 @@ def _manager_loop() -> None:
             sleep(MANAGER_FAILURE_BACKOFF)
 
 
+DEAD_SWEEP_INTERVAL_S = 3600
+_last_dead_sweep = 0.0
+
+
+def sweep_dead_instances(force: bool = False) -> int:
+    """Delete the dead instances that are past the retention limits.
+
+    The limits are `instances.DEAD_RETENTION_DAYS` (age) and `instances.DEAD_MAX_ROWS`
+    (count). The sweep runs at most once per hour unless ``force`` is true. It also
+    removes the archive directories that have no row. Return the number of rows deleted.
+    """
+    global _last_dead_sweep
+    now = time.monotonic()
+    if not force and _last_dead_sweep and now - _last_dead_sweep < DEAD_SWEEP_INTERVAL_S:
+        return 0
+    _last_dead_sweep = now
+    try:
+        days = dead_instances.retention_days()
+        max_rows = dead_instances.retention_max_rows()
+        local_ids = sc.prune_dead_local_instances(max_age_days=days, max_rows=max_rows)
+        delegated_tokens = sc.prune_dead_delegated_instances(max_age_days=days, max_rows=max_rows)
+        dead_instances.remove_dirs(local_ids)
+        # Keep the directories of the dead rows that remain. The rest have no row.
+        kept = {row['id'] for row in sc.get_dead_local_instances()}
+        dead_instances.sweep_orphan_dirs(kept)
+        deleted = len(local_ids) + len(delegated_tokens)
+        if deleted:
+            log.LOGGER(f"Retention sweep deleted {deleted} dead instance(s).")
+        return deleted
+    except Exception as e:
+        log.LOGGER(f"Error in the dead instance retention sweep: {e}")
+        return 0
+
+
 def _manager_pass(short_interval_count: int) -> int:
     """One maintenance pass, ending in the wait. Returns the next interval count."""
     if short_interval_count == int(SHORT_INTERVAL_COUNT):
@@ -898,6 +932,7 @@ def _manager_pass(short_interval_count: int) -> int:
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
+    sweep_dead_instances()
     maintain_delegated_instances(debug_mode=DEBUG_MODE())
     close_orphaned_delegated_endpoints()
     enforce_activity_window(debug_mode=DEBUG_MODE())

@@ -81,6 +81,10 @@ pub enum Page {
     /// The `nodo tunnel` processes running on this host: where each listens and
     /// what it reaches. Opened here or with `t` on INSTANCES; see `tunnels.rs`.
     Tunnels,
+    /// Instances that were killed or died, kept after the fact: why, when, and the
+    /// logs the node saved. Read-only; INSTANCES lists only the live ones. See
+    /// `dead.rs`.
+    Dead,
     Services,
     /// The `nodo pack` runs on this host, current and recent: what each packs, where
     /// it is, and the service id it produced. Launched here or with `p` on SERVICES;
@@ -221,7 +225,7 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 16] = [
+    pub const ALL: [Page; 17] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
@@ -229,6 +233,8 @@ impl Page {
         Page::Instances,
         // Beside Instances: a tunnel is a way into one of them.
         Page::Tunnels,
+        // Beside Instances too: it is where an instance goes when it stops.
+        Page::Dead,
         Page::Peers,
         Page::Services,
         // Beside Services: a pack is how a service gets into the registry.
@@ -261,6 +267,7 @@ impl Page {
             Page::Overview => "OVERVIEW",
             Page::Instances => "INSTANCES",
             Page::Tunnels => "TUNNELS",
+            Page::Dead => "DEAD",
             Page::Services => "SERVICES",
             Page::Packs => "PACKS",
             Page::Peers => "PEERS",
@@ -284,6 +291,7 @@ impl Page {
             Page::Overview => "OVER",
             Page::Instances => "INST",
             Page::Tunnels => "TUNL",
+            Page::Dead => "DEAD",
             Page::Services => "SERV",
             Page::Packs => "PACK",
             Page::Peers => "PEERS",
@@ -308,6 +316,7 @@ impl Page {
             Page::Overview => PageGroup::Status,
             Page::Instances
             | Page::Tunnels
+            | Page::Dead
             | Page::Peers
             | Page::Services
             | Page::Packs
@@ -3128,6 +3137,10 @@ pub struct App {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
+    /// The DEAD page: instances that are gone, newest death first.
+    pub dead: StatefulList<crate::dead::DeadInstance>,
+    /// What the DEAD page shows under the table for the selected row.
+    pub dead_view: crate::dead::DeadView,
     /// The TUNNELS page: running `nodo tunnel` processes, read from the registry.
     pub tunnels: StatefulList<crate::tunnels::Tunnel>,
     /// The TUNNELS page's second table: the `ServiceTunnel` streams this node relays
@@ -3418,6 +3431,8 @@ impl Default for App {
             running: true,
             peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
+            dead: StatefulList::with_items(Vec::new()),
+            dead_view: crate::dead::DeadView::default(),
             tunnels: StatefulList::with_items(crate::tunnels::read_tunnels(
                 &crate::tunnels::tunnels_dir(&paths.storage),
             )),
@@ -3744,6 +3759,10 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
             Page::Tunnels => self.tunnels.previous(),
+            Page::Dead => {
+                self.dead.previous();
+                self.load_dead_view(true);
+            }
             Page::Packs => self.packs.previous(),
             Page::Services => {
                 self.services.previous();
@@ -3783,6 +3802,10 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
             Page::Tunnels => self.tunnels.next(),
+            Page::Dead => {
+                self.dead.next();
+                self.load_dead_view(true);
+            }
             Page::Packs => self.packs.next(),
             Page::Services => {
                 self.services.next();
@@ -4097,6 +4120,10 @@ impl App {
         match self.page() {
             Page::Instances => self.instances.select_visible(visible),
             Page::Tunnels => self.tunnels.select_visible(visible),
+            Page::Dead => {
+                self.dead.select_visible(visible);
+                self.load_dead_view(true);
+            }
             Page::Packs => self.packs.select_visible(visible),
             Page::Services => {
                 self.services.select_visible(visible);
@@ -6246,6 +6273,7 @@ impl App {
         self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.refresh_dead(&service_names);
         self.refresh_tunnels();
         self.refresh_packs();
         self.refresh_chat();
@@ -7492,6 +7520,13 @@ fn get_instances(
     } else {
         "NULL"
     };
+    // A dead instance has its own page (`dead.rs`). Same guard as above: a database
+    // the node has not migrated has no `killed_at`, and then every row is alive.
+    let alive = if column_exists(&connection, "local_instances", "killed_at") {
+        " WHERE li.killed_at IS NULL"
+    } else {
+        ""
+    };
     let base = format!(
         "SELECT li.id, li.name, li.ip, li.balance_mu, li.service_id, li.mem_limit,
                 li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota,
@@ -7502,10 +7537,10 @@ fn get_instances(
             "{base}, ic.mu_per_second, ic.sample_count,
                 CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', ic.last_refresh) AS INTEGER)
              FROM local_instances li
-             LEFT JOIN instance_consumption ic ON ic.instance_id = li.id"
+             LEFT JOIN instance_consumption ic ON ic.instance_id = li.id{alive}"
         )
     } else {
-        format!("{base} FROM local_instances li")
+        format!("{base} FROM local_instances li{alive}")
     };
     let mut statement = connection.prepare(&sql)?;
     let mut instances: Vec<Instance> = statement
@@ -7652,8 +7687,13 @@ fn get_delegated_instances(
     } else {
         "NULL"
     };
+    let alive = if column_exists(connection, "delegated_instances", "killed_at") {
+        " WHERE killed_at IS NULL"
+    } else {
+        ""
+    };
     let mut statement = connection.prepare(&format!(
-        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances"
+        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances{alive}"
     ))?;
     let instances = statement
         .query_map([], |row| {
@@ -8066,7 +8106,7 @@ fn is_secret_path(path: &str) -> bool {
     leaf == "token" || leaf.ends_with("_token")
 }
 
-fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
+pub(crate) fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
     const TAIL_BYTES: u64 = 256 * 1024;
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
@@ -8710,6 +8750,7 @@ mod tests {
                     Page::Overview,
                     Page::Instances,
                     Page::Tunnels,
+                    Page::Dead,
                     Page::Peers,
                     Page::Services,
                     Page::Packs,
@@ -12317,6 +12358,45 @@ ergo: Cold Wallet: 9cold\n";
             assert!((two_hours - 7200.0).abs() < 60.0, "{two_hours}");
             // A row from before the column: not recorded, which is not "just now".
             assert_eq!(by_id("b"), None);
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        /// A dead instance has its own page; INSTANCES lists only the live ones, local
+        /// and delegated.
+        #[test]
+        fn a_dead_instance_is_not_listed_as_live() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-live-only");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = dir.join("database.sqlite");
+            Connection::open(&database)
+                .unwrap()
+                .execute_batch(
+                    "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, ip TEXT,
+                        father_id TEXT, balance_mu TEXT, mem_limit INTEGER,
+                        disk_space INTEGER, cpu_period INTEGER, cpu_quota INTEGER,
+                        serialized_instance TEXT, service_id TEXT, virtualizer TEXT,
+                        launched_at DATETIME, killed_at DATETIME, death_reason TEXT);
+                     INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
+                     VALUES ('alive', 'w', '10', NULL, NULL);
+                     INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
+                     VALUES ('dead', 'x', '10', '2026-01-01 10:00:00', 'manual_kill');
+                     CREATE TABLE delegated_instances (token_delegation TEXT, id TEXT,
+                        peer_id TEXT, father_id TEXT, service_id TEXT, launched_at DATETIME,
+                        killed_at DATETIME, death_reason TEXT);
+                     INSERT INTO delegated_instances (id, killed_at) VALUES ('r-alive', NULL);
+                     INSERT INTO delegated_instances (id, killed_at)
+                     VALUES ('r-dead', '2026-01-01 10:00:00');",
+                )
+                .unwrap();
+            let mut paths = Paths::discover();
+            paths.database = database;
+
+            let instances = get_instances(&paths, &HashMap::new()).unwrap();
+            let mut ids: Vec<&str> = instances.iter().map(|instance| instance.id.as_str()).collect();
+            ids.sort();
+
+            assert_eq!(ids, ["alive", "r-alive"]);
             let _ = fs::remove_dir_all(&dir);
         }
     }

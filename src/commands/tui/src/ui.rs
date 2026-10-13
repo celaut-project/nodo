@@ -156,6 +156,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Overview => draw_overview(frame, app, layout[2]),
         Page::Instances => draw_instances(frame, app, layout[2]),
         Page::Tunnels => crate::tunnels::draw(frame, app, layout[2]),
+        Page::Dead => crate::dead::draw(frame, app, layout[2]),
         Page::Packs => crate::packs::draw(frame, app, layout[2]),
         Page::Services => draw_services(frame, app, layout[2]),
         Page::Peers => crate::peers::draw(frame, app, layout[2]),
@@ -5257,6 +5258,9 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  t tunnel  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  q quit",
         Page::Tunnels => {
             "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  q quit"
+        }
+        Page::Dead => {
+            "\u{2191}/\u{2193} select  \u{2022}  s stream  \u{2022}  PgUp/PgDn scroll log  \u{2022}  End latest  \u{2022}  q quit"
         }
         Page::Packs => {
             "\u{2191}/\u{2193} select  \u{2022}  n new pack  \u{2022}  i log  \u{2022}  c cancel  \u{2022}  q quit"

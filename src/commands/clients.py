@@ -46,7 +46,7 @@ def _client_detail(connection, client_id, limit):
         # between a client and anything it runs.
         detail["instances"] = [dict(row) for row in connection.execute(
             "SELECT id, COALESCE(name, '') AS name FROM local_instances "
-            "WHERE father_id = ? ORDER BY name LIMIT ?", (client_id, limit))]
+            "WHERE father_id = ? AND killed_at IS NULL ORDER BY name LIMIT ?", (client_id, limit))]
     if catalogue.table_exists(connection, "peer") and \
             catalogue.column_exists(connection, "peer", "local_client_id"):
         row = connection.execute(

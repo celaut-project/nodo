@@ -188,6 +188,18 @@ Do not confuse any of this with the packer-side pair below
 pin them to the host arch: a local build runs the target's own toolchain and nodo
 installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
 
+## `instances` — dead instances
+
+When an instance dies, the node keeps its row (`killed_at`, `death_reason`) and, for
+a local instance, its logs under `${main.STORAGE}/instances_dead/<id>/`. A dead
+instance never starts again.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `instances.DEAD_RETENTION_DAYS` | `14` | Delete a dead instance after this many days. `0` turns the limit off. |
+| `instances.DEAD_MAX_ROWS` | `200` | Keep at most this many dead instances. The oldest are deleted first. Local and delegated instances count separately. `0` turns the limit off. |
+| `instances.DEAD_LOG_MAX_BYTES` | `1048576` | Keep the last bytes of each guest log, up to this size. |
+
 ## `builder` — build tuning
 
 | Key | Default | Meaning |
