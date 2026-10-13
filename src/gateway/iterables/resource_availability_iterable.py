@@ -4,6 +4,7 @@ from protos import celaut_pb2
 from src.gateway.client_gate import parse_with_client, require_caller
 from src.utils import activity_window
 from src.utils.bee_client import BeeClient, Buffer
+from src.utils.cost_functions.architecture_resources import NOT_EXECUTING_REASON, executes_locally
 from src.utils.cost_functions.resource_availability import get_architecture_availability
 from src.utils.logger import LOGGER as logger
 from src.utils.tools.query_cache import QueryCache, availability_ttl, canonical_key
@@ -47,11 +48,20 @@ class GetResourceAvailabilityIterable:
             if request is None:
                 request = celaut_pb2.ArchitectureResources()
 
-            availability = QueryCache().get_or_compute(
-                canonical_key("GetResourceAvailability", request),
-                availability_ttl(),
-                lambda: get_architecture_availability(request),
-            )
+            # A node that runs nothing itself has no room to report. `get_architecture_
+            # availability` answers for this machine, and saying "yes" would get a
+            # workload sent here that `launch_service` has no local candidate to run:
+            # the answer is no, and the machine is not measured at all. Ahead of the
+            # cache, so a remembered "yes" from before the key was turned off is never
+            # served, and the hours need no overlay: the reason is not about them.
+            if not executes_locally():
+                availability = {"can_execute": False, "reason": NOT_EXECUTING_REASON}
+            else:
+                availability = QueryCache().get_or_compute(
+                    canonical_key("GetResourceAvailability", request),
+                    availability_ttl(),
+                    lambda: get_architecture_availability(request),
+                )
 
             # After the cache, so the hours always win over a remembered answer.
             #
@@ -64,7 +74,7 @@ class GetResourceAvailabilityIterable:
             # function answers "does this shape fit?", which is a question about the
             # machine, and is also what the operator's own launches go through. The
             # hours belong to the door, not to the room.
-            if not activity_window.is_open():
+            if executes_locally() and not activity_window.is_open():
                 availability = dict(
                     availability,
                     can_execute=False,

@@ -11,6 +11,7 @@ from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
+from src.utils.cost_functions.architecture_resources import executes_locally
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
@@ -35,6 +36,11 @@ def _detect_local_preflight_failure(
         metadata: celaut.Metadata,
         configuration: celaut_pb2.Configuration,
 ) -> Optional[str]:
+    # A node that runs nothing itself has no local failure to explain: it never tried
+    # to run the service here, and "local preflight: insufficient resources" in the
+    # error would send the operator looking at a machine that was never asked.
+    if not executes_locally():
+        return None
     try:
         estimated_cost = generate_estimated_cost(
             resources=service.container.resources,
