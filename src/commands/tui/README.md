@@ -48,10 +48,10 @@ bar moves, the test fails and the change is made on purpose.
 |---|---|
 | `←` `→`, `↑` `↓`, `h` `l`, `Tab`, `Shift+Tab` | Previous or next card. The cards wrap. |
 | `1`…`9`, `Home`, `End` | Go to a card |
-| `Enter` | Choose the profile. The deck shows the list of changes and asks for `y` or `n`. |
+| `Enter` | Choose the profile. The deck shows the list of changes in a panel over the card (see below). |
 | `Esc`, `q`, `s` | Skip. The skip button is always on screen. |
 | Click on an arrow or a dot | Previous card, next card, or go to that card |
-| Click on the card or on `JACK IN` | Choose the profile |
+| Click on the card or on `JACK IN` | Choose the profile, and show the list of changes |
 | Click on `SKIP` | Skip |
 | Mouse wheel | Previous or next card |
 
@@ -66,9 +66,15 @@ Colours: the deck uses 24-bit colour when `COLORTERM` says `truecolor` or `24bit
 not, it uses the nearest colour of the 256-colour palette. If `NO_COLOR` is set, it uses
 greys only. The text is the same in all three modes.
 
-The deck does not write the configuration itself. `Enter` opens the same list of
-changes as the `p` key on Policies, and the same transaction applies them (see
+The deck does not write the configuration itself. `Enter` or a click shows the same
+list of changes as the `p` key on Policies, and the same transaction applies them (see
 [Applying a change](#applying-a-change)).
+
+The list of changes stays in the style of the deck. It is a panel over the card, in the
+colour of the character, with the buttons `Y · APPLY AND RESTART` and `N · BACK`. `y`,
+`n`, `Esc`, a click on a button and the mouse wheel work there. `n` and `Esc` go back to
+the deck with the same card open, so you can try another profile. On a terminal too
+small for the deck, the list of changes is the plain text popup.
 
 The answer is recorded in `storage/.profilepicked`, an empty file like `.acceptedkya`.
 The marker is written when you choose a profile, before the list of changes, and when

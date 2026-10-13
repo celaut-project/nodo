@@ -176,9 +176,25 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match app.input_mode {
         InputMode::Normal => {}
         InputMode::Confirm => draw_confirm_popup(frame, app),
-        InputMode::AcceptKya | InputMode::Details | InputMode::ConfirmWrites => {
-            draw_details_popup(frame, app)
+        // The list of changes of a profile chosen in the deck stays in the deck's own
+        // style. Every other confirmation, and the list on a terminal too small for
+        // the deck, is the plain popup.
+        InputMode::ConfirmWrites => {
+            let deck = app.deck_confirm.and_then(|_| {
+                crate::profile_deck_ui::layout(frame.size(), cell::profiles().len(), false)
+            });
+            match deck {
+                Some(layout) => {
+                    let zones = crate::profile_deck_ui::draw_confirm(frame, app, &layout);
+                    app.deck_confirm_zones = Some(zones);
+                }
+                None => {
+                    app.deck_confirm_zones = None;
+                    draw_details_popup(frame, app)
+                }
+            }
         }
+        InputMode::AcceptKya | InputMode::Details => draw_details_popup(frame, app),
         // The deck on a terminal big enough for it, the plain list otherwise.
         InputMode::PickProfile => {
             match crate::profile_deck_ui::layout(

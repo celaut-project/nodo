@@ -340,6 +340,181 @@ pub fn hit(layout: &DeckLayout, position: Position) -> Option<Hit> {
     None
 }
 
+/// Where the parts of the confirmation are: the panel over the deck, the text of
+/// the changes inside it, and the two buttons.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmLayout {
+    pub panel: Rect,
+    pub body: Rect,
+    pub apply: Rect,
+    pub back: Rect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmHit {
+    Apply,
+    Back,
+}
+
+pub const APPLY_LABEL: &str = "[ Y · APPLY AND RESTART ]";
+pub const BACK_LABEL: &str = "[ N · BACK ]";
+
+/// The geometry of the confirmation over `deck`, for a list of `lines` lines.
+///
+/// The panel is as tall as its text and no taller, so a short list does not sit in a
+/// big empty box. It never leaves the modal.
+pub fn confirm_layout(deck: &DeckLayout, lines: usize) -> ConfirmLayout {
+    let inner = deck.inner;
+    let width = inner.width.saturating_sub(8).clamp(40, 90).min(inner.width);
+    // Two border rows, the text, a blank row and the row of buttons.
+    let wanted = lines as u16 + 4;
+    let height = wanted
+        .clamp(8, inner.height.saturating_sub(2).max(8))
+        .min(inner.height);
+    let panel = Rect::new(
+        inner.x + (inner.width - width) / 2,
+        inner.y + (inner.height - height) / 2,
+        width,
+        height,
+    );
+    let body = Rect::new(
+        panel.x + 2,
+        panel.y + 1,
+        panel.width.saturating_sub(4),
+        panel.height.saturating_sub(4),
+    );
+    let buttons_row = panel.y + panel.height - 2;
+    let apply_width = width_of(APPLY_LABEL);
+    let back_width = width_of(BACK_LABEL);
+    let gap = 3;
+    let pair = apply_width + gap + back_width;
+    let x = panel.x + panel.width.saturating_sub(pair) / 2;
+    ConfirmLayout {
+        panel,
+        body,
+        apply: Rect::new(x, buttons_row, apply_width, 1),
+        back: Rect::new(x + apply_width + gap, buttons_row, back_width, 1),
+    }
+}
+
+pub fn confirm_hit(layout: &ConfirmLayout, position: Position) -> Option<ConfirmHit> {
+    if layout.apply.contains(position) {
+        Some(ConfirmHit::Apply)
+    } else if layout.back.contains(position) {
+        Some(ConfirmHit::Back)
+    } else {
+        None
+    }
+}
+
+/// The list of changes of the chosen profile, drawn over its card: the deck stays on
+/// screen, dark and complete, and a panel in the colour of the character holds the
+/// text and the two buttons. Returns where the buttons are, for clicks.
+pub fn draw_confirm(frame: &mut Frame, app: &App, deck: &DeckLayout) -> ConfirmLayout {
+    draw_confirm_with(frame, app, deck, Instant::now(), ColorMode::detect())
+}
+
+pub fn draw_confirm_with(
+    frame: &mut Frame,
+    app: &App,
+    deck: &DeckLayout,
+    now: Instant,
+    mode: ColorMode,
+) -> ConfirmLayout {
+    // The deck first, in true colour: it is adapted once, with the panel, below.
+    draw_with(frame, app, deck, now, ColorMode::TrueColor);
+
+    let lines: Vec<String> = app
+        .details
+        .as_ref()
+        .map(|details| details.lines.clone())
+        .unwrap_or_default();
+    let layout = confirm_layout(deck, lines.len());
+
+    let profiles = cell::profiles();
+    let profile = profiles.get(app.cell.profile.min(profiles.len().saturating_sub(1)));
+    let persona = profile.and_then(|profile| profile_deck::persona(profile.id));
+    let accent = persona
+        .map(|persona| persona.palette.primary_color())
+        .unwrap_or(WARN);
+    let label = profile.map(|profile| profile.label).unwrap_or("PROFILE");
+
+    let buffer = frame.buffer_mut();
+    for y in layout.panel.y..layout.panel.y + layout.panel.height {
+        for x in layout.panel.x..layout.panel.x + layout.panel.width {
+            let cell = buffer.get_mut(x, y);
+            cell.set_symbol(" ");
+            cell.set_style(Style::default().fg(TEXT).bg(PANEL_BG));
+        }
+    }
+    let title = Line::from(vec![
+        Span::styled(" ◢◤ ", Style::default().fg(accent)),
+        Span::styled(
+            format!("JACK IN · {label}"),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ◥◣ ", Style::default().fg(accent)),
+    ]);
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(accent))
+        .style(Style::default().bg(PANEL_BG))
+        .title(title)
+        .render(layout.panel, buffer);
+
+    let scroll = app
+        .details
+        .as_ref()
+        .map(|details| details.scroll)
+        .unwrap_or(0);
+    let text: Vec<Line<'static>> = lines
+        .iter()
+        .map(|line| confirm_line(line, accent))
+        .collect();
+    Paragraph::new(text)
+        .scroll((scroll as u16, 0))
+        .wrap(Wrap { trim: false })
+        .render(layout.body, buffer);
+
+    Span::styled(
+        APPLY_LABEL,
+        Style::default()
+            .fg(DECK_BG)
+            .bg(accent)
+            .add_modifier(Modifier::BOLD),
+    )
+    .render(layout.apply, buffer);
+    Span::styled(
+        BACK_LABEL,
+        Style::default().fg(WARN).add_modifier(Modifier::BOLD),
+    )
+    .render(layout.back, buffer);
+
+    adapt_area(buffer, deck.modal, mode);
+    layout
+}
+
+/// One line of the list of changes, in the colours of the deck: a warning in
+/// yellow, a changed key with its arrow in the colour of the character.
+fn confirm_line(line: &str, accent: Color) -> Line<'static> {
+    if line.starts_with("!!") {
+        return Line::from(Span::styled(
+            line.to_string(),
+            Style::default().fg(WARN).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some((key, change)) = line.split_once("   ") {
+        if change.contains('→') {
+            return Line::from(vec![
+                Span::styled(format!("{key}   "), Style::default().fg(TEXT)),
+                Span::styled(change.to_string(), Style::default().fg(accent)),
+            ]);
+        }
+    }
+    Line::from(Span::styled(line.to_string(), Style::default().fg(TEXT)))
+}
+
 /// Draw the whole deck for the profile `app.cell.profile`.
 pub fn draw(frame: &mut Frame, app: &App, layout: &DeckLayout) {
     draw_with(frame, app, layout, Instant::now(), ColorMode::detect());
@@ -1118,6 +1293,113 @@ mod tests {
         assert!(on.contains("◢◤") && on.contains("◥◣"));
         assert!(!off.contains("◢◤") && !off.contains("◥◣"));
         assert!(on.contains("SELECT YOUR RIG") && off.contains("SELECT YOUR RIG"));
+    }
+
+    #[test]
+    fn the_confirmation_fits_in_the_modal_and_its_buttons_do_not_overlap() {
+        for (width, height) in [(80, 26), (100, 34), (200, 60)] {
+            let deck = layout(Rect::new(0, 0, width, height), 5, false).unwrap();
+            for lines in [1, 5, 40, 500] {
+                let confirm = confirm_layout(&deck, lines);
+                for zone in [confirm.panel, confirm.body, confirm.apply, confirm.back] {
+                    assert!(
+                        contains(deck.inner, zone),
+                        "{width}x{height} {lines}: {zone:?}"
+                    );
+                }
+                assert!(contains(confirm.panel, confirm.body));
+                assert!(contains(confirm.panel, confirm.apply));
+                assert!(contains(confirm.panel, confirm.back));
+                assert!(!overlaps(confirm.apply, confirm.back));
+                assert!(!overlaps(confirm.body, confirm.apply));
+                assert!(!overlaps(confirm.body, confirm.back));
+                assert!(confirm.body.height >= 1);
+            }
+        }
+    }
+
+    #[test]
+    fn a_short_list_gets_a_short_panel() {
+        let deck = layout(Rect::new(0, 0, 100, 40), 5, false).unwrap();
+        assert!(confirm_layout(&deck, 3).panel.height < confirm_layout(&deck, 30).panel.height);
+    }
+
+    #[test]
+    fn a_click_on_a_button_is_told_from_one_beside_it() {
+        let deck = layout(Rect::new(0, 0, 100, 34), 5, false).unwrap();
+        let confirm = confirm_layout(&deck, 10);
+        let at = |rect: Rect| Position::new(rect.x + rect.width / 2, rect.y);
+        assert_eq!(
+            confirm_hit(&confirm, at(confirm.apply)),
+            Some(ConfirmHit::Apply)
+        );
+        assert_eq!(
+            confirm_hit(&confirm, at(confirm.back)),
+            Some(ConfirmHit::Back)
+        );
+        assert_eq!(
+            confirm_hit(&confirm, Position::new(confirm.body.x, confirm.body.y)),
+            None
+        );
+    }
+
+    fn confirm_screen(mode: ColorMode) -> (Buffer, ConfirmLayout) {
+        let mut app = App::default();
+        app.cell.profile = 1;
+        app.config_document = None;
+        app.details = Some(crate::app::DetailsView {
+            title: "Profile CAUTIOUS RENTER? (y/N)".to_string(),
+            lines: vec![
+                "I will rent this machine out.".to_string(),
+                String::new(),
+                "2 of 30 keys change:".to_string(),
+                "  client.ACCEPT_NEW_DEPOSITS   false  →  true".to_string(),
+                "  network.DELEGATE_EXECUTION   true  →  false".to_string(),
+            ],
+            scroll: 0,
+        });
+        let deck = layout(Rect::new(0, 0, 100, 34), cell::profiles().len(), false).unwrap();
+        let mut zones = None;
+        let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
+        terminal
+            .draw(|frame| {
+                zones = Some(draw_confirm_with(frame, &app, &deck, Instant::now(), mode));
+            })
+            .unwrap();
+        (terminal.backend().buffer().clone(), zones.unwrap())
+    }
+
+    #[test]
+    fn the_confirmation_is_drawn_over_the_deck_with_its_text_and_buttons() {
+        let (buffer, _) = confirm_screen(ColorMode::TrueColor);
+        let text = text_of(&buffer);
+        assert!(text.contains("SELECT YOUR RIG"), "{text}");
+        assert!(text.contains("JACK IN · CAUTIOUS RENTER"), "{text}");
+        assert!(text.contains("client.ACCEPT_NEW_DEPOSITS"), "{text}");
+        assert!(text.contains("false  →  true"), "{text}");
+        assert!(
+            text.contains(APPLY_LABEL) && text.contains(BACK_LABEL),
+            "{text}"
+        );
+        // The deck behind it is still there: the arrows are outside the panel.
+        assert!(text.contains('◀') && text.contains('▶'));
+    }
+
+    #[test]
+    fn the_confirmation_paints_every_cell_it_covers_in_every_colour_mode() {
+        for mode in [ColorMode::TrueColor, ColorMode::Indexed, ColorMode::Grey] {
+            let (buffer, zones) = confirm_screen(mode);
+            for y in zones.panel.y..zones.panel.y + zones.panel.height {
+                for x in zones.panel.x..zones.panel.x + zones.panel.width {
+                    let cell = buffer.get(x, y);
+                    assert_ne!(cell.bg, Color::Reset, "{mode:?} ({x},{y})");
+                    if mode != ColorMode::TrueColor {
+                        assert!(!matches!(cell.fg, Color::Rgb(..)), "{mode:?} ({x},{y})");
+                        assert!(!matches!(cell.bg, Color::Rgb(..)), "{mode:?} ({x},{y})");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

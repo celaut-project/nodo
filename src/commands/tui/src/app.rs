@@ -3331,6 +3331,12 @@ pub struct App {
     pub deck_anim: Option<crate::profile_deck_ui::DeckSlide>,
     /// When the picker was opened: the clock of the blink of its title.
     pub deck_opened: Option<Instant>,
+    /// The profile whose list of changes is waiting for `y` or `n`. While it is set,
+    /// the list is drawn inside the deck, not in the plain text popup, and `n` goes
+    /// back to the deck. Set only by a choice made in the deck.
+    pub deck_confirm: Option<usize>,
+    /// Where the buttons of that confirmation were drawn last, for clicks.
+    pub deck_confirm_zones: Option<crate::profile_deck_ui::ConfirmLayout>,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -3536,6 +3542,8 @@ impl Default for App {
             deck_zones: None,
             deck_anim: None,
             deck_opened: None,
+            deck_confirm: None,
+            deck_confirm_zones: None,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
             paths,
@@ -4297,6 +4305,8 @@ impl App {
 
     pub fn close_input(&mut self) {
         self.input_mode = InputMode::Normal;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
         self.input.clear();
         self.input_title.clear();
         self.edit_config_path = None;
@@ -5501,6 +5511,13 @@ impl App {
         }
     }
 
+    /// What a click on the confirmation of a profile landed on, if the confirmation
+    /// is on screen.
+    pub fn confirm_hit(&self, position: Position) -> Option<crate::profile_deck_ui::ConfirmHit> {
+        let zones = self.deck_confirm_zones.as_ref()?;
+        crate::profile_deck_ui::confirm_hit(zones, position)
+    }
+
     /// A left click on the deck. Does nothing when the deck is not on screen, as when
     /// the plain list is shown instead.
     pub fn click_deck(&mut self, position: Position) {
@@ -5544,6 +5561,9 @@ impl App {
             Some(profile.blurb),
             None,
         );
+        // After `confirm_writes`, which does not touch it, and after `close_input`
+        // above, which clears it.
+        self.deck_confirm = Some(self.cell.profile);
     }
 
     /// Show every key a change would touch, and hold it until the operator agrees.
@@ -6301,12 +6321,36 @@ impl App {
     /// Dismiss a writes confirmation without writing anything.
     pub fn cancel_pending_writes(&mut self) {
         self.pending_action = None;
-        self.close_details();
+        // A refusal in the deck goes back to the deck, with the same card open, so a
+        // user who looked at the changes and did not like them can try another
+        // profile. Anywhere else it closes, as it always did.
+        match self.deck_confirm {
+            Some(index) => self.return_to_deck(index),
+            None => self.close_details(),
+        }
+    }
+
+    /// Show the deck again at the card `index`, after a confirmation was refused.
+    ///
+    /// The first-run marker was written when the profile was chosen, so this is an
+    /// ordinary picker: Esc closes it and changes nothing.
+    fn return_to_deck(&mut self, index: usize) {
+        self.details = None;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
+        self.cell.profile = index.min(cell::profiles().len().saturating_sub(1));
+        self.profile_first_run = false;
+        self.deck_anim = None;
+        self.input_mode = InputMode::PickProfile;
+        self.input_title = "Apply a profile".to_string();
+        self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
     }
 
     /// Close the Details overlay and return to normal mode.
     pub fn close_details(&mut self) {
         self.details = None;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
         self.input_mode = InputMode::Normal;
         self.status.clear();
     }
@@ -13647,6 +13691,195 @@ ergo: Cold Wallet: 9cold\n";
             let main = include_str!("main.rs");
             assert!(main.contains("deck_animating()"));
             assert!(main.contains("profile_deck_ui::FRAME"));
+        }
+
+        fn screen_text(app: &mut App, width: u16, height: u16) -> String {
+            use ratatui::backend::TestBackend;
+            use ratatui::Terminal;
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let mut text = String::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    text.push_str(buffer.get(x, y).symbol());
+                }
+                text.push('\n');
+            }
+            text
+        }
+
+        /// The report of the bug: a click on the card chose the profile, and the list
+        /// of changes came up as the plain text popup, so the deck disappeared. It
+        /// has to stay the deck, with the list inside it.
+        #[tokio::test]
+        async fn a_click_keeps_the_deck_and_shows_the_changes_inside_it() {
+            for target in ["card", "choose"] {
+                let install = Install::new(&format!("confirm-style-{target}"));
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                app.deck_zones = None;
+                // One draw, so the zones are those of the real screen.
+                screen_text(&mut app, 100, 34);
+                let zones = app.deck_zones.clone().unwrap();
+
+                let (x, y) = centre(if target == "card" { zones.card } else { zones.choose });
+                click(&mut app, x, y).await;
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{target}");
+                assert!(app.deck_confirm.is_some(), "{target}");
+                let text = screen_text(&mut app, 100, 34);
+
+                assert!(text.contains("SELECT YOUR RIG"), "{target}: the deck is gone\n{text}");
+                assert!(text.contains("JACK IN · "), "{target}\n{text}");
+                assert!(text.contains(crate::profile_deck_ui::APPLY_LABEL), "{target}");
+                assert!(text.contains(crate::profile_deck_ui::BACK_LABEL), "{target}");
+                assert!(text.contains("client.ACCEPT_NEW_DEPOSITS"), "{target}\n{text}");
+                assert!(!text.contains("(y/N)"), "{target}: the plain popup came back");
+            }
+        }
+
+        /// The same on the keyboard: Enter and a click lead to one screen.
+        #[tokio::test]
+        async fn enter_shows_the_same_confirmation() {
+            let install = Install::new("confirm-enter");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+
+            send(&mut app, KeyCode::Enter).await;
+            let text = screen_text(&mut app, 100, 34);
+
+            assert!(text.contains("JACK IN · "), "{text}");
+            assert!(!text.contains("(y/N)"));
+        }
+
+        /// A terminal too small for the deck has the plain list, and so the plain
+        /// confirmation: the deck cannot be drawn there.
+        #[tokio::test]
+        async fn a_small_terminal_keeps_the_plain_confirmation() {
+            let install = Install::new("confirm-small");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+
+            let text = screen_text(&mut app, 70, 20);
+
+            assert!(app.deck_confirm_zones.is_none());
+            assert!(text.contains("(y/N)"), "{text}");
+            assert!(!text.contains("JACK IN · "));
+        }
+
+        /// Every other confirmation is untouched.
+        #[test]
+        fn another_confirmation_is_still_the_plain_popup() {
+            let install = Install::new("confirm-other");
+            let mut app = deck_app(&install);
+            app.input_mode = InputMode::Normal;
+            app.confirm_writes(
+                "Lever".to_string(),
+                vec![("ui.THEME".to_string(), "x".to_string())],
+                Vec::new(),
+                None,
+                None,
+            );
+
+            let text = screen_text(&mut app, 100, 34);
+
+            assert!(app.deck_confirm.is_none());
+            assert!(text.contains("(y/N)"), "{text}");
+            assert!(!text.contains("SELECT YOUR RIG"));
+        }
+
+        #[tokio::test]
+        async fn refusing_goes_back_to_the_same_card_in_the_deck() {
+            for key in [KeyCode::Char('n'), KeyCode::Esc] {
+                let install = Install::new("confirm-back-key");
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                send(&mut app, KeyCode::Char('4')).await;
+                send(&mut app, KeyCode::Enter).await;
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+
+                send(&mut app, key).await;
+
+                assert_eq!(app.input_mode, InputMode::PickProfile, "{key:?}");
+                assert_eq!(app.cell.profile, 3, "{key:?}: the same card");
+                assert!(app.deck_confirm.is_none());
+                assert!(app.pending_action.is_none(), "nothing is left to apply");
+                assert!(app.details.is_none());
+                assert!(app.running);
+                let text = screen_text(&mut app, 100, 34);
+                assert!(text.contains("SELECT YOUR RIG"), "{key:?}");
+            }
+        }
+
+        /// The marker was written when the profile was chosen, so going back and then
+        /// leaving with Esc is an ordinary close: no second marker, no write.
+        #[tokio::test]
+        async fn leaving_after_going_back_changes_nothing() {
+            let install = Install::new("confirm-back-leave");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+            send(&mut app, KeyCode::Char('n')).await;
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn the_back_button_goes_back_and_the_buttons_have_zones() {
+            let install = Install::new("confirm-back-click");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Char('2')).await;
+            send(&mut app, KeyCode::Enter).await;
+            screen_text(&mut app, 100, 34);
+            let zones = app.deck_confirm_zones.clone().expect("zones after a draw");
+
+            // A click on the text of the changes does nothing.
+            click(&mut app, zones.body.x, zones.body.y).await;
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+
+            let (x, y) = centre(zones.back);
+            click(&mut app, x, y).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert_eq!(app.cell.profile, 1);
+        }
+
+        #[tokio::test]
+        async fn the_wheel_scrolls_the_changes() {
+            use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+            let install = Install::new("confirm-wheel");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+            screen_text(&mut app, 100, 34);
+
+            wheel(&mut app, ScrollDown).await;
+            wheel(&mut app, ScrollDown).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 2);
+            wheel(&mut app, ScrollUp).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 1);
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+        }
+
+        /// Leaving through any other way forgets the confirmation, so a stale index
+        /// can never turn a later plain confirmation into a deck one.
+        #[test]
+        fn closing_forgets_the_confirmation() {
+            let install = Install::new("confirm-forget");
+            let mut app = deck_app(&install);
+            app.deck_confirm = Some(2);
+            app.close_input();
+            assert!(app.deck_confirm.is_none());
+
+            app.deck_confirm = Some(2);
+            app.close_details();
+            assert!(app.deck_confirm.is_none());
         }
 
         /// The gate is applied in `main.rs`, after the KyA gate. Read off the source

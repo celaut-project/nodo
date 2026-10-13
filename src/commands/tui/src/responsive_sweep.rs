@@ -314,6 +314,11 @@ pub(crate) fn overlays() -> Vec<(&'static str, Page, Box<dyn Fn(&mut App)>)> {
             app.cell.profile = 4;
             app.input_mode = InputMode::PickProfile;
         })),
+        ("profile-confirm", Page::Cell, Box::new(|app: &mut App| {
+            app.config_document = None;
+            app.cell.profile = 2;
+            app.submit_profile_selection();
+        })),
         ("lever-key", Page::Cell, Box::new(|app: &mut App| {
             app.lever_keys = vec!["network.DELEGATION_TUNNEL_POLICY", "hashing.HASH", "ui.THEME"];
             app.input_mode = InputMode::PickLeverKey;

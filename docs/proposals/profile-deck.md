@@ -55,12 +55,14 @@ Paths are relative to `src/commands/tui/src`.
 ```
 start -> KyA marker missing?     -> AcceptKya (y)
       -> picker marker missing?  -> PickProfile (first_run = true)
-      -> Enter -> write picker marker -> ConfirmWrites -> apply -> Normal
+      -> Enter -> write picker marker -> ConfirmWrites (in the deck) -> y -> apply -> Normal
+                                                                  -> n -> back to the deck
       -> Esc / SKIP             -> write picker marker, no change -> Normal
 ```
 
 - The new marker is `<storage>/.profilepicked`. It is an empty file, like `.acceptedkya`.
 - The TUI writes the marker when the user chooses a profile, before the diff. If the user then declines the diff, the picker does not show again.
+- The diff of a profile chosen in the deck is drawn inside the deck, as a panel over the card, with its own `y` and `n` buttons. A plain text popup here would break the design at the moment of the choice. `n` returns to the deck. A terminal too small for the deck shows the plain popup.
 - The picker shows if the marker is absent. This includes users who accepted the KyA before this feature.
 - If the user closes the TUI before the choice, the picker shows again at the next start.
 - If the TUI cannot write the marker, it shows a status line. The picker shows again at the next start.

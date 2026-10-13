@@ -66,6 +66,20 @@ pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<
                 app.click_env_form(mouse.column, mouse.row);
             }
         }
+        // The list of changes of a profile, in the deck: its two buttons and the wheel.
+        // Any other confirmation ignores the mouse, as it always did.
+        InputMode::ConfirmWrites if app.deck_confirm.is_some() => match mouse.kind {
+            MouseEventKind::ScrollUp => app.scroll_details(-1),
+            MouseEventKind::ScrollDown => app.scroll_details(1),
+            MouseEventKind::Down(MouseButton::Left) => {
+                match app.confirm_hit(Position::new(mouse.column, mouse.row)) {
+                    Some(crate::profile_deck_ui::ConfirmHit::Apply) => app.confirm_pending().await,
+                    Some(crate::profile_deck_ui::ConfirmHit::Back) => app.cancel_pending_writes(),
+                    None => {}
+                }
+            }
+            _ => {}
+        },
         // The profile deck: the wheel turns the cards, a click acts on the part it is
         // over. The page behind is not clickable.
         InputMode::PickProfile => match mouse.kind {
