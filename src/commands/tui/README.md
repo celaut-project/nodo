@@ -83,7 +83,7 @@ start. A marker that cannot be written is not fatal: the TUI tells you, and the 
 shows again at the next start. An installation that accepted the KyA before this
 feature sees the deck once.
 
-`p` on Policies opens the same deck. There, `Esc` closes it and writes no marker.
+`p` on Policies opens the same deck. So does a click on the `CHANGE PROFILE · p` button, at the right end of the first row of that page. The button is filled in the accent colour. On a narrow terminal it shortens to `PROFILE · p`, and the summary on the left is clipped before the button is. In the deck from Policies, `Esc` closes it and writes no marker.
 
 The design and the plan are in
 [`docs/proposals/profile-deck.md`](../../../docs/proposals/profile-deck.md).
@@ -298,7 +298,7 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 | `g` | Instances: dependency tree / flat list |
 | `i` | Service details, the selected tunnel with its log on Tunnels, or the selected pack with its log on Packs |
 | `e` | Execute the selected service, or edit the selected All, Pricing, Policies or Energy value |
-| `p` | Policies: apply a profile; Services: pack a folder or an https git URL (`nodo pack … --detach`) |
+| `p` | Policies: open the profile deck (the `CHANGE PROFILE` button does the same); Services: pack a folder or an https git URL (`nodo pack … --detach`) |
 | `+` / `-` | Adjust peer reputation on Peers, the selected price by 10 % on Pricing, or open a credit/debit amount modal on Clients |
 | `n` | Policies: the router steps (`nodo nat-guide`); Tunnels: open a new tunnel; Packs: pack a folder or an https git URL |
 | `Tab` | In the pack prompt: complete the folder name being typed (elsewhere: next page) |

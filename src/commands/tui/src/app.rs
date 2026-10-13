@@ -3391,6 +3391,8 @@ pub struct App {
     pub chat_send_area: Rect,
     /// The ⟳ button on the PEERS table's border; `Rect::ZERO` when not drawn.
     pub peers_refresh_area: Rect,
+    /// The "change profile" button on the POLICIES page, where it was drawn last.
+    pub profile_button_area: Rect,
     /// The open right-click menu, while `input_mode` is `ContextMenu`.
     pub context_menu: Option<crate::context_menu::ContextMenu>,
     /// The DOCS page: its index, the page open in it, and where both were drawn.
@@ -3569,6 +3571,7 @@ impl Default for App {
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
             peers_refresh_area: Rect::ZERO,
+            profile_button_area: Rect::ZERO,
             context_menu: None,
             docs: crate::docs::DocsState::default(),
             details: None,
@@ -3971,6 +3974,11 @@ impl App {
         }
         if self.page() == Page::Peers && self.peers_refresh_area.contains(position) {
             self.open_refresh_peers_confirm();
+            return;
+        }
+        // The same thing the `p` key does: open the profile deck.
+        if self.page() == Page::Cell && self.profile_button_area.contains(position) {
+            self.open_profile_picker();
             return;
         }
         // The config tree remembers where it drew each node, so it can resolve the

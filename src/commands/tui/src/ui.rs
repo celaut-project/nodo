@@ -113,6 +113,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.chat_attach_area = Rect::ZERO;
     app.chat_send_area = Rect::ZERO;
     app.peers_refresh_area = Rect::ZERO;
+    app.profile_button_area = Rect::ZERO;
 
     // Below the smallest size the pages are laid out for, say so instead of drawing
     // a tab bar squeezed to nothing over a table of one-character columns (issue
@@ -3291,27 +3292,67 @@ fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Which posture this node is closest to, and how to see where it differs.
-fn draw_profile_bar(frame: &mut Frame, app: &App, area: Rect) {
+/// The label of the button that opens the profile deck, in its two sizes.
+const PROFILE_BUTTON: &str = "[ CHANGE PROFILE · p ]";
+const PROFILE_BUTTON_SHORT: &str = "[ PROFILE · p ]";
+
+/// Which posture this node is closest to, and a button to change it.
+///
+/// The button is filled in the accent colour, so it reads as something to press and
+/// not as one more label on the row. It sits at the right end, and the text on the
+/// left gives way to it, never the other way round: on a narrow terminal the
+/// summary is clipped before the button is.
+fn draw_profile_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     let report = app.cell_profile();
     let colour = if report.deviations.is_empty() { good() } else { warn() };
+    let summary = format!(" closest profile {}", report.summary());
+    let keys = format!(" ({}/{} keys)", report.matched(), report.total);
+    let left_width = (summary.chars().count() + keys.chars().count()) as u16;
+
+    // The long label when it fits beside the summary, the short one when it only
+    // fits alone, and none on a row too narrow for either.
+    let button = [PROFILE_BUTTON, PROFILE_BUTTON_SHORT]
+        .into_iter()
+        .find(|label| {
+            let width = label.chars().count() as u16;
+            area.width >= width + 2 && area.width >= left_width.min(24) + width + 2
+        });
+    let (text_area, button) = match button {
+        Some(label) => {
+            let width = label.chars().count() as u16;
+            let button_area = Rect::new(area.right() - width - 1, area.y, width, 1);
+            let text_area = Rect::new(
+                area.x,
+                area.y,
+                area.width.saturating_sub(width + 2),
+                area.height,
+            );
+            (text_area, Some((label, button_area)))
+        }
+        None => (area, None),
+    };
+
+    // What the button does not say: `d`. Shown only where it fits after the summary.
+    let hint = "   d what differs";
+    let hint_fits = text_area.width >= left_width + hint.chars().count() as u16;
     let line = Line::from(vec![
         Span::styled(" closest profile ", Style::default().fg(muted())),
         Span::styled(report.summary(), Style::default().fg(colour).bold()),
-        Span::styled(
-            format!(" ({}/{} keys)", report.matched(), report.total),
-            Style::default().fg(muted()),
-        ),
-        Span::styled(
-            if area.width >= 92 {
-                "   p apply a profile · d what differs"
-            } else {
-                ""
-            },
-            Style::default().fg(muted()),
-        ),
+        Span::styled(keys, Style::default().fg(muted())),
+        Span::styled(if hint_fits { hint } else { "" }, Style::default().fg(muted())),
     ]);
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(line), text_area);
+
+    if let Some((label, button_area)) = button {
+        app.profile_button_area = button_area;
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                label,
+                Style::default().fg(inverse_text()).bg(accent()).bold(),
+            )),
+            button_area,
+        );
+    }
 }
 
 /// The outward-facing organelles above, the self-preserving ones below, and the
@@ -6416,6 +6457,86 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
+        }
+
+        /// The button, drawn and clickable: it is the visible way to do what `p` does.
+        #[test]
+        fn a_button_opens_the_profile_deck() {
+            let mut app = App::new();
+            app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+            let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+
+            let area = app.profile_button_area;
+            assert!(area.width > 0 && area.height == 1, "no button: {area:?}");
+            let buffer = terminal.backend().buffer().clone();
+            let drawn: String = (area.x..area.x + area.width)
+                .map(|x| buffer.get(x, area.y).symbol())
+                .collect();
+            assert!(drawn.contains("CHANGE PROFILE"), "{drawn}");
+            // Filled, so it reads as a button and not as a label.
+            assert_ne!(buffer.get(area.x, area.y).bg, ratatui::style::Color::Reset);
+            assert!(drawn.contains('p'));
+        }
+
+        /// A click on the button is a click on the page, and it opens the same deck
+        /// as the key. A click beside it does not.
+        #[test]
+        fn clicking_the_button_opens_the_deck_and_clicking_beside_it_does_not() {
+            use crate::app::{InputMode, Page};
+            let mut app = App::new();
+            app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+            app.tabs.select_page(Page::Cell);
+            let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+            let area = app.profile_button_area;
+
+            app.click_at(area.x.saturating_sub(2), area.y);
+            assert_eq!(app.input_mode, InputMode::Normal, "beside the button");
+
+            app.click_at(area.x + area.width / 2, area.y);
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(!app.profile_first_run, "from POLICIES it is not the first run");
+        }
+
+        /// The button gives the summary no say: it is there at every size the page is
+        /// drawn at, in its short form where the long one does not fit.
+        #[test]
+        fn the_button_survives_a_narrow_terminal() {
+            for width in [60u16, 70, 80, 100, 140] {
+                let mut app = App::new();
+                app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+                let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+                terminal
+                    .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                    .unwrap();
+                let area = app.profile_button_area;
+                assert!(area.width > 0, "no button at {width} columns");
+                assert!(area.right() <= width, "{width}: {area:?}");
+                assert_eq!(area.y, 0, "{width}: it is on the profile bar");
+            }
+        }
+
+        #[test]
+        fn another_page_has_no_button_to_click() {
+            use crate::app::{InputMode, Page};
+            let mut app = App::new();
+            app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+            app.tabs.select_page(Page::Cell);
+            let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+            let area = app.profile_button_area;
+            app.tabs.select_page(Page::Overview);
+
+            app.click_at(area.x + 1, area.y);
+
+            assert_eq!(app.input_mode, InputMode::Normal);
         }
 
         const RENTING: &str = "client:\n  ACCEPT_NEW_DEPOSITS: true\nnetwork:\n  GATEWAY_PORT: 58443\n  DISABLE_EXPOSE_OUTSIDE: true\ncosts:\n  ALLOW_DEBT: false\nidentity:\n  MNEMONIC: \"abandon abandon ability\"\n";
