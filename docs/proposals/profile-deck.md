@@ -35,7 +35,7 @@ Paths are relative to `src/commands/tui/src`.
 ### Profiles
 
 - `cell.rs:1382` defines `Profile { id, label, blurb, writes }`.
-- `cell.rs:1392` defines `PROFILES`. There are five: `just-me`, `cautious`, `open-renter`, `lan-lab`, `workbench`.
+- `cell.rs:1392` defines `PROFILES`. There were five when this proposal was written: `just-me`, `cautious`, `open-renter`, `lan-lab`, `workbench`. A sixth, `remote-only`, came later. It comes right after `just-me`.
 - `config_edit.py:79` has a copy of the list. `tests/test_commands_config_edit.py` fails if the two lists differ.
 - The active profile is not stored. `cell::closest_profile` computes it from `config.yaml`.
 - `InputMode::PickProfile` shows a list popup (`draw_profile_popup` in `ui.rs`).
@@ -93,6 +93,7 @@ start -> KyA marker missing?     -> AcceptKya (y)
 | Profile | Character | Neon colour |
 |---|---|---|
 | `just-me` | Ronin hermit | green |
+| `remote-only` | Phantom remote operator | violet |
 | `cautious` | Fixer | yellow |
 | `open-renter` | Netrunner trader | magenta |
 | `lan-lab` | Ripperdoc technician | cyan |
@@ -105,7 +106,7 @@ start -> KyA marker missing?     -> AcceptKya (y)
 - The card shows `label` and `blurb` from `Profile`.
 - The card shows five attribute bars: EXPOSURE, INCOME, OPENNESS, ISOLATION and RISK.
 - A pure function computes the bars from the `writes` of the profile. For example, EXPOSURE is high when `network.DISABLE_EXPOSE_OUTSIDE` is `false`.
-- A test fixes the bars of the five profiles. A change to a profile that changes a bar fails the test.
+- A test fixes the bars of the profiles. A change to a profile that changes a bar fails the test.
 - The card shows 3 or 4 key traits taken from the `writes`.
 - The card shows how many keys change from the current `config.yaml`. It uses `cell::report`.
 

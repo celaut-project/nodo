@@ -41,7 +41,7 @@ Each card has a character on the left and the data of the profile on the right:
 - How many keys of `config.yaml` would change.
 
 The bars are not typed in. `src/profile_deck.rs` computes them from the `writes` of the
-profile, and a test pins the values of the five profiles. If a profile changes and a
+profile, and a test pins the values of the profiles. If a profile changes and a
 bar moves, the test fails and the change is made on purpose.
 
 | Input | Action |
@@ -508,10 +508,22 @@ the most open:
 | Profile | For |
 |---|---|
 | `JUST ME` | I run my own things here. Nothing from outside, nothing spent outside. |
+| `REMOTE ONLY` | I run nothing here. Every service runs on other nodes, and I pay for it. |
 | `CAUTIOUS RENTER` | I will rent this machine out, but on a short leash. |
 | `OPEN RENTER` | I want this machine earning: reachable, delegating, priced by load. |
 | `LAN LAB` | A few machines on my own network, sharing capacity for free. |
 | `WORKBENCH` | I am developing against this node. Nothing here is real money. |
+
+`REMOTE ONLY` turns off local execution (`network.EXECUTE_LOCALLY: false`) and turns
+on delegation, so every service runs on a peer. It also turns on the automatic refill of
+the deposit on the peer, because a node that only consumes has no income to pay with.
+The list of changes shows this line, as it does for `OPEN RENTER`. The other keys keep
+the node closed: no new deposits, no direct exposure, no low-demand fallback. A test
+makes sure that no profile turns local execution off without turning delegation on,
+because a node that runs nothing here and delegates nothing can run nothing anywhere.
+With that key off, the node also refuses to quote a price and answers "no room" when a
+peer asks, and it says why, so a peer that did not read its announcement does not select
+it. See `docs/CONFIG.md`.
 
 A profile writes **policy only**. None of them touches an identity, a wallet, a
 filesystem path, a port or a core-service id — a posture is a decision about how the

@@ -88,6 +88,33 @@ const SPRITE_JUST_ME: Sprite = [
     ".bbbbb..bbbbb.",
 ];
 
+const SPRITE_REMOTE_ONLY: Sprite = [
+    "......gg......",
+    ".....aaaa.....",
+    "...aaaaaaaa...",
+    "..aaaaaaaaaa..",
+    "..aakkkkkkaa..",
+    "..akkggggkka..",
+    "..aakkkkkkaa..",
+    "..aaaakkaaaa..",
+    "...aaaaaaaa...",
+    ".bbbaaaaaabbb.",
+    "bbbbbaaaabbbbb",
+    "bbdbbaaaabbdbb",
+    "bbdbbbaabbbdbb",
+    "bbdbbbbbbbbdbb",
+    ".bbdbbbbbbdbb.",
+    ".bbddbbbbddbb.",
+    "..bbddbbddbb..",
+    "..bbddddddbb..",
+    "...bbddddbb...",
+    "....bbddbb....",
+    ".....bbbb.....",
+    "......bb......",
+    ".......d......",
+    "..............",
+];
+
 const SPRITE_CAUTIOUS: Sprite = [
     "....bbbbbb....",
     "...bbbbbbbb...",
@@ -211,6 +238,19 @@ static PERSONAS: &[Persona] = &[
         sprite: &SPRITE_JUST_ME,
     },
     Persona {
+        id: "remote-only",
+        codename: "PHANTOM",
+        class: "Remote operator",
+        tagline: "\"I leave no trace here. The grid runs it.\"",
+        palette: Palette {
+            primary: (150, 110, 255),
+            secondary: (40, 30, 90),
+            dark: (80, 50, 170),
+            glow: (255, 90, 90),
+        },
+        sprite: &SPRITE_REMOTE_ONLY,
+    },
+    Persona {
         id: "cautious",
         codename: "FIXER",
         class: "Careful broker",
@@ -285,8 +325,8 @@ pub struct Stats {
     /// deposits from strangers, announcing itself, publishing its address.
     pub exposure: u8,
     /// How much the profile is set up to earn: deposits, scarcity pricing, refill,
-    /// low-demand work, no host ceiling. Simulated payments earn nothing, and free
-    /// capacity earns less.
+    /// low-demand work, no host ceiling. Simulated payments earn nothing, free
+    /// capacity earns less, and a node that runs nothing here earns nothing.
     pub income: u8,
     /// How much the node shares with other nodes: delegation, announcing, full
     /// admission, no isolation between internal children, private addresses.
@@ -294,8 +334,8 @@ pub struct Stats {
     /// How hard the node is closed: isolation, tunnel-only exposure, integrity
     /// checks, denied device nodes, host ceilings.
     pub isolation: u8,
-    /// How much can go wrong on purpose: debt allowed, debug logs, lenient
-    /// admission, no host ceiling.
+    /// How much can go wrong on purpose: debt allowed, money spent without asking,
+    /// debug logs, lenient admission, no host ceiling.
     pub risk: u8,
 }
 
@@ -366,7 +406,8 @@ pub fn stats(profile: &Profile) -> Stats {
         is(profile, "low_demand.ENABLED", "true"),
         deposits && !host_limits,
     ]);
-    let income = if simulated {
+    let runs_here = !is(profile, "network.EXECUTE_LOCALLY", "false");
+    let income = if simulated || !runs_here {
         0
     } else if free {
         earning.saturating_sub(1)
@@ -402,6 +443,7 @@ pub fn stats(profile: &Profile) -> Stats {
     let risk = points(&[
         is(profile, "costs.ALLOW_DEBT", "true"),
         is(profile, "costs.ALLOW_DEBT", "true"),
+        is(profile, "deposits.AUTOMATIC_REFILL", "true"),
         is(profile, "logs.DEBUG_MODE", "true"),
         is(profile, "workload_admission.ON_UNSATISFIABLE", "warn"),
         !host_limits,
@@ -441,8 +483,12 @@ pub fn traits(profile: &Profile) -> Vec<String> {
     if is(profile, "network.DELEGATE_EXECUTION", "true") {
         lines.push("Delegates work to peers".to_string());
     }
+    // Host limits cap what runs on this machine, so they say nothing about a node
+    // that runs nothing on it. That is worth a line of its own.
     lines.push(
-        if is(profile, "host_limits.ENABLED", "true") {
+        if is(profile, "network.EXECUTE_LOCALLY", "false") {
+            "Runs nothing locally"
+        } else if is(profile, "host_limits.ENABLED", "true") {
             "Host limits on"
         } else {
             "No host limits"
@@ -637,8 +683,9 @@ mod tests {
             );
         };
         expect("just-me", 0, 0, 0, 3, 0);
+        expect("remote-only", 0, 0, 1, 3, 1);
         expect("cautious", 2, 2, 0, 5, 0);
-        expect("open-renter", 5, 5, 2, 2, 1);
+        expect("open-renter", 5, 5, 2, 2, 2);
         expect("lan-lab", 4, 2, 5, 0, 2);
         expect("workbench", 0, 0, 1, 2, 5);
     }
@@ -648,6 +695,14 @@ mod tests {
     fn opening_the_node_raises_exposure() {
         assert!(stats_of("open-renter").exposure > stats_of("cautious").exposure);
         assert!(stats_of("cautious").exposure > stats_of("just-me").exposure);
+    }
+
+    /// A node that runs nothing here earns nothing, whatever else it writes, and it
+    /// is the one profile where spending money without asking shows as a risk.
+    #[test]
+    fn a_node_that_runs_nothing_locally_earns_nothing() {
+        assert_eq!(stats_of("remote-only").income, 0);
+        assert!(stats_of("remote-only").risk > stats_of("just-me").risk);
     }
 
     #[test]
@@ -665,6 +720,10 @@ mod tests {
         assert!(lines("cautious").contains(&"Tunnel only: no direct exposure".to_string()));
         assert!(lines("workbench").contains(&"Payments are simulated".to_string()));
         assert!(lines("open-renter").contains(&"Delegates work to peers".to_string()));
+        assert!(lines("remote-only").contains(&"Runs nothing locally".to_string()));
+        assert!(lines("remote-only").contains(&"Delegates work to peers".to_string()));
+        // The other profiles run work here, and do not say they do not.
+        assert!(!lines("just-me").contains(&"Runs nothing locally".to_string()));
         for profile in cell::profiles() {
             let count = traits(profile).len();
             assert!(

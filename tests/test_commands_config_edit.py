@@ -101,6 +101,37 @@ class ProfileCatalogueTests(unittest.TestCase):
                 found, _ = ce.value_at(example, ce.parse_path(path))
                 self.assertTrue(found, f"{profile['id']}: {path}")
 
+    def test_a_profile_that_runs_nothing_locally_delegates(self):
+        # Nothing here and nothing delegated would run nothing anywhere.
+        for profile in ce.PROFILES:
+            writes = dict(profile["writes"])
+            if writes.get("network.EXECUTE_LOCALLY") == "false":
+                self.assertEqual(
+                    writes.get("network.DELEGATE_EXECUTION"), "true", profile["id"]
+                )
+
+    def test_remote_only_is_the_only_profile_that_runs_nothing_locally(self):
+        off = [
+            p["id"]
+            for p in ce.PROFILES
+            if dict(p["writes"]).get("network.EXECUTE_LOCALLY") == "false"
+        ]
+        self.assertEqual(off, ["remote-only"])
+        self.assertEqual([p["id"] for p in ce.PROFILES][:2], ["just-me", "remote-only"])
+
+    def test_a_document_in_remote_only_is_closest_to_it(self):
+        document = {}
+        profile = next(p for p in ce.PROFILES if p["id"] == "remote-only")
+        for path, value in profile["writes"]:
+            *parents, leaf = ce.parse_path(path)
+            node = document
+            for key in parents:
+                node = node.setdefault(key, {})
+            node[leaf] = yaml.safe_load(value)
+        report = ce.closest_profile(document)
+        self.assertEqual(report["id"], "remote-only")
+        self.assertEqual(report["deviations"], [])
+
     def test_a_document_in_a_posture_matches_it_exactly(self):
         document = {}
         for path, value in ce.PROFILES[2]["writes"]:
