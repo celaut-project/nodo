@@ -47,6 +47,10 @@ pub mod env_form;
 /// The DOCS page: the installation's `docs/` folder, indexed and rendered.
 pub mod docs;
 
+/// The first-run profile deck: a character, a colour scheme and attribute bars for
+/// each profile (docs/proposals/profile-deck.md).
+pub mod profile_deck;
+
 /// Application.
 pub mod app;
 
