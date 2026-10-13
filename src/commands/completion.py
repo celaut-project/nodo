@@ -106,6 +106,7 @@ COMMANDS = sorted(
         "estimate",
         "service_envs",
         "update",
+        "uninstall",
         "kill",
         "burnall",
         "observe",

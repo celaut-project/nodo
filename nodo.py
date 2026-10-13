@@ -634,6 +634,24 @@ if __name__ == '__main__':
                     os.system(f"/bin/bash {main_dir}/bash/restore_source.sh {main_dir}")
                     os.system(f"/bin/bash {main_dir}/install.sh --target-dir {main_dir}")
 
+            case "uninstall":
+                # uninstall.sh does both modes itself: with sudo it removes all, and
+                # without it, it removes what the user owns and offers the root steps.
+                # The directory is passed on, as for `update`, and the script starts
+                # from /, because it removes the directory it was started from.
+                args = sys.argv[2:]
+                if any(a not in ("--no-input", "-h", "--help") for a in args):
+                    print("Usage: nodo uninstall [--no-input]", flush=True)
+                    _exit(1)
+                script = os.path.join(INSTALL_DIR, "uninstall.sh")
+                if not os.path.isfile(script):
+                    print(f"Error: {script} was not found.", flush=True)
+                    _exit(1)
+                _exit(subprocess.run(
+                    ["/bin/bash", script, "--target-dir", INSTALL_DIR, *args],
+                    cwd="/",
+                ).returncode)
+
             case "kill":
                 args = sys.argv[2:]
                 as_json = "--json" in args and not args.remove("--json")
