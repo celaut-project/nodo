@@ -4386,6 +4386,89 @@ impl App {
         self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
     }
 
+    /// Whether `path` (a dotted config path) or a key under it holds a value that
+    /// config.pending.yaml changes from config.yaml. What every page uses to mark a
+    /// setting the operator has changed and the running node does not have yet.
+    pub fn path_is_staged(&self, path: &str) -> bool {
+        self.config_all.iter().any(|entry| {
+            entry.running.is_some()
+                && entry.path.strip_prefix(path).is_some_and(|rest| {
+                    rest.is_empty() || rest.starts_with('.') || rest.starts_with('[')
+                })
+        })
+    }
+
+    /// Whether any key a lever writes is staged.
+    pub fn lever_is_staged(&self, lever: &crate::cell::Lever) -> bool {
+        lever.paths().iter().any(|path| self.path_is_staged(path))
+    }
+
+    /// Put the selected staged value back to what config.yaml (the running node) holds.
+    ///
+    /// Only a value marked as staged has anything to go back to. The change is made in
+    /// config.pending.yaml, like every edit while a staged file exists.
+    pub fn reset_selected_config_entry(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        let Some(entry) = self.selected_config_entry() else {
+            self.status = "Select a value to reset".to_string();
+            return;
+        };
+        if entry.running.is_none() {
+            self.status = format!("{} is not staged: nothing to reset", entry.path);
+            return;
+        }
+        let label = format!("Reset {}", entry.path);
+        let running = self
+            .running_document
+            .as_ref()
+            .and_then(|document| value_at(document, &entry.path_segments));
+        match running {
+            Some(value) => {
+                let writes = [(entry.path.clone(), yaml_edit_value(value))];
+                self.write_config_values(label, &writes, ConfigFollowUp::None);
+            }
+            // The running config has no such key: resetting means removing it.
+            None => self.start_config_write(ConfigWrite {
+                label,
+                expression: format!("del({})", yq_path_expression(&entry.path_segments)),
+                values: Vec::new(),
+                follow_up: ConfigFollowUp::None,
+            }),
+        }
+    }
+
+    /// Drop every staged value: delete config.pending.yaml, so the node keeps config.yaml.
+    pub fn reset_all_staged_config(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        if pending_change_count(&self.config_all) == 0 && !self.config_write_is_staged() {
+            self.status = "Nothing is staged".to_string();
+            return;
+        }
+        match fs::remove_file(pending_config_path(&self.paths.config)) {
+            Ok(()) => {
+                self.reload_after_config_write();
+                self.status = "All staged values reset to config.yaml".to_string();
+                self.app_logs
+                    .push("Staged configuration discarded".to_string());
+            }
+            Err(error) => {
+                self.status = format!("Could not remove {PENDING_CONFIG_FILE}: {error}");
+            }
+        }
+    }
+
     /// Remove one element from a list in config.yaml.
     fn delete_config_list_item(&mut self, path: &[ConfigPathSegment], label: &str) {
         self.start_config_write(ConfigWrite {
@@ -8005,6 +8088,14 @@ fn yaml_value(value: &Value) -> String {
             .trim()
             .to_string(),
     }
+}
+
+/// The value at `path` in a parsed document, or `None` when the key is absent.
+fn value_at<'a>(document: &'a Value, path: &[ConfigPathSegment]) -> Option<&'a Value> {
+    path.iter().try_fold(document, |value, segment| match segment {
+        ConfigPathSegment::Key(key) => value.get(key.as_str()),
+        ConfigPathSegment::Index(index) => value.get(*index),
+    })
 }
 
 fn yaml_edit_value(value: &Value) -> String {

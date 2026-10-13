@@ -602,6 +602,13 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Config => {
             app.open_delete_config_item_confirm()
         }
+        // Staged values only: put one (u), or all (U), back to what config.yaml holds.
+        (KeyModifiers::NONE, KeyCode::Char('u')) if app.page() == Page::Config => {
+            app.reset_selected_config_entry()
+        }
+        (_, KeyCode::Char('U')) if app.page() == Page::Config => {
+            app.reset_all_staged_config()
+        }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Services => {
             app.execute_selected_service()
         }

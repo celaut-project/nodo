@@ -3444,7 +3444,13 @@ fn draw_organelle(
                 // select the wrong one.
                 app.cell.lever_areas.push((index, lever_index, *row));
                 frame.render_widget(
-                    Paragraph::new(lever_line(levers[lever_index], document, selected, row.width)),
+                    Paragraph::new(lever_line(
+                        levers[lever_index],
+                        document,
+                        selected,
+                        app.lever_is_staged(levers[lever_index]),
+                        row.width,
+                    )),
                     *row,
                 );
             }
@@ -3491,6 +3497,10 @@ fn draw_collapsed_organelle(
         .map(|lever| cell::status(lever, document).label(lever))
         .collect::<Vec<_>>()
         .join(" · ");
+    let staged = organelle
+        .levers()
+        .iter()
+        .any(|lever| app.lever_is_staged(lever));
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("  ", Style::default()),
@@ -3499,6 +3509,7 @@ fn draw_collapsed_organelle(
                 Style::default().fg(organelle_colour(organelle)),
             ),
             Span::styled(summary, Style::default().fg(muted())),
+            Span::styled(if staged { " ◆" } else { "" }, Style::default().fg(warn())),
         ])),
         area,
     );
@@ -3509,6 +3520,7 @@ fn lever_line(
     lever: &Lever,
     document: Option<&serde_yaml::Value>,
     selected: bool,
+    staged: bool,
     width: u16,
 ) -> Line<'static> {
     let status = cell::status(lever, document);
@@ -3539,7 +3551,10 @@ fn lever_line(
         ),
         Span::styled(
             format!("{label:<label_width$} "),
-            if selected {
+            if staged {
+                // Changed, and not yet on the running node.
+                Style::default().fg(warn())
+            } else if selected {
                 Style::default().fg(text_colour()).bold()
             } else {
                 Style::default().fg(muted())
@@ -3547,6 +3562,7 @@ fn lever_line(
         ),
         Span::styled(format!("{marker} "), Style::default().fg(value_colour)),
         Span::styled(value, Style::default().fg(value_colour)),
+        Span::styled(if staged { " ◆" } else { "" }, Style::default().fg(warn())),
     ])
 }
 
@@ -4611,11 +4627,18 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let money = app.money.clone();
+    let staged_rows: Vec<bool> = app
+        .prices
+        .items
+        .iter()
+        .map(|entry| app.path_is_staged(&entry.config_label()))
+        .collect();
     let rows: Vec<(Vec<TextCell>, Style)> = app
         .prices
         .items
         .iter()
-        .map(|entry| {
+        .zip(staged_rows)
+        .map(|(entry, staged)| {
             // A per-arch row config.yaml does not set shows the scalar it inherits,
             // not a price of its own -- the difference between "arm64 costs this" and
             // "arm64 has its own rate", which editing it is what creates.
@@ -4625,7 +4648,9 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 money.format_mu(entry.mu)
             };
             let cells = vec![entry.short.clone().into(), entry.mu.to_string().into(), amount.into()];
-            let style = if entry.arch.is_some() {
+            let style = if staged {
+                Style::default().fg(warn())
+            } else if entry.arch.is_some() {
                 Style::default().fg(muted())
             } else {
                 Style::default()
@@ -4953,6 +4978,8 @@ fn draw_energy_section(
         let marker = if selected { "> " } else { "  " };
         let key_style = if selected {
             selected_style()
+        } else if app.path_is_staged(entry.path) {
+            Style::default().fg(warn())
         } else {
             Style::default().fg(text_colour())
         };
@@ -5181,6 +5208,8 @@ fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
         .unwrap_or_default();
     let key_style = if highlighted {
         Style::default().fg(inverse_text()).bg(warn()).bold()
+    } else if entry.running.is_some() {
+        Style::default().fg(warn())
     } else {
         Style::default().fg(text_colour())
     };
@@ -5291,7 +5320,7 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         }
         Page::Energy => "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} / e edit  \u{2022}  q quit",
         Page::Config => {
-            "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  u reset staged  \u{2022}  U reset all  \u{2022}  / filter  \u{2022}  q quit"
         }
         Page::Logs => "q quit",
         Page::Docs => {
@@ -6569,7 +6598,7 @@ mod tests {
                 "workload_admission:\n  POLICY: full\n  ON_UNSATISFIABLE: reject\n",
             )
             .unwrap();
-            let line = lever_line(lever, Some(&document), false, 30);
+            let line = lever_line(lever, Some(&document), false, false, 30);
             let text: String = line
                 .spans
                 .iter()

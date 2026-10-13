@@ -886,6 +886,9 @@ The running node keeps `config.yaml`. In the `nodo tui` Config page, each value 
 differs from `config.yaml` shows `● staged (running: <old value>)`. The page title shows
 the number of staged values.
 
+To put a staged value back to its `config.yaml` value, select it and press `u`. To drop
+all staged values, press `U`.
+
 Each new change goes to `config.pending.yaml` while the file exists. To apply the
 changes, restart the node when you choose. At start, the node does these steps:
 
