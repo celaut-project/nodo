@@ -17,7 +17,7 @@ from pathlib import Path
 # why the per-arch tables below come from `utils.arch_guard` and not from
 # `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
 from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
-from src.utils.privileges import installed_service_user, valid_user_name
+from src.utils.privileges import can_admin_network, installed_service_user, valid_user_name
 from src.virtualizers.ch import vgic as ch_vgic
 from src.virtualizers.microvm import initramfs as ch_initramfs
 from src.virtualizers.microvm import guest as ch_guest
@@ -45,6 +45,10 @@ def _run_quiet(command):
 
 
 def _can_access_kvm_as_user(username: str, supplementary_groups=()) -> bool:
+    if os.geteuid() != 0:
+        # No runuser or su without root. Doctor only gets here as the daemon's own
+        # user, so this process's own access is the answer.
+        return os.access("/dev/kvm", os.R_OK | os.W_OK)
     test_cmd = ["test", "-r", "/dev/kvm", "-a", "-w", "/dev/kvm"]
     runner_variants = [
         ["runuser", "-u", username, "--"] + test_cmd,
@@ -140,6 +144,20 @@ def _doctor_kvm_checks(service_user: str, supplementary_groups=()):
     if _can_access_kvm_as_user(service_user, supplementary_groups):
         print(f"[OK] Service user '{service_user}' can read/write /dev/kvm.", flush=True)
         return
+
+    if os.geteuid() != 0:
+        # The unit gives the daemon groups that this shell does not have.
+        try:
+            kvm_group = grp.getgrgid(os.stat("/dev/kvm").st_gid).gr_name
+        except (KeyError, OSError):
+            kvm_group = ""
+        if kvm_group and kvm_group in supplementary_groups:
+            print(
+                f"[WARN] This shell cannot use /dev/kvm, but the unit gives the daemon "
+                f"the group '{kvm_group}'. Run 'sudo nodo doctor' to test it as the daemon.",
+                flush=True,
+            )
+            return
 
     print(f"[FAIL] Service user '{service_user}' cannot read/write /dev/kvm.", flush=True)
     if not _user_in_kvm_group(service_user) and "kvm" not in supplementary_groups:
@@ -896,6 +914,14 @@ def _doctor_network_checks():
         flush=True
     )
 
+    if not can_admin_network():
+        print(
+            "\n[SKIP] Guest-facing gateway and guest-to-guest checks: they send packets "
+            "through the bridge and need CAP_NET_ADMIN. Run 'sudo nodo doctor' to run them.",
+            flush=True,
+        )
+        return
+
     _doctor_guest_gateway_reachability()
     _doctor_guest_plaintext_gateway_reachability()
     _doctor_guest_to_guest_forwarding()
@@ -1350,11 +1376,11 @@ def _confirm_user_change(service_name: str, current: str, expected: str) -> bool
     return answer.strip().lower() in ("y", "yes", "s", "si", "sí")
 
 
-def doctor_command(main_dir):
-    if os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
-        return
+def _running_as_root() -> bool:
+    return os.geteuid() == 0
 
+
+def doctor_command(main_dir):
     service_name = "nodo.service"
     service_file_path = SERVICE_FILE_PATH
     try:
@@ -1362,6 +1388,23 @@ def doctor_command(main_dir):
     except (OSError, ValueError) as e:
         print(f"Error: {e}", flush=True)
         return
+
+    # An install without sudo runs the daemon as the installing user, so that user
+    # can check the node. Anything that writes the unit stays with root.
+    read_only = not _running_as_root()
+    if read_only:
+        try:
+            own_user = pwd.getpwuid(os.geteuid()).pw_name
+        except KeyError:
+            own_user = ""
+        if not service_user or service_user != own_user:
+            print("This script requires superuser privileges. Please run with sudo.")
+            return
+        print(
+            f"Running as {own_user}, the user of the daemon: the service file is checked "
+            "but not changed. Run 'sudo nodo doctor' to fix it.",
+            flush=True,
+        )
     template_file = os.path.join(main_dir, "bash", _service_template_name(service_user))
 
     if not os.path.exists(template_file):
@@ -1395,7 +1438,13 @@ def doctor_command(main_dir):
         else:
             print(f"[OK] {service_name} is correctly configured.", flush=True)
 
-    if needs_fix and current_service_user != expected_service_user and os.path.exists(service_file_path):
+    if read_only and needs_fix:
+        print(
+            f"[FAIL] {service_name} is not as this install expects. Run 'sudo nodo doctor' to fix it.",
+            flush=True,
+        )
+        needs_fix = False
+    elif needs_fix and current_service_user != expected_service_user and os.path.exists(service_file_path):
         # A change of the user the node runs as is the operator's decision, not a fix.
         if not _confirm_user_change(service_name, current_service_user, expected_service_user):
             needs_fix = False
@@ -1432,7 +1481,9 @@ def doctor_command(main_dir):
     _doctor_setpriv(current_service_user)
     global _RUN_AS_DAEMON, _DAEMON_IDS
     try:
-        _RUN_AS_DAEMON = _run_as_daemon_prefix(current_service_user, supplementary_groups)
+        _RUN_AS_DAEMON = (
+            [] if read_only else _run_as_daemon_prefix(current_service_user, supplementary_groups)
+        )
         if _RUN_AS_DAEMON:
             info = pwd.getpwnam(current_service_user)
             _DAEMON_IDS = (info.pw_uid, info.pw_gid)
