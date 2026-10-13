@@ -3327,6 +3327,8 @@ pub struct App {
     /// Where each part of the profile deck was drawn last, for clicks. `None` when
     /// the picker is not open or the terminal showed the plain list instead.
     pub deck_zones: Option<crate::profile_deck_ui::DeckLayout>,
+    /// The slide between two cards that is running, if any.
+    pub deck_anim: Option<crate::profile_deck_ui::DeckSlide>,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -3530,6 +3532,7 @@ impl Default for App {
             profile_gate: false,
             profile_first_run: false,
             deck_zones: None,
+            deck_anim: None,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
             paths,
@@ -5437,6 +5440,7 @@ impl App {
             .position(|profile| profile.id == report.profile.id)
             .unwrap_or(0);
         self.profile_first_run = first_run;
+        self.deck_anim = None;
         self.input_mode = InputMode::PickProfile;
         if first_run {
             self.input_title = "Choose your profile".to_string();
@@ -5453,13 +5457,43 @@ impl App {
             return;
         }
         let current = self.cell.profile as i32;
-        self.cell.profile = (current + delta).rem_euclid(count as i32) as usize;
+        let target = (current + delta).rem_euclid(count as i32) as usize;
+        self.slide_to(target, delta > 0);
+    }
+
+    /// Change the open card, and start the slide when the deck is on screen.
+    ///
+    /// A move made during a slide starts the next one from where the last one was
+    /// going: the old slide jumps to its end rather than queuing behind it.
+    fn slide_to(&mut self, target: usize, forward: bool) {
+        let from = self.cell.profile;
+        if target == from {
+            return;
+        }
+        if self.deck_zones.is_some() && self.input_mode == InputMode::PickProfile {
+            self.deck_anim = Some(crate::profile_deck_ui::DeckSlide::new(
+                from,
+                forward,
+                Instant::now(),
+            ));
+        }
+        self.cell.profile = target;
+    }
+
+    /// True while a slide runs, which is when the loop must redraw each frame and
+    /// not each tick.
+    pub fn deck_animating(&self) -> bool {
+        self.input_mode == InputMode::PickProfile
+            && self
+                .deck_anim
+                .map(|slide| !slide.done(Instant::now()))
+                .unwrap_or(false)
     }
 
     /// Go to the profile at `index`, if there is one: a dot or a number key.
     pub fn select_profile(&mut self, index: usize) {
         if index < cell::profiles().len() {
-            self.cell.profile = index;
+            self.slide_to(index, index > self.cell.profile);
         }
     }
 
@@ -13496,6 +13530,119 @@ ergo: Cold Wallet: 9cold\n";
             let mut terminal = Terminal::new(TestBackend::new(70, 20)).unwrap();
             terminal.draw(|frame| crate::ui::render(&mut app, frame)).unwrap();
             assert!(app.deck_zones.is_none(), "a small terminal draws the list");
+        }
+
+        #[tokio::test]
+        async fn a_move_starts_a_slide_in_the_direction_of_the_move() {
+            let install = Install::new("slide-direction");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Right).await;
+            let slide = app.deck_anim.expect("a slide");
+            assert_eq!((slide.from, slide.forward), (0, true));
+            assert!(app.deck_animating());
+
+            send(&mut app, KeyCode::Left).await;
+            let slide = app.deck_anim.unwrap();
+            assert_eq!((slide.from, slide.forward), (1, false));
+        }
+
+        /// From the first card, "left" wraps to the last one, and it is still a
+        /// backward move: the arrow the user pressed decides the side.
+        #[tokio::test]
+        async fn a_wrap_slides_the_way_the_key_points() {
+            let install = Install::new("slide-wrap");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Left).await;
+
+            assert_eq!(app.cell.profile, cell::profiles().len() - 1);
+            assert!(!app.deck_anim.unwrap().forward);
+        }
+
+        #[tokio::test]
+        async fn a_jump_slides_towards_the_card_it_goes_to() {
+            let install = Install::new("slide-jump");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('4')).await;
+            assert!(app.deck_anim.unwrap().forward);
+            send(&mut app, KeyCode::Char('1')).await;
+            assert!(!app.deck_anim.unwrap().forward);
+        }
+
+        /// A move during a slide starts the next slide from the card the last one was
+        /// going to: they do not queue.
+        #[tokio::test]
+        async fn a_move_during_a_slide_replaces_it() {
+            let install = Install::new("slide-replace");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Right).await;
+            send(&mut app, KeyCode::Right).await;
+
+            assert_eq!(app.cell.profile, 2);
+            assert_eq!(app.deck_anim.unwrap().from, 1);
+        }
+
+        /// Without a deck on screen (the plain list), or when nothing moved, nothing
+        /// slides, and the loop is not asked for frames.
+        #[tokio::test]
+        async fn nothing_slides_without_a_deck_or_a_move() {
+            let install = Install::new("slide-none");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+            send(&mut app, KeyCode::Right).await;
+            assert!(app.deck_anim.is_none());
+            assert!(!app.deck_animating());
+
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Char('1')).await;
+            assert!(app.deck_anim.is_none(), "already on the first card");
+        }
+
+        #[tokio::test]
+        async fn a_slide_that_is_over_does_not_ask_for_frames() {
+            let install = Install::new("slide-over");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+            let old = Instant::now() - crate::profile_deck_ui::SLIDE * 2;
+            app.deck_anim = Some(crate::profile_deck_ui::DeckSlide::new(0, true, old));
+
+            assert!(!app.deck_animating());
+        }
+
+        #[tokio::test]
+        async fn leaving_the_picker_stops_the_frames() {
+            let install = Install::new("slide-leave");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+            assert!(app.deck_animating());
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert!(!app.deck_animating());
+        }
+
+        #[tokio::test]
+        async fn opening_the_picker_again_starts_with_no_slide() {
+            let install = Install::new("slide-reopen");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+
+            app.show_profile_picker(false);
+
+            assert!(app.deck_anim.is_none());
+        }
+
+        /// The loop wakes each frame only while a slide runs. Read off the source,
+        /// like the gates: dropping the line would make the slide a slideshow with
+        /// no failure anywhere.
+        #[test]
+        fn main_draws_each_frame_while_a_slide_runs() {
+            let main = include_str!("main.rs");
+            assert!(main.contains("deck_animating()"));
+            assert!(main.contains("profile_deck_ui::FRAME"));
         }
 
         /// The gate is applied in `main.rs`, after the KyA gate. Read off the source

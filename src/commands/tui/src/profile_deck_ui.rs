@@ -15,6 +15,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap};
 use ratatui::Frame;
+use std::time::{Duration, Instant};
 
 /// Smallest terminal the deck is drawn on. Below this the TUI shows the plain list,
 /// which stays usable on any size.
@@ -130,6 +131,53 @@ pub fn layout(area: Rect, count: usize, first_run: bool) -> Option<DeckLayout> {
     })
 }
 
+/// How long one slide takes.
+pub const SLIDE: Duration = Duration::from_millis(200);
+
+/// How often the screen is redrawn while a slide runs: about 30 frames a second.
+pub const FRAME: Duration = Duration::from_millis(33);
+
+/// A card sliding out and the next one sliding in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeckSlide {
+    /// Index of the profile that is leaving.
+    pub from: usize,
+    /// True when the new card comes in from the right (the user went forward).
+    pub forward: bool,
+    pub started: Instant,
+}
+
+impl DeckSlide {
+    pub fn new(from: usize, forward: bool, started: Instant) -> Self {
+        Self {
+            from,
+            forward,
+            started,
+        }
+    }
+
+    /// How far the slide has gone, from `0.0` to `1.0`, on a straight clock.
+    pub fn progress(&self, now: Instant) -> f32 {
+        let elapsed = now.saturating_duration_since(self.started);
+        (elapsed.as_secs_f32() / SLIDE.as_secs_f32()).clamp(0.0, 1.0)
+    }
+
+    pub fn done(&self, now: Instant) -> bool {
+        self.progress(now) >= 1.0
+    }
+
+    /// The position of the slide with easing: fast at the start, soft at the end,
+    /// like a menu in a game.
+    pub fn eased(&self, now: Instant) -> f32 {
+        ease_out_cubic(self.progress(now))
+    }
+}
+
+pub fn ease_out_cubic(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
+}
+
 /// What a click on the deck landed on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hit {
@@ -175,6 +223,11 @@ pub fn hit(layout: &DeckLayout, position: Position) -> Option<Hit> {
 
 /// Draw the whole deck for the profile `app.cell.profile`.
 pub fn draw(frame: &mut Frame, app: &App, layout: &DeckLayout) {
+    draw_at(frame, app, layout, Instant::now());
+}
+
+/// `draw`, with the time given, so a test can look at any moment of a slide.
+pub fn draw_at(frame: &mut Frame, app: &App, layout: &DeckLayout, now: Instant) {
     let profiles = cell::profiles();
     let index = app.cell.profile.min(profiles.len().saturating_sub(1));
     let Some(profile) = profiles.get(index) else {
@@ -209,7 +262,11 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &DeckLayout) {
         .title(counter.alignment(Alignment::Right))
         .render(layout.modal, buffer);
 
-    render_card(buffer, layout.card, profile, persona, app);
+    let slide = app.deck_anim.filter(|slide| !slide.done(now));
+    match slide.and_then(|slide| profiles.get(slide.from).map(|from| (slide, from))) {
+        Some((slide, from)) => render_sliding(buffer, layout.card, from, profile, app, slide, now),
+        None => render_card(buffer, layout.card, profile, persona, app),
+    }
     render_arrow(buffer, layout.prev, "◀", accent);
     render_arrow(buffer, layout.next, "▶", accent);
 
@@ -240,6 +297,59 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &DeckLayout) {
         Style::default().fg(WARN).add_modifier(Modifier::BOLD),
     )
     .render(layout.skip, buffer);
+}
+
+/// Two cards in motion: the one leaving and the one arriving, each drawn into a
+/// buffer of its own and copied into the screen with a horizontal offset, cut at the
+/// edge of the card area so that nothing slides over the arrows or the frame.
+fn render_sliding(
+    buffer: &mut Buffer,
+    area: Rect,
+    from: &'static Profile,
+    to: &'static Profile,
+    app: &App,
+    slide: DeckSlide,
+    now: Instant,
+) {
+    let (Some(from_persona), Some(to_persona)) =
+        (profile_deck::persona(from.id), profile_deck::persona(to.id))
+    else {
+        return;
+    };
+    let width = area.width as i32;
+    let travelled = (slide.eased(now) * width as f32).round() as i32;
+    // Going forward the old card leaves to the left and the new one comes from the
+    // right. Going back it is the other way round.
+    let direction = if slide.forward { -1 } else { 1 };
+    let leaving = direction * travelled;
+    let arriving = leaving - direction * width;
+
+    let mut old = Buffer::empty(area);
+    render_card(&mut old, area, from, from_persona, app);
+    let mut new = Buffer::empty(area);
+    render_card(&mut new, area, to, to_persona, app);
+    blit(&old, buffer, area, leaving);
+    blit(&new, buffer, area, arriving);
+}
+
+/// Copy `source` into `target` moved `offset` columns, keeping inside `area`.
+///
+/// A cell that was never drawn (an empty symbol on the terminal's own background) is
+/// not copied, so the scanlines of the deck show through the gaps of a card.
+fn blit(source: &Buffer, target: &mut Buffer, area: Rect, offset: i32) {
+    for y in area.y..area.y + area.height {
+        for x in area.x..area.x + area.width {
+            let cell = source.get(x, y);
+            if cell.symbol() == " " && cell.bg == Color::Reset {
+                continue;
+            }
+            let moved = x as i32 + offset;
+            if moved < area.x as i32 || moved >= (area.x + area.width) as i32 {
+                continue;
+            }
+            *target.get_mut(moved as u16, y) = cell.clone();
+        }
+    }
 }
 
 /// The dark background with a faint line on every other row: the scanlines.
@@ -611,6 +721,144 @@ mod tests {
             hit(&layout, Position::new(layout.modal.x, layout.modal.y)),
             None
         );
+    }
+
+    fn draw_slide(slide: Option<DeckSlide>, index: usize, now: Instant) -> Buffer {
+        let mut app = App::default();
+        app.cell.profile = index;
+        app.profile_first_run = true;
+        app.config_document = None;
+        app.deck_anim = slide;
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+        terminal
+            .draw(|frame| draw_at(frame, &app, &layout, now))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn card_text(buffer: &Buffer) -> String {
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
+        let mut text = String::new();
+        for y in layout.card.y..layout.card.y + layout.card.height {
+            for x in layout.card.x..layout.card.x + layout.card.width {
+                text.push_str(buffer.get(x, y).symbol());
+            }
+            text.push('\n');
+        }
+        text
+    }
+
+    #[test]
+    fn a_slide_runs_from_nothing_to_done_in_the_time_it_has() {
+        let start = Instant::now();
+        let slide = DeckSlide::new(0, true, start);
+        assert_eq!(slide.progress(start), 0.0);
+        assert!((slide.progress(start + SLIDE / 2) - 0.5).abs() < 0.001);
+        assert!(!slide.done(start + SLIDE / 2));
+        assert!(slide.done(start + SLIDE));
+        assert!(slide.done(start + SLIDE * 10), "it stops at the end");
+        // A clock that reads before the start does not go negative.
+        assert_eq!(slide.progress(start - Duration::from_millis(5)), 0.0);
+    }
+
+    #[test]
+    fn the_easing_starts_fast_and_stays_between_zero_and_one() {
+        assert_eq!(ease_out_cubic(0.0), 0.0);
+        assert_eq!(ease_out_cubic(1.0), 1.0);
+        assert!(
+            ease_out_cubic(0.5) > 0.5,
+            "ease-out is ahead of a straight line"
+        );
+        let mut last = 0.0;
+        for step in 0..=100 {
+            let value = ease_out_cubic(step as f32 / 100.0);
+            assert!((0.0..=1.0).contains(&value));
+            assert!(value >= last, "never goes back");
+            last = value;
+        }
+        assert_eq!(ease_out_cubic(-3.0), 0.0);
+        assert_eq!(ease_out_cubic(9.0), 1.0);
+    }
+
+    /// At its first frame a slide looks like the card it leaves, and at its last
+    /// like the card it arrives at: no jump when the animation starts or ends.
+    #[test]
+    fn a_slide_starts_on_the_old_card_and_ends_on_the_new_one() {
+        let start = Instant::now();
+        for forward in [true, false] {
+            let slide = DeckSlide::new(1, forward, start);
+            let first = card_text(&draw_slide(Some(slide), 2, start));
+            let old = card_text(&draw_slide(None, 1, start));
+            assert_eq!(first, old, "forward = {forward}");
+
+            let last = card_text(&draw_slide(Some(slide), 2, start + SLIDE));
+            let new = card_text(&draw_slide(None, 2, start));
+            assert_eq!(last, new, "forward = {forward}");
+        }
+    }
+
+    #[test]
+    fn halfway_both_cards_are_in_view_and_neither_is_whole() {
+        let start = Instant::now();
+        let slide = DeckSlide::new(1, true, start);
+        let middle = card_text(&draw_slide(Some(slide), 2, start + SLIDE / 2));
+        assert_ne!(middle, card_text(&draw_slide(None, 1, start)));
+        assert_ne!(middle, card_text(&draw_slide(None, 2, start)));
+    }
+
+    /// Going forward the new card comes from the right, going back from the left.
+    #[test]
+    fn the_new_card_comes_from_the_side_the_user_is_going_to() {
+        let start = Instant::now();
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
+        // Early in the slide, count the drawn cells in each half of the card area.
+        let drawn = |buffer: &Buffer, left: bool| {
+            let half = layout.card.width / 2;
+            let (from, to) = if left {
+                (layout.card.x, layout.card.x + half)
+            } else {
+                (layout.card.x + half, layout.card.x + layout.card.width)
+            };
+            let mut count = 0;
+            for y in layout.card.y..layout.card.y + layout.card.height {
+                for x in from..to {
+                    if buffer.get(x, y).symbol() != " " {
+                        count += 1;
+                    }
+                }
+            }
+            count
+        };
+        let at = start + SLIDE / 4;
+        let forward = draw_slide(Some(DeckSlide::new(1, true, start)), 2, at);
+        let backward = draw_slide(Some(DeckSlide::new(1, false, start)), 0, at);
+        let rest = draw_slide(None, 1, start);
+        // The resting card has its data on the right; a forward slide has moved it
+        // left and so shows less on the right than at rest, a backward one more of
+        // the left.
+        assert!(drawn(&forward, false) != drawn(&rest, false));
+        assert!(drawn(&backward, true) != drawn(&rest, true));
+    }
+
+    /// The slide never paints outside the card area: the arrows and the frame stay.
+    #[test]
+    fn a_slide_does_not_touch_the_arrows_or_the_frame() {
+        let start = Instant::now();
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
+        let slide = DeckSlide::new(0, true, start);
+        let moving = draw_slide(Some(slide), 1, start + SLIDE / 3);
+        let still = draw_slide(None, 1, start);
+        for zone in [layout.prev, layout.next] {
+            for y in zone.y..zone.y + zone.height {
+                for x in zone.x..zone.x + zone.width {
+                    assert_eq!(moving.get(x, y), still.get(x, y), "({x},{y})");
+                }
+            }
+        }
+        for x in layout.modal.x..layout.modal.x + layout.modal.width {
+            assert_eq!(moving.get(x, layout.modal.y), still.get(x, layout.modal.y));
+        }
     }
 
     #[test]
