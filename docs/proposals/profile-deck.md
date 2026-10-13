@@ -1,6 +1,6 @@
 # Profile deck: first-run profile picker in the TUI
 
-Status: proposal. No code is written yet.
+Status: phase 1 (state and flow) is implemented. Phases 2 to 6 are not.
 
 ## Goal
 

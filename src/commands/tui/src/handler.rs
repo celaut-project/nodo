@@ -235,7 +235,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 (_, KeyCode::Up) => app.move_profile_selection(-1),
                 (_, KeyCode::Down) => app.move_profile_selection(1),
                 (_, KeyCode::Enter) => app.submit_input().await,
-                (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_input(),
+                (_, KeyCode::Esc | KeyCode::Char('q')) => app.skip_profile_picker(),
                 _ => {}
             }
             return Ok(());

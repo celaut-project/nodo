@@ -2285,6 +2285,15 @@ impl Paths {
         self.storage.join(KYA_MARKER)
     }
 
+    /// Where the "profile picker was answered" marker lives: `<storage>/.profilepicked`.
+    ///
+    /// Needed because the active profile is derived from `config.yaml`, never stored
+    /// (see `cell.rs`): nothing else can say whether the first-run picker was shown.
+    /// Same directory and same empty-file convention as the KyA marker.
+    pub fn profile_marker(&self) -> PathBuf {
+        self.storage.join(PROFILE_MARKER)
+    }
+
     /// Where the KyA document itself lives, in the checkout this binary belongs to.
     pub fn kya_document(&self) -> PathBuf {
         self.root.join("docs").join("KyA.md")
@@ -2295,6 +2304,10 @@ impl Paths {
 /// out here rather than derived, because the two sides of this agreement are in
 /// different languages and the only thing tying them together is this string.
 pub const KYA_MARKER: &str = ".acceptedkya";
+
+/// The file that records the first-run profile picker was answered, by choosing a
+/// profile or by skipping it. Presence means "do not show it again".
+pub const PROFILE_MARKER: &str = ".profilepicked";
 
 /// How the operator's money is denominated.
 ///
@@ -3305,6 +3318,12 @@ pub struct App {
     /// Off by default, so building an `App` does not consult the filesystem and a
     /// rendering test does not draw whatever banner its machine deserves.
     pub poll_alerts: bool,
+    /// True when `with_profile_gate` ran: the first-run profile picker is wanted
+    /// after the KyA. Off by default so constructing an `App` consults no files.
+    pub profile_gate: bool,
+    /// True while the picker is open as the first-run step, not from POLICIES. Then
+    /// Esc skips and records the marker instead of just closing.
+    pub profile_first_run: bool,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -3505,6 +3524,8 @@ impl Default for App {
             energy_series: EnergySeries::default(),
             energy_history_hours: ENERGY_HISTORY_HOURS,
             poll_alerts: false,
+            profile_gate: false,
+            profile_first_run: false,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
             paths,
@@ -3667,6 +3688,64 @@ impl App {
                 marker.display()
             ),
         };
+        self.raise_profile_gate();
+    }
+
+    /// Ask for a profile once, right after the KyA (see `docs/proposals/profile-deck.md`).
+    ///
+    /// Separate from construction and taken once in `main.rs`, for the same reason as
+    /// `with_kya_gate`. When the KyA is still unanswered the picker waits: it is
+    /// raised by `accept_kya`, so the order is always KyA first, profile second.
+    pub fn with_profile_gate(mut self) -> Self {
+        self.profile_gate = true;
+        if !self.awaiting_kya() {
+            self.raise_profile_gate();
+        }
+        self
+    }
+
+    /// Open the picker as the first-run step, if it was never answered.
+    fn raise_profile_gate(&mut self) {
+        if self.profile_gate && !self.paths.profile_marker().exists() {
+            self.show_profile_picker(true);
+        }
+    }
+
+    /// Record that the picker was answered. A marker that cannot be written is not
+    /// fatal, as for the KyA: the picker is shown again at the next start.
+    fn record_profile_picked(&mut self) -> bool {
+        if !self.profile_first_run {
+            return true;
+        }
+        self.profile_first_run = false;
+        let marker = self.paths.profile_marker();
+        let recorded = fs::create_dir_all(&self.paths.storage)
+            .and_then(|()| fs::OpenOptions::new().create(true).append(true).open(&marker))
+            .map(|_| ());
+        match recorded {
+            Ok(()) => true,
+            Err(error) => {
+                self.status = format!(
+                    "{} could not be written ({error}); the profile picker will be shown again",
+                    marker.display()
+                );
+                false
+            }
+        }
+    }
+
+    /// Leave the picker without choosing. On first run this is the SKIP button: it
+    /// records the marker and changes nothing.
+    pub fn skip_profile_picker(&mut self) {
+        let first_run = self.profile_first_run;
+        let recorded = self.record_profile_picked();
+        let failure = self.status.clone();
+        self.close_input();
+        if first_run && !recorded {
+            self.status = failure;
+        } else if first_run {
+            self.status = "Profile skipped • change it any time on the POLICIES page".to_string();
+        }
     }
 
     /// Decline the KyA: stop, exactly as the CLI does (`accept_kya.sh` exits 1).
@@ -5343,15 +5422,25 @@ impl App {
             self.status = "Busy: a configuration change is being applied".to_string();
             return;
         }
+        self.show_profile_picker(false);
+    }
 
+    /// Open the picker from POLICIES (`first_run = false`) or as the first-run step.
+    fn show_profile_picker(&mut self, first_run: bool) {
         let report = self.cell_profile();
         self.cell.profile = cell::profiles()
             .iter()
             .position(|profile| profile.id == report.profile.id)
             .unwrap_or(0);
+        self.profile_first_run = first_run;
         self.input_mode = InputMode::PickProfile;
-        self.input_title = "Apply a profile".to_string();
-        self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
+        if first_run {
+            self.input_title = "Choose your profile".to_string();
+            self.status = "↑/↓ choose • Enter see what changes • Esc SKIP".to_string();
+        } else {
+            self.input_title = "Apply a profile".to_string();
+            self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
+        }
     }
 
     pub fn move_profile_selection(&mut self, delta: i32) {
@@ -5371,6 +5460,7 @@ impl App {
         };
         let document = self.config_document.clone();
         let changes = cell::changes(profile.writes, document.as_ref());
+        let _ = self.record_profile_picked();
         self.close_input();
         if changes.is_empty() {
             self.status = format!("Already in {} — nothing to change", profile.label);
@@ -12955,6 +13045,204 @@ ergo: Cold Wallet: 9cold\n";
             let alerts = main.find("with_operator_alerts()").unwrap();
             let gate = main.find("with_kya_gate()").unwrap();
             assert!(alerts < gate, "the alerts should be primed before the gate");
+        }
+    }
+
+    /// The first-run profile picker (docs/proposals/profile-deck.md, phase 1).
+    ///
+    /// Pinned here is the state machine: it comes after the KyA and never before,
+    /// it is not asked twice, and skipping records the marker without writing config.
+    mod profile_gate {
+        use super::super::*;
+        use crate::handler::handle_key_events;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        struct Install(PathBuf);
+
+        impl Install {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir().join(format!("nodo-tui-profile-{name}"));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(path.join("storage")).unwrap();
+                Self(path)
+            }
+
+            /// The same steps `main.rs` takes, against a directory a test owns.
+            fn app(&self) -> App {
+                let mut app = App::default();
+                app.paths.root = self.0.clone();
+                app.paths.storage = self.0.join("storage");
+                app.with_kya_gate().with_profile_gate()
+            }
+
+            fn mark(&self, name: &str) {
+                fs::write(self.0.join("storage").join(name), "").unwrap();
+            }
+        }
+
+        impl Drop for Install {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        async fn send(app: &mut App, code: KeyCode) {
+            let key = KeyEvent {
+                code,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            };
+            handle_key_events(key, app).await.unwrap();
+        }
+
+        #[test]
+        fn the_marker_name_is_fixed() {
+            let install = Install::new("marker");
+            let app = install.app();
+
+            assert_eq!(PROFILE_MARKER, ".profilepicked");
+            assert_eq!(
+                app.paths.profile_marker(),
+                install.0.join("storage").join(".profilepicked")
+            );
+        }
+
+        /// The KyA is the question the node is conditional on, so it covers the
+        /// picker: with both unanswered the gate is the KyA.
+        #[test]
+        fn the_kya_comes_first() {
+            let install = Install::new("order");
+            let app = install.app();
+
+            assert!(app.awaiting_kya());
+            assert_eq!(app.input_mode, InputMode::AcceptKya);
+        }
+
+        #[tokio::test]
+        async fn accepting_the_kya_opens_the_picker() {
+            let install = Install::new("after-kya");
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Char('y')).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(app.profile_first_run);
+        }
+
+        #[test]
+        fn an_accepted_kya_with_no_profile_marker_opens_the_picker_at_start() {
+            let install = Install::new("existing");
+            install.mark(KYA_MARKER);
+
+            let app = install.app();
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(app.profile_first_run);
+        }
+
+        #[test]
+        fn an_answered_picker_is_not_shown_again() {
+            let install = Install::new("answered");
+            install.mark(KYA_MARKER);
+            install.mark(PROFILE_MARKER);
+
+            let app = install.app();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(!app.profile_first_run);
+        }
+
+        /// Without `with_profile_gate`, nothing consults the marker: the KyA tests and
+        /// every rendering test keep their behaviour.
+        #[test]
+        fn the_picker_is_off_unless_main_asks_for_it() {
+            let install = Install::new("off");
+            install.mark(KYA_MARKER);
+            let mut app = App::default();
+            app.paths.root = install.0.clone();
+            app.paths.storage = install.0.join("storage");
+
+            let app = app.with_kya_gate();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
+        #[tokio::test]
+        async fn skipping_records_the_marker_and_writes_nothing() {
+            let install = Install::new("skip");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.running, "skipping must not quit");
+            assert!(app.paths.profile_marker().exists());
+            assert!(app.pending_action.is_none(), "skipping must not queue a write");
+            assert!(!install.app().profile_first_run);
+        }
+
+        #[tokio::test]
+        async fn choosing_records_the_marker_and_shows_the_diff() {
+            let install = Install::new("choose");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            // A profile whose keys differ from an empty config.
+            app.config_document = None;
+
+            send(&mut app, KeyCode::Enter).await;
+
+            assert!(app.paths.profile_marker().exists());
+            assert!(!app.profile_first_run);
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+        }
+
+        /// Esc from POLICIES only closes: a second look at the profiles is not an
+        /// answer to the first-run question and must not write a marker.
+        #[tokio::test]
+        async fn the_policies_picker_does_not_write_the_marker() {
+            let install = Install::new("policies");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            app.input_mode = InputMode::Normal;
+            app.profile_first_run = false;
+            app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Cell).unwrap();
+
+            app.open_profile_picker();
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(!app.profile_first_run);
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(!app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn a_marker_that_cannot_be_written_is_not_fatal() {
+            let install = Install::new("unwritable");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            let blocked = install.0.join("blocked");
+            fs::write(&blocked, "").unwrap();
+            app.paths.storage = blocked.join("storage");
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert!(app.running);
+            assert!(app.status.contains("shown again"), "{}", app.status);
+        }
+
+        /// The gate is applied in `main.rs`, after the KyA gate. Read off the source
+        /// like `main_asks_the_kya_before_it_draws_anything`.
+        #[test]
+        fn main_raises_the_profile_gate_after_the_kya_gate() {
+            let main = include_str!("main.rs");
+            let kya = main.find("with_kya_gate()").unwrap();
+            let profile = main
+                .find("with_profile_gate()")
+                .expect("main.rs must build its App behind the profile gate");
+            assert!(kya < profile, "the KyA gate must come first");
         }
     }
 
