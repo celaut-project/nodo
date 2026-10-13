@@ -22,6 +22,11 @@ page is the same mechanism at a coarser grain: it groups these keys into the dec
 an operator actually makes, and one of its levers or profiles writes several keys as a
 single change. See [the TUI reference](../src/commands/tui/README.md#applying-a-change).
 
+> **No root:** a restart needs root and stops all instances. If the node is serving and
+> you do not run as root, the change goes to `config.pending.yaml` and the node does not
+> restart. The node applies the file at its next start. See
+> [Staged changes](USAGE.md#staged-changes-no-root).
+
 > ⚠️ **`config.yaml` is read once, when the node starts.** Nothing watches the file.
 > A running node keeps serving the configuration it booted with, however many times
 > the file changes underneath it. That is deliberate: everything derived from a config

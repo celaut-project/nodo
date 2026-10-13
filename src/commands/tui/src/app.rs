@@ -786,6 +786,10 @@ enum Applied {
     /// node to disagree with the file, so the change stands and the next start
     /// reads it.
     NotRunning,
+    /// Written to config.pending.yaml and not to config.yaml. Restarting the node
+    /// stops its instances and this process cannot do it, so the node picks the
+    /// file up the next time it starts.
+    Staged,
 }
 
 /// Result of a configuration transaction.
@@ -878,8 +882,11 @@ async fn apply_config_change(
         Ok(required) => required,
         Err(error) => return fail(error),
     };
-    if was_serving && !is_root() {
-        return fail("Configuration unchanged: restarting nodo requires root. Open the TUI with sudo nodo tui.".into());
+    // A staged file takes every later edit, serving or not: the node swaps it in
+    // when it starts, so a write to config.yaml would be overwritten by it.
+    let pending = pending_config_path(&config);
+    if pending.is_file() || (was_serving && !is_root()) {
+        return stage_config_change(&yq, &config, &pending, &write, label).await;
     }
 
     let backup = match backup_config(&config) {
@@ -947,6 +954,55 @@ async fn apply_config_change(
     ConfigTransaction {
         label,
         result: Ok(Applied::Restarted),
+    }
+}
+
+/// Apply the change to config.pending.yaml and leave config.yaml, and the node,
+/// alone. The file is made from config.yaml when it does not exist yet.
+async fn stage_config_change(
+    yq: &Path,
+    config: &Path,
+    pending: &Path,
+    write: &ConfigWrite,
+    label: String,
+) -> ConfigTransaction {
+    let fail = |error: String| ConfigTransaction {
+        label: label.clone(),
+        result: Err(error),
+    };
+    let created = !pending.is_file();
+    if created {
+        if let Err(error) = fs::copy(config, pending) {
+            return fail(format!("Could not create {}: {error}", pending.display()));
+        }
+        keep_config_owner(config, pending);
+    }
+    let mut command = Command::new(yq);
+    command
+        .arg("e")
+        .arg("-i")
+        .arg(&write.expression)
+        .arg(pending);
+    for (variable, value) in &write.values {
+        command.env(variable, value);
+    }
+    let failure = match command.output().await {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(format!(
+            "yq could not update configuration: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Some(format!("Could not run {}: {error}", yq.display())),
+    };
+    if let Some(error) = failure {
+        if created {
+            let _ = fs::remove_file(pending);
+        }
+        return fail(error);
+    }
+    ConfigTransaction {
+        label,
+        result: Ok(Applied::Staged),
     }
 }
 
@@ -1765,6 +1821,10 @@ pub struct ConfigEntry {
     pub edit_value: String,
     pub value_type: String,
     pub secret: bool,
+    /// Set when `config.pending.yaml` holds a different value than the config
+    /// the node runs on: what the running node has now, or `unset`. `None` when
+    /// both agree, or when nothing is staged.
+    pub running: Option<String>,
 }
 
 impl Identifiable for ConfigEntry {
@@ -3098,6 +3158,9 @@ pub struct App {
     /// frame: the page is redrawn on every keystroke and tick, and re-parsing a
     /// 40 KB file that often is work nobody asked for.
     pub config_document: Option<Value>,
+    /// config.yaml itself: what the running node loaded. Differs from
+    /// `config_document` while a change is staged in config.pending.yaml.
+    pub running_document: Option<Value>,
     /// Editable price vector, and how the operator's money is denominated.
     pub prices: StatefulList<PriceEntry>,
     /// Which row of the ENERGY page's fixed catalogue the cursor is on (issue #395).
@@ -3373,7 +3436,8 @@ impl Default for App {
             config_filter: String::new(),
             config_tree_state: TreeState::default(),
             cell: CellState::default(),
-            config_document: read_yaml(&paths.config).ok(),
+            config_document: read_effective_yaml(&paths.config).ok(),
+            running_document: read_yaml(&paths.config).ok(),
             prices: StatefulList::with_items(prices),
             energy_selected: 0,
             energy_row_areas: Vec::new(),
@@ -3539,7 +3603,7 @@ impl App {
         // `None`: the first `nodo info` has not answered yet, so whether the node
         // is running is genuinely not known here. The next tick knows.
         self.alerts
-            .poll(&self.paths.config, self.config_document.as_ref(), None);
+            .poll(&self.paths.config, self.running_document.as_ref(), None);
         self
     }
 
@@ -4628,14 +4692,14 @@ impl App {
             self.status = "Busy: a command is already running".to_string();
             return;
         }
-        self.status = format!("{} • applying and restarting nodo…", write.label);
+        self.status = format!("{} • applying…", write.label);
         self.config_follow_up = write.follow_up.clone();
         // Said once, here, on the way in: this is the single funnel every config
         // write in the interface passes through, so one line covers the ENERGY
         // page's kWh price, a cell profile, a price nudge and a raw All row
         // alike. It was previously learned by watching a value be written and then
         // silently put back.
-        if let Some(hint) = self.config_write_root_hint() {
+        if let Some(hint) = self.config_write_stage_hint() {
             self.app_logs.push(hint.to_string());
         }
         self.config_task = Some(tokio::spawn(apply_config_change(
@@ -4652,51 +4716,37 @@ impl App {
         self.config_task.is_some()
     }
 
-    /// Whether a configuration change made right now would need root to land.
+    /// Whether a configuration change made right now is staged rather than applied.
     ///
     /// **This is not about the file.** `config.yaml` is `chmod 0660` at install time
-    /// (`install.sh`) and `chown`ed to the installing user, `ConfigManager._atomic_write`
-    /// keeps that owner and mode, and `yq -i` writes it through a rename in the same
-    /// directory. The operator who installed the node can write every key in it, and
-    /// the backup beside it, without ever being asked for a password.
+    /// (`install.sh`) and `chown`ed to the installing user, so the operator who
+    /// installed the node can write every key in it. What cannot be done without
+    /// root is the **restart** that would make a serving node read the change:
+    /// `nodo daemon restart` is `systemctl`, and `daemon_command` in
+    /// `src/commands/daemon.py` refuses under a non-zero euid. A restart also stops
+    /// every instance the node runs, so it is not something to do for each edit.
     ///
-    /// What needs root is the **restart**. `apply_config_change` is a transaction:
-    /// write, restart, and put the file back if the node does not come back --
-    /// because the invariant this whole editor exists to hold is that *what the file
-    /// says is what the running node loaded*. The restart is `nodo daemon restart`,
-    /// which is `systemctl stop` + `systemctl start`, and `daemon_command` in
-    /// `src/commands/daemon.py` refuses outright under a non-zero euid. So an
-    /// unprivileged edit to a **serving** node writes the value, fails the restart,
-    /// and gets reverted -- which from the operator's chair looks exactly like "this
-    /// particular setting needs sudo".
-    ///
-    /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
-    /// by the same `write_config_value` as every price, every cell lever and every
-    /// raw All row; there is one writer and one transaction. It is a property of
-    /// **whether something is serving**, which is why the same edit succeeds
-    /// silently on a stopped node and is refused on a running one -- and why it
-    /// looked arbitrary.
+    /// So an unprivileged edit to a **serving** node goes to `config.pending.yaml`.
+    /// The running node keeps its config.yaml, and the next start swaps the staged
+    /// file in. The same edit on a stopped node, or from root, is written to
+    /// config.yaml as before; once a staged file exists, every edit goes into it.
     ///
     /// Read off `node_info.service_status`, which `nodo info` already reports and
     /// this interface already polls, rather than opening a socket per keystroke. It
     /// can be up to one wallet-refresh stale; that is acceptable for a *warning*,
     /// and the transaction itself still asks the live question
-    /// (`serving_on(port_before)`) before deciding whether a restart is owed.
-    pub fn config_write_needs_root(&self) -> bool {
-        !is_root() && self.node_info.service_status == "running"
+    /// (`serving_on(port_before)`) before deciding.
+    pub fn config_write_is_staged(&self) -> bool {
+        pending_config_path(&self.paths.config).is_file()
+            || (!is_root() && self.node_info.service_status == "running")
     }
 
-    /// The one-line warning shown beside a config editor that is about to fail, or
-    /// `None` when the change can land.
-    ///
-    /// Said before the value is typed. The revert stays -- a node running settings
-    /// that are not the settings on disk is worse -- but "your change was undone" is
-    /// a thing to learn from a message, not from watching a number go back.
-    pub fn config_write_root_hint(&self) -> Option<&'static str> {
-        self.config_write_needs_root().then_some(
-            "Applying this needs root: the node is serving, so the change is \
-             followed by `nodo daemon restart`, which is systemctl. Run the TUI \
-             with sudo, or stop the node and edit it here.",
+    /// The one-line note shown beside a config editor whose change will be staged,
+    /// or `None` when the change lands in config.yaml.
+    pub fn config_write_stage_hint(&self) -> Option<&'static str> {
+        self.config_write_is_staged().then_some(
+            "This change is staged in config.pending.yaml, not config.yaml. It applies \
+             when nodo restarts, and a restart stops its instances.",
         )
     }
 
@@ -4742,6 +4792,9 @@ impl App {
                     Applied::NotRunning => {
                         "applied • nodo is not serving, so it loads on next start".to_string()
                     }
+                    Applied::Staged => "staged in config.pending.yaml • restart nodo to apply \
+                         (its instances stop)"
+                        .to_string(),
                 };
                 self.status = format!("{} • {note}", transaction.label);
                 self.app_logs
@@ -5713,7 +5766,8 @@ impl App {
     }
 
     fn reload_after_config_write(&mut self) {
-        self.config_document = read_yaml(&self.paths.config).ok();
+        self.config_document = read_effective_yaml(&self.paths.config).ok();
+        self.running_document = read_yaml(&self.paths.config).ok();
         crate::theme::refresh_from_document(self.config_document.as_ref());
         self.reload_money();
         self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
@@ -6177,7 +6231,8 @@ impl App {
         self.paths = Paths::discover();
         // Picks up an edit made on the All page, or in a shell, so the cell's
         // levers describe the file as it is rather than as it was at start-up.
-        self.config_document = read_yaml(&self.paths.config).ok();
+        self.config_document = read_effective_yaml(&self.paths.config).ok();
+        self.running_document = read_yaml(&self.paths.config).ok();
 
         let services = get_services(&self.paths).unwrap_or_default();
         let service_names = services
@@ -6212,7 +6267,7 @@ impl App {
             // answers, which is what the third wording is for.
             let serving = self.serving_for_alerts();
             self.alerts
-                .poll(&self.paths.config, self.config_document.as_ref(), serving);
+                .poll(&self.paths.config, self.running_document.as_ref(), serving);
         }
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
@@ -7808,11 +7863,58 @@ fn read_service_tag(path: &Path) -> Option<String> {
     metadata.hashtag?.tag.first().cloned()
 }
 
+/// The file a configuration change is staged in while the node cannot be restarted.
+///
+/// Beside config.yaml. The node swaps it in when it starts (`apply_pending_config`
+/// in src/commands/config_edit.py), keeps the old config.yaml as a timestamped
+/// backup, and deletes this file.
+pub(crate) const PENDING_CONFIG_FILE: &str = "config.pending.yaml";
+
+pub(crate) fn pending_config_path(config: &Path) -> PathBuf {
+    config.with_file_name(PENDING_CONFIG_FILE)
+}
+
+/// The configuration the operator has asked for: the staged file when there is one,
+/// otherwise config.yaml. Every editor reads this, so a second edit builds on the
+/// first instead of on the file the node still runs on.
+fn read_effective_yaml(config: &Path) -> Result<Value, String> {
+    let pending = pending_config_path(config);
+    if pending.is_file() {
+        read_yaml(&pending)
+    } else {
+        read_yaml(config)
+    }
+}
+
+/// Every entry of the effective configuration, each marked when it differs from
+/// the config the node runs on.
 pub(crate) fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
-    let document = read_yaml(path)?;
+    let document = read_effective_yaml(path)?;
     let mut entries = Vec::new();
     flatten_yaml(&document, &mut Vec::new(), &mut entries);
+    if pending_config_path(path).is_file() {
+        if let Ok(running) = read_yaml(path) {
+            let mut before = Vec::new();
+            flatten_yaml(&running, &mut Vec::new(), &mut before);
+            let before: HashMap<String, String> = before
+                .into_iter()
+                .map(|entry| (entry.path, entry.value))
+                .collect();
+            for entry in &mut entries {
+                match before.get(&entry.path) {
+                    Some(value) if *value == entry.value => {}
+                    Some(value) => entry.running = Some(value.clone()),
+                    None => entry.running = Some("unset".to_string()),
+                }
+            }
+        }
+    }
     Ok(entries)
+}
+
+/// How many values of the staged configuration differ from the running one.
+pub fn pending_change_count(entries: &[ConfigEntry]) -> usize {
+    entries.iter().filter(|entry| entry.running.is_some()).count()
 }
 
 fn flatten_yaml(value: &Value, path: &mut Vec<ConfigPathSegment>, entries: &mut Vec<ConfigEntry>) {
@@ -7844,6 +7946,7 @@ fn flatten_yaml(value: &Value, path: &mut Vec<ConfigPathSegment>, entries: &mut 
                 value: yaml_value(value),
                 edit_value: yaml_edit_value(value),
                 value_type: yaml_type(value).to_string(),
+                running: None,
             });
         }
     }
@@ -9391,7 +9494,11 @@ mod tests {
     /// step, and the file goes back if the node does not come back. These pin the
     /// pieces of that transaction that can be exercised without systemd.
     mod config_transactions {
-        use super::super::{chained_write, revert, serving_on};
+        use super::super::{
+            apply_config_change, chained_write, get_config_entries, pending_change_count,
+            pending_config_path, revert, serving_on, Applied, ConfigFollowUp, ConfigWrite,
+        };
+        use serde_yaml::Value;
         use std::fs;
         use std::path::PathBuf;
 
@@ -9483,6 +9590,61 @@ mod tests {
             let message = revert(&missing, &config, "Set port NOT applied");
             assert!(message.contains("COULD NOT RESTORE"), "{message}");
             assert!(message.contains("config-20260101000000-0417.yaml"), "{message}");
+        }
+
+        /// Once a staged file exists every edit goes into it and config.yaml, the
+        /// file the running node loaded, is not touched.
+        #[tokio::test]
+        async fn an_edit_with_a_staged_file_changes_only_the_staged_file() {
+            let Some(yq) = which_yq() else {
+                eprintln!("yq not on PATH; skipping the staged write");
+                return;
+            };
+            let dir = TempDir::new("staged");
+            let config = dir.file("config.yaml");
+            let pending = pending_config_path(&config);
+            let original = "energy:\n  PRICE_PER_KWH: 0.1\nui:\n  DISPLAY_UNIT: erg\n";
+            fs::write(&config, original).unwrap();
+
+            let write = ConfigWrite {
+                label: "kWh price".to_string(),
+                expression: "energy.PRICE_PER_KWH = env(NODO_TUI_V0)".to_string(),
+                values: vec![("NODO_TUI_V0".to_string(), "0.3".to_string())],
+                follow_up: ConfigFollowUp::None,
+            };
+            // First edit creates the staged file from config.yaml.
+            let first = apply_config_change(yq.clone(), config.clone(), dir.file("cache"), write.clone()).await;
+            // A second edit finds it, and builds on it.
+            let write2 = ConfigWrite {
+                expression: "ui.DISPLAY_UNIT = env(NODO_TUI_V0)".to_string(),
+                values: vec![("NODO_TUI_V0".to_string(), "usd".to_string())],
+                ..write
+            };
+            let second = apply_config_change(yq, config.clone(), dir.file("cache"), write2).await;
+
+            assert!(matches!(first.result, Ok(Applied::Staged)), "{:?}", first.result);
+            assert!(matches!(second.result, Ok(Applied::Staged)), "{:?}", second.result);
+            assert_eq!(fs::read_to_string(&config).unwrap(), original);
+            let staged: Value = serde_yaml::from_str(&fs::read_to_string(&pending).unwrap()).unwrap();
+            assert_eq!(staged["energy"]["PRICE_PER_KWH"].as_f64(), Some(0.3));
+            assert_eq!(staged["ui"]["DISPLAY_UNIT"].as_str(), Some("usd"));
+        }
+
+        /// The tree marks the values that differ from the running config, and only those.
+        #[test]
+        fn entries_that_differ_from_the_running_config_are_marked() {
+            let dir = TempDir::new("marks");
+            let config = dir.file("config.yaml");
+            fs::write(&config, "a: 1\nb: 2\n").unwrap();
+            assert_eq!(pending_change_count(&get_config_entries(&config).unwrap()), 0);
+
+            fs::write(pending_config_path(&config), "a: 1\nb: 3\nc: 4\n").unwrap();
+            let entries = get_config_entries(&config).unwrap();
+            let mark = |path: &str| entries.iter().find(|e| e.path == path).unwrap().running.clone();
+            assert_eq!(mark("a"), None);
+            assert_eq!(mark("b"), Some("2".to_string()));
+            assert_eq!(mark("c"), Some("unset".to_string()));
+            assert_eq!(pending_change_count(&entries), 2);
         }
 
         /// `auto` is what an unassigned port reads as, and it is not a port: treating
@@ -10676,6 +10838,7 @@ ergo: Cold Wallet: 9cold\n";
             edit_value: edit_value.to_string(),
             value_type: value_type.to_string(),
             secret,
+            running: None,
         }
     }
 

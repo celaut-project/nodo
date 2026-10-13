@@ -11,6 +11,21 @@ from src.utils.network import get_local_ip, resolve_public_host, resolve_public_
 
 env_manager = ConfigManager(log=log.LOGGER)
 
+# A change staged while the node could not be restarted onto it (config.pending.yaml)
+# is swapped in as the node starts, before anything below reads the configuration.
+if len(sys.argv) > 1 and sys.argv[1] == "serve":
+    try:
+        from src.commands.config_edit import apply_pending_config
+
+        _pending_note = apply_pending_config(env_manager)
+    except Exception as _pending_error:
+        # The node must start on the config.yaml it has. A staged file that cannot
+        # be swapped in (a permission, a full disk) stays where it is.
+        _pending_note = (f"Staged configuration not applied: {_pending_error}. "
+                         "The node starts on config.yaml.")
+    if _pending_note:
+        print(_pending_note, flush=True)
+
 MEMORY_LOGS = env_manager.get("MEMORY_LOGS")
 REGISTRY = env_manager.get("REGISTRY")
 CACHE = env_manager.get("CACHE")

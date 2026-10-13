@@ -206,7 +206,7 @@ class TheRestartIsTheObstacle(unittest.TestCase):
 
 
 class TheTuiNamesTheRealCause(unittest.TestCase):
-    """The warning shown in the editor points at the restart, not at the key.
+    """The note shown in the editor says the change is staged, not that the key needs root.
 
     Read off the Rust source: there is no interpreter to run it from here, and the
     thing being pinned is that the explanation has not drifted back to "this setting
@@ -222,15 +222,16 @@ class TheTuiNamesTheRealCause(unittest.TestCase):
     def test_the_hint_is_conditioned_on_the_node_serving(self):
         source = self._app_rs()
 
-        hint = source.split("fn config_write_needs_root", 1)[1].split("}", 1)[0]
+        hint = source.split("fn config_write_is_staged", 1)[1].split("}", 1)[0]
         self.assertIn("service_status", hint)
         self.assertIn("running", hint)
 
-    def test_the_hint_names_the_restart(self):
+    def test_the_hint_names_the_staged_file_and_the_restart(self):
         source = self._app_rs()
 
-        hint = source.split("fn config_write_root_hint", 1)[1].split("\n    }", 1)[0]
-        self.assertIn("daemon restart", hint)
+        hint = source.split("fn config_write_stage_hint", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("config.pending.yaml", hint)
+        self.assertIn("restarts", hint)
         # And not a claim about this particular key, which is the thing that was
         # wrong with the operator's original theory and would be wrong here too.
         self.assertNotIn("PRICE_PER_KWH", hint)

@@ -176,15 +176,35 @@ class TransactionTests(unittest.TestCase):
         ok, _ = self._run(["remove", "network.DELEGATE_EXECUTION"])
         self.assertFalse(ok)
 
-    def test_a_serving_node_needs_root(self):
+    def test_an_unprivileged_change_to_a_serving_node_is_staged(self):
+        pending = os.path.join(self.directory.name, ce.PENDING_CONFIG_FILE)
         with patch.object(ce, "_serving_on", return_value=True), \
-                patch.object(ce.os, "geteuid", return_value=1000):
+                patch.object(ce.os, "geteuid", return_value=1000), \
+                patch.object(ce, "_restart") as restart:
             ok, out = self._run(["set", "network.DELEGATE_EXECUTION=true", "--json"])
-        self.assertFalse(ok)
-        self.assertIn("root", json.loads(out)["error"])
+            # A second change builds on the staged file.
+            ok2, _ = self._run(["set", "network.GATEWAY_PORT=5", "--json"])
+        self.assertTrue(ok, out)
+        self.assertTrue(ok2)
+        self.assertEqual(json.loads(out)["outcome"], "staged")
+        restart.assert_not_called()
         with open(self.path) as f:
             self.assertEqual(f.read(), SCRATCH)
         self.assertEqual(self._backups(), [])
+        with open(pending) as f:
+            staged = yaml.safe_load(f)
+        self.assertIs(staged["network"]["DELEGATE_EXECUTION"], True)
+        self.assertEqual(staged["network"]["GATEWAY_PORT"], 5)
+
+    def test_once_a_change_is_staged_every_change_is_staged(self):
+        pending = os.path.join(self.directory.name, ce.PENDING_CONFIG_FILE)
+        shutil.copy(self.path, pending)
+        with patch.object(ce.os, "geteuid", return_value=0):
+            ok, out = self._run(["set", "network.DELEGATE_EXECUTION=true", "--json"])
+        self.assertTrue(ok, out)
+        self.assertEqual(json.loads(out)["outcome"], "staged")
+        with open(self.path) as f:
+            self.assertEqual(f.read(), SCRATCH)
 
     def test_a_restart_that_does_not_come_back_is_rolled_back(self):
         with patch.object(ce, "_serving_on", return_value=True), \
@@ -223,6 +243,85 @@ class TransactionTests(unittest.TestCase):
         ok, _ = self._run(["set", "network.DELEGATE_EXECUTION=[unclosed"])
         self.assertFalse(ok)
         self.assertEqual(self._backups(), [])
+
+
+class _Manager:
+    """What ``apply_pending_config`` needs of a ConfigManager."""
+
+    def __init__(self, path, fail=False):
+        self.config_path = path
+        self.fail = fail
+        self.loads = 0
+
+    def load_config(self, force_reload=False):
+        self.loads += 1
+        if self.fail and self.loads == 1:
+            raise ValueError("bad value")
+
+
+class ApplyPendingConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = os.path.join(self.directory.name, "config.yaml")
+        self.pending = os.path.join(self.directory.name, ce.PENDING_CONFIG_FILE)
+        with open(self.path, "w") as f:
+            f.write("network:\n  GATEWAY_PORT: 0\nx: 1\n")
+        patcher = patch.object(ce, "_serving_on", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _stage(self, text):
+        with open(self.pending, "w") as f:
+            f.write(text)
+
+    def _names(self):
+        return sorted(os.listdir(self.directory.name))
+
+    def test_nothing_staged_does_nothing(self):
+        manager = _Manager(self.path)
+        self.assertIsNone(ce.apply_pending_config(manager))
+        self.assertEqual(manager.loads, 0)
+
+    def test_the_staged_file_replaces_config_and_the_old_one_is_kept_as_a_backup(self):
+        self._stage("network:\n  GATEWAY_PORT: 0\nx: 2\n")
+        manager = _Manager(self.path)
+        note = ce.apply_pending_config(manager)
+        self.assertIn("applied", note)
+        self.assertEqual(manager.loads, 1)
+        with open(self.path) as f:
+            self.assertEqual(yaml.safe_load(f)["x"], 2)
+        self.assertFalse(os.path.exists(self.pending))
+        backups = [n for n in self._names() if n.startswith("config-")]
+        self.assertEqual(len(backups), 1)
+        with open(os.path.join(self.directory.name, backups[0])) as f:
+            self.assertEqual(yaml.safe_load(f)["x"], 1)
+
+    def test_a_serving_node_keeps_its_config_and_the_staged_file_waits(self):
+        self._stage("x: 2\n")
+        with patch.object(ce, "_serving_on", return_value=True):
+            self.assertIsNone(ce.apply_pending_config(_Manager(self.path)))
+        self.assertTrue(os.path.exists(self.pending))
+
+    def test_a_staged_file_that_is_not_yaml_is_set_aside(self):
+        self._stage("x: [unclosed\n")
+        note = ce.apply_pending_config(_Manager(self.path))
+        self.assertIn("not applied", note)
+        self.assertIn("config.pending.rejected.yaml", self._names())
+        self.assertFalse(os.path.exists(self.pending))
+        with open(self.path) as f:
+            self.assertEqual(yaml.safe_load(f)["x"], 1)
+
+    def test_a_staged_file_the_node_cannot_load_is_rolled_back(self):
+        self._stage("network:\n  GATEWAY_PORT: 0\nx: 2\n")
+        manager = _Manager(self.path, fail=True)
+        note = ce.apply_pending_config(manager)
+        self.assertIn("not applied", note)
+        with open(self.path) as f:
+            self.assertEqual(yaml.safe_load(f)["x"], 1)
+        with open(os.path.join(self.directory.name, "config.pending.rejected.yaml")) as f:
+            self.assertEqual(yaml.safe_load(f)["x"], 2)
+        self.assertEqual([n for n in self._names() if n.startswith("config-")], [])
 
 
 if __name__ == "__main__":

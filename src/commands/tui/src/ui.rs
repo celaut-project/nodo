@@ -5043,9 +5043,15 @@ fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
+    let staged = crate::app::pending_change_count(&app.config_all);
+    let staged_note = if staged > 0 {
+        format!(" • {staged} staged, apply on restart")
+    } else {
+        String::new()
+    };
     let title = if app.config_filter.is_empty() {
         format!(
-            " CONFIGURATION • {} values • all sections ",
+            " CONFIGURATION • {} values • all sections{staged_note} ",
             app.config_all.len()
         )
     } else {
@@ -5058,7 +5064,7 @@ fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
             })
             .count();
         format!(
-            " CONFIGURATION • {} values • filter \"{}\" • {} match ",
+            " CONFIGURATION • {} values • filter \"{}\" • {} match{staged_note} ",
             app.config_all.len(),
             app.config_filter,
             matches
@@ -5177,7 +5183,7 @@ fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
     } else {
         Style::default().fg(text_colour())
     };
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(key, key_style),
         Span::styled(": ", Style::default().fg(muted())),
         Span::styled(entry.display_value(), Style::default().fg(accent())),
@@ -5185,7 +5191,17 @@ fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
             format!("  [{}]", entry.value_type),
             Style::default().fg(muted()),
         ),
-    ])
+    ];
+    if let Some(running) = &entry.running {
+        // The running node still has the old value; the staged one shown above
+        // takes effect at the next start. A secret never shows its old value.
+        let was = if entry.secret { "changed".to_string() } else { format!("now {running}") };
+        spans.push(Span::styled(
+            format!("  ● staged (running: {was})"),
+            Style::default().fg(warn()).bold(),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// A section branch: its name plus the number of direct children, highlighted
@@ -5522,7 +5538,7 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
     // therefore root -- so the same edit lands quietly on a stopped node and is
     // undone on a running one. That asymmetry is what made it look as though one
     // setting had been singled out.
-    let root_hint = app.config_write_root_hint().filter(|_| {
+    let root_hint = app.config_write_stage_hint().filter(|_| {
         matches!(
             app.input_mode,
             InputMode::EditConfig | InputMode::AddConfigItem
@@ -8950,6 +8966,7 @@ mod config_tree {
             edit_value: value.to_string(),
             value_type: value_type.to_string(),
             secret,
+            running: None,
         }
     }
 
@@ -9367,14 +9384,14 @@ mod alert_banner {
 }
 
 
-/// Why a config edit may not stick, said before the value is typed.
+/// Why a config edit does not apply at once, said before the value is typed.
 ///
-/// Never the file: config.yaml is world-writable by install.sh. What needs root is
-/// the *restart* the transaction owes a serving node (`nodo daemon restart` ->
-/// systemctl, refused under a non-zero euid), so a key the node re-reads from disk
-/// owes none and shows no hint.
+/// Never the file: config.yaml is writable by the installing user. A serving node
+/// cannot be restarted without root, and a restart stops its instances, so an
+/// unprivileged edit is staged in config.pending.yaml. A stopped node owes no
+/// restart and the edit goes to config.yaml.
 #[cfg(test)]
-mod config_write_root_hint {
+mod config_write_stage_hint {
     use super::render;
     use crate::app::{App, EditKind, InputMode, Page};
     use ratatui::backend::TestBackend;
@@ -9409,40 +9426,30 @@ mod config_write_root_hint {
             .join("\n")
     }
 
-    /// The whole point of the fix: the operator is told *before* typing, and told
-    /// the real reason, instead of watching a value be written and put back.
     #[test]
-    fn an_unprivileged_edit_against_a_serving_node_is_warned_about_up_front() {
+    fn an_unprivileged_edit_against_a_serving_node_is_staged_and_says_so() {
         let mut app = app_editing_the_kwh_price("running");
-        // The test process is not root on CI or on a developer's machine; if it
-        // somehow is, the hint is correctly absent and there is nothing to assert.
-        if !app.config_write_needs_root() {
+        // If the test process is root, nothing is staged and there is nothing to assert.
+        if !app.config_write_is_staged() {
             return;
         }
 
         let screen = screen(&mut app);
 
-        assert!(screen.contains("needs root"), "{screen}");
-        // And it names the actual cause, because "needs root" on its own is what
-        // sent the operator looking at the key and at the file permissions.
-        assert!(screen.contains("daemon restart"), "{screen}");
+        assert!(screen.contains("config.pending.yaml"), "{screen}");
+        assert!(screen.contains("restarts"), "{screen}");
     }
 
-    /// A stopped node owes no restart, so the same edit is unprivileged -- and this
-    /// is exactly the asymmetry that made the requirement look arbitrary.
     #[test]
-    fn the_same_edit_against_a_stopped_node_needs_nothing() {
+    fn the_same_edit_against_a_stopped_node_is_not_staged() {
         let mut app = app_editing_the_kwh_price("not running");
 
-        assert!(!app.config_write_needs_root());
-        assert!(!screen(&mut app).contains("needs root"));
+        assert!(!app.config_write_is_staged());
+        assert!(!screen(&mut app).contains("config.pending.yaml"));
     }
 
-    /// It is a property of the transaction, not of the key: the kWh price, a peer
-    /// price and a raw All row all answer the same way, because there is one
-    /// writer behind all three.
     #[test]
-    fn the_requirement_does_not_depend_on_which_key_is_being_edited() {
+    fn staging_does_not_depend_on_which_key_is_being_edited() {
         let mut energy = app_editing_the_kwh_price("running");
         let mut config = app_editing_the_kwh_price("running");
         config.tabs.index = Page::ALL
@@ -9451,26 +9458,20 @@ mod config_write_root_hint {
             .unwrap();
         config.input_title = "Edit main.STORAGE".to_string();
 
+        assert_eq!(energy.config_write_is_staged(), config.config_write_is_staged());
         assert_eq!(
-            energy.config_write_needs_root(),
-            config.config_write_needs_root()
-        );
-        assert_eq!(
-            screen(&mut energy).contains("needs root"),
-            screen(&mut config).contains("needs root")
+            screen(&mut energy).contains("config.pending.yaml"),
+            screen(&mut config).contains("config.pending.yaml")
         );
     }
 
-    /// The hint belongs to config editing. The Connect box and the All filter go
-    /// nowhere near `apply_config_change`, and a root warning on them would be a
-    /// claim that is simply false.
     #[test]
     fn the_hint_is_not_shown_on_modals_that_write_nothing() {
         let mut app = app_editing_the_kwh_price("running");
         app.input_mode = InputMode::FilterConfig;
         app.input_title = "Filter".to_string();
 
-        assert!(!screen(&mut app).contains("needs root"));
+        assert!(!screen(&mut app).contains("config.pending.yaml"));
     }
 }
 

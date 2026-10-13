@@ -857,6 +857,27 @@ once it sees the file changed, which is why those need root on a running node. I
 restart cannot happen, the command says so and tells you to run it — the write is on
 disk but not live until you do.
 
+#### Staged changes (no root)
+
+A restart stops all instances of the node, and a restart needs root. If the node is
+serving and you do not run as root, `nodo tui` and `nodo config set` do not restart the
+node. They write the change to `config.pending.yaml`, beside `config.yaml`.
+
+The running node keeps `config.yaml`. In the `nodo tui` Config page, each value that
+differs from `config.yaml` shows `● staged (running: <old value>)`. The page title shows
+the number of staged values.
+
+Each new change goes to `config.pending.yaml` while the file exists. To apply the
+changes, restart the node when you choose. At start, the node does these steps:
+
+1. It saves the old `config.yaml` as `config-<UTC stamp>-<nnnn>.yaml`.
+2. It replaces `config.yaml` with `config.pending.yaml`.
+3. It removes `config.pending.yaml`.
+
+If the node cannot load the staged file, it puts the old `config.yaml` back. It keeps
+the staged file as `config.pending.rejected.yaml`. To drop a staged change, delete
+`config.pending.yaml`.
+
 If you edit `config.yaml` by hand, restart the node yourself:
 
 ```bash
@@ -1291,8 +1312,9 @@ running on this host.
   file always describes the node that is running, and no change is left waiting for a
   restart somebody has to remember. This is why the TUI is the supported editor: the node
   reads `config.yaml` once at start and never again, so a change that is not restarted
-  into is a change the node never sees. The restart drives `systemctl`, so editing
-  configuration on a serving node needs root.
+  into is a change the node never sees. The restart drives `systemctl`, so it needs root.
+  Without root, the TUI stages the change in `config.pending.yaml` and the node applies it
+  at its next start (see [Staged changes](#staged-changes-no-root)).
 - On Docs (`6`), the `docs/` folder is indexed on the left and the selected page rendered
   on the right: `/` searches it, `l` and Enter follow its links to other pages, and
   Backspace comes back.
