@@ -250,8 +250,8 @@ restart that carries — a heavy price for looking at a colour.
 
 | Theme | For |
 |---|---|
-| `ubuntu` (default) | The Ubuntu terminal palette: aubergine `#300A24`, orange `#E95420`, and the standard Ubuntu ANSI set. `nodo` is installed by a bash script onto a Linux server, and the terminal that script ran in is overwhelmingly GNOME Terminal on Ubuntu — so the console looks like part of the machine it is administering rather than like an application dropped on top of it. `default` is an accepted spelling. |
-| `dark` | The palette this console had before themes existed (cyan accent). |
+| `dark` (default) | The palette this console had before themes existed: cyan accent on a black ground, in the colours the terminal names itself. `default` is an accepted spelling. |
+| `ubuntu` | The Ubuntu terminal palette: aubergine `#300A24`, orange `#E95420`, and the standard Ubuntu ANSI set. `nodo` is installed by a bash script onto a Linux server, and the terminal that script ran in is overwhelmingly GNOME Terminal on Ubuntu — so this theme makes the console look like part of the machine it is administering rather than like an application dropped on top of it. |
 | `light` | A pale terminal, where `DarkGray` on white is unreadable and white text is simply not there. The roles keep their hues — red still has to mean trouble — and only the two chosen against a dark background change. |
 | `mono` | No hue at all. For a genuinely monochrome terminal, for an operator who cannot distinguish these hues, and for a screenshot that has to survive being printed. It is a constraint rather than an aesthetic: anything it cannot express is something the interface was saying with colour *alone*, which it should not be doing. |
 

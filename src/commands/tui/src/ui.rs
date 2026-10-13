@@ -9728,10 +9728,23 @@ mod themes {
         }
     }
 
-    /// The default really is the Ubuntu palette, on screen and not merely in a
-    /// struct: the orange accent and the white text are what the issue asks for.
+    /// The default really is dark, on screen and not merely in a struct: the cyan
+    /// accent on a black ground, and none of the Ubuntu palette.
     #[test]
-    fn the_default_theme_paints_the_ubuntu_palette() {
+    fn the_default_theme_paints_the_dark_palette() {
+        let colours = colours_drawn(Theme::default(), Page::Overview);
+
+        assert!(colours.contains(&Color::Cyan), "no cyan in {colours:?}");
+        assert!(
+            !colours.contains(&Color::Rgb(0xE9, 0x54, 0x20)),
+            "Ubuntu orange in {colours:?}"
+        );
+    }
+
+    /// The Ubuntu palette is still there to pick: the orange accent and the white
+    /// text, on screen.
+    #[test]
+    fn the_ubuntu_theme_paints_the_ubuntu_palette() {
         let colours = colours_drawn(UBUNTU, Page::Overview);
 
         assert!(
