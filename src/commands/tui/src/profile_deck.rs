@@ -478,17 +478,32 @@ fn pixel(character: char, palette: &Palette) -> Option<Color> {
 /// half blocks `▀` and `▄`; a cell with a pixel above and one below uses the
 /// foreground for the top and the background for the bottom.
 pub fn sprite_lines(persona: &Persona) -> Vec<Line<'static>> {
-    let rows: Vec<Vec<char>> = persona
+    sprite_lines_scaled(persona, 1)
+}
+
+/// The sprite with each pixel drawn as a `scale` x `scale` square of pixels, so a
+/// large terminal gets a large character. `scale` 1 is `sprite_lines`.
+pub fn sprite_lines_scaled(persona: &Persona, scale: usize) -> Vec<Line<'static>> {
+    let scale = scale.max(1);
+    let grid: Vec<Vec<Option<Color>>> = persona
         .sprite
         .iter()
-        .map(|row| row.chars().collect())
+        .flat_map(|row| {
+            let pixels: Vec<Option<Color>> = row
+                .chars()
+                .flat_map(|character| {
+                    std::iter::repeat(pixel(character, &persona.palette)).take(scale)
+                })
+                .collect();
+            std::iter::repeat(pixels).take(scale)
+        })
         .collect();
-    rows.chunks(2)
+    grid.chunks(2)
         .map(|pair| {
-            let spans: Vec<Span<'static>> = (0..SPRITE_WIDTH)
+            let spans: Vec<Span<'static>> = (0..SPRITE_WIDTH * scale)
                 .map(|x| {
-                    let top = pixel(pair[0][x], &persona.palette);
-                    let bottom = pair.get(1).and_then(|row| pixel(row[x], &persona.palette));
+                    let top = pair[0][x];
+                    let bottom = pair.get(1).and_then(|row| row[x]);
                     match (top, bottom) {
                         (Some(top), Some(bottom)) if top == bottom => {
                             Span::styled("█", Style::default().fg(top))

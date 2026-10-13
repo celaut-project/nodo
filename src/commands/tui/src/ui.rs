@@ -179,7 +179,17 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::AcceptKya | InputMode::Details | InputMode::ConfirmWrites => {
             draw_details_popup(frame, app)
         }
-        InputMode::PickProfile => draw_profile_popup(frame, app),
+        // The deck on a terminal big enough for it, the plain list otherwise.
+        InputMode::PickProfile => {
+            match crate::profile_deck_ui::layout(
+                frame.size(),
+                cell::profiles().len(),
+                app.profile_first_run,
+            ) {
+                Some(layout) => crate::profile_deck_ui::draw(frame, app, &layout),
+                None => draw_profile_popup(frame, app),
+            }
+        }
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
         InputMode::EditAssets => draw_assets_popup(frame, app),
         InputMode::AddAsset => draw_asset_form_popup(frame, app),

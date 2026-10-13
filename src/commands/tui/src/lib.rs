@@ -51,6 +51,9 @@ pub mod docs;
 /// each profile (docs/proposals/profile-deck.md).
 pub mod profile_deck;
 
+/// Drawing the profile deck and the geometry of its click zones.
+pub mod profile_deck_ui;
+
 /// Application.
 pub mod app;
 
