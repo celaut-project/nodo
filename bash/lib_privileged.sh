@@ -274,6 +274,14 @@ priv_print() {
     done < "$NODO_PRIV_FILE"
 }
 
+priv_print_plain() {
+    # The pending commands, one per line, with no numbers: to copy and run by hand.
+    local description command
+    while IFS=$'\t' read -r description command; do
+        printf '  %s\n' "$command"
+    done < "$NODO_PRIV_FILE"
+}
+
 priv_save_script() {
     # priv_save_script <path>: the same commands as a script, to run or read later.
     local path="$1" description command
@@ -310,11 +318,16 @@ priv_offer() {
     if [ "$interactive" != true ] || ! { : < /dev/tty; } 2>/dev/null; then
         return 1
     fi
-    printf '\nRun them now with sudo? [y/N] '
+    printf '\nThe installer runs only the commands above, in this order, with sudo.\n'
+    printf 'Run them now? [y/N] '
     read -r answer < /dev/tty || answer=""
     case "$answer" in
         y|Y|yes|YES|s|S|si|SI|sí|SÍ) ;;
-        *) return 1 ;;
+        *)
+            printf '\nNothing was run. To run the commands yourself, copy them:\n\n'
+            priv_print_plain
+            return 1
+            ;;
     esac
 
     while IFS=$'\t' read -r description command <&3; do

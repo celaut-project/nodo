@@ -27,7 +27,7 @@ detect_pkg_mgr() {
         fail "No supported package manager found (looked for apt-get and dnf).
 Install these tools by hand and re-run: a C compiler + make, clang, cpio, gzip,
 zip, curl, ca-certificates, git, procps, iproute, ping, iptables, e2fsprogs,
-util-linux (setpriv), and an en_US.UTF-8 locale. See docs/INSTALL.md."
+util-linux (setpriv), and a UTF-8 locale. See docs/INSTALL.md."
     fi
 }
 
@@ -163,7 +163,7 @@ host_alias_present() {
         e2fsprogs)  command -v debugfs >/dev/null 2>&1 && command -v mkfs.ext4 >/dev/null 2>&1 ;;
         ca-certificates)
             [ -s /etc/ssl/certs/ca-certificates.crt ] || [ -s /etc/pki/tls/certs/ca-bundle.crt ] ;;
-        locale)     locale -a 2>/dev/null | grep -Eiq '^en_US\.utf-?8$' ;;
+        locale)     locale -a 2>/dev/null | grep -Eiq '\.utf-?8$' ;;
         clang|cpio|gzip|zip|curl|git|ping|iptables|setpriv)
                     command -v "$alias_name" >/dev/null 2>&1 ;;
         *)          fail "Unknown package alias '${alias_name}'." ;;
@@ -284,6 +284,8 @@ install_virtiofsd_build_deps() {
 ensure_utf8_locale() {
     # Without root, install.sh asked for the locale with the other prerequisites.
     [ "${NODO_UNPRIVILEGED:-}" = 1 ] && return 0
+    # Any UTF-8 locale is enough; en_US.UTF-8 is made only when there is none.
+    host_alias_present locale && return 0
     echo "Ensuring UTF-8 locale support..."
     # Debian generates locales on demand; on Fedora (and most others) the
     # langpack package is all there is, so there is nothing to generate.

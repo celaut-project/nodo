@@ -32,10 +32,36 @@ a Dockerfile along with a configuration file and get a specification for that se
 
 ### Linux
 
-Basic installation:
+Choose one variant. They differ in the user that runs the daemon (see the notes below).
+
+<details>
+<summary><b>Service user</b> (best choice for a server)</summary>
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash -s -- --service-user nodo
+```
+
+</details>
+
+<details>
+<summary><b>Without sudo</b></summary>
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | bash
+```
+
+The installer shows the few commands that need root and asks before it runs them. If you decline, run them yourself, then run the same command again.
+
+</details>
+
+<details>
+<summary><b>Root</b> (the simplest)</summary>
+
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
 ```
+
+</details>
 
 <details>
 <summary>Linux installation notes</summary>

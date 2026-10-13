@@ -387,7 +387,7 @@ if [ "$UNPRIVILEGED" = true ]; then
       "$(pkg_install_command "${missing_packages[@]}")"
   fi
   if [ "$PKG_MGR" = apt ] && ! host_alias_present locale; then
-    priv_record "The en_US.UTF-8 locale" "sudo locale-gen en_US.UTF-8"
+    priv_record "A UTF-8 locale (en_US.UTF-8)" "sudo locale-gen en_US.UTF-8"
   fi
   if ! command -v systemctl >/dev/null 2>&1; then
     printf "Error: systemctl was not found. nodo runs as a systemd service; install systemd first.\n" >&2
@@ -399,7 +399,8 @@ if [ "$UNPRIVILEGED" = true ]; then
   case $? in
     0) ;;
     *)
-      printf "\nRun them, then run this installer again (without sudo).\n" >&2
+      printf "\nRun those commands, then run the same install command again (without sudo).\n" >&2
+      printf "The 'nodo' command is not installed until that second run is done.\n" >&2
       exit 1
       ;;
   esac
@@ -653,7 +654,10 @@ EOF
   printf "Wrapper script %s created.\n" "$WRAPPER_SCRIPT"
   case ":$PATH:" in
     *":$(dirname "$WRAPPER_SCRIPT"):"*) ;;
-    *) printf "Note: %s is not in your PATH; add it to use the 'nodo' command.\n" "$(dirname "$WRAPPER_SCRIPT")" ;;
+    *)
+      printf "Note: %s is not in your PATH, so the shell does not find the 'nodo' command yet.\n" "$(dirname "$WRAPPER_SCRIPT")"
+      printf "Open a new login session, or run this now and add it to ~/.profile:\n  export PATH=\"%s:\$PATH\"\n" "$(dirname "$WRAPPER_SCRIPT")"
+      ;;
   esac
 }
 
