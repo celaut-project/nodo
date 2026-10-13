@@ -1231,6 +1231,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `firewall-compat status\|apply\|remove` | rules a coexisting firewall must keep |
 | `completion bash\|zsh\|install` | shell tab-completion |
 | `update` | update nodo itself (root) |
+| `uninstall [--no-input]` | remove nodo from this machine |
 | `pack <dir\|git url>` | package a project into a service |
 | `download <url> [-o <dir>]` | fetch a published service from its manifest |
 | `get <service> [--now]` | ask peers for a service not held locally |

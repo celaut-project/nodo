@@ -8,7 +8,12 @@ It is aligned with the current runtime model:
 - `nodo.service` exports `JAVA_HOME` and `PATH` from configured local paths.
 - No local Docker: services run under Cloud Hypervisor natively, or under QEMU when their architecture is not the host's. binfmt is not part of the install profile.
 
-## 1) Automatic uninstall (`uninstall.sh`)
+## 1) Automatic uninstall (`nodo uninstall`)
+
+Run `nodo uninstall` (or `sudo nodo uninstall`). The command runs `uninstall.sh`
+for the installation root of the `nodo` that you run. It accepts `--no-input`,
+which has the same meaning as for the script. The sections below describe the
+script, and you can also run it directly.
 
 The script has two modes. It selects the mode with the user that runs it.
 
