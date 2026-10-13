@@ -5,6 +5,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 from src.commands import completion
 
@@ -170,6 +171,29 @@ class ScriptGenerationTests(unittest.TestCase):
         system = completion._completion_targets(user=False)
         self.assertNotEqual(user["bash"], system["bash"])
         self.assertTrue(user["bash"].endswith("/completions/nodo"))
+
+
+class ZshFpathHintTests(unittest.TestCase):
+    def _hint(self, zshrc, user=True, zsh="/usr/bin/zsh"):
+        home = tempfile.mkdtemp(prefix="nodo-completion-home-")
+        if zshrc is not None:
+            with open(os.path.join(home, ".zshrc"), "w", encoding="utf-8") as handle:
+                handle.write(zshrc)
+        with mock.patch.dict(os.environ, {"HOME": home}), mock.patch(
+            "shutil.which", return_value=zsh
+        ):
+            return completion.zsh_fpath_hint(user)
+
+    def test_hint_when_zshrc_does_not_name_the_directory(self):
+        self.assertIn("fpath=(~/.zsh/completions", self._hint("# empty\n"))
+        self.assertIn("fpath=(~/.zsh/completions", self._hint(None))
+
+    def test_no_hint_when_zshrc_names_the_directory(self):
+        self.assertIsNone(self._hint("fpath=(~/.zsh/completions $fpath)\n"))
+
+    def test_no_hint_for_system_install_or_without_zsh(self):
+        self.assertIsNone(self._hint(None, user=False))
+        self.assertIsNone(self._hint(None, zsh=None))
 
 
 class ConfigDirResolutionTests(unittest.TestCase):

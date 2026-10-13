@@ -87,6 +87,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
   the few steps that do (missing packages, subordinate ids, the systemd unit) as exact commands.
   It saves them to `install-privileged.sh` and runs them with sudo only if you say so
   (`--no-input` only prints them). The daemon then runs as you, with `CAP_NET_ADMIN` only.
+  The installer puts the shell completion in your home directory. Bash finds it by itself.
+  For zsh, add `fpath=(~/.zsh/completions $fpath)` to `~/.zshrc`, before `compinit`.
 
 - **Restart stops the VMs**: with a service user and in the installation without sudo, the VMs
   run inside the cgroup of the unit. A restart of `nodo.service` (also `nodo update` and

@@ -17,6 +17,7 @@ Two entry points:
 """
 
 import os
+import shutil
 import sqlite3
 import sys
 from typing import Dict, List, Optional
@@ -480,6 +481,29 @@ def _completion_targets(user: bool) -> Dict[str, str]:
     }
 
 
+def zsh_fpath_hint(user: bool) -> Optional[str]:
+    """Tell the user how to enable zsh completion after a per-user install.
+
+    zsh does not search ``~/.zsh/completions`` by default. Return ``None`` when
+    the note is not needed: system install, zsh not installed, or ``.zshrc``
+    already names the directory. We never edit ``.zshrc`` ourselves.
+    """
+    if not user or shutil.which("zsh") is None:
+        return None
+    zshrc = os.path.join(os.path.expanduser("~"), ".zshrc")
+    try:
+        with open(zshrc, "r", encoding="utf-8", errors="replace") as handle:
+            if ".zsh/completions" in handle.read():
+                return None
+    except OSError:
+        pass
+    return (
+        "zsh does not search ~/.zsh/completions by default. Add this line to "
+        "~/.zshrc, before `compinit`:\n"
+        "  fpath=(~/.zsh/completions $fpath)"
+    )
+
+
 def install(nodo_dir: str, python_bin: str, user: Optional[bool] = None) -> List[str]:
     """Write the bash and zsh scripts, returning the paths written.
 
@@ -548,11 +572,14 @@ def main(argv: List[str]) -> int:
             "install directory is on your `fpath`.",
             flush=True,
         )
+        hint = zsh_fpath_hint(user if user is not None else os.geteuid() != 0)
+        if hint:
+            print(f"\n{hint}", flush=True)
         return 0
 
     print(
         "Usage: nodo completion <bash|zsh|install [--user|--system]>\n"
-        "       nodo completion list <commands|services|instances|peers|refs>",
+        "       nodo completion list <commands|daemon|services|instances|peers|clients|tunnels|packs|refs>",
         flush=True,
     )
     return 0 if action == "help" else 1
