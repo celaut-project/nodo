@@ -270,6 +270,11 @@ download_ch_binary() {
 }
 
 install_local_yq() {
+    if [ -x "$YQ_BIN_DEFAULT" ] && "$YQ_BIN_DEFAULT" --version 2>/dev/null | grep -qF "$YQ_VERSION"; then
+        YQ_BIN="$YQ_BIN_DEFAULT"
+        return 0
+    fi
+    echo "Installing local yq runtime..."
     mkdir -p "$(dirname "$YQ_BIN_DEFAULT")"
     download_file "$YQ_URL" "$YQ_BIN_DEFAULT"
     chmod +x "$YQ_BIN_DEFAULT"
@@ -282,9 +287,15 @@ install_portable_python() {
     local checksums
     local install_dir
 
+    install_dir="${PYTHON_RUNTIME_ROOT}/${PYTHON_VERSION}+${PYTHON_BUILD_TAG}"
+
+    if [ -x "${install_dir}/bin/python3" ]; then
+        ln -sfn "$install_dir" "${PYTHON_RUNTIME_ROOT}/current"
+        return 0
+    fi
+
     archive="$(mktemp /tmp/nodo-python.XXXXXX.tar.gz)"
     checksums="$(mktemp /tmp/nodo-python-sha.XXXXXX)"
-    install_dir="${PYTHON_RUNTIME_ROOT}/${PYTHON_VERSION}+${PYTHON_BUILD_TAG}"
 
     mkdir -p "$PYTHON_RUNTIME_ROOT"
 
@@ -396,7 +407,6 @@ fi
 ensure_utf8_locale
 verify_host_tools
 
-echo "Installing local yq runtime..."
 install_local_yq
 apply_configured_dependency_paths
 

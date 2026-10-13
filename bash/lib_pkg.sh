@@ -117,13 +117,11 @@ pkg_update() {
 }
 
 pkg_install_host_dependencies() {
-    local alias_name
     local packages=()
 
-    for alias_name in "${NODO_HOST_PACKAGE_ALIASES[@]}"; do
-        # shellcheck disable=SC2207
-        packages+=($(pkg_for "$alias_name"))
-    done
+    # shellcheck disable=SC2207
+    packages=($(missing_host_packages))
+    [ "${#packages[@]}" -gt 0 ] || return 0
 
     echo "Installing host dependencies with ${PKG_MGR}: ${packages[*]}"
     case "$PKG_MGR" in
@@ -224,13 +222,14 @@ install_foreign_arch_emulator() {
         return 0
     fi
 
+    local emulator
+    case "$arch_tag" in
+        linux/arm64) emulator="qemu-system-aarch64" ;;
+        linux/amd64) emulator="qemu-system-x86_64" ;;
+    esac
+    command -v "$emulator" >/dev/null 2>&1 && return 0
+
     if [ "${NODO_UNPRIVILEGED:-}" = 1 ]; then
-        local emulator
-        case "$arch_tag" in
-            linux/arm64) emulator="qemu-system-aarch64" ;;
-            linux/amd64) emulator="qemu-system-x86_64" ;;
-        esac
-        command -v "$emulator" >/dev/null 2>&1 && return 0
         priv_record "Optional: ${packages[*]}, so this node can also run ${arch_tag} services under emulation" \
             "$(pkg_install_command "${packages[@]}")"
         return 0
@@ -261,10 +260,11 @@ install_virtiofsd_build_deps() {
         dnf) packages=(libcap-ng-devel libseccomp-devel pkgconf-pkg-config) ;;
     esac
 
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libcap-ng libseccomp; then
+        return 0
+    fi
+
     if [ "${NODO_UNPRIVILEGED:-}" = 1 ]; then
-        if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libcap-ng libseccomp; then
-            return 0
-        fi
         priv_record "Libraries to build virtiofsd (only services with shared directories need it; run the installer again afterwards)" \
             "$(pkg_install_command "${packages[@]}")"
         return 1
