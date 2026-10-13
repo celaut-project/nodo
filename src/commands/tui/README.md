@@ -26,6 +26,62 @@ written** is not fatal either: the operator is told, and the question is asked a
 next start. Refusing to start over a dotfile would turn a full `storage/` into a node
 nobody can look at.
 
+## Choose a profile, once
+
+After the KyA, the first start of `nodo tui` shows the profile deck. The deck is a
+full-modal picker in a retro cyberpunk style. It shows one card for each profile, and
+the cards are in the order of the dial, from the most closed to the most open.
+
+Each card has a character on the left and the data of the profile on the right:
+
+- The name, the class and a short line of the character.
+- What the profile is for (the `blurb` of the profile).
+- Five bars: EXPOSURE, INCOME, OPENNESS, ISOLATION and RISK, from 0 to 5.
+- Three or four key traits, for example "Tunnel only: no direct exposure".
+- How many keys of `config.yaml` would change.
+
+The bars are not typed in. `src/profile_deck.rs` computes them from the `writes` of the
+profile, and a test pins the values of the five profiles. If a profile changes and a
+bar moves, the test fails and the change is made on purpose.
+
+| Input | Action |
+|---|---|
+| `←` `→`, `↑` `↓`, `h` `l`, `Tab`, `Shift+Tab` | Previous or next card. The cards wrap. |
+| `1`…`9`, `Home`, `End` | Go to a card |
+| `Enter` | Choose the profile. The deck shows the list of changes and asks for `y` or `n`. |
+| `Esc`, `q`, `s` | Skip. The skip button is always on screen. |
+| Click on an arrow or a dot | Previous card, next card, or go to that card |
+| Click on the card or on `JACK IN` | Choose the profile |
+| Click on `SKIP` | Skip |
+| Mouse wheel | Previous or next card |
+
+The cards slide to the left or to the right in 200 ms. During a slide the screen
+redraws about 30 times each second. At rest the loop waits as long as before.
+
+The deck needs a terminal of at least 80 columns and 26 rows. On a smaller terminal
+the TUI shows the plain list of profiles, with the same keys. On a terminal of 34 rows
+or more, the character is drawn at double size.
+
+Colours: the deck uses 24-bit colour when `COLORTERM` says `truecolor` or `24bit`. If
+not, it uses the nearest colour of the 256-colour palette. If `NO_COLOR` is set, it uses
+greys only. The text is the same in all three modes.
+
+The deck does not write the configuration itself. `Enter` opens the same list of
+changes as the `p` key on Policies, and the same transaction applies them (see
+[Applying a change](#applying-a-change)).
+
+The answer is recorded in `storage/.profilepicked`, an empty file like `.acceptedkya`.
+The marker is written when you choose a profile, before the list of changes, and when
+you skip. If you close the TUI before you answer, the deck shows again at the next
+start. A marker that cannot be written is not fatal: the TUI tells you, and the deck
+shows again at the next start. An installation that accepted the KyA before this
+feature sees the deck once.
+
+`p` on Policies opens the same deck. There, `Esc` closes it and writes no marker.
+
+The design and the plan are in
+[`docs/proposals/profile-deck.md`](../../../docs/proposals/profile-deck.md).
+
 ## Pages
 
 The tab bar is **two rows**. The top row is the six groups — where the node stands,
@@ -248,6 +304,7 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 | `Ctrl+U` | Clear modal input |
 | `q` or `Ctrl+C` | Exit |
 | `y` / `n` | Answer the KyA gate on first run: accept, or decline and exit |
+| `←` `→` / `Enter` / `Esc` | In the profile deck: previous or next card, choose, skip (see [Choose a profile, once](#choose-a-profile-once)) |
 
 `d` on Peers runs `nodo disconnect <peer id>`, which drops the peer row together with
 its addresses and contract instances. The peer is **forgotten, not banned**: it can
@@ -438,8 +495,9 @@ and paying for it are separately answerable.
 
 ### Profiles
 
-`p` applies a posture — a whole set of policy keys at once, ordered from the most
-closed to the most open:
+`p` opens the profile deck (see [Choose a profile, once](#choose-a-profile-once)) and
+applies a posture — a whole set of policy keys at once, ordered from the most closed to
+the most open:
 
 | Profile | For |
 |---|---|

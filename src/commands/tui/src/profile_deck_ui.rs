@@ -131,8 +131,127 @@ pub fn layout(area: Rect, count: usize, first_run: bool) -> Option<DeckLayout> {
     })
 }
 
+/// How many colours the terminal can show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    /// 24-bit colour: the deck is drawn as designed.
+    TrueColor,
+    /// The 256-colour palette: each colour is moved to the nearest one in it.
+    Indexed,
+    /// `NO_COLOR` is set: the deck is drawn in greys only.
+    Grey,
+}
+
+impl ColorMode {
+    /// From the environment values: `NO_COLOR` (any non-empty value, as
+    /// <https://no-color.org> says), then `COLORTERM`.
+    pub fn from_env(no_color: Option<&str>, colorterm: Option<&str>) -> Self {
+        if no_color.is_some_and(|value| !value.is_empty()) {
+            return Self::Grey;
+        }
+        match colorterm {
+            Some(value) if value.contains("truecolor") || value.contains("24bit") => {
+                Self::TrueColor
+            }
+            _ => Self::Indexed,
+        }
+    }
+
+    pub fn detect() -> Self {
+        Self::from_env(
+            std::env::var("NO_COLOR").ok().as_deref(),
+            std::env::var("COLORTERM").ok().as_deref(),
+        )
+    }
+
+    /// `color` as this mode shows it. Only RGB colours change: the named ones the
+    /// terminal already maps itself.
+    pub fn adapt(self, color: Color) -> Color {
+        let Color::Rgb(r, g, b) = color else {
+            return color;
+        };
+        match self {
+            Self::TrueColor => color,
+            Self::Indexed => Color::Indexed(nearest_256(r, g, b)),
+            Self::Grey => {
+                // The weights of the eye for each primary.
+                let luma = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) as u8;
+                match luma {
+                    0..=40 => Color::Black,
+                    41..=110 => Color::DarkGray,
+                    111..=190 => Color::Gray,
+                    _ => Color::White,
+                }
+            }
+        }
+    }
+}
+
+/// The nearest colour in the 256-colour palette: the 6x6x6 cube, or the grey ramp
+/// when the three channels are close, which is where the cube is coarse.
+fn nearest_256(r: u8, g: u8, b: u8) -> u8 {
+    let cube = |value: u8| -> u8 {
+        match value {
+            0..=47 => 0,
+            48..=114 => 1,
+            v => ((v - 35) / 40).min(5),
+        }
+    };
+    let level = |index: u8| -> i32 {
+        if index == 0 {
+            0
+        } else {
+            55 + 40 * index as i32
+        }
+    };
+    let (cr, cg, cb) = (cube(r), cube(g), cube(b));
+    let cube_index = 16 + 36 * cr + 6 * cg + cb;
+    let cube_distance = (r as i32 - level(cr)).pow(2)
+        + (g as i32 - level(cg)).pow(2)
+        + (b as i32 - level(cb)).pow(2);
+
+    let average = (r as i32 + g as i32 + b as i32) / 3;
+    let step = ((average - 8).max(0) / 10).min(23);
+    let grey_level = 8 + 10 * step;
+    let grey_distance = (r as i32 - grey_level).pow(2)
+        + (g as i32 - grey_level).pow(2)
+        + (b as i32 - grey_level).pow(2);
+    if grey_distance < cube_distance {
+        232 + step as u8
+    } else {
+        cube_index
+    }
+}
+
+/// Move every colour in `area` to what `mode` can show.
+fn adapt_area(buffer: &mut Buffer, area: Rect, mode: ColorMode) {
+    if mode == ColorMode::TrueColor {
+        return;
+    }
+    for y in area.y..area.y + area.height {
+        for x in area.x..area.x + area.width {
+            let cell = buffer.get_mut(x, y);
+            cell.fg = mode.adapt(cell.fg);
+            cell.bg = mode.adapt(cell.bg);
+        }
+    }
+}
+
 /// How long one slide takes.
 pub const SLIDE: Duration = Duration::from_millis(200);
+
+/// Half a period of the blink of the title, so it blinks once a second. The 250 ms
+/// tick redraws often enough to show it.
+pub const BLINK: Duration = Duration::from_millis(500);
+
+/// Whether a blinking part is lit at `now`, counting from `opened`.
+pub fn lit(opened: Option<Instant>, now: Instant) -> bool {
+    let Some(opened) = opened else {
+        return true;
+    };
+    let phase = now.saturating_duration_since(opened).as_millis() / BLINK.as_millis();
+    phase % 2 == 0
+}
 
 /// How often the screen is redrawn while a slide runs: about 30 frames a second.
 pub const FRAME: Duration = Duration::from_millis(33);
@@ -223,11 +342,16 @@ pub fn hit(layout: &DeckLayout, position: Position) -> Option<Hit> {
 
 /// Draw the whole deck for the profile `app.cell.profile`.
 pub fn draw(frame: &mut Frame, app: &App, layout: &DeckLayout) {
-    draw_at(frame, app, layout, Instant::now());
+    draw_with(frame, app, layout, Instant::now(), ColorMode::detect());
 }
 
 /// `draw`, with the time given, so a test can look at any moment of a slide.
 pub fn draw_at(frame: &mut Frame, app: &App, layout: &DeckLayout, now: Instant) {
+    draw_with(frame, app, layout, now, ColorMode::TrueColor);
+}
+
+/// `draw_at`, with the colour mode given as well.
+pub fn draw_with(frame: &mut Frame, app: &App, layout: &DeckLayout, now: Instant, mode: ColorMode) {
     let profiles = cell::profiles();
     let index = app.cell.profile.min(profiles.len().saturating_sub(1));
     let Some(profile) = profiles.get(index) else {
@@ -242,13 +366,19 @@ pub fn draw_at(frame: &mut Frame, app: &App, layout: &DeckLayout, now: Instant) 
     let buffer = frame.buffer_mut();
     paint_background(buffer, layout.modal);
 
+    // The corners of the title blink. The text does not: it has to stay readable.
+    let (left, right) = if lit(app.deck_opened, now) {
+        (" ◢◤ ", " ◥◣ ")
+    } else {
+        ("    ", "    ")
+    };
     let title = Line::from(vec![
-        Span::styled(" ◢◤ ", Style::default().fg(accent)),
+        Span::styled(left, Style::default().fg(accent)),
         Span::styled(
             "SELECT YOUR RIG",
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" ◥◣ ", Style::default().fg(accent)),
+        Span::styled(right, Style::default().fg(accent)),
     ]);
     let counter = Line::from(Span::styled(
         format!(" {}/{} ", index + 1, profiles.len()),
@@ -297,6 +427,8 @@ pub fn draw_at(frame: &mut Frame, app: &App, layout: &DeckLayout, now: Instant) 
         Style::default().fg(WARN).add_modifier(Modifier::BOLD),
     )
     .render(layout.skip, buffer);
+
+    adapt_area(buffer, layout.modal, mode);
 }
 
 /// Two cards in motion: the one leaving and the one arriving, each drawn into a
@@ -859,6 +991,133 @@ mod tests {
         for x in layout.modal.x..layout.modal.x + layout.modal.width {
             assert_eq!(moving.get(x, layout.modal.y), still.get(x, layout.modal.y));
         }
+    }
+
+    fn draw_styled(mode: ColorMode, opened: Option<Instant>, now: Instant) -> Buffer {
+        let mut app = App::default();
+        app.cell.profile = 2;
+        app.profile_first_run = true;
+        app.config_document = None;
+        app.deck_opened = opened;
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+        terminal
+            .draw(|frame| draw_with(frame, &app, &layout, now, mode))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn the_colour_mode_follows_the_environment() {
+        let mode = ColorMode::from_env;
+        assert_eq!(mode(None, Some("truecolor")), ColorMode::TrueColor);
+        assert_eq!(mode(None, Some("24bit")), ColorMode::TrueColor);
+        assert_eq!(mode(None, None), ColorMode::Indexed);
+        assert_eq!(mode(None, Some("")), ColorMode::Indexed);
+        assert_eq!(mode(Some("1"), Some("truecolor")), ColorMode::Grey);
+        // An empty NO_COLOR does not count, as no-color.org says.
+        assert_eq!(mode(Some(""), Some("truecolor")), ColorMode::TrueColor);
+    }
+
+    #[test]
+    fn colours_move_to_the_nearest_in_the_256_palette() {
+        let indexed = |r, g, b| ColorMode::Indexed.adapt(Color::Rgb(r, g, b));
+        assert_eq!(indexed(0, 0, 0), Color::Indexed(16));
+        assert_eq!(indexed(255, 255, 255), Color::Indexed(231));
+        assert_eq!(indexed(255, 0, 200), Color::Indexed(200));
+        // A mid grey goes to the grey ramp, where the cube has no close colour.
+        assert_eq!(indexed(128, 128, 128), Color::Indexed(244));
+        // Named colours are left to the terminal.
+        assert_eq!(ColorMode::Indexed.adapt(Color::Red), Color::Red);
+        assert_eq!(
+            ColorMode::TrueColor.adapt(Color::Rgb(1, 2, 3)),
+            Color::Rgb(1, 2, 3)
+        );
+    }
+
+    #[test]
+    fn grey_mode_keeps_light_things_light() {
+        let grey = |r, g, b| ColorMode::Grey.adapt(Color::Rgb(r, g, b));
+        assert_eq!(grey(8, 6, 20), Color::Black);
+        assert_eq!(grey(255, 255, 255), Color::White);
+        assert!(matches!(grey(255, 0, 200), Color::Gray | Color::DarkGray));
+    }
+
+    #[test]
+    fn a_256_colour_terminal_gets_no_rgb_and_a_grey_one_gets_only_greys() {
+        let now = Instant::now();
+        let layout = layout(Rect::new(0, 0, 100, 32), cell::profiles().len(), true).unwrap();
+        let rgb = |buffer: &Buffer| {
+            let mut count = 0;
+            for y in layout.modal.y..layout.modal.y + layout.modal.height {
+                for x in layout.modal.x..layout.modal.x + layout.modal.width {
+                    let cell = buffer.get(x, y);
+                    if matches!(cell.fg, Color::Rgb(..)) || matches!(cell.bg, Color::Rgb(..)) {
+                        count += 1;
+                    }
+                }
+            }
+            count
+        };
+        assert!(rgb(&draw_styled(ColorMode::TrueColor, None, now)) > 0);
+        assert_eq!(rgb(&draw_styled(ColorMode::Indexed, None, now)), 0);
+        let grey = draw_styled(ColorMode::Grey, None, now);
+        assert_eq!(rgb(&grey), 0);
+        for y in layout.modal.y..layout.modal.y + layout.modal.height {
+            for x in layout.modal.x..layout.modal.x + layout.modal.width {
+                let cell = grey.get(x, y);
+                for color in [cell.fg, cell.bg] {
+                    assert!(
+                        matches!(
+                            color,
+                            Color::Black | Color::DarkGray | Color::Gray | Color::White
+                        ),
+                        "({x},{y}) {color:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The deck keeps its text in every mode: only the colours change.
+    #[test]
+    fn the_text_is_the_same_in_every_colour_mode() {
+        let now = Instant::now();
+        let reference = text_of(&draw_styled(ColorMode::TrueColor, None, now));
+        for mode in [ColorMode::Indexed, ColorMode::Grey] {
+            assert_eq!(
+                text_of(&draw_styled(mode, None, now)),
+                reference,
+                "{mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_blink_alternates_each_half_second() {
+        let start = Instant::now();
+        assert!(lit(None, start));
+        assert!(lit(Some(start), start));
+        assert!(lit(Some(start), start + BLINK / 2));
+        assert!(!lit(Some(start), start + BLINK));
+        assert!(!lit(Some(start), start + BLINK + BLINK / 2));
+        assert!(lit(Some(start), start + BLINK * 2));
+    }
+
+    /// Only the corners of the title blink: the words stay on screen when they are
+    /// dark, so the title can always be read.
+    #[test]
+    fn the_title_corners_blink_and_its_words_do_not() {
+        let start = Instant::now();
+        let on = text_of(&draw_styled(ColorMode::TrueColor, Some(start), start));
+        let off = text_of(&draw_styled(
+            ColorMode::TrueColor,
+            Some(start),
+            start + BLINK,
+        ));
+        assert!(on.contains("◢◤") && on.contains("◥◣"));
+        assert!(!off.contains("◢◤") && !off.contains("◥◣"));
+        assert!(on.contains("SELECT YOUR RIG") && off.contains("SELECT YOUR RIG"));
     }
 
     #[test]

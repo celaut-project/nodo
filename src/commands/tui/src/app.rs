@@ -3329,6 +3329,8 @@ pub struct App {
     pub deck_zones: Option<crate::profile_deck_ui::DeckLayout>,
     /// The slide between two cards that is running, if any.
     pub deck_anim: Option<crate::profile_deck_ui::DeckSlide>,
+    /// When the picker was opened: the clock of the blink of its title.
+    pub deck_opened: Option<Instant>,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -3533,6 +3535,7 @@ impl Default for App {
             profile_first_run: false,
             deck_zones: None,
             deck_anim: None,
+            deck_opened: None,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
             paths,
@@ -5441,6 +5444,7 @@ impl App {
             .unwrap_or(0);
         self.profile_first_run = first_run;
         self.deck_anim = None;
+        self.deck_opened = Some(Instant::now());
         self.input_mode = InputMode::PickProfile;
         if first_run {
             self.input_title = "Choose your profile".to_string();
