@@ -288,9 +288,10 @@ The lookup is not consensus. If two members of a new share are placed at the
 same time on two nodes, both nodes can create the share: one name, two
 directories. Data cannot be merged after that without moving it, so the node
 does not hide it. A later launch that finds the share on more than one node is
-refused, and the message gives every location. The operator stops the members on
-all nodes but one. A member whose shares are held on two different nodes is
-refused the same way, because one instance cannot run on two nodes.
+not refused: those nodes are the only candidates, the balancer chooses the
+cheapest of them, and the log warns with every location. The copies stay
+separate. A member whose shares are held on different nodes, with no node that
+holds them all, is refused, because one instance cannot run on two nodes.
 
 #### Lifecycle of a network share
 
@@ -303,8 +304,10 @@ refused the same way, because one instance cannot run on two nodes.
   share while the last one stops keeps it: the directory is removed only if
   nobody reserved it again.
 - It is **not durable**: a share with no members has no data.
-- A read-only image (`read_mode=ro`) cannot be a member, for the same reason it
-  cannot export: the first member seeds the share from its image with `debugfs`.
+- A read-only image (`read_mode=ro`) can be a member, and can export or inherit a
+  share. It mounts every share read-only, whatever `access` says, so it sees what
+  the others write and only instances that are not read-only write. When it is
+  the first member, it seeds the share from its squashfs or erofs image.
 
 #### Accounting of a network share
 
@@ -344,7 +347,8 @@ failure for the one rule only the node can enforce.
    daemon of their own, all exporting the one host directory (#480).
 2. The first materialization of an export **seeds** its directory with the
    exporter's own packaged subtree at that path, read out of the offline image
-   with `debugfs rdump` (rootless, like every other image access), so mounting
+   with `debugfs rdump` (`unsquashfs` or `fsck.erofs` for a read-only image;
+   rootless, like every other image access), so mounting
    the share does not hide what the exporter shipped. A child attaching later
    never reseeds; a handed-over rundev directory is never seeded at all.
 3. One virtio-fs device per share on the guest's command line: cloud-hypervisor

@@ -12,7 +12,9 @@ This is not consensus. Two members of a new share that are placed at the same
 time, on two nodes that do not see each other's share yet, create two shares.
 That split cannot be repaired after the fact without moving data, so the node
 does not hide it: a later launch that finds the share on more than one node is
-refused with both locations, and the operator decides which one to stop.
+warned about with both locations, and the balancer chooses among the nodes that
+hold it. Shares of one service that sit on different nodes, with no node holding
+them all, still refuse the launch.
 
 Peers that cannot be asked (unreachable, timed out, or running a version without
 ``LocateShare``) are skipped with a log line. They are taken as not holding the
@@ -93,48 +95,51 @@ def share_holders(
     return holders
 
 
-def placement(refs: List[ShareRef], holders: Dict[str, Set[str]]) -> Optional[str]:
-    """The node every share of ``refs`` is on, or ``None`` if no node holds any.
+def placement(refs: List[ShareRef], holders: Dict[str, Set[str]]) -> List[str]:
+    """The nodes a member of ``refs`` may run on; empty when no node holds any.
 
-    Raises :class:`ShareLocationConflict` when they are on more than one node.
+    A node qualifies when it holds every share of ``refs`` that is held anywhere.
+    A share held on several nodes (a split) is no error: each of them is a
+    candidate, and the balancer picks among them. Raises
+    :class:`ShareLocationConflict` when the shares are on different nodes and no
+    node holds them all, because one instance cannot run on two nodes.
     """
-    nodes: Set[str] = set()
-    for ref in refs:
-        nodes |= holders.get(ref.share_id, set())
-    if len(nodes) <= 1:
-        return next(iter(nodes), None)
-
-    lines = []
-    for ref in refs:
-        where = sorted(holders.get(ref.share_id, set()))
-        if where:
-            lines.append(f"{ref.describe()} on {', '.join(where)}")
-    split = [ref for ref in refs if len(holders.get(ref.share_id, set())) > 1]
-    cause = (
-        "a share was created on more than one node (two members were placed at the "
-        "same time); stop the members on all but one of them"
-        if split else
-        "the service shares directories that are on different nodes, and one "
-        "instance cannot run on two nodes"
-    )
-    raise ShareLocationConflict(
-        f"the network shares of this service are held on more than one node: "
-        f"{'; '.join(lines)}. {cause}."
-    )
+    held = [ref for ref in refs if holders.get(ref.share_id)]
+    if not held:
+        return []
+    candidates = set.intersection(*(set(holders[ref.share_id]) for ref in held))
+    if not candidates:
+        lines = [
+            f"{ref.describe()} on {', '.join(sorted(holders[ref.share_id]))}"
+            for ref in held
+        ]
+        raise ShareLocationConflict(
+            f"the network shares of this service are held on different nodes: "
+            f"{'; '.join(lines)}. One instance cannot run on two nodes."
+        )
+    for ref in held:
+        if len(holders[ref.share_id]) > 1:
+            log.LOGGER(
+                f"[SHARES] share {ref.describe()} exists on more than one node "
+                f"({', '.join(sorted(holders[ref.share_id]))}): two members were placed "
+                f"at the same time. The balancer chooses among "
+                f"{', '.join(sorted(candidates))}; the copies are not merged."
+            )
+    return sorted(candidates)
 
 
 def locate_network_shares(
     refs: List[ShareRef],
     ignore_network: Optional[str] = None,
-) -> Optional[str]:
-    """The node to run a member of ``refs`` on: ``LOCAL``, a peer id, or ``None``.
+) -> List[str]:
+    """The nodes to run a member of ``refs`` on: ``LOCAL`` and/or peer ids.
 
-    ``None`` means no node holds any of the shares yet, so the balancer places the
+    Empty means no node holds any of the shares yet, so the balancer places the
     member freely. With ``network.DELEGATE_EXECUTION`` off no peer is asked: this
     node does not delegate, so only what it holds itself can matter.
     """
     if not refs:
-        return None
+        return []
     peer_ids: List[str] = []
     if env_manager.get("network.DELEGATE_EXECUTION", True):
         from src.utils.utils import peers_id_iterator
@@ -142,6 +147,6 @@ def locate_network_shares(
     where = placement(refs, share_holders(refs, peer_ids))
     log.LOGGER(
         f"[SHARES] {len(refs)} network share(s) "
-        f"{'held on ' + where if where else 'not held on any node yet'}."
+        f"{'held on ' + ', '.join(where) if where else 'not held on any node yet'}."
     )
     return where

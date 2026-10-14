@@ -130,39 +130,23 @@ def materialize_shares(
     if not exports and not inherited and not in_network:
         return NO_SHARES
 
-    # Exporting a share means seeding its host directory with what the exporter
-    # packaged at that path, read out of its own image with `debugfs rdump` -- an
-    # ext4 reader, and the only one the node has. A squashfs or erofs image cannot
-    # be read by it, and seeding the export from nothing would silently hide the
-    # content the service shipped behind an empty directory, which is precisely
-    # what the seeding exists to prevent.
-    #
-    # So it is refused rather than degraded, and refused here rather than at build
-    # time: `read_mode=ro` and `shared=true` are each legitimate on their own, and
-    # a node that later grows an unpacker for these formats lifts this without the
-    # service being repacked.
-    #
-    # A member of a network share can be the first one, and then it seeds the
-    # share the same way, so the same rule applies to it.
-    if (exports or in_network) and metadata is not None and metadata.read_only:
-        raise MicroVMError(
-            f"{log_prefix} this service declares read_mode=ro and exports or shares "
-            f"{len(exports) + len(in_network)} shared filesystem(s). A share is seeded "
-            "from the image of its exporter or first member, which the node reads with "
-            "debugfs -- an ext4 reader that cannot open a squashfs/erofs image. Pack it "
-            "read_mode=rw (the default) or drop the shared declaration."
-        )
-
     # A rundev sandbox exports directories of the developer's own rather than
     # anything this node materialized; they are mounted where they are.
     host_dirs = rundev_host_dirs(father_id)
+    ro = metadata is not None and metadata.read_only
     mounts = (
-        [mount_for(ref, base_dir, exported=True) for ref in exports]
+        [mount_for(ref, base_dir, exported=True, read_only_image=ro) for ref in exports]
         + [
-            mount_for(ref, base_dir, exported=False, host_dir=host_dirs.get(ref.share_id))
+            mount_for(
+                ref, base_dir, exported=False,
+                host_dir=host_dirs.get(ref.share_id), read_only_image=ro,
+            )
             for ref in inherited
         ]
-        + [mount_for(ref, base_dir, exported=False, network=True) for ref in in_network]
+        + [
+            mount_for(ref, base_dir, exported=False, network=True, read_only_image=ro)
+            for ref in in_network
+        ]
     )
 
     log.LOGGER(
@@ -180,7 +164,7 @@ def materialize_shares(
         # A new export, or a network share's first member, starts out holding
         # what that instance packaged at that path, read straight out of its own
         # image, so the mount does not hide the content the service shipped.
-        seed_fn=lambda mount, dest: rootfs.debugfs_rdump(
+        seed_fn=lambda mount, dest: rootfs.rdump(
             rootfs_path, mount.guest_path, dest
         ),
         logger_fn=log.LOGGER,

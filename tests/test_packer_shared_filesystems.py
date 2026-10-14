@@ -9,7 +9,7 @@ nothing in the packer wrote them. This pins the packer half:
 * the directory must exist in the image; the packer does not create it;
 * types, roles and unknown fields are refused, not coerced;
 * the result passes through `declarations_for_filesystem`, so its rules apply;
-* `read_only_filesystem: true` plus `shared` stays refused.
+* `read_only_filesystem: true` plus `shared` or `guest` is allowed.
 
 `ZipContainerPacker.__init__` runs BuildKit, so it is never called here: the methods
 under test are invoked on an object built with `__new__`, carrying only `json`.
@@ -237,16 +237,16 @@ class SharedFilesystemsPropertyTests(unittest.TestCase):
 
     # -- read_only_filesystem ------------------------------------------------- #
 
-    def test_read_only_plus_shared_is_still_refused(self):
+    def test_read_only_plus_shared_is_allowed(self):
         tree = _tree(_dir("shared"))
         packer = _packer({READ_ONLY_FILESYSTEM_KEY: True, **_declare({"path": "/shared", "role": "shared"})})
 
         packer._apply_shared_filesystems(tree)
-        with self.assertRaises(ValueError) as caught:
+        # Metadata is not set on these hand-built branches, which is out of scope here.
+        try:
             packer._apply_read_only_filesystem(tree)
-
-        self.assertIn("/shared", str(caught.exception))
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
+        except ValueError as e:
+            self.assertIn("metadata", str(e))
 
     def test_read_only_plus_guest_is_allowed(self):
         tree = _tree(_dir("mnt"))

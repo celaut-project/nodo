@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 import traceback
 
 from protos import celaut_pb2 as celaut, celaut_pb2
@@ -91,7 +91,7 @@ def _force_delegate(
         father_id: str,
         father_ip: str,
         recursion_guard_token: str,
-        share_node: Optional[str] = None,
+        share_nodes: Optional[List[str]] = None,
 ) -> celaut_pb2.ServiceInstance:
     """`nodo force_execution`'s bypass: delegate straight to `forced_peer`, with
     no comparison against `local` or any other peer, and no cheapest-first
@@ -110,10 +110,10 @@ def _force_delegate(
             f"'{forced_peer}'."
         )
 
-    if share_node and share_node != forced_peer:
+    if share_nodes and forced_peer not in share_nodes:
         raise Exception(
             f"force_execution: service {service_id} is a member of a network share "
-            f"held on {share_node}; it cannot be forced onto peer '{forced_peer}'."
+            f"held on {', '.join(share_nodes)}; it cannot be forced onto peer '{forced_peer}'."
         )
 
     log.LOGGER(f"force_execution: bypassing the balancer, delegating straight to peer {forced_peer}.")
@@ -273,16 +273,16 @@ def launch_service(
             network_shares = authorize_network_shares(
                 service=service, father_id=father_id, config=configuration
             )
-            share_node = locate_network_shares(
+            share_nodes = locate_network_shares(
                 network_shares, ignore_network=utils.get_network_name(direction=father_ip)
             )
         except (ShareAuthorizationError, ShareLocationConflict) as e:
             log.LOGGER(f"Refusing to launch service {service_id}: {e}")
             raise Exception(f"Unable to launch service {service_id}: {e}") from e
-        if share_node:
+        if share_nodes:
             log.LOGGER(
                 f"Service {service_id} is a member of a network share held on "
-                f"{share_node}; pinning execution there."
+                f"{', '.join(share_nodes)}; restricting execution to them."
             )
 
         # Every share is served by a virtiofsd on this host, so check it here too,
@@ -296,7 +296,7 @@ def launch_service(
             try:
                 virtiofsd.require_usable()
             except virtiofsd.VirtiofsdUnavailable as e:
-                if any(d.guest for d in share_declarations) or share_node == LOCAL:
+                if any(d.guest for d in share_declarations) or share_nodes == [LOCAL]:
                     log.LOGGER(f"Refusing to launch service {service_id}: {e}")
                     raise Exception(f"Unable to launch service {service_id}: {e}") from e
                 log.LOGGER(f"Service {service_id} cannot run on this node: {e}")
@@ -312,10 +312,10 @@ def launch_service(
         # forced.
         forced_peer = sc.pop_forced_execution_peer(recursion_guard_token) if recursion_guard_token else None
         pin_local = forced_peer == FORCED_LOCAL
-        if pin_local and share_node and share_node != LOCAL:
+        if pin_local and share_nodes and LOCAL not in share_nodes:
             raise Exception(
                 f"Unable to launch service {service_id}: it is pinned to the local node, "
-                f"but it is a member of a network share held on peer {share_node}."
+                f"but it is a member of a network share held on {', '.join(share_nodes)}."
             )
         if pin_local:
             log.LOGGER(f"Service {service_id} is pinned to the local node (no delegation).")
@@ -329,7 +329,7 @@ def launch_service(
                 father_id=father_id,
                 father_ip=father_ip,
                 recursion_guard_token=recursion_guard_token,
-                share_node=share_node,
+                share_nodes=share_nodes,
             )
 
         local_preflight_failure = _detect_local_preflight_failure(
@@ -378,9 +378,9 @@ def launch_service(
                 if pin_local and peer != 'local':
                     log.LOGGER(f"Skipping peer {peer}: this launch is pinned to the local node.")
                     continue
-                if share_node and peer != share_node:
+                if share_nodes and peer not in share_nodes:
                     log.LOGGER(
-                        f"Skipping peer {peer}: the network share is held on {share_node}."
+                        f"Skipping peer {peer}: the network share is held on {', '.join(share_nodes)}."
                     )
                     continue
                 if local_virtiofsd_failure and peer == 'local':
@@ -462,11 +462,12 @@ def launch_service(
                 "allowed for parent-inherited filesystems."
             )
 
-        if share_node and not any(f.startswith(f"{share_node}:") for f in launch_failures) \
-                and not (share_node == LOCAL and local_attempted):
+        if share_nodes and not any(
+            f.startswith(f"{node}:") for f in launch_failures for node in share_nodes
+        ) and not (LOCAL in share_nodes and local_attempted):
             launch_failures.append(
-                f"network share: the share is held on {share_node}, and the balancer "
-                f"did not offer that node as a candidate."
+                f"network share: the share is held on {', '.join(share_nodes)}, and the "
+                f"balancer did not offer any of those nodes as a candidate."
             )
 
         _err_msg = _format_launch_failure(

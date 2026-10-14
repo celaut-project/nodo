@@ -284,6 +284,17 @@ class BackendTests(unittest.TestCase):
             vf.ensure_share_backend(mount, "vm-parent", **self._kwargs(base, sock, []))
             self.assertFalse(vf.holds_network_share(base, sid))
 
+    def test_a_read_only_image_mounts_every_share_read_only(self):
+        for kwargs in ({"exported": True}, {"exported": False}, {"exported": False, "network": True}):
+            mount = vf.mount_for(
+                _ref("6" * 64, readonly=False), "/b", read_only_image=True, **kwargs
+            )
+            self.assertTrue(mount.readonly, kwargs)
+
+    def test_a_writable_image_still_exports_read_write(self):
+        mount = vf.mount_for(_ref("6" * 64, readonly=True), "/b", exported=True)
+        self.assertFalse(mount.readonly)
+
     def test_a_member_keeps_the_mode_it_declared(self):
         mount = vf.mount_for(_ref("5" * 64, readonly=True), "/b", exported=False, network=True)
         self.assertTrue(mount.readonly)
@@ -303,14 +314,14 @@ class PlacementTests(unittest.TestCase):
         return sl.placement(refs, holders)
 
     def test_a_share_nobody_holds_is_placed_freely(self):
-        self.assertIsNone(self._where([self.A], peers={"p1": set()}))
+        self.assertEqual(self._where([self.A], peers={"p1": set()}), [])
 
     def test_a_share_this_node_holds_runs_here(self):
-        self.assertEqual(self._where([self.A], local={self.A.share_id}), sl.LOCAL)
+        self.assertEqual(self._where([self.A], local={self.A.share_id}), [sl.LOCAL])
 
     def test_a_share_a_peer_holds_runs_on_that_peer(self):
         self.assertEqual(
-            self._where([self.A], peers={"p1": set(), "p2": {self.A.share_id}}), "p2"
+            self._where([self.A], peers={"p1": set(), "p2": {self.A.share_id}}), ["p2"]
         )
 
     def test_two_shares_on_two_nodes_are_a_conflict(self):
@@ -321,27 +332,39 @@ class PlacementTests(unittest.TestCase):
                 peers={"p1": {self.B.share_id}},
             )
 
-    def test_one_share_on_two_nodes_is_reported_as_a_split(self):
-        with self.assertRaisesRegex(sl.ShareLocationConflict, "more than one node"):
-            self._where([self.A], local={self.A.share_id}, peers={"p1": {self.A.share_id}})
+    def test_one_share_on_two_nodes_offers_both_as_candidates(self):
+        with patch.object(sl.log, "LOGGER") as logger:
+            where = self._where(
+                [self.A], local={self.A.share_id}, peers={"p1": {self.A.share_id}}
+            )
+        self.assertEqual(where, [sl.LOCAL, "p1"])
+        self.assertIn("more than one node", logger.call_args.args[0])
+
+    def test_a_split_share_is_narrowed_by_the_other_shares(self):
+        where = self._where(
+            [self.A, self.B],
+            local={self.A.share_id},
+            peers={"p1": {self.A.share_id, self.B.share_id}},
+        )
+        self.assertEqual(where, ["p1"])
 
     def test_a_peer_that_cannot_answer_is_taken_as_not_holding_it(self):
         holders = sl.share_holders(
             [self.A], ["p1"], holds_locally=lambda sid: False,
             ask_peer=lambda peer, sid: None,
         )
-        self.assertIsNone(sl.placement([self.A], holders))
+        self.assertEqual(sl.placement([self.A], holders), [])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchPlacementTests(unittest.TestCase):
-    def _launch(self, share_node, candidates):
+    def _launch(self, share_nodes, candidates):
         service = celaut.Service()
         cost = celaut.EstimatedCost(cost=launch.to_amount(1))
         patches = {
             "authorize_shares": None,
             "authorize_network_shares": [object()],
-            "locate_network_shares": share_node,
+            "locate_network_shares": share_nodes,
             "declarations_for_service": [],
             "spend_mu": True,
             "enforce_network_policy": None,
@@ -381,23 +404,29 @@ class LaunchPlacementTests(unittest.TestCase):
             return result, local, delegate
 
     def test_a_member_runs_on_the_peer_that_holds_the_share(self):
-        result, local, delegate = self._launch("p2", ["local", "p1", "p2"])
+        result, local, delegate = self._launch(["p2"], ["local", "p1", "p2"])
         self.assertEqual(result, "peer-instance")
         local.assert_not_called()
         self.assertEqual(delegate.call_args.kwargs["peer"], "p2")
 
     def test_a_member_runs_here_when_this_node_holds_it(self):
-        result, local, delegate = self._launch(sl.LOCAL, ["p1", "local"])
+        result, local, delegate = self._launch([sl.LOCAL], ["p1", "local"])
         self.assertEqual(result, "local-instance")
         delegate.assert_not_called()
 
     def test_a_share_nobody_holds_takes_the_cheapest_candidate(self):
-        result, _local, delegate = self._launch(None, ["p1", "local"])
+        result, _local, delegate = self._launch([], ["p1", "local"])
         self.assertEqual(result, "peer-instance")
         self.assertEqual(delegate.call_args.kwargs["peer"], "p1")
 
+    def test_a_split_share_lets_the_balancer_choose_between_its_holders(self):
+        result, local, delegate = self._launch(["p1", "p2"], ["local", "p2", "p1"])
+        self.assertEqual(result, "peer-instance")
+        local.assert_not_called()
+        self.assertEqual(delegate.call_args.kwargs["peer"], "p2")
+
     def test_the_holder_not_offered_by_the_balancer_fails_with_the_reason(self):
-        result, local, delegate = self._launch("p9", ["local", "p1"])
+        result, local, delegate = self._launch(["p9"], ["local", "p1"])
         self.assertIsInstance(result, Exception)
         self.assertIn("held on p9", str(result))
         local.assert_not_called()
