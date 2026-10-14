@@ -1,7 +1,7 @@
 """``nodo tor`` -- install nodo's own Tor and show whether the node is using it.
 
   nodo tor install   install Tor under dependencies.tor.RUNTIME_ROOT (nothing system-wide)
-  nodo tor status    the setting, the installed copy and what the running node says
+  nodo tor status    the settings, the installed copy, the onion address and what the running node says
 
 Turning Tor on is a setting, not a command: ``nodo config set routing.tor.ENABLED=true``
 (or the CONFIG page of ``nodo tui``). ``install`` is for installing it ahead of time.
@@ -13,6 +13,7 @@ import subprocess
 import sys
 from typing import List, Optional
 
+from src.routing.policy import announce_onion, hidden_mode
 from src.routing.tor import _tor_version, status_file, tor_binary, tor_mode
 from src.routing.tor_install import (
     TorInstallError,
@@ -53,6 +54,9 @@ def status() -> dict:
         "version": ".".join(map(str, version)) if version else None,
         "node": daemon.get("state", "not running"),
         "detail": daemon.get("detail", ""),
+        "hidden": hidden_mode(),
+        "announce": announce_onion(),
+        "onion": daemon.get("onion"),
     }
 
 
@@ -78,6 +82,10 @@ def tor(argv: Optional[List[str]] = None) -> int:
         print(f"binary               {info['binary']}")
         print(f"installed            {'yes, Tor ' + info['version'] if info['installed'] else 'no'}")
         print(f"node                 {info['node']}" + (f" ({info['detail']})" if info['detail'] else ""))
+        print(f"routing.HIDDEN       {info['hidden']}")
+        print(f"announce onion       {info['announce']}")
+        if info["onion"]:
+            print(f"onion address        {info['onion']}")
         if not info["installed"]:
             print(f"\nInstall it with: nodo tor install   ({install_command()})")
         return 0

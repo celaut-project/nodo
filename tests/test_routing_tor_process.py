@@ -103,6 +103,32 @@ class TorProcessTests(unittest.TestCase):
         state = json.loads((self.dir / "storage" / "tor" / "state.json").read_text())
         self.assertEqual((state["state"], state["pid"]), ("ready", os.getpid()))
 
+    def test_without_an_onion_service_tor_hosts_nothing(self):
+        self._fake_tor()
+        backend = self._backend()
+        backend.start()
+        self.assertTrue(wait_for(backend.available))
+        self.assertNotIn("HiddenService", self.seen.read_text())
+        self.assertFalse((self.dir / "storage" / "tor" / "gateway").exists())
+
+    def test_the_onion_service_forwards_to_loopback_and_uses_the_derived_key(self):
+        self._fake_tor()
+        backend = self._backend()
+        mnemonic = ("abandon abandon abandon abandon abandon abandon abandon abandon "
+                    "abandon abandon abandon about")
+        host = backend.configure_onion(mnemonic, local_port=4321, virtual_port=8090)
+        backend.start()
+        self.assertTrue(wait_for(backend.available), backend.status())
+        torrc = self.seen.read_text()
+        service_dir = self.dir / "storage" / "tor" / "gateway"
+        self.assertIn(f"HiddenServiceDir {service_dir}", torrc)
+        self.assertIn("HiddenServiceVersion 3", torrc)
+        self.assertIn("HiddenServicePort 8090 127.0.0.1:4321", torrc)
+        self.assertEqual((service_dir / "hostname").read_text().strip(), host)
+        self.assertEqual((backend.onion_host(), backend.onion_port()), (host, 8090))
+        state = json.loads((self.dir / "storage" / "tor" / "state.json").read_text())
+        self.assertEqual(state["onion"], host)
+
     def test_a_tor_older_than_0_4_8_is_refused(self):
         self._fake_tor(version="0.4.7.16")
         backend = self._backend()

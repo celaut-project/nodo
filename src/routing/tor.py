@@ -4,6 +4,10 @@ nodo runs its own ``tor`` (installed by ``bash/install_tor.sh``) with a private
 data directory under ``STORAGE/tor``. It opens an ``HTTPTunnelPort`` on loopback and
 nothing else: no SOCKS port, no control port, no listener a peer could reach.
 
+If the node announces an onion address (``routing.tor.ANNOUNCE``), tor also hosts the
+gateway as an onion service. It forwards to a loopback-only gRPC server; no port of the
+host is opened to the Internet.
+
 A call to a ``.onion`` host goes to that port as an HTTP ``CONNECT`` with the host
 *name*, so the name is resolved inside Tor and never by the local resolver.
 """
@@ -17,7 +21,9 @@ import threading
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from src.routing import onion_key
 from src.routing.base import RoutingBackend, RoutingUnavailable
+from src.routing.policy import hidden_mode
 from src.routing.tor_install import (
     TorInstallError,
     ensure_tor_installed,
@@ -53,9 +59,11 @@ def tor_mode() -> str:
     """``"on"``, ``"off"`` or ``"auto"``, from ``routing.tor.ENABLED``.
 
     ``auto`` uses Tor if nodo's copy is already installed and never installs it.
-    ``true`` installs it on first start.
+    ``true`` installs it on first start. Hidden mode is always ``on``.
     """
     value = env_manager.get("routing.tor.ENABLED", "auto")
+    if hidden_mode():
+        return "on"  # A hidden node has no other way to call or be called.
     if value is True:
         return "on"
     if value is False:
@@ -87,6 +95,32 @@ class TorBackend(RoutingBackend):
         self._http_port: Optional[int] = None
         self._state = "stopped"
         self._detail = ""
+        self._onion: Optional[Tuple[str, bytes, int, int]] = None
+
+    # --- the onion service -----------------------------------------------------
+
+    def configure_onion(self, mnemonic: str, local_port: int, virtual_port: int) -> str:
+        """Host the gateway as an onion service. Call before :meth:`start`.
+
+        Tor accepts on ``virtual_port`` of the onion name and forwards to
+        ``127.0.0.1:local_port``, where the onion-only gRPC server listens. Returns the
+        ``.onion`` name, which the mnemonic fixes: it is known before Tor is up.
+        """
+        seed = onion_key.derive_seed(mnemonic)
+        host = onion_key.onion_host(onion_key.public_key(seed))
+        with self._lock:
+            self._onion = (host, seed, local_port, virtual_port)
+        return host
+
+    def onion_host(self) -> Optional[str]:
+        """The onion name this node hosts its gateway at, or None if it hosts none."""
+        with self._lock:
+            return self._onion[0] if self._onion else None
+
+    def onion_port(self) -> Optional[int]:
+        """The port peers dial on the onion name."""
+        with self._lock:
+            return self._onion[3] if self._onion else None
 
     def _set(self, state: str, detail: str = "") -> None:
         """Change state, and leave it on disk for ``nodo tor status`` (another process)."""
@@ -94,7 +128,10 @@ class TorBackend(RoutingBackend):
         try:
             path = status_file()
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps({"state": state, "detail": detail, "pid": os.getpid()}))
+            path.write_text(json.dumps({
+                "state": state, "detail": detail, "pid": os.getpid(),
+                "onion": self.onion_host(),
+            }))
         except Exception:
             pass
 
@@ -209,14 +246,25 @@ class TorBackend(RoutingBackend):
         data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         port = get_free_port()
         torrc = tor_dir / "torrc"
-        torrc.write_text(
-            f"DataDirectory {data_dir}\n"
-            "SocksPort 0\n"
-            f"HTTPTunnelPort 127.0.0.1:{port}\n"
-            "ClientOnly 1\n"
-            "AvoidDiskWrites 1\n"
-            "Log notice stdout\n"
-        )
+        lines = [
+            f"DataDirectory {data_dir}",
+            "SocksPort 0",
+            f"HTTPTunnelPort 127.0.0.1:{port}",
+            "ClientOnly 1",
+            "AvoidDiskWrites 1",
+            "Log notice stdout",
+        ]
+        with self._lock:
+            onion = self._onion
+        if onion:
+            _, seed, local_port, virtual_port = onion
+            _, service_dir = onion_key.write_hidden_service_dir(tor_dir / "gateway", seed)
+            lines += [
+                f"HiddenServiceDir {service_dir}",
+                "HiddenServiceVersion 3",
+                f"HiddenServicePort {virtual_port} 127.0.0.1:{local_port}",
+            ]
+        torrc.write_text("\n".join(lines) + "\n")
         os.chmod(torrc, 0o600)
 
         process = subprocess.Popen(

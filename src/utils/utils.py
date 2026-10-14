@@ -396,7 +396,7 @@ def _is_stream_transport(ip: str, transport: str) -> bool:
         not transport
         or transport == "tcp"
         or transport in registry.routed_tags()
-        or registry.backend_for_host(ip) is not registry.CLEARNET
+        or registry.routed_host(ip)
     )
 
 

@@ -18,6 +18,11 @@ def uri_expiry(now: int) -> int:
     # module-level import here would be circular.
     from src.utils.config import ConfigManager
 
+    # A hidden node announces no expiry: the date a lease ends says where the address
+    # lives. An onion name does not expire in any case.
+    if ConfigManager().get("routing.HIDDEN", False) is True:
+        return 0
+
     try:
         validity = int(ConfigManager().get("network.ADDRESS_VALIDITY_SECONDS", 0) or 0)
     except (TypeError, ValueError):

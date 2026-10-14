@@ -434,8 +434,13 @@ The plan is in
 
 | Key | Default | Meaning |
 |---|---|---|
+| `routing.HIDDEN` | `false` | Hide this node's IP address from its peers. See "Hidden mode" below. |
 | `routing.tor.ENABLED` | `auto` | `auto`: use Tor if nodo's own copy is installed, and never install it. `true`: use Tor, and install it at the next start if it is missing. `false`: never use Tor. |
 | `routing.tor.BINARY` | `""` | Path of a `tor` program (0.4.8 or later) to use in place of the installed copy. Empty uses the copy under `dependencies.tor.RUNTIME_ROOT`. |
+| `routing.tor.ANNOUNCE` | `auto` | Announce an onion address for the gateway. `auto`: announce if `ENABLED` is `true`, and in hidden mode. `true`: announce. `false`: never. |
+| `routing.tor.CLEARNET_VIA_EXIT` | `false` | Hidden mode only. Call peers that have a clearnet address through a Tor exit. |
+
+### Calling `.onion` peers
 
 Tor is not installed with the node. To install it, run `nodo tor install`, or set
 `routing.tor.ENABLED` to `true` (`nodo config set routing.tor.ENABLED=true`, or the
@@ -448,14 +453,59 @@ checks each download against a digest fixed in `bash/install_tor.sh`.
   official source. It needs a C compiler, `make`, and the libevent, OpenSSL and zlib
   development headers. It prints the package names if one is missing.
 
-The node runs Tor with a `HTTPTunnelPort` on `127.0.0.1` only. It has no SOCKS port, no
-control port, and nothing a peer can connect to. A call to a `.onion` host is sent to
-that port with the host *name*, so the local resolver never sees it. If Tor is not
-running, the call fails. It never falls back to a direct connection. `nodo tor status`
-shows the state.
+The node runs Tor with a `HTTPTunnelPort` on `127.0.0.1` only. It has no SOCKS port and
+no control port. A call to a `.onion` host is sent to that port with the host *name*, so
+the local resolver never sees it. If Tor is not running, the call fails. It never falls
+back to a direct connection. `nodo tor status` shows the state.
 
-This is only the outgoing side. The node does not announce an onion address yet, and
-it does not hide its own IP address.
+### Announcing an onion address
+
+With `routing.tor.ANNOUNCE` on, the node hosts its gateway as an onion service and
+announces the `.onion` name next to its other addresses (and on the Ergo register R9).
+Peers that call Tor use it.
+
+- The name comes from `identity.MNEMONIC`. A node restored from its mnemonic has the
+  same name, and no key file needs a backup. The key is not the identity key: the seed
+  is hashed with its own personalisation string, so neither key gives the other.
+- Tor forwards the onion service to a second gRPC server on `127.0.0.1` and a free port.
+  No port of the host is opened to the Internet. TLS runs end to end inside the circuit,
+  so a peer still checks the node by its certificate.
+- A call through the onion server comes from `127.0.0.1`. The gateway identifies a local
+  instance by the address of the caller, so the onion server marks its calls and the
+  gateway does not read an address from them. A remote peer is never taken for a local
+  instance, and needs a `client_id` like any other peer.
+- The address is announced when Tor is up, not before.
+
+### Hidden mode
+
+`routing.HIDDEN: true` hides the IP address of the node from its peers. The node:
+
+- announces only its onion address, in `GetPeerInfo` and on the register R9. It never
+  writes an IP there;
+- listens on `127.0.0.1` only, and opens no firewall port for the gateway;
+- calls every peer through Tor. A peer with only a clearnet address is not called,
+  unless `routing.tor.CLEARNET_VIA_EXIT` is `true`. Then it is called through a Tor
+  exit. Many exits block non-standard ports;
+- never gives an instance a public address. The caller uses the service tunnel
+  (`network.DELEGATION_TUNNEL_POLICY` is `always`);
+- announces no address expiry, and rounds its benchmark scores to two digits;
+- does not check that the gateway port is reachable from a guest. The plaintext port
+  is still checked.
+
+The node refuses to start if `routing.tor.ENABLED` or `routing.tor.ANNOUNCE` is `false`,
+if `network.PUBLIC_IP` is set, or if `network.ANNOUNCE_PRIVATE_ADDRESSES` is on. It also
+stops if it cannot host the onion service: it does not fall back to an IP.
+
+An identity that was ever announced with an IP is not hidden: peers and the ledger
+keep that address. Use a new `identity.MNEMONIC` for a hidden node.
+
+What hidden mode does not hide:
+
+- The own outbound traffic of the node (the Ergo explorer and node, Bitcoin, the energy
+  meter) still shows the IP to the operator of that service.
+- Payments and reputation on the ledger are public. If the identity is funded from an
+  account that is linked to a person, the identity is linked too.
+- Tor does not protect against an observer that sees both ends of a circuit.
 
 ## `energy`
 

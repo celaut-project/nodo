@@ -6,6 +6,7 @@ import grpc
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from src.gateway.gateway import Gateway
+from src.routing.policy import announce_onion, hidden_mode
 from src.gateway.utils import plaintext_gateway_host
 from src.manager.maintain import manager_thread
 from src.tunneling import delegated_endpoints
@@ -295,6 +296,48 @@ def _report_network_policy() -> None:
         raise SystemExit(1) from e
 
 
+def _start_onion_server(virtual_port: int):
+    """Serve the gateway to Tor, if this node announces an onion address.
+
+    A second gRPC server on a free loopback port. Tor hosts the onion service and
+    forwards to it. The server tells its callers apart from local instances (see
+    ``src.gateway.onion_server``). Returns the server, or None.
+    """
+    if not announce_onion():
+        return None
+    try:
+        from src.gateway.onion_server import OnionOriginInterceptor, bind_onion_server
+        from src.identity.node_identity import get_identity_mnemonic
+        from src.routing import registry
+        from src.utils.network import get_free_port
+
+        mnemonic = get_identity_mnemonic()
+        if not mnemonic:
+            raise RuntimeError('this node has no identity.MNEMONIC')
+        local_port = get_free_port()
+        onion_server = grpc.server(
+            futures.ThreadPoolExecutor(max_workers=10),
+            interceptors=[OnionOriginInterceptor()],
+        )
+        celaut_pb2_grpc.add_GatewayServicer_to_server(Gateway(), server=onion_server)
+        if not bind_onion_server(onion_server, local_port):
+            raise RuntimeError(f'could not bind 127.0.0.1:{local_port}')
+        onion_server.start()
+        host = registry.TOR.configure_onion(mnemonic, local_port, virtual_port)
+        log.LOGGER(
+            f'Onion service: {host}:{virtual_port} -> 127.0.0.1:{local_port}. '
+            'It is announced once Tor is up.'
+        )
+        return onion_server
+    except Exception as e:
+        log.LOGGER(f'Could not set up the onion service: {e}')
+        if hidden_mode():
+            # Nothing else makes this node reachable, and falling back to an IP would
+            # be the opposite of what was asked.
+            raise SystemExit(1) from e
+        return None
+
+
 def serve():
     # Resolved before anything else: a node whose gateway port is unassigned or
     # unreachable cannot serve a single request, and every service it accepted
@@ -311,7 +354,10 @@ def serve():
     port = env_manager.get_gateway_port()
     _sweep_leaked_probes()
     _ensure_guest_bridge()
-    _open_gateway_port(port)
+    if not hidden_mode():
+        # A hidden node opens nothing: its TLS port listens on loopback, and the only way
+        # in from outside is the onion service.
+        _open_gateway_port(port)
 
     _report_network_policy()
 
@@ -385,7 +431,11 @@ def serve():
     # node's identity key, so a caller can tell it reached us and not whoever holds the
     # address now. This is the only port announced to peers, and the only one this
     # node's own client code ever dials.
-    server.add_secure_port('[::]:' + str(port), server_credentials())
+    if hidden_mode():
+        server.add_secure_port('127.0.0.1:' + str(port), server_credentials())
+        log.LOGGER(f'Hidden mode: the gateway listens on 127.0.0.1:{port} only.')
+    else:
+        server.add_secure_port('[::]:' + str(port), server_credentials())
 
     # ...and, optionally, the same servicer in plain gRPC on a second port, for the
     # services this node runs -- they speak plain gRPC and are handed this port in
@@ -425,10 +475,17 @@ def serve():
             )
 
     server.start()
+    onion_server = _start_onion_server(port)
 
     # Only now can the guest-side probe distinguish "the firewall drops this" from
     # "nothing answers on this port".
-    _verify_gateway_ports(server, port, plaintext_port)
+    if hidden_mode():
+        # The TLS port is on loopback, so a guest cannot reach it and the probe would
+        # refuse to start a node that is working as intended. The plaintext port is the
+        # one guests use, and it is still checked.
+        _verify_plaintext_gateway_port(plaintext_port)
+    else:
+        _verify_gateway_ports(server, port, plaintext_port)
 
     # Measure any per-core benchmark score still at -1 (#459). After the server is up,
     # because the benchmark core service is launched through it; on a daemon thread

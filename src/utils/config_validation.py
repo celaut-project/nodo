@@ -787,19 +787,48 @@ def validate_routing_config(config: Dict[str, Any]) -> None:
         return
     if not isinstance(routing, dict):
         raise ConfigValidationError("routing must be a mapping.")
+    hidden = routing.get("HIDDEN", False)
+    if not isinstance(hidden, bool):
+        raise ConfigValidationError(f"routing.HIDDEN must be true or false, not {hidden!r}.")
     tor = routing.get("tor")
     if tor is None:
-        return
+        tor = {}
     if not isinstance(tor, dict):
         raise ConfigValidationError("routing.tor must be a mapping.")
-    enabled = tor.get("ENABLED", "auto")
-    if not isinstance(enabled, bool) and enabled != "auto":
-        raise ConfigValidationError(
-            f"routing.tor.ENABLED must be true, false or auto, not {enabled!r}."
-        )
+    for key in ("ENABLED", "ANNOUNCE"):
+        value = tor.get(key, "auto")
+        if not isinstance(value, bool) and value != "auto":
+            raise ConfigValidationError(
+                f"routing.tor.{key} must be true, false or auto, not {value!r}."
+            )
     binary = tor.get("BINARY", "")
     if binary is not None and not isinstance(binary, str):
         raise ConfigValidationError("routing.tor.BINARY must be a path or empty.")
+    via_exit = tor.get("CLEARNET_VIA_EXIT", False)
+    if not isinstance(via_exit, bool):
+        raise ConfigValidationError(
+            f"routing.tor.CLEARNET_VIA_EXIT must be true or false, not {via_exit!r}."
+        )
+
+    if not hidden:
+        return
+    # Each of these would put the IP address in the announcement, or leave the node
+    # with no way to be reached, so hidden mode refuses to start on them.
+    if tor.get("ENABLED", "auto") is False:
+        raise ConfigValidationError("routing.HIDDEN needs routing.tor.ENABLED to be true or auto.")
+    if tor.get("ANNOUNCE", "auto") is False:
+        raise ConfigValidationError(
+            "routing.HIDDEN needs an onion address to announce: routing.tor.ANNOUNCE must not be false."
+        )
+    network = config.get("network") if isinstance(config.get("network"), dict) else {}
+    if str(network.get("PUBLIC_IP") or "").strip():
+        raise ConfigValidationError(
+            "routing.HIDDEN conflicts with network.PUBLIC_IP: that address would be announced."
+        )
+    if network.get("ANNOUNCE_PRIVATE_ADDRESSES"):
+        raise ConfigValidationError(
+            "routing.HIDDEN conflicts with network.ANNOUNCE_PRIVATE_ADDRESSES."
+        )
 
 
 def validate_balancers_config(config: Dict[str, Any], *, warn=None) -> None:
