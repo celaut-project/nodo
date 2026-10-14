@@ -1014,6 +1014,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 | `port` | int | Yes | Port number the service listens on |
 | `transport` | string or array | No | Transport protocol(s). Defaults to `["tcp"]` |
 | `protocol` | array | No | Application-level protocol tags (e.g. `["grpc"]`). Accepts `None` if omitted |
+| `protocol_stack` | array of protocol descriptors | No | The protocol layers of the slot, bottom layer first. Each entry is a list of tags (`["http"]`) or an object with `tags` / `prose` / `formal`, as in a network's `protocol_stack`. Use it when the slot speaks more than one layer, for example `[["http"], ["chat"]]` for the chat convention of chatui. A slot declares `protocol` or `protocol_stack`, not both. `protocol` is one layer |
 | `mu_per_call` | object | No | Map of method name → price in MU (integer; the node's unit of account) |
 
 **Example — Single gRPC slot:**
@@ -1046,6 +1047,22 @@ The older `entrypoint` top-level field is still supported and will be automatica
             "port": 8080,
             "transport": ["tcp", "http"],
             "protocol": ["rest", "http1.1"]
+        }
+    ]
+}
+```
+
+**Example — A slot with two protocol layers (HTTP, and a convention above it):**
+```json
+{
+    "api": [
+        {
+            "port": 8080,
+            "transport": "tcp",
+            "protocol_stack": [
+                ["http"],
+                {"tags": ["chat"], "prose": "Echo of each message."}
+            ]
         }
     ]
 }
