@@ -329,7 +329,9 @@ Tests: a matrix of network type and `HIDDEN` in `test_network_policy_enforcement
 
 ### Phase 4: networks whose peers are instances on other nodes
 
-This phase needs its own proposal.
+The proposal is [`539-remote-network-members.md`](539-remote-network-members.md). It
+replaces the sketch below: the tunnel is opened by a member handle and charged to the
+caller, and a service sees only addresses.
 
 1. A node learns the members of a network from its peers. A peer answers with an
    `Instance` that has an empty `uri`.
