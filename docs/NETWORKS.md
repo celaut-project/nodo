@@ -616,3 +616,24 @@ Move existing `pow_networks.ENDPOINTS` entries here; the old setting is retired.
 Generic peer discovery and reputation readers remain reusable helpers, but their
 untrusted suggestions are only wired to the PoW verifier, not blindly granted as
 members of arbitrary domains. Operator defaults are explicit operator assertions.
+
+## Hidden mode
+
+A node with `routing.HIDDEN: true` hides its IP address from its peers
+([`CONFIG.md`](CONFIG.md#hidden-mode)). It does not run a service whose traffic would
+leave the host directly, because the other end would see that address:
+
+| Network | Hidden node |
+|---|---|
+| `*` | Not run here |
+| `pow:<chain>` | Not run here, and no `ResolveNetwork` answer |
+| A host name (`api.example.com`) | Not run here |
+| A tag with seeds in `service_networks.default_instances` | Not run here |
+| A tag that only local instances answer | Run here |
+
+"Not run here" is not a refusal of the domain, unlike the operator lists above. The
+launcher skips this node and the balancer goes on to a peer. The peer's address is the
+one that shows, and this node calls the peer through Tor. The cost quote of this node
+refuses the service, so a peer's balancer does not select it. The virtualizer checks
+again (`rootfs.build_network_resolution`). The check is `enforce_hidden_mode` in
+`src/utils/network_policy.py`.

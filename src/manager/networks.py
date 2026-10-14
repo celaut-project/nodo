@@ -13,7 +13,7 @@ from src.identity.node_identity import (
 )
 from src.manager.network_templates import find_placeholders
 from src.utils.logger import LOGGER
-from src.utils.network_policy import enforce_network_policy
+from src.utils.network_policy import enforce_hidden_resolution, enforce_network_policy
 from src.manager.network_defaults import configured_endpoints, endpoint_addresses
 from src.manager.pow_networks import (
     POW_TAG_PREFIX,
@@ -669,6 +669,7 @@ def resolve_network_for_peer(
     before it learns anything about its own declaration.
     """
     enforce_network_policy(networks=[network], subject=subject)
+    enforce_hidden_resolution(network, subject=subject)
 
     # An unfilled `${VAR}` is not a question this node can answer: there is no peer
     # holding a block named after a variable. Refused here, and before the caller is

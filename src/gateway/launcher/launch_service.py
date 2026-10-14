@@ -16,7 +16,7 @@ from src.utils.cost_functions.generate_estimated_cost import generate_estimated_
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
-from src.utils.network_policy import enforce_network_policy
+from src.utils.network_policy import enforce_network_policy, hidden_mode_rejection
 from src.manager.shares import ShareAuthorizationError, authorize_network_shares, authorize_shares
 from src.manager.share_location import LOCAL, ShareLocationConflict, locate_network_shares
 from src.utils.shared_filesystems import declarations_for_service, service_requires_parent_colocation
@@ -302,6 +302,23 @@ def launch_service(
                 log.LOGGER(f"Service {service_id} cannot run on this node: {e}")
                 local_virtiofsd_failure = str(e)
 
+        # Hidden mode (routing.HIDDEN): this node does not run a service whose traffic
+        # would leave the host directly, because that traffic shows its IP address. It is
+        # a reason not to run it *here*, not a refusal of the domain: a peer that is not
+        # hidden can run it, and this node calls that peer through Tor. So the local
+        # candidate is skipped, as for a missing virtiofsd, and the balancer goes on.
+        local_hidden_failure = None
+        hidden_rejection = hidden_mode_rejection(
+            networks=service.network,
+            subject=f"service {service_id}" if service_id else "this service",
+        )
+        if hidden_rejection is not None:
+            local_hidden_failure = (
+                f"hidden mode does not run '{hidden_rejection.tag}' on this node: "
+                f"{hidden_rejection.reason}"
+            )
+            log.LOGGER(f"Service {service_id} cannot run on this node: {local_hidden_failure}")
+
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
         # `father_id` -- dev client ids are drawn from a small reusable pool
@@ -385,6 +402,9 @@ def launch_service(
                     continue
                 if local_virtiofsd_failure and peer == 'local':
                     launch_failures.append(f"local: {local_virtiofsd_failure}")
+                    continue
+                if local_hidden_failure and peer == 'local':
+                    launch_failures.append(f"local: {local_hidden_failure}")
                     continue
 
                 log.LOGGER(f'Service balancer select peer {peer}')

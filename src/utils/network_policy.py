@@ -59,6 +59,21 @@ The policy applies to every service, including the core services the node starts
 for itself (packer, source-application, low-demand-fallback). Their egress is still
 egress from this node, and exempting them would make ``blacklist: ["*"]`` a claim
 the node does not keep; an operator who needs one of them whitelists what it needs.
+
+**Hidden mode** (``routing.HIDDEN``) adds a second, different refusal: the networks
+whose traffic would leave this host directly, and so show its IP address to whoever is
+at the other end. It is not about the domain, it is about who reaches it:
+
+* the open egress ``*``, a ``pow:<chain>`` network (the host checks each candidate and
+  the guest connects to it), a host name, and a tag with operator seeds
+  (``service_networks.default_instances``) are refused **for local execution**;
+* a network whose only members are instances this node runs is allowed: that traffic
+  stays on the bridge.
+
+A peer can still run a refused service: the peer's IP is the one that shows, and this
+node calls the peer through Tor. So ``enforce_hidden_mode`` is not applied before the
+balancer, as the operator lists are. The launcher skips the local candidate, the cost
+quote answers that this node does not run the service, and ``rootfs`` checks again.
 """
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence, Tuple
@@ -81,6 +96,13 @@ WHITELIST_KEY = f"{CONFIG_BLOCK}.whitelist"
 _MISTAKEN_BLOCK = "networks"
 
 _env_manager = ConfigManager()
+
+HIDDEN_RULE = "routing.HIDDEN"
+# Copies of the constants of the resolvers, kept here so that this module stays cheap
+# to import. tests/test_hidden_network_policy.py checks that they agree.
+ALL_EGRESS_TAG = "*"
+POW_TAG_PREFIX = "pow:"
+SEEDS_KEY = "service_networks.default_instances"
 
 
 class NetworkPolicyConfigError(Exception):
@@ -116,6 +138,8 @@ class Rejection:
     declared: Tuple[Tuple[str, ...], ...]
     candidates: Tuple[str, ...]
     subject: str = ""
+    # Set for a hidden-mode refusal: why this tag would leave the host directly.
+    reason: str = ""
 
     def report(self) -> str:
         """The rejection as the client reads it: what it asked for, and what said no.
@@ -136,6 +160,17 @@ class Rejection:
             matched = f"  matched none of:   {listed}"
 
         subject = f" for {self.subject}" if self.subject else ""
+        if self.rule == HIDDEN_RULE:
+            return (
+                f"Hidden mode: this node does not run a service{subject} that reaches "
+                f"'{self.tag}' itself.\n"
+                f"  declared networks:\n{declared}\n"
+                f"  rejected tag:      {self.tag} (network #{self.network_index})\n"
+                f"  rule:              {HIDDEN_RULE}\n"
+                f"  reason:            {self.reason}\n"
+                f"Its traffic would leave this host directly and show its IP address. "
+                f"A peer that is not hidden can run it. See docs/CONFIG.md, 'Hidden mode'."
+            )
         return (
             f"Network policy: this node refuses to run a service{subject} that reaches "
             f"'{self.tag}'.\n"
@@ -282,3 +317,86 @@ def enforce_network_policy(
     rejection = resolved.check(networks=networks, subject=subject)
     if rejection is not None:
         raise NetworkPolicyRejection(rejection)
+
+
+def direct_egress_reason(tag: str, env_manager: Optional[ConfigManager] = None) -> Optional[str]:
+    """Why traffic for ``tag`` would leave this host directly, or None if it stays local.
+
+    Mirrors the sources ``networks.resolve_network`` uses for a tag, in its order: a
+    ``pow:`` domain, the operator's seeds, then a tag shaped like a host name. ``*`` is
+    the open egress the firewall grants for that tag alone. A tag that none of these
+    answer resolves only to the instances this node runs.
+    """
+    manager = env_manager if env_manager is not None else _env_manager
+    tag = str(tag or "").strip()
+    if not tag:
+        return None
+    if tag == ALL_EGRESS_TAG:
+        return "it opens all egress to the Internet"
+    if tag.startswith(POW_TAG_PREFIX):
+        return "proof-of-work peers are checked from this host and reached directly"
+    seeds = manager.get(SEEDS_KEY, {}) or {}
+    if isinstance(seeds, dict) and seeds.get(tag):
+        return f"the operator's seeds for it ({SEEDS_KEY}) are outside addresses"
+    if tag.islower() and "." in tag:
+        return "a host name is reached directly"
+    return None
+
+
+def hidden_mode_rejection(
+        networks: Sequence[celaut.Service.Network],
+        subject: str = "",
+        env_manager: Optional[ConfigManager] = None,
+) -> Optional[Rejection]:
+    """The first network a hidden node cannot reach itself, or None.
+
+    None when the node is not hidden. Every tag counts: the tags of an entry are
+    synonyms, and the resolver uses the first one that answers, so a single tag that
+    leaves the host is enough to refuse the entry.
+    """
+    manager = env_manager if env_manager is not None else _env_manager
+    if manager.get(HIDDEN_RULE, False) is not True:
+        return None
+    declared = tuple(tuple(network.tags) for network in networks)
+    for index, network in enumerate(networks, start=1):
+        for tag in network.tags:
+            reason = direct_egress_reason(tag, manager)
+            if reason:
+                return Rejection(
+                    tag=tag, network_index=index, rule=HIDDEN_RULE, pattern=None,
+                    declared=declared, candidates=(), subject=subject, reason=reason,
+                )
+    return None
+
+
+class HiddenModeRejection(NetworkPolicyRejection):
+    """A hidden node refuses to reach a network itself. A peer may still run it."""
+
+
+def enforce_hidden_mode(
+        networks: Sequence[celaut.Service.Network],
+        subject: str = "",
+) -> None:
+    """Raise :class:`HiddenModeRejection` if a hidden node would reach ``networks`` itself."""
+    rejection = hidden_mode_rejection(networks=networks, subject=subject)
+    if rejection is not None:
+        raise HiddenModeRejection(rejection)
+
+
+def enforce_hidden_resolution(network: celaut.Service.Network, subject: str = "") -> None:
+    """A hidden node does not answer ``ResolveNetwork`` for a ``pow:`` domain.
+
+    Answering means checking each candidate's chain state from this host, which shows
+    its IP address to every candidate. The other sources only read the config or ask
+    the local resolver, and contact nobody.
+    """
+    if _env_manager.get(HIDDEN_RULE, False) is not True:
+        return
+    declared = (tuple(network.tags),)
+    for tag in network.tags:
+        if str(tag).strip().startswith(POW_TAG_PREFIX):
+            raise HiddenModeRejection(Rejection(
+                tag=tag, network_index=1, rule=HIDDEN_RULE, pattern=None,
+                declared=declared, candidates=(), subject=subject,
+                reason="proof-of-work peers are checked from this host",
+            ))

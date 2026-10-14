@@ -12,7 +12,7 @@ from src.utils.cost_functions.architecture_resources import NOT_EXECUTING_REASON
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils import activity_window
-from src.utils.network_policy import enforce_network_policy
+from src.utils.network_policy import enforce_hidden_mode, enforce_network_policy
 from src.utils.logger import LOGGER as logger
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 
@@ -127,6 +127,12 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         # networks the policy rejects only gets the peer's balancer to
         # select us and fail at launch (#280).
         enforce_network_policy(
+            networks=service.network,
+            subject=f"service {self.service_hash}",
+        )
+        # A hidden node quotes only what it would run itself, and it runs nothing whose
+        # traffic leaves this host directly: that traffic shows its IP address.
+        enforce_hidden_mode(
             networks=service.network,
             subject=f"service {self.service_hash}",
         )
