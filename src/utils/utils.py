@@ -16,6 +16,7 @@ from protos import celaut_pb2 as celaut
 from protos import celaut_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.manager.resources import mem_manager
+from src.routing import registry
 from src.utils import logger as log
 from src.utils.registry_errors import (
     ServiceNotInRegistry,
@@ -379,8 +380,23 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     yield from (
         format_uri(ip, port) for ip, port, transport in get_peer_directions(
         peer_id=peer_id
-    ) if (not transport or transport.strip().lower() == "tcp")
+    ) if _is_stream_transport(ip, transport)
         and is_open(ip=ip, port=port, transport=transport)
+    )
+
+
+def _is_stream_transport(ip: str, transport: str) -> bool:
+    """Whether a stored address is one a gRPC channel can be opened to.
+
+    TCP, and the networks a routing backend reaches (``tor-onion-v3``). A ``.onion``
+    host counts whatever transport it was stored with: it is never dialled directly.
+    """
+    transport = (transport or "").strip().lower()
+    return (
+        not transport
+        or transport == "tcp"
+        or transport in registry.routed_tags()
+        or registry.backend_for_host(ip) is not registry.CLEARNET
     )
 
 
@@ -414,8 +430,15 @@ def is_open(ip: str, port: int, transport: str = "tcp") -> bool:
     """
     # Empty transport = a legacy row from before addresses declared one; those were
     # all TCP gateways, so probing them as TCP keeps the old behaviour.
-    if transport and transport.strip().lower() != "tcp":
+    #
+    # A routed address (``.onion``) is probed through its backend, which is also what
+    # keeps its name away from the local resolver. With the backend down it is closed,
+    # not "open on no evidence": nothing can reach it from here.
+    backend = registry.backend_for_transport(transport, ip)
+    if backend is None:
         return True
+    if not backend.available():
+        return False
 
     key = (ip, port)
     now = time.monotonic()
@@ -427,15 +450,18 @@ def is_open(ip: str, port: int, transport: str = "tcp") -> bool:
             return cached[0]
 
     try:
-        family = socket.AF_INET
-        try:
-            if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
-                family = socket.AF_INET6
-        except ValueError:
-            pass  # A DNS name: let getaddrinfo pick via AF_INET.
-        sock = socket.socket(family, socket.SOCK_STREAM)
-        sock.settimeout(1)
-        sock.connect((ip, port))
+        if backend is registry.CLEARNET:
+            family = socket.AF_INET
+            try:
+                if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+                    family = socket.AF_INET6
+            except ValueError:
+                pass  # A DNS name: let getaddrinfo pick via AF_INET.
+            sock = socket.socket(family, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            sock.connect((ip, port))
+        else:
+            sock = backend.open_socket(ip, port, backend.probe_timeout_s)
         sock.close()
         result = True
     except Exception:
@@ -444,7 +470,8 @@ def is_open(ip: str, port: int, transport: str = "tcp") -> bool:
     with _is_open_cache_lock:
         for stale_key in [k for k, (_, expiry) in _is_open_cache.items() if expiry <= now]:
             _is_open_cache.pop(stale_key, None)
-        _is_open_cache[key] = (result, now + _IS_OPEN_CACHE_TTL_SECONDS)
+        ttl = backend.probe_ttl_open_s if result else backend.probe_ttl_closed_s
+        _is_open_cache[key] = (result, now + (ttl if backend is not registry.CLEARNET else _IS_OPEN_CACHE_TTL_SECONDS))
         _is_open_cache.move_to_end(key)
         while len(_is_open_cache) > _IS_OPEN_CACHE_MAX_ENTRIES:
             _is_open_cache.popitem(last=False)

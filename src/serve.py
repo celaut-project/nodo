@@ -356,6 +356,15 @@ def serve():
     except Exception as e:
         log.LOGGER(f'Could not reset the inbound tunnel snapshot: {e}')
 
+    # The routing backends (Tor), in the background: Tor takes a while to bootstrap, and
+    # with routing.tor.ENABLED true on a node that does not have it yet this is also
+    # where it is installed. Until a backend is ready its addresses are unreachable.
+    try:
+        from src.routing import registry as routing
+        routing.start_backends()
+    except Exception as e:
+        log.LOGGER(f'Could not start the routing backends: {e}')
+
     # Run manager.
     threading.Thread(
         target=manager_thread,

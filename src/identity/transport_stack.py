@@ -103,8 +103,34 @@ Layer = Tuple[Tuple[str, ...], str, bytes]
 # Peer.Uri.transport
 # ---------------------------------------------------------------------------------
 
-def transport_component() -> Layer:
-    """``tcp``: what ``Peer.Uri.transport`` names, under the whole stack."""
+ONION_V3_TAG: Final[str] = "tor-onion-v3"
+
+
+def onion_transport_component() -> Layer:
+    """``tor-onion-v3``: a TCP stream through a Tor v3 onion service.
+
+    The routing network is part of the transport, so the tag is never mixed with
+    ``tcp``: a node that does not know it skips the address, where ``tcp`` plus an
+    unknown tag would read as ``tcp`` and dial the ``.onion`` name directly.
+    """
+    formal = component_formal({
+        "kind": "stream",
+        "port": "per-address",
+        "spec": "rend-spec-v3",
+    })
+    prose = (
+        "The transport is a TCP stream over a Tor v3 onion service, as rend-spec-v3 "
+        "specifies. The address gives a .onion host name and a virtual port."
+    )
+    return (ONION_V3_TAG,), prose, formal
+
+
+def transport_component(tag: str = "tcp") -> Layer:
+    """What ``Peer.Uri.transport`` names, under the whole stack: ``tcp``, or a routed network."""
+    if tag == ONION_V3_TAG:
+        return onion_transport_component()
+    if tag != "tcp":
+        raise ValueError(f"Unknown transport {tag!r}.")
     formal = component_formal({
         "spec": "RFC9293",
         "port": "per-address",
@@ -506,9 +532,9 @@ def _layers() -> Tuple[Layer, ...]:
     )
 
 
-def declare_transport(uri, *, prose: bool = True) -> None:
+def declare_transport(uri, *, prose: bool = True, tag: str = "tcp") -> None:
     """Declare ``uri.transport``, replacing whatever was there."""
-    tags, description, formal = transport_component()
+    tags, description, formal = transport_component(tag)
     uri.transport.CopyFrom(celaut_pb2.Peer.Uri.Protocol(
         tags=list(tags), prose=description if prose else "", formal=formal
     ))

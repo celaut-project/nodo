@@ -36,7 +36,6 @@ visible (a pre-flight handshake plus the gRPC one per call, and ``metrics`` is p
 per instance from ``maintain``), so it is worth measuring with TLS in place and then
 designing the pool, rather than guessing now.
 """
-import socket
 import ssl
 from typing import Optional, Tuple
 
@@ -54,11 +53,8 @@ from src.identity.tls_identity import (
     certificate_pem,
     peer_id_from_certificate,
 )
+from src.routing import registry
 from src.utils.utils import format_uri, generate_uris_by_peer_id
-
-# The pre-flight is a TLS handshake against an address a caller already believes is
-# reachable, so this only has to cover a slow link, not a dead one.
-PREFLIGHT_TIMEOUT_S = 5.0
 
 # Certificates are pinned by their bytes, so the name in them is fixed and meaningless
 # (see tls_identity.TLS_SERVER_NAME) -- but BoringSSL checks it against the target,
@@ -77,6 +73,11 @@ def split_target(target: str) -> Tuple[str, int]:
 def _fetch_certificate(target: str) -> bytes:
     """The certificate ``target`` serves, unverified, over a throwaway TLS connection.
 
+    The connection is opened by the backend the host needs (``src.routing``): a
+    ``.onion`` name goes through Tor and is never handed to the local resolver. The
+    backend also sets the timeout -- a first circuit to an onion service is slow --
+    which is why this is no longer one constant.
+
     ALPN advertises ``h2`` because that is what the server is: gRPC's C-core negotiates
     HTTP/2 and can refuse a client that offers nothing.
     """
@@ -87,7 +88,8 @@ def _fetch_certificate(target: str) -> bytes:
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     context.set_alpn_protocols(["h2"])
-    with socket.create_connection((host, port), timeout=PREFLIGHT_TIMEOUT_S) as sock:
+    backend = registry.backend_for_host(host)
+    with backend.open_socket(host, port, backend.preflight_timeout_s) as sock:
         with context.wrap_socket(sock, server_hostname=TLS_SERVER_NAME) as tls:
             certificate = tls.getpeercert(binary_form=True)
     if not certificate:
@@ -108,7 +110,9 @@ def channel_and_peer_id(target: str) -> Tuple[grpc.Channel, str]:
     credentials = grpc.ssl_channel_credentials(
         root_certificates=certificate_pem(certificate)
     )
-    return grpc.secure_channel(target, credentials, options=list(_CHANNEL_OPTIONS)), peer_id
+    host, _ = split_target(target)
+    options = list(_CHANNEL_OPTIONS) + registry.backend_for_host(host).grpc_channel_options(host)
+    return grpc.secure_channel(target, credentials, options=options), peer_id
 
 
 def node_channel(target: str, expected_peer_id: str) -> grpc.Channel:

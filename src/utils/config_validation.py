@@ -780,6 +780,28 @@ BALANCER_POSITIVE = (
 )
 
 
+def validate_routing_config(config: Dict[str, Any]) -> None:
+    """Validate the ``routing`` section. A missing section or key means the defaults."""
+    routing = config.get("routing")
+    if routing is None:
+        return
+    if not isinstance(routing, dict):
+        raise ConfigValidationError("routing must be a mapping.")
+    tor = routing.get("tor")
+    if tor is None:
+        return
+    if not isinstance(tor, dict):
+        raise ConfigValidationError("routing.tor must be a mapping.")
+    enabled = tor.get("ENABLED", "auto")
+    if not isinstance(enabled, bool) and enabled != "auto":
+        raise ConfigValidationError(
+            f"routing.tor.ENABLED must be true, false or auto, not {enabled!r}."
+        )
+    binary = tor.get("BINARY", "")
+    if binary is not None and not isinstance(binary, str):
+        raise ConfigValidationError("routing.tor.BINARY must be a path or empty.")
+
+
 def validate_balancers_config(config: Dict[str, Any], *, warn=None) -> None:
     """Validate the ``balancers:`` block: the shape of the peer-selection formula.
 

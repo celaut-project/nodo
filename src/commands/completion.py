@@ -111,6 +111,7 @@ COMMANDS = sorted(
         "decrease_deposit",
         "remove",
         "prune",
+        "tor",
         "inspect",
         "services",
         "tag",

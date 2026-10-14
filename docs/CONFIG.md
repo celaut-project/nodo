@@ -100,7 +100,7 @@ it (see
 ## `dependencies` — local runtimes
 
 Portable runtimes installed under `MAIN_DIR` (not system-wide): `python`, `java`,
-`rust`, `yq`, and `buildkit`. Override only to relocate the toolchain.
+`rust`, `yq`, `buildkit` and `tor`. Override only to relocate the toolchain.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -130,6 +130,10 @@ on a machine you develop on, where you want the toolchain regardless.
 `bash/install_buildkit.sh` on demand and drives its own **rootless** builder under
 `MAIN_DIR`, never a system-wide daemon. Because the builder runs as the invoking
 user, `nodo pack` needs no privileges at all.
+
+`dependencies.tor.RUNTIME_ROOT` (`${main.MAIN_DIR}/runtime/tor`) is the same kind of
+optional, node-local dependency. It holds nodo's own copy of Tor. See
+[`routing`](#routing--peers-that-are-not-on-the-clearnet).
 
 ## `virtualizers` — execution runtime
 
@@ -420,6 +424,38 @@ enforcement points: [`NETWORKS.md`](NETWORKS.md).
 
 On the `nodo tui` All page, `a` appends a pattern to the selected list and `d`
 removes the selected one.
+
+## `routing` — peers that are not on the clearnet
+
+A peer address names the network it is reached over in its transport. `tcp` is the
+clearnet. `tor-onion-v3` is a Tor v3 onion service, and its host is a `.onion` name.
+The plan is in
+[`proposals/onion-routing-tor-backend.md`](proposals/onion-routing-tor-backend.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `routing.tor.ENABLED` | `auto` | `auto`: use Tor if nodo's own copy is installed, and never install it. `true`: use Tor, and install it at the next start if it is missing. `false`: never use Tor. |
+| `routing.tor.BINARY` | `""` | Path of a `tor` program (0.4.8 or later) to use in place of the installed copy. Empty uses the copy under `dependencies.tor.RUNTIME_ROOT`. |
+
+Tor is not installed with the node. To install it, run `nodo tor install`, or set
+`routing.tor.ENABLED` to `true` (`nodo config set routing.tor.ENABLED=true`, or the
+CONFIG page of `nodo tui`). The installer puts Tor under `dependencies.tor.RUNTIME_ROOT`
+and nowhere else. It never reads `/etc/tor` and never uses the Tor of the system. It
+checks each download against a digest fixed in `bash/install_tor.sh`.
+
+- x86_64: the installer downloads the prebuilt Tor Expert Bundle.
+- aarch64: no prebuilt Linux bundle exists, so the installer builds Tor from the
+  official source. It needs a C compiler, `make`, and the libevent, OpenSSL and zlib
+  development headers. It prints the package names if one is missing.
+
+The node runs Tor with a `HTTPTunnelPort` on `127.0.0.1` only. It has no SOCKS port, no
+control port, and nothing a peer can connect to. A call to a `.onion` host is sent to
+that port with the host *name*, so the local resolver never sees it. If Tor is not
+running, the call fails. It never falls back to a direct connection. `nodo tor status`
+shows the state.
+
+This is only the outgoing side. The node does not announce an onion address yet, and
+it does not hide its own IP address.
 
 ## `energy`
 

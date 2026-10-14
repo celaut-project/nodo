@@ -12,6 +12,7 @@ from src.tunneling import delegated_endpoints
 from src.utils import logger as log
 from src.utils import utils
 from src.utils.bee_client import BeeClient
+from src.routing import registry as routing
 from src.utils.config import ConfigManager
 from src.utils.instance_names import normalize_instance_name, random_instance_name
 from src.identity.grpc_transport import node_channel, peer_channel
@@ -340,7 +341,14 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
     stored: List[Tuple[str, int]] = []
     for uri in peer.uri:
         try:
-            protocol = resolve_slot_transport_protocols(
+            routed = routing.routed_backend_for_tags(uri.transport.tags)
+            if routed is None and routing.backend_for_host(uri.ip) is not routing.CLEARNET:
+                raise ValueError("a .onion host must declare the tor-onion-v3 transport.")
+            if routed is not None and not routed.handles_host(uri.ip):
+                raise ValueError(f"the {routed.tag} transport needs a {routed.name} host name.")
+            if routed is not None and not routed.valid_host(uri.ip):
+                raise ValueError(f"{uri.ip} is not a valid {routed.name} address.")
+            protocol = routed or resolve_slot_transport_protocols(
                 uri,
                 logger_fn=log.LOGGER,
                 context=f"[PEER][{peer_id}]",
@@ -379,7 +387,10 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
                 f"'nodo protocol {peer_id}' shows the differences."
             )
             continue
-        sc.add_peer_uri(uri=uri, peer_id=peer_id, transport=protocol.value)
+        sc.add_peer_uri(
+            uri=uri, peer_id=peer_id,
+            transport=routed.tag if routed else protocol.value,
+        )
         stored.append((uri.ip, uri.port))
     return stored
 

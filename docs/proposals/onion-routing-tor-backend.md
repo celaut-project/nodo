@@ -1,6 +1,6 @@
 # Onion routing for the gateway: a Tor backend
 
-Working document. It has no issue number yet. The first part is an **audit** of the code
+Working document for [#539](https://github.com/celaut-project/nodo/issues/539). The first part is an **audit** of the code
 on `dev`. The second part is the **design** and the **implementation plan**. A visual
 version of the plan is in [`onion-routing-tor-backend.html`](onion-routing-tor-backend.html).
 
@@ -283,8 +283,8 @@ safe to release alone.
 | Probe | `utils.py:393` | `is_open` uses the backend. Use a longer timeout and cache for Tor |
 | Peer intake | `manager.py:318` | Store `transport="tor-onion-v3"` if the registry knows it. Reject mixed tags |
 | Address choice | `utils.py:367` | Select addresses with an active backend, in order of preference |
-| Descriptor | `transport_stack.py:106` | Make `transport_component()` backend-aware. `nodo protocol` shows it |
-| Install | `install.sh` | Install the `tor` package, version 0.4.8 or later |
+| Descriptor | `transport_stack.py:106` | `transport_component(tag)` knows `tor-onion-v3` (implemented) |
+| Install | `bash/install_tor.sh` | Install nodo's own Tor (0.4.9.14) under `runtime/tor`, on demand: `nodo tor install`, or `routing.tor.ENABLED: true`. Not part of `install.sh`. Digests are pinned. x86_64 uses the Tor Expert Bundle. aarch64 builds from source, because no prebuilt Linux/arm64 bundle exists |
 
 Tests: registry, intake of a Tor address (with a simulated old node), CONNECT against a
 fake proxy with a check that no DNS lookup occurs, the digest test.
