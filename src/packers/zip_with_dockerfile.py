@@ -876,12 +876,7 @@ class ZipContainerPacker:
                 raise ValueError(
                     f"service.json api slot port={slot.port}: 'transport' contains no valid tags."
                 )
-            slot.protocol_stack.append(
-                self._parse_protocol_descriptor(
-                    item.get('protocol'),
-                    f"api slot port={slot.port}: 'protocol'",
-                )
-            )
+            slot.protocol_stack.extend(self._parse_api_protocol_stack(item, slot.port))
             # `gas_amount_per_call` was renamed to `mu_per_call` with the pricing
             # rework. Rejecting the old key rather than ignoring it is deliberate: a
             # service.json that still uses it would otherwise pack with no per-call
@@ -898,7 +893,39 @@ class ZipContainerPacker:
                 for method, amount_mu in item.get("mu_per_call", {}).items()
             })
             self.service.api.slot.append(slot)
-            
+
+    def _parse_api_protocol_stack(self, item, port):
+        """An api slot's ``protocol`` (one layer) or ``protocol_stack`` (layers) -> protocols.
+
+        ``protocol`` is the old key and gives exactly one entry, as it always did, so
+        the bytes of every service packed to date do not change. ``protocol_stack`` is
+        a list of descriptors from the bottom layer to the top, read like a network's
+        ``protocol_stack``. A convention on top of HTTP (for example the ``chat``
+        convention of chatui: ``http``, then ``chat``) needs more than one layer.
+        A slot declares one key or the other, not both.
+        """
+        if 'protocol_stack' not in item:
+            return [self._parse_protocol_descriptor(
+                item.get('protocol'), f"api slot port={port}: 'protocol'",
+            )]
+        if 'protocol' in item:
+            raise ValueError(
+                f"service.json api slot port={port}: declare 'protocol' or "
+                "'protocol_stack', not both."
+            )
+        stack = item['protocol_stack']
+        if not isinstance(stack, list) or not stack:
+            raise ValueError(
+                f"service.json api slot port={port}: 'protocol_stack' must be a "
+                "non-empty list of protocol descriptors (bottom layer first)."
+            )
+        return [
+            self._parse_protocol_descriptor(
+                declaration, f"api slot port={port}: 'protocol_stack'[{index}]",
+            )
+            for index, declaration in enumerate(stack)
+        ]
+
     # ------------------------------------------------------------------ #
     # network
     # ------------------------------------------------------------------ #
