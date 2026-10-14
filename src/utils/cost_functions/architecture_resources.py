@@ -27,6 +27,7 @@ still be refused for load, and that is what the call is for.
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 from protos import celaut_pb2 as celaut
+from src.routing.policy import hidden_mode
 from src.utils import benchmark, host_limits, keyvalue, logger as log
 from src.utils.arch_guard import arch_from_tags
 from src.utils.config import ConfigManager
@@ -69,6 +70,14 @@ def served_architectures() -> List[List[str]]:
     return [list(aliases) for aliases in SUPPORTED_ARCHITECTURES if aliases]
 
 
+def _two_significant_digits(value: int) -> int:
+    """A benchmark score, rounded so it no longer tells one machine from its twin."""
+    if value < 100:
+        return value
+    digits = len(str(value)) - 2
+    return round(value, -digits)
+
+
 def announced_resources(served: Optional[Iterable[Sequence[str]]] = None) -> List[celaut.ArchitectureResources]:
     """This node's ``Peer.resources``: one entry per architecture it serves.
 
@@ -96,7 +105,10 @@ def announced_resources(served: Optional[Iterable[Sequence[str]]] = None) -> Lis
             at_most.mem_limit = int(ram)
         if disk:
             at_most.disk_space = int(disk)
-        keyvalue.from_dict(at_most.benchmark, benchmark.measured(benchmark.node_scores(aliases[0])))
+        scores = benchmark.measured(benchmark.node_scores(aliases[0]))
+        if hidden_mode():
+            scores = {key: _two_significant_digits(value) for key, value in scores.items()}
+        keyvalue.from_dict(at_most.benchmark, scores)
         entries.append(entry)
     return entries
 

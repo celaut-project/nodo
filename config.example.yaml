@@ -57,9 +57,22 @@ dependencies:
 # declares the network it is reached over in its transport; `tcp` is the clearnet.
 # See docs/proposals/onion-routing-tor-backend.md.
 routing:
+  # Hide this node's IP address from its peers. In hidden mode the node:
+  #   - announces only its onion address, never an IP (also on the Ergo register R9);
+  #   - listens on loopback only, and opens no firewall port for the gateway;
+  #   - calls every peer through Tor. Without CLEARNET_VIA_EXIT, a peer that has only a
+  #     clearnet address is not called at all;
+  #   - never gives an instance a public address. The caller uses the service tunnel
+  #     (network.DELEGATION_TUNNEL_POLICY is `always`);
+  #   - has no address expiry, rounds its benchmark scores, and skips the check that
+  #     the gateway port is reachable.
+  # It needs routing.tor.ANNOUNCE not false, routing.tor.ENABLED not false, and no
+  # network.PUBLIC_IP or network.ANNOUNCE_PRIVATE_ADDRESSES. An identity that was ever
+  # announced with an IP is not hidden: use a new identity.mnemonic.
+  HIDDEN: false
   tor:
     # Whether to call peers that announce a .onion address, through a Tor process
-    # nodo runs itself (loopback only; it listens for nothing).
+    # nodo runs itself (loopback only).
     #   auto  use Tor if nodo's own copy is installed; never install it. (default)
     #   true  use Tor, and install it on the first start if it is missing.
     #   false never.
@@ -68,6 +81,16 @@ routing:
     # Path of a `tor` executable (0.4.8 or later) to use instead of the installed
     # copy. Empty uses the one under dependencies.tor.RUNTIME_ROOT.
     BINARY: ""
+    # Whether to announce an onion address for this node's gateway. The name comes
+    # from identity.MNEMONIC, so a restored node keeps it. Tor hosts it as an onion
+    # service that forwards to a gRPC server on 127.0.0.1; no port is opened.
+    #   auto  announce if ENABLED is true, and in hidden mode. (default)
+    #   true  announce (Tor must be installed).
+    #   false never.
+    ANNOUNCE: auto
+    # Hidden mode only: call peers that have a clearnet address through a Tor exit.
+    # Many exits block non-standard ports, so those calls may fail.
+    CLEARNET_VIA_EXIT: false
 
 virtualizers:
   # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed
