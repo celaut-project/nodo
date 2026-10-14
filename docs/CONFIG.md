@@ -491,6 +491,14 @@ Peers that call Tor use it.
 - announces no address expiry, and rounds its benchmark scores to two digits;
 - does not check that the gateway port is reachable from a guest. The plaintext port
   is still checked.
+- does not run a service whose traffic would leave the host directly, because that
+  traffic shows the IP address. These are the networks `*`, `pow:<chain>`, a host name
+  (`api.example.com`), and a tag with seeds in `service_networks.default_instances`.
+  A network whose only members are instances this node runs is allowed. A peer that is
+  not hidden can still run the refused service: the launcher skips this node, the cost
+  quote says this node does not run it, and the virtualizer checks again. This node
+  does not answer `ResolveNetwork` for a `pow:` network, because that checks each
+  candidate from this host. See [`NETWORKS.md`](NETWORKS.md).
 
 The node refuses to start if `routing.tor.ENABLED` or `routing.tor.ANNOUNCE` is `false`,
 if `network.PUBLIC_IP` is set, or if `network.ANNOUNCE_PRIVATE_ADDRESSES` is on. It also

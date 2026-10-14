@@ -15,7 +15,7 @@ from src.utils.cost_functions.generate_estimated_cost import generate_estimated_
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
-from src.utils.network_policy import enforce_network_policy
+from src.utils.network_policy import enforce_network_policy, hidden_mode_rejection
 from src.manager.shares import ShareAuthorizationError, authorize_shares
 from src.utils.shared_filesystems import declarations_for_service, service_requires_parent_colocation
 from src.virtualizers.microvm import virtiofsd
@@ -280,6 +280,23 @@ def launch_service(
         # recycled id. Popped (consumed) here so it can only ever apply to this
         # one launch. No fallback to the balancer if this fails: forced means
         # forced.
+        # Hidden mode (routing.HIDDEN): this node does not run a service whose traffic
+        # would leave the host directly, because that traffic shows its IP address. It is
+        # a reason not to run it *here*, not a refusal of the domain: a peer that is not
+        # hidden can run it, and this node calls that peer through Tor. So the local
+        # candidate is skipped, as for a missing virtiofsd, and the balancer goes on.
+        local_hidden_failure = None
+        hidden_rejection = hidden_mode_rejection(
+            networks=service.network,
+            subject=f"service {service_id}" if service_id else "this service",
+        )
+        if hidden_rejection is not None:
+            local_hidden_failure = (
+                f"hidden mode does not run '{hidden_rejection.tag}' on this node: "
+                f"{hidden_rejection.reason}"
+            )
+            log.LOGGER(f"Service {service_id} cannot run on this node: {local_hidden_failure}")
+
         forced_peer = sc.pop_forced_execution_peer(recursion_guard_token) if recursion_guard_token else None
         pin_local = forced_peer == FORCED_LOCAL
         if pin_local:
@@ -344,6 +361,9 @@ def launch_service(
                     continue
                 if local_virtiofsd_failure and peer == 'local':
                     launch_failures.append(f"local: {local_virtiofsd_failure}")
+                    continue
+                if local_hidden_failure and peer == 'local':
+                    launch_failures.append(f"local: {local_hidden_failure}")
                     continue
 
                 log.LOGGER(f'Service balancer select peer {peer}')

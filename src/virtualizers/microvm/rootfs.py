@@ -25,7 +25,7 @@ from src.manager.pow_networks import narrow_instances_for_local_grant
 from src.utils import guest_env
 from src.utils import keyvalue
 from src.utils import logger as log
-from src.utils.network_policy import enforce_network_policy
+from src.utils.network_policy import enforce_hidden_mode, enforce_network_policy
 from src.virtualizers.microvm.errors import MicroVMError
 from src.virtualizers.microvm.host import run
 from src.virtualizers.microvm.network import NETWORK_BRIDGE_NAME
@@ -298,6 +298,9 @@ def build_network_resolution(
     # run, and a guest silently started without the egress it asked for is the
     # unexplained rejection this policy exists to replace.
     enforce_network_policy(networks=networks, subject="this instance")
+    # And hidden mode (routing.HIDDEN): the launcher skips this node for such a service,
+    # so reaching this line means it did not.
+    enforce_hidden_mode(networks=networks, subject="this instance")
 
     # The requesting instance's own environment values feed `${VAR}` selection
     # keys in a network's `formal` (#385).

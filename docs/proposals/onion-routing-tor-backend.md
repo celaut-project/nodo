@@ -311,6 +311,11 @@ and a test that a caller from `127.0.0.1` on the onion listener gets no instance
 
 ### Phase 3: network policy in hidden mode
 
+Implemented, with one change: the rejection applies to local execution only, not
+before the balancer. A peer that is not hidden can run the service, and this node
+calls the peer through Tor. The launcher skips the local candidate, as it does for a
+missing virtiofsd.
+
 Apply the table in §2.4 in `enforce_network_policy` (`src/utils/network_policy.py`).
 Reject `ResolveNetwork` for `pow:` networks in `resolve_network_for_peer`
 (`networks.py:635`). Make the cost estimate answer "not supported".
