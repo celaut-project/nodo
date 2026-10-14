@@ -316,6 +316,11 @@ before the balancer. A peer that is not hidden can run the service, and this nod
 calls the peer through Tor. The launcher skips the local candidate, as it does for a
 missing virtiofsd.
 
+Then extended (`routing.tor.SERVICE_EGRESS`, on by default): instead of not running such
+a service, the node sends its outside TCP through a Tor `TransPort` on the guest
+bridge, and checks `pow:` candidates through Tor. The rejection above stays for
+`SERVICE_EGRESS: false`, and for a launch while Tor is not ready.
+
 Apply the table in §2.4 in `enforce_network_policy` (`src/utils/network_policy.py`).
 Reject `ResolveNetwork` for `pow:` networks in `resolve_network_for_peer`
 (`networks.py:635`). Make the cost estimate answer "not supported".

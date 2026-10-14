@@ -49,7 +49,7 @@ import socket
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 import requests
 
@@ -61,6 +61,8 @@ from src.identity.node_identity import (
 )
 from src.manager.ergo import MAINNET_P2P_PORT, MAINNET_REST_PORT
 from src.manager.network_defaults import configured_endpoints
+from src.routing import tunneled_http as routing_http
+from src.routing.policy import hidden_mode, is_local_address, service_egress_via_tor
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 
@@ -625,6 +627,24 @@ def _get_json(url: str, path: str, timeout: int) -> Optional[Any]:
     is an absence, but neither can qualify a peer, so both collapse to None here and
     the caller reads them the same way: not a peer for this network.
     """
+    if hidden_mode() and not is_local_address(urlsplit(url).hostname or ""):
+        # A hidden node never checks a candidate from its own address: the candidate
+        # would see it. Through Tor when its services' egress goes there, else not at all.
+        if not service_egress_via_tor():
+            logger(f"[POW] {url}{path}: not checked, hidden mode without routing.tor.SERVICE_EGRESS")
+            return None
+        try:
+            status, body = routing_http.get(f"{url}{path}", timeout=timeout)
+        except Exception as e:
+            logger(f"[POW] {url}{path} (through Tor): {type(e).__name__}")
+            return None
+        if status != 200:
+            return None
+        try:
+            return json.loads(body)
+        except ValueError:
+            return None
+
     try:
         response = requests.get(f"{url}{path}", timeout=timeout)
     except requests.exceptions.RequestException as e:

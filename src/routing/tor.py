@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple
 
 from src.routing import onion_key
 from src.routing.base import RoutingBackend, RoutingUnavailable
-from src.routing.policy import hidden_mode
+from src.routing.policy import hidden_mode, service_egress_via_tor
 from src.routing.tor_install import (
     TorInstallError,
     ensure_tor_installed,
@@ -96,6 +96,7 @@ class TorBackend(RoutingBackend):
         self._state = "stopped"
         self._detail = ""
         self._onion: Optional[Tuple[str, bytes, int, int]] = None
+        self._trans: Optional[Tuple[str, int]] = None
 
     # --- the onion service -----------------------------------------------------
 
@@ -134,6 +135,22 @@ class TorBackend(RoutingBackend):
             }))
         except Exception:
             pass
+
+    # --- the services' egress --------------------------------------------------
+
+    def transparent_proxy(self) -> Optional[Tuple[str, int]]:
+        """``(ip, port)`` of the ``TransPort`` the guests' TCP is redirected to, once ready.
+
+        Only in hidden mode with ``routing.tor.SERVICE_EGRESS``. It listens on the guest
+        bridge address, so only guests reach it.
+        """
+        with self._lock:
+            return self._trans if self.available() else None
+
+    def http_tunnel_port(self) -> Optional[int]:
+        """The ``HTTPTunnelPort`` on loopback, once ready (``src.routing.tunneled_http`` uses it)."""
+        with self._lock:
+            return self._http_port if self.available() else None
 
     # --- what the registry and the CLI ask -------------------------------------
 
@@ -254,6 +271,15 @@ class TorBackend(RoutingBackend):
             "AvoidDiskWrites 1",
             "Log notice stdout",
         ]
+        if service_egress_via_tor():
+            # The guests' outside TCP, redirected here by the firewall
+            # (policy.tor_redirect_rules). On the bridge address, so only guests reach
+            # it. Tor isolates the circuits of each client address, that is of each VM.
+            bridge_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+            trans_port = get_free_port()
+            lines.append(f"TransPort {bridge_ip}:{trans_port}")
+            with self._lock:
+                self._trans = (bridge_ip, trans_port)
         with self._lock:
             onion = self._onion
         if onion:
@@ -303,6 +329,7 @@ class TorBackend(RoutingBackend):
         with self._lock:
             process, self._process = self._process, None
             self._http_port = None
+            self._trans = None
             self._set("stopped")
         if process is None or process.poll() is not None:
             return

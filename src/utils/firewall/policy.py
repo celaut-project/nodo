@@ -229,6 +229,51 @@ def allow_all_egress_rule(vmachine_id: str, vm_ip: str) -> Rule:
     )
 
 
+def tor_redirect_rules(
+    vmachine_id: str,
+    vm_ip: str,
+    tor_ip: str,
+    tor_port: int,
+    ip: Optional[str] = None,
+    port: Optional[int] = None,
+    except_subnet: Optional[str] = None,
+) -> List[Rule]:
+    """Send a guest's TCP to one destination (or to all, without ``ip``) into Tor.
+
+    For a hidden node (``routing.HIDDEN``): the connection is translated to Tor's
+    ``TransPort`` on the host, which reads the original destination and opens it from a
+    Tor exit. Nothing is accepted in FORWARD, so ``block_all`` still drops whatever this
+    does not translate -- UDP among it.
+
+    ``except_subnet`` leaves a destination range alone (the guest subnet, for ``*``),
+    so the guest still reaches the gateway and the instances that run on this node.
+    """
+    source = validate_address(vm_ip, "VM address")
+    tor = validate_address(tor_ip, "Tor address")
+    if ip is not None and except_subnet is not None:
+        raise RuleError("A redirect has either one destination or an excepted range.")
+    destination = validate_address(ip, "Destination address") if ip is not None else None
+    excepted = validate_address(except_subnet, "Excepted subnet") if except_subnet else None
+    if destination is not None:
+        target = f"{destination}:{port}" if port is not None else destination
+    else:
+        target = f"all-but-{excepted}" if excepted else "all"
+    return [
+        Rule(
+            chain=Chain.PREROUTING,
+            comment=_comment(vmachine_id, f"tor;{target}/tcp"),
+            verdict=Verdict.DNAT,
+            source=source,
+            destination=destination or excepted,
+            destination_is_negated=bool(excepted),
+            protocol="tcp",
+            dport=port,
+            dnat_to=f"{tor}:{int(tor_port)}",
+        ),
+        allow_host_connection_rule(vmachine_id, vm_ip, tor, int(tor_port), "tcp"),
+    ]
+
+
 def masquerade_rule(subnet: str) -> Rule:
     """Source-NAT the guest subnet on its way off this host.
 

@@ -804,11 +804,10 @@ def validate_routing_config(config: Dict[str, Any]) -> None:
     binary = tor.get("BINARY", "")
     if binary is not None and not isinstance(binary, str):
         raise ConfigValidationError("routing.tor.BINARY must be a path or empty.")
-    via_exit = tor.get("CLEARNET_VIA_EXIT", False)
-    if not isinstance(via_exit, bool):
-        raise ConfigValidationError(
-            f"routing.tor.CLEARNET_VIA_EXIT must be true or false, not {via_exit!r}."
-        )
+    for key, default in (("CLEARNET_VIA_EXIT", False), ("SERVICE_EGRESS", True)):
+        value = tor.get(key, default)
+        if not isinstance(value, bool):
+            raise ConfigValidationError(f"routing.tor.{key} must be true or false, not {value!r}.")
 
     if not hidden:
         return
