@@ -564,33 +564,8 @@ class ZipContainerPacker:
         if not self._read_only_filesystem_requested():
             return
 
-        # A ro service cannot export a shared filesystem. The node refuses this at
-        # launch (src/virtualizers/microvm/shares.py): a share is seeded from the
-        # exporter's own image with `debugfs rdump`, an ext4 reader that cannot open
-        # a squashfs/erofs image, and seeding from nothing would hide the content
-        # the service shipped behind an empty directory. The same condition is
-        # checked here, on the same declarations, so the operator finds out while
-        # packing rather than after publishing a service that cannot start. A
-        # network share counts too: its first member seeds it the same way.
-        try:
-            exported = [
-                d for d in declarations_for_filesystem(root_filesystem)
-                if d.shared or d.network
-            ]
-        except ValueError as e:
-            raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
-
-        if exported:
-            paths = ", ".join(sorted(d.path for d in exported))
-            raise ValueError(
-                f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' is true and this service "
-                f"exports or shares {len(exported)} shared filesystem(s) ({paths}). A "
-                f"share is seeded from the image of its exporter or first member, which "
-                f"the node reads with "
-                f"debugfs -- an ext4 reader that cannot open the squashfs/erofs image "
-                f"a read-only service is built into. Drop "
-                f"'{READ_ONLY_FILESYSTEM_KEY}' or drop the shared declaration."
-            )
+        # A read-only service may take part in shares, exported or not: the node
+        # seeds them from its squashfs/erofs image and mounts them read-only.
 
         # Per-entry metadata is mandatory for ro (assert_complete_filesystem_metadata
         # in src/utils/filesystem_xattrs.py refuses the build otherwise). Nothing to

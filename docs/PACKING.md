@@ -690,17 +690,10 @@ not the image bytes built from it, so the format is unobservable from inside the
 guest — while pinning one in the manifest would let a node lacking that package
 reject a service it is perfectly able to run.
 
-**What it rules out.** Exporting a shared filesystem (`shared: true`). A share is
-seeded with what the exporter packaged at that path, read out of its own image with
-`debugfs` — an ext4 reader, which cannot open a squashfs or erofs image. A service
-declaring both is refused rather than given an empty share.
-
-The packer refuses that combination **at pack time**, naming the exported paths, so
-the operator finds out before publishing a service that no node could start. It is
-the same condition the node checks at launch, read from the same declarations.
-Importing a directory (`guest: true`) is unaffected: it is mounted from the parent's
-share, with nothing read out of this service's own image, so it has no quarrel with
-an immutable rootfs.
+**Shares.** A read-only service can export, inherit or be a member of a shared
+filesystem. It mounts every share read-only, so it can read what other instances
+write, and it cannot write. When its image seeds a share, the node reads the
+subtree with `unsquashfs` or `fsck.erofs`, so no mount is needed.
 
 **Per-entry metadata is already handled.** The mandatory
 `mode`/`uid`/`gid`/`mtime_ns`/`device.*` keys above are not something a
@@ -753,7 +746,7 @@ node would refuse.
 - Types are checked strictly, as with `read_only_filesystem`: a list of objects, a `role` of `shared` or `guest`, strings where strings are expected. Unknown fields and a repeated `path` are refused. This is checked when `service.json` is read, before the image is built.
 - The result goes through the same validation the node applies, so `shared` and `guest` are exclusive, declarations cannot nest, names (`tag`, or the path) cannot repeat on one side, `tag` must match `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, and `env` must be a POSIX variable name.
 - Absent or empty writes **nothing**, so no existing service gets a new id.
-- `read_only_filesystem: true` together with a `shared` or `network` entry is refused at pack time (see above). A `guest` entry is fine.
+- `read_only_filesystem: true` is allowed with every role (see above). The service mounts its shares read-only.
 - An exported directory counts toward the **exporter's** `resources.at_init.disk_space` and `at_most.disk_space`; its guests are charged nothing for it. Each member of a network share is charged an equal part of it. See [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#accounting).
 
 ---

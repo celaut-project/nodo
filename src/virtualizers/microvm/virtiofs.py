@@ -135,6 +135,7 @@ def mount_for(
     exported: bool,
     host_dir: Optional[str] = None,
     network: bool = False,
+    read_only_image: bool = False,
 ) -> SharedMount:
     """The mount that realizes one authorized share for this VM.
 
@@ -142,12 +143,14 @@ def mount_for(
     writes have to land on the host directory its children will read. ``host_dir``
     overrides where the share lives, which is how a rundev sandbox hands over a
     directory of the developer's own. A member of a network share mounts it the
-    way it declared.
+    way it declared. An instance whose image is read-only (``read_mode=ro``) mounts
+    every share read-only, exporter included: it can see what the others write, and
+    only an instance that is not read-only can write.
     """
     return SharedMount(
         share_id_hex=ref.share_id,
         tag=virtiofs_tag(ref.share_id),
-        readonly=False if exported else ref.readonly,
+        readonly=read_only_image or (False if exported else ref.readonly),
         guest_path=ref.path,
         host_dir=host_dir or str(shared_dir(base_dir, ref.share_id)),
         exported=exported,
