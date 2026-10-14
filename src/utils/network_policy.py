@@ -70,8 +70,11 @@ at the other end. It is not about the domain, it is about who reaches it:
 * a network whose only members are instances this node runs is allowed: that traffic
   stays on the bridge.
 
-A peer can still run a refused service: the peer's IP is the one that shows, and this
-node calls the peer through Tor. So ``enforce_hidden_mode`` is not applied before the
+With ``routing.tor.SERVICE_EGRESS`` (the default) none of this is refused: the
+services' TCP goes through Tor instead (``policy.tor_redirect_rules``), and only a Tor
+that is not ready yet makes the launcher skip this node. Without it, a peer can still
+run a refused service: the peer's IP is the one that shows, and this node calls the
+peer through Tor. So ``enforce_hidden_mode`` is not applied before the
 balancer, as the operator lists are. The launcher skips the local candidate, the cost
 quote answers that this node does not run the service, and ``rootfs`` checks again.
 """
@@ -103,6 +106,7 @@ HIDDEN_RULE = "routing.HIDDEN"
 ALL_EGRESS_TAG = "*"
 POW_TAG_PREFIX = "pow:"
 SEEDS_KEY = "service_networks.default_instances"
+SERVICE_EGRESS_KEY = "routing.tor.SERVICE_EGRESS"
 
 
 class NetworkPolicyConfigError(Exception):
@@ -357,6 +361,11 @@ def hidden_mode_rejection(
     manager = env_manager if env_manager is not None else _env_manager
     if manager.get(HIDDEN_RULE, False) is not True:
         return None
+    if manager.get(SERVICE_EGRESS_KEY, True) is not False:
+        # The services' TCP goes through Tor (``routing.tor.SERVICE_EGRESS``), so
+        # nothing leaves the host directly. Whether Tor is ready is the launcher's
+        # question, at launch time: see ``needs_outside_egress``.
+        return None
     declared = tuple(tuple(network.tags) for network in networks)
     for index, network in enumerate(networks, start=1):
         for tag in network.tags:
@@ -366,6 +375,18 @@ def hidden_mode_rejection(
                     tag=tag, network_index=index, rule=HIDDEN_RULE, pattern=None,
                     declared=declared, candidates=(), subject=subject, reason=reason,
                 )
+    return None
+
+
+def needs_outside_egress(
+        networks: Sequence[celaut.Service.Network],
+        env_manager: Optional[ConfigManager] = None,
+) -> Optional[str]:
+    """The first tag of ``networks`` whose traffic leaves this host, or None."""
+    for network in networks:
+        for tag in network.tags:
+            if direct_egress_reason(tag, env_manager):
+                return tag
     return None
 
 
@@ -392,6 +413,8 @@ def enforce_hidden_resolution(network: celaut.Service.Network, subject: str = ""
     """
     if _env_manager.get(HIDDEN_RULE, False) is not True:
         return
+    if _env_manager.get(SERVICE_EGRESS_KEY, True) is not False:
+        return  # The candidates are checked through Tor (pow_networks._get_json).
     declared = (tuple(network.tags),)
     for tag in network.tags:
         if str(tag).strip().startswith(POW_TAG_PREFIX):

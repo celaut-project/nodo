@@ -155,6 +155,29 @@ class TorProcessTests(unittest.TestCase):
         state = json.loads((self.dir / "storage" / "tor" / "state.json").read_text())
         self.assertEqual(state["onion"], host)
 
+    def test_a_hidden_node_opens_a_transport_on_the_guest_bridge(self):
+        self._fake_tor()
+        self.settings.update({"routing.HIDDEN": True,
+                              "virtualizers.ch.NETWORK_GATEWAY_IP": "192.168.200.1"})
+        backend = self._backend()
+        with mock.patch.object(tor_module, "service_egress_via_tor", return_value=True):
+            backend.start()
+            self.assertTrue(wait_for(backend.available), backend.status())
+        ip, port = backend.transparent_proxy()
+        self.assertEqual(ip, "192.168.200.1")
+        self.assertIn(f"TransPort 192.168.200.1:{port}", self.seen.read_text())
+        backend.stop()
+        self.assertIsNone(backend.transparent_proxy())
+
+    def test_no_transport_without_service_egress(self):
+        self._fake_tor()
+        backend = self._backend()
+        with mock.patch.object(tor_module, "service_egress_via_tor", return_value=False):
+            backend.start()
+            self.assertTrue(wait_for(backend.available))
+        self.assertNotIn("TransPort", self.seen.read_text())
+        self.assertIsNone(backend.transparent_proxy())
+
     def test_a_tor_older_than_0_4_8_is_refused(self):
         self._fake_tor(version="0.4.7.16")
         backend = self._backend()

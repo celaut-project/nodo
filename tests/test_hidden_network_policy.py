@@ -1,5 +1,8 @@
 """Hidden mode and the networks a service declares (phase 3 of #539).
 
+These tests are about ``routing.tor.SERVICE_EGRESS: false``. With it on (the default)
+the services' egress goes through Tor instead: tests/test_service_egress_tor.py.
+
 A hidden node does not run a service whose traffic would leave the host directly:
 that traffic shows its IP address. It is a reason not to run the service *here*, so
 a peer can still run it, and the cost quote, the virtualizer and ResolveNetwork refuse
@@ -73,13 +76,13 @@ class DirectEgressTests(unittest.TestCase):
             enforce_hidden_resolution(net("pow:ergo"))
 
     def test_a_hidden_node_allows_local_members_only(self):
-        with override(routing__HIDDEN=True, service_networks__default_instances={}):
+        with override(routing__HIDDEN=True, routing__tor__SERVICE_EGRESS=False, service_networks__default_instances={}):
             self.assertIsNone(hidden_mode_rejection([net("postgres"), net("cache", "redis")]))
             self.assertIsNone(hidden_mode_rejection([]))
 
     def test_one_tag_that_leaves_the_host_refuses_the_entry(self):
         # Tags of an entry are synonyms and the resolver takes the first that answers.
-        with override(routing__HIDDEN=True, service_networks__default_instances={}):
+        with override(routing__HIDDEN=True, routing__tor__SERVICE_EGRESS=False, service_networks__default_instances={}):
             rejection = hidden_mode_rejection(
                 [net("postgres"), net("db", "db.example.com")], subject="service s"
             )
@@ -94,13 +97,13 @@ class DirectEgressTests(unittest.TestCase):
     def test_the_raise_is_a_policy_rejection(self):
         # ResolveNetwork and the launcher already turn a NetworkPolicyRejection into
         # "this node does not reach that network".
-        with override(routing__HIDDEN=True):
+        with override(routing__HIDDEN=True, routing__tor__SERVICE_EGRESS=False):
             with self.assertRaises(HiddenModeRejection) as caught:
                 enforce_hidden_mode([net("*")])
         self.assertIsInstance(caught.exception, NetworkPolicyRejection)
 
     def test_resolve_network_refuses_only_pow_in_hidden_mode(self):
-        with override(routing__HIDDEN=True):
+        with override(routing__HIDDEN=True, routing__tor__SERVICE_EGRESS=False):
             with self.assertRaises(HiddenModeRejection):
                 enforce_hidden_resolution(net("pow:ergo"))
             # A host name or seeds are read from the resolver and the config: nobody
@@ -109,7 +112,7 @@ class DirectEgressTests(unittest.TestCase):
             enforce_hidden_resolution(net("postgres"))
 
     def test_resolve_network_for_peer_stops_before_any_candidate_is_checked(self):
-        with override(routing__HIDDEN=True), \
+        with override(routing__HIDDEN=True, routing__tor__SERVICE_EGRESS=False), \
                 mock.patch.object(networks, "resolve_network") as resolve:
             with self.assertRaises(HiddenModeRejection):
                 networks.resolve_network_for_peer(net("pow:ergo"), subject="peer p")
@@ -118,7 +121,7 @@ class DirectEgressTests(unittest.TestCase):
     def test_the_virtualizer_checks_again(self):
         from src.virtualizers.microvm import rootfs
         service = celaut.Service(network=[net("*")])
-        with override(routing__HIDDEN=True), \
+        with override(routing__HIDDEN=True, routing__tor__SERVICE_EGRESS=False), \
                 mock.patch.object(rootfs, "enforce_network_policy"):
             with self.assertRaises(HiddenModeRejection):
                 rootfs.build_network_resolution(service, father_id="")
@@ -130,7 +133,7 @@ class DirectEgressTests(unittest.TestCase):
         )
         iterable.service_hash = "svc"
         service = celaut.Service(network=[net("pow:bitcoin")])
-        with override(routing__HIDDEN=True), \
+        with override(routing__HIDDEN=True, routing__tor__SERVICE_EGRESS=False), \
                 mock.patch.object(quote_mod, "read_service_from_disk", return_value=service), \
                 mock.patch.object(quote_mod, "enforce_network_policy"):
             with self.assertRaises(HiddenModeRejection):
@@ -139,6 +142,8 @@ class DirectEgressTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchTests(unittest.TestCase):
+    service_egress = False
+
     def _launch(self, service, candidates, hidden=True):
         cost = SimpleNamespace(cost=SimpleNamespace())
         mod = launch_mod
@@ -147,6 +152,7 @@ class LaunchTests(unittest.TestCase):
                 return stack.enter_context(mock.patch.object(target, name, **kwargs))
 
             stack.enter_context(override(routing__HIDDEN=hidden,
+                                         routing__tor__SERVICE_EGRESS=self.service_egress,
                                          service_networks__default_instances={}))
             patched(mod, "declarations_for_service", return_value=[])
             patched(mod, "service_requires_parent_colocation", return_value=False)

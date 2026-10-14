@@ -42,3 +42,33 @@ def clearnet_via_exit() -> bool:
 def onion_virtual_port() -> int:
     """The port peers dial on the onion name: the gateway port, as on the clearnet."""
     return int(env_manager.get_gateway_port())
+
+
+def service_egress_via_tor() -> bool:
+    """Whether a hidden node sends the outside traffic of its services through Tor.
+
+    ``routing.tor.SERVICE_EGRESS`` (default true), in hidden mode only. The TCP that a
+    service sends outside this host goes to Tor's ``TransPort`` instead of out of the
+    host's interface, so the other end sees a Tor exit. UDP has no such path.
+    """
+    if not hidden_mode():
+        return False
+    return env_manager.get("routing.tor.SERVICE_EGRESS", True) is not False
+
+
+def is_local_address(host: str) -> bool:
+    """Whether ``host`` is an address that does not leave this host's own networks.
+
+    Loopback, private and link-local addresses, and ``localhost``. Traffic to them shows
+    the node's address only to its own LAN, never to a peer, so hidden mode does not
+    send it through Tor (an exit could not reach it anyway).
+    """
+    import ipaddress
+
+    text = str(host or "").strip().strip("[]").lower()
+    if text == "localhost":
+        return True
+    try:
+        return not ipaddress.ip_address(text).is_global
+    except ValueError:
+        return False

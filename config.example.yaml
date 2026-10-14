@@ -62,6 +62,7 @@ routing:
   #   - listens on loopback only, and opens no firewall port for the gateway;
   #   - calls every peer through Tor. Without CLEARNET_VIA_EXIT, a peer that has only a
   #     clearnet address is not called at all;
+  #   - sends the outside TCP of its services through Tor (routing.tor.SERVICE_EGRESS);
   #   - never gives an instance a public address. The caller uses the service tunnel
   #     (network.DELEGATION_TUNNEL_POLICY is `always`);
   #   - has no address expiry, rounds its benchmark scores, and skips the check that
@@ -91,6 +92,12 @@ routing:
     # Hidden mode only: call peers that have a clearnet address through a Tor exit.
     # Many exits block non-standard ports, so those calls may fail.
     CLEARNET_VIA_EXIT: false
+    # Hidden mode only: send the outside TCP of the services this node runs through
+    # Tor (a TransPort on the guest bridge), so they can use '*', pow: networks, host
+    # names and seeded tags without showing this node's address. UDP is still dropped.
+    # Exits block many ports and add latency. false: such services are not run here
+    # and a peer runs them instead.
+    SERVICE_EGRESS: true
 
 virtualizers:
   # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed

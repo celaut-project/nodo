@@ -16,7 +16,9 @@ from src.utils.cost_functions.generate_estimated_cost import generate_estimated_
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
-from src.utils.network_policy import enforce_network_policy, hidden_mode_rejection
+from src.routing import registry
+from src.routing.policy import service_egress_via_tor
+from src.utils.network_policy import enforce_network_policy, hidden_mode_rejection, needs_outside_egress
 from src.manager.shares import ShareAuthorizationError, authorize_network_shares, authorize_shares
 from src.manager.share_location import LOCAL, ShareLocationConflict, locate_network_shares
 from src.utils.shared_filesystems import declarations_for_service, service_requires_parent_colocation
@@ -318,6 +320,15 @@ def launch_service(
                 f"{hidden_rejection.reason}"
             )
             log.LOGGER(f"Service {service_id} cannot run on this node: {local_hidden_failure}")
+        elif service_egress_via_tor() and registry.TOR.transparent_proxy() is None:
+            # The services' egress goes through Tor, and Tor is not up yet: a guest
+            # started now would get no egress at all, so a peer runs it instead.
+            outside_tag = needs_outside_egress(service.network)
+            if outside_tag:
+                local_hidden_failure = (
+                    f"hidden mode sends '{outside_tag}' through Tor, and Tor is not ready"
+                )
+                log.LOGGER(f"Service {service_id} cannot run on this node now: {local_hidden_failure}")
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never

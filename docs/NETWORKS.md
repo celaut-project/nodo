@@ -620,16 +620,20 @@ members of arbitrary domains. Operator defaults are explicit operator assertions
 ## Hidden mode
 
 A node with `routing.HIDDEN: true` hides its IP address from its peers
-([`CONFIG.md`](CONFIG.md#hidden-mode)). It does not run a service whose traffic would
-leave the host directly, because the other end would see that address:
+([`CONFIG.md`](CONFIG.md#hidden-mode)). Traffic that would leave the host directly would
+show that address, so:
 
-| Network | Hidden node |
-|---|---|
-| `*` | Not run here |
-| `pow:<chain>` | Not run here, and no `ResolveNetwork` answer |
-| A host name (`api.example.com`) | Not run here |
-| A tag with seeds in `service_networks.default_instances` | Not run here |
-| A tag that only local instances answer | Run here |
+| Network | `SERVICE_EGRESS: true` (default) | `SERVICE_EGRESS: false` |
+|---|---|---|
+| `*` | TCP through Tor, UDP dropped | Not run here |
+| `pow:<chain>` | Through Tor, candidates checked through Tor | Not run here, no `ResolveNetwork` answer |
+| A host name (`api.example.com`) | Through Tor | Not run here |
+| A tag with seeds in `service_networks.default_instances` | Through Tor (a private seed address directly) | Not run here |
+| A tag that only local instances answer | Directly, on the bridge | Directly, on the bridge |
+
+"Through Tor": the firewall translates the guest's TCP to Tor's `TransPort` on the
+guest bridge (`policy.tor_redirect_rules`). Nothing is accepted in FORWARD towards a
+global address, so whatever is not translated stays dropped.
 
 "Not run here" is not a refusal of the domain, unlike the operator lists above. The
 launcher skips this node and the balancer goes on to a peer. The peer's address is the
