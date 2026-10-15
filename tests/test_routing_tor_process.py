@@ -3,6 +3,7 @@ import json
 import os
 import stat
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -89,6 +90,31 @@ class TorProcessTests(unittest.TestCase):
             backend.start()
         install.assert_called_once()
         self.assertEqual(backend.status(), ("failed", "no compiler"))
+
+    def test_the_state_can_be_read_while_tor_installs(self):
+        self.settings["routing.tor.ENABLED"] = True
+        backend = self._backend()
+        installing, release = threading.Event(), threading.Event()
+
+        def slow_install():
+            installing.set()
+            release.wait(5)
+            raise tor_module.TorInstallError("stopped by the test")
+
+        with mock.patch.object(tor_module, "ensure_tor_installed", side_effect=slow_install):
+            thread = threading.Thread(target=backend.start)
+            thread.start()
+            self.assertTrue(installing.wait(5))
+            answered = []
+            reader = threading.Thread(
+                target=lambda: answered.append((backend.available(), backend.status()[0]))
+            )
+            reader.start()
+            reader.join(2)
+            release.set()
+            thread.join(5)
+        self.assertEqual(answered, [(False, "installing")])
+        self.assertEqual(backend.status()[0], "failed")
 
     def test_it_runs_tor_with_a_loopback_only_http_tunnel_and_becomes_ready(self):
         self._fake_tor()

@@ -115,7 +115,7 @@ class TorBackend(RoutingBackend):
             )
 
     def status(self) -> Tuple[str, str]:
-        """``(state, detail)``: disabled, not-installed, starting, ready, failed, stopped."""
+        """``(state, detail)``: disabled, not-installed, installing, starting, ready, failed, stopped."""
         with self._lock:
             return self._state, self._detail
 
@@ -159,26 +159,35 @@ class TorBackend(RoutingBackend):
 
     def start(self) -> None:
         with self._lock:
-            if self._state in ("starting", "ready"):
+            if self._state in ("installing", "starting", "ready"):
                 return
             mode = tor_mode()
             if mode == "off":
                 self._set("disabled", "routing.tor.ENABLED is false.")
                 return
             binary = tor_binary()
-            if not tor_installed(binary):
+            need_install = not tor_installed(binary)
+            if need_install:
                 if mode == "auto":
                     self._set("not-installed", "Run `nodo tor install`, or set routing.tor.ENABLED: true.")
                     return
                 if binary != managed_binary():
                     self._fail(f"routing.tor.BINARY {binary} is not an executable file.")
                     return
-                try:
-                    ensure_tor_installed()
-                except TorInstallError as e:
+                self._set("installing")
+            else:
+                self._set("starting")
+        if need_install:
+            # The install can take minutes (a source build). Do it without the lock, so
+            # that available() and status() answer while it runs.
+            try:
+                ensure_tor_installed()
+            except TorInstallError as e:
+                with self._lock:
                     self._fail(str(e))
-                    return
-            self._set("starting")
+                return
+            with self._lock:
+                self._set("starting")
         try:
             self._launch(binary)
         except Exception as e:  # never stop the node over a backend that failed to start
