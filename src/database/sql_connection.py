@@ -2873,6 +2873,10 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             str: The associated internal container id.
         """
+        if not uri:
+            # An onion call has no IP address. A local instance always has one, so there
+            # is nothing to look up and nothing to log.
+            return None
         result = self._execute('''
             SELECT id FROM local_instances WHERE ip = ? AND killed_at IS NULL
         ''', (uri,))

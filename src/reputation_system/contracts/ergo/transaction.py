@@ -195,34 +195,53 @@ def _self_network_data() -> str:
     sign_peer_payload,
 )
     from src.utils.network import get_local_ip, resolve_public_host, uri_expiry
-    from src.identity.transport_stack import declare_transport, share_prose_on_ledger
+    from src.identity.transport_stack import ONION_V3_TAG, declare_transport, share_prose_on_ledger
+    from src.routing.policy import hidden_mode
+    from src.routing.registry import announced_onion
 
-    try:
-        outbound_ip = get_local_ip()
-    except Exception as e:
-        LOGGER(f"Could not resolve the outbound IP for the reputation proof: {e}")
-        outbound_ip = None
+    # A hidden node publishes its onion address and nothing else. This register is
+    # public and permanent, so an IP written here cannot be taken back.
+    onion = announced_onion()
+    host = None
+    if hidden_mode():
+        if not onion:
+            LOGGER("Hidden mode: no onion address to advertise on the reputation proof.")
+            return NO_NETWORK_ADDRESS
+    else:
+        try:
+            outbound_ip = get_local_ip()
+        except Exception as e:
+            LOGGER(f"Could not resolve the outbound IP for the reputation proof: {e}")
+            outbound_ip = None
 
-    host = resolve_public_host(
-        configured=str(env_manager.get("network.PUBLIC_IP", "") or ""),
-        outbound_ip=outbound_ip,
-    )
-    if not host:
-        LOGGER("No public address to advertise (set network.PUBLIC_IP if the node is behind NAT).")
-        return NO_NETWORK_ADDRESS
+        host = resolve_public_host(
+            configured=str(env_manager.get("network.PUBLIC_IP", "") or ""),
+            outbound_ip=outbound_ip,
+        )
+        if not host and not onion:
+            LOGGER("No public address to advertise (set network.PUBLIC_IP if the node is behind NAT).")
+            return NO_NETWORK_ADDRESS
 
-    internal_port = env_manager.get_gateway_port()
-    public_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), internal_port)
     peer = celaut_pb2.Peer()
-    uri = peer.uri.add()
-    uri.ip = host
-    uri.port = public_port
-    declare_transport(uri, prose=share_prose_on_ledger())
+    uris = []
+    if host:
+        public_port = resolve_public_port(
+            env_manager.get("network.PUBLIC_TCP_PORT", ""), env_manager.get_gateway_port()
+        )
+        uris.append((host, public_port, "tcp"))
+    if onion:
+        uris.append((onion[0], onion[1], ONION_V3_TAG))
+    for uri_host, uri_port, tag in uris:
+        uri = peer.uri.add()
+        uri.ip = uri_host
+        uri.port = uri_port
+        declare_transport(uri, prose=share_prose_on_ledger(), tag=tag)
 
     public_key_hex = get_node_public_key_hex()
     if public_key_hex:
         ts = int(time.time())
-        uri.expiry_unix_timestamp = uri_expiry(ts)
+        for uri in peer.uri:
+            uri.expiry_unix_timestamp = uri_expiry(ts)
         # This one is read off the ledger by people who never contacted the node, so it
         # is the announcement that most needs to say which cryptography it is asking
         # them to verify -- but the tags say it. Spelling the scheme out in prose as
@@ -250,7 +269,9 @@ def _self_network_data() -> str:
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 
-    LOGGER(f"Advertising {host}:{public_port} on the reputation proof.")
+    LOGGER(
+        "Advertising " + ", ".join(f"{h}:{p}" for h, p, _ in uris) + " on the reputation proof."
+    )
     return message_to_json(peer)
 
 

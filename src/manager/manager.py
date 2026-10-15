@@ -344,7 +344,7 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
     for uri in peer.uri:
         try:
             routed = routing.routed_backend_for_tags(uri.transport.tags)
-            if routed is None and routing.backend_for_host(uri.ip) is not routing.CLEARNET:
+            if routed is None and routing.routed_host(uri.ip):
                 raise ValueError("a .onion host must declare the tor-onion-v3 transport.")
             if routed is not None and not routed.handles_host(uri.ip):
                 raise ValueError(f"the {routed.tag} transport needs a {routed.name} host name.")

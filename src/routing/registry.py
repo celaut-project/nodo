@@ -2,14 +2,39 @@
 
 import atexit
 import threading
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple
 
 from src.routing.base import RoutingBackend, RoutingUnavailable
 from src.routing.clearnet import ClearnetBackend
+from src.routing.policy import clearnet_via_exit, hidden_mode
 from src.routing.tor import TorBackend
+
+
+class _BlockedBackend(RoutingBackend):
+    """Stands in for the clearnet in hidden mode, where nothing may be dialled directly."""
+
+    name = "blocked"
+    tag = ""
+
+    def handles_host(self, host: str) -> bool:
+        return False
+
+    def available(self) -> bool:
+        return False
+
+    def open_socket(self, host, port, timeout):
+        raise RoutingUnavailable(
+            f"{host}:{port} is a clearnet address, and this node is in hidden mode "
+            "(routing.HIDDEN). Set routing.tor.CLEARNET_VIA_EXIT to call it through a Tor exit."
+        )
+
+    def grpc_channel_options(self, host):
+        raise RoutingUnavailable(f"{host} is a clearnet address, and this node is in hidden mode.")
+
 
 CLEARNET = ClearnetBackend()
 TOR = TorBackend()
+BLOCKED = _BlockedBackend()
 
 #: Every backend this build knows, clearnet first.
 BACKENDS = (CLEARNET, TOR)
@@ -28,24 +53,34 @@ def routed_tags() -> frozenset:
     return frozenset(b.tag for b in BACKENDS if b is not CLEARNET)
 
 
+def routed_host(host: str) -> bool:
+    """Whether ``host`` is a name that only a routing backend can reach (``.onion``)."""
+    return any(b.handles_host(host) for b in BACKENDS)
+
+
 def backend_for_host(host: str) -> RoutingBackend:
     """The backend ``host`` has to go through. A ``.onion`` name always goes to Tor.
 
     Chosen by the name, whatever transport an address declared: a ``.onion`` host
     announced as plain ``tcp`` would otherwise be handed to the local resolver.
+
+    In hidden mode a clearnet host never gets a direct connection: it goes through a Tor
+    exit if ``routing.tor.CLEARNET_VIA_EXIT`` is set, and is refused otherwise.
     """
-    return next((b for b in BACKENDS if b.handles_host(host)), CLEARNET)
+    routed = next((b for b in BACKENDS if b.handles_host(host)), None)
+    if routed is not None:
+        return routed
+    if hidden_mode():
+        return TOR if clearnet_via_exit() else BLOCKED
+    return CLEARNET
 
 
 def backend_for_transport(transport: str, host: str) -> Optional[RoutingBackend]:
     """The backend that carries a stored address, or None for one nobody can dial (UDP)."""
-    routed = backend_for_host(host)
-    if routed is not CLEARNET:
-        return routed
     transport = str(transport or "").strip().lower()
-    if not transport or transport == CLEARNET.tag:
-        return CLEARNET
-    return backend_for_tag(transport)
+    if transport and transport != CLEARNET.tag and not routed_host(host):
+        return backend_for_tag(transport)  # UDP: nobody dials it
+    return backend_for_host(host)
 
 
 def routed_backend_for_tags(tags: Iterable[str]) -> Optional[RoutingBackend]:
@@ -72,6 +107,23 @@ def usable(transport: str, host: str) -> bool:
     return backend is not None and backend.available()
 
 
+def announced_onion() -> Optional[Tuple[str, int]]:
+    """``(host, port)`` of the onion address this node announces, or None.
+
+    Worked out from the config and ``identity.MNEMONIC`` alone, not from a running Tor:
+    the name is fixed by the mnemonic, and a process that is not the daemon (the one
+    that publishes the Ergo register) can ask it too. The port is the gateway port.
+    """
+    from src.identity.node_identity import get_identity_mnemonic
+    from src.routing import onion_key
+    from src.routing.policy import announce_onion, onion_virtual_port
+
+    mnemonic = get_identity_mnemonic()
+    if not announce_onion() or not mnemonic:
+        return None
+    return onion_key.host_from_mnemonic(mnemonic), onion_virtual_port()
+
+
 _started = False
 _start_lock = threading.Lock()
 
@@ -94,7 +146,7 @@ def stop_backends() -> None:
 
 
 __all__ = [
-    "BACKENDS", "CLEARNET", "TOR", "RoutingUnavailable", "backend_for_host",
+    "BACKENDS", "BLOCKED", "announced_onion", "CLEARNET", "TOR", "routed_host", "RoutingUnavailable", "backend_for_host",
     "backend_for_tag", "backend_for_transport", "routed_backend_for_tags", "routed_tags",
     "start_backends", "stop_backends", "usable",
 ]

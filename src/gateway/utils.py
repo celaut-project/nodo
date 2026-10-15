@@ -14,8 +14,11 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils import keyvalue
+from src.routing.policy import hidden_mode
+from src.routing.tor import is_onion_host
 from src.utils.config import ConfigManager
 from src.identity.transport_stack import (
+    ONION_V3_TAG,
     declare_transport,
     declare_transport_stack,
     share_prose_on_get_peer_info,
@@ -165,6 +168,14 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     each, and -- being shared strings like ``172.17.0.1`` -- they collide across
     unrelated peers in the address-keyed lookups.
     """
+    onion = _onion_uris()
+    if hidden_mode():
+        # Nothing but the onion address: an IP in this list is the one thing hidden mode
+        # exists to keep out. Empty until Tor is up, and then the node is not reachable.
+        if not onion:
+            log.LOGGER('Hidden mode: the onion service is not up yet; announcing no address.')
+        return onion
+
     uris: List[celaut.Instance.Uri] = []
     seen_ips = set()
 
@@ -202,11 +213,29 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
         log.LOGGER('No routable address; falling back to announcing private addresses.')
         uris.extend(private)
 
+    uris.extend(onion)
+
     if not uris:
         # Not even a private address. Loopback is only useful to this process and is
         # actively wrong for any remote caller, so announce nothing instead.
         log.LOGGER('No reachable address to announce; leaving GetPeerInfo uri list empty.')
     return uris
+
+
+def _onion_uris() -> List[celaut.Instance.Uri]:
+    """This node's onion address, once Tor is up and hosts the gateway there.
+
+    Not before: an address announced while the service is down is one every peer
+    would spend a timeout on. ``announcement_change`` re-sends the announcement when
+    this appears.
+    """
+    from src.routing import registry
+    from src.routing.policy import announce_onion
+
+    host, port = registry.TOR.onion_host(), registry.TOR.onion_port()
+    if not announce_onion() or not host or not port or not registry.TOR.available():
+        return []
+    return [celaut.Instance.Uri(ip=host, port=port)]
 
 
 # The last announcement this node signed, and the content it was signed over. A
@@ -393,7 +422,12 @@ def _unsigned_peer(uris: List[celaut.Instance.Uri], *, quiet: bool = False) -> c
     prose = share_prose_on_get_peer_info()
     for uri in uris:
         announced = peer.uri.add(ip=uri.ip, port=uri.port)
-        declare_transport(announced, prose=prose)
+        # The network an address is reached over is part of its transport: an onion
+        # name is announced as tor-onion-v3, never as tcp.
+        declare_transport(
+            announced, prose=prose,
+            tag=ONION_V3_TAG if is_onion_host(uri.ip) else "tcp",
+        )
         # What the endpoint actually speaks, spelled out rather than named: the tags
         # alone would let two nodes both write "tls" while disagreeing on the extension
         # OID, on what the signature covers or on which RPCs exist, and neither could

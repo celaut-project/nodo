@@ -48,6 +48,7 @@ import netifaces as ni
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
+from src.routing.policy import hidden_mode
 from src.tunneling import logger
 from src.tunneling.tunnel_client import serve_tcp, serve_udp
 from src.utils import utils
@@ -143,6 +144,10 @@ def _publish_lock(token: str) -> threading.Lock:
 
 
 def _policy() -> str:
+    # A hidden node never gives out an address of its own, so the caller can only be
+    # served through the tunnel, whatever the operator configured.
+    if hidden_mode():
+        return POLICY_ALWAYS
     configured = str(env_manager.get("network.DELEGATION_TUNNEL_POLICY", POLICY_AUTO) or "").strip().lower()
     if configured in VALID_POLICIES:
         return configured

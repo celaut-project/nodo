@@ -276,6 +276,11 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # that the node did not recognise the address it came from -- which is what
         # the caller and the operator need to know, and what they were told for a
         # guest that called in before its instance was registered.
+        if not token and not caller_ip:
+            raise Exception(
+                'This node cannot tell which instance is asking to change its resources: '
+                f'the caller has no IP address ({context.peer()}).'
+            )
         if not token:
             raise Exception(
                 f'No local instance is registered at {caller_ip}, so this node cannot tell '
