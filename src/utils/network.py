@@ -4,18 +4,14 @@ import socket
 from typing import Optional
 
 
-def is_globally_routable(host: str, *, allow_dns: bool = True) -> bool:
-    """Public unicast address; DNS may be trusted for self-announcements.
-
-    Gossip passes ``allow_dns=False``: a stranger's name might be split-horizon,
-    local-only, or resolve to a private address. Do not resolve it on their behalf.
-    """
+def is_globally_routable(host: str) -> bool:
+    """Public unicast address. A DNS name is accepted: it is the operator's choice."""
     try:
         address = ipaddress.ip_address(host)
         return (address.is_global and not address.is_multicast
                 and not address.is_unspecified and "%" not in host)
     except ValueError:
-        return bool(host) and allow_dns
+        return bool(host)
 
 
 def uri_expiry(now: int) -> int:

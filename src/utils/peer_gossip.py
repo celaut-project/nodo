@@ -1,16 +1,15 @@
-"""The shared disclosure rule for ListPeers and proactive introductions.
+"""The shared relay rule for ListPeers and proactive introductions.
 
-A Peer signature covers *every* URI, including its expiry. Redacting one and
-keeping the signature would produce a forgery; stripping the signature would
-produce an announcement registration must refuse. Relay the intact claim or
-nothing. In particular, even an expired private URI must not leave this node.
+A Peer signature covers *every* URI, including its expiry. If a relay removes a URI,
+the signature becomes invalid. If it removes the signature, registration refuses the
+announcement. Thus a relay sends the claim exactly as the peer signed it, or does
+not send it. Private, loopback and DNS URIs travel as the peer declared them.
 """
 import random
 import time
 
 from protos import celaut_pb2
 from src.utils.logger import LOGGER
-from src.utils.network import is_globally_routable
 
 
 def gossip_limit(config, key: str, default: int) -> int:
@@ -22,11 +21,9 @@ def gossip_limit(config, key: str, default: int) -> int:
 
 
 def relayable_peer(peer, peer_id: str, now=None) -> bool:
-    """Is this intact advertisement safe to disclose and still useful?"""
+    """Is this intact advertisement signed by its subject and still useful?"""
     if (not isinstance(peer, celaut_pb2.Peer) or not peer_id
             or peer.public_key != peer_id or not peer.signature or not peer.uri):
-        return False
-    if any(not is_globally_routable(uri.ip, allow_dns=False) for uri in peer.uri):
         return False
     now = time.time() if now is None else now
     return any(not uri.expiry_unix_timestamp or uri.expiry_unix_timestamp > now

@@ -1,4 +1,4 @@
-"""Gossip privacy, signatures, resource bounds, and the real streaming wire shape."""
+"""Gossip relay of intact signed claims, resource bounds, and the real streaming wire shape."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -49,17 +49,17 @@ def database(*peers):
 
 
 @pytest.mark.parametrize("address", [
-    "10.0.0.1", "192.168.1.2", "172.16.0.1", "127.0.0.1", "0.0.0.0",
-    "169.254.1.1", "100.64.0.1", "224.0.0.1", "255.255.255.255",
-    "::1", "::", "fc00::1", "fe80::1", "ff02::1", "::ffff:192.168.1.2",
-    "192.0.2.1", "2001:db8::1", "localhost", "node.local", "node.example.com", "",
+    "10.0.0.1", "192.168.1.2", "127.0.0.1", "169.254.1.1", "100.64.0.1",
+    "::1", "fc00::1", "fe80::1", "localhost", "node.local", "node.example.com",
 ])
-def test_private_or_unproven_address_discards_whole_signed_claim(address):
+def test_private_and_dns_addresses_travel_inside_the_intact_signed_claim(address):
+    # The signature covers every URI. Remove one and the claim is a forgery.
     peer = signed_peer("8.8.8.8", address)
     before = peer.SerializeToString()
-    assert not relayable_peer(peer, peer.public_key)
-    assert peer.SerializeToString() == before
-    assert manager.verified_peer_public_key(peer) == peer.public_key
+    sc, _ = database(peer)
+    result, = iter_gossip_peers(sc, 100)
+    assert result.SerializeToString() == before
+    assert manager.verified_peer_public_key(result) == peer.public_key
 
 
 def test_public_claim_is_relayed_byte_for_byte_and_still_verifies():
@@ -80,8 +80,6 @@ def test_expiry_is_filtered_without_editing_signed_fields():
     # Mixed expiry is still valid, but no URI can be removed from the signature.
     live.uri.add(ip="1.1.1.1", port=40001, expiry_unix_timestamp=99)
     assert relayable_peer(live, live.public_key, now=100)
-    live.uri.add(ip="10.0.0.1", port=40001, expiry_unix_timestamp=99)
-    assert not relayable_peer(live, live.public_key, now=100)
 
 
 def test_candidates_are_walked_in_a_fresh_random_order(monkeypatch):
@@ -204,10 +202,11 @@ def test_pull_stream_failure_closes_channel_and_backoffs(tick):
     tick.channel.close.assert_called_once()
 
 
-def test_pull_rejects_private_claims_before_registration(tick):
-    tick.pull.side_effect = lambda *a, **kw: iter([signed_peer("10.0.0.1")])
+def test_pull_registers_private_claims_as_signed(tick):
+    private = signed_peer("10.0.0.1", identity_index=5)
+    tick.pull.side_effect = lambda *a, **kw: iter([private])
     gossip.gossip_pull_tick()
-    tick.register.assert_not_called()
+    tick.register.assert_called_once_with(peer=private, learned_via_gossip=True)
 
 
 def test_pull_skips_our_own_relayed_advertisement(tick, monkeypatch):
@@ -241,13 +240,14 @@ def test_push_cap_excludes_target_and_keeps_signed_payload(tick):
     tick.channel.close.assert_called_once()
 
 
-def test_push_uses_same_privacy_filter_and_survives_refusal_and_error(tick):
+def test_push_relays_private_claims_intact_and_survives_refusal_and_error(tick):
     private = signed_peer("8.8.8.8", "192.168.1.1", identity_index=1)
     tick.rows[private.public_key] = private.SerializeToString()
-    tick.push.side_effect = [RuntimeError("offline"), pb.RecursionGuard(token="REFUSED")]
+    tick.push.side_effect = [RuntimeError("offline"), pb.RecursionGuard(token="REFUSED"), None]
     gossip.gossip_push_tick()
-    assert tick.push.call_count == 2
-    assert all(call.args[1].public_key != private.public_key for call in tick.push.call_args_list)
+    assert tick.push.call_count == 3
+    pushed = {call.args[1].public_key: call.args[1] for call in tick.push.call_args_list}
+    assert pushed[private.public_key].SerializeToString() == private.SerializeToString()
     tick.channel.close.assert_called_once()
 
 
@@ -341,7 +341,8 @@ class TestTransitiveRegistration(_PeerFixture):
         b = signed_peer(identity_index=1)
         c = signed_peer(identity_index=2)
         assert manager.add_peer_instance(b) == b.public_key
-        relay_db, _ = database(c, signed_peer("10.0.0.1", identity_index=3))
+        d = signed_peer("10.0.0.1", identity_index=3)
+        relay_db, _ = database(c, d)
         monkeypatch.setattr(gossip, "_last_pull", None)
         monkeypatch.setattr(gossip, "ConfigManager", lambda: SimpleNamespace(get=lambda k, d=None: d))
         monkeypatch.setattr(gossip, "SQLConnection", lambda: manager.sc)
@@ -350,7 +351,8 @@ class TestTransitiveRegistration(_PeerFixture):
         monkeypatch.setattr(BeeClient, "list_peers", lambda *a, **kw: iter_gossip_peers(relay_db, 100))
         monkeypatch.setattr(manager, "accept_peer_refresh", MagicMock(side_effect=AssertionError("must not refresh B with C")))
         gossip.gossip_pull_tick()
-        assert set(manager.sc.get_peers_id()) == {b.public_key, c.public_key}
+        # D announces only a private address. B relays it intact, and A registers it.
+        assert set(manager.sc.get_peers_id()) == {b.public_key, c.public_key, d.public_key}
         assert self._uris(c.public_key) == ["8.8.8.8"]
         # A fresher signed direct claim wins. Gossip of old C cannot undo it.
         fresh = signed_peer("1.1.1.1", identity_index=2, ts=200)

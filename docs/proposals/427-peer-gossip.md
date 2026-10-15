@@ -6,36 +6,31 @@ envelope; `IntroducePeer` carries proactive announcements. Neither RPC relays a
 query or triggers an immediate onward push. The manager calls independent,
 self-gated pull and push ticks, each selecting one random known peer every 300s.
 
-## Privacy and signatures: an explicit adjustment to the issue plan
+## Signatures: relay the claim as the peer signed it
 
-The issue proposed removing non-global URIs while also relaying the original signed
-advertisement. Those requirements cannot both be met: `canonical_peer_content_digest`
-covers all URIs and their expiry. A filtered claim fails verification, and removing
-its signature/public key makes registration refuse it. Re-signing under the relayer's
-key would misattribute somebody else's addresses and contracts.
+The issue proposed to remove non-global URIs and also to relay the original signed
+advertisement. These two requirements conflict: `canonical_peer_content_digest`
+covers all URIs and their expiry. A filtered claim fails verification. If a relay
+removes the signature or the public key, registration refuses the claim. If a relay
+signs the claim again with its own key, it attributes the addresses and contracts of
+another peer to itself.
 
-Therefore both relay paths share one **whole-advertisement eligibility rule**:
+The signed claim is the authority. Thus both relay paths share one rule:
 
 - Read `peer.advertisement`, not merged address-table rows.
-- Require the advertised public key to match the database row and a signature to be
-  present. Mismatched identities are skipped, never downgraded to unsigned claims.
-- Every URI must be a global unicast IP literal. Never relay a third party's private,
-  loopback, link-local, multicast, reserved, or otherwise non-global address, even an
-  expired one. This is unconditional; `ANNOUNCE_PRIVATE_ADDRESSES` only decides what
-  this node announces about itself.
-- Do not assume arbitrary DNS names are public. Split-horizon/local names and DNS
-  rebinding make that unverifiable without changing the protocol; withhold DNS-bearing
-  claims too. Self-announcement keeps its existing DNS support. Direct connection
-  remains available for DNS-only, LAN-only and mixed public/private peers.
-- Require at least one unexpired URI (`expiry=0` means no declared expiry). Keep all
-  public URIs, including expired ones, in the signed object; editing them breaks it.
-- Send the original fields/signature unchanged. Receivers still do full cryptographic
-  verification and monotonic timestamp checks through `add_peer_instance`.
+- Require the advertised public key to match the database row, and require a
+  signature. Skip a mismatched identity. Never change it into an unsigned claim.
+- Send the original fields and signature without changes. Private, loopback,
+  link-local and DNS URIs travel as the peer declared them. The peer decides what
+  it discloses, with `network.ANNOUNCE_PRIVATE_ADDRESSES` on its own node. A relay
+  does not make that decision again for the peer.
+- Require at least one unexpired URI (`expiry=0` means no declared expiry). Keep
+  expired URIs in the signed object, because a change to them breaks the signature.
+- Receivers do full cryptographic verification and monotonic timestamp checks
+  through `add_peer_instance`, the same as for a direct `IntroducePeer`.
 
-A future selective-disclosure format or separate subject-signed public-only claim
-could allow mixed-address nodes to gossip their public address. It is not safe to
-approximate that by mutating today's claim. `lan-lab` enables gossip as requested,
-but LAN-only announcements intentionally do not travel transitively.
+A claim with only LAN addresses can travel to nodes that cannot reach it. For such a
+node, the cost is a failed dial to that peer.
 
 ## Wire and authentication
 
@@ -123,17 +118,16 @@ protobuf message size; the existing transport and receiver validation remain rel
 
 ## Verification
 
-`tests/test_gossip.py` covers disclosure and signature preservation, row mismatch and
-expiry, independent live flags/clocks, caps (including hostile replies), per-item
-failures, client-id attachment, total push deadline, channel cleanup, four-way RPC
+`tests/test_gossip.py` covers byte-identical relay of signed claims (private and DNS
+URIs included), row mismatch and expiry, independent live flags/clocks, caps
+(including hostile replies), per-item failures, client-id attachment, total push deadline, channel cleanup, four-way RPC
 wiring, and a real localhost gRPC stream through the actual Gateway handler. A real
 SQLite/signature test checks A learning C from B, refusal of a forged C, and retention
 of a newer C announcement against replay, that A never registers its own relayed
 advertisement, and that a gossip-learned peer is not auto-funded while a connected one
 is. the profile tests pin every profile posture.
 
-Full daemon smoke recipe: seed A↔B and B↔C only, lower the interval for the test, and
-watch A register C when C announces only public addresses. Repeat with C announcing
-both public and private addresses: A must not learn C through gossip at all. Restore
-the interval after testing. This requires appropriately reachable peers; do not use
-private addresses to claim the public-only case passed.
+Full daemon smoke recipe: connect A↔B and B↔C only, and set a short interval for the
+test. Make sure A registers C. Then let C announce public and private addresses.
+Make sure the claim that A registers is byte-identical to the claim that C signed.
+Restore the interval after the test.

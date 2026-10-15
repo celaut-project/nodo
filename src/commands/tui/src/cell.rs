@@ -671,8 +671,8 @@ static LEVERS: &[Lever] = &[
         id: "share-peers",
         organelle: Organelle::Vesicles,
         label: "share known peers",
-        question: "Do I share public peer announcements with other nodes?",
-        consequence: "On, this node answers peer-list requests and periodically introduces known peers. Private addresses are never relayed.",
+        question: "Do I share the announcements of known peers with other nodes?",
+        consequence: "On, this node answers peer-list requests and periodically introduces known peers. Each announcement goes out as its peer signed it, private addresses included.",
         kind: LeverKind::Cycle(&[
             LeverState {
                 label: "off",

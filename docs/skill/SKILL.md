@@ -81,8 +81,8 @@ Understand these before running anything. Full glossary:
   `nodo connect <ip:port>`, which dials it over TLS, verifies its identity from
   the certificate, and pulls its signed `Peer` announcement over
   `Gateway.GetPeerInfo`. Optional peer gossip then discovers peers transitively
-  through `ListPeers` pulls and `IntroducePeer` pushes, relaying only intact signed
-  advertisements containing exclusively public IP addresses (see
+  through `ListPeers` pulls and `IntroducePeer` pushes. A relay sends each signed
+  advertisement exactly as its peer signed it (see
   [`../CONFIG.md`](../CONFIG.md#transitive-peer-discovery-gossip)).
   **This is a different layer from `Service.Network`
   below.** `Gateway.ResolveNetwork` (and `network_discovery.py`'s
