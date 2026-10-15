@@ -65,6 +65,26 @@ class VirtiofsBuildersTest(unittest.TestCase):
         self.assertIn("tag=vfs-abc", arg)
         self.assertIn("socket=/tmp/nodo-ch/vfs-abc.sock", arg)
 
+    def test_each_vm_has_its_own_socket_for_a_share(self):
+        # A virtiofsd answers one client, so two VMs on one share need two sockets.
+        sid = "a" * 64
+        parent = vf.virtiofs_socket_path("/tmp/nodo-ch", sid, "1" * 64)
+        child = vf.virtiofs_socket_path("/tmp/nodo-ch", sid, "2" * 64)
+        other_share = vf.virtiofs_socket_path("/tmp/nodo-ch", "b" * 64, "1" * 64)
+        self.assertEqual(len({parent, child, other_share}), 3)
+
+    def test_a_read_only_daemon_is_started_readonly(self):
+        rw = vf.build_virtiofsd_command("virtiofsd", "/s.sock", "/d")
+        ro = vf.build_virtiofsd_command("virtiofsd", "/s.sock", "/d", readonly=True)
+        self.assertNotIn("--readonly", rw)
+        self.assertIn("--readonly", ro)
+        self.assertEqual(ro[:-1], rw)
+
+    def test_the_socket_path_fits_in_sun_path(self):
+        # AF_UNIX paths are limited to 108 bytes including the terminator.
+        path = vf.virtiofs_socket_path("/tmp/nodo-ch", "f" * 64, "e" * 64)
+        self.assertLess(len(str(path).encode()), 108)
+
 
 @unittest.skipIf(IMPORT_ERROR, f"imports unavailable: {IMPORT_ERROR}")
 class ShareOwnershipTest(unittest.TestCase):
@@ -113,26 +133,150 @@ class VirtiofsOrchestrationTest(unittest.TestCase):
         )
         self.assertEqual((args, state), ([], []))
 
-    def test_ensure_backend_spawns_then_reuses(self):
+    def test_two_shares_are_one_fs_option_with_two_values(self):
+        # cloud-hypervisor declares `--fs <fs>...` as one option taking several values and
+        # refuses it repeated, so `--fs a --fs b` cannot start a guest with two shares.
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            mounts = [
+                vf.mount_for(_ref(share_id=sid * 64), base, exported=True) for sid in ("a", "b")
+            ]
+            args, state = vf.attach_virtiofs_backends(
+                mounts, "vm-1", base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                spawn_fn=lambda cmd, log_path: 4242, pid_alive_fn=lambda pid: True,
+            )
+            self.assertEqual(args.count("--fs"), 1)
+            self.assertEqual(args[0], "--fs")
+            self.assertEqual(len(args), 3)
+            self.assertEqual(len(state), 2)
+            self.assertTrue(all(value.startswith("tag=") for value in args[1:]))
+
+    def test_one_share_is_still_a_single_fs_option(self):
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            mount = vf.mount_for(_ref(share_id="c" * 64), base, exported=True)
+            args, _state = vf.attach_virtiofs_backends(
+                [mount], "vm-1", base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                spawn_fn=lambda cmd, log_path: 4242, pid_alive_fn=lambda pid: True,
+            )
+            self.assertEqual(len(args), 2)
+            self.assertEqual(args[0], "--fs")
+
+    def test_each_vm_gets_a_daemon_of_its_own_on_the_same_directory(self):
+        # A virtiofsd serves a single vhost-user client: a second VM connected to the
+        # parent's socket is never answered and its guest never boots (#480).
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
             sid = "a" * 64
-            mount = vf.mount_for(_ref(share_id=sid), base, exported=True)
+            spawned = []
+            pids = iter([4242, 4343])
+            kwargs = dict(
+                base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                spawn_fn=lambda cmd, log_path: spawned.append(cmd) or next(pids),
+                pid_alive_fn=lambda pid: True,
+            )
+            parent = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid), base, exported=True), "vm-parent", **kwargs)
+            Path(parent["socket"]).write_text("")   # the daemon bound its socket
+            child = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid), base, exported=False), "vm-child", **kwargs)
+
+            self.assertEqual(len(spawned), 2)
+            self.assertNotEqual(parent["socket"], child["socket"])
+            self.assertEqual((parent["pid"], child["pid"]), (4242, 4343))
+            # Both daemons export the one host directory.
+            shared = str(vf.shared_dir(base, sid))
+            for command in spawned:
+                self.assertEqual(command[command.index("--shared-dir") + 1], shared)
+            state = vf.load_share_state(base, sid)
+            self.assertEqual(state["users"], ["vm-parent", "vm-child"])
+            self.assertEqual(state["daemons"]["vm-parent"], {"pid": 4242, "socket": parent["socket"]})
+            self.assertEqual(state["daemons"]["vm-child"], {"pid": 4343, "socket": child["socket"]})
+
+    def test_only_the_daemon_of_a_read_only_guest_refuses_writes(self):
+        # `-o ro` in the guest is the guest's own choice: it is root in its VM and can
+        # remount read-write. Its daemon is what keeps it from writing, and only its
+        # daemon, since the exporter and other guests have their own.
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            sid = "a" * 64
+            commands = {}
+            pids = iter(range(100, 110))
+
+            def spawn(cmd, log_path):
+                commands[cmd[cmd.index("--socket-path") + 1]] = cmd
+                return next(pids)
+
+            kwargs = dict(base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                          spawn_fn=spawn, pid_alive_fn=lambda pid: True)
+            exporter = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid, readonly=True), base, exported=True),
+                "vm-parent", **kwargs)
+            reader = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid, readonly=True), base, exported=False),
+                "vm-reader", **kwargs)
+            writer = vf.ensure_share_backend(
+                vf.mount_for(_ref(share_id=sid, readonly=False), base, exported=False),
+                "vm-writer", **kwargs)
+            # The exporter always writes, whatever its declaration said.
+            self.assertNotIn("--readonly", commands[exporter["socket"]])
+            self.assertIn("--readonly", commands[reader["socket"]])
+            self.assertNotIn("--readonly", commands[writer["socket"]])
+
+    def test_the_same_vm_reuses_its_own_daemon(self):
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            mount = vf.mount_for(_ref(share_id="a" * 64), base, exported=True)
             spawned = []
             kwargs = dict(
                 base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
                 spawn_fn=lambda cmd, log_path: spawned.append(cmd) or 4242,
                 pid_alive_fn=lambda pid: True,
             )
-            state = vf.ensure_share_backend(mount, "vm-1", **kwargs)
-            self.assertEqual(state["pid"], 4242)
-            self.assertTrue(Path(vf.shared_dir(base, sid)).is_dir())
+            first = vf.ensure_share_backend(mount, "vm-1", **kwargs)
+            Path(first["socket"]).write_text("")
+            again = vf.ensure_share_backend(mount, "vm-1", **kwargs)
             self.assertEqual(len(spawned), 1)
+            self.assertEqual(again["pid"], 4242)
 
-            # Socket must exist for reuse; simulate the daemon having bound it.
-            Path(state["socket"]).write_text("")
-            vf.ensure_share_backend(mount, "vm-2", **kwargs)
-            self.assertEqual(len(spawned), 1)  # reused, not spawned again
-            self.assertEqual(vf.load_share_state(base, sid)["users"], ["vm-1", "vm-2"])
+    def test_a_dead_daemon_of_this_vm_is_replaced(self):
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            mount = vf.mount_for(_ref(share_id="a" * 64), base, exported=True)
+            pids = iter([10, 11])
+            kwargs = dict(
+                base_dir=base, socket_dir=sock, virtiofsd_binary="virtiofsd",
+                spawn_fn=lambda cmd, log_path: next(pids),
+                pid_alive_fn=lambda pid: False,
+            )
+            vf.ensure_share_backend(mount, "vm-1", **kwargs)
+            again = vf.ensure_share_backend(mount, "vm-1", **kwargs)
+            self.assertEqual(again["pid"], 11)
+            self.assertEqual(vf.load_share_state(base, "a" * 64)["daemons"]["vm-1"]["pid"], 11)
+
+    def test_a_share_that_fails_to_come_up_releases_the_ones_before_it(self):
+        # The caller never gets their state back, so nothing else would stop these
+        # daemons or drop this VM from the shares it had already reserved.
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
+            first, second = "a" * 64, "b" * 64
+            mounts = [vf.mount_for(_ref(share_id=sid), base, exported=False)
+                      for sid in (first, second)]
+            # The parent exports both, so the shares outlive this VM's failure.
+            for sid in (first, second):
+                vf.reserve_share(base, vf.mount_for(_ref(share_id=sid), base, exported=True),
+                                 "vm-parent")
+
+            def spawn(cmd, log_path):
+                if second[:12] in cmd[cmd.index("--socket-path") + 1]:
+                    raise OSError("virtiofsd failed to start")
+                return 4242
+
+            killed = []
+            with self.assertRaises(OSError):
+                vf.attach_virtiofs_backends(
+                    mounts, "vm-child", base_dir=base, socket_dir=sock,
+                    virtiofsd_binary="virtiofsd", spawn_fn=spawn,
+                    pid_alive_fn=lambda pid: True, kill_fn=killed.append,
+                )
+            self.assertEqual(killed, [4242])
+            for sid in (first, second):
+                state = vf.load_share_state(base, sid)
+                self.assertEqual(state["users"], ["vm-parent"], sid)
+                self.assertNotIn("vm-child", state.get("daemons") or {}, sid)
 
     def test_export_is_seeded_once_and_never_by_a_child(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as sock:
@@ -178,17 +322,24 @@ class VirtiofsOrchestrationTest(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR, f"imports unavailable: {IMPORT_ERROR}")
 class VirtiofsTeardownTest(unittest.TestCase):
+    PIDS = {"vm-parent": 101, "vm-child": 202}
+
     def _materialize(self, base, sid, *users):
+        """Reserve the share for each user and record a daemon of its own, as
+        ensure_share_backend does."""
         for vmachine_id, exported in users:
             mount = vf.mount_for(_ref(share_id=sid), base, exported=exported)
             vf.shared_dir(base, sid).mkdir(parents=True, exist_ok=True)
             vf.reserve_share(base, mount, vmachine_id)
         path = vf.share_state_path(base, sid)
         state = vf.load_share_state(base, sid)
-        state.update({"pid": 999, "socket": str(Path(base) / "s.sock")})
+        state["daemons"] = {
+            vm: {"pid": self.PIDS[vm], "socket": str(Path(base) / f"{vm}.sock")}
+            for vm, _ in users
+        }
         vf._save_share_state(path, state)
 
-    def test_the_daemon_survives_a_guest_leaving(self):
+    def test_a_guest_leaving_stops_only_its_own_daemon(self):
         with tempfile.TemporaryDirectory() as base:
             sid = "b" * 64
             self._materialize(base, sid, ("vm-parent", True), ("vm-child", False))
@@ -196,10 +347,13 @@ class VirtiofsTeardownTest(unittest.TestCase):
             vf.teardown_virtiofs_for_vm(
                 "vm-child", [{"share_id_hex": sid}], base_dir=base, kill_fn=killed.append,
             )
-            self.assertEqual(killed, [])
+            self.assertEqual(killed, [202])
             self.assertTrue(vf.share_state_dir(base, sid).exists())
+            state = vf.load_share_state(base, sid)
+            self.assertEqual(list(state["daemons"]), ["vm-parent"])
+            self.assertNotIn("released", state)
 
-    def test_the_exporter_leaving_takes_the_daemon_and_the_data(self):
+    def test_the_exporter_leaving_takes_every_daemon_and_the_data(self):
         with tempfile.TemporaryDirectory() as base:
             sid = "c" * 64
             self._materialize(base, sid, ("vm-parent", True), ("vm-child", False))
@@ -208,10 +362,35 @@ class VirtiofsTeardownTest(unittest.TestCase):
                 "vm-parent", [{"share_id_hex": sid}], base_dir=base,
                 kill_fn=killed.append, logger_fn=logged.append,
             )
-            self.assertEqual(killed, [999])
+            # Its own daemon, then the one of the guest that loses the directory.
+            self.assertEqual(killed, [101, 202])
             self.assertFalse(vf.share_state_dir(base, sid).exists())
             # The guests that lose it are named, not left to be inferred.
             self.assertTrue(any("still running" in line for line in logged))
+
+    def test_a_stopped_daemon_leaves_neither_its_socket_nor_its_pid_file(self):
+        with tempfile.TemporaryDirectory() as base:
+            sid = "b" * 64
+            self._materialize(base, sid, ("vm-parent", True), ("vm-child", False))
+            socket = Path(base) / "vm-child.sock"
+            socket.write_text("")
+            Path(f"{socket}.pid").write_text("202")   # virtiofsd's own lock file
+            vf.teardown_virtiofs_for_vm(
+                "vm-child", [{"share_id_hex": sid}], base_dir=base, kill_fn=lambda pid: None,
+            )
+            self.assertFalse(socket.exists())
+            self.assertFalse(Path(f"{socket}.pid").exists())
+
+    def test_a_vm_whose_share_state_is_gone_still_stops_its_own_daemon(self):
+        with tempfile.TemporaryDirectory() as base:
+            sid = "d" * 64
+            killed = []
+            vf.teardown_virtiofs_for_vm(
+                "vm-child",
+                [{"share_id_hex": sid, "pid": 303, "socket": str(Path(base) / "c.sock")}],
+                base_dir=base, kill_fn=killed.append,
+            )
+            self.assertEqual(killed, [303])
 
     def test_a_handed_over_directory_is_released_but_never_deleted(self):
         with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as host:

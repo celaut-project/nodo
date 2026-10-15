@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
 from typing import Callable, Dict, Generator, Iterable, List, Sequence, Tuple, Optional
-from google.protobuf.json_format import MessageToJson
+from src.utils.keyvalue import message_to_json
 
 from protos import celaut_pb2
 from src.utils import logger as log, logger
@@ -98,8 +98,29 @@ TRACEABILITY_COLUMNS = {
     # A node that already deployed peer_chat_messages before conversations existed
     # has the table but not this column -- an ADD COLUMN, not ensure_tables, for the
     # same reason as `peer.local_client_id` above.
-    "peer_chat_messages": {"conversation_id": "TEXT DEFAULT NULL"},
+    "peer_chat_messages": {
+        "conversation_id": "TEXT DEFAULT NULL",
+        # A service shared in chat (issue #438): same upgrade path again.
+        "service_id": "TEXT DEFAULT NULL",
+        "service_metadata": "BLOB DEFAULT NULL",
+    },
 }
+
+
+def _chat_service(row) -> Optional[dict]:
+    """A chat row's shared service (issue #438), or None for an ordinary message.
+
+    ``id`` is the registry id stored with it (None when its Metadata had no hash of
+    this node's type), ``tags`` its Metadata's tags.
+    """
+    if row['service_metadata'] is None:
+        return None
+    metadata = celaut_pb2.Metadata()
+    try:
+        metadata.ParseFromString(row['service_metadata'])
+    except Exception:
+        pass
+    return {'id': row['service_id'], 'tags': list(metadata.hashtag.tag)}
 
 
 def _as_int(value) -> int:
@@ -128,15 +149,15 @@ LOCAL_PEER_ID = "LOCAL"
 PAYMENT_INSERT = """
     INSERT INTO payments (
         tx_id, direction, status, peer_id, client_id, deposit_token,
-        ledger, contract_hash, token_id, address, amount_mu, purpose
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ledger, contract_hash, token_id, address, amount_mu, peer_amount_mu, purpose
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
 def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
                           peer_id=None, client_id=None, deposit_token=None,
                           ledger=None, contract_hash=None, token_id=None, address=None,
-                          purpose=None) -> tuple:
+                          peer_amount_mu=None, purpose=None) -> tuple:
     """Bind one payment row for :data:`PAYMENT_INSERT`, in its column order.
 
     Shared so a donation payout can write its rows in the *same* transaction that
@@ -148,7 +169,8 @@ def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
     one tick paying two assets on one contract would otherwise be indistinguishable.
     """
     return (tx_id, direction, status, peer_id, client_id, deposit_token,
-            ledger, contract_hash, token_id, address, str(int(amount_mu)), purpose)
+            ledger, contract_hash, token_id, address, str(int(amount_mu)),
+            None if peer_amount_mu is None else str(int(peer_amount_mu)), purpose)
 
 
 def _normalized_asset(asset) -> str:
@@ -190,17 +212,30 @@ def _plain(value: Decimal) -> str:
 
 def _ensure_traceability_tables(connection) -> None:
     try:
-        from src.database.migrate import ensure_columns, ensure_tables
+        from src.database.migrate import (
+            ensure_columns,
+            ensure_tables,
+            forget_peer_rates_per_whole_unit,
+        )
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
         for table, columns in TRACEABILITY_COLUMNS.items():
             ensure_columns(cursor, table, columns)
+        # The restart after pulling new code is the only upgrade path (see above), so
+        # the one-shot rate migration runs here too, not only from `migrate`.
+        forget_peer_rates_per_whole_unit(cursor)
         connection.commit()
     except Exception as e:
         # A read-only or otherwise unusable database is the node's problem to report
         # elsewhere; it must not stop this constructor, which runs at import time.
         logger.LOGGER(f'Could not ensure the traceability tables exist: {e}')
+
+
+def _local_capacity_changed() -> None:
+    """A local instance started, stopped or was resized: the room this node reported is stale."""
+    from src.utils.tools.query_cache import QueryCache
+    QueryCache().invalidate("GetResourceAvailability")
 
 
 class SQLConnection(metaclass=Singleton):
@@ -545,6 +580,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
               serialized_instance, service_id, virtualizer, envs, arch))
+        _local_capacity_changed()
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def set_local_instance_definition(self, id: str, serialized_instance) -> bool:
@@ -558,7 +594,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             self._execute(
-                "UPDATE local_instances SET serialized_instance = ? WHERE id = ?",
+                "UPDATE local_instances SET serialized_instance = ? WHERE id = ? AND killed_at IS NULL",
                 (serialized_instance, id),
             )
             return True
@@ -579,7 +615,7 @@ class SQLConnection(metaclass=Singleton):
             Optional[str]: The JSON-encoded env map, or ``None``.
         """
         cursor = self._execute('''
-            SELECT envs FROM local_instances WHERE id = ?
+            SELECT envs FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result and result[0] is not None else None
@@ -628,9 +664,10 @@ class SQLConnection(metaclass=Singleton):
         params.append(id)
         try:
             self._execute(
-                f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ?",
+                f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ? AND killed_at IS NULL",
                 tuple(params),
             )
+            _local_capacity_changed()
             return True
         except:
             return False
@@ -648,7 +685,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT father_id
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else ""
@@ -666,7 +703,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT serialized_instance
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else None
@@ -684,7 +721,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT ip
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else None
@@ -693,7 +730,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT name
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         return row['name'] if row else None
@@ -717,7 +754,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -735,7 +772,7 @@ class SQLConnection(metaclass=Singleton):
             int: The balance_mu amount.
         """
         result = self._execute('''
-            SELECT balance_mu FROM local_instances WHERE id = ?
+            SELECT balance_mu FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -756,7 +793,7 @@ class SQLConnection(metaclass=Singleton):
             Exception: If no service is found for the given container ID.
         """
         result = self._execute('''
-            SELECT service_id FROM local_instances WHERE id = ?
+            SELECT service_id FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -774,7 +811,7 @@ class SQLConnection(metaclass=Singleton):
             Optional[str]: The associated virtualizer, or None if not found.
         """
         result = self._execute('''
-            SELECT virtualizer FROM local_instances WHERE id = ?
+            SELECT virtualizer FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         return row['virtualizer'] if row else None
@@ -787,7 +824,7 @@ class SQLConnection(metaclass=Singleton):
             List[str]: A list of ids.
         """
         result = self._execute('''
-            SELECT father_id, ip, id FROM local_instances
+            SELECT father_id, ip, id FROM local_instances WHERE killed_at IS NULL
         ''')
         return [row['id'] for row in result.fetchall()]
 
@@ -804,7 +841,7 @@ class SQLConnection(metaclass=Singleton):
         the PC as any other.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE killed_at IS NULL
         ''')
         return [dict(row) for row in result.fetchall()]
 
@@ -832,7 +869,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT COUNT(*)
             FROM local_instances
-            WHERE name = ?
+            WHERE name = ? AND killed_at IS NULL
         ''', (name,))
         return result.fetchone()[0] > 0
 
@@ -881,7 +918,7 @@ class SQLConnection(metaclass=Singleton):
         
         balance_mu = str(balance_mu)
         self._execute('''
-            UPDATE local_instances SET balance_mu = ? WHERE id = ?
+            UPDATE local_instances SET balance_mu = ? WHERE id = ? AND killed_at IS NULL
         ''', (balance_mu, id))
 
     def spend_instance_balance(self, id: str, amount_mu: int, allow_debt: bool) -> Optional[bool]:
@@ -902,7 +939,7 @@ class SQLConnection(metaclass=Singleton):
         with SQLConnection._lock:
             try:
                 cursor = SQLConnection._connection.cursor()
-                cursor.execute('SELECT balance_mu FROM local_instances WHERE id = ?', (id,))
+                cursor.execute('SELECT balance_mu FROM local_instances WHERE id = ? AND killed_at IS NULL', (id,))
                 row = cursor.fetchone()
                 if row is None:
                     return None
@@ -910,7 +947,7 @@ class SQLConnection(metaclass=Singleton):
                 if current < amount_mu and not allow_debt:
                     return False
                 cursor.execute(
-                    'UPDATE local_instances SET balance_mu = ? WHERE id = ?',
+                    'UPDATE local_instances SET balance_mu = ? WHERE id = ? AND killed_at IS NULL',
                     (str(current - amount_mu), id),
                 )
                 SQLConnection._connection.commit()
@@ -932,13 +969,13 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT COUNT(*)
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         return result.fetchone()[0] > 0
 
     def get_local_instance_id_by_name(self, name: str) -> Optional[str]:
         result = self._execute('''
-            SELECT id FROM local_instances WHERE name = ?
+            SELECT id FROM local_instances WHERE name = ? AND killed_at IS NULL
         ''', (name,))
         row = result.fetchone()
         if row:
@@ -952,9 +989,74 @@ class SQLConnection(metaclass=Singleton):
             return resolved_by_name
         return None
 
+    def mark_local_killed(self, id: str, reason: str) -> bool:
+        """Mark a local instance as dead. Keep the row for the operator to read.
+
+        Return True if this call killed the instance. Return False if the row does
+        not exist or is already dead, so the call is safe to repeat.
+
+        The burn-rate rows and the in-memory window are removed here: they describe a
+        live instance only. The trigger on the table makes the dead row final.
+        """
+        cursor = self._execute('''
+            UPDATE local_instances
+            SET killed_at = CURRENT_TIMESTAMP, death_reason = ?
+            WHERE id = ? AND killed_at IS NULL
+        ''', (reason, id))
+        killed = cursor.rowcount > 0
+        if killed:
+            _local_capacity_changed()
+        self._execute('DELETE FROM instance_consumption WHERE instance_id = ?', (id,))
+        self._execute('DELETE FROM instance_energy WHERE instance_id = ?', (id,))
+        with SQLConnection._consumption_lock:
+            SQLConnection._consumption_windows.pop(id, None)
+        return killed
+
+    def get_dead_local_instances(self) -> List[dict]:
+        """Return the dead local instances, the newest death first."""
+        result = self._execute('''
+            SELECT id, name, father_id, service_id, virtualizer, balance_mu,
+                   mem_limit, disk_space, cpu_period, cpu_quota,
+                   launched_at, killed_at, death_reason
+            FROM local_instances
+            WHERE killed_at IS NOT NULL
+            ORDER BY killed_at DESC, id
+        ''')
+        return [dict(row) for row in result.fetchall()]
+
+    def get_dead_local_instance_by_reference(self, reference: str) -> Optional[dict]:
+        """Find a dead local instance by id or by name. The newest death wins."""
+        result = self._execute('''
+            SELECT id, name, father_id, service_id, virtualizer, balance_mu,
+                   launched_at, killed_at, death_reason
+            FROM local_instances
+            WHERE killed_at IS NOT NULL AND (id = ? OR name = ?)
+            ORDER BY killed_at DESC
+            LIMIT 1
+        ''', (reference, reference))
+        row = result.fetchone()
+        return dict(row) if row else None
+
+    def prune_dead_local_instances(
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+    ) -> List[str]:
+        """Delete the old dead local instances. Return the ids that were deleted.
+
+        A dead row goes if it is older than ``max_age_days``, or if more than
+        ``max_rows`` dead rows exist (the oldest go first). A value of 0 or less
+        turns that limit off. With ``delete_all``, every dead row goes. With
+        ``dry_run``, nothing is deleted and the ids that would go are returned.
+        """
+        return self._prune_dead_rows(
+            'local_instances', 'id', max_age_days, max_rows, dry_run, delete_all
+        )
+
     def purge_internal(self, id: str):
         """
-        Purges an internal container
+        Delete the row of an internal container for good.
+
+        The normal stop path calls :meth:`mark_local_killed` instead, which keeps the
+        row. Only the retention sweep and a failed launch that never ran use this.
 
         Args:
             id (str): The id of the internal container.
@@ -963,6 +1065,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM local_instances WHERE id = ?
         ''', (id,))
+        _local_capacity_changed()
         # Drop the burn-rate row and its in-memory window together with the instance,
         # so a later instance that reuses this id never inherits a stale rate.
         self._execute('''
@@ -1287,7 +1390,7 @@ class SQLConnection(metaclass=Singleton):
                     # silently dropped every peer whose proof we had never validated --
                     # publishing an opinion set narrower than the one we actually held.
                     instance_json = (
-                        MessageToJson(data['peer']) if data['publish_announcement'] else ""
+                        message_to_json(data['peer']) if data['publish_announcement'] else ""
                     )
 
                     # Calculate the percentage of the total reputation token amount
@@ -2100,7 +2203,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT father_id
             FROM delegated_instances
-            WHERE token_delegation = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else ""
@@ -2118,7 +2221,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT serialized_instance
             FROM delegated_instances
-            WHERE token_delegation = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else None
@@ -2216,7 +2319,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT token_delegation, id, peer_id, father_id, serialized_instance,
                    balance_mu, peer_balance_mu
-            FROM delegated_instances
+            FROM delegated_instances WHERE killed_at IS NULL
         ''')
         return [
             {
@@ -2230,6 +2333,70 @@ class SQLConnection(metaclass=Singleton):
             }
             for row in result.fetchall()
         ]
+
+    def mark_delegated_killed(self, token: str, reason: str) -> bool:
+        """Mark a delegated instance as dead. Keep the row for the operator to read.
+
+        Return True if this call killed the instance, False if the row does not
+        exist or is already dead.
+        """
+        cursor = self._execute('''
+            UPDATE delegated_instances
+            SET killed_at = CURRENT_TIMESTAMP, death_reason = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
+        ''', (reason, token))
+        return cursor.rowcount > 0
+
+    def get_dead_delegated_instances(self) -> List[dict]:
+        """Return the dead delegated instances, the newest death first."""
+        result = self._execute('''
+            SELECT token_delegation, id, peer_id, father_id, service_id,
+                   balance_mu, peer_balance_mu, launched_at, killed_at, death_reason
+            FROM delegated_instances
+            WHERE killed_at IS NOT NULL
+            ORDER BY killed_at DESC, token_delegation
+        ''')
+        return [dict(row) for row in result.fetchall()]
+
+    def prune_dead_delegated_instances(
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+    ) -> List[str]:
+        """Delete the old dead delegated instances. Return the tokens deleted."""
+        return self._prune_dead_rows(
+            'delegated_instances', 'token_delegation', max_age_days, max_rows, dry_run, delete_all
+        )
+
+    def _prune_dead_rows(
+        self, table: str, key: str, max_age_days: int, max_rows: int,
+        dry_run: bool = False, delete_all: bool = False,
+    ) -> List[str]:
+        """Delete dead rows of ``table`` by age and by count. Return the deleted keys."""
+        doomed: List[str] = []
+        if delete_all:
+            result = self._execute(f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL")
+            doomed = [row[0] for row in result.fetchall()]
+            if not dry_run:
+                self._execute(f"DELETE FROM {table} WHERE killed_at IS NOT NULL")
+            return doomed
+        if max_age_days and max_age_days > 0:
+            result = self._execute(
+                f"SELECT {key} FROM {table} "
+                f"WHERE killed_at IS NOT NULL AND killed_at < datetime('now', ?)",
+                (f"-{int(max_age_days)} days",),
+            )
+            doomed.extend(row[0] for row in result.fetchall())
+        if max_rows and max_rows > 0:
+            result = self._execute(
+                f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL "
+                f"ORDER BY killed_at DESC, {key} LIMIT -1 OFFSET ?",
+                (int(max_rows),),
+            )
+            doomed.extend(row[0] for row in result.fetchall())
+        doomed = list(dict.fromkeys(doomed))
+        if not dry_run:
+            for key_value in doomed:
+                self._execute(f"DELETE FROM {table} WHERE {key} = ?", (key_value,))
+        return doomed
 
     def purgue_delegated(self, token: str):
         """
@@ -2350,7 +2517,8 @@ class SQLConnection(metaclass=Singleton):
         return row['id'] if row else None
 
     def add_chat_message(self, peer_id: str, from_us: bool, body: str, ts: int,
-                         keep_per_peer: int, conversation_id: Optional[str] = None) -> None:
+                         keep_per_peer: int, conversation_id: Optional[str] = None,
+                         service: Optional[celaut_pb2.Metadata] = None) -> None:
         """Store one Chat message and prune ``peer_id``'s history down to ``keep_per_peer``.
 
         The prune runs on every insert rather than on a schedule of its own, the
@@ -2365,11 +2533,22 @@ class SQLConnection(metaclass=Singleton):
         opening many small conversations would buy itself a much larger effective
         allowance than one who does not -- the ceiling exists to bound one peer's
         total footprint, not to be multiplied by however many threads it opens.
+
+        ``service`` is the Metadata of a service shared in the message (issue #438),
+        stored serialized for the TUI to render, next to the registry id this node
+        derives from it (``registry_service_id``) -- the id its Get/Execute take.
         """
+        from src.utils.verify import registry_service_id
+
         self._execute('''
-            INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (peer_id, int(bool(from_us)), body, int(ts), conversation_id))
+            INSERT INTO peer_chat_messages
+                (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            peer_id, int(bool(from_us)), body, int(ts), conversation_id,
+            registry_service_id(service) if service is not None else None,
+            service.SerializeToString() if service is not None else None,
+        ))
         self._execute('''
             DELETE FROM peer_chat_messages
             WHERE peer_id = ? AND id NOT IN (
@@ -2387,7 +2566,7 @@ class SQLConnection(metaclass=Singleton):
         :meth:`get_conversation_messages` for one thread alone.
         """
         result = self._execute('''
-            SELECT from_us, body, ts, received_at, conversation_id
+            SELECT from_us, body, ts, received_at, conversation_id, service_id, service_metadata
             FROM peer_chat_messages
             WHERE peer_id = ?
             ORDER BY id DESC
@@ -2400,6 +2579,7 @@ class SQLConnection(metaclass=Singleton):
                 'ts': int(row['ts']),
                 'received_at': row['received_at'],
                 'conversation_id': row['conversation_id'],
+                'service': _chat_service(row),
             }
             for row in reversed(result.fetchall())
         ]
@@ -2407,7 +2587,7 @@ class SQLConnection(metaclass=Singleton):
     def get_conversation_messages(self, conversation_id: str, limit: int = 200) -> List[dict]:
         """Every message in one thread, oldest first, capped at ``limit``."""
         result = self._execute('''
-            SELECT from_us, body, ts, received_at
+            SELECT from_us, body, ts, received_at, service_id, service_metadata
             FROM peer_chat_messages
             WHERE conversation_id = ?
             ORDER BY id DESC
@@ -2419,6 +2599,7 @@ class SQLConnection(metaclass=Singleton):
                 'body': row['body'],
                 'ts': int(row['ts']),
                 'received_at': row['received_at'],
+                'service': _chat_service(row),
             }
             for row in reversed(result.fetchall())
         ]
@@ -2575,7 +2756,7 @@ class SQLConnection(metaclass=Singleton):
             token (str): The token of the external container.
         """
         result = self._execute('''
-            SELECT balance_mu FROM delegated_instances WHERE token_delegation = ?
+            SELECT balance_mu FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         row = result.fetchone()
         return _as_int(row['balance_mu']) if row else 0
@@ -2588,7 +2769,7 @@ class SQLConnection(metaclass=Singleton):
             balance_mu (int): The new balance.
         """
         self._execute('''
-            UPDATE delegated_instances SET balance_mu = ? WHERE token_delegation = ?
+            UPDATE delegated_instances SET balance_mu = ? WHERE token_delegation = ? AND killed_at IS NULL
         ''', (str(int(balance_mu)), token))
 
     def update_delegated_deposit(self, token: str, balance_mu: int, peer_balance_mu: int):
@@ -2608,7 +2789,7 @@ class SQLConnection(metaclass=Singleton):
         """
         self._execute('''
             UPDATE delegated_instances SET balance_mu = ?, peer_balance_mu = ?
-            WHERE token_delegation = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
         ''', (str(int(balance_mu)), str(int(peer_balance_mu)), token))
 
     def get_delegated_peer_balance(self, token: str) -> int:
@@ -2618,7 +2799,7 @@ class SQLConnection(metaclass=Singleton):
             token (str): The token of the external container.
         """
         result = self._execute('''
-            SELECT peer_balance_mu FROM delegated_instances WHERE token_delegation = ?
+            SELECT peer_balance_mu FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         row = result.fetchone()
         return _as_int(row['peer_balance_mu']) if row else 0
@@ -2635,7 +2816,7 @@ class SQLConnection(metaclass=Singleton):
             peer_balance_mu (int): The peer's own figure, just read.
         """
         self._execute('''
-            UPDATE delegated_instances SET peer_balance_mu = ? WHERE token_delegation = ?
+            UPDATE delegated_instances SET peer_balance_mu = ? WHERE token_delegation = ? AND killed_at IS NULL
         ''', (str(int(peer_balance_mu)), token))
 
     def get_delegated_token_by_id(self, id: str) -> Optional[str]:
@@ -2650,7 +2831,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT token_delegation FROM delegated_instances WHERE id = ?
+                SELECT token_delegation FROM delegated_instances WHERE id = ? AND killed_at IS NULL
             ''', (id,))
             row = result.fetchone()
             if row:
@@ -2672,7 +2853,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT peer_id FROM delegated_instances WHERE token_delegation = ?
+                SELECT peer_id FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL
             ''', (token,))
             row = result.fetchone()
             if row:
@@ -2693,7 +2874,7 @@ class SQLConnection(metaclass=Singleton):
             str: The associated internal container id.
         """
         result = self._execute('''
-            SELECT id FROM local_instances WHERE ip = ?
+            SELECT id FROM local_instances WHERE ip = ? AND killed_at IS NULL
         ''', (uri,))
         row = result.fetchone()
         if row:
@@ -2744,13 +2925,18 @@ class SQLConnection(metaclass=Singleton):
 
     # What a payment row is allowed to say happened. See the `payments` table in
     # migrate.py for what each one means.
-    PAYMENT_STATUSES = ('communicated', 'unacknowledged', 'accepted', 'rejected')
+    PAYMENT_STATUSES = ('signed', 'broadcast', 'confirmed', 'communicated',
+                        'unacknowledged', 'failed', 'accepted', 'rejected')
+    # The outgoing states a payment can be left in by a daemon that stopped: the money
+    # may be on the network and the peer has not been told yet.
+    PAYMENT_RESUMABLE_STATUSES = ('signed', 'broadcast', 'confirmed')
 
     def record_payment(self, direction: str, status: str, amount_mu: int,
                        tx_id: Optional[str] = None, peer_id: Optional[str] = None,
                        client_id: Optional[str] = None, deposit_token: Optional[str] = None,
                        ledger: Optional[str] = None, contract_hash: Optional[str] = None,
                        token_id: Optional[str] = None, address: Optional[str] = None,
+                       peer_amount_mu: Optional[int] = None,
                        purpose: Optional[str] = None) -> bool:
         """Write down one payment. Returns whether the row landed.
 
@@ -2771,12 +2957,59 @@ class SQLConnection(metaclass=Singleton):
                 tx_id=tx_id, direction=direction, status=status, peer_id=peer_id,
                 client_id=client_id, deposit_token=deposit_token, ledger=ledger,
                 contract_hash=contract_hash, token_id=token_id, address=address,
-                amount_mu=amount_mu, purpose=purpose,
+                amount_mu=amount_mu, peer_amount_mu=peer_amount_mu, purpose=purpose,
             ))
             return True
         except Exception as e:
             logger.LOGGER(f'Failed to record the {direction} payment of {amount_mu} MU: {e}')
             return False
+
+    def set_outgoing_payment_status(self, tx_id: str, status: str) -> bool:
+        """Move the outgoing payment of ``tx_id`` to ``status``. Returns whether a row moved.
+
+        Keyed by the transaction id because that is what the contract reports at the
+        broadcast, and it is unique per payment. Never raises, for the same reason
+        `record_payment` does not: the money has already moved.
+        """
+        if status not in SQLConnection.PAYMENT_STATUSES:
+            logger.LOGGER(f"Refusing to set a payment status {status!r}.")
+            return False
+        try:
+            cursor = self._execute(
+                "UPDATE payments SET status = ? WHERE direction = 'out' AND tx_id = ?",
+                (status, tx_id),
+            )
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.LOGGER(f'Failed to set the payment of tx {tx_id} to {status}: {e}')
+            return False
+
+    def outgoing_payments_to_resume(self) -> List[dict]:
+        """Outgoing payments a stopped daemon left between the broadcast and `Payable`.
+
+        Oldest first, so the payment closest to its deposit token's expiry is resumed
+        first. ``age_seconds`` is computed by SQLite, against the same clock that wrote
+        ``created_at``.
+        """
+        placeholders = ", ".join("?" for _ in SQLConnection.PAYMENT_RESUMABLE_STATUSES)
+        try:
+            rows = self._execute(
+                f"""
+                SELECT tx_id, status, peer_id, deposit_token, ledger, contract_hash,
+                       token_id, address, amount_mu, peer_amount_mu,
+                       CAST(strftime('%s', 'now') - strftime('%s', created_at) AS INTEGER)
+                           AS age_seconds
+                FROM payments
+                WHERE direction = 'out' AND tx_id IS NOT NULL
+                  AND status IN ({placeholders})
+                ORDER BY created_at, id
+                """,
+                SQLConnection.PAYMENT_RESUMABLE_STATUSES,
+            ).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the outgoing payments to resume: {e}')
+            return []
+        return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------ donations
     # A donation debt is money this node owes but has not moved yet, and it is keyed by

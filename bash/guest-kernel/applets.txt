@@ -22,3 +22,9 @@ umount
 # Guest env vars from .__nodo_envs (#405): decoding the base64 value on each
 # line before export.
 base64
+# Shared filesystems: the mount plan is flattened (tr), parsed (sed) and its scratch
+# file removed (rm) before switch_root. Without them the guest init exits 127 and the
+# kernel panics, so no service that declares a guest directory can start.
+tr
+sed
+rm

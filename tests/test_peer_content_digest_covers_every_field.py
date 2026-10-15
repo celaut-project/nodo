@@ -24,6 +24,7 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from protos import celaut_pb2
+    from src.utils import keyvalue
     from src.identity.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
@@ -46,6 +47,10 @@ def _censused_messages():
         "Contract.Ledger": celaut_pb2.Contract.Ledger.DESCRIPTOR,
         "ContractRate": celaut_pb2.ContractRate.DESCRIPTOR,
         "Amount": celaut_pb2.Amount.DESCRIPTOR,
+        "ArchitectureResources": celaut_pb2.ArchitectureResources.DESCRIPTOR,
+        "Service.Container.Architecture": celaut_pb2.Service.Container.Architecture.DESCRIPTOR,
+        "Sysresources": celaut_pb2.Sysresources.DESCRIPTOR,
+        "Uint64KeyValue": celaut_pb2.Uint64KeyValue.DESCRIPTOR,
     }
 
 
@@ -71,17 +76,28 @@ def _announcement():
     uri = _uri(peer)
     uri.expiry_unix_timestamp = 1800000000
     uri.protocol_stack.add(tags=["grpc"], prose="gRPC", formal=b"\x01")
-    peer.mu_per_call["start"].n = "1000"
+    keyvalue.set_value(peer.mu_per_call, "start", celaut_pb2.Amount(n="1000"))
     rate = peer.payment_contracts.add()
     rate.contract.ledger.tags.append("ergo")
     rate.contract.ledger.prose = "Ergo mainnet"
     rate.contract.ledger.formal = b"\x02"
-    rate.contract.xattrs["token_id"] = b"\xaa"
+    keyvalue.set_value(rate.contract.xattrs, "token_id", b"\xaa")
     rate.mu_per_unit.n = "1000000000"
     proof = peer.reputation_proofs.add()
     proof.ledger.tags.append("ergo")
-    proof.xattrs["token_id"] = b"\xbb"
+    keyvalue.set_value(proof.xattrs, "token_id", b"\xbb")
     peer.signature_scheme.components.add(tags=["ed25519"], prose="Ed25519", formal=b"\x03")
+    announced = peer.resources.add()
+    announced.architecture.tags.extend(["linux/amd64", "x86_64"])
+    announced.architecture.prose = "x86-64"
+    announced.architecture.formal = b"\x04"
+    at_most = announced.resources
+    at_most.blkio_weight = 500
+    at_most.cpu_period = 100000
+    at_most.cpu_quota = 400000
+    at_most.mem_limit = 8 * 1024 ** 3
+    at_most.disk_space = 100 * 1024 ** 3
+    keyvalue.set_value(at_most.benchmark, "int_ops_per_sec", 900000)
     peer.public_key = "ab" * 32
     peer.signature = "cd" * 64
     peer.ts = 1700000000
@@ -92,9 +108,9 @@ def _announcement():
 # same names the census uses, so a covered field with no mutation is a failure.
 MUTATIONS = {
     "Peer.uri": lambda p: _uri(p, ip="5.6.7.8", port=9090),
-    "Peer.mu_per_call": lambda p: p.mu_per_call["start"].__setattr__("n", "2000"),
-    "Peer.payment_contracts": lambda p: p.payment_contracts[0].contract.xattrs.__setitem__("token_id", b"\xff"),
-    "Peer.reputation_proofs": lambda p: p.reputation_proofs[0].xattrs.__setitem__("token_id", b"\xff"),
+    "Peer.mu_per_call": lambda p: keyvalue.set_value(p.mu_per_call, "start", celaut_pb2.Amount(n="2000")),
+    "Peer.payment_contracts": lambda p: keyvalue.set_value(p.payment_contracts[0].contract.xattrs, "token_id", b"\xff"),
+    "Peer.reputation_proofs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "token_id", b"\xff"),
     "Peer.signature_scheme": lambda p: p.signature_scheme.components.add(tags=["secp256k1"]),
     "Peer.Uri.ip": lambda p: setattr(p.uri[0], "ip", "9.9.9.9"),
     "Peer.Uri.port": lambda p: setattr(p.uri[0], "port", 1234),
@@ -106,13 +122,27 @@ MUTATIONS = {
     "Peer.Uri.Protocol.formal": lambda p: setattr(p.uri[0].protocol_stack[0], "formal", b"\xfe"),
     "Peer.SignatureScheme.components": lambda p: p.signature_scheme.components.add(tags=["schnorr"]),
     "Contract.ledger": lambda p: p.reputation_proofs[0].ledger.tags.append("cardano"),
-    "Contract.xattrs": lambda p: p.reputation_proofs[0].xattrs.__setitem__("script", b"\x99"),
+    "Contract.xattrs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "script", b"\x99"),
     "Contract.Ledger.tags": lambda p: p.payment_contracts[0].contract.ledger.tags.append("mainnet"),
     "Contract.Ledger.prose": lambda p: setattr(p.payment_contracts[0].contract.ledger, "prose", "other"),
     "Contract.Ledger.formal": lambda p: setattr(p.payment_contracts[0].contract.ledger, "formal", b"\xfd"),
     "ContractRate.contract": lambda p: p.payment_contracts[0].contract.ledger.tags.append("testnet"),
     "ContractRate.mu_per_unit": lambda p: setattr(p.payment_contracts[0].mu_per_unit, "n", "5"),
     "Amount.n": lambda p: setattr(p.payment_contracts[0].mu_per_unit, "n", "7"),
+    "Peer.resources": lambda p: p.resources.add().architecture.tags.append("linux/arm64"),
+    "ArchitectureResources.architecture": lambda p: p.resources[0].architecture.tags.append("amd64"),
+    "ArchitectureResources.resources": lambda p: p.resources[0].ClearField("resources"),
+    "Service.Container.Architecture.tags": lambda p: p.resources[0].architecture.tags.append("x64"),
+    "Service.Container.Architecture.prose": lambda p: setattr(p.resources[0].architecture, "prose", "other"),
+    "Service.Container.Architecture.formal": lambda p: setattr(p.resources[0].architecture, "formal", b"\xfc"),
+    "Sysresources.blkio_weight": lambda p: setattr(p.resources[0].resources, "blkio_weight", 10),
+    "Sysresources.cpu_period": lambda p: setattr(p.resources[0].resources, "cpu_period", 50000),
+    "Sysresources.cpu_quota": lambda p: setattr(p.resources[0].resources, "cpu_quota", 800000),
+    "Sysresources.mem_limit": lambda p: setattr(p.resources[0].resources, "mem_limit", 1),
+    "Sysresources.disk_space": lambda p: setattr(p.resources[0].resources, "disk_space", 1),
+    "Sysresources.benchmark": lambda p: keyvalue.set_value(p.resources[0].resources.benchmark, "sha256_hashes_per_sec", 1),
+    "Uint64KeyValue.key": lambda p: setattr(p.resources[0].resources.benchmark[0], "key", "flt_ops_per_sec"),
+    "Uint64KeyValue.value": lambda p: setattr(p.resources[0].resources.benchmark[0], "value", 1),
 }
 
 
@@ -183,6 +213,28 @@ class ContentDigestCoversEveryFieldTests(unittest.TestCase):
                     payload,
                     f"{field} is excluded from the digest and unsigned everywhere else",
                 )
+
+    def test_an_unset_limit_and_a_zero_limit_are_different_claims(self):
+        # Every Sysresources scalar is `optional`: "nothing said" is not "0".
+        unset = _announcement()
+        unset.resources[0].resources.ClearField("blkio_weight")
+        zero = _announcement()
+        zero.resources[0].resources.blkio_weight = 0
+        self.assertNotEqual(
+            canonical_peer_content_digest(unset), canonical_peer_content_digest(zero)
+        )
+
+    def test_the_order_architectures_are_announced_in_does_not_matter(self):
+        arm64 = celaut_pb2.ArchitectureResources()
+        arm64.architecture.tags.append("linux/arm64")
+        one, other = _announcement(), _announcement()
+        one.resources.append(arm64)
+        entries = [arm64] + list(other.resources)
+        other.ClearField("resources")
+        other.resources.extend(entries)
+        self.assertEqual(
+            canonical_peer_content_digest(one), canonical_peer_content_digest(other)
+        )
 
     def test_an_excluded_field_does_not_move_the_digest(self):
         # The other half: the cache must hit for a re-signed announcement of identical

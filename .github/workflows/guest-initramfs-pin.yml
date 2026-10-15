@@ -1,0 +1,85 @@
+name: guest-initramfs-pin
+
+# Fails when the initramfs this tree builds is not the one SHA256SUMS.pinned
+# names, which is the one nodes install from the guest-kernel release.
+#
+# Installed nodes boot the release asset, not what build_ch_initramfs.sh produces,
+# so a change to that script or to applets.txt reaches nobody until the release is
+# republished (guest-initramfs.yml) and the pin moves. #481 changed /init and
+# shipped without either step (#490). The build is byte-reproducible, so rebuilding
+# against the pinned busybox and comparing digests is a complete check.
+#
+# Runs natively per arch, like guest-initramfs.yml: the applet check executes the
+# busybox going into the image.
+
+on:
+  pull_request:
+    paths:
+      - 'bash/build_ch_initramfs.sh'
+      - 'bash/guest-kernel/**'
+      - '.github/workflows/guest-initramfs-pin.yml'
+  push:
+    branches: [dev, stable]
+    paths:
+      - 'bash/build_ch_initramfs.sh'
+      - 'bash/guest-kernel/**'
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            tag: linux-arm64
+          - arch: x86_64
+            runner: ubuntu-24.04
+            tag: linux-amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cpio gzip curl ca-certificates
+
+      - name: Fetch the pinned busybox
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: busybox-${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          PIN=bash/guest-kernel/SHA256SUMS.pinned
+          pinned_tag="$(awk '$1 == "TAG" { print $2; exit }' "$PIN")"
+          expected="$(awk -v n="$ASSET" '$2 == n { print $1; exit }' "$PIN")"
+          [ -n "$expected" ] || { echo "No pinned digest for $ASSET in $PIN"; exit 1; }
+          mkdir -p busybox
+          gh release download "$pinned_tag" --repo "${{ github.repository }}" \
+            --pattern "$ASSET" --dir busybox --clobber
+          actual="$(sha256sum "busybox/$ASSET" | awk '{print $1}')"
+          [ "$expected" = "$actual" ] || {
+            echo "SHA256 mismatch for $ASSET: pinned $expected, got $actual."
+            exit 1
+          }
+
+      - name: Rebuild the initramfs and compare with the pin
+        env:
+          ASSET: initramfs-${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          bash bash/guest-kernel/build-initramfs.sh ${{ matrix.arch }} out \
+            "busybox/busybox-${{ matrix.tag }}"
+          expected="$(awk -v n="$ASSET" '$2 == n { print $1; exit }' bash/guest-kernel/SHA256SUMS.pinned)"
+          actual="$(sha256sum "out/$ASSET" | awk '{print $1}')"
+          [ "$expected" = "$actual" ] || {
+            echo "::error::$ASSET built from this tree is $actual, but the pin says $expected."
+            echo "Run the guest-initramfs workflow (gh workflow run guest-initramfs -f tag=guest-kernel),"
+            echo "then record the digests it prints in bash/guest-kernel/SHA256SUMS.pinned."
+            exit 1
+          }
+          echo "$ASSET matches its pin."

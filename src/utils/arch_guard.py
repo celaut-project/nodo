@@ -96,6 +96,21 @@ def host_arch_tag() -> Optional[str]:
     return normalize_arch_tag(platform.machine())
 
 
+def arch_from_tags(tags) -> Optional[str]:
+    """The canonical tag the first recognised entry of ``tags`` names, or None.
+
+    For a ``Container.Architecture``'s tags, whoever wrote them: unlike
+    ``virtualizers.architecture.get_arch_tag`` this does not ask whether THIS host can
+    run the architecture, which is the wrong question when reading what a peer
+    announced or what a delegated service needs.
+    """
+    for tag in tags or ():
+        canonical = normalize_arch_tag(tag)
+        if canonical:
+            return canonical
+    return None
+
+
 def _binfmt_handler_enabled(name: str) -> bool:
     """Whether ``binfmt_misc`` handler ``name`` exists and is enabled.
 

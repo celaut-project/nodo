@@ -103,6 +103,12 @@ class ErgoAssetConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigValidationError):
             self._validate([_asset(MU_PER_UNIT=None)])
 
+    def test_a_fractional_rate_is_refused_and_the_way_out_is_named(self):
+        # ContractRate.mu_per_unit is an integer per base unit; a token worth less
+        # than 1 MU per base unit can only be priced by rescaling the node (#467).
+        with self.assertRaisesRegex(ConfigValidationError, "MU_PER_NANOERG"):
+            self._validate([_asset(MU_PER_UNIT="0.5")])
+
     def test_a_limit_finer_than_the_assets_decimals_is_refused(self):
         # It cannot be expressed in that asset at all, and reading as zero would
         # silently sweep everything.

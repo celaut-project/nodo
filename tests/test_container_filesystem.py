@@ -22,6 +22,7 @@ from src.utils.container_filesystem import (
     filesystem_block_id,
     filesystem_hash_types,
     load_container_filesystem,
+    split_oversized_filesystem_block,
 )
 
 BIG = b"L" * 40_000          # over the threshold used below -> stored as a block
@@ -123,6 +124,67 @@ class ContainerFilesystemTests(unittest.TestCase):
 
     def test_a_service_with_no_filesystem_reads_as_empty(self):
         self.assertEqual(len(load_container_filesystem(celaut.Service()).branch), 0)
+
+
+class OversizedFilesystemBlock(unittest.TestCase):
+    """A filesystem block that arrives with its large files inline (nodo#524).
+
+    A peer that sends the block flat, or packed it with another threshold, leaves
+    more inline than a message can be parsed from once the image passes 2 GiB.
+    The receiver applies the packer's policy itself. The limit and the threshold
+    are small here; the code is the same.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="cfs-oversized-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.blocks = os.path.join(self.root, "blocks")
+        os.makedirs(self.blocks)
+        modify_env(cache_dir=self.root + os.sep, block_dir=self.blocks + os.sep)
+        self.addCleanup(modify_env, cache_dir=packer.CACHE, block_dir=packer.BLOCKDIR)
+        threshold = mock.patch("src.utils.container_filesystem.ConfigManager")
+        threshold.start().return_value.get.return_value = 32_768
+        self.addCleanup(threshold.stop)
+
+    def _service_with_flat_filesystem_block(self):
+        filesystem = celaut.Service.Container.Filesystem()
+        small = filesystem.branch.add()
+        small.name = "small.txt"
+        small.file = SMALL
+        directory = filesystem.branch.add()
+        directory.name = "data"
+        big = directory.filesystem.branch.add()
+        big.name = "big.bin"
+        big.file = BIG
+        data = filesystem.SerializeToString()
+        block_id = Enviroment.hash_factory(data).hexdigest()
+        with open(os.path.join(self.blocks, block_id), "wb") as f:
+            f.write(data)
+        service = celaut.Service()
+        service.container.filesystem = block_pointer(block_id=block_id).SerializeToString()
+        return service, block_id
+
+    def test_the_large_file_becomes_a_block_and_the_id_stays(self):
+        service, block_id = self._service_with_flat_filesystem_block()
+        self.assertTrue(split_oversized_filesystem_block(service, limit=10_000))
+        self.assertTrue(os.path.isdir(os.path.join(self.blocks, block_id)))
+        self.assertEqual(filesystem_block_id(service.container.filesystem), block_id)
+
+        loaded = load_container_filesystem(service)
+        big = loaded.branch[1].filesystem.branch[0]
+        self.assertLess(len(big.file), 100, "the large file is still inline")
+        target = os.path.join(self.root, "restored.bin")
+        self.assertTrue(copy_block_if_exists(
+            buffer=big.file, directory=target,
+            inherited=filesystem_hash_types(service)))
+        with open(target, "rb") as f:
+            self.assertEqual(f.read(), BIG)
+        self.assertEqual(loaded.branch[0].file, SMALL)
+
+    def test_a_block_within_the_limit_is_left_as_it_is(self):
+        service, block_id = self._service_with_flat_filesystem_block()
+        self.assertFalse(split_oversized_filesystem_block(service))
+        self.assertTrue(os.path.isfile(os.path.join(self.blocks, block_id)))
 
 
 class CompressedPointersInTheFilesystemBlock(unittest.TestCase):

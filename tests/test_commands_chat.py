@@ -22,7 +22,7 @@ class OpenThreadTests(unittest.TestCase):
 
         self.assertTrue(ok)
         mock_send.assert_called_once_with(
-            peer_id="peer-1", body="status update", conversation_id="conv-1",
+            peer_id="peer-1", body="status update", conversation_id="conv-1", service=None,
         )
 
     @patch("src.manager.chat.send_chat_message")
@@ -32,7 +32,18 @@ class OpenThreadTests(unittest.TestCase):
 
         self.assertTrue(ok)
         mock_send.assert_called_once_with(
-            peer_id="peer-1", body="all green", conversation_id="conv-1",
+            peer_id="peer-1", body="all green", conversation_id="conv-1", service=None,
+        )
+
+    @patch("src.manager.chat.send_chat_message")
+    @patch("src.manager.chat.open_conversation", return_value="conv-1")
+    def test_a_shared_service_travels_with_the_first_message(self, mock_open, mock_send):
+        """`--service` (issue #438): the card rides on the opening message."""
+        ok = open_thread(peer_id="peer-1", topic="try this", service="hello-world")
+
+        self.assertTrue(ok)
+        mock_send.assert_called_once_with(
+            peer_id="peer-1", body="try this", conversation_id="conv-1", service="hello-world",
         )
 
     @patch("src.manager.chat.close_conversation")

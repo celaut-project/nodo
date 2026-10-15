@@ -142,4 +142,5 @@ This is purely a backend: the semantics (the `shared`/`guest`/`access` /
 the service specification never mentions VirtioFS. See
 [`docs/SHARED_FILESYSTEMS.md`](../../../docs/SHARED_FILESYSTEMS.md) for the full
 model. Configure the daemon binary with `virtualizers.ch.VIRTIOFSD_BINARY`
-(default `virtiofsd`).
+(default `virtiofsd`; the installer sets the absolute path of the Rust virtiofsd
+it puts in `<MAIN_DIR>/bin`). `nodo doctor` checks it.

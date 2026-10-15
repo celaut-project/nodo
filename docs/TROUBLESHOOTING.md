@@ -107,6 +107,27 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 
 `doctor` also checks/repairs the `nodo.service` systemd unit; run it with `sudo`.
 
+## arm64: `CreateVgic` / `No such device (os error 19)`
+
+**Symptom:** every native arm64 launch dies at once with
+`Fatal error: VmBoot(... CreateInterruptController(CreateGic(CreateVgic(... No such device (os error 19)))))`;
+`nodo doctor` reports `[FAIL] KVM cannot create a GICv3`.
+
+**Why:** on arm64 Cloud Hypervisor only emulates a GICv3 with an ITS; it has no
+GICv2 support. KVM can only offer the vGIC its host has, so on a host whose
+interrupt controller is a GICv2 — the GIC-400 of a Raspberry Pi 4/5 and many other
+SoCs — or a nested/cloud VM that does not expose a vGICv3, the device does not
+exist. It is a host limitation: no service, config or nodo change boots a CH guest
+there. The node detects it at start and stops advertising `linux/arm64`, so peers
+route those services elsewhere instead of failing on it; QEMU-emulated foreign
+architectures are unaffected.
+
+**Fix:** run the node on an arm64 host with a GICv3 (Ampere, Graviton bare-metal,
+Apple Silicon under Asahi, ...). `dmesg | grep -i gic` shows which GIC a host has.
+The `Failed to mark pages as THP eligible (os error 22)` warning printed just before
+is unrelated and harmless: it only means the host kernel has no transparent
+hugepages.
+
 ## Guest kernel missing or rejected by Cloud Hypervisor
 
 **Symptom:** the installer fails downloading the guest kernel, initramfs or
@@ -142,6 +163,25 @@ busybox, or CH refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(Uefi
   the builder accepts; it falls back to the host's busybox only when
   `NODO_ALLOW_HOST_BUSYBOX=1` is set, which the installer never does and which
   produces a dev-only image no node runs.
+
+## virtiofsd missing: a service with shared directories is refused
+
+**Symptom:** a launch fails with *this service declares shared directories, which
+need the Rust virtiofsd on this node*, or (before #478)
+`MicroVMError: [Errno 2] No such file or directory: 'virtiofsd'`. `nodo doctor`
+shows `[WARN]` under `virtiofsd (shared filesystems)`.
+
+**Why:** each share is served by a `virtiofsd` on the host, and the node gives it
+the flags of the Rust implementation. The node finds it through
+`virtualizers.ch.VIRTIOFSD_BINARY`, as root. The old QEMU C daemon at
+`/usr/lib/qemu/virtiofsd` does not accept those flags, and a binary in
+`~/.cargo/bin` is not on root's `PATH`.
+
+**Fix:** re-run the installer, which puts the Rust daemon in `<MAIN_DIR>/bin` and
+sets the absolute path. Or install it by hand and set the path, as
+[SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#host-requirement-the-rust-virtiofsd)
+shows. Then run `sudo nodo doctor` again. Services without shared directories do
+not need it.
 
 ## Initramfs contract version mismatch
 

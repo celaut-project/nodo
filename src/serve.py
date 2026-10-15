@@ -18,7 +18,11 @@ from src.utils.firewall.gateway import (
     operator_notice,
 )
 from src.utils.firewall.legacy import sweep_compat_tables
-from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
+from src.utils.firewall.reachability import (
+    ProbeResult,
+    probe_tcp_from_bridge,
+    sweep_leaked_probes,
+)
 from src.identity.grpc_transport import server_credentials
 from src.utils.network_policy import NetworkPolicy, NetworkPolicyConfigError
 
@@ -37,6 +41,24 @@ def _gateway_port_call(port: int, *, verify: bool) -> ProbeResult:
         config_path=env_manager.config_path,
         log=log.LOGGER,
     )
+
+
+def _sweep_leaked_probes() -> None:
+    """Delete the probe namespaces a previous daemon left on the guest bridge.
+
+    A daemon killed mid-probe never runs the probe's cleanup, and the namespace it
+    leaves keeps an address on the bridge that a guest can be given (#493). The
+    allocator skips those addresses, but only a sweep gives them back.
+    """
+    try:
+        removed = sweep_leaked_probes()
+        if removed:
+            log.LOGGER(
+                f"Removed {len(removed)} leaked reachability-probe namespace(s) and "
+                f"link(s): {', '.join(removed)}"
+            )
+    except Exception as e:
+        log.LOGGER(f"Could not sweep leaked reachability-probe namespaces: {e}")
 
 
 def _ensure_guest_bridge() -> None:
@@ -202,6 +224,7 @@ def _verify_plaintext_gateway_port(port: int) -> None:
         "plaintext gateway unreachable",
         "\n".join(lines),
         command=frontend.command if frontend else None,
+        port=port,
     )
 
 
@@ -286,6 +309,7 @@ def serve():
     except GatewayPortUnavailable as e:
         _refuse_to_start(e)
     port = env_manager.get_gateway_port()
+    _sweep_leaked_probes()
     _ensure_guest_bridge()
     _open_gateway_port(port)
 
@@ -309,6 +333,28 @@ def serve():
         delegated_endpoints.restore()
     except Exception as e:
         log.LOGGER(f'Could not restore delegated tunnel endpoints: {e}')
+
+    # Detached `nodo tunnel`s that were running before the restart come back, on the
+    # ports their clients were given. In the background: each waits for its child to
+    # bind, and the gateway must not wait for that.
+    def _restore_detached_tunnels():
+        try:
+            from src.commands.tunnel import restore_detached
+            restore_detached()
+        except Exception as e:
+            log.LOGGER(f'Could not restore detached tunnels: {e}')
+
+    threading.Thread(
+        target=_restore_detached_tunnels, name='restore-detached-tunnels', daemon=True,
+    ).start()
+
+    # The inbound-tunnel snapshot on disk is the last daemon's; none of its streams
+    # survived it.
+    try:
+        from src.tunneling import inbound as inbound_tunnels
+        inbound_tunnels.reset()
+    except Exception as e:
+        log.LOGGER(f'Could not reset the inbound tunnel snapshot: {e}')
 
     # Run manager.
     threading.Thread(
@@ -374,5 +420,16 @@ def serve():
     # Only now can the guest-side probe distinguish "the firewall drops this" from
     # "nothing answers on this port".
     _verify_gateway_ports(server, port, plaintext_port)
+
+    # Measure any per-core benchmark score still at -1 (#459). After the server is up,
+    # because the benchmark core service is launched through it; on a daemon thread
+    # and fully guarded, so it can neither hold up nor break startup or billing. A node
+    # with no `core_services.benchmark` configured starts no thread at all.
+    try:
+        from src.core_services.benchmark import start_in_background
+
+        start_in_background()
+    except Exception as e:
+        log.LOGGER(f'Could not start the benchmark measurement: {e}')
 
     server.wait_for_termination()

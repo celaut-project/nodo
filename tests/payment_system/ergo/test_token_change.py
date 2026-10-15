@@ -90,9 +90,15 @@ class _FakeErgo:
         return ("mnemonic", "seed", "password")
 
     def signTransaction(self, unsigned_tx, mnemonic, prover_index=0):
-        return "signed"
+        # AppKit's SignedTransaction: its id is known before it is sent.
+        return _Signed()
 
     def txId(self, signed_tx):
+        return "tx-id-1"
+
+
+class _Signed:
+    def getId(self):
         return "tx-id-1"
 
 

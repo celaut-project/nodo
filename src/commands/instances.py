@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from src.utils import dead_instances
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
@@ -25,10 +26,22 @@ DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA = env_manager.get("METADATA_REGISTRY")
 DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
 
-def _direct_purge_local_instance(instance_id: str) -> None:
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _direct_kill_local_instance(instance_id: str, reason: str) -> None:
+    """Mark a local instance as dead without the manager. Keep its row."""
     conn = sqlite3.connect(DATABASE_FILE)
     try:
-        conn.execute("DELETE FROM local_instances WHERE id = ?", (instance_id,))
+        conn.execute(
+            "UPDATE local_instances SET killed_at = CURRENT_TIMESTAMP, death_reason = ? "
+            "WHERE id = ? AND killed_at IS NULL",
+            (reason, instance_id),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -80,7 +93,7 @@ def _prune_stale_instances() -> None:
     conn = sqlite3.connect(DATABASE_FILE)
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM local_instances")
+        cursor.execute("SELECT id FROM local_instances WHERE killed_at IS NULL")
         candidates = [row[0] for row in cursor.fetchall()]
     except sqlite3.Error:
         return
@@ -93,8 +106,8 @@ def _prune_stale_instances() -> None:
         try:
             from src.manager.manager import stop_instance
 
-            if stop_instance(token=instance_id) is None:
-                _direct_purge_local_instance(instance_id)
+            if stop_instance(token=instance_id, reason=dead_instances.PROCESS_LOST) is None:
+                _direct_kill_local_instance(instance_id, dead_instances.PROCESS_LOST)
         except Exception:
             # `stop_instance` is the normal teardown; this is the fallback for a
             # row it could not act on. Routed through the interface so the kill
@@ -105,17 +118,149 @@ def _prune_stale_instances() -> None:
                 vm_kill(vmachine_id=instance_id)
             except Exception:
                 pass
-            _direct_purge_local_instance(instance_id)
+            _direct_kill_local_instance(instance_id, dead_instances.PROCESS_LOST)
 
-def list_instances(groupable: bool = False, search: str = ""):
+def _live_usage(instance_id: str) -> dict:
+    """Cumulative counters the TUI turns into CPU% and network rates.
+
+    Read from the same places `nodo tui` and `nodo observe` read: the instance's
+    cgroup (`cpu.stat`, `memory.current`) and its tap interface's byte counters.
+    Cumulative rather than rates, because a rate needs two readings and this is
+    one: a caller wanting CPU% reads twice and divides the `cpu_usage_usec`
+    delta by the elapsed microseconds. A figure that cannot be read is None,
+    never 0 -- an idle instance and one we cannot see into are different claims.
+    """
+    usage = {"cpu_usage_usec": None, "memory_current_bytes": None,
+             "net_rx_bytes": None, "net_tx_bytes": None}
+    base = env_manager.get("virtualizers.ch.CGROUPS_BASE_DIR", "/sys/fs/cgroup")
+    cgroup = os.path.join(str(base), "nodo-ch", instance_id)
+    try:
+        with open(os.path.join(cgroup, "cpu.stat")) as f:
+            for line in f:
+                key, _, value = line.partition(" ")
+                if key == "usage_usec":
+                    usage["cpu_usage_usec"] = int(value)
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(os.path.join(cgroup, "memory.current")) as f:
+            usage["memory_current_bytes"] = int(f.read().strip())
+    except (OSError, ValueError):
+        pass
+    try:
+        from src.commands.observe import tap_ifname_for_instance
+
+        tap = tap_ifname_for_instance(instance_id)
+        for counter, key in (("rx_bytes", "net_rx_bytes"), ("tx_bytes", "net_tx_bytes")):
+            with open(f"/sys/class/net/{tap}/statistics/{counter}") as f:
+                usage[key] = int(f.read().strip())
+    except (OSError, ValueError, ImportError):
+        pass
+    return usage
+
+
+def _read_dead_instances(search: str = "") -> list:
+    """The dead instances, local and delegated, the newest death first."""
+    records = []
+    conn = sqlite3.connect(DATABASE_FILE)
+    conn.row_factory = sqlite3.Row
+    try:
+        for location, query in (
+            ("local",
+             "SELECT id, name, father_id, service_id, virtualizer, balance_mu, "
+             "launched_at, killed_at, death_reason FROM local_instances "
+             "WHERE killed_at IS NOT NULL"),
+            ("delegated",
+             "SELECT id, peer_id, father_id, service_id, balance_mu, "
+             "launched_at, killed_at, death_reason FROM delegated_instances "
+             "WHERE killed_at IS NOT NULL"),
+        ):
+            try:
+                for row in conn.execute(query):
+                    record = dict(row)
+                    record["location"] = location
+                    record["logs"] = (
+                        sorted(dead_instances.list_logs(record["id"]))
+                        if location == "local" else []
+                    )
+                    records.append(record)
+            except sqlite3.Error:
+                continue
+    finally:
+        conn.close()
+    records.sort(key=lambda r: r.get("killed_at") or "", reverse=True)
+    if search:
+        needle = search.lower()
+        records = [r for r in records if needle in " ".join(str(v).lower() for v in r.values())]
+    return records
+
+
+def _print_dead_instances(records: list) -> None:
+    for record in records:
+        print(f"ID: {record['id']}")
+        print(f"Name: {record.get('name') or 'N/A'}")
+        print(f"Location: {record['location']}")
+        print(f"Service: {record.get('service_id') or 'N/A'}")
+        print(f"Parent ID: {record.get('father_id') or 'N/A'}")
+        print(f"Launched at: {record.get('launched_at') or 'N/A'}")
+        print(f"Killed at: {record.get('killed_at')}")
+        print(f"Death reason: {record.get('death_reason') or 'N/A'}")
+        if record["logs"]:
+            print(f"Logs: {', '.join(record['logs'])} (nodo logs {record['id']})")
+        print()
+
+
+def list_dead_instances(search: str = "", as_json: bool = False) -> bool:
+    """``nodo instances --dead [<search>] [--json]``: the instances that died."""
+    records = _read_dead_instances(search)
+    if as_json:
+        from src.commands._catalogue import emit_json
+        emit_json({"dead_instances": records})
+        return True
+    if not records:
+        print("No dead instances found.")
+        return True
+    _print_dead_instances(records)
+    return True
+
+
+def list_instances(groupable: bool = False, search: str = "", as_json: bool = False,
+                   dead: bool = False, include_dead: bool = False):
+    """``nodo instances [<search>] [--grouped] [--dead | --all] [--json]``.
+
+    ``--dead`` lists only the dead instances. ``--all`` lists the live ones and then
+    the dead ones. Without them, only the live instances are listed.
+
+    ``--json`` prints one object, ``{"instances": [...]}``, each record carrying the
+    raw values (``balance_mu``, byte counts, URIs, live usage counters) beside the
+    display strings the printed form uses. Returns whether the listing was read.
+    """
+    if dead:
+        return list_dead_instances(search=search, as_json=as_json)
     _prune_stale_instances()
 
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
 
     instances = []
+    # The tunnels each instance is reached through (`nodo tunnels --instance <id>`
+    # has the full records); read once, not once per row.
+    running_tunnels = []
+    if as_json:
+        try:
+            from src.utils import tunnel_registry
+
+            running_tunnels = tunnel_registry.list_tunnels()
+        except Exception:
+            running_tunnels = []
+
+    def tunnel_ids(*references) -> list:
+        from src.utils.tunnel_registry import reaches
+
+        return [record["id"] for record in running_tunnels if reaches(record, references)]
+
     try:
-        cursor.execute("SELECT id FROM local_instances;")
+        cursor.execute("SELECT id FROM local_instances WHERE killed_at IS NULL;")
         internal_ids = {row[0] for row in cursor.fetchall()}
         cursor.execute("SELECT id FROM clients;")
         client_ids = {row[0] for row in cursor.fetchall()}
@@ -131,6 +276,17 @@ def list_instances(groupable: bool = False, search: str = ""):
                 return s.strip() if s else "N/A"
             except Exception:
                 return "Error Parsing Instance"
+
+        def get_uris(serialized_instance: bytes) -> list:
+            try:
+                instance = celaut.Instance()
+                instance.ParseFromString(serialized_instance)
+                return [
+                    {"ip": _uri.ip, "port": _uri.port, "internal_port": _exp.internal_port}
+                    for _exp in instance.uri_slot for _uri in _exp.uri
+                ]
+            except Exception:
+                return []
 
         def get_tag(service_id: str) -> str:
             if not service_id: return "Unknown Service ID"
@@ -191,7 +347,7 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances"
+                "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances WHERE killed_at IS NULL"
             )
             for id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
                 parent_type = (
@@ -239,13 +395,24 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'vm_mem_rss': vm_mem_rss,
                     'vm_mem_limit_cgroup': vm_mem_limit_cgroup,
                     'vm_mem_current_cgroup': vm_mem_current_cgroup,
+                    **({
+                        'service_id': service,
+                        'balance_mu': _int_or_none(balance_mu),
+                        'mem_limit_bytes': mem_limit,
+                        'disk_space_bytes': disk_space,
+                        'uris': get_uris(si) if si else [],
+                        'runtime': get_vm_runtime_snapshot(vmachine_id=id_)
+                        if _has_runtime_snapshot(runtime_virtualizer) and id_ else None,
+                        'usage': _live_usage(id_) if id_ else None,
+                        'tunnels': tunnel_ids(id_, name),
+                    } if as_json else {}),
                 })
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
                 "SELECT token_delegation, id, peer_id, father_id, serialized_instance, service_id, "
-                "balance_mu FROM delegated_instances"
+                "balance_mu FROM delegated_instances WHERE killed_at IS NULL"
             )
             for external_token, id, peer_id, father_id, si, service, balance_mu in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
@@ -277,11 +444,24 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'vm_mem_rss': 'N/A',
                     'vm_mem_limit_cgroup': 'N/A',
                     'vm_mem_current_cgroup': 'N/A',
+                    **({
+                        'service_id': service,
+                        'balance_mu': _int_or_none(balance_mu),
+                        'uris': get_uris(si) if si else [],
+                    } if as_json else {}),
                 })
 
     except sqlite3.Error as e:
+        if as_json:
+            from src.commands._catalogue import emit_error
+            conn.close()
+            return emit_error(True, f"An error occurred while retrieving instances: {e}")
         print(f"An error occurred while retrieving instances: {e}")
     except Exception as e:
+        if as_json:
+            from src.commands._catalogue import emit_error
+            conn.close()
+            return emit_error(True, f"An unexpected error occurred: {e}")
         print(f"An unexpected error occurred: {e}")
     finally:
         conn.close()
@@ -295,12 +475,20 @@ def list_instances(groupable: bool = False, search: str = ""):
                 filtered_instances.append(inst)
         instances = filtered_instances
 
+    if as_json:
+        from src.commands._catalogue import emit_json
+        payload = {"instances": instances}
+        if include_dead:
+            payload["dead_instances"] = _read_dead_instances(search)
+        emit_json(payload)
+        return True
+
     if not instances:
         if search:
             print(f"No service instances found matching '{search}'.")
         else:
             print("No service instances found.")
-        return
+        return True
 
     def format_instance(inst, prefix="", include_runtime=False):
         color = '\033[37m' if inst.get('location', 'local') != 'local' else ''
@@ -391,3 +579,4 @@ def list_instances(groupable: bool = False, search: str = ""):
             format_instance(inst, include_runtime=False)
             if i < len(instances) - 1:
                 print("-" * 40 + "\n")
+    return True

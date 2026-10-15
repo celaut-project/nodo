@@ -8,13 +8,16 @@
 //! `app.rs`/`ui.rs`.
 
 use crate::app::{shorten, App, CommandKind, Identifiable, Money, PaymentRow, PendingAction};
-use crate::ui::{
-    accent, bad, good, header_row, metric_line, muted, nonempty, payment_lines,
+use crate::app::{format_bytes, format_bytes_compact};
+use crate::layout_util::Column;
+use crate::peer_resources::{format_benchmark, format_cores, short_arch, Announced};
+use crate::ui::{fitted_column_x, fitted_table, TextCell,
+    accent, bad, good, metric_line, muted, nonempty, payment_lines,
     reputation_event_lines, section_block, selected_style, text_colour, warn,
 };
 use prost::Message;
 use ratatui::prelude::*;
-use ratatui::widgets::{Cell, Row, Table};
+use ratatui::widgets::Paragraph;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use std::path::Path;
 
@@ -50,11 +53,15 @@ pub struct Peer {
     /// detail card rather than the table: a peer can hold several instances,
     /// and each carries more than a row can show (see issue #231).
     pub contracts: Vec<PeerContract>,
+    /// What this peer announced it can run, per architecture (`Peer.resources`,
+    /// #459), read from the same stored advertisement as `proof_ids`. Summed on the
+    /// Overview and spelled out in the detail card (issue #455).
+    pub resources: crate::peer_resources::Announced,
 }
 
 /// One `contract_instance` row: the ledger a peer settles on, the contract it
 /// charges through, the address it gets paid at, and what one of its units is worth.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PeerContract {
     /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
     /// ledger row can't be resolved or carries no tag.
@@ -123,19 +130,29 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 .unwrap_or_else(|| "0".to_string());
             // Straight out of the advertisement the peer signed, which we store
             // verbatim: it carries every proof the peer holds, where a column of our
-            // own could only ever keep the last one announced (issue #281).
-            let proof_ids = row
-                .get::<_, Option<Vec<u8>>>(3)?
-                .and_then(|bytes| crate::app::protos::Peer::decode(&*bytes).ok())
+            // own could only ever keep the last one announced (issue #281). Decoded
+            // once here for both the proofs and the resources it announced (#455).
+            let advertisement = row.get::<_, Option<Vec<u8>>>(3)?;
+            let decoded = advertisement
+                .as_deref()
+                .map(crate::app::protos::Peer::decode);
+            let resources = crate::peer_resources::from_decoded(decoded.as_ref());
+            let proof_ids = decoded
+                .and_then(Result::ok)
                 .map(|announced| {
                     announced
                         .reputation_proofs
                         .into_iter()
                         .filter_map(|contract| {
+                            // An entry list, not a map: a key resolves to the LAST
+                            // entry that carries it (what a map did on a repeat).
                             contract
                                 .xattrs
-                                .get("token_id")
-                                .and_then(|value| String::from_utf8(value.clone()).ok())
+                                .iter()
+                                .rev()
+                                .find(|entry| entry.key == "token_id")
+                                .and_then(|entry| entry.value.clone())
+                                .and_then(|value| String::from_utf8(value).ok())
                         })
                         .filter(|token_id| !token_id.is_empty())
                         .collect()
@@ -146,6 +163,7 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 uris: row.get(1)?,
                 balance: row.get::<_, String>(2)?,
                 proof_ids,
+                resources,
                 reputation_score,
                 remote_client_id: row.get(5)?,
                 local_client_id: row.get(6)?,
@@ -280,6 +298,23 @@ impl App {
         }
     }
 
+    /// Ask before re-fetching every peer's announcement and our balance there
+    /// (`nodo refresh_peers`): it opens a connection to each peer, which is a lot of
+    /// network and disk I/O. Reached by `r`, and by clicking the ⟳ button.
+    pub fn open_refresh_peers_confirm(&mut self) {
+        if self.page() != crate::app::Page::Peers {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let count = self.peers.items.len();
+        self.input_mode = crate::app::InputMode::Confirm;
+        self.input_title = format!("Refresh all {count} peers from the network? Heavy on I/O (y/N)");
+        self.pending_action = Some(PendingAction::RefreshPeers);
+    }
+
     /// Increase or decrease the selected peer's local reputation score.
     pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
         if self.page() != crate::app::Page::Peers {
@@ -365,14 +400,19 @@ impl App {
     }
 }
 
-/// The clickable id column's `[start, end)` column range on the Peers table -- the
-/// border, then the table's own highlight-symbol gutter, then the id column itself
-/// (`Constraint::Length(30)` in `draw`). Kept alongside `draw` rather than derived at
-/// click time so the two cannot drift apart.
-pub fn id_column_x(area: Rect) -> (u16, u16) {
-    let start = area.x + 1 /* left border */ + 2 /* "▸ " highlight gutter */;
-    (start, (start + 30).min(area.x + area.width.saturating_sub(1)))
-}
+/// The refresh button: a clockwise open-circle arrow.
+const REFRESH_BUTTON: &str = "[ \u{27f3} ]";
+
+/// The PEERS table's columns (issue #453): the id, then what this node holds there
+/// and the peer's standing, outlast where it is reached and what it announced --
+/// both of which the card below spells out.
+pub(crate) const PEER_COLUMNS: [Column; 5] = [
+    Column::new("Peer ID", Constraint::Length(30), 10, 0),
+    Column::new("Endpoints", Constraint::Length(24), 9, 3),
+    Column::new("Our balance", Constraint::Length(13), 8, 1),
+    Column::new("Rep", Constraint::Length(7), 3, 2),
+    Column::new("Reputation proofs", Constraint::Min(20), 8, 4),
+];
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     // The card sizes itself to what the selected peer actually has: contracts, the
@@ -408,52 +448,61 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     ])
     .split(area);
 
-    let peers = app.peers.items.iter().map(|peer| {
-        Row::new(vec![
-            Cell::from(peer.id.clone()),
-            Cell::from(peer.uris.clone()),
-            Cell::from(app.money.format_raw(&peer.balance)),
-            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(good()).bold()),
-            Cell::from(match peer.proof_ids.len() {
-                0 => "none".to_string(),
-                1 => shorten(&peer.proof_ids[0], 18),
-                n => format!("{n} announced"),
-            }),
-        ])
-    });
-    let peer_table = Table::new(
-        peers,
-        [
-            Constraint::Length(30),
-            Constraint::Length(24),
-            Constraint::Length(13),
-            Constraint::Length(7),
-            Constraint::Min(20),
-        ],
-    )
-    .header(header_row(vec![
-        "Peer ID",
-        "Endpoints",
-        "Our balance",
-        "Rep",
-        "Reputation proofs",
-    ]))
-    .block(section_block(
-        match &app.peers_error {
-            // Consequence first: an operator reading this row has to learn that the
-            // page is not answering before learning what SQLite said about it.
-            Some(_) => " PEERS • CANNOT BE READ ".to_string(),
-            None => format!(" PEERS • {} connected ", app.peers.items.len()),
-        },
-        if app.peers_error.is_some() { bad() } else { accent() },
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+    let peers = app
+        .peers
+        .items
+        .iter()
+        .map(|peer| {
+            let cells: Vec<TextCell> = vec![
+                peer.id.clone().into(),
+                peer.uris.clone().into(),
+                app.money.format_raw(&peer.balance).into(),
+                TextCell::from(peer.reputation_score.clone())
+                    .style(Style::default().fg(good()).bold()),
+                match peer.proof_ids.len() {
+                    0 => "none".to_string(),
+                    1 => shorten(&peer.proof_ids[0], 18),
+                    n => format!("{n} announced"),
+                }
+                .into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    let has_selection = app.peers.state.selected().is_some();
+    let (peer_table, columns) = fitted_table(&PEER_COLUMNS, peers, split[0], has_selection);
+    let peer_table = peer_table
+        .block(section_block(
+            match &app.peers_error {
+                // Consequence first: an operator reading this row has to learn that the
+                // page is not answering before learning what SQLite said about it.
+                Some(_) => " PEERS • CANNOT BE READ ".to_string(),
+                None => format!(" PEERS • {} connected ", app.peers.items.len()),
+            },
+            if app.peers_error.is_some() { bad() } else { accent() },
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     let selected_id = selected.map(|peer| peer.id.clone());
     let has_error = app.peers_error.is_some();
     app.list_area = split[0];
-    app.id_column_x = Some(id_column_x(split[0]));
+    // Where the id column was actually drawn, after any narrower columns gave way.
+    app.id_column_x = fitted_column_x(split[0], &columns, 0, has_selection);
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
+    // The ⟳ button sits on the table's top border, right-aligned. Clicking it asks the
+    // same confirmation as `r`.
+    let button_width = REFRESH_BUTTON.chars().count() as u16;
+    if split[0].width > button_width + 4 {
+        let area = Rect::new(split[0].right() - button_width - 2, split[0].y, button_width, 1);
+        app.peers_refresh_area = area;
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                REFRESH_BUTTON,
+                Style::default().fg(accent()).add_modifier(Modifier::BOLD),
+            )),
+            area,
+        );
+    }
 
     // A query that failed takes the card, not a corner of it. `0 connected` is the
     // screen a new node draws, so an unreadable table that merely looked empty was
@@ -465,7 +514,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         // The full id repeats the table's own first line, so it is worth a precise
         // click target: clicking it copies the id even when the table truncated it
         // (issue: click-to-copy full IDs).
-        if let Some(id) = selected_id {
+        if let Some(id) = selected_id.filter(|_| split[1].height > 2) {
             app.id_copy_areas.push((
                 id,
                 Rect {
@@ -503,12 +552,113 @@ fn peers_unreadable_lines(error: &str) -> Vec<Line<'static>> {
     ]
 }
 
+/// What the peer announced it can run, one block per architecture (issue #455): the
+/// most one instance there could be granted, and its measured per-core scores. As
+/// announced and signed by the peer -- a ceiling it claims, not what is free on it.
+fn announced_resource_lines(resources: &Announced) -> Vec<Line<'static>> {
+    let offers = match resources {
+        Announced::Declared(offers) => offers,
+        Announced::Undeclared => {
+            return vec![metric_line("Resources", "none announced (adds nothing to the total)")];
+        }
+        Announced::Unreadable => {
+            return vec![Line::from(vec![
+                Span::styled(format!("{:<12}", "Resources"), Style::default().fg(muted())),
+                Span::styled(
+                    "announcement could not be decoded",
+                    Style::default().fg(warn()).bold(),
+                ),
+            ])];
+        }
+    };
+    let unstated = || "not stated".to_string();
+    let mut lines = vec![Line::from(Span::styled(
+        format!("Announced resources ({} architecture{})", offers.len(), if offers.len() == 1 { "" } else { "s" }),
+        Style::default().fg(accent()).bold(),
+    ))];
+    for offer in offers {
+        lines.push(Line::from(vec![
+            Span::styled("  ● ", Style::default().fg(good())),
+            Span::styled(offer.arch.clone(), Style::default().fg(good()).bold()),
+            Span::styled(
+                format!(
+                    "  {} cores • {} RAM • {} disk",
+                    offer.millicores.map(format_cores).unwrap_or_else(unstated),
+                    offer.mem_bytes.map(format_bytes).unwrap_or_else(unstated),
+                    offer.disk_bytes.map(format_bytes).unwrap_or_else(unstated),
+                ),
+                Style::default().fg(text_colour()),
+            ),
+        ]));
+        if offer.benchmark.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "      no benchmark scores announced",
+                Style::default().fg(muted()),
+            )));
+        }
+        for (key, value) in &offer.benchmark {
+            let (label, value) = format_benchmark(key, *value);
+            lines.push(Line::from(vec![
+                Span::styled(format!("      {label:<18}"), Style::default().fg(muted())),
+                Span::styled(format!("{value} per core"), Style::default().fg(text_colour())),
+            ]));
+        }
+    }
+    lines
+}
+
+/// [`announced_resource_lines`] in one line, for the compact card.
+fn announced_resources_summary(resources: &Announced) -> String {
+    match resources {
+        Announced::Undeclared => "none announced".to_string(),
+        Announced::Unreadable => "announcement unreadable".to_string(),
+        Announced::Declared(offers) => offers
+            .iter()
+            .map(|offer| {
+                format!(
+                    "{} {}c/{}",
+                    short_arch(&offer.arch),
+                    offer.millicores.map(format_cores).unwrap_or_else(|| "?".to_string()),
+                    offer.mem_bytes.map(format_bytes_compact).unwrap_or_else(|| "?".to_string()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("  "),
+    }
+}
+
 /// Full breakdown of the peer highlighted in the peers table: identity, balance,
 /// reputation, and every payment contract it has registered. Previously reachable
 /// only through a raw sqlite query (issue #231).
 ///
 /// `compact` collapses each contract onto one line for terminals too short for the
 /// full card.
+/// A peer's advertised rate, as a person reads it.
+///
+/// On the wire (`ContractRate.mu_per_unit`) the rate is MU per BASE unit -- per nanoERG,
+/// per satoshi, per smallest unit of a token -- because between nodes nothing else is
+/// needed. A person thinks in whole ERG or BTC, so a native asset's rate is shown per
+/// whole unit: the base rate followed by as many zeros as the asset has decimals, which
+/// is exact for any size of number. A token's decimals are not on the wire, so its rate
+/// stays per base unit and says so.
+fn rate_for_a_person(contract: &PeerContract) -> String {
+    let rate = contract.mu_per_unit.trim();
+    if rate.is_empty() {
+        return "rate —".to_string();
+    }
+    let native = match (contract.asset.as_str(), contract.ledger.as_str()) {
+        ("ERG", _) | ("", "ergo") => Some(("ERG", 9)),
+        ("BTC", _) | ("", "bitcoin") => Some(("BTC", 8)),
+        _ => None,
+    };
+    match native {
+        Some((symbol, decimals)) if rate.chars().all(|c| c.is_ascii_digit()) && rate != "0" => {
+            format!("1 {} = {}{} MU", symbol, rate, "0".repeat(decimals))
+        }
+        _ => format!("1 base unit = {} MU", rate),
+    }
+}
+
 fn peer_detail_lines(
     money: &Money,
     peer: Option<&Peer>,
@@ -586,6 +736,12 @@ fn peer_detail_lines(
             },
         ));
         lines.push(Line::from(""));
+        lines.extend(announced_resource_lines(&peer.resources));
+        lines.push(Line::from(""));
+    }
+
+    if compact {
+        lines.push(metric_line("Resources", announced_resources_summary(&peer.resources)));
     }
 
     // Same guard as the client card: the selection can move between the load and the
@@ -637,12 +793,11 @@ fn peer_detail_lines(
                 Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
                 Span::styled(
                     format!(
-                        "  {}  {}  {}  1 {} = {} MU",
+                        "  {}  {}  {}  {}",
                         asset,
                         shorten(&contract.contract_hash, 14),
                         shorten(nonempty(&contract.address, "—"), 14),
-                        asset,
-                        nonempty(&contract.mu_per_unit, "—")
+                        rate_for_a_person(contract)
                     ),
                     Style::default().fg(text_colour()),
                 ),
@@ -667,10 +822,10 @@ fn peer_detail_lines(
         lines.push(Line::from(vec![
             Span::styled("      rate     ", Style::default().fg(muted())),
             Span::styled(
-                // What this peer says one unit of its ledger buys in ITS MU. This is
-                // what makes a price it quotes convertible into money we understand,
-                // so it is stated as an equation rather than as a bare number.
-                format!("1 {} = {} MU", asset, nonempty(&contract.mu_per_unit, "—")),
+                // What this peer says its money buys in ITS MU. This is what makes a
+                // price it quotes convertible into money we understand, so it is
+                // stated as an equation rather than as a bare number.
+                rate_for_a_person(contract),
                 Style::default().fg(text_colour()),
             ),
         ]));
@@ -772,6 +927,25 @@ mod tests {
         assert_eq!(contract.address, "addr-1");
         assert_eq!(contract.mu_per_unit, "500");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_native_rate_is_shown_per_whole_unit_and_a_token_rate_per_base_unit() {
+        // The wire carries MU per base unit; a person reads whole ERG / BTC.
+        let contract = |ledger: &str, asset: &str, rate: &str| PeerContract {
+            ledger: ledger.to_string(),
+            asset: asset.to_string(),
+            mu_per_unit: rate.to_string(),
+            ..Default::default()
+        };
+        assert_eq!(rate_for_a_person(&contract("ergo", "ERG", "1")), "1 ERG = 1000000000 MU");
+        assert_eq!(rate_for_a_person(&contract("bitcoin", "BTC", "1400000")), "1 BTC = 140000000000000 MU");
+        assert_eq!(rate_for_a_person(&contract("ergo", "", "2")), "1 ERG = 2000000000 MU");
+        assert_eq!(
+            rate_for_a_person(&contract("ergo", &"ab".repeat(32), "20000000")),
+            "1 base unit = 20000000 MU"
+        );
+        assert_eq!(rate_for_a_person(&contract("ergo", "ERG", "")), "rate —");
     }
 
     #[test]
@@ -879,6 +1053,7 @@ mod tests {
                 proof_ids: Vec::new(),
                 reputation_score: "0".to_string(),
                 contracts: Vec::new(),
+                resources: Default::default(),
             }
         }
 

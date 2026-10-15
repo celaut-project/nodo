@@ -20,3 +20,4 @@ storage/*
 .claude
 .gateway_notice
 .gateway_plaintext_notice
+/install-privileged.sh

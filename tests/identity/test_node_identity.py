@@ -11,6 +11,7 @@ import unittest.mock
 from mnemonic import Mnemonic
 
 from protos import celaut_pb2
+from src.utils import keyvalue
 from src.identity import node_identity as ni
 from src.reputation_system.bip_wallet_verification import bip_schnorr_sign, derive_compressed_pubkey
 
@@ -23,7 +24,7 @@ def _peer(ip="1.2.3.4", port=80, rate="10", contract=b"HONEST", expiry=0, transp
     uri = peer.uri.add(ip=ip, port=port, expiry_unix_timestamp=expiry)
     uri.transport.tags.append(transport)
     uri.protocol_stack.add(tags=["grpc"])
-    peer.mu_per_call["exec"].n = rate
+    keyvalue.set_value(peer.mu_per_call, "exec", celaut_pb2.Amount(n=rate))
     gas_price = peer.payment_contracts.add()
     gas_price.contract.ledger.formal = contract
     gas_price.mu_per_unit.n = "1"

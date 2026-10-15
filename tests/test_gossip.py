@@ -15,6 +15,7 @@ from protos import celaut_pb2 as pb, celaut_pb2_grpc as rpc
 from src.gateway.gateway import Gateway
 from src.gateway.iterables import list_peers_iterable as server
 from src.identity import node_identity as identity
+from src.identity.transport_stack import declare_transport_stack
 from src.manager import gossip, manager
 from src.utils.bee_client import BeeClient
 from src.utils.peer_gossip import gossip_limit, iter_gossip_peers, relayable_peer
@@ -30,6 +31,8 @@ def signed_peer(*addresses, ts=100, expiry=0, identity_index=0):
     for address in addresses or ("8.8.8.8",):
         uri = peer.uri.add(ip=address, port=40001, expiry_unix_timestamp=expiry)
         uri.transport.tags.append("tcp")
+        # An address that declares no stack is not spoken to, so is not stored.
+        declare_transport_stack(uri, prose=False)
     identity.declare_signature_scheme(peer)
     peer.signature = key.sign(identity.canonical_peer_payload(
         pubkey, ts, identity.canonical_peer_content_digest(peer),
@@ -459,7 +462,7 @@ def test_manager_pass_calls_both_self_gated_ticks(monkeypatch):
     hooks = ("drain_wanted_inbox", "maintain_vmachines", "maintain_delegated_instances",
              "enforce_activity_window", "maintain_clients", "peer_deposits",
              "scheduler_tick", "energy_tick", "donations_tick", "onchain_reputation_tick",
-             "network_change_tick", "gossip_pull_tick", "gossip_push_tick", "sleep")
+             "announcement_change_tick", "gossip_pull_tick", "gossip_push_tick", "sleep")
     for name in hooks:
         monkeypatch.setattr(maintain, name, MagicMock())
     monkeypatch.setattr(maintain, "wanted_services", set())

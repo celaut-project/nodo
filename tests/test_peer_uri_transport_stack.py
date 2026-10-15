@@ -77,12 +77,10 @@ class StorePeerUrisTransportStackTests(unittest.TestCase):
 
         self.assertEqual(manager._store_peer_uris(peer, PEER), [("10.0.0.2", 8080)])
 
-    def test_an_address_declaring_no_stack_is_stored(self):
-        # Silence is not a foreign protocol: an announcement predating the declaration
-        # carries no components, and what it would have declared is what this node
-        # speaks anyway.
-        stored = manager._store_peer_uris(self._peer(declare=False), PEER)
-        self.assertEqual(stored, [("10.0.0.1", 8080)])
+    def test_an_address_declaring_no_stack_is_refused(self):
+        # Every node declares what its addresses speak. One that declares nothing gives
+        # this node nothing to check before dialling it, so it is not stored.
+        self.assertEqual(manager._store_peer_uris(self._peer(declare=False), PEER), [])
 
     def test_rewording_the_prose_does_not_refuse_an_address(self):
         # Only `formal` and the tags decide. Prose is the same protocol written out,

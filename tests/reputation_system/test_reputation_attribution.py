@@ -81,16 +81,20 @@ class PaymentCommunicationTests(unittest.TestCase):
         )
         reputation = mock.MagicMock()
 
-        with mock.patch.object(payment_process, "__get_grpc_stub",
-                               return_value=mock.MagicMock(), create=True), \
-                mock.patch.object(payment_process, "bee") as bee, \
+        manager = mock.MagicMock()
+        manager.get_client_id_on_other_peer.return_value = "client-1"
+
+        with mock.patch.object(payment_process, "__get_channel",
+                               return_value=mock.MagicMock()), \
+                mock.patch.object(payment_process, "_manager_module", return_value=manager), \
+                mock.patch.object(payment_process, "BeeClient") as bee, \
                 mock.patch.object(payment_process, "COMMUNICATION_ATTEMPTS", 1), \
                 mock.patch.object(payment_process, "_reputation_interface",
                                   return_value=reputation):
-            bee.client_grpc.side_effect = Exception("peer refused the payment call")
+            bee.payable.side_effect = Exception("peer refused the payment call")
             communicated = attempt_payment_communication(
                 peer_id="peer-1",
-                amount=1000,
+                peer_amount=1000,
                 deposit_token="deposit-token-1",
                 contract_ledger=celaut_pb2.Contract(),
             )

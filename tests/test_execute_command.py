@@ -6,6 +6,7 @@ from unittest.mock import patch
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.commands import execute as execute_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -26,7 +27,7 @@ class ExecuteCommandTests(unittest.TestCase):
             )
 
         config = messages[1]
-        self.assertEqual(config.environment_variables["__nodo_instance_name"], b"my-instance")
+        self.assertEqual(keyvalue.get(config.environment_variables, "__nodo_instance_name"), b"my-instance")
 
     def _response_with_slot(self, *, protocol_tags=None, transport_tags=None):
         response = celaut.ServiceInstance()
@@ -49,6 +50,8 @@ class ExecuteCommandTests(unittest.TestCase):
         out = io.StringIO()
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
+            execute_cmd, "inspect_service"
+        ), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.BeeClient, "start_service", return_value=response
@@ -57,8 +60,8 @@ class ExecuteCommandTests(unittest.TestCase):
                 execute_cmd.execute("svc")
 
         rendered = out.getvalue()
-        self.assertIn("service partition ->", rendered)
-        self.assertNotIn("HTTP Service", rendered)
+        self.assertIn("No endpoints available", rendered)
+        self.assertNotIn("http://", rendered)
         mock_channel.return_value.close.assert_called_once()
 
     def test_execute_prints_http_endpoint_when_http_is_declared_in_transport(self):
@@ -66,6 +69,8 @@ class ExecuteCommandTests(unittest.TestCase):
         out = io.StringIO()
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
+            execute_cmd, "inspect_service"
+        ), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.BeeClient, "start_service", return_value=response
@@ -74,26 +79,8 @@ class ExecuteCommandTests(unittest.TestCase):
                 execute_cmd.execute("svc")
 
         rendered = out.getvalue()
-        self.assertIn("HTTP Service (Port: 5000)", rendered)
+        self.assertIn("Endpoints available", rendered)
         self.assertIn("http://127.0.0.1:18080", rendered)
-        mock_channel.return_value.close.assert_called_once()
-
-    def test_execute_external_uses_external_execute_client(self):
-        response = self._response_with_slot(transport_tags=["http"])
-
-        with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
-            execute_cmd, "local_channel"
-        ) as mock_channel, patch.object(
-            execute_cmd.BeeClient, "start_service", return_value=response
-        ), patch.object(
-            execute_cmd, "get_execute_client", return_value="dev-external-1"
-        ) as mock_get_execute_client:
-            execute_cmd.execute("svc", external=True)
-
-        mock_get_execute_client.assert_called_once_with(
-            amount_mu=execute_cmd.DEV_CLIENT_FUNDING_MU,
-            external=True,
-        )
         mock_channel.return_value.close.assert_called_once()
 
     def test_execute_prints_inspect_before_starting_service_loading(self):
@@ -121,6 +108,27 @@ class ExecuteCommandTests(unittest.TestCase):
             [("inspect", "svc"), ("start_service", None)],
         )
         mock_channel.return_value.close.assert_called_once()
+
+    def test_removed_remote_flag_is_refused_with_the_tunnel_hint(self):
+        out = io.StringIO()
+        with redirect_stdout(out), self.assertRaises(SystemExit) as raised:
+            execute_cmd.reject_removed_remote_flag(["--remote", "svc"])
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("--remote", out.getvalue())
+        self.assertIn("nodo tunnel", out.getvalue())
+
+    def test_args_without_remote_flag_pass_through(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            execute_cmd.reject_removed_remote_flag(["--name", "x", "svc"])
+
+        self.assertEqual(out.getvalue(), "")
+
+    def test_nodo_execute_checks_for_the_removed_remote_flag(self):
+        # nodo.py runs its dispatch at module level, so pin the call in its source.
+        with open("nodo.py", encoding="utf-8") as f:
+            self.assertIn("reject_removed_remote_flag(args)", f.read())
 
 
 if __name__ == "__main__":

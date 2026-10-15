@@ -114,7 +114,14 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
             )
 
         connection.record_payment.assert_called_once()
-        return paid, connection.record_payment.call_args.kwargs
+        row = dict(connection.record_payment.call_args.kwargs)
+        # The row is written once, at the broadcast, and then moves through its states.
+        # What a test reads as "the row" is that row with the status it ended in.
+        self.statuses = [row["status"]] + [
+            call.args[1] for call in connection.set_outgoing_payment_status.call_args_list
+        ]
+        row["status"] = self.statuses[-1]
+        return paid, row
 
     def test_an_acknowledged_payment_records_the_peer_the_amount_and_the_transaction(self):
         paid, row = self._pay(communicated=True)
@@ -143,6 +150,14 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
         self.assertEqual(row["status"], "unacknowledged")
         self.assertEqual(row["tx_id"], TX_ID)
         self.assertEqual(row["peer_id"], "peer-1")
+
+    def test_the_row_is_written_at_the_broadcast_and_moves_through_its_states(self):
+        """A daemon that stops during the confirmation wait must still have the row (#523)."""
+        _, row = self._pay(communicated=True)
+
+        self.assertEqual(self.statuses, ["broadcast", "confirmed", "communicated"])
+        # What a resumed payment tells the peer: the same figure, on the peer's scale.
+        self.assertEqual(row["peer_amount_mu"], 2000)
 
     def test_the_row_holds_our_mu_and_the_peer_is_told_its_own(self):
         """MU is each node's own unit, so the two figures are not interchangeable.

@@ -2,6 +2,7 @@ import re
 from typing import Optional, Sequence
 
 from protos import celaut_pb2
+from src.utils import keyvalue
 
 
 INTERNAL_INSTANCE_NAME_ENV = "__nodo_instance_name"
@@ -83,7 +84,11 @@ def inject_instance_name(
 ) -> celaut_pb2.Configuration:
     if not instance_name:
         return config
-    config.environment_variables[INTERNAL_INSTANCE_NAME_ENV] = normalize_instance_name(instance_name).encode("utf-8")
+    keyvalue.set_value(
+        config.environment_variables,
+        INTERNAL_INSTANCE_NAME_ENV,
+        normalize_instance_name(instance_name).encode("utf-8"),
+    )
     return config
 
 
@@ -95,9 +100,8 @@ def extract_instance_name(
 
     sanitized = celaut_pb2.Configuration()
     sanitized.CopyFrom(config)
-    raw_value = sanitized.environment_variables.get(INTERNAL_INSTANCE_NAME_ENV, b"")
-    if INTERNAL_INSTANCE_NAME_ENV in sanitized.environment_variables:
-        del sanitized.environment_variables[INTERNAL_INSTANCE_NAME_ENV]
+    raw_value = keyvalue.get(sanitized.environment_variables, INTERNAL_INSTANCE_NAME_ENV, b"")
+    keyvalue.delete(sanitized.environment_variables, INTERNAL_INSTANCE_NAME_ENV)
 
     instance_name = None
     if raw_value:

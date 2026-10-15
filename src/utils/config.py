@@ -3,6 +3,7 @@ import os
 import random
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import threading
@@ -14,6 +15,7 @@ import yaml
 from mnemonic import Mnemonic
 
 from src.utils.network import get_free_port
+from src.utils.privileges import can_admin_network
 from src.utils.singleton import Singleton
 
 
@@ -69,10 +71,24 @@ GATEWAY_PLAINTEXT_NOTICE_FILE = ".gateway_plaintext_notice"
 GATEWAY_NOTICE_COMMAND_FILE = ".gateway_notice.cmd"
 GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE = ".gateway_plaintext_notice.cmd"
 
+# The port a pending plaintext notice is *about* (issue #438). `auto` makes that
+# port GATEWAY_PORT + 1, so changing the TLS port moves it without the plaintext
+# key changing at all -- and a notice written about the old one, read against the
+# new, is a firewall rule for a port the node no longer uses. Only a notice whose
+# port is the one config.yaml resolves to now is reported; the next start
+# re-probes the right one. Absent on a notice written before this file existed,
+# which is reported as before.
+GATEWAY_PLAINTEXT_NOTICE_PORT_FILE = ".gateway_plaintext_notice.port"
+
 
 def _command_file_for(notice_file: str) -> str:
     """The companion file holding ``notice_file``'s one-line fix, if it has one."""
     return notice_file + ".cmd"
+
+
+def _port_file_for(notice_file: str) -> str:
+    """The companion file holding the port ``notice_file`` is about, if it names one."""
+    return notice_file + ".port"
 
 
 def coerce_gateway_port(value: Any) -> Optional[int]:
@@ -187,6 +203,39 @@ def _prune_config_backups(directory: str, retention: int) -> None:
             pass
 
 
+# config.yaml holds the wallet mnemonics and names the binaries the daemon runs
+# (cloud-hypervisor, virtiofsd, qemu). It used to be rewritten 0o666 so that root
+# and the installing user could both edit it, which also let every other local
+# user edit it -- and through it choose what a root daemon executes. Owner and
+# group keep read and write; everybody else gets nothing.
+CONFIG_FILE_MODE = 0o660
+
+
+def config_file_mode(path: str) -> int:
+    """The mode a rewrite of ``path`` gets: its current owner and group bits, never other."""
+    try:
+        current = stat.S_IMODE(os.stat(path).st_mode)
+    except OSError:
+        return CONFIG_FILE_MODE
+    return (current & CONFIG_FILE_MODE) | stat.S_IRUSR | stat.S_IWUSR
+
+
+def _match_config_file(tmp_path: str, target: str) -> None:
+    """Give the replacement file the mode and, under root, the owner of ``target``.
+
+    ``mkstemp`` creates the file ``0600`` and owned by whoever writes it. Without the
+    ``chown``, the first save by a root process would hand config.yaml to root and
+    lock the installing user out of it; the old 0o666 hid that.
+    """
+    os.chmod(tmp_path, config_file_mode(target))
+    if os.geteuid() == 0:
+        try:
+            info = os.stat(target)
+        except OSError:
+            return
+        os.chown(tmp_path, info.st_uid, info.st_gid)
+
+
 def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTION) -> Optional[str]:
     """Snapshot config_path to config-<YYYYMMDDHHMMSS>-<nnnn>.yaml beside it, then
     prune to the newest `retention`. Timestamps are UTC so the filename sorts the same
@@ -203,6 +252,12 @@ def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTIO
     stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
     backup_path = os.path.join(directory, f"config-{stamp}-{random.randrange(10_000):04d}.yaml")
     shutil.copy2(config_path, backup_path)
+    # Same mode and owner as config.yaml: a backup taken under sudo would otherwise
+    # be root's, and 0660 no longer lets the installing user read it.
+    try:
+        _match_config_file(backup_path, config_path)
+    except OSError:
+        pass
     _prune_config_backups(directory, retention)
     return backup_path
 
@@ -412,39 +467,28 @@ class ConfigManager(metaclass=Singleton):
     def _clear_gateway_port_passed_unlocked(self) -> None:
         # The pending alert goes with it: it names the old port, so whatever it asked
         # the operator to do is no longer the thing to do.
-        for path in (
-            self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE),
-            os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE),
-            os.path.join(self._config_dir(), GATEWAY_NOTICE_COMMAND_FILE),
-        ):
-            try:
-                os.unlink(path)
-            except OSError:
-                continue
+        try:
+            os.unlink(self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE))
+        except OSError:
+            pass
+        self._clear_notice_unlocked(GATEWAY_NOTICE_FILE)
 
     def _clear_plaintext_gateway_port_passed_unlocked(self) -> None:
-        for path in (
-            self._cache_path_unlocked(GATEWAY_PLAINTEXT_PORT_PASSED_FILE),
-            os.path.join(self._config_dir(), GATEWAY_PLAINTEXT_NOTICE_FILE),
-            os.path.join(self._config_dir(), GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE),
-        ):
-            try:
-                os.unlink(path)
-            except OSError:
-                continue
+        try:
+            os.unlink(self._cache_path_unlocked(GATEWAY_PLAINTEXT_PORT_PASSED_FILE))
+        except OSError:
+            pass
+        self._clear_notice_unlocked(GATEWAY_PLAINTEXT_NOTICE_FILE)
 
     def _clear_gateway_notice_unlocked(self) -> None:
         self._clear_notice_unlocked(GATEWAY_NOTICE_FILE)
 
     def _clear_notice_unlocked(self, notice_file: str) -> None:
-        try:
-            os.unlink(os.path.join(self._config_dir(), notice_file))
-        except OSError:
-            pass
-        try:
-            os.unlink(os.path.join(self._config_dir(), _command_file_for(notice_file)))
-        except OSError:
-            pass
+        for name in (notice_file, _command_file_for(notice_file), _port_file_for(notice_file)):
+            try:
+                os.unlink(os.path.join(self._config_dir(), name))
+            except OSError:
+                pass
 
     def _withdraw_unsaved_gateway_port(self) -> None:
         """Take back the rule for a port that was opened but never persisted."""
@@ -465,6 +509,7 @@ class ConfigManager(metaclass=Singleton):
         body: str,
         notice_file: str = GATEWAY_NOTICE_FILE,
         command: Optional[str] = None,
+        port: Optional[int] = None,
     ) -> None:
         """Emit a gateway alert: to the log now, to the terminal last, to disk for later.
 
@@ -485,6 +530,11 @@ class ConfigManager(metaclass=Singleton):
         None clears any stale command from a previous notice about this same
         file, so a diagnosis that stopped naming a command does not leave an old
         one behind.
+
+        ``port`` is the port the notice is about, written to its ``.port``
+        companion the same way (see ``GATEWAY_PLAINTEXT_NOTICE_PORT_FILE``), so a
+        reader can tell a notice about the port in force from one about a port
+        config.yaml has since moved off.
         """
         from src.utils.firewall.gateway import defer_operator_notice, operator_notice
 
@@ -496,15 +546,19 @@ class ConfigManager(metaclass=Singleton):
         except OSError:
             path = ""
 
-        command_path = os.path.join(self._config_dir(), _command_file_for(notice_file))
-        try:
-            if command:
-                with open(command_path, "w") as f:
-                    f.write(command)
-            else:
-                os.unlink(command_path)
-        except OSError:
-            pass
+        for companion, value in (
+            (_command_file_for(notice_file), command),
+            (_port_file_for(notice_file), str(port) if port else None),
+        ):
+            companion_path = os.path.join(self._config_dir(), companion)
+            try:
+                if value:
+                    with open(companion_path, "w") as f:
+                        f.write(value)
+                else:
+                    os.unlink(companion_path)
+            except OSError:
+                pass
 
         # A one-liner through the log and the framed block at the end, rather than
         # the block twice: the fallback logger prints straight to stderr, so logging
@@ -533,7 +587,7 @@ class ConfigManager(metaclass=Singleton):
             self._gateway_notice_unlocked(title, body, command=command)
 
     def emit_plaintext_gateway_notice(
-        self, title: str, body: str, command: Optional[str] = None
+        self, title: str, body: str, command: Optional[str] = None, port: Optional[int] = None
     ) -> None:
         """Public counterpart of ``_gateway_notice_unlocked`` for the plaintext port.
 
@@ -542,11 +596,18 @@ class ConfigManager(metaclass=Singleton):
         this method's. Writes to ``GATEWAY_PLAINTEXT_NOTICE_FILE`` and is cleared
         by ``mark_plaintext_gateway_port_passed`` the moment the port is proven,
         the same lifecycle ``.gateway_notice`` has for the TLS port.
+
+        ``port`` is the port that was probed, recorded beside the notice so it is
+        only ever reported against that port (``GATEWAY_PLAINTEXT_NOTICE_PORT_FILE``).
         """
         with self._lock:
             self.ensure_loaded()
             self._gateway_notice_unlocked(
-                title, body, notice_file=GATEWAY_PLAINTEXT_NOTICE_FILE, command=command
+                title,
+                body,
+                notice_file=GATEWAY_PLAINTEXT_NOTICE_FILE,
+                command=command,
+                port=port,
             )
 
     def assign_gateway_port_if_unset(self) -> Optional[int]:
@@ -590,20 +651,20 @@ class ConfigManager(metaclass=Singleton):
         the one thing the old candidate cache was for -- a port that stays the same
         between runs, so "open TCP 52285" is still true tomorrow.
 
-        Assignment still needs root, because it writes a firewall rule. An
-        unprivileged run leaves the sentinel alone rather than consuming it.
+        Assignment still needs root or CAP_NET_ADMIN, because it writes a firewall
+        rule. An unprivileged run leaves the sentinel alone rather than consuming it.
         """
         stored = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
         if coerce_gateway_port(stored) is not None:
             return
 
-        if os.geteuid() != 0:
+        if not can_admin_network():
             self._gateway_notice_unlocked(
                 "gateway port not assigned",
-                "network.GATEWAY_PORT is unassigned and this process is not root, so it\n"
-                "cannot open the port in the host firewall. Leaving it unassigned rather\n"
-                "than storing a port nothing can reach: run 'sudo nodo serve' once, or\n"
-                "set network.GATEWAY_PORT to a port you have opened yourself.",
+                "network.GATEWAY_PORT is unassigned and this process is not root and has no\n"
+                "CAP_NET_ADMIN, so it cannot open the port in the host firewall. Leaving it\n"
+                "unassigned rather than storing a port nothing can reach: run 'sudo nodo serve'\n"
+                "once, or set network.GATEWAY_PORT to a port you have opened yourself.",
             )
             return
 
@@ -735,6 +796,7 @@ class ConfigManager(metaclass=Singleton):
                 _find_removed_keys,
                 ConfigValidationError,
                 validate_balancers_config,
+                validate_benchmark_config,
                 validate_bitcoin_config,
                 validate_host_policy_config,
                 validate_pricing_config,
@@ -767,6 +829,11 @@ class ConfigManager(metaclass=Singleton):
             validate_balancers_config(
                 self._config, warn=lambda message: self.log(f"[BALANCERS] {message}")
             )
+
+            # This node's per-core benchmark scores, which admission refuses services
+            # on. A score that does not parse would either refuse everything or admit
+            # anything, so it stops here instead (#459).
+            validate_benchmark_config(self._config)
 
             # The Bitcoin ledger block, if there is one. Structural only -- addresses
             # are checked with arithmetic, never by asking a node -- so a node that
@@ -819,13 +886,12 @@ class ConfigManager(metaclass=Singleton):
                 for name, ledger in ledgers.items():
                     if not isinstance(ledger, dict):
                         continue
-                    # Unless the ledger says its keys live somewhere else. A chain
-                    # whose wallet is held by its own node -- Bitcoin's is, in Core --
-                    # would otherwise be handed a BIP-39 mnemonic that nothing uses,
-                    # written into config.yaml and labelled a secret to back up. The
-                    # flag is a generic key in that ledger's own block, so nothing here
-                    # has to know which chains those are.
-                    if ledger.get("WALLET_KEYS_EXTERNAL"):
+                    # Unless the ledger's keys live somewhere else. Bitcoin's do under
+                    # `BACKEND: core`: the wallet is the operator's own bitcoind's, and
+                    # it would otherwise be handed a BIP-39 mnemonic that nothing uses,
+                    # written into config.yaml and labelled a secret to back up. Every
+                    # other backend signs with the mnemonic, so it is minted for them.
+                    if str(ledger.get("BACKEND") or "").strip().lower() == "core":
                         continue
                     configured = str(ledger.get("WALLET_MNEMONIC") or "").strip()
                     if not configured or configured == "auto":
@@ -842,7 +908,21 @@ class ConfigManager(metaclass=Singleton):
                 self.log("Dynamic values were processed, saving configuration...")
                 self._save_config_unlocked()
 
+            self._apply_nft_table()
             self._loaded = True
+
+    def _apply_nft_table(self) -> None:
+        """Point the firewall backend at this install's own nft table, when one is set.
+
+        Only imported when the key names a table other than the default, so a
+        normal install keeps the firewall package off its import path.
+        """
+        table = self._get_nested(self._config, ["virtualizers", "ch", "NFT_TABLE"])
+        if table is None or str(table).strip() in ("", "nodo"):
+            return
+        from src.utils.firewall.backends import set_nft_table
+
+        set_nft_table(str(table))
 
     def _save_config_unlocked(self):
         """Internal save method without locking (assumes caller holds lock)."""
@@ -878,7 +958,7 @@ class ConfigManager(metaclass=Singleton):
             )
             with os.fdopen(fd, "w") as f:
                 yaml.safe_dump(safe_config, f, indent=2, default_flow_style=False)
-            os.chmod(tmp_path, 0o666)  # To allow sudo nodo update and still be writable
+            _match_config_file(tmp_path, target)
             os.replace(tmp_path, target)
             return True
         except OSError:
@@ -891,7 +971,7 @@ class ConfigManager(metaclass=Singleton):
 
     def _chmod_config(self):
         try:
-            os.chmod(self.config_path, 0o666)  # To allow sudo nodo update and still be writable
+            os.chmod(self.config_path, config_file_mode(self.config_path))
         except Exception:
             pass
 

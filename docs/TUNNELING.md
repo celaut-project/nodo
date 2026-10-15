@@ -17,6 +17,14 @@ port out of `network.FREE_PORTS_RANGE` and is published in the instance's
 `uri_slot`. Tunneling does not replace that — it is an additional way in, and the
 only one available when `network.DISABLE_EXPOSE_OUTSIDE` is set.
 
+For an instance you launch yourself with `nodo execute`, tunneling is the **only**
+off-host path: the address `execute` prints is only meaningful on the machine that
+ran it. (`nodo execute --remote`, which advertised a LAN address instead, has been
+removed.) `network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE` does not change that: it
+publishes the instance on a port of the node host's own interface, for when the
+operator's tools sit just outside the node's network namespace (a node inside a VM, say),
+and never advertises loopback. Anything beyond that host is still a tunnel.
+
 ### Option 1: Direct exposure (NAT traversal)
 
 1. Forward the relevant ports on your router to the machine running the node.
@@ -136,7 +144,7 @@ authorises the tunnel in the first place.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
+| `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel stream — with `nodo tunnel`, each TCP connection or UDP flow through the local port. `nodo tunnel` prints it (`open_fee_mu` in `--json`) and the TUI asks y/N with the amount before opening one. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
 | `pricing.NET_MU_PER_GIB` | `2000000` | Charged per GiB relayed, counting **both** directions. |
 | `costs.TUNNEL_CHARGE_INTERVAL_KB` | `1024` | How much traffic accumulates before it is billed. |
 
@@ -224,6 +232,39 @@ nodo tunnel abcdef1234567890 8080 --peer 192.168.1.10:4040
 `--udp` selects the *local* socket type; the node picks the node-to-service
 transport from what the slot declares, so the two must match to be useful.
 
+Each `nodo tunnel` registers itself while it runs, so it can be found and stopped
+from elsewhere — another shell, a script, or the TUI's TUNNELS page (and `t` on
+INSTANCES, which opens one):
+
+```bash
+nodo tunnel my-instance 8080 --listen 9000 --detach   # background; prints its id
+nodo tunnels                                          # what is running here
+nodo tunnels 3f9a0c12                                 # one, with its log
+nodo tunnels --instance my-instance                   # the ones reaching it
+nodo tunnel_close 3f9a0c12                            # stop it (or --all)
+```
+
+On the relaying node, `nodo tunnels --inbound` (and the INBOUND table on the TUI's
+TUNNELS page) lists the `ServiceTunnel` streams it is carrying for others: the
+caller's address, the instance token and slot, the protocol, the bytes relayed each
+way so far, and the age. They are kept in the daemon's memory
+(`src/tunneling/inbound.py`) and mirrored to `<main.STORAGE>/tunnels/inbound.snapshot`
+on every open and close and every 2 s while one is open. They are listed, not
+closed: the daemon has no control path for that, and the instance's balance and
+`host_limits` are what end them.
+
+A tunnel started with `--detach` comes back after a reboot or a daemon restart: its
+spec (`<id>.spec` beside its record — instance, slot, flags, pinned to the port it
+got) is kept, and the daemon re-runs the same detach path on start, under the same
+id and port, the way delegated endpoints are restored. Closing it on purpose
+(`nodo tunnel_close`, the TUI's `d`, `nodo kill` of its instance) removes the spec. A
+tunnel whose instance no longer exists is dropped with a log line; one that fails to
+start (its port taken, say) is retried on the next start, and dropped after three
+failures in a row.
+
+`nodo kill <instance>` closes the tunnels this host opened to that instance as well:
+with the instance gone they would only hold their ports and fail every connection.
+
 With TCP each accepted connection gets its own stream, so concurrent clients
 work. UDP has no connections, so traffic is keyed by source address: the first
 datagram from an `ip:port` opens a stream, later ones reuse it, and the flow is
@@ -269,7 +310,9 @@ approximates what the client can reach, and a UDP slot cannot be probed at all
 
 ### Lifetime
 
-Listeners live as long as the delegated instance and are closed when it stops. The
+Listeners live as long as the delegated instance and are closed when it stops. A stop
+from outside the daemon (`nodo kill`) cannot reach them; the daemon's maintenance
+tick then closes the listeners whose instance has no `delegated_instances` row. The
 instance stored in `delegated_instances.serialized_instance` is the **rewritten**
 one — what the client was told is what gets persisted — so the same listeners can
 be rebound on the same ports when the node restarts, and firewall cleanup targets
@@ -361,7 +404,13 @@ they existed:
   per service in a `tunnels` table. That approach was dropped: a tunnel lives
   exactly as long as its stream, and the table is gone. Delegated endpoints do
   survive restarts, but their state rides along in `delegated_instances` rather
-  than in a registry of their own.
+  than in a registry of their own. What *does* exist is narrower: each running
+  `nodo tunnel` process leaves `<main.STORAGE>/tunnels/<id>.json` for as long as it
+  runs (`src/utils/tunnel_registry.py`), so `nodo tunnels` can list the client ends
+  this host opened, and the relaying node lists the streams it carries in memory
+  (`nodo tunnels --inbound`). Detached client tunnels are reopened after a restart
+  from a spec kept beside their record; the relayed streams are not (they end with
+  the daemon that carried them).
 * **A reachability check from outside.** The router guide (`nodo nat-guide`)
   exists, but nothing confirms from *outside* that the gateway port is really
   forwarded: a connection from inside the node's own network succeeds either way.

@@ -59,7 +59,7 @@ def find_running_endpoint(service_id: str) -> Optional[str]:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT serialized_instance FROM local_instances WHERE service_id = ?",
+                "SELECT serialized_instance FROM local_instances WHERE service_id = ? AND killed_at IS NULL",
                 (service_id,),
             )
             rows = cursor.fetchall()
@@ -105,7 +105,7 @@ def find_running_instance(service_id: str) -> Optional[str]:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, serialized_instance FROM local_instances WHERE service_id = ?",
+                "SELECT id, serialized_instance FROM local_instances WHERE service_id = ? AND killed_at IS NULL",
                 (service_id,),
             )
             rows = cursor.fetchall()

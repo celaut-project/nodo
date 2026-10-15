@@ -1,7 +1,9 @@
 # NODO QUICK START
 
 1. Setup
-   nodo tui        (Config page — edits config.yaml, backup included)
+   nodo tui        (All page — edits config.yaml, backup included)
+                   The first time, nodo tui asks you to choose a profile.
+                   You can skip it. Press p on the Policies page to choose later.
 
 2. Get a service
    nodo download <url>
@@ -19,8 +21,8 @@
 
 EXTRAS
 
-Remote run:
-   nodo execute --remote <service>
+Reach a running instance from another machine:
+   nodo tunnel <instance> <slot> --peer <node address>:<gateway port>
 
 Export package (importable .celaut.bee — share this, feed it to `nodo import`):
    nodo export <service> <dir>

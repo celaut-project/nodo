@@ -50,12 +50,17 @@ class OnChainPeerObjectTests(unittest.TestCase):
              mock.patch.object(tx.env_manager, "get", side_effect=fake_get), \
              mock.patch("src.utils.config.ConfigManager.get", autospec=True,
                         side_effect=lambda _self, key, default=None: fake_get(key, default)), \
+             mock.patch("src.utils.config.ConfigManager.get_gateway_port", return_value=8080), \
              mock.patch("src.utils.network.get_local_ip", return_value=PUBLIC_IP):
             return Parse(tx._self_network_data(), celaut_pb2.Peer())
 
-    def _r7_owner_key(self):
-        """The public key a reader would recover from the box's R7 owner."""
-        return ni.node_proposition_hex(ni.get_node_public_key_hex())[len("0008cd"):]
+    def _identity_key(self):
+        """The key the envelope is signed with: the node's own identity, not a wallet's.
+
+        R7 holds an Ergo proposition, which the identity deliberately is not (see
+        ``src/identity/node_identity.py``); the tie between the two is an attestation.
+        """
+        return ni.get_node_public_key_hex()
 
     def _payload_for(self, peer):
         return ni.canonical_peer_payload(
@@ -77,7 +82,7 @@ class OnChainPeerObjectTests(unittest.TestCase):
         del peer.uri[0].transport.tags[:]
         peer.uri[0].transport.tags.append("udp")
         self.assertFalse(
-            ni.verify_peer_payload(self._r7_owner_key(), self._payload_for(peer), peer.signature)
+            ni.verify_peer_payload(self._identity_key(), self._payload_for(peer), peer.signature)
         )
 
     def test_publishes_a_peer_envelope_not_a_bare_instance(self):
@@ -93,14 +98,13 @@ class OnChainPeerObjectTests(unittest.TestCase):
     def test_no_expiry_is_published_when_none_is_configured(self):
         self.assertEqual(self._publish(validity=0).uri[0].expiry_unix_timestamp, 0)
 
-    def test_the_published_key_is_the_r7_owner(self):
-        # One mnemonic per node, so the identity signing R9 is the wallet owning R7.
-        self.assertEqual(self._publish().public_key, self._r7_owner_key())
+    def test_the_published_key_is_the_node_identity(self):
+        self.assertEqual(self._publish().public_key, self._identity_key())
 
-    def test_signature_verifies_against_r7_without_contacting_the_node(self):
+    def test_signature_verifies_against_the_identity_without_contacting_the_node(self):
         peer = self._publish()
         self.assertTrue(
-            ni.verify_peer_payload(self._r7_owner_key(), self._payload_for(peer), peer.signature)
+            ni.verify_peer_payload(self._identity_key(), self._payload_for(peer), peer.signature)
         )
 
     def test_a_stretched_expiry_breaks_the_signature(self):
@@ -109,14 +113,14 @@ class OnChainPeerObjectTests(unittest.TestCase):
         peer = self._publish()
         peer.uri[0].expiry_unix_timestamp += 999_999
         self.assertFalse(
-            ni.verify_peer_payload(self._r7_owner_key(), self._payload_for(peer), peer.signature)
+            ni.verify_peer_payload(self._identity_key(), self._payload_for(peer), peer.signature)
         )
 
     def test_a_swapped_address_breaks_the_signature(self):
         peer = self._publish()
         peer.uri[0].ip = "6.6.6.6"
         self.assertFalse(
-            ni.verify_peer_payload(self._r7_owner_key(), self._payload_for(peer), peer.signature)
+            ni.verify_peer_payload(self._identity_key(), self._payload_for(peer), peer.signature)
         )
 
     def test_stays_small_enough_for_a_register(self):
@@ -125,6 +129,7 @@ class OnChainPeerObjectTests(unittest.TestCase):
         fake_get = self._overrides(86400)
         with mock.patch.object(tx, "SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", lambda: True), \
              mock.patch.object(tx.env_manager, "get", side_effect=fake_get), \
+             mock.patch("src.utils.config.ConfigManager.get_gateway_port", return_value=8080), \
              mock.patch("src.utils.network.get_local_ip", return_value=PUBLIC_IP):
             self.assertLess(len(tx._self_network_data()), 1024)
 

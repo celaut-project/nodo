@@ -1,8 +1,10 @@
 """Translate amounts between two nodes' private MU scales.
 
 MU is deliberately local to a node.  A payment contract's ``mu_per_unit`` is
-therefore the bridge: it says how many of *that node's* MU one ledger unit is
-worth.  Amounts passed to a peer must use the peer's rate; amounts charged to a
+therefore the bridge: it says how many of *that node's* MU one base unit of the
+asset (a nanoERG, a satoshi, a token's smallest unit) is worth.  Both sides of a
+conversion are rates per the same base unit, so the ratio between them is all
+that is ever used.  Amounts passed to a peer must use the peer's rate; amounts charged to a
 local client must use ours.
 
 Rounding always goes the direction that cannot cost this node money: what we

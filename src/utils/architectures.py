@@ -15,7 +15,9 @@ cannot run that arch, a service was accepted and then died deep inside the CH
 build looking for a guest kernel that was never installed; set to false on a host
 that could, the node hid capacity it had. Capability is now *derived*:
 
-* the host's own architecture, which Cloud Hypervisor runs under KVM;
+* the host's own architecture, which Cloud Hypervisor runs under KVM --
+  unless KVM positively cannot give it the interrupt controller it needs
+  (``virtualizers.ch.vgic``: an arm64 host with a GICv2, issue #440);
 * plus every foreign architecture QEMU can emulate here, which
   ``virtualizers.qemu`` answers by checking the emulator binary and the guest
   kernel/initramfs on disk.
@@ -59,7 +61,7 @@ if config.get("packer.X86_PACKER_SUPPORT"):
     PACKER_SUPPORTED_ARCHITECTURES.append(list(_ALIASES_BY_CANONICAL["linux/amd64"]))
 
 
-def resolve_supported_architectures(host_arch, emulation_ready):
+def resolve_supported_architectures(host_arch, emulation_ready, native_ready=lambda: True):
     """The architectures a node can execute, given its host arch and an emulation
     probe. Pure, so what the node advertises is testable without an install.
 
@@ -70,13 +72,15 @@ def resolve_supported_architectures(host_arch, emulation_ready):
     emulator binary present, guest kernel and initramfs on disk. It is allowed to
     raise: a broken emulation probe costs the foreign arch, never the native one.
 
-    The host's own arch comes first, and is never asked about: Cloud Hypervisor
-    boots it under KVM, with nothing optional in the way.
+    The host's own arch comes first: Cloud Hypervisor boots it under KVM, with
+    nothing optional in the way. ``native_ready`` is only a veto for a host whose
+    KVM cannot boot a CH guest at all -- advertising the arch there had peers route
+    every native service to a launch that failed 100% of the time (#440).
     """
     supported = []
 
     native_aliases = _ALIASES_BY_CANONICAL.get(host_arch or "")
-    if native_aliases:
+    if native_aliases and native_ready():
         supported.append(list(native_aliases))
 
     native = {entry[0] for entry in supported}
@@ -103,7 +107,18 @@ def _emulation_ready(arch):
     return emulation_ready(arch)
 
 
+def _native_ready():
+    """False only when KVM positively cannot create CH's vGIC; never on a guess."""
+    try:
+        from src.virtualizers.ch.vgic import probe
+    except Exception:
+        return True
+    return not probe().missing
+
+
 # Architectures this node can RUN: native under CH/KVM, plus whatever QEMU can
 # emulate here. Resolved once at import, like every other config-derived table --
 # installing an emulator or a guest kernel takes effect on the next node start.
-SUPPORTED_ARCHITECTURES = resolve_supported_architectures(host_arch_tag(), _emulation_ready)
+SUPPORTED_ARCHITECTURES = resolve_supported_architectures(
+    host_arch_tag(), _emulation_ready, _native_ready
+)

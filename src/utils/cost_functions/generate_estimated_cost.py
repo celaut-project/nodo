@@ -33,10 +33,12 @@ def generate_estimated_cost(
         resources: celaut.Service.Container.Resources,
         arch: Optional[str] = None,
         service: Optional[celaut.Service] = None,
+        check_availability: bool = True,
 ) -> Optional[celaut_pb2.EstimatedCost]:
     """What running this service here would cost, at the current prices and load.
 
-    ``arch`` is the service's architecture. It selects the memory price when the
+    ``arch`` is the service's architecture. It selects which of this node's benchmark
+    scores admission holds the service's required ones against, and the memory price when the
     operator has set one per architecture, so a quote and the charge the maintenance
     tick then levies come from the same rate -- quoting the scalar and charging a
     per-arch rate would have the node bill above what it offered. Omitted, both sides
@@ -48,12 +50,15 @@ def generate_estimated_cost(
     be given and pricing it at them would quote a small immutable capsule at the
     128 MiB MIN_ROOTFS_BYTES. Omitted, the floors stay -- which over-quotes rather
     than under-quotes, and only over-quoting is recoverable.
+
+    ``check_availability=False`` prices the service whatever the current load, for a
+    caller that remembers the price and checks availability itself on every answer.
     """
 
     initial_mu = from_amount(config.initial_mu) \
         if config and config.HasField("initial_mu") else 0
 
-    if not get_resource_availability(resources=resources)["can_execute"]:
+    if check_availability and not get_resource_availability(resources=resources, arch=arch)["can_execute"]:
         return
 
     # What the client pays up front: the one-off build, plus the balance the instance

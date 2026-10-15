@@ -8,12 +8,27 @@ below are unchanged from before they existed.
 from datetime import datetime, timezone
 
 
-def send_chat(peer_id: str, body: str) -> bool:
-    """Send ``body`` to ``peer_id``. Returns whether it was sent."""
+def _service_suffix(entry: dict) -> str:
+    """How a stored service card (issue #438) reads in a plain-text transcript."""
+    service = entry.get("service")
+    if not service:
+        return ""
+    tags = f" ({', '.join(service['tags'])})" if service["tags"] else ""
+    # No id: its Metadata has no hash of this node's registry type (see
+    # registry_service_id), so there is nothing here to `nodo get` it by.
+    service_id = service["id"] or "(no id of this node's hash type)"
+    return f" [service {service_id}{tags}]"
+
+
+def send_chat(peer_id: str, body: str, service: str = None) -> bool:
+    """Send ``body`` to ``peer_id``, with ``service`` attached as a card if given.
+
+    Returns whether it was sent.
+    """
     from src.manager.chat import ChatError, send_chat_message
 
     try:
-        send_chat_message(peer_id=peer_id, body=body)
+        send_chat_message(peer_id=peer_id, body=body, service=service)
     except ChatError as e:
         print(f"STOP: {e}", flush=True)
         return False
@@ -24,11 +39,19 @@ def send_chat(peer_id: str, body: str) -> bool:
     return True
 
 
-def show_chat(peer_id: str, limit: int = 100) -> bool:
+def _emit(document: dict) -> bool:
+    from src.commands._catalogue import emit_json
+    emit_json(document)
+    return True
+
+
+def show_chat(peer_id: str, limit: int = 100, as_json: bool = False) -> bool:
     """Print the stored conversation with ``peer_id``, oldest first."""
     from src.manager.chat import get_chat_history
 
     history = get_chat_history(peer_id=peer_id, limit=limit)
+    if as_json:
+        return _emit({"peer_id": peer_id, "messages": history})
     if not history:
         print(f"No stored messages with {peer_id}.", flush=True)
         return True
@@ -36,11 +59,12 @@ def show_chat(peer_id: str, limit: int = 100) -> bool:
         when = datetime.fromtimestamp(entry["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         who = "us" if entry["from_us"] else peer_id
         thread = f" (thread {entry['conversation_id']})" if entry.get("conversation_id") else ""
-        print(f"[{when}] {who}{thread}: {entry['body']}", flush=True)
+        print(f"[{when}] {who}{thread}: {entry['body']}{_service_suffix(entry)}", flush=True)
     return True
 
 
-def open_thread(peer_id: str, topic: str, body: str = None) -> bool:
+def open_thread(peer_id: str, topic: str, body: str = None, service: str = None,
+                as_json: bool = False) -> bool:
     """Open a new conversation with ``peer_id``, sending ``body`` as its first message.
 
     ``body`` defaults to ``topic`` itself when not given, which is the whole of
@@ -59,7 +83,9 @@ def open_thread(peer_id: str, topic: str, body: str = None) -> bool:
         print(f"STOP: {e}", flush=True)
         return False
     try:
-        send_chat_message(peer_id=peer_id, body=body, conversation_id=conversation_id)
+        send_chat_message(
+            peer_id=peer_id, body=body, conversation_id=conversation_id, service=service,
+        )
     except ChatError as e:
         # The thread exists locally either way -- opening is not the send -- but a
         # thread whose first message never went anywhere is confusing left open.
@@ -70,16 +96,18 @@ def open_thread(peer_id: str, topic: str, body: str = None) -> bool:
         close_conversation(conversation_id)
         print(f"Could not reach peer {peer_id}: {e}", flush=True)
         return False
+    if as_json:
+        return _emit({"conversation_id": conversation_id, "peer_id": peer_id, "topic": topic})
     print(f"Opened {conversation_id} with {peer_id}.", flush=True)
     return True
 
 
-def reply_in_thread(conversation_id: str, body: str) -> bool:
+def reply_in_thread(conversation_id: str, body: str, service: str = None) -> bool:
     """Send ``body`` in the existing conversation ``conversation_id``."""
     from src.manager.chat import ChatError, reply_to_conversation
 
     try:
-        reply_to_conversation(conversation_id=conversation_id, body=body)
+        reply_to_conversation(conversation_id=conversation_id, body=body, service=service)
     except ChatError as e:
         print(f"STOP: {e}", flush=True)
         return False
@@ -90,11 +118,13 @@ def reply_in_thread(conversation_id: str, body: str) -> bool:
     return True
 
 
-def list_threads(peer_id: str = None) -> bool:
+def list_threads(peer_id: str = None, as_json: bool = False) -> bool:
     """Print every conversation (open and closed) this node knows, newest first."""
     from src.manager.chat import list_conversations
 
     conversations = list_conversations(peer_id=peer_id)
+    if as_json:
+        return _emit({"conversations": conversations})
     if not conversations:
         print("No conversations." if peer_id is None else f"No conversations with {peer_id}.", flush=True)
         return True
@@ -110,18 +140,20 @@ def list_threads(peer_id: str = None) -> bool:
     return True
 
 
-def show_thread(conversation_id: str, limit: int = 200) -> bool:
+def show_thread(conversation_id: str, limit: int = 200, as_json: bool = False) -> bool:
     """Print one conversation's messages, oldest first."""
     from src.manager.chat import get_conversation_history
 
     history = get_conversation_history(conversation_id=conversation_id, limit=limit)
+    if as_json:
+        return _emit({"conversation_id": conversation_id, "messages": history})
     if not history:
         print(f"No stored messages in {conversation_id}.", flush=True)
         return True
     for entry in history:
         when = datetime.fromtimestamp(entry["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         who = "us" if entry["from_us"] else "them"
-        print(f"[{when}] {who}: {entry['body']}", flush=True)
+        print(f"[{when}] {who}: {entry['body']}{_service_suffix(entry)}", flush=True)
     return True
 
 

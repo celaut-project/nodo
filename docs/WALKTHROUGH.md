@@ -82,8 +82,9 @@ or free resources before executing.
 ## 4. Execute — creates a running instance
 
 ```bash
-# Pass only declared envs; --remote advertises the host-facing IP.
-nodo execute --remote -e WORKERS 8 -e TIMEOUT 20 my-solver
+# Pass only declared envs. The address printed is reachable from this host only;
+# use `nodo tunnel` to reach the instance from elsewhere.
+nodo execute -e WORKERS 8 -e TIMEOUT 20 my-solver
 ```
 
 `execute` prints the full `nodo inspect` dump of the launched service, then a
@@ -127,8 +128,8 @@ grpcurl -H "authorization: <instance id>" -d '{"input": "..."}' \
 ```
 
 Each call is metered per `service.json → api.mu_per_call` (here `Solve` costs 100 MU).
-Top up a running instance with `nodo increase_deposit c92ae2ff1b7d4a0e… 0.001` (use the
-full instance id); the amount is in whatever `ui.DISPLAY_UNIT` says, ERG by default.
+Top up a running instance with `nodo increase_deposit c92ae2ff1b7d4a0e… 1000000` (use the
+full instance id); the amount is in whatever `ui.DISPLAY_UNIT` says, MU by default.
 
 ## 6. Observe live metrics and network activity
 

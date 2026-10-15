@@ -1,6 +1,7 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
 use crate::chat::{
-    get_conversation_messages, get_untopiced_messages, ChatCompose, ChatEntry, ChatEntryKind,
+    get_conversation_messages, get_untopiced_messages, ChatCardAction, ChatCompose, ChatEntry,
+    ChatEntryKind, ChatService,
     ChatMessageRow,
 };
 use crate::clients::{get_client_detail, get_clients, Client, ClientDetail};
@@ -43,6 +44,10 @@ const REPUTATION_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// rows the node's own hourly indexing tick wrote, plus config, so refreshing it
 /// faster than the tick that fills it in would only re-read the same numbers.
 const DONATIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(600);
+/// How often this node's own announced resources are re-read (`nodo resources
+/// --json`, issue #455). Ceilings, not headroom: they move when the machine, its
+/// `host_limits` caps or its benchmark scores do, so there is no point asking often.
+const OWN_RESOURCES_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// How much demand history the SCHEDULE page reads back. A month shows the weekly shape
 /// without letting one unusual day set the scale of the whole chart.
 const DEMAND_HISTORY_DAYS: u16 = 30;
@@ -73,7 +78,18 @@ pub trait Identifiable {
 pub enum Page {
     Overview,
     Instances,
+    /// The `nodo tunnel` processes running on this host: where each listens and
+    /// what it reaches. Opened here or with `t` on INSTANCES; see `tunnels.rs`.
+    Tunnels,
+    /// Instances that were killed or died, kept after the fact: why, when, and the
+    /// logs the node saved. Read-only; INSTANCES lists only the live ones. See
+    /// `dead.rs`.
+    Dead,
     Services,
+    /// The `nodo pack` runs on this host, current and recent: what each packs, where
+    /// it is, and the service id it produced. Launched here or with `p` on SERVICES;
+    /// see `packs.rs`.
+    Packs,
     /// Peers we talk to, and what we have paid them.
     Peers,
     /// Clients that talk to us, and what they have paid.
@@ -94,13 +110,16 @@ pub enum Page {
     /// two separate fields cannot say so.
     Schedule,
     /// What the machine costs to run, as watts and as money (`energy:`). Its own page
-    /// rather than a branch of Config because the block is a dozen keys spread over
+    /// rather than a branch of All because the block is a dozen keys spread over
     /// five mutually exclusive measurement sources, and the comments that say which
     /// one applies to a given machine are the whole difference between a reading and
     /// a number somebody invented (issue #395).
     Energy,
     Config,
     Logs,
+    /// The installation's own `docs/` folder: an index of every page, and the
+    /// selected one rendered to read in place.
+    Docs,
 }
 
 /// Which band of the tab bar a page belongs to.
@@ -124,6 +143,8 @@ pub enum PageGroup {
     Record,
     /// The pages that change the node rather than describe it.
     Settings,
+    /// How the node works, as its own documentation says.
+    Reference,
 }
 
 impl PageGroup {
@@ -133,12 +154,13 @@ impl PageGroup {
     /// a test — but written out, because the top row's order is a fact about the top
     /// row and a reader should be able to see it without folding twelve pages down
     /// into five.
-    pub const ALL: [PageGroup; 5] = [
+    pub const ALL: [PageGroup; 6] = [
         PageGroup::Status,
         PageGroup::Activity,
         PageGroup::Money,
         PageGroup::Record,
         PageGroup::Settings,
+        PageGroup::Reference,
     ];
 
     /// The short name on the group row.
@@ -154,6 +176,20 @@ impl PageGroup {
             PageGroup::Money => "EARNINGS",
             PageGroup::Record => "LOGS",
             PageGroup::Settings => "SETTINGS",
+            PageGroup::Reference => "DOCS",
+        }
+    }
+
+    /// The name on the group row when the full ones do not fit (issue #453). Four
+    /// letters or fewer, so all six fit a 40-column terminal.
+    pub fn short_title(self) -> &'static str {
+        match self {
+            PageGroup::Status => "OVER",
+            PageGroup::Activity => "WORK",
+            PageGroup::Money => "EARN",
+            PageGroup::Record => "LOGS",
+            PageGroup::Settings => "SET",
+            PageGroup::Reference => "DOCS",
         }
     }
 
@@ -189,14 +225,20 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 13] = [
+    pub const ALL: [Page; 17] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
         // network this node is part of and the services are what it brings to it.
         Page::Instances,
+        // Beside Instances: a tunnel is a way into one of them.
+        Page::Tunnels,
+        // Beside Instances too: it is where an instance goes when it stops.
+        Page::Dead,
         Page::Peers,
         Page::Services,
+        // Beside Services: a pack is how a service gets into the registry.
+        Page::Packs,
         Page::Clients,
         // Beside Clients: both are "who is on the other end", and Chat is often
         // reached from noticing something worth telling that operator about.
@@ -215,23 +257,54 @@ impl Page {
         Page::Schedule,
         Page::Energy,
         Page::Config,
+        // Last, and a group of its own: it describes the node rather than being
+        // part of it, and it is where an operator goes from any page above.
+        Page::Docs,
     ];
 
     pub fn title(self) -> &'static str {
         match self {
             Page::Overview => "OVERVIEW",
             Page::Instances => "INSTANCES",
+            Page::Tunnels => "TUNNELS",
+            Page::Dead => "DEAD",
             Page::Services => "SERVICES",
+            Page::Packs => "PACKS",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
             Page::Chat => "CHAT",
             Page::Earnings => "EARNINGS",
-            Page::Cell => "CELL",
+            Page::Cell => "POLICIES",
             Page::Pricing => "PRICING",
             Page::Schedule => "SCHEDULE",
             Page::Energy => "ENERGY",
-            Page::Config => "CONFIG",
+            Page::Config => "ALL",
             Page::Logs => "LOGS",
+            Page::Docs => "DOCS",
+        }
+    }
+
+    /// The name on the page row when the full ones do not fit (issue #453): short
+    /// enough that the widest group's six pages fit a 40-column terminal (unpadded).
+    pub fn short_title(self) -> &'static str {
+        match self {
+            Page::Overview => "OVER",
+            Page::Instances => "INST",
+            Page::Tunnels => "TUNL",
+            Page::Dead => "DEAD",
+            Page::Services => "SERV",
+            Page::Packs => "PACK",
+            Page::Peers => "PEERS",
+            Page::Clients => "CLNT",
+            Page::Chat => "CHAT",
+            Page::Earnings => "EARN",
+            Page::Cell => "POLICY",
+            Page::Pricing => "PRICE",
+            Page::Schedule => "SCHED",
+            Page::Energy => "ENERGY",
+            Page::Config => "ALL",
+            Page::Logs => "LOGS",
+            Page::Docs => "DOCS",
         }
     }
 
@@ -241,14 +314,76 @@ impl Page {
     pub fn group(self) -> PageGroup {
         match self {
             Page::Overview => PageGroup::Status,
-            Page::Instances | Page::Peers | Page::Services | Page::Clients | Page::Chat => {
-                PageGroup::Activity
-            }
+            Page::Instances
+            | Page::Tunnels
+            | Page::Dead
+            | Page::Peers
+            | Page::Services
+            | Page::Packs
+            | Page::Clients
+            | Page::Chat => PageGroup::Activity,
             Page::Earnings => PageGroup::Money,
             Page::Logs => PageGroup::Record,
             Page::Cell | Page::Pricing | Page::Schedule | Page::Energy | Page::Config => {
                 PageGroup::Settings
             }
+            Page::Docs => PageGroup::Reference,
+        }
+    }
+}
+
+/// What a tab row draws at a given width: its titles, and the padding either side
+/// of each.
+///
+/// The full titles with one space of padding when they fit; the short ones
+/// ([`Page::short_title`]) when they do not; the short ones unpadded when even that
+/// is too wide (issue #453). Chosen here, once, for both the drawing and the hit
+/// test, so a click lands on the tab drawn under it whichever form was drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabRow {
+    pub titles: Vec<&'static str>,
+    pub padding: u16,
+}
+
+impl TabRow {
+    fn fit(full: Vec<&'static str>, short: Vec<&'static str>, available: u16) -> Self {
+        let needed = |titles: &[&str], padding: u16| -> usize {
+            titles.iter().map(|title| title.chars().count() + 2 * padding as usize).sum::<usize>()
+                + TAB_DIVIDER.chars().count() * titles.len().saturating_sub(1)
+        };
+        for (titles, padding) in [(&full, 1), (&short, 1)] {
+            if needed(titles, padding) <= available as usize {
+                return Self { titles: titles.clone(), padding };
+            }
+        }
+        Self { titles: short, padding: 0 }
+    }
+
+    /// The bordered group row drawn `width` columns wide.
+    pub fn groups(width: u16) -> Self {
+        Self::fit(
+            PageGroup::ALL.iter().map(|group| group.title()).collect(),
+            PageGroup::ALL.iter().map(|group| group.short_title()).collect(),
+            width.saturating_sub(2),
+        )
+    }
+
+    /// `group`'s borderless page row drawn `width` columns wide.
+    pub fn pages(group: PageGroup, width: u16) -> Self {
+        let pages = group.pages();
+        Self::fit(
+            pages.iter().map(|page| page.title()).collect(),
+            pages.iter().map(|page| page.short_title()).collect(),
+            width,
+        )
+    }
+
+    /// The padding as the string `Tabs::padding` takes.
+    pub fn pad(&self) -> &'static str {
+        if self.padding > 0 {
+            " "
+        } else {
+            ""
         }
     }
 }
@@ -262,22 +397,30 @@ pub const TAB_DIVIDER: &str = "│";
 /// Which of a row of `titles` covers column `x`, given the row's own `Rect`.
 ///
 /// Retraces what `Tabs` lays out rather than asking it — the widget keeps no hit
-/// map. Each title sits in one space of padding, the title, one space of padding,
-/// and tabs are joined by [`TAB_DIVIDER`]. Measured in characters, not bytes.
+/// map. Each title sits in `padding` spaces either side, and tabs are joined by
+/// [`TAB_DIVIDER`]. Measured in characters, not bytes.
 ///
 /// One function for both rows so the group row and the page row cannot drift into
 /// two slightly different pieces of arithmetic, which is the kind of bug that shows
 /// up as a click landing on the neighbouring tab and gets worked around rather than
 /// reported. `x_offset` is where the titles begin: the bordered group row starts one
 /// column in, the borderless page row starts at its own left edge.
-fn title_row_at(x: u16, area: Rect, titles: &[&str], x_offset: u16) -> Option<usize> {
-    let divider_width = TAB_DIVIDER.chars().count() as u16;
-    let mut cursor = area.x + x_offset;
-    for (index, title) in titles.iter().enumerate() {
+///
+/// A title the row was too narrow to draw is not clickable: `Tabs` stops at the
+/// row's inner edge, and so does this.
+fn title_row_at(x: u16, area: Rect, row: &TabRow, x_offset: u16) -> Option<usize> {
+    let divider_width = TAB_DIVIDER.chars().count() as u32;
+    let right = area.x as u32 + area.width.saturating_sub(x_offset) as u32;
+    let x = x as u32;
+    if x >= right {
+        return None;
+    }
+    let mut cursor = area.x as u32 + x_offset as u32;
+    for (index, title) in row.titles.iter().enumerate() {
         if index > 0 {
             cursor += divider_width;
         }
-        let width = title.chars().count() as u16 + 2;
+        let width = title.chars().count() as u32 + 2 * row.padding as u32;
         if x >= cursor && x < cursor + width {
             return Some(index);
         }
@@ -288,8 +431,7 @@ fn title_row_at(x: u16, area: Rect, titles: &[&str], x_offset: u16) -> Option<us
 
 /// Which group the click at column `x` on the group row landed on.
 pub fn group_at(x: u16, area: Rect) -> Option<PageGroup> {
-    let titles: Vec<&str> = PageGroup::ALL.iter().map(|group| group.title()).collect();
-    title_row_at(x, area, &titles, 1).map(|index| PageGroup::ALL[index])
+    title_row_at(x, area, &TabRow::groups(area.width), 1).map(|index| PageGroup::ALL[index])
 }
 
 /// Which page of `group` the click at column `x` on the page row landed on.
@@ -302,8 +444,7 @@ pub fn page_at(x: u16, area: Rect, group: PageGroup) -> Option<Page> {
     if pages.len() <= 1 {
         return None;
     }
-    let titles: Vec<&str> = pages.iter().map(|page| page.title()).collect();
-    title_row_at(x, area, &titles, 0).map(|index| pages[index])
+    title_row_at(x, area, &TabRow::pages(group, area.width), 0).map(|index| pages[index])
 }
 
 /// How many rows below the first visible one a click at terminal row `y` lands, for a
@@ -335,6 +476,8 @@ fn visible_row_at(position: Position, area: Rect) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    /// The DOCS page's `/`: text to find on the open page.
+    SearchDocs,
     /// The Know-your-Assumptions gate, shown once, before anything else is reachable
     /// (issue #395).
     ///
@@ -349,7 +492,7 @@ pub enum InputMode {
     AcceptKya,
     Connect,
     EditConfig,
-    /// A new element for the list the Config page's selection points at.
+    /// A new element for the list the All page's selection points at.
     AddConfigItem,
     FilterConfig,
     /// Amount entry for crediting/debiting the selected client's balance.
@@ -358,12 +501,12 @@ pub enum InputMode {
     Confirm,
     /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
     Details,
-    /// Profile picker on the CELL page: choose a posture, then confirm its diff.
+    /// Profile picker on the POLICIES page: choose a posture, then confirm its diff.
     PickProfile,
-    /// Which of the config keys behind one CELL lever to edit (issue #414).
+    /// Which of the config keys behind one POLICIES lever to edit (issue #414).
     ///
     /// A lever stands for several keys, and used to answer `e` with a read-only
-    /// list that ended by sending the operator to the Config page. This is that
+    /// list that ended by sending the operator to the All page. This is that
     /// list made actionable, over exactly the same keys.
     PickLeverKey,
     /// Confirmation showing every key a lever or profile would change, before any
@@ -376,9 +519,17 @@ pub enum InputMode {
     /// (`src/utils/monetary.py::display_unit` refuses one with none), so this does
     /// not just set `ui.DISPLAY_UNIT` -- it takes a name and a MU-per-unit ratio
     /// together and writes both `ui.DISPLAY_UNIT` and `ui.UNITS.<name>.MU_PER_UNIT`
-    /// in the one transaction, the same way a CELL profile writes a dozen keys
+    /// in the one transaction, the same way a POLICIES profile writes a dozen keys
     /// rather than leaving the node to run on a partial edit.
     AddCustomUnit,
+    /// The tokens this node accepts besides ERG, reached from the POLICIES page's
+    /// `assets` lever: the list, with `a` to add one and `d` to remove the selected.
+    EditAssets,
+    /// The form for one new asset, inside the assets modal (see [`AssetForm`]).
+    AddAsset,
+    /// The env vars of a service whose execution was just confirmed
+    /// (see [`crate::env_form`]).
+    ExecuteEnvs,
     /// CHAT page, new-chat wizard step 1: pick which peer to start a chat with,
     /// narrowed by typing (issue: TUI chat/peers/clients redesign).
     PickChatPeer,
@@ -392,6 +543,22 @@ pub enum InputMode {
     /// message, docked in the conversation pane rather than a centered popup --
     /// `Enter` inserts a newline here instead of submitting (see `handler.rs`).
     ComposeChatMessage,
+    /// SERVICES page: the hash of a service this node does not hold, to ask the
+    /// network for with `nodo get` (issue #438).
+    GetService,
+    /// A new tunnel: `<slot> [flags]` from INSTANCES (`t`, to the selected
+    /// instance) or `<instance> <slot> [flags]` from TUNNELS (`n`).
+    NewTunnel,
+    /// PACKS page (`n`) or SERVICES (`p`): a folder or an https git URL to pack. Tab
+    /// completes folder names.
+    NewPack,
+    /// CHAT page, a step of `ComposeChatMessage`: which of this node's services to
+    /// attach to the message as a card (issue #438). Esc goes back to the message
+    /// rather than dropping it.
+    PickChatService,
+    /// A right-click menu of the clicked row's actions (issue #438). Choosing an
+    /// entry presses its key, in Normal mode, as if it had been typed.
+    ContextMenu,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -513,6 +680,18 @@ pub enum PendingAction {
     /// moment it launches, and goes on burning MU until something stops it.
     ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Re-fetch every peer and our balance there. Confirmed because it contacts all of
+    /// them, which is heavy on network and disk I/O.
+    RefreshPeers,
+    /// Stop a running tunnel. Confirmed because whatever is connected through it is
+    /// cut off, and reopening it may not get the same local port back.
+    CloseTunnel { id: String, label: String },
+    /// Open a tunnel (`t` on INSTANCES, `n` on TUNNELS). Confirmed because every
+    /// connection through it spends `pricing.TUNNEL_OPEN_MU` of the instance's balance;
+    /// the question says how much.
+    OpenTunnel { label: String, args: Vec<String> },
+    /// Stop a running pack. Confirmed because the build so far is thrown away.
+    CancelPack { id: String, label: String },
     /// Remove one element from a list in config.yaml. Confirmed like the others
     /// because dropping an entry from, say, a network policy loosens it silently.
     DeleteConfigItem {
@@ -524,6 +703,12 @@ pub enum PendingAction {
     ApplyWrites {
         label: String,
         writes: Vec<(String, String)>,
+    },
+    /// Open the value editor on a lever's key once the operator has read what
+    /// replacing it costs. Nothing is written by this: it only lets the editor open.
+    EditLever {
+        lever: &'static Lever,
+        path: &'static str,
     },
 }
 
@@ -544,14 +729,27 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         }
         PendingAction::ExecuteService { id, label } => Some((
             format!("Execute service {label}"),
-            vec!["execute".to_string(), id],
+            crate::env_form::execute_args(&id, &[]),
         )),
         PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
         )),
+        PendingAction::RefreshPeers => {
+            Some(("Refresh peers".to_string(), vec!["refresh_peers".to_string()]))
+        }
+        PendingAction::CloseTunnel { id, label } => Some((
+            format!("Close tunnel {label}"),
+            vec!["tunnel_close".to_string(), id, "--json".to_string()],
+        )),
         PendingAction::DeleteConfigItem { .. } => None,
         PendingAction::ApplyWrites { .. } => None,
+        PendingAction::OpenTunnel { label, args } => Some((label, args)),
+        PendingAction::CancelPack { id, label } => Some((
+            format!("Cancel pack {label}"),
+            vec!["pack_cancel".to_string(), id, "--json".to_string()],
+        )),
+        PendingAction::EditLever { .. } => None,
     }
 }
 
@@ -597,6 +795,10 @@ enum Applied {
     /// node to disagree with the file, so the change stands and the next start
     /// reads it.
     NotRunning,
+    /// Written to config.pending.yaml and not to config.yaml. Restarting the node
+    /// stops its instances and this process cannot do it, so the node picks the
+    /// file up the next time it starts.
+    Staged,
 }
 
 /// Result of a configuration transaction.
@@ -689,8 +891,11 @@ async fn apply_config_change(
         Ok(required) => required,
         Err(error) => return fail(error),
     };
-    if was_serving && !is_root() {
-        return fail("Configuration unchanged: restarting nodo requires root. Open the TUI with sudo nodo tui.".into());
+    // A staged file takes every later edit, serving or not: the node swaps it in
+    // when it starts, so a write to config.yaml would be overwritten by it.
+    let pending = pending_config_path(&config);
+    if pending.is_file() || (was_serving && !is_root()) {
+        return stage_config_change(&yq, &config, &pending, &write, label).await;
     }
 
     let backup = match backup_config(&config) {
@@ -718,20 +923,9 @@ async fn apply_config_change(
         Err(error) => return fail(format!("Could not run {}: {error}", yq.display())),
     }
 
-    let port_after = read_gateway_port(&config);
-    if port_after != port_before {
-        let _ = fs::remove_file(cache.join("gateway_port_passed"));
-        // GATEWAY_PLAINTEXT_PORT's `auto` resolves as GATEWAY_PORT + 1 (see
-        // ConfigManager.get_plaintext_gateway_port), so a changed TLS port changes
-        // what the plaintext one *is* even when GATEWAY_PLAINTEXT_PORT itself was
-        // never touched by this write.
-        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
-    }
-
-    let plaintext_after = read_gateway_plaintext_port_raw(&config);
-    if plaintext_after != plaintext_before {
-        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
-    }
+    let tls_moved = read_gateway_port(&config) != port_before;
+    let plaintext_moved = read_gateway_plaintext_port_raw(&config) != plaintext_before;
+    forget_gateway_verdicts(&config, &cache, tls_moved, plaintext_moved);
 
     if !was_serving {
         return ConfigTransaction {
@@ -769,6 +963,84 @@ async fn apply_config_change(
     ConfigTransaction {
         label,
         result: Ok(Applied::Restarted),
+    }
+}
+
+/// Apply the change to config.pending.yaml and leave config.yaml, and the node,
+/// alone. The file is made from config.yaml when it does not exist yet.
+async fn stage_config_change(
+    yq: &Path,
+    config: &Path,
+    pending: &Path,
+    write: &ConfigWrite,
+    label: String,
+) -> ConfigTransaction {
+    let fail = |error: String| ConfigTransaction {
+        label: label.clone(),
+        result: Err(error),
+    };
+    let created = !pending.is_file();
+    if created {
+        if let Err(error) = fs::copy(config, pending) {
+            return fail(format!("Could not create {}: {error}", pending.display()));
+        }
+        keep_config_owner(config, pending);
+    }
+    let mut command = Command::new(yq);
+    command
+        .arg("e")
+        .arg("-i")
+        .arg(&write.expression)
+        .arg(pending);
+    for (variable, value) in &write.values {
+        command.env(variable, value);
+    }
+    let failure = match command.output().await {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(format!(
+            "yq could not update configuration: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Some(format!("Could not run {}: {error}", yq.display())),
+    };
+    if let Some(error) = failure {
+        if created {
+            let _ = fs::remove_file(pending);
+        }
+        return fail(error);
+    }
+    ConfigTransaction {
+        label,
+        result: Ok(Applied::Staged),
+    }
+}
+
+/// Drop what is known about a gateway port an edit just moved: the "proven
+/// reachable" marker the node would skip its probe on, and the pending notice --
+/// with its command and port companions -- that `nodo` and the TUI report from.
+///
+/// Both halves, as `ConfigManager.set` does on the Python side. Dropping only the
+/// marker (issue #438) left the notice about the old port on disk: the alert then
+/// named the new port and the old port's firewall command, the operator opened the
+/// old one, restarted, and only then heard about the port the node actually used.
+///
+/// A moved TLS port moves the plaintext one too: `auto` is GATEWAY_PORT + 1 (see
+/// ConfigManager.get_plaintext_gateway_port), even when GATEWAY_PLAINTEXT_PORT
+/// itself was never touched by this write.
+fn forget_gateway_verdicts(config: &Path, cache: &Path, tls_moved: bool, plaintext_moved: bool) {
+    if tls_moved {
+        let _ = fs::remove_file(cache.join("gateway_port_passed"));
+        for path in crate::alerts::notice_files(config, crate::alerts::GATEWAY_NOTICE_FILE) {
+            let _ = fs::remove_file(path);
+        }
+    }
+    if tls_moved || plaintext_moved {
+        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
+        for path in
+            crate::alerts::notice_files(config, crate::alerts::GATEWAY_PLAINTEXT_NOTICE_FILE)
+        {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
@@ -903,6 +1175,20 @@ pub(crate) enum CommandKind {
     Generic,
     /// Render stdout in the Details overlay (carries the service id for the title).
     Inspect(String),
+    /// Report the command's own last line of stdout as the status. For commands
+    /// that print their outcome rather than exit non-zero on it: `nodo get` says
+    /// "not a valid service hash" and "queued" alike with a zero exit, so
+    /// `Generic`'s "completed" would read the same for both.
+    Report,
+    /// `nodo tunnel --detach --json` / `nodo tunnel_close --json`: the status comes
+    /// from the one JSON object, whose `error` is on stdout (`tunnels::outcome_status`).
+    Tunnel,
+    /// `nodo pack --detach --json` / `nodo pack_cancel --json`, read the same way
+    /// (`packs::outcome_status`).
+    Pack,
+    /// `nodo service_envs <id> --json` for a confirmed execution: opens the env var
+    /// form, or runs `nodo execute` when the service asks for none.
+    ServiceEnvs { id: String, label: String },
 }
 
 /// Result of a background `nodo` invocation.
@@ -1544,6 +1830,10 @@ pub struct ConfigEntry {
     pub edit_value: String,
     pub value_type: String,
     pub secret: bool,
+    /// Set when `config.pending.yaml` holds a different value than the config
+    /// the node runs on: what the running node has now, or `unset`. `None` when
+    /// both agree, or when nothing is staged.
+    pub running: Option<String>,
 }
 
 impl Identifiable for ConfigEntry {
@@ -1849,6 +2139,31 @@ mod cpu_breakdown_tests {
     /// No cores reported (an `App` built before the first `sys.refresh_cpu()`, say)
     /// must not divide by zero.
     #[test]
+    fn root_is_found_when_the_compiled_path_does_not_exist() {
+        use super::locate_root;
+        let base = std::env::temp_dir().join(format!("nodo-tui-root-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let install = base.join("install");
+        std::fs::create_dir_all(install.join("bin")).unwrap();
+        std::fs::write(install.join("config.yaml"), "main: {}\n").unwrap();
+        let ghost = base.join("home/runner/work/nodo");
+
+        // Explicit variable wins.
+        assert_eq!(
+            locate_root(Some(install.clone()), &ghost, None, None),
+            install
+        );
+        // Otherwise it is found from the binary's own location.
+        assert_eq!(
+            locate_root(None, &ghost, Some(install.join("bin/tui")), None),
+            install
+        );
+        // Nothing matches: the compiled root, as before.
+        assert_eq!(locate_root(None, &ghost, None, None), ghost);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn zero_cores_does_not_panic() {
         let breakdown = cpu_breakdown(&stats(0, 0, 0.0, 0.0));
 
@@ -1874,12 +2189,55 @@ pub struct Paths {
     pub yq: PathBuf,
 }
 
+/// Names the nodo checkout explicitly. `nodo.py` sets it when it launches the TUI,
+/// because the path this crate was compiled at is the CI runner's
+/// (`/home/runner/work/nodo/...`) in a released binary and does not exist on the
+/// operator's machine.
+pub const ROOT_ENV: &str = "NODO_ROOT";
+
+/// Whether `dir` is a nodo checkout: it has the config or the docs tree.
+fn is_nodo_root(dir: &Path) -> bool {
+    dir.join("config.yaml").is_file() || dir.join("docs").join("KyA.md").is_file()
+}
+
+/// The directory `config.yaml` and `docs/` are resolved against.
+///
+/// In order: the explicit variable (taken at its word when it is a directory); the
+/// compile-time root when it still looks like a checkout (a local build); then the
+/// first ancestor of the executable or working directory that does. When nothing
+/// matches, the compile-time root is returned, as before.
+pub fn locate_root(
+    explicit: Option<PathBuf>,
+    compiled: &Path,
+    executable: Option<PathBuf>,
+    working_dir: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(dir) = explicit.filter(|dir| dir.is_dir()) {
+        return dir;
+    }
+    if is_nodo_root(compiled) {
+        return compiled.to_path_buf();
+    }
+    for start in [executable, working_dir].into_iter().flatten() {
+        if let Some(found) = start.ancestors().find(|dir| is_nodo_root(dir)) {
+            return found.to_path_buf();
+        }
+    }
+    compiled.to_path_buf()
+}
+
 impl Paths {
     pub fn discover() -> Self {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../..")
-            .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."));
+        let compiled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let compiled = compiled.canonicalize().unwrap_or(compiled);
+        let root = locate_root(
+            std::env::var_os(ROOT_ENV)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from),
+            &compiled,
+            std::env::current_exe().ok(),
+            std::env::current_dir().ok(),
+        );
         let config = root.join("config.yaml");
         let document = read_yaml(&config).ok();
 
@@ -1927,6 +2285,15 @@ impl Paths {
         self.storage.join(KYA_MARKER)
     }
 
+    /// Where the "profile picker was answered" marker lives: `<storage>/.profilepicked`.
+    ///
+    /// Needed because the active profile is derived from `config.yaml`, never stored
+    /// (see `cell.rs`): nothing else can say whether the first-run picker was shown.
+    /// Same directory and same empty-file convention as the KyA marker.
+    pub fn profile_marker(&self) -> PathBuf {
+        self.storage.join(PROFILE_MARKER)
+    }
+
     /// Where the KyA document itself lives, in the checkout this binary belongs to.
     pub fn kya_document(&self) -> PathBuf {
         self.root.join("docs").join("KyA.md")
@@ -1937,6 +2304,10 @@ impl Paths {
 /// out here rather than derived, because the two sides of this agreement are in
 /// different languages and the only thing tying them together is this string.
 pub const KYA_MARKER: &str = ".acceptedkya";
+
+/// The file that records the first-run profile picker was answered, by choosing a
+/// profile or by skipping it. Presence means "do not show it again".
+pub const PROFILE_MARKER: &str = ".profilepicked";
 
 /// How the operator's money is denominated.
 ///
@@ -1987,8 +2358,33 @@ fn exact_pow10(value: f64) -> Option<u32> {
     ((candidate - value).abs() < f64::EPSILON * candidate.max(1.0)).then_some(exponent as u32)
 }
 
+/// `5100000` -> `5.1M`: the figure itself when no suffix can say it exactly.
+///
+/// The same rule as `abbreviate_mu` in `src/utils/monetary.py`. Never rounds: a suffix is
+/// used only when it needs at most two decimals, so what is shown is the exact amount.
+/// `digits` is a non-negative integer with no leading zeros (empty for zero).
+fn abbreviate_mu(digits: &str) -> String {
+    for (suffix, zeros) in [("G", 9usize), ("M", 6), ("K", 3)] {
+        // Needs at least one digit above the scale, and the last `zeros - 2` digits zero
+        // (the two before them are the decimals the suffix may show).
+        if digits.len() <= zeros || !digits.ends_with(&"0".repeat(zeros - 2)) {
+            continue;
+        }
+        let kept = &digits[..digits.len() - (zeros - 2)];
+        let (whole, fraction) = kept.split_at(kept.len() - 2);
+        let fraction = fraction.trim_end_matches('0');
+        return if fraction.is_empty() {
+            format!("{whole}{suffix}")
+        } else {
+            format!("{whole}.{fraction}{suffix}")
+        };
+    }
+    digits.to_string()
+}
+
 impl Money {
-    /// Resolve the display unit from `config.yaml`, falling back to ERG.
+    /// Resolve the display unit from `config.yaml`, falling back to MU: what the node
+    /// counts in, not money anyone holds (see `ui.DISPLAY_UNIT`).
     pub fn load(config: &Path) -> Self {
         let document = read_yaml(config).ok();
         let mu_per_nanoerg = yaml_scalar(
@@ -2000,7 +2396,7 @@ impl Money {
         .unwrap_or(1.0);
 
         let name = yaml_string(document.as_ref(), &["ui", "DISPLAY_UNIT"])
-            .unwrap_or_else(|| "erg".to_string())
+            .unwrap_or_else(|| "mu".to_string())
             .trim()
             .to_lowercase();
 
@@ -2091,7 +2487,7 @@ impl Money {
         }
 
         let text = match self.mu_per_unit_pow10 {
-            Some(0) => digits.trim_start_matches('0').to_string(),
+            Some(0) => abbreviate_mu(digits.trim_start_matches('0')),
             Some(shift) => {
                 let shift = shift as usize;
                 let padded = format!("{digits:0>width$}", width = shift + 1);
@@ -2298,7 +2694,7 @@ impl Default for Scarcity {
     }
 }
 
-fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
+pub(crate) fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
     let document = read_yaml(config).ok();
     let read = |key: &str| -> u64 {
         yaml_scalar(document.as_ref(), &["pricing", key])
@@ -2712,7 +3108,7 @@ impl<T: Identifiable> StatefulList<T> {
     }
 }
 
-/// Where the cursor is on the CELL page, and where the page last drew things so a
+/// Where the cursor is on the POLICIES page, and where the page last drew things so a
 /// click can be resolved back to them.
 ///
 /// (organelle, lever) rather than a flat index: ←/→ move between boxes while ↑/↓
@@ -2754,6 +3150,20 @@ pub struct App {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
+    /// The DEAD page: instances that are gone, newest death first.
+    pub dead: StatefulList<crate::dead::DeadInstance>,
+    /// What the DEAD page shows under the table for the selected row.
+    pub dead_view: crate::dead::DeadView,
+    /// The TUNNELS page: running `nodo tunnel` processes, read from the registry.
+    pub tunnels: StatefulList<crate::tunnels::Tunnel>,
+    /// The TUNNELS page's second table: the `ServiceTunnel` streams this node relays
+    /// for others, from the daemon's snapshot. Listed only, never selected.
+    pub inbound_tunnels: Vec<crate::tunnels::InboundStream>,
+    /// The instance a `t` on INSTANCES opened the new-tunnel prompt for; `None` when
+    /// the prompt came from TUNNELS and the instance is typed.
+    pub tunnel_instance: Option<String>,
+    /// The PACKS page: `nodo pack` runs, newest first, read from the registry.
+    pub packs: StatefulList<crate::packs::Pack>,
     /// The CHAT sidebar (issue #431): every conversation, both directions, plus each
     /// peer's topic-less bucket, merged and sorted by recency -- see `chat::ChatEntry`.
     pub conversations: StatefulList<ChatEntry>,
@@ -2767,13 +3177,16 @@ pub struct App {
     /// or `["servers", "[1]", "id"]` for a sequence element), which lets the tree
     /// keep its expanded sections and selection stable across refreshes and edits.
     pub config_tree_state: TreeState<String>,
-    /// Cursor and hit-test geometry for the CELL page.
+    /// Cursor and hit-test geometry for the POLICIES page.
     pub cell: CellState,
     /// config.yaml as a parsed document, from which every cell lever's position is
     /// derived. Cached and refreshed with the rest of the data rather than read per
     /// frame: the page is redrawn on every keystroke and tick, and re-parsing a
     /// 40 KB file that often is work nobody asked for.
     pub config_document: Option<Value>,
+    /// config.yaml itself: what the running node loaded. Differs from
+    /// `config_document` while a change is staged in config.pending.yaml.
+    pub running_document: Option<Value>,
     /// Editable price vector, and how the operator's money is denominated.
     pub prices: StatefulList<PriceEntry>,
     /// Which row of the ENERGY page's fixed catalogue the cursor is on (issue #395).
@@ -2829,6 +3242,12 @@ pub struct App {
     /// selected. Empty whenever the picker is closed.
     pub lever_keys: Vec<&'static str>,
     pub lever_key_index: usize,
+    /// Which asset the `EditAssets` modal has highlighted.
+    pub assets_index: usize,
+    /// The new-asset form, while `AddAsset` is open.
+    pub asset_form: AssetForm,
+    /// The env vars of the service about to run ([`InputMode::ExecuteEnvs`]).
+    pub env_form: crate::env_form::EnvForm,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -2860,6 +3279,9 @@ pub struct App {
     pub reputation: NodeReputation,
     /// What this node donates and what it counts, from `nodo donations --json`.
     pub donations: NodeDonations,
+    /// What this node itself announces it can run, from `nodo resources --json`
+    /// (issue #455): its own row of the Overview's total, and a card of its own.
+    pub own_resources: crate::peer_resources::OwnResources,
     pub payment_report: serde_json::Value,
     pub payment_error: String,
     pub payment_rate_areas: Vec<(String, Rect)>,
@@ -2896,6 +3318,25 @@ pub struct App {
     /// Off by default, so building an `App` does not consult the filesystem and a
     /// rendering test does not draw whatever banner its machine deserves.
     pub poll_alerts: bool,
+    /// True when `with_profile_gate` ran: the first-run profile picker is wanted
+    /// after the KyA. Off by default so constructing an `App` consults no files.
+    pub profile_gate: bool,
+    /// True while the picker is open as the first-run step, not from POLICIES. Then
+    /// Esc skips and records the marker instead of just closing.
+    pub profile_first_run: bool,
+    /// Where each part of the profile deck was drawn last, for clicks. `None` when
+    /// the picker is not open or the terminal showed the plain list instead.
+    pub deck_zones: Option<crate::profile_deck_ui::DeckLayout>,
+    /// The slide between two cards that is running, if any.
+    pub deck_anim: Option<crate::profile_deck_ui::DeckSlide>,
+    /// When the picker was opened: the clock of the blink of its title.
+    pub deck_opened: Option<Instant>,
+    /// The profile whose list of changes is waiting for `y` or `n`. While it is set,
+    /// the list is drawn inside the deck, not in the plain text popup, and `n` goes
+    /// back to the deck. Set only by a choice made in the deck.
+    pub deck_confirm: Option<usize>,
+    /// Where the buttons of that confirmation were drawn last, for clicks.
+    pub deck_confirm_zones: Option<crate::profile_deck_ui::ConfirmLayout>,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -2937,18 +3378,41 @@ pub struct App {
     /// which `nodo` subcommand, and with what -- set by whichever of the new-chat
     /// wizard or `open_reply_prompt` opened it.
     pub chat_compose: Option<ChatCompose>,
+    /// The service the open compose box will share as a card, and the attach
+    /// picker's highlighted row (0 is "no attachment") -- issue #438.
+    pub chat_attachment: Option<ChatService>,
+    pub chat_service_index: usize,
+    /// Where each service card's buttons, and the compose box's Attach button,
+    /// were drawn this frame -- the same lifecycle as `id_copy_areas`.
+    pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
+    /// The eye at the right of each env var field, by field index, as last drawn.
+    pub env_form_eye_buttons: Vec<(usize, Rect)>,
+    pub chat_attach_area: Rect,
+    pub chat_send_area: Rect,
+    /// The ⟳ button on the PEERS table's border; `Rect::ZERO` when not drawn.
+    pub peers_refresh_area: Rect,
+    /// The "change profile" button on the POLICIES page, where it was drawn last.
+    pub profile_button_area: Rect,
+    /// The open right-click menu, while `input_mode` is `ContextMenu`.
+    pub context_menu: Option<crate::context_menu::ContextMenu>,
+    /// The DOCS page: its index, the page open in it, and where both were drawn.
+    pub docs: crate::docs::DocsState,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
     /// Where the tab bar and the current page's selectable table were last drawn, so a
     /// click can be mapped back to a tab or a row. Written by the draw path each frame;
-    /// `list_area` stays empty on pages with no table (Overview, Logs, Config — the
+    /// `list_area` stays empty on pages with no table (Overview, Logs, All — the
     /// config tree tracks its own rendered area).
     pub tabs_area: Rect,
     /// Where the second row — the pages inside the open group — was last drawn, so a
     /// click on a page title can be mapped back to it. `Rect::ZERO` for a group with
     /// one page, which draws no second row at all.
     pub page_tabs_area: Rect,
+    /// Whether the last frame was the "terminal too small" notice instead of a page
+    /// (issue #453). The mouse is ignored while it is: every hit-test area a page
+    /// recorded describes something not on screen.
+    pub too_small: bool,
     pub list_area: Rect,
     /// The clickable id column's `[start, end)` on whichever table `list_area` names
     /// this frame (Peers/Clients/Chat all have one; every other page leaves this
@@ -2977,6 +3441,8 @@ pub struct App {
     reputation_task: Option<JoinHandle<Result<NodeReputation, String>>>,
     last_donations_refresh: Instant,
     donations_task: Option<JoinHandle<Result<NodeDonations, String>>>,
+    last_own_resources_refresh: Instant,
+    own_resources_task: Option<JoinHandle<Result<crate::peer_resources::Announced, String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
     pub(crate) command_task: Option<JoinHandle<CommandOutcome>>,
     /// In-flight configuration transaction: write, restart, and revert on failure.
@@ -2999,6 +3465,16 @@ impl Default for App {
             running: true,
             peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
+            dead: StatefulList::with_items(Vec::new()),
+            dead_view: crate::dead::DeadView::default(),
+            tunnels: StatefulList::with_items(crate::tunnels::read_tunnels(
+                &crate::tunnels::tunnels_dir(&paths.storage),
+            )),
+            inbound_tunnels: crate::tunnels::read_inbound(&crate::tunnels::tunnels_dir(&paths.storage)),
+            tunnel_instance: None,
+            packs: StatefulList::with_items(crate::packs::read_packs(&crate::packs::packs_dir(
+                &paths.storage,
+            ))),
             conversations: StatefulList::with_items(
                 crate::chat::load_entries(&paths.database).unwrap_or_default(),
             ),
@@ -3009,7 +3485,8 @@ impl Default for App {
             config_filter: String::new(),
             config_tree_state: TreeState::default(),
             cell: CellState::default(),
-            config_document: read_yaml(&paths.config).ok(),
+            config_document: read_effective_yaml(&paths.config).ok(),
+            running_document: read_yaml(&paths.config).ok(),
             prices: StatefulList::with_items(prices),
             energy_selected: 0,
             energy_row_areas: Vec::new(),
@@ -3027,6 +3504,9 @@ impl Default for App {
             price_bar_areas: Vec::new(),
             lever_keys: Vec::new(),
             lever_key_index: 0,
+            assets_index: 0,
+            asset_form: AssetForm::default(),
+            env_form: crate::env_form::EnvForm::default(),
             now_minute: local_minute_of_day(),
             last_clock_refresh: now,
             demand: DemandByHour::default(),
@@ -3036,6 +3516,7 @@ impl Default for App {
             earnings: Vec::new(),
             reputation: NodeReputation::default(),
             donations: NodeDonations::default(),
+            own_resources: Default::default(),
             payment_report: serde_json::Value::Null,
             payment_error: String::new(),
             payment_rate_areas: Vec::new(),
@@ -3058,6 +3539,13 @@ impl Default for App {
             energy_series: EnergySeries::default(),
             energy_history_hours: ENERGY_HISTORY_HOURS,
             poll_alerts: false,
+            profile_gate: false,
+            profile_first_run: false,
+            deck_zones: None,
+            deck_anim: None,
+            deck_opened: None,
+            deck_confirm: None,
+            deck_confirm_zones: None,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
             paths,
@@ -3076,10 +3564,23 @@ impl Default for App {
             chat_wizard_topics: Vec::new(),
             chat_wizard_topic_index: 0,
             chat_compose: None,
+            chat_attachment: None,
+            chat_service_index: 0,
+            chat_card_buttons: Vec::new(),
+            env_form_eye_buttons: Vec::new(),
+            chat_attach_area: Rect::ZERO,
+            chat_send_area: Rect::ZERO,
+            peers_refresh_area: Rect::ZERO,
+            profile_button_area: Rect::ZERO,
+            context_menu: None,
+            docs: crate::docs::DocsState::default(),
             details: None,
-            status: "Press r to refresh • q to quit".to_string(),
+            // Nothing to report until something happens: the footer's first line
+            // already lists `r` and `q`, and saying them twice was noise.
+            status: String::new(),
             tabs_area: Rect::ZERO,
             page_tabs_area: Rect::ZERO,
+            too_small: false,
             list_area: Rect::ZERO,
             id_column_x: None,
             id_copy_areas: Vec::new(),
@@ -3098,6 +3599,10 @@ impl Default for App {
                 .checked_sub(DONATIONS_REFRESH_INTERVAL)
                 .unwrap_or(now),
             donations_task: None,
+            last_own_resources_refresh: now
+                .checked_sub(OWN_RESOURCES_REFRESH_INTERVAL)
+                .unwrap_or(now),
+            own_resources_task: None,
             command_task: None,
             config_task: None,
             config_follow_up: ConfigFollowUp::None,
@@ -3155,7 +3660,7 @@ impl App {
         // `None`: the first `nodo info` has not answered yet, so whether the node
         // is running is genuinely not known here. The next tick knows.
         self.alerts
-            .poll(&self.paths.config, self.config_document.as_ref(), None);
+            .poll(&self.paths.config, self.running_document.as_ref(), None);
         self
     }
 
@@ -3204,6 +3709,64 @@ impl App {
                 marker.display()
             ),
         };
+        self.raise_profile_gate();
+    }
+
+    /// Ask for a profile once, right after the KyA (see `docs/proposals/profile-deck.md`).
+    ///
+    /// Separate from construction and taken once in `main.rs`, for the same reason as
+    /// `with_kya_gate`. When the KyA is still unanswered the picker waits: it is
+    /// raised by `accept_kya`, so the order is always KyA first, profile second.
+    pub fn with_profile_gate(mut self) -> Self {
+        self.profile_gate = true;
+        if !self.awaiting_kya() {
+            self.raise_profile_gate();
+        }
+        self
+    }
+
+    /// Open the picker as the first-run step, if it was never answered.
+    fn raise_profile_gate(&mut self) {
+        if self.profile_gate && !self.paths.profile_marker().exists() {
+            self.show_profile_picker(true);
+        }
+    }
+
+    /// Record that the picker was answered. A marker that cannot be written is not
+    /// fatal, as for the KyA: the picker is shown again at the next start.
+    fn record_profile_picked(&mut self) -> bool {
+        if !self.profile_first_run {
+            return true;
+        }
+        self.profile_first_run = false;
+        let marker = self.paths.profile_marker();
+        let recorded = fs::create_dir_all(&self.paths.storage)
+            .and_then(|()| fs::OpenOptions::new().create(true).append(true).open(&marker))
+            .map(|_| ());
+        match recorded {
+            Ok(()) => true,
+            Err(error) => {
+                self.status = format!(
+                    "{} could not be written ({error}); the profile picker will be shown again",
+                    marker.display()
+                );
+                false
+            }
+        }
+    }
+
+    /// Leave the picker without choosing. On first run this is the SKIP button: it
+    /// records the marker and changes nothing.
+    pub fn skip_profile_picker(&mut self) {
+        let first_run = self.profile_first_run;
+        let recorded = self.record_profile_picked();
+        let failure = self.status.clone();
+        self.close_input();
+        if first_run && !recorded {
+            self.status = failure;
+        } else if first_run {
+            self.status = "Profile skipped • change it any time on the POLICIES page".to_string();
+        }
     }
 
     /// Decline the KyA: stop, exactly as the CLI does (`accept_kya.sh` exits 1).
@@ -3241,7 +3804,7 @@ impl App {
         self.tabs.cycle_group(-1);
     }
 
-    /// `1`..`5`: jump straight to a group.
+    /// `1`..`6`: jump straight to a group.
     ///
     /// One-based, matching the labels as counted on screen rather than as indexed in
     /// an array — nobody reading a row of five looks for a zeroth.
@@ -3264,6 +3827,8 @@ impl App {
                 let next = (self.cell.organelle + 1) % Organelle::ALL.len();
                 self.cell.go_to_organelle(next);
             }
+            // Two panes side by side: → reads the page, ← goes back to the index.
+            Page::Docs => self.docs_focus(crate::docs::Focus::Page),
             _ => {}
         }
     }
@@ -3281,6 +3846,7 @@ impl App {
                 let previous = (self.cell.organelle + count - 1) % count;
                 self.cell.go_to_organelle(previous);
             }
+            Page::Docs => self.docs_focus(crate::docs::Focus::Index),
             _ => {}
         }
     }
@@ -3292,6 +3858,12 @@ impl App {
             // than up/down adjusting and ←/← selecting.
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
+            Page::Tunnels => self.tunnels.previous(),
+            Page::Dead => {
+                self.dead.previous();
+                self.load_dead_view(true);
+            }
+            Page::Packs => self.packs.previous(),
             Page::Services => {
                 self.services.previous();
                 self.load_selection_details();
@@ -3320,6 +3892,7 @@ impl App {
             Page::Config => {
                 self.config_tree_state.key_up();
             }
+            Page::Docs => self.docs_up_down(-1),
             _ => {}
         }
     }
@@ -3328,6 +3901,12 @@ impl App {
         match self.page() {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
+            Page::Tunnels => self.tunnels.next(),
+            Page::Dead => {
+                self.dead.next();
+                self.load_dead_view(true);
+            }
+            Page::Packs => self.packs.next(),
             Page::Services => {
                 self.services.next();
                 self.load_selection_details();
@@ -3356,6 +3935,7 @@ impl App {
             Page::Config => {
                 self.config_tree_state.key_down();
             }
+            Page::Docs => self.docs_up_down(1),
             _ => {}
         }
     }
@@ -3392,6 +3972,15 @@ impl App {
             self.copy_to_clipboard(&id);
             return;
         }
+        if self.page() == Page::Peers && self.peers_refresh_area.contains(position) {
+            self.open_refresh_peers_confirm();
+            return;
+        }
+        // The same thing the `p` key does: open the profile deck.
+        if self.page() == Page::Cell && self.profile_button_area.contains(position) {
+            self.open_profile_picker();
+            return;
+        }
         // The config tree remembers where it drew each node, so it can resolve the
         // click itself — including collapsing a section that was already selected.
         if self.page() == Page::Config {
@@ -3414,21 +4003,42 @@ impl App {
             self.click_pricing(position);
             return;
         }
-        if let Some(visible) = visible_row_at(position, self.list_area) {
-            // A click landing in the table's own id column copies that row's id in
-            // addition to selecting it, since that column is exactly where an
-            // operator would click to read an id the table truncated.
-            let in_id_column = self
-                .id_column_x
-                .map(|(start, end)| column >= start && column < end)
-                .unwrap_or(false);
-            self.select_visible_row(visible);
-            if in_id_column {
-                if let Some(id) = self.selected_row_id() {
-                    self.copy_to_clipboard(&id);
-                }
+        if self.page() == Page::Docs {
+            self.click_docs(position);
+            return;
+        }
+        // A service card's Get/Execute (issue #438).
+        if let Some((action, _)) = self
+            .chat_card_buttons
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .cloned()
+        {
+            self.run_chat_card_action(action);
+            return;
+        }
+        // A click landing in the table's own id column copies that row's id in
+        // addition to selecting it, since that column is exactly where an
+        // operator would click to read an id the table truncated.
+        let in_id_column = self
+            .id_column_x
+            .map(|(start, end)| column >= start && column < end)
+            .unwrap_or(false);
+        if self.select_row_at(position) && in_id_column {
+            if let Some(id) = self.selected_row_id() {
+                self.copy_to_clipboard(&id);
             }
         }
+    }
+
+    /// Select the table row drawn at `position`, if there is one there. What a left
+    /// click and a right click (`open_context_menu`) have in common.
+    pub(crate) fn select_row_at(&mut self, position: Position) -> bool {
+        let Some(visible) = visible_row_at(position, self.list_area) else {
+            return false;
+        };
+        self.select_visible_row(visible);
+        true
     }
 
     /// The id of whatever `select_visible_row` just selected, for the pages whose
@@ -3614,6 +4224,12 @@ impl App {
     fn select_visible_row(&mut self, visible: usize) {
         match self.page() {
             Page::Instances => self.instances.select_visible(visible),
+            Page::Tunnels => self.tunnels.select_visible(visible),
+            Page::Dead => {
+                self.dead.select_visible(visible);
+                self.load_dead_view(true);
+            }
+            Page::Packs => self.packs.select_visible(visible),
             Page::Services => {
                 self.services.select_visible(visible);
                 self.load_selection_details();
@@ -3673,7 +4289,7 @@ impl App {
     }
 
     /// Expand or collapse the selected configuration section (Enter/Space on the
-    /// Config page). A no-op on a scalar leaf, which has nothing to expand.
+    /// All page). A no-op on a scalar leaf, which has nothing to expand.
     pub fn toggle_selected_config_node(&mut self) {
         self.config_tree_state.toggle_selected();
     }
@@ -3697,6 +4313,8 @@ impl App {
 
     pub fn close_input(&mut self) {
         self.input_mode = InputMode::Normal;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
         self.input.clear();
         self.input_title.clear();
         self.edit_config_path = None;
@@ -3706,12 +4324,16 @@ impl App {
         self.credit_client_id = None;
         self.lever_keys.clear();
         self.lever_key_index = 0;
+        self.assets_index = 0;
+        self.asset_form = AssetForm::default();
         self.chat_wizard_peer_filter.clear();
         self.chat_wizard_peer_index = 0;
         self.chat_wizard_peer_id = None;
         self.chat_wizard_topics.clear();
         self.chat_wizard_topic_index = 0;
         self.chat_compose = None;
+        self.chat_attachment = None;
+        self.chat_service_index = 0;
     }
 
     /// True while a background `nodo` command is still running.
@@ -3869,6 +4491,89 @@ impl App {
         self.input_mode = InputMode::Confirm;
         self.input_title = format!("Remove {label}? (y/N)");
         self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
+    }
+
+    /// Whether `path` (a dotted config path) or a key under it holds a value that
+    /// config.pending.yaml changes from config.yaml. What every page uses to mark a
+    /// setting the operator has changed and the running node does not have yet.
+    pub fn path_is_staged(&self, path: &str) -> bool {
+        self.config_all.iter().any(|entry| {
+            entry.running.is_some()
+                && entry.path.strip_prefix(path).is_some_and(|rest| {
+                    rest.is_empty() || rest.starts_with('.') || rest.starts_with('[')
+                })
+        })
+    }
+
+    /// Whether any key a lever writes is staged.
+    pub fn lever_is_staged(&self, lever: &crate::cell::Lever) -> bool {
+        lever.paths().iter().any(|path| self.path_is_staged(path))
+    }
+
+    /// Put the selected staged value back to what config.yaml (the running node) holds.
+    ///
+    /// Only a value marked as staged has anything to go back to. The change is made in
+    /// config.pending.yaml, like every edit while a staged file exists.
+    pub fn reset_selected_config_entry(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        let Some(entry) = self.selected_config_entry() else {
+            self.status = "Select a value to reset".to_string();
+            return;
+        };
+        if entry.running.is_none() {
+            self.status = format!("{} is not staged: nothing to reset", entry.path);
+            return;
+        }
+        let label = format!("Reset {}", entry.path);
+        let running = self
+            .running_document
+            .as_ref()
+            .and_then(|document| value_at(document, &entry.path_segments));
+        match running {
+            Some(value) => {
+                let writes = [(entry.path.clone(), yaml_edit_value(value))];
+                self.write_config_values(label, &writes, ConfigFollowUp::None);
+            }
+            // The running config has no such key: resetting means removing it.
+            None => self.start_config_write(ConfigWrite {
+                label,
+                expression: format!("del({})", yq_path_expression(&entry.path_segments)),
+                values: Vec::new(),
+                follow_up: ConfigFollowUp::None,
+            }),
+        }
+    }
+
+    /// Drop every staged value: delete config.pending.yaml, so the node keeps config.yaml.
+    pub fn reset_all_staged_config(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        if pending_change_count(&self.config_all) == 0 && !self.config_write_is_staged() {
+            self.status = "Nothing is staged".to_string();
+            return;
+        }
+        match fs::remove_file(pending_config_path(&self.paths.config)) {
+            Ok(()) => {
+                self.reload_after_config_write();
+                self.status = "All staged values reset to config.yaml".to_string();
+                self.app_logs
+                    .push("Staged configuration discarded".to_string());
+            }
+            Err(error) => {
+                self.status = format!("Could not remove {PENDING_CONFIG_FILE}: {error}");
+            }
+        }
     }
 
     /// Remove one element from a list in config.yaml.
@@ -4040,10 +4745,17 @@ impl App {
             InputMode::PickProfile => self.submit_profile_selection(),
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
             InputMode::AddCustomUnit => self.save_custom_unit(),
+            InputMode::AddAsset => self.save_new_asset(),
+            InputMode::ExecuteEnvs => self.submit_env_form(),
             InputMode::PickChatPeer => self.submit_chat_peer_pick(),
             InputMode::PickChatTopic => self.submit_chat_topic_pick(),
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
+            InputMode::GetService => self.submit_get_service(),
+            InputMode::NewTunnel => self.submit_new_tunnel(),
+            InputMode::NewPack => self.submit_new_pack(),
+            InputMode::PickChatService => self.submit_chat_service_pick(),
+            InputMode::SearchDocs => self.submit_docs_search(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -4053,7 +4765,9 @@ impl App {
             | InputMode::AcceptKya
             | InputMode::Confirm
             | InputMode::ConfirmWrites
-            | InputMode::Details => {}
+            | InputMode::EditAssets
+            | InputMode::Details
+            | InputMode::ContextMenu => {}
         }
     }
 
@@ -4076,6 +4790,12 @@ impl App {
         if let Err(error) = serde_yaml::from_str::<Value>(&self.input) {
             self.status = format!("Invalid YAML value: {error}");
             return;
+        }
+        if is_mnemonic_path(&label_path) {
+            if let Err(message) = check_mnemonic_shape(&self.input) {
+                self.status = message;
+                return;
+            }
         }
 
         if label_path.ends_with("MU_PER_NANOERG") || label_path.ends_with("MU_PER_SATOSHI") {
@@ -4189,14 +4909,14 @@ impl App {
             self.status = "Busy: a command is already running".to_string();
             return;
         }
-        self.status = format!("{} • applying and restarting nodo…", write.label);
+        self.status = format!("{} • applying…", write.label);
         self.config_follow_up = write.follow_up.clone();
         // Said once, here, on the way in: this is the single funnel every config
         // write in the interface passes through, so one line covers the ENERGY
-        // page's kWh price, a cell profile, a price nudge and a raw Config row
+        // page's kWh price, a cell profile, a price nudge and a raw All row
         // alike. It was previously learned by watching a value be written and then
         // silently put back.
-        if let Some(hint) = self.config_write_root_hint() {
+        if let Some(hint) = self.config_write_stage_hint() {
             self.app_logs.push(hint.to_string());
         }
         self.config_task = Some(tokio::spawn(apply_config_change(
@@ -4213,51 +4933,37 @@ impl App {
         self.config_task.is_some()
     }
 
-    /// Whether a configuration change made right now would need root to land.
+    /// Whether a configuration change made right now is staged rather than applied.
     ///
-    /// **This is not about the file.** `config.yaml` is `chmod a+w` at install time
-    /// (`install.sh`) and rewritten `0o666` by `ConfigManager._atomic_write`, it is
-    /// `chown`ed to the installing user, and `yq -i` writes it through a rename in
-    /// the same directory. An unprivileged operator can write every key in it, and
-    /// the backup beside it, without ever being asked for a password.
+    /// **This is not about the file.** `config.yaml` is `chmod 0660` at install time
+    /// (`install.sh`) and `chown`ed to the installing user, so the operator who
+    /// installed the node can write every key in it. What cannot be done without
+    /// root is the **restart** that would make a serving node read the change:
+    /// `nodo daemon restart` is `systemctl`, and `daemon_command` in
+    /// `src/commands/daemon.py` refuses under a non-zero euid. A restart also stops
+    /// every instance the node runs, so it is not something to do for each edit.
     ///
-    /// What needs root is the **restart**. `apply_config_change` is a transaction:
-    /// write, restart, and put the file back if the node does not come back --
-    /// because the invariant this whole editor exists to hold is that *what the file
-    /// says is what the running node loaded*. The restart is `nodo daemon restart`,
-    /// which is `systemctl stop` + `systemctl start`, and `daemon_command` in
-    /// `src/commands/daemon.py` refuses outright under a non-zero euid. So an
-    /// unprivileged edit to a **serving** node writes the value, fails the restart,
-    /// and gets reverted -- which from the operator's chair looks exactly like "this
-    /// particular setting needs sudo".
-    ///
-    /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
-    /// by the same `write_config_value` as every price, every cell lever and every
-    /// raw Config row; there is one writer and one transaction. It is a property of
-    /// **whether something is serving**, which is why the same edit succeeds
-    /// silently on a stopped node and is refused on a running one -- and why it
-    /// looked arbitrary.
+    /// So an unprivileged edit to a **serving** node goes to `config.pending.yaml`.
+    /// The running node keeps its config.yaml, and the next start swaps the staged
+    /// file in. The same edit on a stopped node, or from root, is written to
+    /// config.yaml as before; once a staged file exists, every edit goes into it.
     ///
     /// Read off `node_info.service_status`, which `nodo info` already reports and
     /// this interface already polls, rather than opening a socket per keystroke. It
     /// can be up to one wallet-refresh stale; that is acceptable for a *warning*,
     /// and the transaction itself still asks the live question
-    /// (`serving_on(port_before)`) before deciding whether a restart is owed.
-    pub fn config_write_needs_root(&self) -> bool {
-        !is_root() && self.node_info.service_status == "running"
+    /// (`serving_on(port_before)`) before deciding.
+    pub fn config_write_is_staged(&self) -> bool {
+        pending_config_path(&self.paths.config).is_file()
+            || (!is_root() && self.node_info.service_status == "running")
     }
 
-    /// The one-line warning shown beside a config editor that is about to fail, or
-    /// `None` when the change can land.
-    ///
-    /// Said before the value is typed. The revert stays -- a node running settings
-    /// that are not the settings on disk is worse -- but "your change was undone" is
-    /// a thing to learn from a message, not from watching a number go back.
-    pub fn config_write_root_hint(&self) -> Option<&'static str> {
-        self.config_write_needs_root().then_some(
-            "Applying this needs root: the node is serving, so the change is \
-             followed by `nodo daemon restart`, which is systemctl. Run the TUI \
-             with sudo, or stop the node and edit it here.",
+    /// The one-line note shown beside a config editor whose change will be staged,
+    /// or `None` when the change lands in config.yaml.
+    pub fn config_write_stage_hint(&self) -> Option<&'static str> {
+        self.config_write_is_staged().then_some(
+            "This change is staged in config.pending.yaml, not config.yaml. It applies \
+             when nodo restarts, and a restart stops its instances.",
         )
     }
 
@@ -4285,6 +4991,7 @@ impl App {
 
         self.paths = Paths::discover();
         self.reload_after_config_write();
+        self.forget_node_info_from_before(&transaction.result);
 
         match transaction.result {
             Ok(applied) => {
@@ -4302,6 +5009,9 @@ impl App {
                     Applied::NotRunning => {
                         "applied • nodo is not serving, so it loads on next start".to_string()
                     }
+                    Applied::Staged => "staged in config.pending.yaml • restart nodo to apply \
+                         (its instances stop)"
+                        .to_string(),
                 };
                 self.status = format!("{} • {note}", transaction.label);
                 self.app_logs
@@ -4313,6 +5023,46 @@ impl App {
             }
         }
         self.refresh_local(true);
+    }
+
+    /// Whether the node serves, as the operator alerts must read it.
+    ///
+    /// `None` while a configuration transaction is in flight. That transaction
+    /// restarts the node, so the gateway port is closed for a time on purpose, and
+    /// "nothing is listening" is not a fact to report in that window.
+    pub(crate) fn serving_for_alerts(&self) -> Option<bool> {
+        if self.config_task.is_some() {
+            return None;
+        }
+        match self.node_info.service_status.as_str() {
+            "running" => Some(true),
+            "not running" => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Make `node_info` agree with the node that a configuration transaction left.
+    ///
+    /// `nodo info` runs on its own 60 s timer. A run that fell in the restart
+    /// probed a closed port and reported "not running". Without this, that stale
+    /// answer stays until the next run. The alerts then read the new port with no
+    /// notice beside it, and show "nothing is listening" for up to a minute on a
+    /// node that serves.
+    ///
+    /// A run still in flight is dropped for the same reason: it can have probed
+    /// the port before the node opened it. Then the next tick starts a new run.
+    fn forget_node_info_from_before(&mut self, result: &Result<Applied, String>) {
+        if let Some(task) = self.wallet_task.take() {
+            task.abort();
+        }
+        let now = Instant::now();
+        self.last_wallet_refresh = now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now);
+        // `wait_until_serving` proved the new port answers before it returned
+        // `Restarted`. The other results leave the state unknown until `nodo info`
+        // answers again.
+        if matches!(result, Ok(Applied::Restarted)) {
+            self.node_info.service_status = "running".to_string();
+        }
     }
 
     // --- Cell ---------------------------------------------------------------
@@ -4328,7 +5078,7 @@ impl App {
         cell::closest_profile(self.config_document.as_ref())
     }
 
-    /// Route a click on the CELL page: a lever row selects it, anywhere else in an
+    /// Route a click on the POLICIES page: a lever row selects it, anywhere else in an
     /// organelle's box moves the cursor into that box.
     fn click_cell(&mut self, position: Position) {
         if let Some((organelle, lever, _)) = self
@@ -4372,10 +5122,11 @@ impl App {
                 if let Some(index) = Page::ALL.iter().position(|candidate| *candidate == page) {
                     self.tabs.index = index;
                     self.status =
-                        format!("{} is edited here — or `e` on the CELL row for one key", lever.label);
+                        format!("{} is edited here — or `e` on the POLICIES row for one key", lever.label);
                 }
             }
             LeverKind::Scalar { .. } => self.open_lever_editor(),
+            LeverKind::Assets { .. } => self.open_assets_modal(),
             LeverKind::Cycle(states) => {
                 let document = self.config_document.clone();
                 let current = cell::status(lever, document.as_ref());
@@ -4410,7 +5161,7 @@ impl App {
     ///
     /// A cycle lever has no single key to edit, so `e` there lists the keys it owns
     /// instead: the operator gets to see exactly which settings one named position
-    /// stands for, and the Config page remains the place to break them apart.
+    /// stands for, and the All page remains the place to break them apart.
     /// `e` on the selected lever: edit one of the keys behind it, here.
     ///
     /// A scalar lever is one key, so it opens straight into the editor. Anything
@@ -4432,12 +5183,45 @@ impl App {
         };
         match lever.kind {
             LeverKind::Scalar { path, .. } => self.edit_lever_key(lever, path),
+            LeverKind::Assets { .. } => self.open_assets_modal(),
             _ => self.open_lever_key_picker(lever),
         }
     }
 
-    /// Open the value editor on one config key of `lever`.
+    /// Edit one config key of `lever`.
+    ///
+    /// A wallet mnemonic is not an ordinary value: what it opens may hold money, and
+    /// its address may already be in other nodes' hands. Replacing one first shows
+    /// both, and the editor only opens on `y`.
     fn edit_lever_key(&mut self, lever: &'static Lever, path: &'static str) {
+        if let Some(ledger) = wallet_mnemonic_ledger(path) {
+            self.confirm_wallet_replacement(lever, path, ledger);
+            return;
+        }
+        self.open_lever_value_editor(lever, path);
+    }
+
+    /// Show what replacing a ledger's wallet mnemonic leaves behind, and hold the
+    /// editor until the operator has read it.
+    fn confirm_wallet_replacement(
+        &mut self,
+        lever: &'static Lever,
+        path: &'static str,
+        ledger: &str,
+    ) {
+        let lines = wallet_replacement_lines(ledger, &self.node_info.wallets);
+        self.details = Some(DetailsView {
+            title: format!("Replace the {} wallet? (y/N)", capitalised(ledger)),
+            lines,
+            scroll: 0,
+        });
+        self.input_mode = InputMode::ConfirmWrites;
+        self.status = "y opens the editor • n cancels • nothing is written yet".to_string();
+        self.pending_action = Some(PendingAction::EditLever { lever, path });
+    }
+
+    /// Open the value editor on one config key of `lever`.
+    fn open_lever_value_editor(&mut self, lever: &'static Lever, path: &'static str) {
         let document = self.config_document.clone();
         let current = yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>())
             .unwrap_or_default();
@@ -4464,9 +5248,139 @@ impl App {
             infer_edit_kind(path, value_type)
         };
         // A secret opens empty, so the plaintext is never on screen -- the same rule
-        // the Config editor follows.
+        // the All editor follows.
         self.input = if lever.secret { String::new() } else { current };
-        self.status = lever.question.to_string();
+        self.status = if wallet_mnemonic_ledger(path).is_some() {
+            "12 or 24 words • \"\" has the node generate a fresh one • Esc cancels".to_string()
+        } else {
+            lever.question.to_string()
+        };
+    }
+
+    /// The tokens this node accepts besides ERG, with the keys to add and remove one.
+    ///
+    /// Add and remove only: an asset is five fields that price a payment method, and
+    /// changing one in place is the same decision as replacing it -- the rate peers
+    /// were told is the old one until the node restarts either way.
+    pub fn open_assets_modal(&mut self) {
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        self.input_mode = InputMode::EditAssets;
+        self.input_title = "Ergo assets".to_string();
+        self.assets_index = 0;
+        self.status = "a add • d remove • ↑/↓ choose • Esc close".to_string();
+    }
+
+    pub fn move_assets_selection(&mut self, delta: i32) {
+        let count = configured_assets(self.config_document.as_ref()).len();
+        if count == 0 {
+            return;
+        }
+        self.assets_index =
+            (self.assets_index as i32 + delta).rem_euclid(count as i32) as usize;
+    }
+
+    /// Open the form for a new asset, over the list.
+    pub fn open_add_asset_prompt(&mut self) {
+        self.input_mode = InputMode::AddAsset;
+        self.input.clear();
+        self.input_title = "New Ergo asset".to_string();
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
+        self.asset_form = AssetForm::default();
+        self.status = "Tab/↑/↓ move • Enter next, and saves on the last field • Esc back".to_string();
+    }
+
+    /// Back to the list without adding anything.
+    pub fn cancel_asset_form(&mut self) {
+        self.asset_form = AssetForm::default();
+        self.input_mode = InputMode::EditAssets;
+        self.input_title = "Ergo assets".to_string();
+        self.status = "a add • d remove • ↑/↓ choose • Esc close".to_string();
+    }
+
+    pub fn asset_form_move(&mut self, delta: i32) {
+        let count = ASSET_FIELDS.len() as i32;
+        self.asset_form.focus = (self.asset_form.focus as i32 + delta).rem_euclid(count) as usize;
+    }
+
+    pub fn asset_form_type(&mut self, character: char) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].push(character);
+    }
+
+    pub fn asset_form_backspace(&mut self) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].pop();
+    }
+
+    pub fn asset_form_clear_field(&mut self) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].clear();
+    }
+
+    /// Enter: on to the next field, and on the last one, save.
+    pub fn asset_form_enter(&mut self) {
+        if self.asset_form.focus + 1 < ASSET_FIELDS.len() {
+            self.asset_form_move(1);
+        } else {
+            self.save_new_asset();
+        }
+    }
+
+    fn save_new_asset(&mut self) {
+        let document = self.config_document.clone();
+        let existing = configured_assets(document.as_ref());
+        let declared_units: Vec<String> = document
+            .as_ref()
+            .and_then(|document| document.get("ui")?.get("UNITS")?.as_mapping())
+            .map(|units| {
+                units
+                    .keys()
+                    .filter_map(|key| key.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let entry = match parse_asset_fields(&self.asset_form.values, &existing, &declared_units) {
+            Ok(entry) => entry,
+            Err((field, message)) => {
+                // The form stays open on the field that is wrong: a message about
+                // "field 3" the operator has to go and find is half an answer.
+                self.asset_form.focus = field;
+                self.asset_form.error = Some(message);
+                return;
+            }
+        };
+        let symbol = entry.symbol.clone();
+        let path = config_path_segments(ASSETS_PATH);
+        self.close_input();
+        self.start_config_write(ConfigWrite {
+            label: format!("Add asset {symbol}"),
+            expression: format!("{} += [env(NODO_TUI_V0)]", yq_path_expression(&path)),
+            values: vec![("NODO_TUI_V0".to_string(), entry.flow_yaml())],
+            follow_up: ConfigFollowUp::None,
+        });
+    }
+
+    /// Confirm removing the highlighted asset.
+    pub fn open_remove_asset_confirm(&mut self) {
+        let assets = configured_assets(self.config_document.as_ref());
+        let Some(asset) = assets.get(self.assets_index) else {
+            self.status = "No asset to remove".to_string();
+            return;
+        };
+        let mut path = config_path_segments(ASSETS_PATH);
+        path.push(ConfigPathSegment::Index(self.assets_index));
+        let label = format!("{} ({})", asset.symbol, short_token_id(&asset.token_id));
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Remove {label}? (y/N)");
+        self.status = "The node stops advertising it and restarts onto the new list".to_string();
+        self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
     }
 
     /// Offer the keys one lever stands for, so any of them can be edited from here.
@@ -4536,15 +5450,27 @@ impl App {
             self.status = "Busy: a configuration change is being applied".to_string();
             return;
         }
+        self.show_profile_picker(false);
+    }
 
+    /// Open the picker from POLICIES (`first_run = false`) or as the first-run step.
+    fn show_profile_picker(&mut self, first_run: bool) {
         let report = self.cell_profile();
         self.cell.profile = cell::profiles()
             .iter()
             .position(|profile| profile.id == report.profile.id)
             .unwrap_or(0);
+        self.profile_first_run = first_run;
+        self.deck_anim = None;
+        self.deck_opened = Some(Instant::now());
         self.input_mode = InputMode::PickProfile;
-        self.input_title = "Apply a profile".to_string();
-        self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
+        if first_run {
+            self.input_title = "Choose your profile".to_string();
+            self.status = "↑/↓ choose • Enter see what changes • Esc SKIP".to_string();
+        } else {
+            self.input_title = "Apply a profile".to_string();
+            self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
+        }
     }
 
     pub fn move_profile_selection(&mut self, delta: i32) {
@@ -4553,7 +5479,68 @@ impl App {
             return;
         }
         let current = self.cell.profile as i32;
-        self.cell.profile = (current + delta).rem_euclid(count as i32) as usize;
+        let target = (current + delta).rem_euclid(count as i32) as usize;
+        self.slide_to(target, delta > 0);
+    }
+
+    /// Change the open card, and start the slide when the deck is on screen.
+    ///
+    /// A move made during a slide starts the next one from where the last one was
+    /// going: the old slide jumps to its end rather than queuing behind it.
+    fn slide_to(&mut self, target: usize, forward: bool) {
+        let from = self.cell.profile;
+        if target == from {
+            return;
+        }
+        if self.deck_zones.is_some() && self.input_mode == InputMode::PickProfile {
+            self.deck_anim = Some(crate::profile_deck_ui::DeckSlide::new(
+                from,
+                forward,
+                Instant::now(),
+            ));
+        }
+        self.cell.profile = target;
+    }
+
+    /// True while a slide runs, which is when the loop must redraw each frame and
+    /// not each tick.
+    pub fn deck_animating(&self) -> bool {
+        self.input_mode == InputMode::PickProfile
+            && self
+                .deck_anim
+                .map(|slide| !slide.done(Instant::now()))
+                .unwrap_or(false)
+    }
+
+    /// Go to the profile at `index`, if there is one: a dot or a number key.
+    pub fn select_profile(&mut self, index: usize) {
+        if index < cell::profiles().len() {
+            self.slide_to(index, index > self.cell.profile);
+        }
+    }
+
+    /// What a click on the confirmation of a profile landed on, if the confirmation
+    /// is on screen.
+    pub fn confirm_hit(&self, position: Position) -> Option<crate::profile_deck_ui::ConfirmHit> {
+        let zones = self.deck_confirm_zones.as_ref()?;
+        crate::profile_deck_ui::confirm_hit(zones, position)
+    }
+
+    /// A left click on the deck. Does nothing when the deck is not on screen, as when
+    /// the plain list is shown instead.
+    pub fn click_deck(&mut self, position: Position) {
+        use crate::profile_deck_ui::{hit, Hit};
+        let Some(zones) = self.deck_zones.as_ref() else {
+            return;
+        };
+        match hit(zones, position) {
+            Some(Hit::Prev) => self.move_profile_selection(-1),
+            Some(Hit::Next) => self.move_profile_selection(1),
+            Some(Hit::Dot(index)) => self.select_profile(index),
+            Some(Hit::Choose | Hit::Card) => self.submit_profile_selection(),
+            Some(Hit::Skip) => self.skip_profile_picker(),
+            None => {}
+        }
     }
 
     /// Confirm the selected profile, showing every key it would change.
@@ -4564,6 +5551,7 @@ impl App {
         };
         let document = self.config_document.clone();
         let changes = cell::changes(profile.writes, document.as_ref());
+        let _ = self.record_profile_picked();
         self.close_input();
         if changes.is_empty() {
             self.status = format!("Already in {} — nothing to change", profile.label);
@@ -4581,6 +5569,9 @@ impl App {
             Some(profile.blurb),
             None,
         );
+        // After `confirm_writes`, which does not touch it, and after `close_input`
+        // above, which clears it.
+        self.deck_confirm = Some(self.cell.profile);
     }
 
     /// Show every key a change would touch, and hold it until the operator agrees.
@@ -4700,7 +5691,7 @@ impl App {
     ///
     /// Wraps because the catalogue is short and fully visible: with fourteen rows on
     /// screen at once, stopping at the end is a keypress that does nothing for no
-    /// reason the operator can see. Same behaviour the CELL page's lever cursor has.
+    /// reason the operator can see. Same behaviour the POLICIES page's lever cursor has.
     pub fn move_energy_selection(&mut self, delta: i32) {
         let count = energy::entries().len();
         if count == 0 {
@@ -4725,7 +5716,7 @@ impl App {
 
     /// Open the ordinary config editor on the selected energy key (issue #395).
     ///
-    /// The same popup, path and transaction the Config page uses. This page
+    /// The same popup, path and transaction the All page uses. This page
     /// contributes the catalogue and the explanation beside it, and nothing else: a
     /// second way to write YAML would be a second set of quoting rules.
     ///
@@ -5069,7 +6060,8 @@ impl App {
     }
 
     fn reload_after_config_write(&mut self) {
-        self.config_document = read_yaml(&self.paths.config).ok();
+        self.config_document = read_effective_yaml(&self.paths.config).ok();
+        self.running_document = read_yaml(&self.paths.config).ok();
         crate::theme::refresh_from_document(self.config_document.as_ref());
         self.reload_money();
         self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
@@ -5155,12 +6147,15 @@ impl App {
         } else {
             service.tag.clone()
         };
+        self.confirm_execute_service(service.id, label);
+    }
+
+    /// The one spend confirmation both `e` on SERVICES and a chat card's Execute
+    /// button go through.
+    pub(crate) fn confirm_execute_service(&mut self, id: String, label: String) {
         self.input_mode = InputMode::Confirm;
         self.input_title = format!("Run {label}? It is funded now and burns until killed. (y/N)");
-        self.pending_action = Some(PendingAction::ExecuteService {
-            id: service.id.clone(),
-            label,
-        });
+        self.pending_action = Some(PendingAction::ExecuteService { id, label });
     }
 
     /// Open the read-only Details overlay for the selected service by running
@@ -5179,6 +6174,34 @@ impl App {
             "Inspect service".to_string(),
             vec!["inspect".to_string(), id],
         );
+    }
+
+    /// Ask for the hash of a service to fetch from the network (`g` on SERVICES).
+    ///
+    /// A popup rather than the selected row: the services this action is for are
+    /// exactly the ones this table does not list.
+    pub fn open_get_service(&mut self) {
+        if self.page() != Page::Services {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        self.input_mode = InputMode::GetService;
+        self.input.clear();
+        self.input_title = "Get service (hash)".to_string();
+        self.edit_kind = EditKind::Text;
+    }
+
+    pub(crate) fn submit_get_service(&mut self) {
+        match get_service_command(&self.input) {
+            Ok((label, args)) => {
+                self.close_input();
+                self.spawn_command(CommandKind::Report, label, args);
+            }
+            Err(message) => self.status = message,
+        }
     }
 
     /// Ask for confirmation before deleting the selected service.
@@ -5225,8 +6248,15 @@ impl App {
         } else {
             instance.name.clone()
         };
+        // `nodo kill` closes the tunnels this host opened to it, so say so here.
+        let tunnels = crate::tunnels::reaching(&self.tunnels.items, &instance.id, &instance.name).len();
+        let also = match tunnels {
+            0 => String::new(),
+            1 => " Its tunnel is closed too.".to_string(),
+            count => format!(" Its {count} tunnels are closed too."),
+        };
         self.input_mode = InputMode::Confirm;
-        self.input_title = format!("Kill instance {label}? (y/N)");
+        self.input_title = format!("Kill instance {label}?{also} (y/N)");
         self.pending_action = Some(PendingAction::KillInstance {
             id: instance.id.clone(),
             label,
@@ -5248,6 +6278,38 @@ impl App {
                 self.details = None;
                 self.write_config_values(label, &writes, ConfigFollowUp::None);
             }
+            PendingAction::EditLever { lever, path } => {
+                self.details = None;
+                self.open_lever_value_editor(lever, path);
+            }
+            PendingAction::CloseTunnel { id, label } => {
+                if let Some((label, args)) = pending_command(PendingAction::CloseTunnel { id, label }) {
+                    self.spawn_command(CommandKind::Tunnel, label, args);
+                }
+            }
+            PendingAction::RefreshPeers => {
+                if let Some((label, args)) = pending_command(PendingAction::RefreshPeers) {
+                    self.spawn_command(CommandKind::Report, label, args);
+                }
+            }
+            PendingAction::OpenTunnel { label, args } => {
+                self.spawn_command(CommandKind::Tunnel, label, args);
+            }
+            PendingAction::CancelPack { id, label } => {
+                if let Some((label, args)) = pending_command(PendingAction::CancelPack { id, label }) {
+                    self.spawn_command(CommandKind::Pack, label, args);
+                }
+            }
+            // The spend is confirmed; what the service asks for is read next, and
+            // answered in a form before it runs (`env_form`).
+            PendingAction::ExecuteService { id, label } => {
+                let args = vec!["service_envs".to_string(), id.clone(), "--json".to_string()];
+                self.spawn_command(
+                    CommandKind::ServiceEnvs { id, label: label.clone() },
+                    format!("Read env vars of {label}"),
+                    args,
+                );
+            }
             other => {
                 if let Some((label, args)) = pending_command(other) {
                     self.spawn_command(CommandKind::Generic, label, args);
@@ -5267,14 +6329,38 @@ impl App {
     /// Dismiss a writes confirmation without writing anything.
     pub fn cancel_pending_writes(&mut self) {
         self.pending_action = None;
-        self.close_details();
+        // A refusal in the deck goes back to the deck, with the same card open, so a
+        // user who looked at the changes and did not like them can try another
+        // profile. Anywhere else it closes, as it always did.
+        match self.deck_confirm {
+            Some(index) => self.return_to_deck(index),
+            None => self.close_details(),
+        }
+    }
+
+    /// Show the deck again at the card `index`, after a confirmation was refused.
+    ///
+    /// The first-run marker was written when the profile was chosen, so this is an
+    /// ordinary picker: Esc closes it and changes nothing.
+    fn return_to_deck(&mut self, index: usize) {
+        self.details = None;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
+        self.cell.profile = index.min(cell::profiles().len().saturating_sub(1));
+        self.profile_first_run = false;
+        self.deck_anim = None;
+        self.input_mode = InputMode::PickProfile;
+        self.input_title = "Apply a profile".to_string();
+        self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
     }
 
     /// Close the Details overlay and return to normal mode.
     pub fn close_details(&mut self) {
         self.details = None;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
         self.input_mode = InputMode::Normal;
-        self.status = "Press r to refresh • q to quit".to_string();
+        self.status.clear();
     }
 
     /// Spawn a `nodo` command in the background so the UI stays responsive.
@@ -5331,6 +6417,44 @@ impl App {
                     self.status = format!("nodo inspect failed: {}", first_line(&outcome.stderr));
                 }
             }
+            CommandKind::Report => {
+                self.status = if outcome.success {
+                    let report = last_line(&outcome.stdout);
+                    if report.is_empty() {
+                        format!("{} completed", outcome.label)
+                    } else {
+                        report
+                    }
+                } else {
+                    format!("{} failed: {}", outcome.label, first_line(&outcome.stderr))
+                };
+            }
+            CommandKind::Pack => {
+                self.status = crate::packs::outcome_status(
+                    &outcome.label,
+                    outcome.success,
+                    &outcome.stdout,
+                    &outcome.stderr,
+                );
+            }
+            CommandKind::Tunnel => {
+                self.status = crate::tunnels::outcome_status(
+                    &outcome.label,
+                    outcome.success,
+                    &outcome.stdout,
+                    &outcome.stderr,
+                );
+            }
+            CommandKind::ServiceEnvs { id, label } => {
+                let envs = if outcome.success {
+                    crate::env_form::parse_service_envs(&outcome.stdout)
+                } else {
+                    Err(crate::env_form::parse_service_envs(&outcome.stdout)
+                        .err()
+                        .unwrap_or_else(|| first_line(&outcome.stderr)))
+                };
+                self.on_service_envs(id, label, envs);
+            }
             CommandKind::Generic => {
                 self.status = if outcome.success {
                     format!("{} completed", outcome.label)
@@ -5363,6 +6487,15 @@ impl App {
                 serde_json::from_str(report_line(&stdout).ok_or("No payment report returned")?).map_err(|e| e.to_string())
             }));
         }
+        // DOCS: `r` re-reads the folder; otherwise only the open page, and only
+        // when it changed on disk -- one stat per tick, and only on this page.
+        if self.page() == Page::Docs {
+            if force {
+                self.reload_docs();
+            } else {
+                self.docs.reload_if_changed(false);
+            }
+        }
         self.refresh_clock();
         self.refresh_local(force);
         self.poll_config_task().await;
@@ -5388,6 +6521,13 @@ impl App {
             self.last_donations_refresh = Instant::now();
             self.donations_task = Some(tokio::spawn(fetch_node_donations()));
         }
+        self.poll_own_resources_task().await;
+        if self.own_resources_task.is_none()
+            && (force || self.last_own_resources_refresh.elapsed() >= OWN_RESOURCES_REFRESH_INTERVAL)
+        {
+            self.last_own_resources_refresh = Instant::now();
+            self.own_resources_task = Some(tokio::spawn(fetch_own_resources()));
+        }
     }
 
     /// Update the schedule marker on its own timer.
@@ -5407,9 +6547,10 @@ impl App {
         self.demand = get_demand_by_hour(&self.paths.database, DEMAND_HISTORY_DAYS)
             .unwrap_or_default();
         self.paths = Paths::discover();
-        // Picks up an edit made on the Config page, or in a shell, so the cell's
+        // Picks up an edit made on the All page, or in a shell, so the cell's
         // levers describe the file as it is rather than as it was at start-up.
-        self.config_document = read_yaml(&self.paths.config).ok();
+        self.config_document = read_effective_yaml(&self.paths.config).ok();
+        self.running_document = read_yaml(&self.paths.config).ok();
 
         let services = get_services(&self.paths).unwrap_or_default();
         let service_names = services
@@ -5423,6 +6564,9 @@ impl App {
         self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.refresh_dead(&service_names);
+        self.refresh_tunnels();
+        self.refresh_packs();
         self.refresh_chat();
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
@@ -5440,13 +6584,9 @@ impl App {
             // "running but unreachable" -- the state no local check can see --
             // rather than only "not reachable". `None` until the first `nodo info`
             // answers, which is what the third wording is for.
-            let serving = match self.node_info.service_status.as_str() {
-                "running" => Some(true),
-                "not running" => Some(false),
-                _ => None,
-            };
+            let serving = self.serving_for_alerts();
             self.alerts
-                .poll(&self.paths.config, self.config_document.as_ref(), serving);
+                .poll(&self.paths.config, self.running_document.as_ref(), serving);
         }
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
@@ -5494,7 +6634,7 @@ impl App {
             .filter_map(|instance| instance.usage.cpu_percent)
             .sum();
         self.stats.daemon_memory_used =
-            read_u64(&daemon_cgroup_dir(&self.paths).join("memory.current")).unwrap_or(0);
+            read_cgroup_memory_working_set(&daemon_cgroup_dir(&self.paths)).unwrap_or(0);
         self.stats.daemon_cpu_percent = self.derive_daemon_cpu_rate(Instant::now());
     }
 
@@ -5615,6 +6755,28 @@ impl App {
         }
     }
 
+    /// Collect this node's announced resources. A failed read keeps the last
+    /// announcement on screen with the failure beside it, as reputation does.
+    async fn poll_own_resources_task(&mut self) {
+        if !self
+            .own_resources_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.own_resources_task.take().unwrap();
+        match task.await {
+            Ok(Ok(announced)) => {
+                self.own_resources.announced = Some(announced);
+                self.own_resources.error.clear();
+            }
+            Ok(Err(error)) => self.own_resources.error = error,
+            Err(error) => self.own_resources.error = format!("Resources read failed: {error}"),
+        }
+    }
+
     async fn poll_donations_task(&mut self) {
         if !self
             .donations_task
@@ -5688,6 +6850,40 @@ fn first_line(text: &str) -> String {
         .to_string()
 }
 
+/// Last non-blank line of `text`, trimmed: where a command that narrates its
+/// progress (`Asking known peers…`) puts its verdict.
+fn last_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .last()
+        .unwrap_or("")
+        .to_string()
+}
+
+/// The `nodo get` a typed service hash turns into, or why it does not.
+///
+/// Queued, not `--now`: the running node retries a wanted service across every
+/// peer on its own schedule (`src/commands/get_service.py`), whereas `--now` would
+/// hold the TUI's one command slot for as long as a download from a slow peer
+/// takes. The service shows up in the table once it lands.
+///
+/// Checked here only for shape -- hex -- so a typo is answered in the popup rather
+/// than by a round trip; whether any peer has it is the CLI's question.
+pub(crate) fn get_service_command(input: &str) -> Result<(String, Vec<String>), String> {
+    let hash = input.trim();
+    if hash.is_empty() {
+        return Err("Type a service hash first".to_string());
+    }
+    if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("A service hash is hexadecimal".to_string());
+    }
+    Ok((
+        format!("Get service {}", shorten(hash, 18)),
+        vec!["get".to_string(), hash.to_lowercase()],
+    ))
+}
+
 /// Run `nodo reputation --json` off the UI thread.
 ///
 /// Generously timed against the wallet's twenty seconds: the report walks the whole
@@ -5705,6 +6901,29 @@ async fn fetch_node_reputation() -> Result<NodeReputation, String> {
     match report_line(&stdout) {
         Some(line) => parse_node_reputation(line),
         None => Err(nonblank_error(&String::from_utf8_lossy(&output.stderr))),
+    }
+}
+
+/// Run `nodo resources --json` off the UI thread: this node's own `Peer.resources`.
+async fn fetch_own_resources() -> Result<crate::peer_resources::Announced, String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("nodo").args(["resources", "--json"]).output(),
+    )
+    .await
+    .map_err(|_| "nodo resources timed out after 30 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo resources: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match report_line(&stdout) {
+        Some(line) => crate::peer_resources::parse_own_resources(line),
+        None => {
+            let stderr = first_line(&String::from_utf8_lossy(&output.stderr));
+            Err(if stderr.is_empty() {
+                "nodo resources produced no output".to_string()
+            } else {
+                stderr
+            })
+        }
     }
 }
 
@@ -5761,7 +6980,9 @@ async fn fetch_node_info() -> Result<NodeInfo, String> {
     // lines ahead of them are simply ignored.
     let output = tokio::time::timeout(
         Duration::from_secs(20),
-        Command::new("nodo").output(),
+        // A run that is aborted (see `forget_node_info_from_before`) must not leave
+        // its `nodo` process behind.
+        Command::new("nodo").kill_on_drop(true).output(),
     )
     .await
     .map_err(|_| "nodo timed out after 20 seconds".to_string())?
@@ -5770,6 +6991,287 @@ async fn fetch_node_info() -> Result<NodeInfo, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     Ok(parse_node_info(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Where the Ergo tokens live in config.yaml.
+pub const ASSETS_PATH: &str = "ledgers.ergo.payments.ASSETS";
+
+fn config_path_segments(path: &str) -> Vec<ConfigPathSegment> {
+    path.split('.')
+        .map(|key| ConfigPathSegment::Key(key.to_string()))
+        .collect()
+}
+
+/// One entry of `ledgers.ergo.payments.ASSETS`, as the modal lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetRow {
+    pub token_id: String,
+    pub symbol: String,
+    pub unit_name: String,
+    pub decimals: String,
+    pub mu_per_unit: String,
+}
+
+impl AssetRow {
+    /// The entry as a one-line YAML flow mapping, for `yq`'s `env()` to parse.
+    ///
+    /// Strings go in as JSON, which is valid YAML and cannot be read as anything but a
+    /// string; the two numbers go in bare so they stay numbers.
+    fn flow_yaml(&self) -> String {
+        let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
+        format!(
+            "{{TOKEN_ID: {}, SYMBOL: {}, UNIT_NAME: {}, DECIMALS: {}, MU_PER_UNIT: {}}}",
+            quoted(&self.token_id),
+            quoted(&self.symbol),
+            quoted(&self.unit_name),
+            self.decimals,
+            self.mu_per_unit
+        )
+    }
+}
+
+/// `003bd19d…85d0`: enough of a 64-hex id to tell two apart on one row.
+pub fn short_token_id(token_id: &str) -> String {
+    if token_id.chars().count() <= 12 {
+        return token_id.to_string();
+    }
+    let head: String = token_id.chars().take(8).collect();
+    let tail: String = token_id.chars().skip(token_id.chars().count() - 4).collect();
+    format!("{head}…{tail}")
+}
+
+/// The assets config.yaml declares now, in order.
+pub fn configured_assets(document: Option<&Value>) -> Vec<AssetRow> {
+    let text = |entry: &Value, key: &str| match entry.get(key) {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    };
+    let Some(Value::Sequence(entries)) = document
+        .and_then(|document| document.get("ledgers")?.get("ergo")?.get("payments")?.get("ASSETS"))
+    else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .map(|entry| AssetRow {
+            token_id: text(entry, "TOKEN_ID"),
+            symbol: text(entry, "SYMBOL"),
+            unit_name: text(entry, "UNIT_NAME"),
+            decimals: text(entry, "DECIMALS"),
+            mu_per_unit: text(entry, "MU_PER_UNIT"),
+        })
+        .collect()
+}
+
+/// The fields of the new-asset form, in the order they are asked.
+pub struct AssetFieldInfo {
+    pub name: &'static str,
+    /// One line under the form while the field is focused.
+    pub help: &'static str,
+}
+
+pub const ASSET_FIELDS: [AssetFieldInfo; 5] = [
+    AssetFieldInfo {
+        name: "TOKEN_ID",
+        help: "The token's 64-hex id, never its name: anyone can mint a token called SigUSD.",
+    },
+    AssetFieldInfo {
+        name: "SYMBOL",
+        help: "Shown to people (SigUSD). Never used to match a box.",
+    },
+    AssetFieldInfo {
+        name: "UNIT_NAME",
+        help: "The display unit's name (sigusd): unique, and not erg or one in ui.UNITS.",
+    },
+    AssetFieldInfo {
+        name: "DECIMALS",
+        help: "Stated here, not read from the minter (SigUSD: 2). A wrong one misprices by 10^n.",
+    },
+    AssetFieldInfo {
+        name: "MU_PER_UNIT",
+        help: "MU per BASE unit, as MU_PER_NANOERG is for ERG: one cent of a 2-decimal token.",
+    },
+];
+
+/// What the operator has typed into the new-asset form.
+#[derive(Debug, Clone, Default)]
+pub struct AssetForm {
+    pub values: [String; 5],
+    pub focus: usize,
+    /// Why the last save was refused; cleared by the next keystroke.
+    pub error: Option<String>,
+}
+
+/// Validate the form: the asset, or the field that is wrong and why.
+///
+/// The same rules the node enforces at startup (`parse_assets` in
+/// `contracts/ergo/rate.py`), checked here so a mistake is reported at the form rather
+/// than as a restart that does not come back. A rate out of scale with `MU_PER_NANOERG`
+/// is not caught here -- that is a warning the node prints at start.
+pub fn parse_asset_fields(
+    values: &[String; 5],
+    existing: &[AssetRow],
+    declared_units: &[String],
+) -> Result<AssetRow, (usize, String)> {
+    let [token_id, symbol, unit_name, decimals, rate] = values.each_ref().map(|v| v.trim());
+
+    let token_id = token_id.to_lowercase();
+    if token_id.len() != 64 || !token_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err((0, "TOKEN_ID is the token's 64-hex id, never its name".to_string()));
+    }
+    if existing.iter().any(|asset| asset.token_id == token_id) {
+        return Err((
+            0,
+            "That token is already accepted; one asset cannot have two rates".to_string(),
+        ));
+    }
+    if symbol.is_empty() {
+        return Err((1, "SYMBOL is required: an amount has to say what it is".to_string()));
+    }
+    if symbol.chars().any(|c| c.is_control()) {
+        return Err((1, "SYMBOL has a control character in it".to_string()));
+    }
+    let unit_name = unit_name.to_lowercase();
+    if unit_name.is_empty() {
+        return Err((2, "UNIT_NAME is required".to_string()));
+    }
+    if !unit_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err((2, "UNIT_NAME is letters, digits or underscore".to_string()));
+    }
+    if unit_name == "erg"
+        || existing.iter().any(|asset| asset.unit_name == unit_name)
+        || declared_units.iter().any(|unit| unit == &unit_name)
+    {
+        return Err((
+            2,
+            format!("\"{unit_name}\" is already a unit name (ERG, another asset or ui.UNITS)"),
+        ));
+    }
+    if decimals.parse::<u32>().is_err() {
+        return Err((3, "DECIMALS is a whole number, 0 or more".to_string()));
+    }
+    let positive = rate.parse::<f64>().map(|rate| rate.is_finite() && rate > 0.0);
+    if positive != Ok(true) {
+        return Err((4, "MU_PER_UNIT is MU per BASE unit, a positive number".to_string()));
+    }
+    Ok(AssetRow {
+        token_id,
+        symbol: symbol.to_string(),
+        unit_name,
+        decimals: decimals.to_string(),
+        mu_per_unit: rate.to_string(),
+    })
+}
+
+/// `ledgers.<ledger>.WALLET_MNEMONIC` -> `<ledger>`.
+fn wallet_mnemonic_ledger(path: &str) -> Option<&str> {
+    path.strip_prefix("ledgers.")?
+        .strip_suffix(".WALLET_MNEMONIC")
+        .filter(|ledger| !ledger.is_empty() && !ledger.contains('.'))
+}
+
+/// A key that holds a BIP-39 phrase: a wallet's, or the node's identity.
+fn is_mnemonic_path(path: &str) -> bool {
+    path == "identity.MNEMONIC" || wallet_mnemonic_ledger(path).is_some()
+}
+
+fn capitalised(word: &str) -> String {
+    let mut letters = word.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
+}
+
+/// Whether `input` looks like a mnemonic, or like the explicit ask for a fresh one.
+///
+/// A shape check, not a BIP-39 one: the checksum needs the 2048-word list, which lives
+/// on the Python side and is what the node checks at the restart. This catches the
+/// mistakes that are made at a keyboard -- a pasted sentence, a missing word, a stray
+/// capital -- before they are written, restarted on, and rolled back.
+fn check_mnemonic_shape(input: &str) -> Result<(), String> {
+    let trimmed = input.trim();
+    // `""` is how a secret is cleared on purpose, and a cleared mnemonic is one the
+    // node generates on its next load.
+    if matches!(trimmed, "\"\"" | "''" | "auto") {
+        return Ok(());
+    }
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if ![12, 15, 18, 21, 24].contains(&words.len()) {
+        return Err(format!(
+            "A mnemonic is 12, 15, 18, 21 or 24 words; this has {}. \"\" has the node generate one.",
+            words.len()
+        ));
+    }
+    if let Some(word) = words
+        .iter()
+        .find(|word| !word.chars().all(|c| c.is_ascii_lowercase()))
+    {
+        return Err(format!(
+            "Mnemonic words are lowercase letters only; \"{}\" is not.",
+            word.chars().take(1).collect::<String>() + "…"
+        ));
+    }
+    Ok(())
+}
+
+/// What to tell an operator before they replace a ledger's wallet mnemonic.
+///
+/// Two things the editor cannot show them and that cannot be undone from it: whether
+/// the wallet they are about to stop using holds money, and that other nodes may
+/// already know its address. The balance is the one `nodo info` last reported; a
+/// wallet it did not report is treated as funded, because "I could not read it" is not
+/// "it is empty".
+fn wallet_replacement_lines(ledger: &str, wallets: &[LedgerWallet]) -> Vec<String> {
+    let name = capitalised(ledger);
+    let wallet = wallets.iter().find(|wallet| wallet.ledger == ledger);
+    let mut lines = vec![
+        format!("!! This replaces the {name} wallet the node is using now."),
+        "   Nothing on-chain is deleted, but only the old words can ever move what it holds."
+            .to_string(),
+        String::new(),
+        "FUNDS".to_string(),
+    ];
+    let whose = wallet
+        .map(|wallet| wallet.address.as_str())
+        .filter(|address| !address.is_empty())
+        .map(|address| format!("{address} "))
+        .unwrap_or_default();
+    match wallet.and_then(|wallet| wallet.balance.map(|balance| (balance, wallet.unit.as_str()))) {
+        Some((balance, unit)) if balance > 0.0 => {
+            lines.push(format!("  !! {whose}holds {balance} {unit}.").trim_end().to_string());
+            lines.push(
+                "     Back up the old words, or sweep it to your cold wallet, before going on."
+                    .to_string(),
+            );
+        }
+        Some(_) => {
+            lines.push(format!("  {whose}holds nothing that node info can see."));
+            lines.push("     Unconfirmed payments are not counted.".to_string());
+        }
+        None => {
+            lines.push(format!("  !! The balance of {whose}could not be read."));
+            lines.push("     Treat it as holding funds.".to_string());
+        }
+    }
+    lines.push(String::new());
+    lines.push("ANNOUNCED TO PEERS".to_string());
+    lines.push("  The wallet's address is part of the payment contract this node advertises,".to_string());
+    lines.push("  so peers may already hold it — and may have paid to it. After the restart".to_string());
+    lines.push("  the node advertises the new address; a deposit still on its way to the old".to_string());
+    lines.push("  one is rejected, and its money stays at the old address.".to_string());
+    if ledger == "ergo" {
+        lines.push(String::new());
+        lines.push("  Reputation proofs published from the old wallet stay on-chain under it;".to_string());
+        lines.push("  the new wallet starts with none.".to_string());
+    }
+    lines.push(String::new());
+    lines.push("y opens the editor. Nothing is written until you save there.".to_string());
+    lines
 }
 
 pub fn parse_node_info(output: &str) -> NodeInfo {
@@ -6309,6 +7811,13 @@ fn get_instances(
     } else {
         "NULL"
     };
+    // A dead instance has its own page (`dead.rs`). Same guard as above: a database
+    // the node has not migrated has no `killed_at`, and then every row is alive.
+    let alive = if column_exists(&connection, "local_instances", "killed_at") {
+        " WHERE li.killed_at IS NULL"
+    } else {
+        ""
+    };
     let base = format!(
         "SELECT li.id, li.name, li.ip, li.balance_mu, li.service_id, li.mem_limit,
                 li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota,
@@ -6319,10 +7828,10 @@ fn get_instances(
             "{base}, ic.mu_per_second, ic.sample_count,
                 CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', ic.last_refresh) AS INTEGER)
              FROM local_instances li
-             LEFT JOIN instance_consumption ic ON ic.instance_id = li.id"
+             LEFT JOIN instance_consumption ic ON ic.instance_id = li.id{alive}"
         )
     } else {
-        format!("{base} FROM local_instances li")
+        format!("{base} FROM local_instances li{alive}")
     };
     let mut statement = connection.prepare(&sql)?;
     let mut instances: Vec<Instance> = statement
@@ -6443,7 +7952,7 @@ fn resolve_instance_clients(connection: &Connection, instances: &mut [Instance])
 
 /// Whether an id names one of this node's own dev clients.
 ///
-/// Both pools, since `dev-external-` is drawn from `dev-`. Prefix only: the Python
+/// Prefix only: the Python
 /// side also checks the clients table, because there it is deciding whether to grant
 /// a privilege on the strength of an id that arrived over the wire. This decides
 /// what word to print, and a dev client that has expired out of the table is still
@@ -6469,8 +7978,13 @@ fn get_delegated_instances(
     } else {
         "NULL"
     };
+    let alive = if column_exists(connection, "delegated_instances", "killed_at") {
+        " WHERE killed_at IS NULL"
+    } else {
+        ""
+    };
     let mut statement = connection.prepare(&format!(
-        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances"
+        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances{alive}"
     ))?;
     let instances = statement
         .query_map([], |row| {
@@ -6680,11 +8194,58 @@ fn read_service_tag(path: &Path) -> Option<String> {
     metadata.hashtag?.tag.first().cloned()
 }
 
-fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
-    let document = read_yaml(path)?;
+/// The file a configuration change is staged in while the node cannot be restarted.
+///
+/// Beside config.yaml. The node swaps it in when it starts (`apply_pending_config`
+/// in src/commands/config_edit.py), keeps the old config.yaml as a timestamped
+/// backup, and deletes this file.
+pub(crate) const PENDING_CONFIG_FILE: &str = "config.pending.yaml";
+
+pub(crate) fn pending_config_path(config: &Path) -> PathBuf {
+    config.with_file_name(PENDING_CONFIG_FILE)
+}
+
+/// The configuration the operator has asked for: the staged file when there is one,
+/// otherwise config.yaml. Every editor reads this, so a second edit builds on the
+/// first instead of on the file the node still runs on.
+fn read_effective_yaml(config: &Path) -> Result<Value, String> {
+    let pending = pending_config_path(config);
+    if pending.is_file() {
+        read_yaml(&pending)
+    } else {
+        read_yaml(config)
+    }
+}
+
+/// Every entry of the effective configuration, each marked when it differs from
+/// the config the node runs on.
+pub(crate) fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
+    let document = read_effective_yaml(path)?;
     let mut entries = Vec::new();
     flatten_yaml(&document, &mut Vec::new(), &mut entries);
+    if pending_config_path(path).is_file() {
+        if let Ok(running) = read_yaml(path) {
+            let mut before = Vec::new();
+            flatten_yaml(&running, &mut Vec::new(), &mut before);
+            let before: HashMap<String, String> = before
+                .into_iter()
+                .map(|entry| (entry.path, entry.value))
+                .collect();
+            for entry in &mut entries {
+                match before.get(&entry.path) {
+                    Some(value) if *value == entry.value => {}
+                    Some(value) => entry.running = Some(value.clone()),
+                    None => entry.running = Some("unset".to_string()),
+                }
+            }
+        }
+    }
     Ok(entries)
+}
+
+/// How many values of the staged configuration differ from the running one.
+pub fn pending_change_count(entries: &[ConfigEntry]) -> usize {
+    entries.iter().filter(|entry| entry.running.is_some()).count()
 }
 
 fn flatten_yaml(value: &Value, path: &mut Vec<ConfigPathSegment>, entries: &mut Vec<ConfigEntry>) {
@@ -6716,6 +8277,7 @@ fn flatten_yaml(value: &Value, path: &mut Vec<ConfigPathSegment>, entries: &mut 
                 value: yaml_value(value),
                 edit_value: yaml_edit_value(value),
                 value_type: yaml_type(value).to_string(),
+                running: None,
             });
         }
     }
@@ -6736,6 +8298,14 @@ fn yaml_value(value: &Value) -> String {
     }
 }
 
+/// The value at `path` in a parsed document, or `None` when the key is absent.
+fn value_at<'a>(document: &'a Value, path: &[ConfigPathSegment]) -> Option<&'a Value> {
+    path.iter().try_fold(document, |value, segment| match segment {
+        ConfigPathSegment::Key(key) => value.get(key.as_str()),
+        ConfigPathSegment::Index(index) => value.get(*index),
+    })
+}
+
 fn yaml_edit_value(value: &Value) -> String {
     serde_yaml::to_string(value)
         .unwrap_or_else(|_| yaml_value(value))
@@ -6744,7 +8314,7 @@ fn yaml_edit_value(value: &Value) -> String {
 }
 
 /// Which editor widget a key gets: the closed value set some keys document, else
-/// the widget for its YAML type. Shared by the Config page and the cell levers, so
+/// the widget for its YAML type. Shared by the All page and the cell levers, so
 /// one key is edited the same way whichever page opened it.
 fn infer_edit_kind(path: &str, value_type: &str) -> EditKind {
     if let Some(options) = known_enum_values(path) {
@@ -6835,7 +8405,7 @@ fn is_secret_path(path: &str) -> bool {
     leaf == "token" || leaf.ends_with("_token")
 }
 
-fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
+pub(crate) fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
     const TAIL_BYTES: u64 = 256 * 1024;
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
@@ -6859,14 +8429,6 @@ fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
     Ok(lines.into_iter().collect())
 }
 
-/// The 36-byte pointer header every block file carries, which is not content.
-///
-/// Mirrors `BLOCK_LENGTH` in `bee_rpc.utils`, whose `get_pruned_block_length`
-/// subtracts it for exactly this figure. Restated rather than shelled out to: the
-/// TUI would otherwise spawn a Python interpreter per service per refresh, and this
-/// page can hold dozens of them.
-const BLOCK_POINTER_LENGTH: u64 = 36;
-
 /// The name of the manifest inside a service's registry directory.
 /// `METADATA_FILE_NAME` in `bee_rpc.utils`.
 const SERVICE_MANIFEST: &str = "_.json";
@@ -6884,20 +8446,35 @@ const SERVICE_MANIFEST: &str = "_.json";
 /// figure it shows. A Python helper would mean an interpreter spawn per service on
 /// every refresh, four times a second, to re-read files the TUI has open anyway.
 ///
-/// Mirrors `bee_rpc.utils.getsize`: an integer entry is a local part, a list entry
-/// is `[block_id, ...]` and contributes the block file's size less its pointer
-/// header. `None` rather than a partial total when the manifest is unreadable or a
-/// block it names is missing -- a total quietly short by a 2 GiB layer is worse than
-/// no total, because it reads as a real measurement.
+/// Mirrors `bee_rpc.utils.getsize` as pinned (bee-rpc-over-grpc-py v0.0.2), which is
+/// what `nodo services` prints (issue #438): an integer entry is a local part, a
+/// list entry is `[block_id, ...]` and contributes the block's whole expansion
+/// (`get_expanded_block_length`) -- a block file's full length, or for a multiblock
+/// *directory* its own manifest measured the same way, to any depth. This used to
+/// mirror an older `getsize` instead: it took 36 bytes of pointer off every block,
+/// and read a directory block as the size of its directory entry, a few hundred
+/// bytes standing in for however much the block holds.
+///
+/// `None` rather than a partial total when the manifest is unreadable, a block it
+/// names is missing or a block contains itself -- a total quietly short by a 2 GiB
+/// layer is worse than no total, because it reads as a real measurement.
 fn service_total_size(service_dir: &Path, blocks: &Path) -> Option<u64> {
-    let manifest = fs::read_to_string(service_dir.join(SERVICE_MANIFEST)).ok()?;
+    manifest_size(service_dir, blocks, &mut Vec::new())
+}
+
+/// The expansion of the object whose `_.json` is in `dir`. `stack` is the chain of
+/// directory blocks being measured, so one that names itself is a loop, not a hang;
+/// a block referenced twice from one object is not a loop, and counts twice, as
+/// `getsize` counts it.
+fn manifest_size(dir: &Path, blocks: &Path, stack: &mut Vec<String>) -> Option<u64> {
+    let manifest = fs::read_to_string(dir.join(SERVICE_MANIFEST)).ok()?;
     let entries: Vec<serde_json::Value> = serde_json::from_str(&manifest).ok()?;
     let mut total: u64 = 0;
     for entry in entries {
         match entry {
             // A local part, named by its index in this directory.
             serde_json::Value::Number(index) => {
-                let part = service_dir.join(index.to_string());
+                let part = dir.join(index.to_string());
                 total = total.checked_add(fs::metadata(part).ok()?.len())?;
             }
             // `[block_id, ...]`: content that lives in the shared block store.
@@ -6909,8 +8486,19 @@ fn service_total_size(service_dir: &Path, blocks: &Path) -> Option<u64> {
                 if block_id.is_empty() || block_id.contains('/') || block_id.contains('\\') {
                     return None;
                 }
-                let length = fs::metadata(blocks.join(block_id)).ok()?.len();
-                total = total.checked_add(length.saturating_sub(BLOCK_POINTER_LENGTH))?;
+                let block = blocks.join(block_id);
+                let length = if fs::metadata(&block).ok()?.is_dir() {
+                    if stack.iter().any(|seen| seen == block_id) {
+                        return None;
+                    }
+                    stack.push(block_id.to_string());
+                    let length = manifest_size(&block, blocks, stack);
+                    stack.pop();
+                    length?
+                } else {
+                    fs::metadata(&block).ok()?.len()
+                };
+                total = total.checked_add(length)?;
             }
             _ => return None,
         }
@@ -7002,6 +8590,22 @@ fn read_cgroup_keyed_u64(path: &Path, key: &str) -> Option<u64> {
         }
         fields.next()?.parse().ok()
     })
+}
+
+/// A cgroup's working set: `memory.current` minus the `inactive_file` it reports in
+/// `memory.stat`, the figure `docker stats` and cAdvisor show.
+///
+/// `memory.current` charges the page cache to whoever faulted it in, so a daemon that
+/// has just read a few GiB of microVM rootfs images carries all of it -- a reading
+/// that once put `nodo.service` at 29% of host RAM while its own anonymous memory was
+/// 230 MiB. Inactive file pages are the first thing the kernel reclaims, so they are
+/// not memory the cgroup is holding onto. A missing `memory.stat` (or key) subtracts
+/// nothing rather than hiding the reading.
+fn read_cgroup_memory_working_set(cgroup: &Path) -> Option<u64> {
+    let current = read_u64(&cgroup.join("memory.current"))?;
+    let inactive_file =
+        read_cgroup_keyed_u64(&cgroup.join("memory.stat"), "inactive_file").unwrap_or(0);
+    Some(current.saturating_sub(inactive_file))
 }
 
 /// Cumulative block-IO from cgroup v2 `io.stat`, summed over every backing device.
@@ -7127,6 +8731,9 @@ pub fn percent(used: u64, total: u64) -> u64 {
     }
 }
 
+/// A byte count in binary units, one decimal. `format_bytes` in
+/// src/commands/services.py is the same function, so `nodo services` and the
+/// SERVICES table say the same size the same way (issue #438).
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -7211,9 +8818,30 @@ fn backup_config(config: &Path) -> io::Result<PathBuf> {
         backup_nonce(),
     ));
     fs::copy(config, &backup)?;
+    keep_config_owner(config, &backup);
     prune_config_backups(config)?;
     Ok(backup)
 }
+
+/// Give `copy` the owner of `config` when this TUI runs under sudo.
+///
+/// `fs::copy` keeps the mode (0660) but not the owner, so a backup taken as root
+/// would be root's and the installing user could no longer read it. Same rule as
+/// `_match_config_file` in src/utils/config.py. Best effort: the backup exists
+/// either way.
+#[cfg(unix)]
+fn keep_config_owner(config: &Path, copy: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    if !is_root() {
+        return;
+    }
+    if let Ok(meta) = fs::metadata(config) {
+        let _ = std::os::unix::fs::chown(copy, Some(meta.uid()), Some(meta.gid()));
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_config_owner(_config: &Path, _copy: &Path) {}
 
 /// Four random digits for a backup filename.
 ///
@@ -7420,8 +9048,11 @@ mod tests {
                 vec![
                     Page::Overview,
                     Page::Instances,
+                    Page::Tunnels,
+                    Page::Dead,
                     Page::Peers,
                     Page::Services,
+                    Page::Packs,
                     Page::Clients,
                     Page::Chat,
                     Page::Earnings,
@@ -7431,6 +9062,7 @@ mod tests {
                     Page::Schedule,
                     Page::Energy,
                     Page::Config,
+                    Page::Docs,
                 ]
             );
         }
@@ -7508,7 +9140,11 @@ mod tests {
     /// The cursor is two-dimensional: ←/→ walk the organelles, ↑/↓ the levers inside
     /// the one in focus. Getting that wrong makes a lever unreachable by keyboard.
     mod cell_navigation {
-        use crate::app::{App, InputMode, Page};
+        use crate::app::{
+            check_mnemonic_shape, config_path_display, configured_assets, is_mnemonic_path,
+            parse_asset_fields, wallet_mnemonic_ledger, AssetRow, ConfigPathSegment, ASSET_FIELDS,
+            wallet_replacement_lines, App, InputMode, LedgerWallet, Page, PendingAction,
+        };
         use crate::cell::{LeverKind, LeverStatus, Organelle};
 
         fn on_cell_page() -> App {
@@ -7758,6 +9394,419 @@ mod tests {
             assert!(body.contains("[\"*\"]"), "{body}");
         }
 
+        fn nucleus_lever(app: &mut App, id: &str) {
+            app.cell.organelle = Organelle::ALL
+                .iter()
+                .position(|organelle| *organelle == Organelle::Nucleus)
+                .unwrap();
+            app.cell.lever = Organelle::Nucleus
+                .levers()
+                .iter()
+                .position(|lever| lever.id == id)
+                .unwrap();
+        }
+
+        fn funded(ledger: &str, balance: Option<f64>, unit: &str) -> LedgerWallet {
+            LedgerWallet {
+                ledger: ledger.to_string(),
+                address: format!("{ledger}-address"),
+                balance,
+                unit: unit.to_string(),
+                cold_address: String::new(),
+            }
+        }
+
+        /// Enter on a wallet mnemonic does not open the editor: it shows what
+        /// replacing it leaves behind, and only `y` goes on.
+        #[test]
+        fn replacing_a_wallet_mnemonic_asks_before_the_editor_opens() {
+            for (id, ledger) in [
+                ("ergo-wallet-mnemonic", "ergo"),
+                ("bitcoin-wallet-mnemonic", "bitcoin"),
+            ] {
+                let mut app = on_cell_page();
+                app.config_document =
+                    Some(serde_yaml::from_str("ledgers:\n  ergo: {}\n  bitcoin: {}\n").unwrap());
+                nucleus_lever(&mut app, id);
+                app.toggle_selected_lever();
+
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{id}");
+                let details = app.details.as_ref().expect("the alert is shown");
+                assert!(details.title.contains("wallet"), "{}", details.title);
+                assert!(
+                    matches!(app.pending_action, Some(PendingAction::EditLever { .. })),
+                    "{id}: nothing may be written by this"
+                );
+                assert!(app.edit_config_path.is_none(), "{id}: the editor opened early");
+                let _ = ledger;
+            }
+        }
+
+        #[tokio::test]
+        async fn confirming_opens_the_secret_editor_empty_and_cancelling_does_not() {
+            let mut app = on_cell_page();
+            app.config_document =
+                Some(serde_yaml::from_str("ledgers:\n  ergo:\n    WALLET_MNEMONIC: old words\n").unwrap());
+            nucleus_lever(&mut app, "ergo-wallet-mnemonic");
+            app.toggle_selected_lever();
+            app.cancel_pending_writes();
+            assert!(app.edit_config_path.is_none());
+            assert_eq!(app.input_mode, InputMode::Normal);
+
+            app.toggle_selected_lever();
+            app.confirm_pending().await;
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert!(app.edit_config_secret);
+            assert!(app.input.is_empty(), "the old mnemonic must not be on screen");
+            assert_eq!(
+                app.edit_config_path.as_ref().map(|path| config_path_display(path)),
+                Some("ledgers.ergo.WALLET_MNEMONIC".to_string())
+            );
+        }
+
+        /// Only the wallet mnemonics are held back. The cold wallet and the hot limit
+        /// open straight into their editor, as before.
+        #[test]
+        fn other_nucleus_levers_still_open_their_editor_directly() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str("ledgers:\n  bitcoin:\n    payments:\n      COLD_WALLET: ''\n")
+                    .unwrap(),
+            );
+            nucleus_lever(&mut app, "bitcoin-cold-wallet");
+            app.toggle_selected_lever();
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert!(app.pending_action.is_none());
+        }
+
+        #[test]
+        fn the_alert_says_what_the_wallet_holds() {
+            let text = |wallets: &[LedgerWallet]| wallet_replacement_lines("ergo", wallets).join("\n");
+
+            let funded_text = text(&[funded("ergo", Some(12.5), "ERG")]);
+            assert!(funded_text.contains("holds 12.5 ERG"), "{funded_text}");
+            assert!(funded_text.contains("ergo-address"), "{funded_text}");
+
+            let empty_text = text(&[funded("ergo", Some(0.0), "ERG")]);
+            assert!(empty_text.contains("holds nothing"), "{empty_text}");
+            assert!(!empty_text.contains("holding funds"), "{empty_text}");
+
+            // "I could not read it" is not "it is empty": both a wallet with no
+            // balance and one `nodo info` did not report at all read as funded.
+            for unreadable in [text(&[funded("ergo", None, "")]), text(&[])] {
+                assert!(unreadable.contains("could not be read"), "{unreadable}");
+                assert!(unreadable.contains("holding funds"), "{unreadable}");
+            }
+        }
+
+        #[test]
+        fn the_alert_reads_the_wallet_of_the_ledger_being_replaced() {
+            let wallets = [funded("ergo", Some(3.0), "ERG"), funded("bitcoin", Some(0.5), "BTC")];
+            let bitcoin = wallet_replacement_lines("bitcoin", &wallets).join("\n");
+            assert!(bitcoin.contains("holds 0.5 BTC"), "{bitcoin}");
+            assert!(!bitcoin.contains("ERG"), "{bitcoin}");
+        }
+
+        #[test]
+        fn the_alert_warns_that_peers_may_already_know_the_address() {
+            for ledger in ["ergo", "bitcoin"] {
+                let body = wallet_replacement_lines(ledger, &[]).join("\n");
+                assert!(body.contains("ANNOUNCED TO PEERS"), "{ledger}:\n{body}");
+                assert!(body.contains("may already hold it"), "{ledger}:\n{body}");
+            }
+        }
+
+        #[test]
+        fn only_ergo_has_reputation_proofs_to_leave_behind() {
+            assert!(wallet_replacement_lines("ergo", &[]).join("\n").contains("Reputation proofs"));
+            assert!(!wallet_replacement_lines("bitcoin", &[]).join("\n").contains("Reputation"));
+        }
+
+        #[test]
+        fn the_ledger_is_read_off_the_key_and_nothing_else_is_a_wallet() {
+            assert_eq!(wallet_mnemonic_ledger("ledgers.ergo.WALLET_MNEMONIC"), Some("ergo"));
+            assert_eq!(wallet_mnemonic_ledger("ledgers.bitcoin.WALLET_MNEMONIC"), Some("bitcoin"));
+            for path in [
+                "identity.MNEMONIC",
+                "ledgers.bitcoin.payments.COLD_WALLET",
+                "ledgers.ergo.payments.WALLET_MNEMONIC",
+                "ledgers..WALLET_MNEMONIC",
+            ] {
+                assert_eq!(wallet_mnemonic_ledger(path), None, "{path}");
+            }
+        }
+
+        #[test]
+        fn a_mnemonic_is_checked_for_its_shape_before_it_is_written() {
+            let twelve = "abandon ".repeat(11) + "about";
+            assert!(check_mnemonic_shape(&twelve).is_ok());
+            assert!(check_mnemonic_shape(&("abandon ".repeat(23) + "art")).is_ok());
+            // Clearing it on purpose is how a fresh one is asked for.
+            for clear in ["\"\"", "''", "auto"] {
+                assert!(check_mnemonic_shape(clear).is_ok(), "{clear}");
+            }
+            assert!(check_mnemonic_shape(&"abandon ".repeat(11)).unwrap_err().contains("has 11"));
+            assert!(check_mnemonic_shape("").is_err());
+            let capital = twelve.replacen("abandon", "Abandon", 1);
+            let message = check_mnemonic_shape(&capital).unwrap_err();
+            assert!(message.contains("lowercase"), "{message}");
+            // The offending word is not repeated whole: it is part of a secret.
+            assert!(!message.contains("Abandon"), "{message}");
+        }
+
+        const TOKEN: &str = "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0";
+
+        fn sigusd() -> AssetRow {
+            AssetRow {
+                token_id: TOKEN.to_string(),
+                symbol: "SigUSD".to_string(),
+                unit_name: "sigusd".to_string(),
+                decimals: "2".to_string(),
+                mu_per_unit: "20000000".to_string(),
+            }
+        }
+
+        fn fields(token_id: &str, symbol: &str, unit: &str, decimals: &str, rate: &str) -> [String; 5] {
+            [token_id, symbol, unit, decimals, rate].map(str::to_string)
+        }
+
+        #[test]
+        fn a_filled_form_becomes_an_asset() {
+            let asset =
+                parse_asset_fields(&fields(TOKEN, "SigUSD", "sigusd", "2", "20000000"), &[], &[])
+                    .unwrap();
+            assert_eq!(asset, sigusd());
+            // Upper-case hex and unit names are folded, as the node folds them, and
+            // the padding a person leaves around a pasted value is not kept.
+            let asset = parse_asset_fields(
+                &fields(&format!("  {}  ", TOKEN.to_uppercase()), " SigUSD ", "SIGUSD", "2", " 20000000 "),
+                &[],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(asset, sigusd());
+        }
+
+        /// Each rule the node enforces at startup is refused at the form, and the
+        /// refusal names the field it is about so the focus can go there.
+        #[test]
+        fn each_rule_the_node_enforces_is_refused_on_the_field_it_concerns() {
+            let existing = [sigusd()];
+            let units = vec!["usd".to_string()];
+            let other = "1".repeat(64);
+            let refused = |values: [String; 5], field: usize, why: &str| {
+                let (at, message) = parse_asset_fields(&values, &existing, &units)
+                    .expect_err(&format!("{values:?} should be refused"));
+                assert_eq!(at, field, "{values:?}: {message}");
+                assert!(message.contains(why), "{values:?}: {message}");
+            };
+            refused(fields("", "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields("SigUSD", "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields(&"z".repeat(64), "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields(TOKEN, "A", "a", "0", "1"), 0, "already accepted");
+            refused(fields(&other, "", "a", "0", "1"), 1, "SYMBOL is required");
+            refused(fields(&other, "A", "", "0", "1"), 2, "UNIT_NAME is required");
+            refused(fields(&other, "A", "erg", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "sigusd", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "usd", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "bad-name", "0", "1"), 2, "letters, digits");
+            refused(fields(&other, "A", "a", "", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "-1", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "two", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "2", ""), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "0"), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "-5"), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "lots"), 4, "MU_PER_UNIT");
+        }
+
+        /// A symbol may have a space in it now that it is its own field.
+        #[test]
+        fn a_symbol_with_a_space_is_one_symbol() {
+            let asset = parse_asset_fields(
+                &fields(&"2".repeat(64), "Sigma USD", "sigmausd", "2", "5"),
+                &[],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(asset.symbol, "Sigma USD");
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&asset.flow_yaml()).unwrap();
+            assert_eq!(parsed["SYMBOL"], serde_yaml::Value::String("Sigma USD".to_string()));
+        }
+
+        /// What `yq`'s `env()` is handed has to read back as the same entry, with the
+        /// two numbers still numbers and every string still a string.
+        #[test]
+        fn the_entry_is_written_as_yaml_that_reads_back_unchanged() {
+            let asset = sigusd();
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&asset.flow_yaml()).unwrap();
+            let expected: serde_yaml::Value = serde_yaml::from_str(&format!(
+                "TOKEN_ID: \"{TOKEN}\"\nSYMBOL: SigUSD\nUNIT_NAME: sigusd\nDECIMALS: 2\nMU_PER_UNIT: 20000000\n"
+            ))
+            .unwrap();
+            assert_eq!(parsed, expected);
+            assert!(parsed["DECIMALS"].is_number() && parsed["MU_PER_UNIT"].is_number());
+            // A symbol that YAML would read as something else stays a string.
+            let tricky = AssetRow { symbol: "true".to_string(), ..asset };
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&tricky.flow_yaml()).unwrap();
+            assert_eq!(parsed["SYMBOL"], serde_yaml::Value::String("true".to_string()));
+        }
+
+        #[test]
+        fn the_configured_assets_are_read_in_order() {
+            let document: serde_yaml::Value = serde_yaml::from_str(&format!(
+                "ledgers:\n  ergo:\n    payments:\n      ASSETS:\n        - {}\n        - {{TOKEN_ID: x, SYMBOL: Two, UNIT_NAME: two, DECIMALS: 0, MU_PER_UNIT: 5}}\n",
+                sigusd().flow_yaml()
+            ))
+            .unwrap();
+            let assets = configured_assets(Some(&document));
+            assert_eq!(assets.len(), 2);
+            assert_eq!(assets[0], sigusd());
+            assert_eq!(assets[1].symbol, "Two");
+            assert!(configured_assets(None).is_empty());
+            let empty: serde_yaml::Value = serde_yaml::from_str("ledgers: {}\n").unwrap();
+            assert!(configured_assets(Some(&empty)).is_empty());
+        }
+
+        fn on_assets(list: &str) -> App {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(&format!(
+                    "ledgers:\n  ergo:\n    payments:\n      ASSETS: {list}\n"
+                ))
+                .unwrap(),
+            );
+            nucleus_lever(&mut app, "ergo-assets");
+            app
+        }
+
+        #[test]
+        fn enter_on_the_assets_lever_opens_the_modal_without_writing() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.pending_action.is_none());
+
+            // `e` is the same gesture on this row: there is no scalar behind it.
+            let mut app = on_assets("[]");
+            app.open_lever_editor();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+        }
+
+        fn type_into_form(app: &mut App, text: &str) {
+            for character in text.chars() {
+                app.asset_form_type(character);
+            }
+        }
+
+        #[test]
+        fn the_form_takes_a_field_at_a_time_and_enter_walks_forward() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            assert_eq!(app.input_mode, InputMode::AddAsset);
+            assert_eq!(app.asset_form.focus, 0);
+
+            type_into_form(&mut app, TOKEN);
+            app.asset_form_enter();
+            assert_eq!(app.asset_form.focus, 1);
+            type_into_form(&mut app, "SigUSD");
+            app.asset_form_backspace();
+            assert_eq!(app.asset_form.values[1], "SigUS");
+            assert_eq!(app.asset_form.values[0], TOKEN, "typing must not touch another field");
+
+            app.asset_form_move(-1);
+            assert_eq!(app.asset_form.focus, 0);
+            app.asset_form_move(-1);
+            assert_eq!(app.asset_form.focus, ASSET_FIELDS.len() - 1, "focus wraps");
+            app.asset_form_clear_field();
+            assert!(app.asset_form.values[4].is_empty());
+        }
+
+        /// Saving with a field wrong keeps the form open, puts the focus on that
+        /// field, and writes nothing -- the error is cleared by the next keystroke.
+        #[test]
+        fn saving_a_bad_form_jumps_to_the_field_and_writes_nothing() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            type_into_form(&mut app, TOKEN);
+            app.asset_form_move(1);
+            type_into_form(&mut app, "SigUSD");
+            app.asset_form_move(1);
+            type_into_form(&mut app, "sigusd");
+            // DECIMALS and MU_PER_UNIT are still empty: save from the last field.
+            app.asset_form.focus = ASSET_FIELDS.len() - 1;
+            app.asset_form_enter();
+
+            assert_eq!(app.input_mode, InputMode::AddAsset, "the form must stay open");
+            assert_eq!(app.asset_form.focus, 3, "DECIMALS is the first one that is wrong");
+            let error = app.asset_form.error.clone().expect("the reason is shown");
+            assert!(error.contains("DECIMALS"), "{error}");
+            assert!(app.config_task.is_none(), "nothing may be written");
+
+            app.asset_form_type('2');
+            assert!(app.asset_form.error.is_none(), "typing dismisses the error");
+            assert_eq!(app.asset_form.values[0], TOKEN, "what was typed is kept");
+        }
+
+        #[test]
+        fn escape_goes_back_to_the_list_and_drops_the_form() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            type_into_form(&mut app, "abc");
+            app.cancel_asset_form();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.asset_form.values.iter().all(String::is_empty));
+            assert_eq!(app.asset_form.focus, 0);
+        }
+
+        #[test]
+        fn removing_asks_first_and_names_the_entry_by_its_index() {
+            let mut app = on_assets(&format!("[{}]", sigusd().flow_yaml()));
+            app.toggle_selected_lever();
+            app.open_remove_asset_confirm();
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.input_title.contains("SigUSD"), "{}", app.input_title);
+            match &app.pending_action {
+                Some(PendingAction::DeleteConfigItem { path, .. }) => {
+                    assert_eq!(
+                        config_path_display(path),
+                        "ledgers.ergo.payments.ASSETS[0]"
+                    );
+                    assert!(matches!(path.last(), Some(ConfigPathSegment::Index(0))));
+                }
+                other => panic!("expected a delete confirmation, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn there_is_nothing_to_remove_from_an_empty_list() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_remove_asset_confirm();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.pending_action.is_none());
+        }
+
+        #[test]
+        fn the_selection_wraps_over_the_assets() {
+            let two = format!("[{}, {}]", sigusd().flow_yaml(), sigusd().flow_yaml());
+            let mut app = on_assets(&two);
+            app.toggle_selected_lever();
+            app.move_assets_selection(-1);
+            assert_eq!(app.assets_index, 1);
+            app.move_assets_selection(1);
+            assert_eq!(app.assets_index, 0);
+        }
+
+        #[test]
+        fn mnemonic_paths_are_the_identity_and_the_wallets() {
+            assert!(is_mnemonic_path("identity.MNEMONIC"));
+            assert!(is_mnemonic_path("ledgers.bitcoin.WALLET_MNEMONIC"));
+            assert!(!is_mnemonic_path("ledgers.bitcoin.WALLET_PASSPHRASE"));
+        }
+
         /// A lever already in the position asked for writes nothing, so Enter on it
         /// cannot cost the operator a restart for no change.
         #[test]
@@ -7785,7 +9834,11 @@ mod tests {
     /// step, and the file goes back if the node does not come back. These pin the
     /// pieces of that transaction that can be exercised without systemd.
     mod config_transactions {
-        use super::super::{chained_write, revert, serving_on};
+        use super::super::{
+            apply_config_change, chained_write, get_config_entries, pending_change_count,
+            pending_config_path, revert, serving_on, Applied, ConfigFollowUp, ConfigWrite,
+        };
+        use serde_yaml::Value;
         use std::fs;
         use std::path::PathBuf;
 
@@ -7877,6 +9930,61 @@ mod tests {
             let message = revert(&missing, &config, "Set port NOT applied");
             assert!(message.contains("COULD NOT RESTORE"), "{message}");
             assert!(message.contains("config-20260101000000-0417.yaml"), "{message}");
+        }
+
+        /// Once a staged file exists every edit goes into it and config.yaml, the
+        /// file the running node loaded, is not touched.
+        #[tokio::test]
+        async fn an_edit_with_a_staged_file_changes_only_the_staged_file() {
+            let Some(yq) = which_yq() else {
+                eprintln!("yq not on PATH; skipping the staged write");
+                return;
+            };
+            let dir = TempDir::new("staged");
+            let config = dir.file("config.yaml");
+            let pending = pending_config_path(&config);
+            let original = "energy:\n  PRICE_PER_KWH: 0.1\nui:\n  DISPLAY_UNIT: erg\n";
+            fs::write(&config, original).unwrap();
+
+            let write = ConfigWrite {
+                label: "kWh price".to_string(),
+                expression: "energy.PRICE_PER_KWH = env(NODO_TUI_V0)".to_string(),
+                values: vec![("NODO_TUI_V0".to_string(), "0.3".to_string())],
+                follow_up: ConfigFollowUp::None,
+            };
+            // First edit creates the staged file from config.yaml.
+            let first = apply_config_change(yq.clone(), config.clone(), dir.file("cache"), write.clone()).await;
+            // A second edit finds it, and builds on it.
+            let write2 = ConfigWrite {
+                expression: "ui.DISPLAY_UNIT = env(NODO_TUI_V0)".to_string(),
+                values: vec![("NODO_TUI_V0".to_string(), "usd".to_string())],
+                ..write
+            };
+            let second = apply_config_change(yq, config.clone(), dir.file("cache"), write2).await;
+
+            assert!(matches!(first.result, Ok(Applied::Staged)), "{:?}", first.result);
+            assert!(matches!(second.result, Ok(Applied::Staged)), "{:?}", second.result);
+            assert_eq!(fs::read_to_string(&config).unwrap(), original);
+            let staged: Value = serde_yaml::from_str(&fs::read_to_string(&pending).unwrap()).unwrap();
+            assert_eq!(staged["energy"]["PRICE_PER_KWH"].as_f64(), Some(0.3));
+            assert_eq!(staged["ui"]["DISPLAY_UNIT"].as_str(), Some("usd"));
+        }
+
+        /// The tree marks the values that differ from the running config, and only those.
+        #[test]
+        fn entries_that_differ_from_the_running_config_are_marked() {
+            let dir = TempDir::new("marks");
+            let config = dir.file("config.yaml");
+            fs::write(&config, "a: 1\nb: 2\n").unwrap();
+            assert_eq!(pending_change_count(&get_config_entries(&config).unwrap()), 0);
+
+            fs::write(pending_config_path(&config), "a: 1\nb: 3\nc: 4\n").unwrap();
+            let entries = get_config_entries(&config).unwrap();
+            let mark = |path: &str| entries.iter().find(|e| e.path == path).unwrap().running.clone();
+            assert_eq!(mark("a"), None);
+            assert_eq!(mark("b"), Some("2".to_string()));
+            assert_eq!(mark("c"), Some("unset".to_string()));
+            assert_eq!(pending_change_count(&entries), 2);
         }
 
         /// `auto` is what an unassigned port reads as, and it is not a port: treating
@@ -7973,6 +10081,59 @@ mod tests {
             fs::write(&config, "network:\n  GATEWAY_PORT: 52285\n").unwrap();
 
             assert_eq!(super::super::read_gateway_plaintext_port_raw(&config), None);
+        }
+
+        /// Issue #438. Moving the TLS port through this editor used to drop only
+        /// the `*_passed` markers, so `.gateway_plaintext_notice` and its command,
+        /// written about the old `auto` port, survived the restart and were read
+        /// back under the new one.
+        #[test]
+        fn moving_the_tls_port_forgets_both_ports_notices_and_markers() {
+            use crate::alerts::{GATEWAY_NOTICE_FILE, GATEWAY_PLAINTEXT_NOTICE_FILE};
+
+            let dir = TempDir::new("forget-verdicts");
+            let config = dir.file("config.yaml");
+            let cache = dir.file("cache");
+            fs::create_dir_all(&cache).unwrap();
+            let mut files = vec![
+                cache.join("gateway_port_passed"),
+                cache.join("gateway_plaintext_port_passed"),
+            ];
+            files.extend(crate::alerts::notice_files(&config, GATEWAY_NOTICE_FILE));
+            files.extend(crate::alerts::notice_files(&config, GATEWAY_PLAINTEXT_NOTICE_FILE));
+            for file in &files {
+                fs::write(file, "52286").unwrap();
+            }
+
+            super::super::forget_gateway_verdicts(&config, &cache, true, false);
+
+            for file in &files {
+                assert!(!file.exists(), "{} survived the port change", file.display());
+            }
+        }
+
+        /// The plaintext key alone moving says nothing about the TLS port.
+        #[test]
+        fn moving_only_the_plaintext_port_keeps_the_tls_ports_verdict() {
+            use crate::alerts::{GATEWAY_NOTICE_FILE, GATEWAY_PLAINTEXT_NOTICE_FILE};
+
+            let dir = TempDir::new("forget-plaintext");
+            let config = dir.file("config.yaml");
+            let cache = dir.file("cache");
+            fs::create_dir_all(&cache).unwrap();
+            let tls_marker = cache.join("gateway_port_passed");
+            let tls_notice = crate::alerts::notice_files(&config, GATEWAY_NOTICE_FILE)[0].clone();
+            let plaintext_notice =
+                crate::alerts::notice_files(&config, GATEWAY_PLAINTEXT_NOTICE_FILE)[0].clone();
+            for file in [&tls_marker, &tls_notice, &plaintext_notice] {
+                fs::write(file, "x").unwrap();
+            }
+
+            super::super::forget_gateway_verdicts(&config, &cache, false, true);
+
+            assert!(tls_marker.exists());
+            assert!(tls_notice.exists());
+            assert!(!plaintext_notice.exists());
         }
     }
 
@@ -8139,7 +10300,8 @@ mod tests {
     mod usage {
         use super::super::{
             counter_rate, format_bytes_compact, format_rate_compact, read_cgroup_io_bytes,
-            read_cgroup_keyed_u64, read_cpu_max_allowance, tap_ifname_for_instance, vcpu_allowance,
+            read_cgroup_keyed_u64, read_cgroup_memory_working_set, read_cpu_max_allowance,
+            tap_ifname_for_instance, vcpu_allowance,
             App, Instance,
             InstanceUsage,
         };
@@ -8361,6 +10523,29 @@ mod tests {
         }
 
         #[test]
+        fn memory_working_set_excludes_inactive_page_cache() {
+            let dir = TempDir::new("memory-working-set");
+            dir.write("memory.current", "4251078656\n");
+            dir.write(
+                "memory.stat",
+                "anon 241487872\nfile 3945881600\nactive_file 13598720\ninactive_file 3932282880\n",
+            );
+            assert_eq!(
+                read_cgroup_memory_working_set(&dir.path("")),
+                Some(4_251_078_656 - 3_932_282_880)
+            );
+        }
+
+        #[test]
+        fn memory_working_set_without_stat_falls_back_to_current() {
+            let dir = TempDir::new("memory-working-set-no-stat");
+            dir.write("memory.current", "1048576\n");
+            assert_eq!(read_cgroup_memory_working_set(&dir.path("")), Some(1_048_576));
+            let empty = TempDir::new("memory-working-set-absent");
+            assert_eq!(read_cgroup_memory_working_set(&empty.path("")), None);
+        }
+
+        #[test]
         fn io_stat_sums_every_backing_device() {
             let dir = TempDir::new("io-stat");
             let path = dir.write(
@@ -8496,6 +10681,13 @@ mod tests {
                 mu_per_nanoerg: 1.0,
             };
             assert_eq!(money.format_raw("14582"), "14582 MU");
+        assert_eq!(money.format_raw("5100000"), "5.1M MU");
+        assert_eq!(money.format_raw("10000000"), "10M MU");
+        assert_eq!(money.format_raw("1500"), "1.5K MU");
+        assert_eq!(money.format_raw("-2500000"), "-2.5M MU");
+        assert_eq!(money.format_raw("5123456"), "5123456 MU");
+        assert_eq!(money.format_raw("1000"), "1K MU");
+        assert_eq!(money.format_raw("999"), "999 MU");
         }
 
         #[test]
@@ -8986,6 +11178,7 @@ ergo: Cold Wallet: 9cold\n";
             edit_value: edit_value.to_string(),
             value_type: value_type.to_string(),
             secret,
+            running: None,
         }
     }
 
@@ -8994,7 +11187,7 @@ ergo: Cold Wallet: 9cold\n";
         app.config_all = vec![entry];
     }
 
-    /// An app on the Config page whose tree is the real `flatten_yaml` reading of
+    /// An app on the All page whose tree is the real `flatten_yaml` reading of
     /// `yaml`, so a list is a leaf or a section here for exactly the reason it is one
     /// on screen.
     fn on_config_page(yaml: &str) -> App {
@@ -9560,7 +11753,7 @@ ergo: Cold Wallet: 9cold\n";
         assert_eq!(percent(1, 0), 0);
     }
 
-    /// ←/→ walk the Config tree; pages are cycled with Tab/Shift+Tab only.
+    /// ←/→ walk the All tree; pages are cycled with Tab/Shift+Tab only.
     /// Editing the working day: what the keys move, and what reaches config.yaml.
     ///
     /// The arithmetic of a window lives in `crate::schedule` and is tested there. What
@@ -10037,7 +12230,7 @@ ergo: Cold Wallet: 9cold\n";
 
         #[test]
         fn the_arrows_never_change_page() {
-            // They used to be page navigation; a stray ← on Config must no longer
+            // They used to be page navigation; a stray ← on All must no longer
             // throw the operator onto another page mid-edit.
             let mut app = on_config_page();
             app.config_tree_state.select(vec!["network".to_string()]);
@@ -10104,11 +12297,26 @@ ergo: Cold Wallet: 9cold\n";
                 dir
             }
 
-            /// A block file of `content` bytes, plus the pointer header every one
-            /// carries on disk.
+            /// A block file of `content` bytes.
             fn block(&self, id: &str, content: usize) {
-                let bytes = vec![0u8; content + BLOCK_POINTER_LENGTH as usize];
-                fs::write(self.blocks.join(id), bytes).unwrap();
+                fs::write(self.blocks.join(id), vec![0u8; content]).unwrap();
+            }
+
+            /// A multiblock directory: `parts` of its own and sub-`blocks`, in the
+            /// same `_.json` shape as a service.
+            fn directory_block(&self, id: &str, parts: &[usize], blocks: &[&str]) {
+                let dir = self.blocks.join(id);
+                fs::create_dir_all(&dir).unwrap();
+                let mut manifest = Vec::new();
+                for (index, size) in parts.iter().enumerate() {
+                    fs::write(dir.join(index.to_string()), vec![0u8; *size]).unwrap();
+                    manifest.push(serde_json::json!(index));
+                }
+                for block in blocks {
+                    manifest.push(serde_json::json!([block, 0]));
+                }
+                fs::write(dir.join(SERVICE_MANIFEST), serde_json::to_string(&manifest).unwrap())
+                    .unwrap();
             }
         }
 
@@ -10130,16 +12338,43 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(total, Some(100 + 200 + 4096 + 1024));
         }
 
-        /// The pointer header is not content. `bee_rpc`'s own
-        /// `get_pruned_block_length` subtracts it for exactly this figure, and
-        /// counting it would inflate every total by 36 bytes per block.
+        /// Issue #438: a block counts its whole length, as the pinned `getsize` --
+        /// and so `nodo services` -- counts it. This used to take a 36-byte pointer
+        /// header off each one, after an older `getsize`.
         #[test]
-        fn a_blocks_pointer_header_is_not_counted_as_content() {
-            let registry = Registry::new("header");
-            registry.block("block-a", 0);
+        fn a_block_counts_its_whole_length_as_nodo_services_does() {
+            let registry = Registry::new("whole-block");
+            registry.block("block-a", 100);
             let service = registry.service("svc", &[], &["block-a"]);
 
-            assert_eq!(service_total_size(&service, &registry.blocks), Some(0));
+            assert_eq!(service_total_size(&service, &registry.blocks), Some(100));
+        }
+
+        /// A multiblock directory is measured by its own manifest, to any depth --
+        /// not as the size of its directory entry.
+        #[test]
+        fn a_directory_block_is_its_expansion_not_its_dirent() {
+            let registry = Registry::new("directory-block");
+            registry.block("leaf", 3000);
+            registry.directory_block("inner", &[200], &["leaf"]);
+            registry.directory_block("outer", &[10], &["inner", "leaf"]);
+            let service = registry.service("svc", &[1], &["outer"]);
+
+            assert_eq!(
+                service_total_size(&service, &registry.blocks),
+                Some(1 + 10 + (200 + 3000) + 3000)
+            );
+        }
+
+        /// A block that names itself is refused, as `getsize` refuses it, rather than
+        /// measured forever.
+        #[test]
+        fn a_block_that_contains_itself_has_no_total() {
+            let registry = Registry::new("loop");
+            registry.directory_block("ouroboros", &[1], &["ouroboros"]);
+            let service = registry.service("svc", &[], &["ouroboros"]);
+
+            assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
         /// The case the column exists for: a service that stores almost nothing of
@@ -10168,6 +12403,23 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
+        /// Issue #438: the same cases as tests/test_services_sizes.py, so the CLI's
+        /// `format_bytes` and this one cannot come to say one size two ways again.
+        #[test]
+        fn sizes_read_as_nodo_services_prints_them() {
+            for (bytes, text) in [
+                (0, "0 B"),
+                (394, "394 B"),
+                (1023, "1023 B"),
+                (1024, "1.0 KiB"),
+                (1536, "1.5 KiB"),
+                (41_628_467, "39.7 MiB"),
+                (5 * 1024 * 1024 * 1024, "5.0 GiB"),
+            ] {
+                assert_eq!(format_bytes(bytes), text, "{bytes} bytes");
+            }
+        }
+
         #[test]
         fn a_service_with_no_manifest_has_no_total() {
             let registry = Registry::new("no-manifest");
@@ -10187,12 +12439,12 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
-        /// The two constants are `bee_rpc`'s, restated here so the TUI need not
+        /// The manifest name is `bee_rpc`'s, restated here so the TUI need not
         /// spawn an interpreter per service per refresh. Read rather than run: a
         /// Rust test suite has no interpreter to hand, and the two drifting apart
         /// would show as every total being quietly wrong.
         #[test]
-        fn the_block_constants_match_bee_rpc() {
+        fn the_manifest_name_matches_bee_rpc() {
             let Ok(utils) = std::fs::read_to_string(
                 "/opt/homebrew/lib/python3.11/site-packages/bee_rpc/utils.py",
             )
@@ -10205,11 +12457,6 @@ ergo: Cold Wallet: 9cold\n";
                 return;
             };
 
-            assert!(
-                utils.contains(&format!("BLOCK_LENGTH = {BLOCK_POINTER_LENGTH}")),
-                "bee_rpc's BLOCK_LENGTH is no longer {BLOCK_POINTER_LENGTH}, so every \
-                 service total this page shows is off by it per block"
-            );
             assert!(
                 utils.contains(&format!("METADATA_FILE_NAME = '{SERVICE_MANIFEST}'")),
                 "bee_rpc no longer names its manifest {SERVICE_MANIFEST}"
@@ -10412,6 +12659,117 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(by_id("b"), None);
             let _ = fs::remove_dir_all(&dir);
         }
+
+        /// A dead instance has its own page; INSTANCES lists only the live ones, local
+        /// and delegated.
+        #[test]
+        fn a_dead_instance_is_not_listed_as_live() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-live-only");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = dir.join("database.sqlite");
+            Connection::open(&database)
+                .unwrap()
+                .execute_batch(
+                    "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, ip TEXT,
+                        father_id TEXT, balance_mu TEXT, mem_limit INTEGER,
+                        disk_space INTEGER, cpu_period INTEGER, cpu_quota INTEGER,
+                        serialized_instance TEXT, service_id TEXT, virtualizer TEXT,
+                        launched_at DATETIME, killed_at DATETIME, death_reason TEXT);
+                     INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
+                     VALUES ('alive', 'w', '10', NULL, NULL);
+                     INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
+                     VALUES ('dead', 'x', '10', '2026-01-01 10:00:00', 'manual_kill');
+                     CREATE TABLE delegated_instances (token_delegation TEXT, id TEXT,
+                        peer_id TEXT, father_id TEXT, service_id TEXT, launched_at DATETIME,
+                        killed_at DATETIME, death_reason TEXT);
+                     INSERT INTO delegated_instances (id, killed_at) VALUES ('r-alive', NULL);
+                     INSERT INTO delegated_instances (id, killed_at)
+                     VALUES ('r-dead', '2026-01-01 10:00:00');",
+                )
+                .unwrap();
+            let mut paths = Paths::discover();
+            paths.database = database;
+
+            let instances = get_instances(&paths, &HashMap::new()).unwrap();
+            let mut ids: Vec<&str> = instances.iter().map(|instance| instance.id.as_str()).collect();
+            ids.sort();
+
+            assert_eq!(ids, ["alive", "r-alive"]);
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// `g` on the Services page: fetch a service this node does not hold (#438).
+    mod getting_a_service {
+        use super::*;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        fn on_services_page() -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Services)
+                .unwrap();
+            app
+        }
+
+        #[test]
+        fn g_opens_a_popup_asking_for_the_hash() {
+            let mut app = on_services_page();
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(crate::handler::handle_key_events(
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+                &mut app,
+            ))
+            .unwrap();
+
+            assert_eq!(app.input_mode, InputMode::GetService);
+            assert!(app.input.is_empty());
+            assert!(app.command_task.is_none(), "nothing runs before a hash is given");
+        }
+
+        #[test]
+        fn g_means_nothing_on_other_pages_it_is_not_bound_on() {
+            let mut app = on_services_page();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Peers)
+                .unwrap();
+            app.open_get_service();
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
+        #[test]
+        fn a_hash_becomes_the_same_nodo_get_the_operator_would_type() {
+            let hash = "AB".repeat(32);
+            let (label, args) = get_service_command(&format!("  {hash} ")).unwrap();
+            assert_eq!(args, vec!["get".to_string(), hash.to_lowercase()]);
+            assert!(label.starts_with("Get service"), "{label}");
+        }
+
+        #[test]
+        fn a_typo_is_answered_in_the_popup_rather_than_run() {
+            let mut app = on_services_page();
+            app.open_get_service();
+            app.input = "not-a-hash".to_string();
+
+            app.submit_get_service();
+
+            assert_eq!(app.input_mode, InputMode::GetService, "still open to fix it");
+            assert!(app.command_task.is_none());
+            assert!(app.status.contains("hexadecimal"), "{}", app.status);
+            assert!(get_service_command("   ").is_err());
+        }
+
+        #[test]
+        fn the_verdict_is_the_commands_last_line() {
+            assert_eq!(
+                last_line("Asking known peers for ab...\nService ab retrieved.\n\n"),
+                "Service ab retrieved."
+            );
+            assert_eq!(last_line(""), "");
+        }
     }
 
     /// `e` on the Services page. The other key in this interface that spends.
@@ -10490,7 +12848,8 @@ ergo: Cold Wallet: 9cold\n";
             })
             .expect("executing a service is a `nodo` invocation");
 
-            assert_eq!(args, vec!["execute".to_string(), "svc-abc".to_string()]);
+            // --no-input: `nodo` inherits this terminal, and must not ask on it.
+            assert_eq!(args, vec!["execute", "--no-input", "svc-abc"]);
             assert_eq!(label, "Execute service hello-world");
         }
 
@@ -10711,12 +13070,14 @@ ergo: Cold Wallet: 9cold\n";
             let mut app = install.app();
             let page = app.page();
 
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             for kind in [
                 MouseEventKind::ScrollUp,
                 MouseEventKind::ScrollDown,
                 MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Down(MouseButton::Right),
             ] {
-                handle_mouse_events(
+                rt.block_on(handle_mouse_events(
                     MouseEvent {
                         kind,
                         column: 4,
@@ -10724,7 +13085,8 @@ ergo: Cold Wallet: 9cold\n";
                         modifiers: KeyModifiers::NONE,
                     },
                     &mut app,
-                );
+                ))
+                .unwrap();
             }
 
             assert!(app.awaiting_kya());
@@ -10801,6 +13163,743 @@ ergo: Cold Wallet: 9cold\n";
             let alerts = main.find("with_operator_alerts()").unwrap();
             let gate = main.find("with_kya_gate()").unwrap();
             assert!(alerts < gate, "the alerts should be primed before the gate");
+        }
+    }
+
+    /// The first-run profile picker (docs/proposals/profile-deck.md, phase 1).
+    ///
+    /// Pinned here is the state machine: it comes after the KyA and never before,
+    /// it is not asked twice, and skipping records the marker without writing config.
+    mod profile_gate {
+        use super::super::*;
+        use crate::handler::handle_key_events;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        struct Install(PathBuf);
+
+        impl Install {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir().join(format!("nodo-tui-profile-{name}"));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(path.join("storage")).unwrap();
+                Self(path)
+            }
+
+            /// The same steps `main.rs` takes, against a directory a test owns.
+            fn app(&self) -> App {
+                let mut app = App::default();
+                app.paths.root = self.0.clone();
+                app.paths.storage = self.0.join("storage");
+                app.with_kya_gate().with_profile_gate()
+            }
+
+            fn mark(&self, name: &str) {
+                fs::write(self.0.join("storage").join(name), "").unwrap();
+            }
+        }
+
+        impl Drop for Install {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        async fn send(app: &mut App, code: KeyCode) {
+            let key = KeyEvent {
+                code,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            };
+            handle_key_events(key, app).await.unwrap();
+        }
+
+        #[test]
+        fn the_marker_name_is_fixed() {
+            let install = Install::new("marker");
+            let app = install.app();
+
+            assert_eq!(PROFILE_MARKER, ".profilepicked");
+            assert_eq!(
+                app.paths.profile_marker(),
+                install.0.join("storage").join(".profilepicked")
+            );
+        }
+
+        /// The KyA is the question the node is conditional on, so it covers the
+        /// picker: with both unanswered the gate is the KyA.
+        #[test]
+        fn the_kya_comes_first() {
+            let install = Install::new("order");
+            let app = install.app();
+
+            assert!(app.awaiting_kya());
+            assert_eq!(app.input_mode, InputMode::AcceptKya);
+        }
+
+        #[tokio::test]
+        async fn accepting_the_kya_opens_the_picker() {
+            let install = Install::new("after-kya");
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Char('y')).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(app.profile_first_run);
+        }
+
+        #[test]
+        fn an_accepted_kya_with_no_profile_marker_opens_the_picker_at_start() {
+            let install = Install::new("existing");
+            install.mark(KYA_MARKER);
+
+            let app = install.app();
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(app.profile_first_run);
+        }
+
+        #[test]
+        fn an_answered_picker_is_not_shown_again() {
+            let install = Install::new("answered");
+            install.mark(KYA_MARKER);
+            install.mark(PROFILE_MARKER);
+
+            let app = install.app();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(!app.profile_first_run);
+        }
+
+        /// Without `with_profile_gate`, nothing consults the marker: the KyA tests and
+        /// every rendering test keep their behaviour.
+        #[test]
+        fn the_picker_is_off_unless_main_asks_for_it() {
+            let install = Install::new("off");
+            install.mark(KYA_MARKER);
+            let mut app = App::default();
+            app.paths.root = install.0.clone();
+            app.paths.storage = install.0.join("storage");
+
+            let app = app.with_kya_gate();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
+        #[tokio::test]
+        async fn skipping_records_the_marker_and_writes_nothing() {
+            let install = Install::new("skip");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.running, "skipping must not quit");
+            assert!(app.paths.profile_marker().exists());
+            assert!(app.pending_action.is_none(), "skipping must not queue a write");
+            assert!(!install.app().profile_first_run);
+        }
+
+        #[tokio::test]
+        async fn choosing_records_the_marker_and_shows_the_diff() {
+            let install = Install::new("choose");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            // A profile whose keys differ from an empty config.
+            app.config_document = None;
+
+            send(&mut app, KeyCode::Enter).await;
+
+            assert!(app.paths.profile_marker().exists());
+            assert!(!app.profile_first_run);
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+        }
+
+        /// Esc from POLICIES only closes: a second look at the profiles is not an
+        /// answer to the first-run question and must not write a marker.
+        #[tokio::test]
+        async fn the_policies_picker_does_not_write_the_marker() {
+            let install = Install::new("policies");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            app.input_mode = InputMode::Normal;
+            app.profile_first_run = false;
+            app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Cell).unwrap();
+
+            app.open_profile_picker();
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(!app.profile_first_run);
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(!app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn a_marker_that_cannot_be_written_is_not_fatal() {
+            let install = Install::new("unwritable");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            let blocked = install.0.join("blocked");
+            fs::write(&blocked, "").unwrap();
+            app.paths.storage = blocked.join("storage");
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert!(app.running);
+            assert!(app.status.contains("shown again"), "{}", app.status);
+        }
+
+        /// An app with the picker open and the deck "drawn" at a known size.
+        fn deck_app(install: &Install) -> App {
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            app.cell.profile = 0;
+            app.deck_zones = crate::profile_deck_ui::layout(
+                ratatui::layout::Rect::new(0, 0, 100, 32),
+                cell::profiles().len(),
+                true,
+            );
+            assert!(app.deck_zones.is_some());
+            app
+        }
+
+        async fn click(app: &mut App, x: u16, y: u16) {
+            use crate::handler::handle_mouse_events;
+            use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+            handle_mouse_events(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                },
+                app,
+            )
+            .await
+            .unwrap();
+        }
+
+        async fn wheel(app: &mut App, kind: crossterm::event::MouseEventKind) {
+            use crate::handler::handle_mouse_events;
+            use crossterm::event::MouseEvent;
+            handle_mouse_events(
+                MouseEvent {
+                    kind,
+                    column: 50,
+                    row: 10,
+                    modifiers: KeyModifiers::NONE,
+                },
+                app,
+            )
+            .await
+            .unwrap();
+        }
+
+        fn centre(rect: ratatui::layout::Rect) -> (u16, u16) {
+            (rect.x + rect.width / 2, rect.y + rect.height / 2)
+        }
+
+        #[tokio::test]
+        async fn the_arrow_keys_turn_the_cards_and_wrap() {
+            let install = Install::new("keys-arrows");
+            let mut app = deck_app(&install);
+            let count = cell::profiles().len();
+
+            send(&mut app, KeyCode::Right).await;
+            assert_eq!(app.cell.profile, 1);
+            send(&mut app, KeyCode::Left).await;
+            send(&mut app, KeyCode::Left).await;
+            assert_eq!(app.cell.profile, count - 1, "left of the first wraps");
+            send(&mut app, KeyCode::Right).await;
+            assert_eq!(app.cell.profile, 0, "right of the last wraps");
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        #[tokio::test]
+        async fn h_l_tab_and_shift_tab_do_the_same() {
+            let install = Install::new("keys-vi");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('l')).await;
+            send(&mut app, KeyCode::Tab).await;
+            assert_eq!(app.cell.profile, 2);
+            send(&mut app, KeyCode::Char('h')).await;
+            send(&mut app, KeyCode::BackTab).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        /// The plain list shown on a small terminal keeps its keys.
+        #[tokio::test]
+        async fn up_and_down_still_move_the_list() {
+            let install = Install::new("keys-updown");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Down).await;
+            assert_eq!(app.cell.profile, 1);
+            send(&mut app, KeyCode::Up).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        #[tokio::test]
+        async fn number_keys_home_and_end_jump() {
+            let install = Install::new("keys-jump");
+            let mut app = deck_app(&install);
+            let count = cell::profiles().len();
+
+            send(&mut app, KeyCode::Char('3')).await;
+            assert_eq!(app.cell.profile, 2);
+            send(&mut app, KeyCode::End).await;
+            assert_eq!(app.cell.profile, count - 1);
+            send(&mut app, KeyCode::Home).await;
+            assert_eq!(app.cell.profile, 0);
+            // A number with no profile behind it changes nothing.
+            send(&mut app, KeyCode::Char('9')).await;
+            assert_eq!(app.cell.profile, 0);
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        #[tokio::test]
+        async fn s_skips_like_escape() {
+            let install = Install::new("keys-s");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('s')).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn a_click_on_an_arrow_turns_the_card() {
+            let install = Install::new("mouse-arrows");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let (x, y) = centre(zones.next);
+            click(&mut app, x, y).await;
+            assert_eq!(app.cell.profile, 1);
+            let (x, y) = centre(zones.prev);
+            click(&mut app, x, y).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        #[tokio::test]
+        async fn a_click_on_a_dot_goes_to_that_card() {
+            let install = Install::new("mouse-dots");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let dot = zones.dots[3];
+            click(&mut app, dot.x, dot.y).await;
+
+            assert_eq!(app.cell.profile, 3);
+        }
+
+        #[tokio::test]
+        async fn a_click_on_the_card_or_the_choose_button_chooses() {
+            for target in ["card", "choose"] {
+                let install = Install::new(&format!("mouse-choose-{target}"));
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                let zones = app.deck_zones.clone().unwrap();
+
+                let (x, y) = centre(if target == "card" { zones.card } else { zones.choose });
+                click(&mut app, x, y).await;
+
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{target}");
+                assert!(app.paths.profile_marker().exists(), "{target}");
+            }
+        }
+
+        #[tokio::test]
+        async fn a_click_on_skip_skips() {
+            let install = Install::new("mouse-skip");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let (x, y) = centre(zones.skip);
+            click(&mut app, x, y).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.paths.profile_marker().exists());
+            assert!(app.pending_action.is_none());
+        }
+
+        /// A click on the frame, or on the page behind it, does nothing: the deck is
+        /// a modal, and a click that fell through would act on a page nobody sees.
+        #[tokio::test]
+        async fn a_click_outside_the_parts_does_nothing() {
+            let install = Install::new("mouse-outside");
+            let mut app = deck_app(&install);
+            let page = app.page();
+
+            click(&mut app, 0, 0).await;
+            click(&mut app, 99, 31).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert_eq!(app.cell.profile, 0);
+            assert_eq!(app.page(), page);
+        }
+
+        #[tokio::test]
+        async fn the_wheel_turns_the_cards() {
+            use crossterm::event::MouseEventKind::{ScrollDown, ScrollLeft, ScrollRight, ScrollUp};
+            let install = Install::new("mouse-wheel");
+            let mut app = deck_app(&install);
+
+            wheel(&mut app, ScrollDown).await;
+            wheel(&mut app, ScrollRight).await;
+            assert_eq!(app.cell.profile, 2);
+            wheel(&mut app, ScrollUp).await;
+            wheel(&mut app, ScrollLeft).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        /// On a small terminal the plain list is shown, and nothing was drawn to click.
+        #[tokio::test]
+        async fn without_a_drawn_deck_a_click_does_nothing() {
+            let install = Install::new("mouse-list");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+
+            click(&mut app, 50, 16).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        /// Drawing the picker records where its parts are, and drawing the list in
+        /// its place forgets them.
+        #[test]
+        fn drawing_records_the_zones_and_the_list_forgets_them() {
+            use ratatui::backend::TestBackend;
+            use ratatui::Terminal;
+            let install = Install::new("zones");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+
+            let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+            terminal.draw(|frame| crate::ui::render(&mut app, frame)).unwrap();
+            assert!(app.deck_zones.is_some(), "a big terminal draws the deck");
+
+            let mut terminal = Terminal::new(TestBackend::new(70, 20)).unwrap();
+            terminal.draw(|frame| crate::ui::render(&mut app, frame)).unwrap();
+            assert!(app.deck_zones.is_none(), "a small terminal draws the list");
+        }
+
+        #[tokio::test]
+        async fn a_move_starts_a_slide_in_the_direction_of_the_move() {
+            let install = Install::new("slide-direction");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Right).await;
+            let slide = app.deck_anim.expect("a slide");
+            assert_eq!((slide.from, slide.forward), (0, true));
+            assert!(app.deck_animating());
+
+            send(&mut app, KeyCode::Left).await;
+            let slide = app.deck_anim.unwrap();
+            assert_eq!((slide.from, slide.forward), (1, false));
+        }
+
+        /// From the first card, "left" wraps to the last one, and it is still a
+        /// backward move: the arrow the user pressed decides the side.
+        #[tokio::test]
+        async fn a_wrap_slides_the_way_the_key_points() {
+            let install = Install::new("slide-wrap");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Left).await;
+
+            assert_eq!(app.cell.profile, cell::profiles().len() - 1);
+            assert!(!app.deck_anim.unwrap().forward);
+        }
+
+        #[tokio::test]
+        async fn a_jump_slides_towards_the_card_it_goes_to() {
+            let install = Install::new("slide-jump");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('4')).await;
+            assert!(app.deck_anim.unwrap().forward);
+            send(&mut app, KeyCode::Char('1')).await;
+            assert!(!app.deck_anim.unwrap().forward);
+        }
+
+        /// A move during a slide starts the next slide from the card the last one was
+        /// going to: they do not queue.
+        #[tokio::test]
+        async fn a_move_during_a_slide_replaces_it() {
+            let install = Install::new("slide-replace");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Right).await;
+            send(&mut app, KeyCode::Right).await;
+
+            assert_eq!(app.cell.profile, 2);
+            assert_eq!(app.deck_anim.unwrap().from, 1);
+        }
+
+        /// Without a deck on screen (the plain list), or when nothing moved, nothing
+        /// slides, and the loop is not asked for frames.
+        #[tokio::test]
+        async fn nothing_slides_without_a_deck_or_a_move() {
+            let install = Install::new("slide-none");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+            send(&mut app, KeyCode::Right).await;
+            assert!(app.deck_anim.is_none());
+            assert!(!app.deck_animating());
+
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Char('1')).await;
+            assert!(app.deck_anim.is_none(), "already on the first card");
+        }
+
+        #[tokio::test]
+        async fn a_slide_that_is_over_does_not_ask_for_frames() {
+            let install = Install::new("slide-over");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+            let old = Instant::now() - crate::profile_deck_ui::SLIDE * 2;
+            app.deck_anim = Some(crate::profile_deck_ui::DeckSlide::new(0, true, old));
+
+            assert!(!app.deck_animating());
+        }
+
+        #[tokio::test]
+        async fn leaving_the_picker_stops_the_frames() {
+            let install = Install::new("slide-leave");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+            assert!(app.deck_animating());
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert!(!app.deck_animating());
+        }
+
+        #[tokio::test]
+        async fn opening_the_picker_again_starts_with_no_slide() {
+            let install = Install::new("slide-reopen");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+
+            app.show_profile_picker(false);
+
+            assert!(app.deck_anim.is_none());
+        }
+
+        /// The loop wakes each frame only while a slide runs. Read off the source,
+        /// like the gates: dropping the line would make the slide a slideshow with
+        /// no failure anywhere.
+        #[test]
+        fn main_draws_each_frame_while_a_slide_runs() {
+            let main = include_str!("main.rs");
+            assert!(main.contains("deck_animating()"));
+            assert!(main.contains("profile_deck_ui::FRAME"));
+        }
+
+        fn screen_text(app: &mut App, width: u16, height: u16) -> String {
+            use ratatui::backend::TestBackend;
+            use ratatui::Terminal;
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let mut text = String::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    text.push_str(buffer.get(x, y).symbol());
+                }
+                text.push('\n');
+            }
+            text
+        }
+
+        /// The report of the bug: a click on the card chose the profile, and the list
+        /// of changes came up as the plain text popup, so the deck disappeared. It
+        /// has to stay the deck, with the list inside it.
+        #[tokio::test]
+        async fn a_click_keeps_the_deck_and_shows_the_changes_inside_it() {
+            for target in ["card", "choose"] {
+                let install = Install::new(&format!("confirm-style-{target}"));
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                app.deck_zones = None;
+                // One draw, so the zones are those of the real screen.
+                screen_text(&mut app, 100, 34);
+                let zones = app.deck_zones.clone().unwrap();
+
+                let (x, y) = centre(if target == "card" { zones.card } else { zones.choose });
+                click(&mut app, x, y).await;
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{target}");
+                assert!(app.deck_confirm.is_some(), "{target}");
+                let text = screen_text(&mut app, 100, 34);
+
+                assert!(text.contains("SELECT YOUR RIG"), "{target}: the deck is gone\n{text}");
+                assert!(text.contains("JACK IN · "), "{target}\n{text}");
+                assert!(text.contains(crate::profile_deck_ui::APPLY_LABEL), "{target}");
+                assert!(text.contains(crate::profile_deck_ui::BACK_LABEL), "{target}");
+                assert!(text.contains("client.ACCEPT_NEW_DEPOSITS"), "{target}\n{text}");
+                assert!(!text.contains("(y/N)"), "{target}: the plain popup came back");
+            }
+        }
+
+        /// The same on the keyboard: Enter and a click lead to one screen.
+        #[tokio::test]
+        async fn enter_shows_the_same_confirmation() {
+            let install = Install::new("confirm-enter");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+
+            send(&mut app, KeyCode::Enter).await;
+            let text = screen_text(&mut app, 100, 34);
+
+            assert!(text.contains("JACK IN · "), "{text}");
+            assert!(!text.contains("(y/N)"));
+        }
+
+        /// A terminal too small for the deck has the plain list, and so the plain
+        /// confirmation: the deck cannot be drawn there.
+        #[tokio::test]
+        async fn a_small_terminal_keeps_the_plain_confirmation() {
+            let install = Install::new("confirm-small");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+
+            let text = screen_text(&mut app, 70, 20);
+
+            assert!(app.deck_confirm_zones.is_none());
+            assert!(text.contains("(y/N)"), "{text}");
+            assert!(!text.contains("JACK IN · "));
+        }
+
+        /// Every other confirmation is untouched.
+        #[test]
+        fn another_confirmation_is_still_the_plain_popup() {
+            let install = Install::new("confirm-other");
+            let mut app = deck_app(&install);
+            app.input_mode = InputMode::Normal;
+            app.confirm_writes(
+                "Lever".to_string(),
+                vec![("ui.THEME".to_string(), "x".to_string())],
+                Vec::new(),
+                None,
+                None,
+            );
+
+            let text = screen_text(&mut app, 100, 34);
+
+            assert!(app.deck_confirm.is_none());
+            assert!(text.contains("(y/N)"), "{text}");
+            assert!(!text.contains("SELECT YOUR RIG"));
+        }
+
+        #[tokio::test]
+        async fn refusing_goes_back_to_the_same_card_in_the_deck() {
+            for key in [KeyCode::Char('n'), KeyCode::Esc] {
+                let install = Install::new("confirm-back-key");
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                send(&mut app, KeyCode::Char('4')).await;
+                send(&mut app, KeyCode::Enter).await;
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+
+                send(&mut app, key).await;
+
+                assert_eq!(app.input_mode, InputMode::PickProfile, "{key:?}");
+                assert_eq!(app.cell.profile, 3, "{key:?}: the same card");
+                assert!(app.deck_confirm.is_none());
+                assert!(app.pending_action.is_none(), "nothing is left to apply");
+                assert!(app.details.is_none());
+                assert!(app.running);
+                let text = screen_text(&mut app, 100, 34);
+                assert!(text.contains("SELECT YOUR RIG"), "{key:?}");
+            }
+        }
+
+        /// The marker was written when the profile was chosen, so going back and then
+        /// leaving with Esc is an ordinary close: no second marker, no write.
+        #[tokio::test]
+        async fn leaving_after_going_back_changes_nothing() {
+            let install = Install::new("confirm-back-leave");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+            send(&mut app, KeyCode::Char('n')).await;
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn the_back_button_goes_back_and_the_buttons_have_zones() {
+            let install = Install::new("confirm-back-click");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Char('2')).await;
+            send(&mut app, KeyCode::Enter).await;
+            screen_text(&mut app, 100, 34);
+            let zones = app.deck_confirm_zones.clone().expect("zones after a draw");
+
+            // A click on the text of the changes does nothing.
+            click(&mut app, zones.body.x, zones.body.y).await;
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+
+            let (x, y) = centre(zones.back);
+            click(&mut app, x, y).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert_eq!(app.cell.profile, 1);
+        }
+
+        #[tokio::test]
+        async fn the_wheel_scrolls_the_changes() {
+            use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+            let install = Install::new("confirm-wheel");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+            screen_text(&mut app, 100, 34);
+
+            wheel(&mut app, ScrollDown).await;
+            wheel(&mut app, ScrollDown).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 2);
+            wheel(&mut app, ScrollUp).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 1);
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+        }
+
+        /// Leaving through any other way forgets the confirmation, so a stale index
+        /// can never turn a later plain confirmation into a deck one.
+        #[test]
+        fn closing_forgets_the_confirmation() {
+            let install = Install::new("confirm-forget");
+            let mut app = deck_app(&install);
+            app.deck_confirm = Some(2);
+            app.close_input();
+            assert!(app.deck_confirm.is_none());
+
+            app.deck_confirm = Some(2);
+            app.close_details();
+            assert!(app.deck_confirm.is_none());
+        }
+
+        /// The gate is applied in `main.rs`, after the KyA gate. Read off the source
+        /// like `main_asks_the_kya_before_it_draws_anything`.
+        #[test]
+        fn main_raises_the_profile_gate_after_the_kya_gate() {
+            let main = include_str!("main.rs");
+            let kya = main.find("with_kya_gate()").unwrap();
+            let profile = main
+                .find("with_profile_gate()")
+                .expect("main.rs must build its App behind the profile gate");
+            assert!(kya < profile, "the KyA gate must come first");
         }
     }
 
@@ -10953,7 +14052,7 @@ energy:
         }
 
         /// Nothing edits config.yaml while a transaction holds its backup: the same
-        /// guard the Config and Pricing editors have, for the same reason.
+        /// guard the All and Pricing editors have, for the same reason.
         #[tokio::test]
         async fn the_editor_refuses_to_open_while_a_change_is_being_applied() {
             let mut app = app_on_energy();
@@ -11278,6 +14377,85 @@ mod restart_state_regressions {
         });
         assert!(tokio::time::timeout(Duration::from_secs(2), wait_until_serving(&config)).await.unwrap());
         assign.await.unwrap();
+    }
+
+    /// A finished transaction whose result `poll_config_task` can take at once.
+    async fn finished_transaction(result: Result<Applied, String>) -> JoinHandle<ConfigTransaction> {
+        let task = tokio::spawn(async move {
+            ConfigTransaction {
+                label: "network.GATEWAY_PORT".to_string(),
+                result,
+            }
+        });
+        while !task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        task
+    }
+
+    /// A `nodo info` that never answers: a run still in flight.
+    fn node_info_in_flight() -> JoinHandle<Result<NodeInfo, String>> {
+        tokio::spawn(async {
+            std::future::pending::<()>().await;
+            unreachable!()
+        })
+    }
+
+    /// The restart closes the gateway port on purpose. While the transaction is in
+    /// flight, the alerts must not read that as "nothing is listening".
+    #[tokio::test]
+    async fn a_restart_in_flight_does_not_report_the_port_as_closed() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.config_task = Some(tokio::spawn(async {
+            std::future::pending::<()>().await;
+            unreachable!()
+        }));
+
+        assert_eq!(app.serving_for_alerts(), None);
+    }
+
+    /// The bug: a gateway port moved to a port that peers can reach. A `nodo info`
+    /// run in the restart reported "not running", and the Overview then showed
+    /// "nothing is listening" for up to 60 s on a node that served.
+    #[tokio::test]
+    async fn a_restart_that_came_back_clears_a_stale_not_running() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.last_wallet_refresh = Instant::now();
+        let stale = node_info_in_flight();
+        let stale_abort = stale.abort_handle();
+        app.wallet_task = Some(stale);
+        app.config_task = Some(finished_transaction(Ok(Applied::Restarted)).await);
+
+        app.poll_config_task().await;
+
+        assert_eq!(app.node_info.service_status, "running");
+        assert_eq!(app.serving_for_alerts(), Some(true));
+        assert!(app.wallet_task.is_none(), "a stale nodo info run is still in flight");
+        tokio::task::yield_now().await;
+        assert!(stale_abort.is_finished(), "the stale nodo info run was not aborted");
+        assert!(
+            app.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL,
+            "the next tick does not ask nodo info again"
+        );
+    }
+
+    /// A failed transaction proves nothing about the port. The status stays as it
+    /// was, and a new `nodo info` is due at once.
+    #[tokio::test]
+    async fn a_failed_restart_asks_nodo_info_again_without_a_guess() {
+        let mut app = App::default();
+        app.node_info.service_status = "not running".to_string();
+        app.last_wallet_refresh = Instant::now();
+        app.wallet_task = Some(node_info_in_flight());
+        app.config_task = Some(finished_transaction(Err("restart failed".to_string())).await);
+
+        app.poll_config_task().await;
+
+        assert_eq!(app.node_info.service_status, "not running");
+        assert!(app.wallet_task.is_none());
+        assert!(app.last_wallet_refresh.elapsed() >= WALLET_REFRESH_INTERVAL);
     }
 }
 

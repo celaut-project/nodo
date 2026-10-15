@@ -20,6 +20,7 @@ reads them. See ``docs/BACKENDS.md``.
 """
 import hashlib
 import ipaddress
+import os
 import shutil
 import time
 from pathlib import Path
@@ -39,7 +40,7 @@ from src.virtualizers.firewall import (
 )
 from src.virtualizers.microvm import serial
 from src.virtualizers.microvm.errors import MicroVMError
-from src.virtualizers.microvm.host import ensure_command_available, run
+from src.virtualizers.microvm.host import ensure_command_available, run, write_sysctl
 from src.virtualizers.microvm.runtime_state import list_runtime_states
 
 env_manager = ConfigManager()
@@ -88,13 +89,32 @@ def used_ips() -> set[str]:
     return used
 
 
+def _probe_held_ips() -> set[str]:
+    """Addresses the reachability probe holds on the bridge, see #493.
+
+    The probe draws from the same subnet, and a namespace a dead process leaked
+    keeps answering ARP for its address: a guest given that address boots and is
+    never reached. Best-effort, because the allocator must not fail on a host
+    where the namespaces cannot be read.
+    """
+    try:
+        from src.utils.firewall.reachability import probe_held_addresses
+
+        return probe_held_addresses()
+    except Exception as e:
+        log.LOGGER(f"Could not read the addresses held by reachability probes: {e}")
+        return set()
+
+
 def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     """An address and MAC for this VM, derived from its id rather than served.
 
     No DHCP, so the address is stable for the life of the VM and the firewall can
     be written against it before the guest exists. Derived from the id and then
     probed against :func:`used_ips`, so two VMs never share one and a relaunch of
-    the same id lands on the same address whenever it is free.
+    the same id lands on the same address whenever it is free. Addresses held by
+    a reachability probe's namespace are skipped too: the node has no record of
+    them, but they answer on the bridge all the same.
     """
     network = ip_network()
     gateway_ip = ipaddress.ip_address(NETWORK_GATEWAY_IP)
@@ -107,7 +127,7 @@ def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     if hosts <= 1:
         raise MicroVMError(f"No usable host addresses in subnet {NETWORK_SUBNET}")
 
-    used = used_ips()
+    used = used_ips() | _probe_held_ips()
     digest = hashlib.sha256(vmachine_id.encode("utf-8")).digest()
     seed = int.from_bytes(digest[:8], "big")
 
@@ -179,7 +199,7 @@ def preflight() -> ipaddress.IPv4Network:
 
     network = ensure_guest_bridge()
 
-    run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+    write_sysctl("net.ipv4.ip_forward", "1")
     ensure_guest_l2_isolation()
     # Not fatal, on purpose. This is the one thing nodo writes into a table it does
     # not own, and a host that refuses it -- or an operator who turned it off -- has
@@ -237,7 +257,7 @@ def ensure_guest_l2_isolation() -> None:
         (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.proxy_arp_pvlan", "1"),
         (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.send_redirects", "0"),
     ):
-        run(["sysctl", "-w", f"{key}={value}"])
+        write_sysctl(key, value)
 
 
 def ensure_masquerade(network: ipaddress.IPv4Network) -> None:
@@ -264,7 +284,13 @@ def create_tap(vmachine_id: str) -> str:
     if run(["ip", "link", "show", "dev", tap_name], check=False).returncode == 0:
         run(["ip", "link", "del", tap_name], check=False)
 
-    run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
+    # Owned by the user the hypervisor runs as, which is this process's: a tap with
+    # no owner can be opened by any local user (/dev/net/tun is 0666), and one owned
+    # by somebody else makes the hypervisor's TUNSETIFF fail with EPERM. Brought UP
+    # below, before the hypervisor starts, because a hypervisor without
+    # CAP_NET_ADMIN cannot bring it up itself (SIOCSIFFLAGS). Both are measured in
+    # docs/proposals/rootless-nodo.md.
+    run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap", "user", str(os.geteuid())])
     run(["ip", "link", "set", tap_name, "master", NETWORK_BRIDGE_NAME])
     # An isolated bridge port can only exchange frames with the bridge itself,
     # never with another isolated port, so a guest reaches its neighbours through

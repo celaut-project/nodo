@@ -13,11 +13,17 @@ PROTO_DIR="${ROOT_DIR}/protos"
 # independent buffer_pb2.py here would make Python's protobuf descriptor pool
 # reject one of the two with "duplicate file name buffer.proto" as soon as both
 # got imported into the same process.
+# protos/celaut_doc.binpb is celaut.proto's descriptor with its comments
+# (--include_source_info). The gencode drops the comments, and the node has no protoc at
+# run time. The prose of the celaut-gateway protocol layer is built from these comments
+# (src/identity/protocol_doc.py), so the comments are the only copy of that text.
 if python3 -c "import grpc_tools.protoc" >/dev/null 2>&1; then
   python3 -m grpc_tools.protoc \
     -I"${PROTO_DIR}" \
     --python_out="${PROTO_DIR}" \
     --grpc_python_out="${PROTO_DIR}" \
+    --include_source_info \
+    --descriptor_set_out="${PROTO_DIR}/celaut_doc.binpb" \
     "${PROTO_DIR}/celaut.proto" \
     --experimental_allow_proto3_optional
 
@@ -30,6 +36,8 @@ else
   protoc \
     -I"${PROTO_DIR}" \
     --python_out="${PROTO_DIR}" \
+    --include_source_info \
+    --descriptor_set_out="${PROTO_DIR}/celaut_doc.binpb" \
     "${PROTO_DIR}/celaut.proto" \
     --experimental_allow_proto3_optional
 

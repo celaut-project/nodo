@@ -110,6 +110,7 @@ class JavaDependencyLazyImportTests(unittest.TestCase):
         def _raise(*args, **kwargs):
             raise JavaDependencyMissing(build_java_dependency_message(feature="Ergo payments or reputation"))
 
+        fake_module.deposit_refusal_reason = lambda *args, **kwargs: None
         fake_module.increase_deposit_on_peer = _raise
         stdout = io.StringIO()
 

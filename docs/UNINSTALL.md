@@ -8,7 +8,16 @@ It is aligned with the current runtime model:
 - `nodo.service` exports `JAVA_HOME` and `PATH` from configured local paths.
 - No local Docker: services run under Cloud Hypervisor natively, or under QEMU when their architecture is not the host's. binfmt is not part of the install profile.
 
-## 1) Automatic uninstall (`uninstall.sh`)
+## 1) Automatic uninstall (`nodo uninstall`)
+
+Run `nodo uninstall` (or `sudo nodo uninstall`). The command runs `uninstall.sh`
+for the installation root of the `nodo` that you run. It accepts `--no-input`,
+which has the same meaning as for the script. The sections below describe the
+script, and you can also run it directly.
+
+The script has two modes. It selects the mode with the user that runs it.
+
+### 1.1) With sudo
 
 Use this if your installation root is the default `/nodo`.
 
@@ -25,6 +34,45 @@ What it does (best effort):
   stops the rootless BuildKit builder (and any `dockerd` left over from the
   retired Docker toolchain), and unmounts everything under `/nodo`.
 - Removes `/etc/systemd/system/nodo.service`, `/usr/local/bin/nodo`, and `/nodo`.
+- Removes the files that a node with a service user or without sudo adds:
+  `/etc/nodo/service-user`, `/usr/local/libexec/nodo/virtiofsd` and the AppArmor
+  profile `/etc/apparmor.d/nodo-virtiofsd`. It does not delete the service user.
+
+### 1.2) Without sudo
+
+Use this if you installed with `./install.sh` without sudo. The default
+installation root is `~/.local/share/nodo`. Use `--target-dir` for another root.
+
+```bash
+cd ~/.local/share/nodo
+./uninstall.sh
+```
+
+The script removes the files that you own:
+
+- The BuildKit builder processes.
+- The wrapper `~/.local/bin/nodo`.
+- The shell completion in `~/.local/share/bash-completion/completions/nodo`
+  and `~/.zsh/completions/_nodo`.
+- The installation root.
+
+The script cannot do these steps without root:
+
+- Stop and disable `nodo.service`. This stops every VM that the service runs.
+- Remove the unit `/etc/systemd/system/nodo.service`.
+- Remove `/etc/nodo/service-user`, `/usr/local/libexec/nodo/virtiofsd` and the
+  AppArmor profile `/etc/apparmor.d/nodo-virtiofsd`.
+- Unmount a mount point under the installation root.
+- Remove a file in the installation root that belongs to root, for example a
+  `.pyc` file that `sudo nodo doctor` wrote.
+
+The script prints each of these steps as an exact `sudo` command. It saves them
+to `<target-dir>/uninstall-privileged.sh`. It runs them only if you answer yes.
+It removes nothing from the installation root until the root steps are done.
+
+With `--no-input`, the script only prints and saves the steps, and stops. Run the
+saved script, then run `./uninstall.sh` again. The second run asks for no root
+steps and removes your files. A step is only listed when it is still necessary.
 
 > **Note:** the script does **not** clean up running Cloud Hypervisor microVMs.
 > CH instances are subprocess children of the daemon (not systemd units), so

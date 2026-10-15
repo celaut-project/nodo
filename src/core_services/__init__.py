@@ -33,6 +33,11 @@ BITCOIN_NODE = "bitcoin-node"
 # and no real workloads; always preempted by real/paid execute requests. See
 # :mod:`src.core_services.low_demand` and ``docs/design/low-demand-fallback.md``.
 LOW_DEMAND_FALLBACK = "low-demand-fallback"
+# Optional: measures this node's per-core benchmark scores at startup, while any of
+# them is still -1 in config.yaml. One id, or a list of ids (one per architecture),
+# unlike every other role -- read by :func:`src.core_services.benchmark.configured_service_ids`,
+# not by :func:`get_core_service_id`. See :mod:`src.core_services.benchmark`.
+BENCHMARK = "benchmark"
 
 _env_manager = ConfigManager()
 

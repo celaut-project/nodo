@@ -18,8 +18,12 @@ from src.manager.manager import get_execute_client
 from src.identity.grpc_transport import local_channel
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
+from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
 from src.utils.instance_names import inject_instance_name
 from src.utils.registry_errors import ServiceRegistryError
+from src.utils import service_envs
+from src.utils.utils import load_service_from_disk
 
 env_manager = ConfigManager()
 
@@ -68,12 +72,11 @@ DEV_CLIENT_FUNDING_MU = 10**12
 def generator(
     _hash: str,
     client_funding_mu: int = DEV_CLIENT_FUNDING_MU,
-    external: bool = False,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
 ) -> Generator[Any, None, None]:
     try:
-        client_id = get_execute_client(amount_mu=client_funding_mu, external=external)
+        client_id = get_execute_client(amount_mu=client_funding_mu)
     except Exception:
         raise RuntimeError("No execute client available.")
 
@@ -84,7 +87,7 @@ def generator(
         # deposits.INITIAL_RUNTIME_HOURS, in its own MU.
         config = celaut_pb2.Configuration()
         if envs:
-            config.environment_variables.update({
+            keyvalue.update(config.environment_variables, {
                 k: v.encode() for k, v in envs.items()
             })
         inject_instance_name(config=config, instance_name=instance_name)
@@ -200,38 +203,27 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
             channel.close()
 
 
-def _dim(text: str) -> str:
-    """Dim, but only where something will render it -- never escape noise in a pipe."""
-    if not sys.stdout.isatty():
-        return text
-    return f"\033[2m{text}\033[0m"
+#: `execute --remote` is gone (#437): the address `execute` hands back is only
+#: meaningful on the machine that ran it, and `nodo tunnel` is the one way to reach
+#: an instance from anywhere else. Refused loudly rather than ignored, so a script
+#: still passing it learns why instead of getting a loopback address that looks right.
+REMOVED_REMOTE_FLAG_ERROR = (
+    "Error: `nodo execute --remote` was removed. The address `execute` prints is only "
+    "reachable from this host; to reach the instance from elsewhere use "
+    "`nodo tunnel <instance> <slot> --peer <node address>:<gateway port>` "
+    "(see docs/TUNNELING.md). To have `execute` also publish on this host's own "
+    f"interface, set {HOST_EXPOSURE_KEY}."
+)
 
 
-def print_lan_reachability_note(response) -> None:
-    """Footnote for `--remote`: the address handed out is the node's LAN address.
-
-    That is the point of the flag -- an external client gets the address the node
-    is reachable at on its own network, not the guest-internal one -- and it is
-    exactly what an operator connected over SSH from somewhere else cannot use.
-    Nothing has gone wrong when that happens, so this stays a footnote.
-    """
-    slot = next(
-        (uri_slot.internal_port for uri_slot in response.instance.uri_slot),
-        "<slot>",
-    )
-    token = response.token or "<instance>"
-
-    print(_dim(
-        "\n  Note: that address is the one the node is reachable at on its own local\n"
-        "  network, so it only answers from a machine on that network. Over the\n"
-        "  internet it is unroutable, whatever you forward on your side. To reach the\n"
-        "  instance from elsewhere, run a node where you are and tunnel in through\n"
-        "  this one:\n"
-        f"      nodo tunnel {token} {slot} --peer <node address>:<gateway port>"
-    ))
+def reject_removed_remote_flag(args: list[str]) -> None:
+    """Exit with ``REMOVED_REMOTE_FLAG_ERROR`` if ``args`` still carries `--remote`."""
+    if "--remote" in args:
+        print(REMOVED_REMOTE_FLAG_ERROR, flush=True)
+        sys.exit(1)
 
 
-def print_endpoints(response, remote: bool = False) -> None:
+def print_endpoints(response) -> None:
     """Print the HTTP endpoints (if any) a `ServiceInstance` response exposes."""
     endpoints: list[str] = []
     for slot in response.instance.api.slot:
@@ -255,27 +247,136 @@ def print_endpoints(response, remote: bool = False) -> None:
     else:
         print("No endpoints available")
 
-    if remote:
-        print_lan_reachability_note(response)
+
+def print_host_exposure_note(response) -> None:
+    """With ``HOST_EXPOSURE_KEY`` on, say whether the instance made it onto the host interface.
+
+    The gateway resolves the address from the same config this process reads, so the
+    CLI re-resolves it to tell a published instance (its URIs carry that address)
+    from one that stayed internal -- and says why, instead of letting an internal
+    address pass for a host one.
+    """
+    if not env_manager.get(HOST_EXPOSURE_KEY, False) or not response.instance.uri_slot:
+        return
+    advertised = {uri.ip for uri_slot in response.instance.uri_slot for uri in uri_slot.uri}
+    try:
+        host_ip = resolve_from_config(env_manager.get)
+    except HostInterfaceUnresolved as e:
+        reason = f"no host interface address resolves ({e}); set network.EXTERNAL_INTERFACE or network.PUBLIC_IP"
+    else:
+        if host_ip in advertised:
+            print(f"\n  Published on this host's interface ({host_ip}) by {HOST_EXPOSURE_KEY}.")
+            return
+        reason = "the gateway kept it internal (see the gateway log)"
+
+    slot = next((uri_slot.internal_port for uri_slot in response.instance.uri_slot), "<slot>")
+    token = response.token or "<instance>"
+    print(
+        f"\n  Warning: {HOST_EXPOSURE_KEY} is on, but the instance was not published on "
+        f"this host's interface: {reason}.\n"
+        "  The address above is internal to the node's host. To reach the instance from "
+        "elsewhere:\n"
+        f"      nodo tunnel {token} {slot} --peer <node address>:<gateway port>"
+    )
+
+
+def _describe_env(spec: service_envs.EnvSpec) -> str:
+    if spec.required:
+        need = f"required by network {'; '.join(spec.networks)}"
+    else:
+        need = "optional, Enter to skip"
+    lines = [f"  {spec.name} ({need})"]
+    if spec.tags:
+        lines.append(f"    format: {', '.join(spec.tags)}")
+    if spec.prose:
+        lines.append(f"    {spec.prose}")
+    return "\n".join(lines)
+
+
+def complete_envs(
+    service_hash: str,
+    envs: dict[str, str] | None,
+    interactive: bool,
+) -> dict[str, str] | None:
+    """``envs`` plus whatever the service declares and the caller left out, or None to abort.
+
+    Interactive: asks for each missing variable; a required one is asked again until it
+    has a value, an optional one is skipped on Enter. Otherwise nothing is asked: a
+    missing required variable aborts the launch and a missing optional one is reported.
+
+    Values are never printed, only names: one of them may be a secret.
+    """
+    envs = dict(envs or {})
+    try:
+        specs = service_envs.env_specs(load_service_from_disk(service_hash=service_hash))
+    except ServiceRegistryError:
+        # The launch reports why the spec cannot be read; the check has nothing to say.
+        return envs
+
+    missing = service_envs.missing_envs(specs, envs)
+    if not missing:
+        return envs
+
+    if not interactive:
+        required = [spec.name for spec in missing if spec.required]
+        if required:
+            print(
+                f"❌ Missing required env var{'s' if len(required) > 1 else ''}: "
+                f"{', '.join(required)}. Give each with -e <key> <value>.",
+                flush=True,
+            )
+            return None
+        print(
+            f"⚠️  Optional env vars not given, so not set: "
+            f"{', '.join(spec.name for spec in missing)}. Give them with -e <key> <value>.",
+            flush=True,
+        )
+        return envs
+
+    print("The service declares env vars that were not given with -e:", flush=True)
+    for spec in missing:
+        print(_describe_env(spec), flush=True)
+        while True:
+            try:
+                value = input(f"  {spec.name} = ")
+            except (EOFError, KeyboardInterrupt):
+                print("\n❌ Cancelled.", flush=True)
+                return None
+            candidate = {**envs, spec.name: value}
+            if value == "" and not spec.required:
+                break
+            if service_envs.is_answered(spec, candidate):
+                envs = candidate
+                break
+            print(f"  {spec.name} is required and needs a value on one line.", flush=True)
+    return envs
 
 
 def execute(
     service: str,
-    external: bool = False,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
-    silent: bool = False
+    silent: bool = False,
+    check_envs: bool = False,
+    ask_envs: bool = False,
 ):
+    """Launch ``service`` through this node's gateway.
+
+    ``check_envs`` compares ``envs`` with the variables the service declares
+    (:func:`complete_envs`), asking for the missing ones when ``ask_envs`` is set. Both
+    are off by default so a programmatic caller (``core_services.runtime``) launches
+    exactly as before; ``nodo execute`` turns them on.
+    """
     sink = open(os.devnull, "w") if silent else None
 
     try:
         resolved = resolve_service_hash(service)
         if not resolved:
-            # The service isn't in the local registry. Before refusing, try to acquire it
-            # through the 'source-application' core service: it maps the requested service id
-            # to its published sources and downloads it via the existing download/import path.
-            # This only succeeds when a trusted source-application is configured in
-            # 'core_services'; otherwise it's a no-op and we fall through to the error below.
+            # The service isn't in the local registry. Before refusing, try to acquire it:
+            # first from the known peers, then through the 'source-application' core
+            # service, which maps the requested service id to its published sources and
+            # downloads it via the existing download/import path. If neither provides it,
+            # we fall through to the error below.
             if acquire_service(service):
                 resolved = resolve_service_hash(service)
 
@@ -285,11 +386,15 @@ def execute(
 
         service = resolved
 
+        if check_envs:
+            envs = complete_envs(service_hash=service, envs=envs, interactive=ask_envs)
+            if envs is None:
+                return
+
         response = launch_via_gateway(
             service=service,
             input_generator=generator(
                 _hash=service,
-                external=external,
                 envs=envs,
                 instance_name=instance_name,
             ),
@@ -298,7 +403,8 @@ def execute(
         if response is None:
             return
 
-        print_endpoints(response, remote=external)
+        print_endpoints(response)
+        print_host_exposure_note(response)
 
     finally:
         if sink:

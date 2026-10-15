@@ -17,6 +17,7 @@ Two entry points:
 """
 
 import os
+import shutil
 import sqlite3
 import sys
 from typing import Dict, List, Optional
@@ -28,6 +29,7 @@ from typing import Dict, List, Optional
 SERVICE_COMMANDS = [
     "execute",
     "estimate",
+    "service_envs",
     "inspect",
     "remove",
     "publish",
@@ -35,10 +37,15 @@ SERVICE_COMMANDS = [
     "export",
     "integrity",
     "get",
+    "services",
 ]
 
 # Commands whose first positional argument is an instance id.
 INSTANCE_COMMANDS = ["kill", "observe", "increase_deposit", "decrease_deposit", "tunnel"]
+
+# Commands whose first positional argument is a dead local instance (its saved
+# logs). `logs` takes no argument otherwise, so the instance is optional.
+DEAD_INSTANCE_COMMANDS = ["logs"]
 
 # Commands whose first positional argument is a peer id.
 PEER_COMMANDS = [
@@ -51,10 +58,20 @@ PEER_COMMANDS = [
     "chat",
     "chat_open",
     "chat_threads",
+    "peers",
+    "refresh_peers",
+    "peer_reputation",
+    "protocol",
 ]
 
 # Commands whose first positional argument is a client id.
-CLIENT_COMMANDS = ["credit_client", "debit_client"]
+CLIENT_COMMANDS = ["credit_client", "debit_client", "clients"]
+
+# Commands whose first positional argument is a running tunnel's id.
+TUNNEL_COMMANDS = ["tunnels", "tunnel_close"]
+
+# Commands whose first positional argument is a pack's id (`<storage>/packs`).
+PACK_COMMANDS = ["packs", "pack_cancel"]
 
 # Commands whose first positional argument is a filesystem path (a project dir,
 # a .bee file, a config dir, …). These get file/dir completion, not an id list.
@@ -71,6 +88,13 @@ COMMANDS = sorted(
     {
         "help",
         "logs",
+        "status",
+        "config",
+        "docs",
+        "earnings",
+        "energy",
+        "schedule",
+        "peer_reputation",
         "export",
         "import",
         "publish",
@@ -80,11 +104,15 @@ COMMANDS = sorted(
         "execute",
         "force_execution",
         "estimate",
+        "service_envs",
         "update",
+        "uninstall",
         "kill",
         "burnall",
         "observe",
         "tunnel",
+        "tunnels",
+        "tunnel_close",
         "increase_deposit",
         "decrease_deposit",
         "remove",
@@ -94,11 +122,14 @@ COMMANDS = sorted(
         "tag",
         "clients",
         "peers",
+        "refresh_peers",
+        "protocol",
         "instances",
         "connect",
         "disconnect",
         "reputation",
         "donations",
+        "resources",
         "submit_reputation",
         "sync_reputation_proof",
         "refresh_ergo_nodes",
@@ -108,6 +139,8 @@ COMMANDS = sorted(
         "storage:prune_blocks",
         "test",
         "pack",
+        "packs",
+        "pack_cancel",
         "tui",
         "ggconf",
         "nat-guide",
@@ -158,6 +191,7 @@ def config_paths() -> Dict[str, Optional[str]]:
         "registry": env.get("REGISTRY"),
         "metadata": env.get("METADATA_REGISTRY"),
         "database": env.get("DATABASE_FILE"),
+        "storage": env.get("main.STORAGE"),
     }
 
 
@@ -230,7 +264,14 @@ def _sqlite_column(database: Optional[str], query: str) -> List[str]:
 
 def instance_candidates(database: Optional[str]) -> List[str]:
     """Instance ids and their human-friendly names."""
-    return _sqlite_column(database, "SELECT id, name FROM local_instances")
+    return _sqlite_column(database, "SELECT id, name FROM local_instances WHERE killed_at IS NULL")
+
+
+def dead_instance_candidates(database: Optional[str]) -> List[str]:
+    """Ids and names of the dead local instances, for `nodo logs`."""
+    return _sqlite_column(
+        database, "SELECT id, name FROM local_instances WHERE killed_at IS NOT NULL"
+    )
 
 
 def peer_candidates(database: Optional[str]) -> List[str]:
@@ -241,6 +282,37 @@ def peer_candidates(database: Optional[str]) -> List[str]:
 def client_candidates(database: Optional[str]) -> List[str]:
     """Known client ids."""
     return _sqlite_column(database, "SELECT id FROM clients")
+
+
+def tunnel_candidates(storage: Optional[str]) -> List[str]:
+    """Ids of the tunnels registered under ``<storage>/tunnels`` (see
+    ``src/utils/tunnel_registry.py``). File names only: completion has no time to
+    check each pid, and ``nodo tunnels`` sweeps the dead ones anyway."""
+    directory = os.environ.get("NODO_TUNNELS_DIR") or (
+        os.path.join(storage, "tunnels") if storage else None
+    )
+    if not directory:
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    return [name[: -len(".json")] for name in names if name.endswith(".json")]
+
+
+def pack_candidates(storage: Optional[str]) -> List[str]:
+    """Ids of the packs recorded under ``<storage>/packs`` (see
+    ``src/utils/pack_registry.py``)."""
+    directory = os.environ.get("NODO_PACKS_DIR") or (
+        os.path.join(storage, "packs") if storage else None
+    )
+    if not directory:
+        return []
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    return [name[: -len(".json")] for name in names if name.endswith(".json")]
 
 
 def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> List[str]:
@@ -258,10 +330,16 @@ def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> L
         return service_candidates(paths.get("registry"), paths.get("metadata"))
     if kind == "instances":
         return instance_candidates(paths.get("database"))
+    if kind == "dead_instances":
+        return dead_instance_candidates(paths.get("database"))
     if kind == "peers":
         return peer_candidates(paths.get("database"))
     if kind == "clients":
         return client_candidates(paths.get("database"))
+    if kind == "tunnels":
+        return tunnel_candidates(paths.get("storage"))
+    if kind == "packs":
+        return pack_candidates(paths.get("storage"))
     if kind == "refs":
         return (
             service_candidates(paths.get("registry"), paths.get("metadata"))
@@ -312,8 +390,11 @@ _nodo_completion() {{
         case "$cmd" in
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
+            {"|".join(DEAD_INSTANCE_COMMANDS)}) kind="dead_instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
+            {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
+            {"|".join(PACK_COMMANDS)}) kind="packs" ;;
             {"|".join(PATH_COMMANDS)}) _nodo_paths; return 0 ;;
             daemon)
                 COMPREPLY=( $(compgen -W "{_quote_words(DAEMON_SUBCOMMANDS)}" -- "$cur") )
@@ -370,8 +451,11 @@ _nodo() {{
         case $cmd in
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
+            {"|".join(DEAD_INSTANCE_COMMANDS)}) kind="dead_instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
+            {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
+            {"|".join(PACK_COMMANDS)}) kind="packs" ;;
             {"|".join(PATH_COMMANDS)}) _files; return ;;
             daemon)
                 items=({_quote_words(DAEMON_SUBCOMMANDS)})
@@ -411,6 +495,29 @@ def _completion_targets(user: bool) -> Dict[str, str]:
         "bash": "/etc/bash_completion.d/nodo",
         "zsh": "/usr/local/share/zsh/site-functions/_nodo",
     }
+
+
+def zsh_fpath_hint(user: bool) -> Optional[str]:
+    """Tell the user how to enable zsh completion after a per-user install.
+
+    zsh does not search ``~/.zsh/completions`` by default. Return ``None`` when
+    the note is not needed: system install, zsh not installed, or ``.zshrc``
+    already names the directory. We never edit ``.zshrc`` ourselves.
+    """
+    if not user or shutil.which("zsh") is None:
+        return None
+    zshrc = os.path.join(os.path.expanduser("~"), ".zshrc")
+    try:
+        with open(zshrc, "r", encoding="utf-8", errors="replace") as handle:
+            if ".zsh/completions" in handle.read():
+                return None
+    except OSError:
+        pass
+    return (
+        "zsh does not search ~/.zsh/completions by default. Add this line to "
+        "~/.zshrc, before `compinit`:\n"
+        "  fpath=(~/.zsh/completions $fpath)"
+    )
 
 
 def install(nodo_dir: str, python_bin: str, user: Optional[bool] = None) -> List[str]:
@@ -481,11 +588,14 @@ def main(argv: List[str]) -> int:
             "install directory is on your `fpath`.",
             flush=True,
         )
+        hint = zsh_fpath_hint(user if user is not None else os.geteuid() != 0)
+        if hint:
+            print(f"\n{hint}", flush=True)
         return 0
 
     print(
         "Usage: nodo completion <bash|zsh|install [--user|--system]>\n"
-        "       nodo completion list <commands|services|instances|peers|refs>",
+        "       nodo completion list <commands|daemon|services|instances|peers|clients|tunnels|packs|refs>",
         flush=True,
     )
     return 0 if action == "help" else 1

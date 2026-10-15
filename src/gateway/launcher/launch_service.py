@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 import traceback
 
 from protos import celaut_pb2 as celaut, celaut_pb2
@@ -11,15 +11,25 @@ from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
+from src.utils.cost_functions.architecture_resources import executes_locally
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.utils.network_policy import enforce_network_policy
-from src.manager.shares import ShareAuthorizationError, authorize_shares
-from src.utils.shared_filesystems import service_requires_parent_colocation
+from src.manager.shares import ShareAuthorizationError, authorize_network_shares, authorize_shares
+from src.manager.share_location import LOCAL, ShareLocationConflict, locate_network_shares
+from src.utils.shared_filesystems import declarations_for_service, service_requires_parent_colocation
+from src.virtualizers.microvm import virtiofsd
 
 sc = SQLConnection()
+
+# The forced-peer hint that pins a launch to THIS node instead of a peer: the balancer's
+# own name for the local candidate. A peer id is a public key in hex, so no peer can be
+# called this. Set by a measurement that is only meaningful here -- the benchmark core
+# service (src/core_services/benchmark.py) scores the node that runs it, and a peer that
+# won the cost comparison would hand back that peer's numbers as ours.
+FORCED_LOCAL = 'local'
 
 
 def _detect_local_preflight_failure(
@@ -27,6 +37,11 @@ def _detect_local_preflight_failure(
         metadata: celaut.Metadata,
         configuration: celaut_pb2.Configuration,
 ) -> Optional[str]:
+    # A node that runs nothing itself has no local failure to explain: it never tried
+    # to run the service here, and "local preflight: insufficient resources" in the
+    # error would send the operator looking at a machine that was never asked.
+    if not executes_locally():
+        return None
     try:
         estimated_cost = generate_estimated_cost(
             resources=service.container.resources,
@@ -38,7 +53,9 @@ def _detect_local_preflight_failure(
         if estimated_cost:
             return None
 
-        availability = get_resource_availability(service.container.resources)
+        availability = get_resource_availability(
+            service.container.resources, arch=get_arch_tag(service=service, metadata=metadata)
+        )
         return availability.get("reason") or "Local execution was rejected due to insufficient resources."
     except UnsupportedArchitectureException as exc:
         return str(exc)
@@ -74,6 +91,7 @@ def _force_delegate(
         father_id: str,
         father_ip: str,
         recursion_guard_token: str,
+        share_nodes: Optional[List[str]] = None,
 ) -> celaut_pb2.ServiceInstance:
     """`nodo force_execution`'s bypass: delegate straight to `forced_peer`, with
     no comparison against `local` or any other peer, and no cheapest-first
@@ -92,6 +110,12 @@ def _force_delegate(
             f"'{forced_peer}'."
         )
 
+    if share_nodes and forced_peer not in share_nodes:
+        raise Exception(
+            f"force_execution: service {service_id} is a member of a network share "
+            f"held on {', '.join(share_nodes)}; it cannot be forced onto peer '{forced_peer}'."
+        )
+
     log.LOGGER(f"force_execution: bypassing the balancer, delegating straight to peer {forced_peer}.")
 
     estimated_cost = estimate_cost_on_peer(
@@ -99,7 +123,6 @@ def _force_delegate(
         resources=service.container.resources,
         metadata=metadata,
         configuration=configuration,
-        recursion_guard_token=recursion_guard_token,
     )
     if estimated_cost is None:
         raise Exception(
@@ -150,11 +173,13 @@ def launch_service(
         service_id: str = None,
         configuration: Optional[celaut_pb2.Configuration] = None,
         recursion_guard_token: str = None,
+        recursion_guard_hops: Optional[int] = None,
 ) -> celaut_pb2.ServiceInstance:
 
     with RecursionGuard(
             token=recursion_guard_token,
-            generate=bool(father_id)  # Use only if is from outside.
+            generate=bool(father_id),  # Use only if is from outside.
+            remaining_hops=recursion_guard_hops,
     ) as recursion_guard_token:
 
         # Check father id.
@@ -238,11 +263,44 @@ def launch_service(
         # `_detect_local_preflight_failure`, which reports a *local* failure worth
         # trying another candidate for. There is no other candidate: the export is
         # materialized from the parent's own rootfs, on the parent's own node.
+        #
+        # A network share (#268) needs no exporter, but it is held on one node: a
+        # member placed anywhere else would get an empty directory under the same
+        # id. So the node that holds it is found here, before the balancer, and the
+        # member runs there. When no node holds it yet, placement is free.
         try:
             authorize_shares(service=service, father_id=father_id, config=configuration)
-        except ShareAuthorizationError as e:
+            network_shares = authorize_network_shares(
+                service=service, father_id=father_id, config=configuration
+            )
+            share_nodes = locate_network_shares(
+                network_shares, ignore_network=utils.get_network_name(direction=father_ip)
+            )
+        except (ShareAuthorizationError, ShareLocationConflict) as e:
             log.LOGGER(f"Refusing to launch service {service_id}: {e}")
             raise Exception(f"Unable to launch service {service_id}: {e}") from e
+        if share_nodes:
+            log.LOGGER(
+                f"Service {service_id} is a member of a network share held on "
+                f"{', '.join(share_nodes)}; restricting execution to them."
+            )
+
+        # Every share is served by a virtiofsd on this host, so check it here too,
+        # before anything is charged or built (#478). A service with a `guest`
+        # directory can only run here, so a missing daemon ends the launch. A service
+        # that only exports can still run on a peer: this node stops being a
+        # candidate, and the reason goes into the failure message if no peer takes it.
+        local_virtiofsd_failure = None
+        share_declarations = declarations_for_service(service)
+        if share_declarations:
+            try:
+                virtiofsd.require_usable()
+            except virtiofsd.VirtiofsdUnavailable as e:
+                if any(d.guest for d in share_declarations) or share_nodes == [LOCAL]:
+                    log.LOGGER(f"Refusing to launch service {service_id}: {e}")
+                    raise Exception(f"Unable to launch service {service_id}: {e}") from e
+                log.LOGGER(f"Service {service_id} cannot run on this node: {e}")
+                local_virtiofsd_failure = str(e)
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
@@ -253,7 +311,15 @@ def launch_service(
         # one launch. No fallback to the balancer if this fails: forced means
         # forced.
         forced_peer = sc.pop_forced_execution_peer(recursion_guard_token) if recursion_guard_token else None
-        if forced_peer:
+        pin_local = forced_peer == FORCED_LOCAL
+        if pin_local and share_nodes and LOCAL not in share_nodes:
+            raise Exception(
+                f"Unable to launch service {service_id}: it is pinned to the local node, "
+                f"but it is a member of a network share held on {', '.join(share_nodes)}."
+            )
+        if pin_local:
+            log.LOGGER(f"Service {service_id} is pinned to the local node (no delegation).")
+        elif forced_peer:
             return _force_delegate(
                 forced_peer=forced_peer,
                 service=service,
@@ -263,6 +329,7 @@ def launch_service(
                 father_id=father_id,
                 father_ip=father_ip,
                 recursion_guard_token=recursion_guard_token,
+                share_nodes=share_nodes,
             )
 
         local_preflight_failure = _detect_local_preflight_failure(
@@ -307,6 +374,17 @@ def launch_service(
                     log.LOGGER(
                         f"Skipping peer {peer}: service must be co-located with its parent."
                     )
+                    continue
+                if pin_local and peer != 'local':
+                    log.LOGGER(f"Skipping peer {peer}: this launch is pinned to the local node.")
+                    continue
+                if share_nodes and peer not in share_nodes:
+                    log.LOGGER(
+                        f"Skipping peer {peer}: the network share is held on {', '.join(share_nodes)}."
+                    )
+                    continue
+                if local_virtiofsd_failure and peer == 'local':
+                    launch_failures.append(f"local: {local_virtiofsd_failure}")
                     continue
 
                 log.LOGGER(f'Service balancer select peer {peer}')
@@ -382,6 +460,14 @@ def launch_service(
                 "co-location: service inherits a shared filesystem from its parent "
                 "but the local node could not execute it, and delegation is not "
                 "allowed for parent-inherited filesystems."
+            )
+
+        if share_nodes and not any(
+            f.startswith(f"{node}:") for f in launch_failures for node in share_nodes
+        ) and not (LOCAL in share_nodes and local_attempted):
+            launch_failures.append(
+                f"network share: the share is held on {', '.join(share_nodes)}, and the "
+                f"balancer did not offer any of those nodes as a candidate."
             )
 
         _err_msg = _format_launch_failure(

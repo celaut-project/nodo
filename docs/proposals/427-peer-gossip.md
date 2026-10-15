@@ -56,7 +56,7 @@ manager error.
 ## Limits and runtime behavior
 
 See [CONFIG](../CONFIG.md#transitive-peer-discovery-gossip) for all five live config
-keys and CELL profile defaults. List responses cap at 100 eligible advertisements.
+keys and POLICIES profile defaults. List responses cap at 100 eligible advertisements.
 Pull also caps at 100 messages locally, counting malformed/rejected candidates
 against the cap, and closes the stream/channel when finished. One pull RPC has a
 10s deadline. Push caps at 20 advertisements, excludes its target, and has one shared
@@ -130,7 +130,7 @@ wiring, and a real localhost gRPC stream through the actual Gateway handler. A r
 SQLite/signature test checks A learning C from B, refusal of a forged C, and retention
 of a newer C announcement against replay, that A never registers its own relayed
 advertisement, and that a gossip-learned peer is not auto-funded while a connected one
-is. CELL tests pin all five profile postures.
+is. the profile tests pin every profile posture.
 
 Full daemon smoke recipe: seed A↔B and B↔C only, lower the interval for the test, and
 watch A register C when C announces only public addresses. Repeat with C announcing

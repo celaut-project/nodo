@@ -1,25 +1,25 @@
 """A bitcoind this node runs itself, seeded from a mnemonic it holds.
 
-The third way of reaching Bitcoin, and the one that finally lets a node **pay** in it
-without asking anything of its operator's infrastructure:
+One of three ways of reaching Bitcoin, all of which can be paid and can pay:
 
-* ``explorer`` is a public HTTP API. No key, nothing to run, and the node can only be
-  paid -- which is the half that matters when you are earning.
-* ``core`` is a bitcoind the operator installed and trusts with a wallet. It signs, so
-  the node can pay, but somebody has to run it and back it up.
+* ``explorer`` is a public HTTP API, with the key derived from the mnemonic and every
+  transaction signed by nodo (``signer.py``). Nothing to run.
+* ``core`` is a bitcoind the operator installed and trusts with a wallet. It signs, but
+  somebody has to run it and back it up.
 * ``service`` is this one: the same bitcoind, run by the node as a **core service**,
   with its wallet derived from ``ledgers.bitcoin.WALLET_MNEMONIC``. The operator backs
   up one mnemonic, the way they already do for Ergo, and the node brings the rest up.
+  It is for a node that wants a full node's view of the chain rather than trusting an
+  explorer's.
 
 Nothing about the payment flow changes: this is a different way to *reach* Core, not a
 different contract. The JSON-RPC client is the same :class:`ChainBackend`, so what signs
-a sweep to cold storage or a donation payout is Core -- nodo still builds no raw Bitcoin
-transaction, which is what made local signing "not here" until now.
+a sweep to cold storage or a donation payout is Core.
 
 **What is nodo's and what is the service's.** Nodo holds the mnemonic and hands it over
-at launch; the service derives the wallet from it and holds the keys. Nodo never derives
-a Bitcoin key, never asks for one, and asks Core for a receiving address like any other
-``core`` deployment. The derivation is therefore the *service's* contract, and it is
+at launch; the service derives the wallet from it and holds the keys. This backend derives
+no Bitcoin key itself and asks Core for a receiving address like any other ``core``
+deployment. The derivation is therefore the *service's* contract, and it is
 stated in docs/BITCOIN.md so the operator can open the same wallet in any BIP-84 tool
 with nothing but the mnemonic: ``m/84'/0'/0'`` on mainnet, ``m/84'/1'/0'`` on the test
 networks, P2WPKH, which is the address type ``new_address`` asks Core for.
@@ -27,8 +27,7 @@ networks, P2WPKH, which is the address type ``new_address`` asks Core for.
 **Where the secret goes, said plainly.** The mnemonic lives in ``config.yaml`` (like
 Ergo's) and is passed to the instance as an environment variable, which the node also
 records against the instance -- redacted, see ``local_execution._serialize_envs``. It is
-never sent to a peer, never logged, and never leaves this machine. A node that would
-rather hold no Bitcoin key at all should stay on ``explorer``: it can still be paid.
+never sent to a peer, never logged, and never leaves this machine.
 
 **Attaching versus launching**, because the difference is a hung payment path. This
 module's ``backend()`` only *attaches* to an instance that is already running: it is

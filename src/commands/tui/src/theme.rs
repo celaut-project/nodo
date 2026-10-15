@@ -3,9 +3,9 @@
 //! Fields are named for the role they play (`good`, `warn`, `bad`) rather than for
 //! the colour, so adding a widget does not add a field.
 //!
-//! `ubuntu` is the default and states its palette in RGB, because naming a specific
-//! palette is what it is for. The others use named ANSI colours and so inherit what
-//! the operator's terminal means by "red".
+//! `dark` is the default. It uses named ANSI colours, so it inherits what the
+//! operator's terminal means by "red". `ubuntu` states its palette in RGB, because
+//! naming a specific palette is what it is for.
 
 use ratatui::style::Color;
 
@@ -16,8 +16,12 @@ pub struct Theme {
     pub name: &'static str,
     /// Selected tabs, focused borders, the node's own identity.
     pub accent: Color,
-    /// Labels, dividers and help text: there to be read past rather than read.
+    /// Borders, dividers and help text: there to be read past rather than read.
     pub muted: Color,
+    /// The name beside a value (`Status`, `Address`). Lighter than `muted`, which in
+    /// the ubuntu palette is a purple only a little brighter than its own
+    /// background: fine for a border, too faint for a word the operator has to read.
+    pub label: Color,
     /// Working, healthy, running, local.
     pub good: Color,
     /// Worth a look, not yet a problem.
@@ -41,7 +45,7 @@ pub struct Theme {
     pub series: [Color; 4],
 }
 
-/// The Ubuntu terminal palette, and the default.
+/// The Ubuntu terminal palette.
 ///
 /// Ubuntu's own orange and aubergine, with the standard Ubuntu ANSI set for the
 /// rest, so a nodo console beside `htop` in the same terminal agrees with it about
@@ -50,6 +54,7 @@ pub const UBUNTU: Theme = Theme {
     name: "ubuntu",
     accent: Color::Rgb(0xE9, 0x54, 0x20),
     muted: Color::Rgb(0x77, 0x21, 0x6F),
+    label: Color::Rgb(0xC8, 0xA2, 0xC8),
     good: Color::Rgb(0x4E, 0x9A, 0x06),
     warn: Color::Rgb(0xC4, 0xA0, 0x00),
     bad: Color::Rgb(0xCC, 0x00, 0x00),
@@ -66,12 +71,12 @@ pub const UBUNTU: Theme = Theme {
     ],
 };
 
-/// The palette this console had before themes existed, kept so an operator used to
-/// the cyan accent can keep it.
+/// The palette this console had before themes existed, and the default.
 pub const DARK: Theme = Theme {
     name: "dark",
     accent: Color::Cyan,
     muted: Color::DarkGray,
+    label: Color::Gray,
     good: Color::Green,
     warn: Color::Yellow,
     bad: Color::Red,
@@ -96,6 +101,7 @@ pub const LIGHT: Theme = Theme {
     name: "light",
     accent: Color::Blue,
     muted: Color::Gray,
+    label: Color::DarkGray,
     good: Color::Green,
     warn: Color::Rgb(0xB0, 0x70, 0x00),
     bad: Color::Red,
@@ -116,6 +122,7 @@ pub const MONO: Theme = Theme {
     name: "mono",
     accent: Color::White,
     muted: Color::DarkGray,
+    label: Color::Gray,
     good: Color::White,
     warn: Color::White,
     bad: Color::White,
@@ -131,32 +138,32 @@ pub const MONO: Theme = Theme {
     series: [Color::White, Color::Gray, Color::White, Color::Gray],
 };
 
-/// Every theme, in the order the CONFIG page offers them.
+/// Every theme, in the order the ALL page offers them.
 pub const ALL: [Theme; 4] = [UBUNTU, DARK, LIGHT, MONO];
 
-/// The names `ui.THEME` accepts, for the CONFIG page's picker and for an error
+/// The names `ui.THEME` accepts, for the ALL page's picker and for an error
 /// message that can list them.
 pub const NAMES: [&str; 5] = ["default", "ubuntu", "dark", "light", "mono"];
 
 impl Default for Theme {
     fn default() -> Self {
-        UBUNTU
+        DARK
     }
 }
 
 impl Theme {
-    /// The theme called `name`, or [`UBUNTU`] for anything unrecognised.
+    /// The theme called `name`, or [`DARK`] for anything unrecognised.
     ///
     /// An unknown name falls back rather than failing: a console that refuses to
     /// start over a misspelt colour scheme cannot be used to fix the misspelling.
     pub fn by_name(name: &str) -> Theme {
         let name = name.trim().to_ascii_lowercase();
         if name.is_empty() || name == "default" {
-            return UBUNTU;
+            return DARK;
         }
         ALL.into_iter()
             .find(|theme| theme.name == name)
-            .unwrap_or(UBUNTU)
+            .unwrap_or(DARK)
     }
 
     /// The theme this run should use: `--theme` beats `NODO_TUI_THEME` beats
@@ -180,7 +187,7 @@ impl Theme {
             .and_then(|value| value.as_str());
         match configured {
             Some(name) => Theme::by_name(name),
-            None => UBUNTU,
+            None => DARK,
         }
     }
 }
@@ -234,14 +241,14 @@ fn theme_flag(argv: &[String]) -> Option<String> {
 /// forty-odd draw functions for a value that never changes.
 ///
 /// `RwLock` rather than `OnceLock` so the tests can pin a theme and put it back.
-static CURRENT: std::sync::RwLock<Theme> = std::sync::RwLock::new(UBUNTU);
+static CURRENT: std::sync::RwLock<Theme> = std::sync::RwLock::new(DARK);
 
 /// The theme in force. Every colour in `ui.rs` comes from here.
 ///
 /// Falls back to the default on a poisoned lock: the worst case is one frame in the
 /// wrong colour, which beats a console that cannot draw.
 pub fn current() -> Theme {
-    CURRENT.read().map(|theme| *theme).unwrap_or(UBUNTU)
+    CURRENT.read().map(|theme| *theme).unwrap_or(DARK)
 }
 
 /// Install the theme for this process. Called from `main.rs` at startup and again,
@@ -257,10 +264,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_is_the_ubuntu_palette() {
-        assert_eq!(Theme::default(), UBUNTU);
-        assert_eq!(Theme::by_name("default"), UBUNTU);
-        assert_eq!(Theme::by_name(""), UBUNTU);
+    fn the_default_is_dark() {
+        assert_eq!(Theme::default(), DARK);
+        assert_eq!(Theme::by_name("default"), DARK);
+        assert_eq!(Theme::by_name(""), DARK);
+        // The process starts in it too, before anything resolves a theme.
+        assert_eq!(CURRENT.read().map(|theme| *theme).unwrap_or(UBUNTU).name, "dark");
+        assert_eq!(DARK.accent, Color::Cyan);
+        assert_eq!(DARK.background, Color::Black);
+    }
+
+    #[test]
+    fn the_ubuntu_palette_is_what_it_was() {
         // By value: this is the one theme whose purpose is a specific palette, so
         // "it is some orange" is not the property being claimed.
         assert_eq!(UBUNTU.accent, Color::Rgb(0xE9, 0x54, 0x20));
@@ -269,6 +284,17 @@ mod tests {
         assert_eq!(UBUNTU.text, Color::Rgb(0xFF, 0xFF, 0xFF));
     }
 
+
+    /// A label that is no easier to read than a border is the failure `label` was
+    /// added to fix.
+    #[test]
+    fn a_label_is_set_apart_from_a_border() {
+        for theme in [UBUNTU, DARK, LIGHT, MONO] {
+            assert_ne!(theme.label, theme.background, "{}", theme.name);
+        }
+        assert_ne!(UBUNTU.label, UBUNTU.muted);
+        assert_ne!(DARK.label, DARK.muted);
+    }
 
     #[test]
     fn every_theme_is_reachable_by_its_name() {
@@ -301,7 +327,7 @@ mod tests {
     /// the colour scheme.
     #[test]
     fn an_unknown_theme_falls_back_instead_of_failing() {
-        assert_eq!(Theme::by_name("solarized-aubergine"), UBUNTU);
+        assert_eq!(Theme::by_name("solarized-aubergine"), DARK);
     }
 
     #[test]
@@ -334,8 +360,8 @@ mod tests {
     fn a_config_with_no_ui_block_gets_the_default() {
         let document: serde_yaml::Value = serde_yaml::from_str("main:\n  STORAGE: x\n").unwrap();
 
-        assert_eq!(Theme::resolve(Some(&document), &[]), UBUNTU);
-        assert_eq!(Theme::resolve(None, &[]), UBUNTU);
+        assert_eq!(Theme::resolve(Some(&document), &[]), DARK);
+        assert_eq!(Theme::resolve(None, &[]), DARK);
     }
 
     /// Keeps mono honest as widgets are added: anything it cannot express is

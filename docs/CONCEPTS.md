@@ -72,7 +72,7 @@ Three things are kept apart, and conflating them is the classic mistake:
 | | What it is |
 |---|---|
 | **MU** (monetary unit) | What a node *counts in*. An integer, so no balance goes through a float. It is the node's own unit of account and has **no intrinsic value**. |
-| The **contract rate** | What one MU is *worth*. A property of the payment system, not of MU: each payment contract declares how many MU one of its units buys (`ContractRate.mu_per_unit`), and that declaration travels to peers with every price. |
+| The **contract rate** | What one MU is *worth*. A property of the payment system, not of MU: each payment contract declares how many MU one *base* unit of its asset buys (`ContractRate.mu_per_unit`: per nanoERG, per satoshi, per smallest unit of a token), and that declaration travels to peers with every price. |
 | The **display unit** | What a human reads and types. Purely presentational, local to one node, absent from the wire; changing it never changes what anybody is charged. |
 
 ### Payment systems

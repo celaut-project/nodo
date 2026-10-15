@@ -48,7 +48,7 @@ class DemandHistoryTests(unittest.TestCase):
     def test_instances_held_keeps_the_peak_and_the_rest_adds_up(self):
         # Two flushes of one hour: a restart mid-hour must not make a busy hour read as
         # quiet, and it must not double-count the launches either.
-        hour = "2026-09-07T14"
+        hour = demand_history.hour_key(datetime.now() - timedelta(hours=3))
         self.sc.add_demand_history(hour=hour, instances_held=6, mu_charged=1000, admissions=2)
         self.sc.add_demand_history(hour=hour, instances_held=2, mu_charged=500, refusals=1)
 
@@ -84,16 +84,18 @@ class DemandHistoryTests(unittest.TestCase):
         self.assertEqual(self._rows(), {})
 
     def test_the_hour_is_flushed_when_it_turns_over(self):
-        early = datetime(2026, 9, 7, 14, 5)
+        # Recent, because reading is windowed on today's date.
+        early = datetime.now().replace(minute=5, second=0, microsecond=0) - timedelta(hours=3)
         later = early + timedelta(hours=1)
+        finished, current = demand_history.hour_key(early), demand_history.hour_key(later)
         self.recorder.record(admissions=1, moment=early)
         self.assertEqual(self._rows(), {}, "written before the hour was over")
 
         self.recorder.record(admissions=1, moment=later)
         rows = self._rows()
-        self.assertIn("2026-09-07T14", rows, "the finished hour was not flushed")
-        self.assertEqual(rows["2026-09-07T14"]["admissions"], 1)
-        self.assertNotIn("2026-09-07T15", rows, "the current hour is still in memory")
+        self.assertIn(finished, rows, "the finished hour was not flushed")
+        self.assertEqual(rows[finished]["admissions"], 1)
+        self.assertNotIn(current, rows, "the current hour is still in memory")
 
     def test_reading_folds_a_period_into_the_hours_of_the_clock(self):
         # What the page draws: for each hour of the day, the worst hour of that name in

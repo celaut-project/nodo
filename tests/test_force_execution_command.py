@@ -96,7 +96,7 @@ class ForceExecutionCommandTests(unittest.TestCase):
             ))
 
         mock_client.assert_called_once_with(
-            amount_mu=force_execution_cmd.DEV_CLIENT_FUNDING_MU, external=False
+            amount_mu=force_execution_cmd.DEV_CLIENT_FUNDING_MU
         )
         configs = [message for message in messages if isinstance(message, celaut.Configuration)]
         self.assertEqual(len(configs), 1)

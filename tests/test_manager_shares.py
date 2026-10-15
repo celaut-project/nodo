@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.manager import shares as ms
     from src.utils.registry_errors import ServiceNotInRegistry
     IMPORT_ERROR = None
@@ -25,7 +26,7 @@ def _dir(name, xattrs=None, children=None):
     for c in (children or []):
         b.filesystem.branch.append(c)
     for k, v in (xattrs or {}).items():
-        b.xattrs[k] = v
+        keyvalue.set_value(b.xattrs, k, v)
     return b
 
 
@@ -41,7 +42,7 @@ def _service(*branches):
 def _config(**envs):
     c = celaut.Configuration()
     for k, v in envs.items():
-        c.environment_variables[k] = v.encode("utf-8")
+        keyvalue.set_value(c.environment_variables, k, v.encode("utf-8"))
     return c
 
 

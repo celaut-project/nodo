@@ -452,6 +452,35 @@ the toolchain on a machine that would otherwise skip it (you intend to rebuild
 the crate), set `dependencies.rust.INSTALL_TOOLCHAIN: true` or export
 `NODO_INSTALL_RUST=1` before running the setup script.
 
+## 10c) virtiofsd (only for services with shared directories)
+
+A service that declares `shared` or `guest` directories needs the Rust
+`virtiofsd` on the host. The old C one in `/usr/lib/qemu` does not work, and no
+distro package exists on Ubuntu 22.04. See
+[SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#host-requirement-the-rust-virtiofsd).
+The setup scripts do this step in `bash/lib_virtiofsd.sh`. Skip it if this node
+will not run such services.
+
+```bash
+VIRTIOFSD_BIN="$TARGET_DIR/bin/virtiofsd"
+if [ "$(uname -m)" = "x86_64" ]; then
+  # Static build attached to the upstream v1.14.0 release; digests from lib_virtiofsd.sh.
+  curl -fsSL -o /tmp/virtiofsd.zip \
+    "https://gitlab.com/-/project/21523468/uploads/f505704014ae7a816e515f2a05a93d8b/virtiofsd-v1.14.0.zip"
+  echo "2e4fe9571f492b00baa34bc4e708e950039c5da05b830b31a8d179cb6ac8978e  /tmp/virtiofsd.zip" | sha256sum -c -
+  "$PY_RUNTIME_BIN" -m zipfile -e /tmp/virtiofsd.zip /tmp/virtiofsd-zip
+  sudo install -m 0755 /tmp/virtiofsd-zip/target/x86_64-unknown-linux-musl/release/virtiofsd "$VIRTIOFSD_BIN"
+else
+  # No upstream binary for arm64: build it with the node's own toolchain.
+  sudo apt-get install -y libcap-ng-dev libseccomp-dev pkg-config
+  RUSTUP_HOME="$RUST_RUNTIME_ROOT/rustup" CARGO_HOME="$RUST_RUNTIME_ROOT/cargo" \
+    "$RUST_RUNTIME_ROOT/cargo/bin/cargo" install virtiofsd --version =1.14.0 --locked --root /tmp/virtiofsd-build
+  sudo install -m 0755 /tmp/virtiofsd-build/bin/virtiofsd "$VIRTIOFSD_BIN"
+fi
+"$VIRTIOFSD_BIN" --version   # virtiofsd 1.14.0
+"$YQ_BIN" -i ".virtualizers.ch.VIRTIOFSD_BINARY = \"$VIRTIOFSD_BIN\"" "$TARGET_DIR/config.yaml"
+```
+
 ## 11) Rootless local builder directories
 
 Nodo never uses the host Docker daemon. When packing with `packer.local: true`,

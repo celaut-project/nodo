@@ -19,9 +19,9 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from google.protobuf.json_format import MessageToJson
 
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.utils.config import ConfigManager
     from src.utils.cost_functions import general_cost_functions as rates_module
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -149,7 +149,7 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         uri.transport.tags.append("tcp")
         with _config():
             for rate, amount_mu in rates_module.node_advertised_rates().items():
-                peer.mu_per_call[rate].n = str(amount_mu)
+                keyvalue.set_value(peer.mu_per_call, rate, celaut.Amount(n=str(amount_mu)))
         return peer
 
     def test_rates_survive_the_advertisement_round_trip(self):
@@ -160,7 +160,7 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         parsed.ParseFromString(stored)
 
         self.assertEqual(
-            {rate: amount.n for rate, amount in parsed.mu_per_call.items()},
+            {rate: amount.n for rate, amount in keyvalue.items(parsed.mu_per_call)},
             {
                 "ram_mu_per_gib_second": "277",
                 "cpu_mu_per_vcpu_second": "1111",
@@ -181,7 +181,7 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         parsed = celaut.Peer()
         parsed.ParseFromString(self._peer_with_rates().SerializeToString())
 
-        published = MessageToJson(parsed)
+        published = keyvalue.message_to_json(parsed)
 
         self.assertIn("ram_mu_per_gib_second", published)
         self.assertIn("net_mu_per_gib", published)

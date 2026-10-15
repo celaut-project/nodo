@@ -39,6 +39,7 @@ before conversations existed, and still works unchanged.
 # `import src.manager.chat` from failing on the type hint below in the meantime.
 from __future__ import annotations
 
+import os
 import time
 from typing import List, Optional
 from uuid import uuid4
@@ -50,6 +51,7 @@ from src.utils.bee_client import BeeClient
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.config import ConfigManager
+from src.utils.verify import registry_service_id
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -58,6 +60,16 @@ MAX_MESSAGE_BYTES = int(env_manager.get("chat.MAX_MESSAGE_BYTES", 4096) or 4096)
 MAX_STORED_MESSAGES_PER_PEER = int(
     env_manager.get("chat.MAX_STORED_MESSAGES_PER_PEER", 200) or 200
 )
+
+# The shape a shared service's Metadata (issue #438, `ChatMessage.service`) must
+# have to be stored. It comes from a peer, so it is bounded like a body is: a cap on
+# its serialized size (which also bounds everything nested in it), and hashes and
+# tags that are few and short -- the parts the card shows and `get` is handed.
+MAX_SERVICE_METADATA_BYTES = 32 * 1024
+MAX_SERVICE_HASHES = 8
+MAX_SERVICE_HASH_BYTES = 64
+MAX_SERVICE_TAGS = 16
+MAX_SERVICE_TAG_CHARS = 64
 
 
 class ChatError(Exception):
@@ -72,6 +84,81 @@ def _validated_body(body: str) -> str:
             f"Message is over the {MAX_MESSAGE_BYTES}-byte limit; send something shorter."
         )
     return body
+
+
+def service_fallback_line(metadata: celaut_pb2.Metadata) -> str:
+    """The line a shared service travels as in ``body``, for a reader without cards.
+
+    A node that predates ``ChatMessage.service`` skips the field and shows only the
+    body, so the body has to name the service on its own -- by the sender's registry
+    id, the one ``nodo get`` there took. A reader that has the Metadata strips this
+    exact line back off (:func:`_strip_fallback`) rather than show the service twice.
+    """
+    return _fallback_line(registry_service_id(metadata) or "", list(metadata.hashtag.tag))
+
+
+def _fallback_line(service_id: str, tags: List[str]) -> str:
+    tagged = f" ({', '.join(tags)})" if tags else ""
+    return f"[service {service_id}{tagged} -- get it with: nodo get {service_id}]"
+
+
+def _strip_fallback(body: str, metadata: celaut_pb2.Metadata) -> str:
+    # The sender named the service by *its* registry hash type, which need not be
+    # this node's, so the line may carry any of the Metadata's hashes.
+    for hash in metadata.hashtag.hash:
+        line = _fallback_line(hash.value.hex(), list(metadata.hashtag.tag))
+        if body == line:
+            return ""
+        if body.endswith("\n" + line):
+            return body[: -len(line) - 1]
+    return body
+
+
+def _validated_service(metadata: celaut_pb2.Metadata) -> celaut_pb2.Metadata:
+    if metadata.ByteSize() > MAX_SERVICE_METADATA_BYTES:
+        raise ChatError(
+            f"The shared service's metadata is over the {MAX_SERVICE_METADATA_BYTES}-byte limit."
+        )
+    hashes = metadata.hashtag.hash
+    if not hashes or len(hashes) > MAX_SERVICE_HASHES or any(
+        not hash.type or not hash.value
+        or len(hash.type) > MAX_SERVICE_HASH_BYTES or len(hash.value) > MAX_SERVICE_HASH_BYTES
+        for hash in hashes
+    ):
+        raise ChatError(
+            f"The shared service must carry 1 to {MAX_SERVICE_HASHES} hashes, each a type "
+            f"and a value of up to {MAX_SERVICE_HASH_BYTES} bytes."
+        )
+    tags = metadata.hashtag.tag
+    if len(tags) > MAX_SERVICE_TAGS or any(
+        not tag.strip() or len(tag) > MAX_SERVICE_TAG_CHARS or "\n" in tag for tag in tags
+    ):
+        raise ChatError(
+            f"The shared service's tags must be at most {MAX_SERVICE_TAGS} single-line "
+            f"tags of up to {MAX_SERVICE_TAG_CHARS} characters."
+        )
+    return metadata
+
+
+def local_service_metadata(service: str) -> celaut_pb2.Metadata:
+    """The Metadata of a service in this node's own registry, by id or tag.
+
+    The same Metadata ``nodo services``, ``get`` and ``execute`` read, sent as it is.
+    Only a service this node holds can be shared, and only if its Metadata names it
+    by the id the registry keys it under -- the card is a promise that the Metadata
+    leads to something real, and the one place that can be checked is here.
+    """
+    from src.commands.__by_tag import get_id
+    from src.utils.utils import read_metadata_from_disk
+
+    registry = env_manager.get("REGISTRY")
+    service_id = (get_id(service) or service or "").lower()
+    if not service_id or not os.path.isdir(os.path.join(registry, service_id)):
+        raise ChatError(f"{service} is not a service in the local registry.")
+    metadata = read_metadata_from_disk(service_hash=service_id)
+    if metadata is None or registry_service_id(metadata) != service_id:
+        raise ChatError(f"{service}'s metadata does not name it by its registry id.")
+    return _validated_service(metadata)
 
 
 def receive_chat_message(message: celaut_pb2.ChatMessage) -> str:
@@ -99,6 +186,13 @@ def receive_chat_message(message: celaut_pb2.ChatMessage) -> str:
 
     body = _validated_body(message.body)
 
+    # A shared service (issue #438). Validated before anything is stored, like the
+    # body: malformed Metadata refuses the whole message rather than storing a card
+    # the TUI would then offer to `get`.
+    service = _validated_service(message.service) if message.HasField("service") else None
+    if service is not None:
+        body = _strip_fallback(body, service)
+
     conversation_id = message.conversation_id if message.HasField("conversation_id") else None
     if conversation_id:
         sc.create_conversation(conversation_id=conversation_id, peer_id=peer_id, opened_by_us=False)
@@ -106,12 +200,14 @@ def receive_chat_message(message: celaut_pb2.ChatMessage) -> str:
     sc.add_chat_message(
         peer_id=peer_id, from_us=False, body=body, ts=int(time.time()),
         keep_per_peer=MAX_STORED_MESSAGES_PER_PEER, conversation_id=conversation_id,
+        service=service,
     )
     log.LOGGER(f"Chat message stored from peer {peer_id} (client {client_id}).")
     return peer_id
 
 
-def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = None) -> None:
+def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = None,
+                      service: Optional[str] = None) -> None:
     """Send and locally record a Chat message to ``peer_id``.
 
     Sent under whichever client_id this node already holds on ``peer_id``
@@ -124,8 +220,18 @@ def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = 
     (:func:`open_conversation`) -- passed through as-is, never minted here, so a
     typo names a thread that fails to record rather than silently starting a new
     one under a name nobody asked for.
+
+    ``service`` (an id or tag in the local registry) attaches that service's
+    Metadata as a card (issue #438). The body may then be empty: the card is the message, and the
+    body on the wire still names the service for a peer that predates cards
+    (:func:`service_fallback_line`).
     """
-    body = _validated_body(body)
+    metadata = local_service_metadata(service) if service else None
+    wire_body = body
+    if metadata is not None:
+        line = service_fallback_line(metadata)
+        wire_body = f"{body}\n{line}" if body else line
+    _validated_body(wire_body)
 
     if not sc.peer_exists(peer_id=peer_id):
         raise ChatError(f"{peer_id} is not a known peer.")
@@ -146,9 +252,11 @@ def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = 
     if not client_id:
         raise ChatError(f"Could not become a client of {peer_id}.")
 
-    chat_message = celaut_pb2.ChatMessage(client_id=client_id, body=body)
+    chat_message = celaut_pb2.ChatMessage(client_id=client_id, body=wire_body)
     if conversation_id:
         chat_message.conversation_id = conversation_id
+    if metadata is not None:
+        chat_message.service.CopyFrom(metadata)
 
     ack = BeeClient.chat(peer_channel(peer_id=peer_id), chat_message)
     if ack is not None and not ack.stored:
@@ -160,6 +268,7 @@ def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = 
     sc.add_chat_message(
         peer_id=peer_id, from_us=True, body=body, ts=int(time.time()),
         keep_per_peer=MAX_STORED_MESSAGES_PER_PEER, conversation_id=conversation_id,
+        service=metadata,
     )
     log.LOGGER(f"Chat message sent to peer {peer_id}.")
 
@@ -196,7 +305,7 @@ def reopen_conversation(conversation_id: str) -> None:
         raise ChatError(f"Could not reopen conversation {conversation_id}.")
 
 
-def reply_to_conversation(conversation_id: str, body: str) -> None:
+def reply_to_conversation(conversation_id: str, body: str, service: Optional[str] = None) -> None:
     """Send ``body`` in ``conversation_id``, resolving its peer automatically.
 
     The convenience a caller who already has a ``conversation_id`` in hand wants
@@ -206,7 +315,10 @@ def reply_to_conversation(conversation_id: str, body: str) -> None:
     conversation = sc.get_conversation(conversation_id)
     if conversation is None:
         raise ChatError(f"No such conversation: {conversation_id}.")
-    send_chat_message(peer_id=conversation["peer_id"], body=body, conversation_id=conversation_id)
+    send_chat_message(
+        peer_id=conversation["peer_id"], body=body, conversation_id=conversation_id,
+        service=service,
+    )
 
 
 def list_conversations(peer_id: Optional[str] = None, opened_by_us: Optional[bool] = None,

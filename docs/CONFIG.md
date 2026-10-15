@@ -7,7 +7,7 @@ installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
 
 ## Edit it with `nodo tui`
 
-The Config page is the supported way to change a value, because it is the only one
+The All page is the supported way to change a value, because it is the only one
 that does all four things a change needs:
 
 1. **Validates** the value against the key's type before it lands.
@@ -17,10 +17,15 @@ that does all four things a change needs:
    up on the new file.
 
 The four are one transaction, so the file always describes the node that is running,
-and a change that cannot be started into is undone rather than left on disk. The Cell
+and a change that cannot be started into is undone rather than left on disk. The Policies
 page is the same mechanism at a coarser grain: it groups these keys into the decisions
 an operator actually makes, and one of its levers or profiles writes several keys as a
 single change. See [the TUI reference](../src/commands/tui/README.md#applying-a-change).
+
+> **No root:** a restart needs root and stops all instances. If the node is serving and
+> you do not run as root, the change goes to `config.pending.yaml` and the node does not
+> restart. The node applies the file at its next start. See
+> [Staged changes](USAGE.md#staged-changes-no-root).
 
 > ⚠️ **`config.yaml` is read once, when the node starts.** Nothing watches the file.
 > A running node keeps serving the configuration it booted with, however many times
@@ -53,7 +58,7 @@ the same second get a snapshot each instead of the second overwriting the first'
 |---|---|---|
 | `nodo tui` | whatever you edit, in one `yq` invocation | Restarts the node, and reverts the file if it does not come back. |
 | A CLI command — `nodo sync_reputation_proof`, `nodo submit_reputation` | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | Restarts a serving node once it sees the file changed. Needs root; if the restart cannot happen the command says so and names the fix. |
-| The daemon itself | `ledgers.ergo.NODE_URL` when the configured Ergo node stops answering, and the proof id when it submits one | None needed — the process that wrote the value is the one running on it, and the value is live in memory the moment it is set. |
+| The daemon itself | `ledgers.ergo.NODE_URL` when the configured Ergo node stops answering, the proof id when it submits one, and the `-1`s of `benchmark.BY_ARCH` once the benchmark core service has measured them | None needed — the process that wrote the value is the one running on it, and the value is live in memory the moment it is set. |
 | First load, on any process | resolves `auto` values (`network.GATEWAY_PORT`, `identity.MNEMONIC`, `ledgers.ergo.WALLET_MNEMONIC`) and interpolated paths | None — this happens before the node serves. |
 
 A hand edit is the one write with none of that: no validation, no backup, no restart.
@@ -183,6 +188,18 @@ Do not confuse any of this with the packer-side pair below
 pin them to the host arch: a local build runs the target's own toolchain and nodo
 installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
 
+## `instances` — dead instances
+
+When an instance dies, the node keeps its row (`killed_at`, `death_reason`) and, for
+a local instance, its logs under `${main.STORAGE}/instances_dead/<id>/`. A dead
+instance never starts again.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `instances.DEAD_RETENTION_DAYS` | `14` | Delete a dead instance after this many days. `0` turns the limit off. |
+| `instances.DEAD_MAX_ROWS` | `200` | Keep at most this many dead instances. The oldest are deleted first. Local and delegated instances count separately. `0` turns the limit off. |
+| `instances.DEAD_LOG_MAX_BYTES` | `1048576` | Keep the last bytes of each guest log, up to this size. |
+
 ## `builder` — build tuning
 
 | Key | Default | Meaning |
@@ -206,7 +223,7 @@ the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
 | `communication.MAX_PEERS_PER_GOSSIP_PUSH` | `20` | Maximum other peers introduced to one random target per tick. Zero disables push work. |
 | `communication.GOSSIP_INTERVAL_SECONDS` | `300` | Independent pull/push intervals, measured with a monotonic clock. Invalid or nonpositive values use 300 seconds. |
 
-The two switches are independent of self-announcement and are read live. CELL exposes
+The two switches are independent of self-announcement and are read live. The POLICIES page exposes
 both as individual levers. Profiles mirror self-announcement: `just-me`, `cautious`,
 and `workbench` disable both; `open-renter` and `lan-lab` enable both. A first peer
 still needs `nodo connect`; there is no bootstrap list or DHT.
@@ -300,6 +317,64 @@ closed ("Service not allowed.").
 | `source-application` | Maps a service id → its downloadable sources (manifest URLs). |
 | `packer` | The packer-service used by `nodo pack` (default mode). |
 | `low-demand-fallback` | Opportunistic service run only when the node is idle (WIP). |
+| `bitcoin-node` | A bitcoind this node runs itself (see [BITCOIN.md](BITCOIN.md)). |
+| `benchmark` | **Optional.** Measures this node's per-core scores at startup (see [`benchmark`](#benchmark--this-nodes-per-core-scores) below). One id, or a list of ids — one per architecture. |
+
+## `benchmark` — this node's per-core scores
+
+`cpu_quota`/`cpu_period` say how many cores a service gets, not how fast one is: the same
+"1.0 core" is native silicon under Cloud Hypervisor and software emulation under
+QEMU+TCG. A service states the second half as `resources.at_init.benchmark` in its
+`service.json` (see [PACKING.md](PACKING.md#benchmark)); this block is what it is held
+against, per architecture this node serves:
+
+```yaml
+benchmark:
+  BY_ARCH:
+    linux/amd64:
+      int_ops_per_sec: -1
+      flt_ops_per_sec: -1
+      mem_bandwidth_64mib_bytes_per_sec: -1
+      mem_bandwidth_256mib_bytes_per_sec: -1
+      mem_bandwidth_1gib_bytes_per_sec: -1
+      sha256_hashes_per_sec: -1
+```
+
+- Every value is **per core, per second**, a non-negative integer, or **`-1` for "not
+  measured"**. A malformed value, an unknown key or a non-canonical architecture
+  (`amd64` for `linux/amd64`) stops the node at load.
+- **Admission enforces** a measured score: a service requiring more of a primitive than
+  this node scored for the service's architecture is refused, with the reason. A
+  requirement on a `-1` score is only logged — an unknown capacity is not evidence of an
+  insufficient one.
+- **Memory bandwidth has one key per working set** it is measured over
+  (`mem_bandwidth_64mib_…`, `…_256mib_…`, `…_1gib_bytes_per_sec`), because a bandwidth is
+  only comparable over the same amount of memory. A requirement is held against the score
+  under the same key, or, for a size the node did not measure, under the smallest larger
+  one it did (a larger working set can only lower a bandwidth). The former `mem_bandwidth_bytes_per_sec` and
+  `mem_bandwidth_working_set_bytes` are refused at load, naming the new keys.
+- The measured scores are **announced to peers** (`Peer.resources`), so a peer whose
+  service needs more does not even ask this node.
+- Foreign architectures served under QEMU+TCG have their own block: scoring an emulated
+  guest with the host's numbers would admit exactly the "1.0 core" this exists to tell
+  apart.
+
+**Filling it in.** Either by hand — write the numbers; the node never touches a value
+that is not `-1` — or with the optional `benchmark` core service:
+
+1. Pack `celaut-basics/demo-service`'s `benchmark/` (`cd benchmark && nodo pack .`)
+   once per architecture this node serves, changing `"architecture"` in its
+   `service.json` for each (it ships as `linux/arm64`, like the other variants).
+2. Put the printed id(s) under `core_services.benchmark` — one string, or a list.
+3. Leave the scores you want measured at `-1` and restart the node.
+
+At startup, while a served architecture has a `-1` primitive, the node launches the
+service **on itself** (never on a peer), asks it for its scores (once over 1 GiB, and once
+more per other working set still at `-1`), files the answer under the architecture the
+service reports having run under, and stops it. Only the `-1`s are written. It runs on a background thread after the gateway
+is up, so it never holds up startup or billing; a failure is logged (`[BENCHMARK]`) and
+the `-1`s stay for the next start. With `core_services.benchmark` unset, nothing is
+measured and nothing changes.
 
 ## `hashing`
 
@@ -316,20 +391,39 @@ authenticated against this node's identity key, and the only port announced to p
 for the services this node runs and for external callers that do not want TLS — `0`
 disables it, and then a service must speak TLS too; see [The plaintext
 gateway](#the-plaintext-gateway) below),
-`PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
+`PUBLIC_IP` / `EXTERNAL_INTERFACE` (the address this node advertises),
 `PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
 differs from the internal one — empty means "same as internal"; only
 `PUBLIC_TCP_PORT` is used today, since the gateway is TCP-only),
 `FREE_PORTS_RANGE` (ports used to expose services — match your router forwarding),
-`DISABLE_EXPOSE_OUTSIDE`, `ISOLATE_INTERNAL_CHILDREN`, and `DEFAULT_EXECUTE_REMOTE`
-(default remote for NAT/WSL2 nodes). See also [`NETWORKS.md`](NETWORKS.md).
+`DISABLE_EXPOSE_OUTSIDE` and `ISOLATE_INTERNAL_CHILDREN`. See also
+[`NETWORKS.md`](NETWORKS.md).
+
+`EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE` (default `false`) also publishes the
+instances this node's own local clients start — the ones `nodo execute` launches, which
+are otherwise internal — on a port of this host's interface, and `execute` prints that
+address. It is for a host whose operator's tools run outside the network namespace the
+node runs in, e.g. a node inside a VM driven from the machine that hosts it. The address
+comes from `PUBLIC_IP`, else `EXTERNAL_INTERFACE`, else the default-route interface, and
+is never loopback or link-local: when none of those resolves, the instance still starts,
+internally, and the gateway log and `execute` say why. Ports come from
+`FREE_PORTS_RANGE`; `DISABLE_EXPOSE_OUTSIDE` overrides it. It is read at every launch.
+It only publishes on the host's own interface — reaching an instance from anywhere else
+is still [`nodo tunnel`](TUNNELING.md).
 
 Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) and
 `TUNNEL_UDP_IDLE_TIMEOUT_S` — see [`TUNNELING.md`](TUNNELING.md).
 
 | Key | Default | Meaning |
 |---|---|---|
+| `network.EXECUTE_LOCALLY` | `true` | Set `false` and this node never runs a service itself: the balancer stops pricing local execution and only selects a peer, so a service no peer will take fails instead of being run here. The mirror image of `DELEGATE_EXECUTION`, for a node that orchestrates rather than computes. The node then announces no resources, and the changed announcement is sent to every known peer. A peer that asks anyway gets a refusal with the reason: `GetServiceEstimatedCost` fails, and `GetResourceAvailability` answers that it cannot run the service. Workload admission does not count this machine either. A service that inherits a directory from its parent (`guest=true`) cannot run anywhere else, so it fails. With `DELEGATE_EXECUTION` also `false`, no launch can succeed. The `remote-only` profile sets this key to `false`, and turns delegation on. |
 | `network.DELEGATE_EXECUTION` | `true` | Set `false` and this node never asks a peer to run a service for it: the balancer stops polling peers for prices and only ever selects `local`, so a service it cannot run itself fails rather than being delegated. The automatic peer-deposit refill stops too — a deposit buys execution on that peer and nothing else. `nodo pay`, `nodo increase_peer_deposit` and `nodo force_execution` still work, since an operator typing the command overrides the default on purpose. |
+| `network.RECURSION_MAX_HOPS` | `16` | How many nodes one StartService tree (a StartService and everything it is delegated to) may span when it starts here or arrives without a hop count. Each node that passes the request on sends one hop less; a node given none left refuses it, and a node with one left runs it itself or fails rather than delegating. A count sent by a peer is clamped to this, never raised by it. Quotes and availability probes do not carry it: they use the query cache below. See [`RECURSION_GUARD.md`](RECURSION_GUARD.md). |
+| `network.QUERY_CACHE_TTL_SECONDS` | `30` | Seconds the price of a quote (`GetServiceEstimatedCost`) is remembered, keyed by the content of the question: the same service, configuration and metadata is priced once. Whether this node has room for it is not remembered: it is checked on every answer, so a full node never serves a remembered offer and a node that freed room never serves a remembered "no". `0` turns it off. Because the price is remembered, a change of price or network policy can show up up to this late. |
+| `network.QUERY_CACHE_PEER_TTL_SECONDS` | `10` | Seconds a quote this node got from a peer is reused, so a peer is not asked the same thing again. Shorter than the above, since the peer may already have served it from its own cache. `0` turns it off. |
+| `network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS` | `5` | The same for `GetResourceAvailability` answers, much shorter since free capacity moves fast; a local instance starting, stopping or being resized forgets them at once. `activity_window` is always applied on top, so closed hours are never served from memory. `0` turns it off. |
+| `network.QUERY_CACHE_WAIT_SECONDS` | `5` | A question that arrives while the same one is being computed waits up to this long for that answer instead of computing it again. Past it, or when the question came back to the node computing it (a loop), it is refused with "retry". |
+| `network.QUERY_CACHE_MAX_ENTRIES` | `4096` | How many questions the cache holds at once, for both queries. Past it, expired entries go first and then the least recently used; one being computed is never dropped. |
 
 The two directions are separate settings, and neither implies the other:
 
@@ -337,6 +431,7 @@ The two directions are separate settings, and neither implies the other:
 |---|---|
 | Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
+| Don't run services **here** at all (remote-only) | `network.EXECUTE_LOCALLY: false`, with `network.DELEGATE_EXECUTION: true` |
 | Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
 
 ### The plaintext gateway
@@ -385,7 +480,7 @@ ports and addresses, and a `networks:` block carrying `blacklist`/`whitelist` is
 rejected as a config error rather than silently ignored. Full semantics and the
 enforcement points: [`NETWORKS.md`](NETWORKS.md).
 
-On the `nodo tui` Config page, `a` appends a pattern to the selected list and `d`
+On the `nodo tui` All page, `a` appends a pattern to the selected list and `d`
 removes the selected one.
 
 ## `energy`
@@ -486,8 +581,8 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `free_tier.CREDIT_MU_PER_NEW_CLIENT` | `4500000` | Starting balance given to every new client: one hour of 0.5 GiB of RAM plus one vCPU at the shipped prices. `0` gives nothing away, which with `costs.ALLOW_DEBT` off refuses every new client at its first launch. |
 | `free_tier.FREE_WHILE_SCARCITY_BELOW` | `0.0` | Charge nothing while *every* resource is below this share of capacity. `0.0` disables it. |
 | `free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY` | `500` | How many clients `GenerateClient` hands out per proof-of-work difficulty level. The first 500 are free; the next 500 cost one Blake2b zero each, and so on — each step is 16x the work. Must be positive: it is the size of a step, so `0` has no meaning. See [`CONCEPTS.md`](CONCEPTS.md#creating-a-client). |
-| `ui.DISPLAY_UNIT` | `erg` | What you read and type. `erg`, `mu`, `btc` once `ledgers.bitcoin.payments.MU_PER_SATOSHI` is set, or a name declared under `ui.UNITS`. Purely presentational. Edited from the TUI's Config page (or the CELL page's `display unit` lever) as a picker over exactly these; picking `custom…` there asks for a new name and its `ui.UNITS.<name>.MU_PER_UNIT` rate together, since one without the other is a display unit the node refuses to start against. |
-| `ui.THEME` | `ubuntu` | Colour scheme for `nodo tui`. `ubuntu` (the Ubuntu terminal palette, and the default — `default` is an accepted spelling), `dark` (the palette before themes existed), `light` (for a pale terminal), `mono` (no hue at all). Edited from the TUI's Config page as a picker. An unrecognised name falls back to the default rather than refusing to start. `nodo tui --theme <name>` and `NODO_TUI_THEME` override it for one run, so two themes can be compared without a config write and the restart that carries. |
+| `ui.DISPLAY_UNIT` | `mu` | What you read and type. `mu` (the default: the node's own accounting unit, not money held anywhere; large figures take an exact `K`/`M`/`G` suffix, `5100000` shown as `5.1M`, and the suffixed form can be typed back), `erg`, `btc` once `ledgers.bitcoin.payments.MU_PER_SATOSHI` is set, or a name declared under `ui.UNITS`. Purely presentational. Edited from the TUI's All page (or the POLICIES page's `display unit` lever) as a picker over exactly these; picking `custom…` there asks for a new name and its `ui.UNITS.<name>.MU_PER_UNIT` rate together, since one without the other is a display unit the node refuses to start against. |
+| `ui.THEME` | `dark` | Colour scheme for `nodo tui`. `dark` (the palette before themes existed, and the default — `default` is an accepted spelling), `ubuntu` (the Ubuntu terminal palette), `light` (for a pale terminal), `mono` (no hue at all). Edited from the TUI's All page as a picker. An unrecognised name falls back to the default rather than refusing to start. `nodo tui --theme <name>` and `NODO_TUI_THEME` override it for one run, so two themes can be compared without a config write and the restart that carries. |
 | `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. It does not pay one only learned via gossip unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is on ([see above](#transitive-peer-discovery-gossip)). Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
 | `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` | `false` | Whether the automatic refill also funds a peer learned only via gossip and never connected to or paid by hand. Off by default because identities are free to mint, so a relayed Sybil peer would draw a full deposit from every refill-enabled node that learns it. Only matters when `deposits.AUTOMATIC_REFILL` and `network.DELEGATE_EXECUTION` are on; it never enables refills by itself. Any value other than `true` counts as `false`. |
 | `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
@@ -607,6 +702,8 @@ maintenance-loop timing and client slot/expiration policy.
 
 | Key | Default | Meaning |
 |---|---|---|
+| `timing.GET_SERVICE_IDLE_TIMEOUT` | `30` | Seconds a peer's `GetService` may send nothing before this node gives up on it and asks the next peer. A silence, not a deadline: a large service still arriving is not cut. `0` disables. |
+| `timing.GET_SERVICE_TIMEOUT` | `1800` | Ceiling, in seconds, on a whole `GetService` transfer from one peer, so a peer that trickles bytes cannot hold `nodo execute` forever. `0` disables. Either timeout costs the peer 100 reputation (`get_service_timed_out`); a service that does not hash to the id asked for is dropped and costs it 1000 (`get_service_wrong_hash`). Each is scored once per peer and service, not per retry. |
 | `client.ACCEPT_NEW_DEPOSITS` | `true` | Set `false` to stop `GenerateDepositToken` for every client (local or peer): no one can open a new deposit, so no one can acquire MU beyond what they already hold. Existing balances keep spending normally -- this only closes the door on new top-ups. Use to stop onboarding new demand, or to cap growth even while demand exists. |
 
 ## `host_limits` — how much of this machine nodo may take
@@ -645,7 +742,7 @@ retry, and be told about disk. A capacity psutil cannot report lifts its own cei
 unknown total is not evidence of a small one, and the memory pool and free-disk checks
 still apply either way.
 
-Edited from the TUI's Cell page, under `WALL · footprint & hours`.
+Edited from the TUI's Policies page, under `RESOURCES · footprint & hours`.
 
 ## `activity_window` — the hours work is taken in
 
@@ -682,8 +779,8 @@ somehow reaches the runtime with an entry it cannot parse leaves the node open a
 once: taking the node off the network over a typo would be a silent outage where a log
 line is enough.
 
-Edited from the TUI's Schedule page (linked from the Cell page, under
-`WALL · footprint & hours`), which draws every window on the day and supports the
+Edited from the TUI's Schedule page (linked from the Policies page, under
+`RESOURCES · footprint & hours`), which draws every window on the day and supports the
 mouse as well as the keyboard.
 
 ## `identity` — the node's name
@@ -708,7 +805,7 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 |---|---|---|
 | `ledgers.ergo.WALLET_MNEMONIC` | `""` | The one wallet the node controls: what it is paid into, what publishes its reputation proofs, and what attests its identity on Ergo. Not the node's identity. Empty disables payments/reputation; `"auto"` generates a fresh mnemonic on first load. **Secret.** |
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
-| `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit`. ERG↔nanoERG is fixed in code, not here. |
+| `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit` (MU per base unit). A whole number. ERG↔nanoERG is fixed in code, not here. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |
@@ -725,33 +822,37 @@ full mechanism, the two lists and why they are separate: [`DONATIONS.md`](DONATI
 
 ### `ledgers.bitcoin`
 
-A second payment system, off until `payments.MU_PER_SATOSHI` is set — and that key has
-no default on purpose: a satoshi is worth about a million nanoERG, so borrowing
-`MU_PER_NANOERG`'s `1` would sell an hour of compute for a millionth of its price.
-Unset, the node does not offer Bitcoin at all rather than offering it mispriced.
+A second payment system, priced by `payments.MU_PER_SATOSHI` (shipped as `1400000`, worked
+out at $0.50/ERG and $70,000/BTC with `MU_PER_NANOERG: 1`; change it to your own market).
+A satoshi is worth about a million nanoERG, so borrowing `MU_PER_NANOERG`'s `1` would sell
+an hour of compute for a millionth of its price, and the node warns if you do. Set it empty
+and the node does not offer Bitcoin at all.
 
-`BACKEND` decides what this node can do and where the key is. With `explorer` (a public
-HTTP API) there is no key anywhere and the node can only be *paid*, at
-`payments.COLD_WALLET`: with no key there is no hot wallet to be paid into and no sweep
-to cold later, so the cold wallet is where payers are sent. With `core` the key
-is in the wallet of a bitcoind you run and back up, and `WALLET_KEYS_EXTERNAL: true` is
-what tells the node not to generate a mnemonic for it.
+`BACKEND` decides how this node reaches Bitcoin and where the key is. All three can be
+paid and can pay. With `explorer` (a public Esplora HTTP API) — the default, and Ergo's
+posture — the node derives its wallet from `WALLET_MNEMONIC` here, builds and signs
+every transaction itself, and asks the explorer only which outputs it owns and to relay
+the result. With `core` the key is in the wallet of a bitcoind you run and back up, so no
+mnemonic is generated for it.
 
 With `service` the node runs the bitcoind itself, as the `bitcoin-node` core service,
-and derives its wallet from `WALLET_MNEMONIC` here — Ergo's posture, with Core still
-doing the signing. That needs `WALLET_KEYS_EXTERNAL: false` (so the node mints the
-mnemonic), `RPC_USER`/`RPC_PASSWORD` (Core's cookie lives inside the service and cannot
-be read from here) and `core_services.bitcoin-node`. `PRUNE_MIB` sizes the chain it
-keeps: `0` is the whole ~700 GB with a `txindex`, anything else prunes to about that many
-MiB. All of it is checked at startup.
+and derives its wallet from the same `WALLET_MNEMONIC` — Core doing the signing. That
+needs `RPC_USER`/`RPC_PASSWORD` (Core's cookie lives inside the service and cannot be
+read from here) and `core_services.bitcoin-node`. `PRUNE_MIB` sizes the chain it keeps:
+`0` is the whole ~700 GB with a `txindex`, anything else prunes to about that many MiB.
+All of it is checked at startup.
+
+Payers are sent to the node's own wallet; `payments.COLD_WALLET` is only where the
+excess is swept. `WALLET_KEYS_EXTERNAL`, which used to switch the mnemonic off, is gone:
+the backend decides, and a config that still has it is refused at load.
 
 Every key, what it does, the BIP-84 path the service derives at, and why on-chain BTC is
 for coarse node-to-node deposits rather than for a client topping up an instance:
 [`BITCOIN.md`](BITCOIN.md).
 
-> ⚠️ `WALLET_MNEMONIC` is a secret — on either ledger. With Bitcoin's `service`
-> backend this file is the *only* backup of that wallet: the service derives its keys
-> and stores none. The `nodo tui` Config editor masks secret values; keep backups
+> ⚠️ `WALLET_MNEMONIC` is a secret — on either ledger. With Bitcoin's `explorer` and
+> `service` backends this file is the *only* backup of that wallet: nothing else
+> stores the keys. The `nodo tui` All editor masks secret values; keep backups
 > off-repo. Ergo and Bitcoin transactions are both **final and irreversible**
 > (see [`KyA.md`](KyA.md)).
 
@@ -765,4 +866,30 @@ for coarse node-to-node deposits rather than for a client topping up an instance
   buries the rest of the node log on a busy tunnel. See [`TUNNELING.md`](TUNNELING.md).
 - `low_demand.*` — opportunistic idle scheduler (off by default; WIP).
 - `publisher.*` — how `nodo publish` uploads a service and how a freshly-published
-  source gets registered (GitHub repo, chunking, auto-publish-tx settings).
+  source gets registered (GitHub repo, split and part sizes, auto-publish-tx settings).
+  The service goes to a GitHub Release of `publisher.REPOSITORY`, tagged
+  `celaut-<service id>`; nothing is committed to the repository.
+  - `publisher.REPOSITORY` — `owner/repo`. It must be public, so that the
+    `releases/download` URLs work without a token, and have at least one commit for the
+    release tag to point at.
+  - `publisher.BRANCH` — the branch the release tag is created on. Empty (default): the
+    repository's default branch. It does not hold any file data.
+  - `publisher.SPLIT_SIZE_MB` (`2000`) — a file above this size is uploaded as parts.
+    At or below it, the file is one asset, `<service id>.celaut.bee`, and its URL is the
+    source URL.
+  - `publisher.PART_SIZE_MB` (`1000`) — size of each part. The parts go with a `manifest`
+    asset that lists their URLs, one per line; the manifest URL is the source URL. Both
+    sizes are at most `2047`: GitHub refuses an asset of 2 GiB or more.
+  - `publisher.TOKEN` / `TOKEN_ENV_VAR` / `FALLBACK_TOKEN` / `FALLBACK_TOKEN_ENV_VAR` —
+    the token. It must be allowed to create releases: *Contents: Read and write* for a
+    fine-grained token, the `repo` (or `public_repo`) scope for a classic one.
+  - `publisher.TIMEOUT_SECONDS`, `MAX_RETRY`, `BACKOFF_SECONDS` — applied to every
+    release API call and asset upload.
+  - Publishing the same service again reuses its release when the assets are already
+    there, and replaces them when they differ (for example, other part sizes). The
+    release stays a draft until every asset is uploaded, and is deleted if an upload
+    fails, so a published release never points to a missing part.
+  - `publisher.CHUNK_SIZE_MB` and `publisher.UPLOADS_PREFIX` are not read any more. They
+    set the old upload through commits to the branch. Sources registered with those
+    `raw.githubusercontent.com` URLs keep working while the commits stay in the
+    repository; there is no migration.

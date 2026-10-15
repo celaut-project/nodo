@@ -185,7 +185,6 @@ class NodeServiceBackendTests(unittest.TestCase):
         base = _config(rate="1000")
         bitcoin = base["ledgers"]["bitcoin"]
         bitcoin["BACKEND"] = "service"
-        bitcoin["WALLET_KEYS_EXTERNAL"] = False
         bitcoin["WALLET_MNEMONIC"] = "twelve words that are not really twelve words"
         bitcoin["RPC_USER"] = "nodo"
         bitcoin["RPC_PASSWORD"] = "hunter2"
@@ -213,25 +212,13 @@ class NodeServiceBackendTests(unittest.TestCase):
                 with self.assertRaisesRegex(ConfigValidationError, "core_services.bitcoin-node"):
                     self._validate(config)
 
-    def test_external_keys_and_a_derived_wallet_cannot_both_be_true(self):
-        """The flag is what tells the loader whether to mint a mnemonic.
-
-        Left true, the node holds no Bitcoin key and the service comes up with no
-        wallet. It is refused rather than silently corrected: "the keys are external"
-        honestly means "do not put a key in my config file", and overriding that is not
-        a validator's decision to make.
-        """
-        with self.assertRaisesRegex(ConfigValidationError, "WALLET_KEYS_EXTERNAL"):
-            self._validate(self._config(WALLET_KEYS_EXTERNAL=True))
-
     def test_an_empty_mnemonic_is_accepted_because_the_loader_fills_it_in(self):
         """The setup the documentation asks for, and it must boot.
 
         Validation runs *before* the loader mints a mnemonic, so refusing an empty one
-        would refuse exactly the operator who set `WALLET_KEYS_EXTERNAL: false` and left
-        the phrase blank for the node to generate -- with an error telling them to do
-        what they had already done. The flag is the invariant; the emptiness is
-        transient, and a launch with no wallet is refused later, by name.
+        would refuse exactly the operator who left the phrase blank for the node to
+        generate -- with an error telling them to do what they had already done. A launch
+        with no wallet is refused later, by name.
         """
         self._validate(self._config(WALLET_MNEMONIC=""))
 

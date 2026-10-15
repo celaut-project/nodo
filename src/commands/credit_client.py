@@ -8,7 +8,7 @@ sc = SQLConnection()
 def credit_client(client_id: str, amount: str, decrement: bool = False):
     """Credit or debit a client's balance.
 
-    The amount is in the operator's display unit (`ui.DISPLAY_UNIT`, ERG by default) --
+    The amount is in the operator's display unit (`ui.DISPLAY_UNIT`, MU by default) --
     what they read everywhere else. MU is the integer unit the node counts in and is
     never asked for here.
     """

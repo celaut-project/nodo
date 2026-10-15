@@ -26,6 +26,7 @@ from src.commands.execute import (
     DEV_CLIENT_FUNDING_MU,
     launch_via_gateway,
     acquire_service,
+    complete_envs,
     print_endpoints,
     resolve_service_hash,
 )
@@ -33,6 +34,7 @@ from src.database.sql_connection import SQLConnection
 from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
 from src.utils.instance_names import inject_instance_name
 from src.payment_system.mu_conversion import matching_payment_system
 
@@ -52,7 +54,7 @@ def _forced_generator(
     instance_name: str | None = None,
 ):
     try:
-        client_id = get_execute_client(amount_mu=local_client_balance_mu, external=False)
+        client_id = get_execute_client(amount_mu=local_client_balance_mu)
     except Exception:
         raise RuntimeError("No execute client available.")
 
@@ -69,7 +71,7 @@ def _forced_generator(
         # instance's balance -- charging the client is what it is for.
         config = celaut_pb2.Configuration()
         if envs:
-            config.environment_variables.update({
+            keyvalue.update(config.environment_variables, {
                 k: v.encode() for k, v in envs.items()
             })
         inject_instance_name(config=config, instance_name=instance_name)
@@ -89,6 +91,8 @@ def force_execution(
     service: str,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
+    check_envs: bool = False,
+    ask_envs: bool = False,
 ):
     if not sc.peer_exists(peer_id):
         print(f"❌ Peer '{peer_id}' is not connected. Check `nodo peers`.")
@@ -104,6 +108,11 @@ def force_execution(
         return
 
     service = resolved
+
+    if check_envs:
+        envs = complete_envs(service_hash=service, envs=envs, interactive=ask_envs)
+        if envs is None:
+            return
 
     try:
         matching_payment_system(peer_id, connection=sc)

@@ -9,14 +9,13 @@ from src.utils.monetary import format_mu
 from src.utils.utils import (
     from_amount,
     read_metadata_from_disk,
-    to_amount,
     service_extended,
 )
 
 env_manager = ConfigManager()
 
-# Balance the throwaway estimation client is given. It only has to clear whatever the
-# node quotes; it is never actually spent, since estimating launches nothing.
+# Balance the throwaway estimation client is given, only to authenticate the request;
+# it is never spent, since estimating launches nothing, and never quoted.
 ESTIMATION_BALANCE_MU = 10 ** 16
 
 
@@ -39,9 +38,11 @@ def estimate(service: str) -> None:
         print("There is no dev client available with enough balance.")
         return
 
-    configuration = celaut_pb2.Configuration(
-        initial_mu=to_amount(ESTIMATION_BALANCE_MU)
-    )
+    # No `initial_mu`: the quote's "to start" is the build plus the balance the instance
+    # starts with, so asking with the throwaway balance would report that balance as the
+    # cost. Left unset, the node funds the quote with its own default (the requested
+    # resources for `deposits.INITIAL_RUNTIME_HOURS`), which is what a real launch pays.
+    configuration = celaut_pb2.Configuration()
 
     channel = local_channel()
 

@@ -5,6 +5,7 @@ import grp
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -16,8 +17,11 @@ from pathlib import Path
 # why the per-arch tables below come from `utils.arch_guard` and not from
 # `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
 from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
+from src.utils.privileges import can_admin_network, installed_service_user, valid_user_name
+from src.virtualizers.ch import vgic as ch_vgic
 from src.virtualizers.microvm import initramfs as ch_initramfs
 from src.virtualizers.microvm import guest as ch_guest
+from src.virtualizers.microvm import virtiofsd as microvm_virtiofsd
 
 
 def _parse_unit_user(unit_content: str) -> str:
@@ -27,16 +31,40 @@ def _parse_unit_user(unit_content: str) -> str:
     return "root"
 
 
+def _parse_unit_supplementary_groups(unit_content: str) -> list:
+    """``SupplementaryGroups=`` of the unit. An empty assignment resets the list, as in systemd."""
+    groups = []
+    for match in re.finditer(r"^\s*SupplementaryGroups\s*=(.*)$", unit_content, flags=re.MULTILINE):
+        value = match.group(1).split()
+        groups = groups + value if value else []
+    return groups
+
+
 def _run_quiet(command):
     return subprocess.run(command, capture_output=True, text=True)
 
 
-def _can_access_kvm_as_user(username: str) -> bool:
+def _can_access_kvm_as_user(username: str, supplementary_groups=()) -> bool:
+    if os.geteuid() != 0:
+        # No runuser or su without root. Doctor only gets here as the daemon's own
+        # user, so this process's own access is the answer.
+        return os.access("/dev/kvm", os.R_OK | os.W_OK)
     test_cmd = ["test", "-r", "/dev/kvm", "-a", "-w", "/dev/kvm"]
     runner_variants = [
         ["runuser", "-u", username, "--"] + test_cmd,
         ["su", "-s", "/bin/sh", username, "-c", "test -r /dev/kvm -a -w /dev/kvm"],
     ]
+    # The unit can give the user a group it is not a member of (an install without
+    # sudo adds kvm this way): test with the groups the daemon actually gets.
+    if supplementary_groups:
+        try:
+            primary = grp.getgrgid(pwd.getpwnam(username).pw_gid).gr_name
+            supp_args = [arg for group in supplementary_groups for arg in ("-G", group)]
+            runner_variants.insert(
+                0, ["runuser", "-u", username, "-g", primary] + supp_args + ["--"] + test_cmd
+            )
+        except (KeyError, OverflowError):
+            pass
     for command in runner_variants:
         try:
             result = _run_quiet(command)
@@ -68,7 +96,7 @@ def _user_in_kvm_group(username: str) -> bool:
     return "kvm" in user_groups
 
 
-def _doctor_kvm_checks(service_user: str):
+def _doctor_kvm_checks(service_user: str, supplementary_groups=()):
     print("\nVirtualization checks (Cloud Hypervisor/KVM):", flush=True)
 
     vmx_count = 0
@@ -113,12 +141,26 @@ def _doctor_kvm_checks(service_user: str):
         print("[OK] Service user is root; /dev/kvm access is usually available.", flush=True)
         return
 
-    if _can_access_kvm_as_user(service_user):
+    if _can_access_kvm_as_user(service_user, supplementary_groups):
         print(f"[OK] Service user '{service_user}' can read/write /dev/kvm.", flush=True)
         return
 
+    if os.geteuid() != 0:
+        # The unit gives the daemon groups that this shell does not have.
+        try:
+            kvm_group = grp.getgrgid(os.stat("/dev/kvm").st_gid).gr_name
+        except (KeyError, OSError):
+            kvm_group = ""
+        if kvm_group and kvm_group in supplementary_groups:
+            print(
+                f"[WARN] This shell cannot use /dev/kvm, but the unit gives the daemon "
+                f"the group '{kvm_group}'. Run 'sudo nodo doctor' to test it as the daemon.",
+                flush=True,
+            )
+            return
+
     print(f"[FAIL] Service user '{service_user}' cannot read/write /dev/kvm.", flush=True)
-    if not _user_in_kvm_group(service_user):
+    if not _user_in_kvm_group(service_user) and "kvm" not in supplementary_groups:
         print(
             f"  Suggestion: add '{service_user}' to group 'kvm' and restart session/service.",
             flush=True,
@@ -172,8 +214,26 @@ def _resolve_config_paths(main_dir: str):
             k: _interpolate(v)
             for k, v in (qemu_cfg.get("BINARY_PATHS") or {}).items()
         },
+        "virtiofsd_binary": _interpolate(
+            ch_cfg.get("VIRTIOFSD_BINARY") or microvm_virtiofsd.DEFAULT_BINARY
+        ),
         "main_dir": str(main_dir_cfg),
     }
+
+
+# A path that goes into a systemd unit: the same rule as valid_unit_path in
+# bash/lib_privileged.sh. No newline, backslash, quote, '$', '`', '%', ':' or ';'.
+_UNIT_PATH = re.compile(r"/[A-Za-z0-9 ._+@,/-]*")
+
+
+def _valid_unit_path(value) -> bool:
+    return isinstance(value, str) and bool(_UNIT_PATH.fullmatch(value))
+
+
+def _config_path(raw, path: str, default):
+    """A path from config.yaml, or ``default`` when it is unset or empty, as in install.sh."""
+    value = _get_nested_config(raw, path, None)
+    return default if value is None or value == "" else value
 
 
 def _get_nested_config(raw, path: str, default):
@@ -210,8 +270,32 @@ def _resolve_admin_group() -> str:
     return "root"
 
 
-def _render_service_template(template_content: str, main_dir: str) -> str:
-    """Render nodo.service.template using the same config keys as install.sh."""
+def _service_group(service_user: str) -> str:
+    """The primary group of the service user, as the installers render it."""
+    if not service_user:
+        return ""
+    try:
+        return grp.getgrgid(pwd.getpwnam(service_user).pw_gid).gr_name
+    except KeyError:
+        return service_user
+
+
+def _service_template_name(service_user: str) -> str:
+    """The unit template for a daemon that runs as ``service_user`` ("" = root).
+
+    A service user gets ``nodo-nosudo.service.template``, as
+    ``bash/setup_service_user.sh`` renders it. Comparing its unit against the root
+    template would report it as wrong and "fix" it back to ``User=root``.
+    """
+    return "nodo-nosudo.service.template" if service_user else "nodo.service.template"
+
+
+def _render_service_template(template_content: str, main_dir: str, service_user: str = "") -> str:
+    """Render a unit template using the same config keys as install.sh.
+
+    ``service_user`` comes from root's record (``installed_service_user``), never
+    from config.yaml.
+    """
     import yaml
 
     config_path = os.path.join(main_dir, "config.yaml")
@@ -221,7 +305,7 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
             raw = yaml.safe_load(f) or {}
 
     java_home = _expand_main_dir_placeholder(
-        _get_nested_config(
+        _config_path(
             raw,
             "dependencies.java.JAVA_HOME",
             os.path.join(main_dir, "runtime", "java", "current"),
@@ -229,7 +313,7 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         main_dir,
     )
     python_runtime_bin = _expand_main_dir_placeholder(
-        _get_nested_config(
+        _config_path(
             raw,
             "dependencies.python.RUNTIME_BIN",
             os.path.join(main_dir, "runtime", "python", "current", "bin", "python3"),
@@ -237,7 +321,7 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         main_dir,
     )
     python_venv_bin = _expand_main_dir_placeholder(
-        _get_nested_config(
+        _config_path(
             raw,
             "dependencies.python.VENV_BIN",
             os.path.join(main_dir, "venv", "bin", "python"),
@@ -251,7 +335,25 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         "{{PYTHON_RUNTIME_BIN_DIR}}": os.path.dirname(python_runtime_bin),
         "{{PYTHON_VENV_BIN}}": python_venv_bin,
         "{{ADMIN_GROUP}}": _resolve_admin_group(),
+        # Only in nodo-nosudo.service.template, rendered by bash/setup_service_user.sh.
+        "{{SERVICE_USER}}": service_user,
+        "{{SERVICE_GROUP}}": _service_group(service_user),
+        "{{RUNTIME_DIR_NAME}}": "nodo",
     }
+
+    # config.yaml is the service user's to write on a no-sudo node, and this unit is
+    # written by root: a newline in a value would add a directive (a second User=).
+    for placeholder in ("{{MAIN_DIR}}", "{{JAVA_HOME}}", "{{PYTHON_RUNTIME_BIN_DIR}}", "{{PYTHON_VENV_BIN}}"):
+        if not _valid_unit_path(replacements[placeholder]):
+            raise ValueError(
+                f"{placeholder} would be {replacements[placeholder]!r}, which cannot go into "
+                "the systemd unit. Use an absolute path made only of letters, digits, "
+                "spaces and . _ + @ , / - (check dependencies.* in config.yaml)."
+            )
+    for placeholder in ("{{ADMIN_GROUP}}", "{{SERVICE_USER}}", "{{SERVICE_GROUP}}"):
+        value = replacements[placeholder]
+        if value and not valid_user_name(value):
+            raise ValueError(f"{placeholder} would be {value!r}, which is not a valid name.")
 
     rendered = template_content
     for placeholder, value in replacements.items():
@@ -291,7 +393,7 @@ def _parse_kernel_version(release: str):
 
 
 def _classify_ch_smoke_failure(stderr: str) -> str:
-    """Name why the smoke-test VM died: 'vcpu', 'kernel_load' or 'unknown'.
+    """Name why the smoke-test VM died: 'vcpu', 'vgic', 'kernel_load' or 'unknown'.
 
     Matched loosely on purpose. Cloud Hypervisor wraps the same underlying failure
     in different call paths -- a kernel it cannot read surfaces as
@@ -303,6 +405,8 @@ def _classify_ch_smoke_failure(stderr: str) -> str:
     """
     if "VcpuRun" in stderr or "InternalError" in stderr:
         return "vcpu"
+    if ch_vgic.is_vgic_failure(stderr):
+        return "vgic"
     if "KernelLoad" in stderr or "UefiLoad" in stderr or "ReadKernelImage" in stderr:
         return "kernel_load"
     return "unknown"
@@ -333,7 +437,7 @@ def _doctor_ch_binary(ch_binary: str):
     # Get version
     try:
         result = subprocess.run(
-            [ch_binary, "--version"], capture_output=True, text=True, timeout=10
+            [*_RUN_AS_DAEMON, ch_binary, "--version"], capture_output=True, text=True, timeout=10
         )
         version_text = (result.stdout or "").strip() or (result.stderr or "").strip()
         if version_text:
@@ -480,6 +584,31 @@ def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
     return initramfs_path
 
 
+def _doctor_vgic():
+    """Whether KVM can create the GICv3/ITS Cloud Hypervisor needs on arm64 (#440).
+
+    Asked of KVM directly rather than left to the smoke test, which needs a binary,
+    a guest kernel and an initramfs before it can say anything, and then only says
+    that CH died.
+    """
+    result = ch_vgic.probe()
+    if result.status == ch_vgic.NOT_APPLICABLE:
+        return
+    print("\nCloud Hypervisor interrupt controller (arm64 vGIC):", flush=True)
+    if result.status == ch_vgic.OK:
+        print(f"[OK] {result.detail}.", flush=True)
+    elif result.missing:
+        print(f"[FAIL] {result.detail}.", flush=True)
+        print(f"  {ch_vgic.GUIDANCE}", flush=True)
+        print(
+            "  This node will not advertise linux/arm64 while this is so; foreign "
+            "architectures QEMU emulates are unaffected.",
+            flush=True,
+        )
+    else:
+        print(f"[SKIP] Could not ask KVM: {result.detail}.", flush=True)
+
+
 def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str):
     """Run a minimal Cloud Hypervisor VM to verify vCPU execution works on this host.
 
@@ -519,8 +648,14 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
             return
 
         cmdline = f"root=/dev/vda rw console={ch_guest.serial_device()}"
+        if _RUN_AS_DAEMON:
+            # The VM runs as the daemon's user: its disk, socket and serial log too.
+            uid, gid = _DAEMON_IDS
+            for path in (tmpdir, rootfs_path):
+                os.chown(path, uid, gid)
 
         cmd = [
+            *_RUN_AS_DAEMON,
             ch_binary,
             "--api-socket", api_socket,
             "--kernel", kernel_path,
@@ -574,6 +709,14 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
                     "other way out.",
                     flush=True,
                 )
+            elif failure == "vgic":
+                print(
+                    "[FAIL] Cloud Hypervisor could not create the guest's interrupt "
+                    "controller (vGIC).",
+                    flush=True,
+                )
+                print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
+                print(f"  {ch_vgic.GUIDANCE}", flush=True)
             elif failure == "kernel_load":
                 print(
                     "[FAIL] Cloud Hypervisor could not load the guest kernel. "
@@ -679,6 +822,30 @@ def _doctor_emulated_architectures(cfg: dict, host_arch_tag: str):
     return executable
 
 
+def _doctor_virtiofsd(virtiofsd_binary: str):
+    """Report the virtiofsd that serves shared filesystems, and which one it is.
+
+    A WARN and never a FAIL: only a service that declares shared or guest
+    directories starts one, and every other service runs without it. The launch
+    check in launch_service gives such a service the same reason, before any charge.
+    """
+    print("\nvirtiofsd (shared filesystems):", flush=True)
+
+    result = microvm_virtiofsd.probe(virtiofsd_binary, run_as=_RUN_AS_DAEMON)
+    if result.usable:
+        print(f"[OK] {result.detail}", flush=True)
+        return result
+
+    print(f"[WARN] {result.detail}", flush=True)
+    print(
+        "  Services that declare shared or guest directories cannot run on this "
+        "node. Other services are not affected.",
+        flush=True,
+    )
+    print(f"  Suggestion: {microvm_virtiofsd.INSTALL_HINT}", flush=True)
+    return result
+
+
 def _doctor_cloud_hypervisor(main_dir: str):
     """Run all Cloud Hypervisor compatibility checks."""
     cfg = _resolve_config_paths(main_dir)
@@ -693,8 +860,10 @@ def _doctor_cloud_hypervisor(main_dir: str):
     _doctor_host_kernel()
     guest_kernel = _doctor_guest_kernel(cfg.get("kernel_paths", {}), host_arch_tag)
     initramfs = _doctor_initramfs(cfg.get("initramfs_paths", {}), host_arch_tag)
+    _doctor_vgic()
     _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)
     _doctor_emulated_architectures(cfg, host_arch_tag)
+    _doctor_virtiofsd(cfg.get("virtiofsd_binary", ""))
 
 
 def _doctor_network_checks():
@@ -744,6 +913,14 @@ def _doctor_network_checks():
         "Run 'nodo nat-guide' for the steps, then test from outside your network.",
         flush=True
     )
+
+    if not can_admin_network():
+        print(
+            "\n[SKIP] Guest-facing gateway and guest-to-guest checks: they send packets "
+            "through the bridge and need CAP_NET_ADMIN. Run 'sudo nodo doctor' to run them.",
+            flush=True,
+        )
+        return
 
     _doctor_guest_gateway_reachability()
     _doctor_guest_plaintext_gateway_reachability()
@@ -1139,14 +1316,96 @@ def _compat_state(bridge):
         return None
 
 
+SERVICE_FILE_PATH = "/etc/systemd/system/nodo.service"
+
+# How doctor runs the binaries config.yaml names (cloud-hypervisor, virtiofsd): as
+# the user the unit runs the daemon as, with the groups the unit gives it and no
+# capability. Empty for a root daemon. On a node whose daemon is a service user,
+# that user can write config.yaml, and doctor runs as root.
+_RUN_AS_DAEMON: list = []
+_DAEMON_IDS = (0, 0)
+
+
+def _run_as_daemon_prefix(username: str, supplementary_groups=()) -> list:
+    if not username or username == "root":
+        return []
+    user = pwd.getpwnam(username)
+    groups = ",".join(supplementary_groups) if supplementary_groups else ""
+    return [
+        "setpriv",
+        f"--reuid={user.pw_uid}",
+        f"--regid={user.pw_gid}",
+        f"--groups={groups}" if groups else "--clear-groups",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--",
+    ]
+
+
+def _doctor_setpriv(service_user: str):
+    """A daemon that is not root starts its hypervisors through setpriv."""
+    if not service_user or service_user == "root":
+        return
+    print("\nDropping capabilities for the hypervisors:", flush=True)
+    path = shutil.which("setpriv")
+    if path:
+        print(f"[OK] setpriv found: {path}", flush=True)
+    else:
+        print(
+            "[FAIL] setpriv not found. The daemon runs as "
+            f"{service_user} and starts cloud-hypervisor, QEMU and virtiofsd through it; "
+            "without it no service starts.",
+            flush=True,
+        )
+        print("  Suggestion: install util-linux (apt/dnf install util-linux).", flush=True)
+
+
+def _confirm_user_change(service_name: str, current: str, expected: str) -> bool:
+    """Ask before a rewrite changes who the unit runs as; never without a terminal."""
+    if not sys.stdin.isatty():
+        return False
+    print(
+        f"{service_name} runs nodo as {current}; the unit this install renders runs it as "
+        f"{expected}.",
+        flush=True,
+    )
+    try:
+        answer = input(f"Rewrite {service_name} to run as {expected}? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes", "s", "si", "sí")
+
+
+def _running_as_root() -> bool:
+    return os.geteuid() == 0
+
+
 def doctor_command(main_dir):
-    if os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
+    service_name = "nodo.service"
+    service_file_path = SERVICE_FILE_PATH
+    try:
+        service_user = installed_service_user(unit_file=service_file_path)
+    except (OSError, ValueError) as e:
+        print(f"Error: {e}", flush=True)
         return
 
-    service_name = "nodo.service"
-    service_file_path = f"/etc/systemd/system/{service_name}"
-    template_file = os.path.join(main_dir, "bash", "nodo.service.template")
+    # An install without sudo runs the daemon as the installing user, so that user
+    # can check the node. Anything that writes the unit stays with root.
+    read_only = not _running_as_root()
+    if read_only:
+        try:
+            own_user = pwd.getpwuid(os.geteuid()).pw_name
+        except KeyError:
+            own_user = ""
+        if not service_user or service_user != own_user:
+            print("This script requires superuser privileges. Please run with sudo.")
+            return
+        print(
+            f"Running as {own_user}, the user of the daemon: the service file is checked "
+            "but not changed. Run 'sudo nodo doctor' to fix it.",
+            flush=True,
+        )
+    template_file = os.path.join(main_dir, "bash", _service_template_name(service_user))
 
     if not os.path.exists(template_file):
         print(f"Error: Template file {template_file} not found.", flush=True)
@@ -1154,7 +1413,7 @@ def doctor_command(main_dir):
 
     with open(template_file, "r") as f:
         try:
-            expected_content = _render_service_template(f.read(), main_dir)
+            expected_content = _render_service_template(f.read(), main_dir, service_user)
         except ValueError as e:
             print(f"Error: {e}", flush=True)
             return
@@ -1166,16 +1425,36 @@ def doctor_command(main_dir):
         print(f"Service file {service_file_path} does not exist.", flush=True)
         needs_fix = True
         current_service_user = expected_service_user
+        current_unit = expected_content
     else:
         with open(service_file_path, "r") as f:
             current_content = f.read()
         current_service_user = _parse_unit_user(current_content)
+        current_unit = current_content
 
         if current_content.strip() != expected_content.strip():
             print("Service file content differs from expected configuration.", flush=True)
             needs_fix = True
         else:
             print(f"[OK] {service_name} is correctly configured.", flush=True)
+
+    if read_only and needs_fix:
+        print(
+            f"[FAIL] {service_name} is not as this install expects. Run 'sudo nodo doctor' to fix it.",
+            flush=True,
+        )
+        needs_fix = False
+    elif needs_fix and current_service_user != expected_service_user and os.path.exists(service_file_path):
+        # A change of the user the node runs as is the operator's decision, not a fix.
+        if not _confirm_user_change(service_name, current_service_user, expected_service_user):
+            needs_fix = False
+            print(
+                f"[FAIL] {service_name} runs nodo as {current_service_user}, and this install "
+                f"says {expected_service_user}. Left unchanged. To choose, run "
+                "'sudo ./install.sh --service-user <name>' (root: --service-user root), or "
+                "'sudo nodo doctor' in a terminal and confirm.",
+                flush=True,
+            )
 
     if needs_fix:
         print(f"Fixing {service_name}...", flush=True)
@@ -1194,8 +1473,27 @@ def doctor_command(main_dir):
         print(f"[OK] {service_name} has been fixed and enabled.", flush=True)
         print("  Run 'nodo daemon start' to start the service.", flush=True)
         current_service_user = expected_service_user
+        current_unit = expected_content
 
     print(f"Service runtime user for checks: {current_service_user}", flush=True)
-    _doctor_kvm_checks(current_service_user)
+    supplementary_groups = _parse_unit_supplementary_groups(current_unit)
+    _doctor_kvm_checks(current_service_user, supplementary_groups)
+    _doctor_setpriv(current_service_user)
+    global _RUN_AS_DAEMON, _DAEMON_IDS
+    try:
+        _RUN_AS_DAEMON = (
+            [] if read_only else _run_as_daemon_prefix(current_service_user, supplementary_groups)
+        )
+        if _RUN_AS_DAEMON:
+            info = pwd.getpwnam(current_service_user)
+            _DAEMON_IDS = (info.pw_uid, info.pw_gid)
+    except KeyError:
+        print(
+            f"[FAIL] {service_name} runs as {current_service_user}, who does not exist. "
+            "Skipping the checks that run the configured binaries.",
+            flush=True,
+        )
+        _doctor_network_checks()
+        return
     _doctor_cloud_hypervisor(main_dir)
     _doctor_network_checks()

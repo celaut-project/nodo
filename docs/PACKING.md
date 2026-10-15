@@ -272,7 +272,7 @@ DATA_GENERATOR=def456hashvalue
 #### `blocks_directory`
 - **Type:** `string`
 - **Required:** No
-- **Description:** Directory name where block files referenced by dependencies will be stored. Blocks are resolved automatically from each dependency's `_.json` manifest.
+- **Description:** Directory name where block files referenced by dependencies will be stored. Blocks are resolved automatically from each dependency's `_.json` manifest, at every depth: a block that is a multiblock directory brings the blocks that its own `_.json` names. The service needs all of them to send the dependency to a node that does not have it.
 
 ```json
 {
@@ -496,8 +496,73 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 | `cpu_period` | int (microseconds) | `0` (no limit) | CPU CFS period |
 | `cpu_quota` | int (microseconds) | `0` (no limit) | CPU CFS quota |
 | `blkio_weight` | int | `0` (no limit) | Block I/O weight |
+| `benchmark` | object (`{primitive: int}`) | omitted (no requirement) | Minimum **per-core** benchmark scores, see below |
 
 > A value of `0` means **no limit** for that resource.
+
+##### `benchmark`
+
+`cpu_quota`/`cpu_period` say how many cores a service needs, not how fast one has to be: the
+same admitted core is native silicon on one node and software emulation on another.
+`benchmark` states the second half, as an object from a named primitive to the least the
+service needs of it **on one core, per second**. It composes with the quota rather than
+competing with it — "2 cores, each at least 500k integer ops/s" is
+`cpu_quota / cpu_period = 2.0` plus `"int_ops_per_sec": 500000`, never a total across cores.
+
+| Key | Unit (per core, per second) | What it stands for |
+|-----|-----------------------------|--------------------|
+| `int_ops_per_sec` | operations | Integer / branch-heavy throughput |
+| `flt_ops_per_sec` | operations | Floating-point throughput |
+| `mem_bandwidth_64mib_bytes_per_sec` | bytes | Memory bandwidth over a 64 MiB working set |
+| `mem_bandwidth_256mib_bytes_per_sec` | bytes | Memory bandwidth over a 256 MiB working set |
+| `mem_bandwidth_1gib_bytes_per_sec` | bytes | Memory bandwidth over a 1 GiB working set |
+| `sha256_hashes_per_sec` | digests | SHA-256 hashing |
+
+- **Only under `at_init`.** `benchmark` is a minimum, and a minimum is what `at_init`
+  states; that is the half admission enforces. Under `at_most` it would mean nothing, so the
+  packer refuses it — and refuses the field's old name, `min_benchmark`, and the old
+  memory-bandwidth keys `mem_bandwidth_bytes_per_sec` and `mem_bandwidth_working_set_bytes`,
+  naming the new ones.
+- The key set is `BENCHMARK_KEYS` in `src/utils/benchmark.py`. It is keyed so that a
+  new primitive is a new key, never a change to the wire format. On the wire it is a
+  list of key/value entries sorted by key (see [`protos/README.md`](../protos/README.md)).
+- An **omitted key is no requirement** on that primitive; an omitted `benchmark` is no
+  requirement at all, and a service that never mentions it packs to the same bytes as before.
+- Values must be **non-negative integers** (JSON numbers, not strings or booleans, at most
+  2^64-1). Anything else is a packing error, raised before the image is built.
+- A key outside the table is **kept as written**, with a line in the log, never refused: a
+  node may know a primitive the packer does not.
+- **Memory bandwidth is only comparable over the same amount of memory** — 5 KiB lives in
+  cache, 2 GiB does not. So the working set is part of the key: a requirement is held
+  against the node's score under the same key, i.e. over the same amount of memory. The
+  keys above are the sizes a node measures, but a service may require **any** size as
+  `mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec` (say `mem_bandwidth_300mib_bytes_per_sec`):
+  a larger working set can only lower a bandwidth, so it is held against the node's score
+  over the **smallest larger working set it measured**. With none that large it is only
+  logged, not enforced.
+
+**Enforced per architecture.** A node holds the requirement against its own measured
+scores for the service's architecture (`benchmark.BY_ARCH` in its `config.yaml`, see
+[CONFIG.md](CONFIG.md#benchmark--this-nodes-per-core-scores)) and refuses the service, with
+the reason, when a measured score is lower. A primitive the node has not measured (`-1`) is
+logged and not enforced. A node also announces its scores to its peers (`Peer.resources`),
+so a peer never asks it to run a service it could not admit. The requirement is carried
+intact to every peer the service is delegated to.
+
+```json
+{
+    "resources": {
+        "at_init": {
+            "cpu_period": 100000,
+            "cpu_quota": 200000,
+            "benchmark": {
+                "int_ops_per_sec": 500000,
+                "mem_bandwidth_1gib_bytes_per_sec": 5000000000
+            }
+        }
+    }
+}
+```
 
 **Example — Constrained service:**
 ```json
@@ -625,17 +690,10 @@ not the image bytes built from it, so the format is unobservable from inside the
 guest — while pinning one in the manifest would let a node lacking that package
 reject a service it is perfectly able to run.
 
-**What it rules out.** Exporting a shared filesystem (`shared: true`). A share is
-seeded with what the exporter packaged at that path, read out of its own image with
-`debugfs` — an ext4 reader, which cannot open a squashfs or erofs image. A service
-declaring both is refused rather than given an empty share.
-
-The packer refuses that combination **at pack time**, naming the exported paths, so
-the operator finds out before publishing a service that no node could start. It is
-the same condition the node checks at launch, read from the same declarations.
-Importing a directory (`guest: true`) is unaffected: it is mounted from the parent's
-share, with nothing read out of this service's own image, so it has no quarrel with
-an immutable rootfs.
+**Shares.** A read-only service can export, inherit or be a member of a shared
+filesystem. It mounts every share read-only, so it can read what other instances
+write, and it cannot write. When its image seeds a share, the node reads the
+subtree with `unsquashfs` or `fsck.erofs`, so no mount is needed.
 
 **Per-entry metadata is already handled.** The mandatory
 `mode`/`uid`/`gid`/`mtime_ns`/`device.*` keys above are not something a
@@ -645,6 +703,51 @@ gate exists for trees produced by other packers and for services packed before t
 metadata contract existed. The packer asserts it anyway before setting the xattr, so
 that if that ever stops being true it says so rather than shipping a service every
 node would refuse.
+
+---
+
+#### `shared_filesystems`
+- **Type:** `array` of objects
+- **Required:** No
+- **Default:** absent (nothing is written)
+- **Description:** Declares directories this service **exports** to the children it launches (`role: "shared"`), **inherits** from the parent that launched it (`role: "guest"`), or **shares** with the members of one of its networks (`role: "network"`). The packer writes the reserved xattrs described in [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md) on the directory's `ItemBranch`, and the node reads them at launch.
+
+```json
+"shared_filesystems": [
+  { "path": "/shared", "role": "shared", "tag": "demo-share", "env": "SHARE_ID", "access": "rw" }
+]
+```
+
+```json
+"shared_filesystems": [
+  { "path": "/mnt/from-parent", "role": "guest", "tag": "demo-share", "env": "SHARE_ID", "access": "rw" }
+]
+```
+
+```json
+"network": [
+  { "tags": ["hdfs"], "prose": "HDFS cluster", "formal": { "cluster": "${HDFS_CLUSTER}" } }
+],
+"shared_filesystems": [
+  { "path": "/data", "role": "network", "network": "hdfs", "tag": "hdfs-data" }
+]
+```
+
+| Field | Required | Becomes | Meaning |
+|---|---|---|---|
+| `path` | yes | (selects the branch) | Absolute path of the directory, not `/`. |
+| `role` | yes | `shared=true`, `guest=true`, or nothing for `network` | `shared` exports, `guest` inherits, `network` shares with the members of a network. |
+| `network` | with `role: "network"` only | `share_network` | Tag of an entry of the service's `network`. The packer refuses a tag that no entry carries. |
+| `tag` | no | `share_tag` | Logical name of the share, used instead of the path. |
+| `env` | no | `share_env` | Environment variable whose value picks the concrete share. |
+| `access` | no | `access` | `ro` or `rw` (default `rw`). |
+
+- The directory **must already exist** in the image. The packer does not create it: if it is missing the pack fails and tells you to create it in the Dockerfile (`RUN mkdir -p /shared`), so owner, mode and content stay your decision.
+- Types are checked strictly, as with `read_only_filesystem`: a list of objects, a `role` of `shared` or `guest`, strings where strings are expected. Unknown fields and a repeated `path` are refused. This is checked when `service.json` is read, before the image is built.
+- The result goes through the same validation the node applies, so `shared` and `guest` are exclusive, declarations cannot nest, names (`tag`, or the path) cannot repeat on one side, `tag` must match `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, and `env` must be a POSIX variable name.
+- Absent or empty writes **nothing**, so no existing service gets a new id.
+- `read_only_filesystem: true` is allowed with every role (see above). The service mounts its shares read-only.
+- An exported directory counts toward the **exporter's** `resources.at_init.disk_space` and `at_most.disk_space`; its guests are charged nothing for it. Each member of a network share is charged an equal part of it. See [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#accounting).
 
 ---
 
@@ -658,7 +761,7 @@ node would refuse.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `count` | int | `1` | Number of concurrent descendant instances in this group |
-| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit) |
+| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit — plus an optional [`benchmark`](#benchmark)) |
 | `dependency` | object or `null` | omitted | Optional identity, embedded specification, and availability information for the descendant service |
 
 ##### `workloads[].dependency`
@@ -685,7 +788,9 @@ service is refused if any group has nowhere that could take it. Every limit the 
 is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
 `cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
 time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
-10–1000 range cgroups accept.
+10–1000 range cgroups accept. A group's `benchmark` is checked too, as the minimum it is:
+against the scores of whichever node is asked, for the group's architecture — the embedded
+dependency service's, or the node's native one for a resource-only group.
 
 This is an existence check, not a capacity reservation: it does not prove `count` concurrent
 instances of a group could all run at once, locally or spread across peers, and it does not
@@ -912,6 +1017,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 | `port` | int | Yes | Port number the service listens on |
 | `transport` | string or array | No | Transport protocol(s). Defaults to `["tcp"]` |
 | `protocol` | array | No | Application-level protocol tags (e.g. `["grpc"]`). Accepts `None` if omitted |
+| `protocol_stack` | array of protocol descriptors | No | The protocol layers of the slot, bottom layer first. Each entry is a list of tags (`["http"]`) or an object with `tags` / `prose` / `formal`, as in a network's `protocol_stack`. Use it when the slot speaks more than one layer, for example `[["http"], ["chat"]]` for the chat convention of chatui. A slot declares `protocol` or `protocol_stack`, not both. `protocol` is one layer |
 | `mu_per_call` | object | No | Map of method name → price in MU (integer; the node's unit of account) |
 
 **Example — Single gRPC slot:**
@@ -944,6 +1050,22 @@ The older `entrypoint` top-level field is still supported and will be automatica
             "port": 8080,
             "transport": ["tcp", "http"],
             "protocol": ["rest", "http1.1"]
+        }
+    ]
+}
+```
+
+**Example — A slot with two protocol layers (HTTP, and a convention above it):**
+```json
+{
+    "api": [
+        {
+            "port": 8080,
+            "transport": "tcp",
+            "protocol_stack": [
+                ["http"],
+                {"tags": ["chat"], "prose": "Echo of each message."}
+            ]
         }
     ]
 }

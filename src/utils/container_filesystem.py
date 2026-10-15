@@ -24,6 +24,7 @@ import warnings
 from typing import Optional, Sequence, Tuple
 
 from bee_rpc import buffer_pb2
+from bee_rpc.block_splitter import PROTOBUF_LIMIT, split_block
 from bee_rpc.client import get_hash_from_block
 from bee_rpc.reader import block_exists, read_block
 from bee_rpc.utils import Enviroment, WITHOUT_BLOCK_POINTERS_FILE_NAME, HashTypeError, \
@@ -32,6 +33,7 @@ from google.protobuf.message import DecodeError
 
 from protos import celaut_pb2 as celaut
 from src.utils import logger as log
+from src.utils.config import ConfigManager
 
 # A pointer holds one hash: its type and value, tens of bytes. Generous enough
 # for several hashes, far below anything an inline filesystem could be.
@@ -137,9 +139,40 @@ def load_container_filesystem(service: celaut.Service) -> celaut.Service.Contain
         filesystem.ParseFromString(raw)
         return filesystem
 
+    split_oversized_filesystem_block(service)
     log.LOGGER(f"Reading filesystem block {block_id}.")
     filesystem.ParseFromString(_filesystem_block_bytes(block_id))
     return filesystem
+
+
+_FILE_FIELD = celaut.Service.Container.Filesystem.ItemBranch.DESCRIPTOR.fields_by_name["file"]
+
+
+def split_oversized_filesystem_block(service: celaut.Service, limit: int = PROTOBUF_LIMIT) -> bool:
+    """Give the filesystem block sub-blocks if what it holds directly passes `limit`.
+
+    A filesystem block is read as one message (`_filesystem_block_bytes`), and a
+    message over 2 GiB does not parse. The packer keeps it far under that: every
+    file at or over `packer.MIN_BUFFER_BLOCK_SIZE` is a block of its own. A block
+    that came from elsewhere may not be -- a peer that sent it flat, or packed it
+    with another threshold -- so this applies the packer's policy to it here, the
+    same way: the file contents become blocks, the tree stays inline. The block id
+    does not change, so neither does the service id.
+
+    False when there is no filesystem block or it is within `limit`.
+    """
+    block_id = filesystem_block_id(service.container.filesystem)
+    if block_id is None:
+        return False
+    threshold = ConfigManager().get("packer.MIN_BUFFER_BLOCK_SIZE")
+    return split_block(
+        block_id,
+        celaut.Service.Container.Filesystem,
+        lambda field, length: field is _FILE_FIELD and length >= threshold,
+        inherited=filesystem_hash_types(service),
+        limit=limit,
+        debug=log.LOGGER,
+    )
 
 
 def _filesystem_block_bytes(block_id: str) -> bytes:

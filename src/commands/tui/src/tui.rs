@@ -1,12 +1,20 @@
 use crate::app::{App, AppResult};
 use crate::event::EventHandler;
 use crate::ui;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::Backend;
 use ratatui::Terminal;
 use std::io;
 use std::panic;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Whether `init` switched the terminal to the kitty keyboard protocol, so `reset`
+/// only pops what was pushed.
+static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 
 /// Representation of a terminal user interface.
 ///
@@ -32,6 +40,19 @@ impl<B: Backend> Tui<B> {
     pub fn init(&mut self) -> AppResult<()> {
         terminal::enable_raw_mode()?;
         crossterm::execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
+        // Where the terminal speaks it, the kitty keyboard protocol is the only way
+        // Ctrl+Enter reaches a program as anything but Enter (the chat compose box
+        // sends on it; see handler.rs). Only the disambiguation flag: no release
+        // events, and text keys still arrive as the plain characters they were.
+        if matches!(terminal::supports_keyboard_enhancement(), Ok(true))
+            && crossterm::execute!(
+                io::stderr(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )
+            .is_ok()
+        {
+            KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
+        }
 
         // Define a custom panic hook to reset the terminal properties.
         // This way, you won't have your terminal messed up if an unexpected error happens.
@@ -60,6 +81,9 @@ impl<B: Backend> Tui<B> {
     /// This function is also used for the panic hook to revert
     /// the terminal properties if unexpected errors occur.
     fn reset() -> AppResult<()> {
+        if KEYBOARD_ENHANCED.swap(false, Ordering::SeqCst) {
+            let _ = crossterm::execute!(io::stderr(), PopKeyboardEnhancementFlags);
+        }
         terminal::disable_raw_mode()?;
         crossterm::execute!(io::stderr(), LeaveAlternateScreen, DisableMouseCapture)?;
         Ok(())

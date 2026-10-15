@@ -370,6 +370,38 @@ class PlaintextGatewayPortAlertTests(unittest.TestCase):
         )
         self.assertNotIn(self._notice_path(), alert.summary)
 
+    def _write_port(self, port):
+        from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_PORT_FILE
+
+        with open(os.path.join(self._dir.name, GATEWAY_PLAINTEXT_NOTICE_PORT_FILE), "w") as handle:
+            handle.write(str(port))
+
+    def test_a_notice_about_the_port_auto_used_to_resolve_to_is_not_reported(self):
+        """Issue #438: the TLS port moved from 52285 to 60000, so `auto` is now 60001.
+
+        The notice and its command were written about 52286. Reported against the
+        new port, the operator was told to open 52286 -- which they did, restarted,
+        and were then told to open 60001, the port the node had been using all
+        along. A notice about another port is no question about this one.
+        """
+        self._write_notice()
+        self._write_command()
+        self._write_port(52286)
+        manager = _FakePlaintextConfigManager(self.config_path, 60001)
+
+        self.assertIsNone(operator_alerts.plaintext_gateway_port_alert(manager))
+
+    def test_a_notice_about_the_port_in_force_is_still_reported(self):
+        self._write_notice()
+        self._write_command()
+        self._write_port(52286)
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        alert = operator_alerts.plaintext_gateway_port_alert(manager)
+
+        self.assertIsNotNone(alert)
+        self.assertIn("52286", alert.summary)
+
     def test_the_port_turned_off_raises_nothing_even_with_a_stray_notice(self):
         """0 is the operator's own choice (services fall back to the TLS port).
 

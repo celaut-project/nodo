@@ -87,23 +87,13 @@ class RequireCallerTests(unittest.TestCase):
         with self.assertRaises(ClientRequired):
             require_caller(_Context(), uuid4().hex)
 
-    def test_a_malformed_client_id_is_refused_without_touching_the_database(self):
-        # The shape check is pure string work; nothing here should need a DB read to
-        # reject an id that could not possibly have been minted.
+    def test_a_malformed_client_id_is_refused(self):
+        # There is no shape check any more (f0dcd349): the one indexed read decides, so
+        # an id that could not have been minted is refused because no client has it.
         for bad in ("", "not-a-uuid", "x" * 32, uuid4().hex.upper(), uuid4().hex + "0"):
             with self.subTest(bad=bad):
                 with self.assertRaises(ClientRequired):
                     require_caller(_Context(), bad)
-        self.existence_patcher.stop()
-        try:
-            with patch.object(
-                client_gate.sc, "client_exists",
-                side_effect=AssertionError("client_exists should not have been called"),
-            ):
-                with self.assertRaises(ClientRequired):
-                    require_caller(_Context(), "still-not-a-uuid")
-        finally:
-            self.existence_patcher.start()
 
     def test_a_known_client_id_is_accepted(self):
         client_id = self._new_client()
@@ -210,7 +200,7 @@ class ParseWithClientWireTests(unittest.TestCase):
     def test_a_payload_with_no_client_parses_with_an_empty_client_id(self):
         peer = celaut_pb2.Peer(public_key="abc")
         buffers = self._round_trip([peer], {1: celaut_pb2.Peer, 2: celaut_pb2.Client})
-        payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
+        payload, client_id = parse_with_client(iter(buffers), method="IntroducePeer")
         self.assertEqual(payload, peer)
         self.assertEqual(client_id, "")
 
@@ -223,14 +213,19 @@ class ParseWithClientWireTests(unittest.TestCase):
                 buffers = self._round_trip(
                     messages, {1: celaut_pb2.Peer, 2: celaut_pb2.Client}
                 )
-                payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
+                payload, client_id = parse_with_client(iter(buffers), method="IntroducePeer")
                 self.assertEqual(payload, peer)
                 self.assertEqual(client_id, client.client_id)
+
+    def test_a_method_without_one_payload_and_one_client_is_refused(self):
+        # The indices come from GATEWAY_RPCS; GetPeerInfo takes only a Client.
+        with self.assertRaises(ValueError):
+            parse_with_client(iter([]), method="GetPeerInfo")
 
     def test_a_caller_that_sends_nothing_parses_to_no_payload_and_no_client(self):
         from bee_rpc import buffer_pb2 as bee_buffer_pb2
         buffers = list(bee.serialize_to_buffer(message_iterator=bee_buffer_pb2.Empty(), indices={}))
-        payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
+        payload, client_id = parse_with_client(iter(buffers), method="IntroducePeer")
         self.assertIsNone(payload)
         self.assertEqual(client_id, "")
 

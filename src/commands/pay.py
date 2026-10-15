@@ -127,9 +127,10 @@ def _amount_to_mu(contract, amount: str) -> int:
     what moves is an on-chain transfer and the asset denominates it, not the operator's
     presentation preference.
 
-    Converted through ``mu_per_unit()``, which is the same figure peers are told as
-    ``ContractRate``, so what the operator types and what the peer credits are related
-    by one number rather than by two conversions that can disagree.
+    Converted through ``mu_per_unit()``, MU per whole unit: the rate peers are told as
+    ``ContractRate.mu_per_unit`` (per base unit) scaled by the asset's decimals, so what
+    the operator types and what the peer credits are related by one number rather than
+    by two conversions that can disagree.
     """
     try:
         typed = Decimal(str(amount).strip())

@@ -62,7 +62,7 @@ class _Harness:
         self.sc.get_instance_balance.side_effect = self._balance
         self.sc.update_instance_balance.side_effect = self._record_instance_credit
         self.sc.add_balance.side_effect = self._record_client_credit
-        self.sc.purge_internal.side_effect = self._record_purge
+        self.sc.mark_local_killed.side_effect = self._record_purge
         self.balances = {CHILD: LEFTOVER, father_id: 0}
 
     def _balance(self, id):
@@ -76,14 +76,16 @@ class _Harness:
         self.calls.append(("credit_client", client_id, balance_mu))
         self.balances[client_id] = self.balances.get(client_id, 0) + balance_mu
 
-    def _record_purge(self, id):
+    def _record_purge(self, id, reason=None):
         self.calls.append(("purge", id))
         if self.purge_raises:
             raise RuntimeError("database is locked")
+        return True
 
     def run(self):
         with patch.object(manager, "sc", self.sc), \
                 patch.object(manager, "kill", return_value=True), \
+                patch.object(manager.dead_instances, "write_death_record"), \
                 patch.object(manager, "resolve_instance_token", return_value=None), \
                 patch.object(manager.IOBigData, "log_snapshot", lambda *a, **k: None):
             return manager.stop_instance(token=CHILD)

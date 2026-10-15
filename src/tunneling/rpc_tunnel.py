@@ -77,7 +77,7 @@ from typing import Callable, Generator, Iterator, List, Optional, Tuple
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
-from src.tunneling import logger
+from src.tunneling import inbound, logger
 from src.utils import host_limits
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.execution_cost import traffic_charge_mu
@@ -412,6 +412,7 @@ def _pump_to_service(
     is_udp: bool,
     meter: TrafficMeter,
     activity: List[float],
+    stream_id: Optional[str] = None,
 ) -> None:
     """Forward caller payload to the service until the caller stops sending.
 
@@ -447,6 +448,7 @@ def _pump_to_service(
 
             sent += len(message)
             messages += 1
+            inbound.count(stream_id, bytes_in=len(message))
             activity[0] = time.monotonic()  # caller->service counts as activity too
 
             if not meter.add(len(message)):
@@ -480,8 +482,15 @@ def _relay(
     target: str,
     is_udp: bool,
     meter: TrafficMeter,
+    stream: Optional[dict] = None,
 ) -> Generator[bytes, None, None]:
-    """Yield everything the service sends while forwarding the caller's payload."""
+    """Yield everything the service sends while forwarding the caller's payload.
+
+    ``stream`` describes the tunnel for the operator's list of inbound streams
+    (``inbound.opened``): it is registered once relaying starts and dropped when it
+    ends, so a relay that is never iterated is never listed.
+    """
+    stream_id = inbound.opened(**stream) if stream else None
     stop = threading.Event()
     caller_done = threading.Event()
     # Shared last-activity clock (a one-element list so both threads see writes),
@@ -498,6 +507,7 @@ def _relay(
             "is_udp": is_udp,
             "meter": meter,
             "activity": activity,
+            "stream_id": stream_id,
         },
         name=f"tunnel-writer-{target}",
         daemon=True,
@@ -539,6 +549,7 @@ def _relay(
 
             received += len(data)
             messages += 1
+            inbound.count(stream_id, bytes_out=len(data))
 
             # Charged before handing it over: what the caller receives is what it
             # pays for, and an exhausted balance stops the next read, not this one.
@@ -567,11 +578,13 @@ def _relay(
         # and gRPC breaks that iterator when the RPC ends, so don't wait forever.
         writer.join(timeout=WRITER_JOIN_TIMEOUT_S)
         meter.settle()
+        inbound.closed(stream_id)
 
 
 def service_tunnel(
     iterator: Iterator,
     is_active: Callable[[], bool] = lambda: True,
+    caller: str = "",
 ) -> Tuple[socket.socket, Generator[bytes, None, None]]:
     """Establish a tunnel and return ``(conn, relay)``.
 
@@ -588,6 +601,9 @@ def service_tunnel(
     ``is_active`` is polled while relaying (the gateway passes
     ``context.is_active``) so a cancelled RPC tears the tunnel down instead of
     leaving it parked on an idle service.
+
+    ``caller`` (the gateway passes ``context.peer()``) is who the stream is relayed
+    for, as ``nodo tunnels --inbound`` lists it.
     """
     token, slot = _handshake(iterator)
     logger(f"{LOG_PREFIX} Handshake for token={token} slot={slot}")
@@ -620,5 +636,12 @@ def service_tunnel(
         target=target,
         is_udp=transport is TransportProtocol.UDP,
         meter=meter,
+        stream={
+            "caller": caller,
+            "token": token,
+            "slot": slot,
+            "transport": transport.value,
+            "target": f"{ip}:{port}",
+        },
     )
     return conn, relay

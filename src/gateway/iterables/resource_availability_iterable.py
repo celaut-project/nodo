@@ -4,12 +4,14 @@ from protos import celaut_pb2
 from src.gateway.client_gate import parse_with_client, require_caller
 from src.utils import activity_window
 from src.utils.bee_client import BeeClient, Buffer
-from src.utils.cost_functions.resource_availability import get_resource_availability
+from src.utils.cost_functions.architecture_resources import NOT_EXECUTING_REASON, executes_locally
+from src.utils.cost_functions.resource_availability import get_architecture_availability
 from src.utils.logger import LOGGER as logger
+from src.utils.tools.query_cache import QueryCache, availability_ttl, canonical_key
 
 
 class GetResourceAvailabilityIterable:
-    """Answers "could you run an instance shaped like this right now?".
+    """Answers "could you run an instance of this architecture, shaped like this, right now?".
 
     Unlike GetServiceEstimatedCost, the input is a bare resource profile that need not
     correspond to any packed service on either side -- there is no hash to look up and
@@ -17,9 +19,15 @@ class GetResourceAvailabilityIterable:
     Service.PossibleEnvironmentWorkload scenario asks, since a descendant workload
     group may declare only `resources`, with no `hash` or embedded `service`.
 
-    The answer is `get_resource_availability`'s, verbatim: the same admission gate a
+    The answer is `get_architecture_availability`'s, verbatim: the same admission gate a
     real StartService goes through locally, so a peer is told exactly what this node
     would decide about itself and nothing more.
+
+    The answer depends only on the question, so it is remembered by the content of the
+    question for `network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS` (#456), and one asked
+    while it is being computed waits for that answer. Availability moves fast, which is
+    why that TTL is short, and every local start, stop or resize forgets these answers
+    at once; 0 turns the cache off. See `src/utils/tools/query_cache.py`.
     """
 
     def __init__(self, request_iterator, context):
@@ -33,15 +41,30 @@ class GetResourceAvailabilityIterable:
             # you run something with no declared limits?"), so it is answered rather
             # than refused -- the same shape get_resource_availability itself gives an
             # unset `at_most`.
-            resources, client_id = parse_with_client(
-                self.request_iterator, payload_type=celaut_pb2.Service.Container.Resources
+            request, client_id = parse_with_client(
+                self.request_iterator, method="GetResourceAvailability"
             )
             require_caller(self.context, client_id)
-            if resources is None:
-                resources = celaut_pb2.Service.Container.Resources()
+            if request is None:
+                request = celaut_pb2.ArchitectureResources()
 
-            availability = get_resource_availability(resources)
+            # A node that runs nothing itself has no room to report. `get_architecture_
+            # availability` answers for this machine, and saying "yes" would get a
+            # workload sent here that `launch_service` has no local candidate to run:
+            # the answer is no, and the machine is not measured at all. Ahead of the
+            # cache, so a remembered "yes" from before the key was turned off is never
+            # served, and the hours need no overlay: the reason is not about them.
+            if not executes_locally():
+                availability = {"can_execute": False, "reason": NOT_EXECUTING_REASON}
+            else:
+                availability = QueryCache().get_or_compute(
+                    canonical_key("GetResourceAvailability", request),
+                    availability_ttl(),
+                    lambda: get_architecture_availability(request),
+                )
 
+            # After the cache, so the hours always win over a remembered answer.
+            #
             # Outside `activity_window` the answer is no, whatever the resources say.
             # A peer probing this node's capacity is asking whether it could place a
             # workload here, and after hours it could not -- reporting the room this
@@ -51,7 +74,7 @@ class GetResourceAvailabilityIterable:
             # function answers "does this shape fit?", which is a question about the
             # machine, and is also what the operator's own launches go through. The
             # hours belong to the door, not to the room.
-            if not activity_window.is_open():
+            if executes_locally() and not activity_window.is_open():
                 availability = dict(
                     availability,
                     can_execute=False,

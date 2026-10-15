@@ -24,6 +24,7 @@ import signal
 from pathlib import Path
 from typing import List, Optional
 
+from src.utils import dead_instances
 from src.utils import logger as log
 from src.virtualizers.microvm import network, paths
 from src.virtualizers.microvm.cgroups import remove_vm_cgroup
@@ -90,7 +91,12 @@ def _cleanup_tap(hypervisor: Hypervisor, vmachine_id: str, tap_name: Optional[st
         log.LOGGER(hypervisor.log(vmachine_id, f"error cleaning tap {tap_name}: {e}"))
 
 
-def kill(hypervisor: Hypervisor, vmachine_id: str) -> bool:
+def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False) -> bool:
+    """Tear down one microVM. If ``archive`` is true, save its logs first.
+
+    Only an instance with a row in the database sets ``archive``. An orphan guest
+    has no row, so nobody can read its archive.
+    """
     state = load_runtime_state(vmachine_id) or {}
     pid = int(state.get("pid") or 0)
     tap_name = str(state.get("tap") or "")
@@ -127,6 +133,11 @@ def kill(hypervisor: Hypervisor, vmachine_id: str) -> bool:
     except Exception as e:
         log.LOGGER(hypervisor.log(vmachine_id, f"failed removing control socket {socket_path}: {e}"))
 
+    # The guest process is dead here, so its logs are complete. Save them before the
+    # runtime directory goes: it holds the only copy.
+    if archive:
+        dead_instances.archive_runtime(vmachine_id, state)
+
     try:
         if runtime_dir and runtime_dir.exists():
             shutil.rmtree(runtime_dir, ignore_errors=True)
@@ -134,11 +145,11 @@ def kill(hypervisor: Hypervisor, vmachine_id: str) -> bool:
     except Exception as e:
         log.LOGGER(hypervisor.log(vmachine_id, f"failed removing runtime directory: {e}"))
 
-    # Release the shared filesystems this VM used. Each share's own state says
-    # who else is still using it: its daemon is stopped and its directory removed
-    # when this VM was the last user, and not before -- which covers both a
-    # parent leaving while a child still holds the share and a child outliving
-    # the parent that created it.
+    # Release the shared filesystems this VM used. The state of each share
+    # decides if the share ends: it ends when its exporter leaves, also if guests
+    # still use it, or when its last user leaves. When a share ends, its daemon
+    # stops and its directory is removed. A guest that leaves while the exporter
+    # runs changes nothing.
     virtiofs_mounts = state.get("virtiofs") or []
     if virtiofs_mounts:
         try:

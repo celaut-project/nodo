@@ -377,10 +377,16 @@ class GenerateClientTests(unittest.TestCase):
         self.client_count = 500
         client_id = _client_id()
         challenge = self._challenge_for(client_id)
+        # A fixed string answers a difficulty-1 challenge by luck about one time in
+        # sixteen, so take the first candidate that really does not.
+        wrong = next(
+            candidate for candidate in (f"definitely not it {n}" for n in range(1000))
+            if not verify_solution(challenge, candidate, 1)
+        )
 
         with self.assertRaises(PoWError):
             manager.generate_client_or_pow_required(
-                client_id=client_id, challenge=challenge, solution="definitely not it"
+                client_id=client_id, challenge=challenge, solution=wrong
             )
         self.assertEqual(self.created, [])
 

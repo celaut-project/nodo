@@ -1,4 +1,4 @@
-"""Shared filesystems as a parent -> child capability.
+"""Shared filesystems: a parent -> child capability, or a network one.
 
 A shared directory is a **communication channel**. If an instance that is not a
 child of the exporter could mount it, two instances the Networks model keeps in
@@ -60,6 +60,26 @@ parent that created it. If the exporter restarts it gets a new instance id, henc
 a new share, and the previous directory is removed with the instance that owned
 it. Persistence across restarts is not what this mechanism provides.
 
+**Network shares** (#268) are the second kind, for instances that have no
+common parent -- for example six services that a script launches one by one. Here
+the scope that replaces the instance tree is a ``Service.Network``, so a share
+stays a channel inside a communication domain the Networks model already allows:
+
+* ``share_network=<tag>`` — this directory is shared with every instance that
+  declares the same network (the network entry of ``Service.network`` that
+  carries ``<tag>``) and the same name, variable and value.
+
+A network share is **symmetric**: it has no owner and no ``shared``/``guest``
+sides. The first member that materializes it seeds it with its own packaged
+subtree, and it is removed when its last member stops. Its id::
+
+    share_id = H("network", tag, formal, name, share_env, discriminator)
+
+``formal`` is the network's ``formal`` after ``${VAR}`` substitution, or empty
+when it declares none. It is not compared with ``match_networks``: that relation
+is not transitive (one common tag is enough), so it cannot give one id. A side
+that declares a ``formal`` and a side that declares none are two shares.
+
 VirtioFS is one runtime implementation of the materialization (see
 ``src/virtualizers/microvm/shares.py``); the service specification stays
 completely independent of it.
@@ -78,7 +98,9 @@ from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional
 
 from protos import celaut_pb2 as celaut
+from src.manager.network_templates import Missing, substitute
 from src.utils.container_filesystem import load_container_filesystem
+from src.utils import keyvalue
 
 # Reserved sharing xattr keys (distinct from the POSIX metadata keys in
 # src/utils/filesystem_xattrs.py).
@@ -87,6 +109,12 @@ GUEST_XATTR_KEY = "guest"
 ACCESS_XATTR_KEY = "access"
 SHARE_TAG_XATTR_KEY = "share_tag"
 SHARE_ENV_XATTR_KEY = "share_env"
+SHARE_NETWORK_XATTR_KEY = "share_network"
+
+# First field of the material a share id is hashed from. It keeps the two kinds
+# of share in separate id spaces whatever text the other fields carry.
+_PARENT_DOMAIN = "parent"
+_NETWORK_DOMAIN = "network"
 
 ACCESS_RO = "ro"
 ACCESS_RW = "rw"
@@ -106,13 +134,15 @@ _ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 @dataclass(frozen=True)
 class SharedDir:
-    """A directory a service either exports to, or imports from, its parent."""
+    """A directory a service exports to its children, imports from its parent,
+    or shares with the members of a network."""
     path: str        # absolute guest path of the directory (e.g. /mnt/photos)
     shared: bool     # exported to children (shared=true)
     guest: bool      # inherited from parent (guest=true)
     access: str      # "ro" | "rw"
     tag: str = ""    # share_tag: logical name of the share, "" => use the path
     env: str = ""    # share_env: env var discriminating the concrete share
+    network: str = ""  # share_network: tag of the network that scopes the share
 
     @property
     def readonly(self) -> bool:
@@ -143,10 +173,12 @@ class ShareRef:
     discriminator: str   # value of that variable, "" if none or unset
     path: str            # where this side mounts it
     readonly: bool       # how this side mounts it
+    network: str = ""    # tag of the scoping network, "" for a parent share
 
     def describe(self) -> str:
         env_part = f", {self.env}={self.discriminator or '<unset>'}" if self.env else ""
-        return f"'{self.name}'{env_part}"
+        network_part = f" in network '{self.network}'" if self.network else ""
+        return f"'{self.name}'{env_part}{network_part}"
 
 
 def _decode_bool(key: str, value) -> bool:
@@ -195,26 +227,37 @@ def _decode_name(path: str, key: str, xattrs: Mapping[str, bytes], pattern) -> s
 def declaration_from_xattrs(path: str, xattrs: Mapping[str, bytes]) -> "SharedDir | None":
     """Build a :class:`SharedDir` for ``path`` if its xattrs opt into sharing.
 
-    Returns ``None`` when the directory declares neither ``shared`` nor ``guest``.
-    Raises ``ValueError`` on a malformed / contradictory declaration.
+    Returns ``None`` when the directory declares none of ``shared``, ``guest``
+    and ``share_network``. Raises ``ValueError`` on a malformed / contradictory
+    declaration.
     """
     has_shared = SHARED_XATTR_KEY in xattrs and _decode_bool(SHARED_XATTR_KEY, xattrs[SHARED_XATTR_KEY])
     has_guest = GUEST_XATTR_KEY in xattrs and _decode_bool(GUEST_XATTR_KEY, xattrs[GUEST_XATTR_KEY])
     tag = _decode_name(path, SHARE_TAG_XATTR_KEY, xattrs, _TAG_PATTERN)
     env = _decode_name(path, SHARE_ENV_XATTR_KEY, xattrs, _ENV_NAME_PATTERN)
-    if not has_shared and not has_guest:
-        # A tag or an env var names a share that is neither exported nor
-        # imported: nothing would ever be materialized, so it is a typo, not a
-        # declaration.
+    network = _decode_name(path, SHARE_NETWORK_XATTR_KEY, xattrs, _TAG_PATTERN)
+    if not has_shared and not has_guest and not network:
+        # A tag or an env var names a share that is neither exported, imported
+        # nor shared in a network: nothing would ever be materialized, so it is a
+        # typo, not a declaration.
         if tag or env:
             raise ValueError(
                 f"directory '{path}' declares {SHARE_TAG_XATTR_KEY}/{SHARE_ENV_XATTR_KEY} "
-                f"without '{SHARED_XATTR_KEY}' or '{GUEST_XATTR_KEY}'"
+                f"without '{SHARED_XATTR_KEY}', '{GUEST_XATTR_KEY}' or "
+                f"'{SHARE_NETWORK_XATTR_KEY}'"
             )
         return None
     if has_shared and has_guest:
         raise ValueError(
             f"directory '{path}' cannot be both shared (export) and guest (import)"
+        )
+    if network and (has_shared or has_guest):
+        # A network share has no owner and no sides. Combined with a parent
+        # share it would be two identities for one directory.
+        raise ValueError(
+            f"directory '{path}' declares '{SHARE_NETWORK_XATTR_KEY}' together with "
+            f"'{SHARED_XATTR_KEY}' or '{GUEST_XATTR_KEY}'; a network share is "
+            f"symmetric and has neither side"
         )
     # The path of a share is the one thing here a *remote* spec gets to point at
     # something outside itself: the node reads the exporter's subtree off the
@@ -233,6 +276,7 @@ def declaration_from_xattrs(path: str, xattrs: Mapping[str, bytes]) -> "SharedDi
         access=_decode_access(xattrs),
         tag=tag,
         env=env,
+        network=network,
     )
 
 
@@ -251,10 +295,10 @@ def _walk(
     for branch in fs.branch:
         path = _join(parent_path, branch.name)
         is_dir = branch.HasField("filesystem")
-        decl = declaration_from_xattrs(path, dict(branch.xattrs))
+        decl = declaration_from_xattrs(path, keyvalue.to_dict(branch.xattrs))
         if decl is not None and not is_dir:
             raise ValueError(
-                f"sharing xattrs (shared/guest) are only valid on directories; "
+                f"sharing xattrs (shared/guest/share_network) are only valid on directories; "
                 f"'{path}' is not a directory"
             )
         if decl is not None and enclosing is not None:
@@ -265,7 +309,7 @@ def _walk(
             # order of the mount plan -- undefined, not a policy.
             raise ValueError(
                 f"share declaration on '{path}' is nested inside the one on "
-                f"'{enclosing.path}'; a shared/guest directory cannot contain "
+                f"'{enclosing.path}'; a shared/guest/network directory cannot contain "
                 f"another, and an inherited directory can never be re-exported"
             )
         if decl is not None:
@@ -281,11 +325,16 @@ def _reject_duplicate_names(declarations: List[SharedDir]) -> None:
     A filesystem tree cannot hold one path twice, so path-named shares never
     collide; a ``share_tag`` can be repeated. Two exports sharing a name resolve
     to one share id, hence one virtio-fs tag emitted as two devices and two mount
-    points onto one host directory.
+    points onto one host directory. Network shares are one side per network.
     """
+    networks = sorted({d.network for d in declarations if d.network})
     for side, group in (
         ("shared", [d for d in declarations if d.shared]),
         ("guest", [d for d in declarations if d.guest]),
+        *(
+            (f"shared in network '{n}'", [d for d in declarations if d.network == n])
+            for n in networks
+        ),
     ):
         seen: Dict[str, str] = {}
         for d in group:
@@ -323,10 +372,12 @@ def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     """All shared/guest directory declarations in a service's container fs.
 
     Raises ``ValueError`` on anything a spec alone can be judged on: a malformed
-    xattr, a non-directory, a nested declaration, or two of them resolving to one
-    share.
+    xattr, a non-directory, a nested declaration, two of them resolving to one
+    share, or a ``share_network`` naming a network the service does not declare.
     """
-    return declarations_for_filesystem(load_container_filesystem(service))
+    declarations = declarations_for_filesystem(load_container_filesystem(service))
+    _reject_undeclared_networks(service, declarations)
+    return declarations
 
 
 def exported_dirs(service: celaut.Service) -> List[SharedDir]:
@@ -339,10 +390,49 @@ def guest_dirs(service: celaut.Service) -> List[SharedDir]:
     return [d for d in declarations_for_service(service) if d.guest]
 
 
+def network_dirs(service: celaut.Service) -> List[SharedDir]:
+    """Directories this service shares with the members of a network
+    (share_network=<tag>)."""
+    return [d for d in declarations_for_service(service) if d.network]
+
+
 def service_requires_parent_colocation(service: celaut.Service) -> bool:
     """True if the service imports any directory from its parent and therefore
     must be scheduled on the same node as that parent."""
     return bool(guest_dirs(service))
+
+
+def declared_network(
+    service: celaut.Service, tag: str
+) -> Optional[celaut.Service.Network]:
+    """The first entry of ``Service.network`` that carries ``tag``, if any.
+
+    The tags of one entry are synonyms for one destination (see
+    ``docs/NETWORKS.md``), so the entry that carries the tag is the network the
+    share is scoped to, with its ``formal``.
+    """
+    for network in service.network:
+        if tag in network.tags:
+            return network
+    return None
+
+
+def _reject_undeclared_networks(
+    service: celaut.Service, declarations: List[SharedDir]
+) -> None:
+    """Refuse a ``share_network`` that names a network the service does not declare.
+
+    A network share is a channel inside a communication domain. A service that
+    does not declare the domain asks for no peers there, so the share would be the
+    only channel into it: that is the isolation ``Service.Network`` gives, broken
+    over disk. Decidable from the spec alone, so the packer refuses it too.
+    """
+    for d in declarations:
+        if d.network and declared_network(service, d.network) is None:
+            raise ValueError(
+                f"directory '{d.path}' is shared in network '{d.network}', but the "
+                f"service declares no network with that tag in Service.network"
+            )
 
 
 def share_discriminator(
@@ -368,10 +458,23 @@ def share_discriminator(
     return bytes(raw).decode("utf-8", "replace")
 
 
+def _hash_fields(*fields: bytes) -> str:
+    """sha256 of the fields, each prefixed by its length.
+
+    Length-prefixing rather than a separator: several fields carry text the spec
+    or the launcher chose, so with a separator ``name="a\\0b"`` and ``name="a",
+    discriminator="b"`` would hash alike and a service could reach a share it was
+    never granted by putting the separator in its own tag. Length-prefixing makes
+    the encoding injective, so no validation has to stand in for it.
+    """
+    material = b"".join(len(field).to_bytes(4, "big") + field for field in fields)
+    return hashlib.sha256(material).hexdigest()
+
+
 def share_id(
     parent_instance_id: str, name: str, env: str = "", discriminator: str = ""
 ) -> str:
-    """Stable content id of a shared directory.
+    """Stable content id of a parent -> child shared directory.
 
     ``name`` is the declaration's ``share_tag`` or, absent one, the exported
     path; ``env`` is the name of its ``share_env`` variable and ``discriminator``
@@ -379,26 +482,43 @@ def share_id(
     parent instance id -- the exporter's own, the importer's ``father_id`` -- so a
     child can never address a share belonging to a different parent, whatever it
     names it.
-
-    The fields are length-prefixed rather than joined by a separator. Two of them
-    carry text the spec chose and one an environment value, so with a separator
-    ``name="a\\0b"`` and ``name="a", discriminator="b"`` would hash alike and a
-    child could reach a share of its parent's it was never granted by putting the
-    separator in its own tag. Length-prefixing makes the encoding injective, so
-    no validation has to stand in for it.
     """
     if not parent_instance_id:
         raise ValueError("parent_instance_id is required to identify a share")
-    material = b"".join(
-        len(field).to_bytes(4, "big") + field
-        for field in (
-            parent_instance_id.encode("utf-8"),
-            name.encode("utf-8"),
-            env.encode("utf-8"),
-            discriminator.encode("utf-8"),
-        )
+    return _hash_fields(
+        _PARENT_DOMAIN.encode("utf-8"),
+        parent_instance_id.encode("utf-8"),
+        name.encode("utf-8"),
+        env.encode("utf-8"),
+        discriminator.encode("utf-8"),
     )
-    return hashlib.sha256(material).hexdigest()
+
+
+def network_share_id(
+    network_tag: str,
+    formal: bytes,
+    name: str,
+    env: str = "",
+    discriminator: str = "",
+) -> str:
+    """Stable content id of a network shared directory (#268).
+
+    The network takes the place of the parent instance: ``network_tag`` is the
+    tag the declaration names and ``formal`` the network's ``formal`` with every
+    ``${VAR}`` already substituted (empty when it declares none). Every member
+    that declares the same network, name, variable and value derives this id,
+    whichever node and whichever parent it runs under.
+    """
+    if not network_tag:
+        raise ValueError("network_tag is required to identify a network share")
+    return _hash_fields(
+        _NETWORK_DOMAIN.encode("utf-8"),
+        network_tag.encode("utf-8"),
+        bytes(formal),
+        name.encode("utf-8"),
+        env.encode("utf-8"),
+        discriminator.encode("utf-8"),
+    )
 
 
 def share_ref(
@@ -421,6 +541,59 @@ def share_ref(
     )
 
 
+class UnresolvedNetworkShare(ValueError):
+    """A network share whose network ``formal`` still has an unanswered ``${VAR}``.
+
+    The share's identity is not complete until the launcher answers it, and a
+    guess would put the instance into a share of a different domain.
+    """
+
+
+def network_share_ref(
+    service: celaut.Service,
+    declaration: SharedDir,
+    env_values: Optional[Mapping[str, bytes]] = None,
+) -> ShareRef:
+    """Resolve one ``share_network`` declaration into a :class:`ShareRef`.
+
+    Raises ``ValueError`` when the service does not declare the network, and
+    :class:`UnresolvedNetworkShare` when its ``formal`` cannot be completed from
+    ``env_values``.
+    """
+    network = declared_network(service, declaration.network)
+    if network is None:
+        raise ValueError(
+            f"directory '{declaration.path}' is shared in network "
+            f"'{declaration.network}', but the service declares no network with that tag"
+        )
+    formal = substitute(bytes(network.formal), dict(env_values or {}))
+    if isinstance(formal, Missing):
+        problems = [f"unset: {', '.join(formal.variables)}"] if formal.variables else []
+        problems.extend(formal.malformed)
+        raise UnresolvedNetworkShare(
+            f"directory '{declaration.path}' is shared in network "
+            f"'{declaration.network}', whose formal is not complete "
+            f"({'; '.join(problems)}). The share's identity includes the "
+            f"network, so the instance cannot be placed in it."
+        )
+    discriminator = share_discriminator(declaration, env_values)
+    return ShareRef(
+        share_id=network_share_id(
+            declaration.network,
+            formal,
+            declaration.share_name,
+            declaration.env,
+            discriminator,
+        ),
+        name=declaration.share_name,
+        env=declaration.env,
+        discriminator=discriminator,
+        path=declaration.path,
+        readonly=declaration.readonly,
+        network=declaration.network,
+    )
+
+
 def exported_refs(
     service: celaut.Service,
     instance_id: str,
@@ -439,3 +612,11 @@ def guest_refs(
     if not father_id:
         return []
     return [share_ref(father_id, d, env_values) for d in guest_dirs(service)]
+
+
+def network_refs(
+    service: celaut.Service,
+    env_values: Optional[Mapping[str, bytes]] = None,
+) -> List[ShareRef]:
+    """The network shares this instance takes part in."""
+    return [network_share_ref(service, d, env_values) for d in network_dirs(service)]

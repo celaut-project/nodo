@@ -23,8 +23,14 @@ from src.manager.network_templates import Missing, substitute
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.manager.pow_networks import narrow_instances_for_local_grant
 from src.utils import guest_env
+from src.utils import keyvalue
 from src.utils import logger as log
 from src.utils.network_policy import enforce_network_policy
+from src.virtualizers.microvm.bundle_formats import (
+    ROOTFS_FORMAT_EROFS,
+    ROOTFS_FORMAT_SQUASHFS,
+    ROOTFS_IMAGE_NAMES,
+)
 from src.virtualizers.microvm.errors import MicroVMError
 from src.virtualizers.microvm.host import run
 from src.virtualizers.microvm.network import NETWORK_BRIDGE_NAME
@@ -255,6 +261,69 @@ def debugfs_rdump(image_path: Path, guest_dir: str, host_dest: Path) -> bool:
     return True
 
 
+def _stage_subtree(staging: Path, guest_dir: str, host_dest: Path) -> bool:
+    """Move what an extractor left under ``staging`` onto ``host_dest``.
+
+    Extractors keep the hierarchy of the path they were asked for, so the subtree
+    is ``staging/<guest_dir>``. Some versions put its content straight into
+    ``staging`` instead; that is taken when the hierarchy is not there. Returns
+    False when nothing was extracted.
+    """
+    parts = [p for p in posixpath.normpath(guest_dir).split("/") if p]
+    if ".." in parts or not staging.is_dir():
+        return False
+    source = staging.joinpath(*parts)
+    if not source.is_dir():
+        source = staging
+    entries = list(source.iterdir())
+    if not entries:
+        return False
+    for entry in entries:
+        shutil.move(str(entry), str(host_dest / entry.name))
+    return True
+
+
+def _extract_read_only(image_path: Path, guest_dir: str, host_dest: Path, command) -> bool:
+    host_dest.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=host_dest.parent) as staging:
+        result = run(command(staging), check=False)
+        if not _stage_subtree(Path(staging) / "out", guest_dir, host_dest):
+            log.LOGGER(
+                f"nothing to seed from {image_path}:{guest_dir} "
+                f"({(result.stderr or result.stdout or '').strip()})"
+            )
+            return False
+    return True
+
+
+def rdump(image_path: Path, guest_dir: str, host_dest: Path) -> bool:
+    """Copy the image's ``guest_dir`` subtree onto ``host_dest``, whatever its format.
+
+    An ext4 image is read with ``debugfs``; a squashfs one with ``unsquashfs`` and
+    an erofs one with ``fsck.erofs``. None of them needs a mount or privileges.
+    The format is the one the image's name says (``bundle_formats``). Returns
+    False when the image has nothing at that path, which is an empty share.
+    """
+    name = Path(image_path).name
+    if name == ROOTFS_IMAGE_NAMES[ROOTFS_FORMAT_SQUASHFS]:
+        return _extract_read_only(
+            image_path, guest_dir, host_dest,
+            lambda staging: [
+                "unsquashfs", "-no-progress", "-d", str(Path(staging) / "out"),
+                str(image_path), guest_dir,
+            ],
+        )
+    if name == ROOTFS_IMAGE_NAMES[ROOTFS_FORMAT_EROFS]:
+        return _extract_read_only(
+            image_path, guest_dir, host_dest,
+            lambda staging: [
+                "fsck.erofs", f"--extract={Path(staging) / 'out'}",
+                f"--path={guest_dir}", str(image_path),
+            ],
+        )
+    return debugfs_rdump(image_path, guest_dir, host_dest)
+
+
 def build_network_resolution(
     service: celaut.Service,
     father_id: str,
@@ -300,7 +369,7 @@ def build_network_resolution(
 
     # The requesting instance's own environment values feed `${VAR}` selection
     # keys in a network's `formal` (#385).
-    env = dict(config.environment_variables) if config else {}
+    env = keyvalue.to_dict(config.environment_variables) if config else {}
 
     resolutions: List[celaut.ConfigurationFile.NetworkResolution] = []
     for network in networks:
@@ -395,7 +464,7 @@ def build_guest_envs_file(config: Optional[celaut.Configuration]) -> Optional[by
 
     One line per kept variable, ``NAME BASE64VALUE``: the value is base64
     rather than raw so a byte string that happens to contain a newline (legal
-    in ``Configuration.environment_variables``, a ``map<string, bytes>``) stays
+    in ``Configuration.environment_variables``, a list of ``bytes`` values) stays
     on its own line, and so ``bash/build_ch_initramfs.sh`` -- which has no
     ``sed``/``awk`` to lean on -- never has to parse anything more than
     whitespace-separated fields. ``NAME`` is already restricted to
@@ -409,7 +478,7 @@ def build_guest_envs_file(config: Optional[celaut.Configuration]) -> Optional[by
     if not config:
         return None
 
-    kept = guest_env.linux_env_vars(config.environment_variables)
+    kept = guest_env.linux_env_vars(keyvalue.to_dict(config.environment_variables))
     if not kept:
         return None
 

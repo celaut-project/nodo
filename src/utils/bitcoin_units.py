@@ -198,6 +198,26 @@ def script_pubkey_from_address(address: str, network: str = "mainnet") -> Option
     return bytes([opcode, len(program)]) + bytes(program)
 
 
+def script_pubkey_for_address(address: str, network: str = "mainnet") -> Optional[bytes]:
+    """The ``scriptPubKey`` to *pay* ``address``, segwit or legacy, or ``None``.
+
+    Wider than :func:`script_pubkey_from_address` on purpose. That one is what this node
+    advertises to be paid at, and it stays segwit-only. This one is what it builds an
+    output against when it pays, and a cold wallet may well be a legacy address an
+    operator already owns -- sweeping to it is as valid as sweeping to a segwit one.
+    """
+    if not is_valid_bitcoin_address(address, network=network):
+        return None
+    segwit = script_pubkey_from_address(address, network=network)
+    if segwit is not None:
+        return segwit
+    raw = _b58decode(address)
+    version, digest = raw[0], raw[1:21]
+    if version in (0x00, 0x6F):  # P2PKH
+        return b"\x76\xa9\x14" + digest + b"\x88\xac"
+    return b"\xa9\x14" + digest + b"\x87"  # P2SH
+
+
 def address_from_script_pubkey(script: bytes, network: str = "mainnet") -> Optional[str]:
     """The segwit address a raw ``scriptPubKey`` pays to, or ``None``.
 

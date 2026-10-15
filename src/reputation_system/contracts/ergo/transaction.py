@@ -5,6 +5,7 @@ import requests
 
 from src.reputation_system.envs import REPUTATION_PROOF_ADDRESS
 from src.utils.config import ConfigManager
+from src.utils.ergo_node_url import ergo_node_url_problem
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
 from src.utils.network import resolve_public_port
@@ -183,7 +184,7 @@ def _self_network_data() -> str:
 
     import time
 
-    from google.protobuf.json_format import MessageToJson
+    from src.utils.keyvalue import message_to_json
 
     from protos import celaut_pb2
     from src.identity.node_identity import (
@@ -194,7 +195,7 @@ def _self_network_data() -> str:
     sign_peer_payload,
 )
     from src.utils.network import get_local_ip, resolve_public_host, uri_expiry
-    from src.identity.transport_stack import share_prose_on_ledger
+    from src.identity.transport_stack import declare_transport, share_prose_on_ledger
 
     try:
         outbound_ip = get_local_ip()
@@ -216,7 +217,7 @@ def _self_network_data() -> str:
     uri = peer.uri.add()
     uri.ip = host
     uri.port = public_port
-    uri.transport.tags.append("tcp")
+    declare_transport(uri, prose=share_prose_on_ledger())
 
     public_key_hex = get_node_public_key_hex()
     if public_key_hex:
@@ -250,7 +251,7 @@ def _self_network_data() -> str:
         LOGGER("No node identity available; publishing the address unsigned.")
 
     LOGGER(f"Advertising {host}:{public_port} on the reputation proof.")
-    return MessageToJson(peer)
+    return message_to_json(peer)
 
 
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]]):
@@ -413,8 +414,9 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
         mnemonic = env_manager.get('ledgers.ergo.WALLET_MNEMONIC') or env_manager.get('WALLET_MNEMONIC')
         node_url = ERGO_NODE_URL()
 
-        if not node_url:
-            LOGGER("Missing configuration: ledgers.ergo.NODE_URL")
+        problem = ergo_node_url_problem(node_url)
+        if problem:
+            LOGGER(problem)
             return False
 
         if not mnemonic:

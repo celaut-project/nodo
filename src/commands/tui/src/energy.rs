@@ -1,7 +1,7 @@
 //! The ENERGY page's catalogue: what the machine costs to run, and where that
 //! figure is allowed to come from (issue #395).
 //!
-//! The `energy:` block is editable on the Config page already. This page exists
+//! The `energy:` block is editable on the All page already. This page exists
 //! because the keys are meaningless without the comments beside them in
 //! `config.example.yaml`, and a YAML tree cannot show a comment: `IDLE_WATTS` must
 //! be *measured* rather than guessed, and the five sources are tried in a fixed
@@ -11,7 +11,7 @@
 //! page opens, so there is one writer and one transaction.
 //!
 //! Mirrors the `energy:` block of `config.example.yaml`; a key added there and not
-//! here is invisible on this page and still reachable on Config.
+//! here is invisible on this page and still reachable on All.
 
 use crate::app::{ConfigPathSegment, EditKind, Identifiable};
 

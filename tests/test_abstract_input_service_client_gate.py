@@ -110,5 +110,37 @@ class ClientOrderIndependenceTests(unittest.TestCase):
         self.assertEqual(it.generate_calls, 0)
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class MissingServiceTests(unittest.TestCase):
+    """Neither side has the service: the node refuses with an error, never with silence."""
+
+    def _run(self, messages, found):
+        iterable = _RecordingIterable(_request(messages), _Context())
+        with patch.object(aisi, "find_service_hash", return_value=found), \
+                patch.object(aisi, "add_wanted") as wanted, \
+                patch.object(aisi, "require_caller", _fake_require_caller):
+            with self.assertRaises(Exception) as caught:
+                list(iterable)
+        return str(caught.exception), wanted, iterable
+
+    def test_a_hash_the_node_does_not_hold_is_refused_and_wanted(self):
+        hash_message = celaut_pb2.Metadata.HashTag.Hash(type=b"t", value=b"v")
+        reason, wanted, iterable = self._run(
+            [hash_message, celaut_pb2.Client(client_id="known")], ("missing-hash", False)
+        )
+        self.assertIn("does not have the service missing-hash", reason)
+        wanted.assert_called_once_with("missing-hash")
+        self.assertEqual(iterable.generate_calls, 0)
+
+    def test_a_request_with_no_usable_hash_is_refused(self):
+        hash_message = celaut_pb2.Metadata.HashTag.Hash(type=b"other", value=b"v")
+        reason, wanted, _ = self._run(
+            [hash_message, celaut_pb2.Client(client_id="known")], (None, False)
+        )
+        self.assertIn("no hash of the type this node uses", reason)
+        wanted.assert_not_called()
+
+
+
 if __name__ == "__main__":
     unittest.main()

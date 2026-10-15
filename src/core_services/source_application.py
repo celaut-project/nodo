@@ -9,6 +9,10 @@ same acquisition path as ``nodo download``** (:func:`download_from_manifest_url`
 which fetches the manifest's chunks and imports them into the registry via
 ``import_bee``). Nothing here re-implements downloading or storage.
 
+Before the source-application, :func:`acquire_service` asks the known peers for the
+service (``GetService``, the same path as ``nodo get --now``). The source-application
+is only used when no peer provides it.
+
 Trust / fail-closed: the fallback is only attempted when a non-placeholder
 ``source-application`` id is present in ``core_services`` (see
 :func:`src.core_services.get_core_service_id`). If it is unset, or the lookup/download
@@ -97,14 +101,45 @@ def __lookup_sources(service_id: str) -> List[str]:
     return _parse_sources(payload)
 
 
+def _acquire_from_peers(service_id: str) -> bool:
+    """Ask the known peers for ``service_id`` (their ``GetService``), as ``nodo get --now`` does."""
+    try:
+        bytes.fromhex(service_id)
+    except ValueError:
+        # A tag nobody resolved: peers are asked by hash only.
+        return False
+
+    # Imported here: the manager module pulls in the whole node (DB, payments, ...).
+    from src.manager.maintain import fetch_service_from_peers
+
+    print(f"🔎 Asking known peers for '{service_id}'...")
+    try:
+        if fetch_service_from_peers(service_id):
+            print("✅ Service acquired from a peer.")
+            return True
+    except Exception as exc:  # defensive: a peer failure must not break execute
+        print(f"⚠️  Peer lookup failed: {exc}")
+        return False
+    print("ℹ️  No known peer provided the service.")
+    return False
+
+
 def acquire_service(service_id: str) -> bool:
-    """Best-effort: download ``service_id`` via the source-application core service.
+    """Best-effort: get ``service_id`` from a peer, else via the source-application.
+
+    Peers are asked first: a peer that holds the service sends it over the node
+    network, so the source-application (and the download from its sources) is only
+    needed for a service no known peer has.
 
     Returns ``True`` only if the service was successfully downloaded AND imported into
     the local registry (so the caller can re-resolve and execute it). Returns ``False``
-    if the source-application is not configured, has no source for the service, or every
-    candidate source fails to download — never raising into the execute path.
+    if no peer has it and the source-application is not configured, has no source for
+    the service, or every candidate source fails to download — never raising into the
+    execute path.
     """
+    if _acquire_from_peers(service_id):
+        return True
+
     source_application_id = get_core_service_id(SOURCE_APPLICATION)
     if not source_application_id:
         print(

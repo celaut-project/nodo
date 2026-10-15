@@ -5,13 +5,16 @@ the `--fs` arguments in, QEMU builds vhost-user-fs devices off the mount state -
 the resolving, granting, seeding and mount-plan injection happen here, once.
 """
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.manager.shares import ShareAuthorizationError
     from src.utils.shared_filesystems import ShareRef, exported_refs
     from src.virtualizers.microvm import shares
@@ -27,7 +30,7 @@ def _dir(name, xattrs=None, children=None):
     for c in (children or []):
         b.filesystem.branch.append(c)
     for k, v in (xattrs or {}).items():
-        b.xattrs[k] = v
+        keyvalue.set_value(b.xattrs, k, v)
     return b
 
 
@@ -42,7 +45,7 @@ def _service(*branches):
 
 @unittest.skipIf(IMPORT_ERROR, f"imports unavailable: {IMPORT_ERROR}")
 class MaterializeSharesTest(unittest.TestCase):
-    def _run(self, service, father_id="", granted=None, config=None):
+    def _run(self, service, father_id="", granted=None, config=None, metadata=None):
         """Call materialize_shares with the host side stubbed out, and report
         what it asked the backend and the image to do.
 
@@ -73,6 +76,7 @@ class MaterializeSharesTest(unittest.TestCase):
                     rootfs_path=Path(runtime_dir) / "rootfs.ext4",
                     runtime_dir=Path(runtime_dir),
                     log_prefix="[TEST][vm-self]",
+                    metadata=metadata,
                 )
                 seen["injection"] = write.call_args
                 plan = Path(runtime_dir) / shares.GUEST_MOUNT_PLAN_PATH.lstrip("/")
@@ -100,9 +104,18 @@ class MaterializeSharesTest(unittest.TestCase):
             seen["injection"].kwargs["guest_target"], shares.GUEST_MOUNT_PLAN_PATH
         )
         # The seed reads the exporter's own packaged subtree at that path.
-        with patch.object(shares.rootfs, "debugfs_rdump") as rdump:
+        with patch.object(shares.rootfs, "rdump") as rdump:
             seen["seed_fn"](seen["mounts"][0], Path("/dest"))
         self.assertEqual(rdump.call_args.args[1:], ("/data", Path("/dest")))
+
+    def test_a_read_only_image_exports_and_mounts_read_only(self):
+        metadata = MagicMock(read_only=True)
+        setup, seen = self._run(
+            _service(_dir("data", {"shared": b"true"})), metadata=metadata
+        )
+        self.assertTrue(setup.any)
+        self.assertTrue(seen["mounts"][0].readonly)
+        self.assertEqual(seen["plan"][0]["ro"], True)
 
     def test_an_inherited_share_is_mounted_where_the_child_declared_it(self):
         # The coordinator exports /data as `hdfs-data`; the datanode mounts that
@@ -152,6 +165,35 @@ class MaterializeSharesTest(unittest.TestCase):
                         rootfs_path=Path(runtime_dir) / "rootfs.ext4",
                         runtime_dir=Path(runtime_dir), log_prefix="[TEST]",
                     )
+
+
+@unittest.skipIf(shutil.which("mksquashfs") is None or shutil.which("unsquashfs") is None,
+                 "squashfs-tools not installed")
+class SquashfsSeedTests(unittest.TestCase):
+    def _image(self, tmp):
+        root = Path(tmp) / "root"
+        (root / "mnt/data/sub").mkdir(parents=True)
+        (root / "mnt/data/a.txt").write_text("hi")
+        (root / "mnt/data/sub/b").write_text("x")
+        image = Path(tmp) / "rootfs.squashfs"
+        subprocess.run(["mksquashfs", str(root), str(image), "-quiet", "-noappend"],
+                       check=True, capture_output=True)
+        return image
+
+    def test_the_share_is_seeded_from_a_squashfs_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image = self._image(tmp)
+            dest = Path(tmp) / "share"
+            self.assertTrue(shares.rootfs.rdump(image, "/mnt/data", dest))
+            self.assertEqual((dest / "a.txt").read_text(), "hi")
+            self.assertEqual((dest / "sub" / "b").read_text(), "x")
+
+    def test_a_path_the_image_lacks_seeds_an_empty_share(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image = self._image(tmp)
+            dest = Path(tmp) / "share"
+            self.assertFalse(shares.rootfs.rdump(image, "/nope", dest))
+            self.assertEqual(list(dest.iterdir()), [])
 
 
 if __name__ == "__main__":
@@ -224,3 +266,33 @@ class ShareAccountingTest(unittest.TestCase):
                  patch.object(shares.paths, "cache_root", return_value=root):
                 self.assertIsNone(shares.resolved_disk_bytes("vm-plain"))
                 self.assertEqual(shares.exported_disk_bytes("vm-plain"), 0)
+
+
+@unittest.skipIf(IMPORT_ERROR, f"imports unavailable: {IMPORT_ERROR}")
+class FailedLaunchReleaseTest(unittest.TestCase):
+    """A VM that fails to start keeps no runtime state for a kill to read its shares
+    from, so the launcher gives them back itself (release_shares)."""
+
+    def test_nothing_to_release_for_an_ordinary_service(self):
+        with patch.object(shares, "teardown_virtiofs_for_vm") as teardown:
+            shares.release_shares("vm-1", shares.NO_SHARES, "[t]")
+        teardown.assert_not_called()
+
+    def test_the_shares_of_a_failed_launch_are_released(self):
+        mounts_state = [{"share_id_hex": "a" * 64, "pid": 7}]
+        setup = shares.ShareSetup([], mounts_state, [])
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(shares.paths, "cache_root", return_value=root), \
+             patch.object(shares, "teardown_virtiofs_for_vm") as teardown:
+            shares.release_shares("vm-1", setup, "[t]")
+        teardown.assert_called_once()
+        self.assertEqual(teardown.call_args.kwargs["vmachine_id"], "vm-1")
+        self.assertEqual(teardown.call_args.kwargs["mounts_state"], mounts_state)
+
+    def test_a_release_that_fails_does_not_mask_the_launch_error(self):
+        setup = shares.ShareSetup([], [{"share_id_hex": "a" * 64}], [])
+        with tempfile.TemporaryDirectory() as root, \
+             patch.object(shares.paths, "cache_root", return_value=root), \
+             patch.object(shares, "teardown_virtiofs_for_vm", side_effect=OSError("boom")):
+            shares.release_shares("vm-1", setup, "[t]")   # must not raise
+

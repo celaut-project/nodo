@@ -66,7 +66,7 @@ A selection key may carry the placeholder `${VAR_NAME}` in place of a value:
 ```
 
 The value is filled in at **launch** from the launcher-provided
-`Configuration.environment_variables` — the same map most of a service's own Linux
+`Configuration.environment_variables` — the same set most of a service's own Linux
 environment is built from (see `envs` in [`PACKING.md`](PACKING.md)), so an
 instantiator sets one variable and the guest, the node's resolver and (when the
 name and value pass `src/utils/guest_env.py`'s validation) the entrypoint's own
@@ -153,6 +153,18 @@ peers declaring the same value are treated as the same domain. This replaced a
 dedicated `Network.environment_variable` filter, which never had a path from
 `service.json` and was bypassed for remote peers; `formal` + `${VAR}` is the one
 mechanism, packer-validated and enforced end to end.
+
+---
+
+## Network shares
+
+A network is also the scope of a **network share** (#268): a directory that
+instances with no common parent share when they declare the same network
+(`share_network=<tag>`). The share id includes the tag and the `formal` after
+`${VAR}` substitution, so a selection key such as `cluster=${PG_CLUSTER}`
+partitions shares the same way it partitions peers. The node runs a member on the
+node that already holds the share, which it finds with `Gateway.LocateShare`. See
+[SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#network-shares--no-common-parent).
 
 ---
 

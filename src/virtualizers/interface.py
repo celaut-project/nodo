@@ -176,12 +176,15 @@ def hotplug(
     )
 
 
-def kill(vmachine_id: str) -> bool:
-    """Kill a running service, routed to the backend that launched it."""
-    return _backend_of(vmachine_id).kill(vmachine_id=vmachine_id)
+def kill(vmachine_id: str, archive: bool = False) -> bool:
+    """Kill a running service, routed to the backend that launched it.
+
+    With ``archive`` true, the backend saves the guest logs before it removes them.
+    """
+    return _backend_of(vmachine_id).kill(vmachine_id=vmachine_id, archive=archive)
 
 
-def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
+def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[..., None]) -> None:
     """Check the status of a running service and remove it if it has exited."""
     _backend_of(vmachine_id).maintain(
         vmachine_id=vmachine_id,

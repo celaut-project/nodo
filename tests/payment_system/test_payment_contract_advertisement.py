@@ -74,7 +74,7 @@ ERGO_CONTRACT = "proveDlog(decodePoint())"
 ERGO_CONTRACT_HASH = sha3_256(ERGO_CONTRACT.encode("utf-8")).hexdigest()
 
 
-def _contract(contract=ERGO_CONTRACT, ledger="ergo", asset="ERG", rate=1_000_000_000,
+def _contract(contract=ERGO_CONTRACT, ledger="ergo", asset="ERG", rate=1,
               is_demo=False):
     """One registered payment **method**, as `local_payment_methods` reads it.
 
@@ -96,7 +96,10 @@ def _contract(contract=ERGO_CONTRACT, ledger="ergo", asset="ERG", rate=1_000_000
     module.NATIVE_ASSET = asset
     module.asset = asset
     module.is_demo = is_demo
-    module.mu_per_unit.return_value = rate
+    # What travels is MU per BASE unit (nanoERG, satoshi, a token's smallest unit);
+    # the per-whole-unit figure is for a person and never reaches the wire.
+    module.mu_per_base_unit.return_value = rate
+    module.mu_per_unit.side_effect = AssertionError("the whole-unit rate is not advertised")
     return module
 
 
@@ -208,7 +211,7 @@ class MultipleContractAdvertisementTests(unittest.TestCase):
         proto change and keeps ERG's advertisement byte-identical to what it always was.
         """
         native = _contract()
-        token = _contract(asset="ab" * 32, rate=20_000_000)
+        token = _contract(asset="ab" * 32, rate=200)
         methods = self._advertised(
             [(PROPOSITION_BYTES, ERGO_LEDGER, native.CONTRACT_HASH)],
             [native, token],
@@ -216,8 +219,8 @@ class MultipleContractAdvertisementTests(unittest.TestCase):
 
         by_asset = {get_token_id(m.contract): m for m in methods}
         self.assertEqual(set(by_asset), {"ERG", "ab" * 32})
-        self.assertEqual(int(by_asset["ERG"].mu_per_unit.n), 1_000_000_000)
-        self.assertEqual(int(by_asset["ab" * 32].mu_per_unit.n), 20_000_000)
+        self.assertEqual(int(by_asset["ERG"].mu_per_unit.n), 1)
+        self.assertEqual(int(by_asset["ab" * 32].mu_per_unit.n), 200)
         # One contract: the script and the type are the same for both, because on Ergo
         # they genuinely are.
         self.assertEqual(
@@ -231,7 +234,7 @@ class MultipleContractAdvertisementTests(unittest.TestCase):
     def test_each_contract_carries_its_own_asset_and_rate(self):
         ergo = _contract()
         bitcoin = _contract(contract="p2wpkh", ledger="bitcoin", asset="BTC",
-                            rate=200_000_000_000_000)
+                            rate=2_000_000)
         script = bytes.fromhex("0014" + "22" * 20)
         methods = self._advertised(
             [
@@ -243,8 +246,8 @@ class MultipleContractAdvertisementTests(unittest.TestCase):
 
         by_asset = {get_token_id(method.contract): method for method in methods}
         self.assertEqual(set(by_asset), {"ERG", "BTC"})
-        self.assertEqual(int(by_asset["ERG"].mu_per_unit.n), 1_000_000_000)
-        self.assertEqual(int(by_asset["BTC"].mu_per_unit.n), 200_000_000_000_000)
+        self.assertEqual(int(by_asset["ERG"].mu_per_unit.n), 1)
+        self.assertEqual(int(by_asset["BTC"].mu_per_unit.n), 2_000_000)
         # Each one's own script, untouched, and its own ledger tag.
         self.assertEqual(get_script(by_asset["BTC"].contract), script)
         self.assertEqual(list(by_asset["BTC"].contract.ledger.tags), ["bitcoin"])
@@ -266,7 +269,7 @@ class MultipleContractAdvertisementTests(unittest.TestCase):
         this node's prices by dividing by nothing.
         """
         broken = _contract()
-        broken.mu_per_unit.side_effect = ValueError("MU_PER_NANOERG is not a number")
+        broken.mu_per_base_unit.side_effect = ValueError("MU_PER_NANOERG is not a number")
         self.assertEqual(
             self._advertised([(PROPOSITION_BYTES, ERGO_LEDGER, broken.CONTRACT_HASH)],
                              [broken]),

@@ -1,4 +1,4 @@
-"""VirtioFS backend for shared filesystems (parent -> child inheritance).
+"""VirtioFS backend for shared filesystems (parent -> child, and network shares).
 
 The *semantics* of shared filesystems live in ``src/utils/shared_filesystems.py``
 and their *authorization* in ``src/manager/shares.py``. This module is the
@@ -9,16 +9,25 @@ authorized.
 
 For each share (identified by ``shared_filesystems.share_id``) it provides:
 
-1. **A daemon per share.** virtiofsd exports the share's host directory over a
-   Unix socket keyed by the share id. One daemon per share on this host, reused
-   by the exporting parent and every child that inherits it.
+1. **A daemon per guest.** virtiofsd exports the share's host directory over a
+   Unix socket keyed by the share id *and* the VM. A virtiofsd serves exactly one
+   vhost-user client: a second VM that connects to the same socket is queued by
+   the kernel and never answered, so its hypervisor waits in the handshake and the
+   guest never boots; and the daemon exits when its one client disconnects. So
+   every VM that takes part in a share -- the exporting parent and each child that
+   inherits it -- gets a daemon of its own, all of them exporting the one host
+   directory (#480).
 2. **A device per guest.** A ``--fs tag=<…>,socket=<…>`` device (cloud-hypervisor)
    or the same socket wired as ``vhost-user-fs`` (QEMU), so the guest can
    ``mount -t virtiofs <tag> <declared-path>``. A child that asked for
-   ``access=ro`` mounts with ``-o ro``.
+   ``access=ro`` mounts with ``-o ro``, and its daemon runs ``--readonly`` so the
+   host refuses its writes too: a guest is root in its own VM and could remount
+   the device read-write.
 3. **Seeding.** The first time an export is materialized its directory is filled
    with what the exporter packaged at that path, so the mount does not hide the
-   content the service shipped.
+   content the service shipped. A network share has no exporter: its first member
+   seeds it, under the share's lock, so two members that start together cannot
+   both seed it.
 4. **Lifecycle by reservation.** A share's own state file records who is using it,
    written *before* the VM that will use it is built. Ownership lives there and
    not in the state of whichever VM happens to leave last, so neither of the two
@@ -41,8 +50,10 @@ import threading
 from pathlib import Path
 from typing import Callable, Dict, List, NamedTuple, Optional
 
+from src.utils.privileges import without_capabilities
 from src.utils.shared_filesystems import ShareRef
 from src.virtualizers.microvm import paths
+from src.virtualizers.microvm.host import ensure_private_dir
 
 # Guest metadata file injected into the rootfs: a JSON list of the virtiofs
 # mounts the guest init should perform ({tag, path, ro}). Kept alongside the
@@ -63,6 +74,8 @@ class SharedMount(NamedTuple):
     exported: bool = False  # this VM is the share's exporter, not a guest of it
     external: bool = False  # the host directory is someone else's (rundev): never
                             # seeded, never deleted
+    network: bool = False   # a network share (#268): no owner, seeded by its
+                            # first member, removed with its last
 
 
 # --------------------------------------------------------------------------- #
@@ -100,10 +113,19 @@ def share_state_path(base_dir: str, share_id_hex: str) -> Path:
     return share_state_dir(base_dir, share_id_hex) / "share.json"
 
 
-def virtiofs_socket_path(socket_dir: str, share_id_hex: str) -> Path:
-    """virtiofsd control socket, kept in the (short) control socket dir to stay
-    under the AF_UNIX SUN_LEN limit."""
-    return Path(socket_dir) / f"vfs-{share_id_hex[:16]}.sock"
+def virtiofs_socket_path(socket_dir: str, share_id_hex: str, vmachine_id: str) -> Path:
+    """The socket of the virtiofsd that serves ``vmachine_id`` for this share.
+
+    One per VM and share, since a virtiofsd answers a single client. Kept in the
+    (short) control socket dir, and the ids shortened, to stay under the AF_UNIX
+    SUN_LEN limit.
+    """
+    return Path(socket_dir) / f"vfs-{share_id_hex[:12]}-{vmachine_id[:12]}.sock"
+
+
+def virtiofsd_log_path(base_dir: str, share_id_hex: str, vmachine_id: str) -> Path:
+    """Log of the virtiofsd that serves ``vmachine_id`` for this share."""
+    return share_state_dir(base_dir, share_id_hex) / f"virtiofsd-{vmachine_id[:12]}.log"
 
 
 def mount_for(
@@ -112,22 +134,28 @@ def mount_for(
     *,
     exported: bool,
     host_dir: Optional[str] = None,
+    network: bool = False,
+    read_only_image: bool = False,
 ) -> SharedMount:
     """The mount that realizes one authorized share for this VM.
 
     An exporter always mounts read-write, whatever the declaration asked for:
     writes have to land on the host directory its children will read. ``host_dir``
     overrides where the share lives, which is how a rundev sandbox hands over a
-    directory of the developer's own.
+    directory of the developer's own. A member of a network share mounts it the
+    way it declared. An instance whose image is read-only (``read_mode=ro``) mounts
+    every share read-only, exporter included: it can see what the others write, and
+    only an instance that is not read-only can write.
     """
     return SharedMount(
         share_id_hex=ref.share_id,
         tag=virtiofs_tag(ref.share_id),
-        readonly=False if exported else ref.readonly,
+        readonly=read_only_image or (False if exported else ref.readonly),
         guest_path=ref.path,
         host_dir=host_dir or str(shared_dir(base_dir, ref.share_id)),
         exported=exported,
         external=bool(host_dir),
+        network=network,
     )
 
 
@@ -145,21 +173,27 @@ def build_virtiofsd_command(
     *,
     sandbox: str = "chroot",
     cache: str = "auto",
+    readonly: bool = False,
 ) -> List[str]:
     """Command line for the rust ``virtiofsd`` daemon exporting ``export_dir``.
 
-    The daemon is always read-write and confined to ``export_dir`` via
-    ``--sandbox`` (deny-by-default). Read-only children mount the resulting
-    device with ``-o ro`` on the guest side, so one daemon serves both the
-    read-write parent and read-only children.
+    The daemon is confined to ``export_dir`` via ``--sandbox`` (deny-by-default).
+    ``readonly`` starts it with ``--readonly``, for a guest that asked for
+    ``access=ro``. The guest also mounts the device ``-o ro``, but that is the
+    guest's own choice: it is root in its VM and can remount it read-write, so the
+    daemon is what actually keeps it from writing. Each guest has a daemon of its
+    own, so making one read-only takes nothing from the others.
     """
-    return [
+    command = [
         binary,
         "--socket-path", str(socket_path),
         "--shared-dir", str(export_dir),
         "--sandbox", sandbox,
         "--cache", cache,
     ]
+    if readonly:
+        command.append("--readonly")
+    return command
 
 
 def build_guest_mount_plan(mounts: List[SharedMount]) -> str:
@@ -217,19 +251,39 @@ def reserve_share(
     """
     path = share_state_path(base_dir, mount.share_id_hex)
     with _lock_for(path):
-        state = load_share_state(base_dir, mount.share_id_hex) or {
-            "share_id_hex": mount.share_id_hex,
-            "users": [],
-            "external": mount.external,
-            "host_dir": mount.host_dir,
-        }
-        users = [u for u in state.get("users") or [] if u != vmachine_id]
-        users.append(vmachine_id)
-        state["users"] = users
-        if mount.exported:
-            state["owner"] = vmachine_id
-        _save_share_state(path, state)
-        return state
+        return _reserve_locked(path, base_dir, mount, vmachine_id)
+
+
+def _reserve_locked(
+    path: Path, base_dir: str, mount: SharedMount, vmachine_id: str
+) -> dict:
+    """:func:`reserve_share` for a caller that already holds the share's lock."""
+    state = load_share_state(base_dir, mount.share_id_hex) or {
+        "share_id_hex": mount.share_id_hex,
+        "users": [],
+        "external": mount.external,
+        "host_dir": mount.host_dir,
+    }
+    users = [u for u in state.get("users") or [] if u != vmachine_id]
+    users.append(vmachine_id)
+    state["users"] = users
+    if mount.exported:
+        state["owner"] = vmachine_id
+    if mount.network:
+        state["network"] = True
+    _save_share_state(path, state)
+    return state
+
+
+def holds_network_share(base_dir: str, share_id_hex: str) -> bool:
+    """Whether this node holds the network share ``share_id_hex`` now.
+
+    Held means a state file that marks it as a network share and lists at least
+    one user. A parent share is never reported: its id is the parent's business,
+    and no instance on another node can join it.
+    """
+    state = load_share_state(base_dir, share_id_hex) or {}
+    return bool(state.get("network")) and bool(state.get("users"))
 
 
 def release_share(base_dir: str, share_id_hex: str, vmachine_id: str) -> dict:
@@ -247,12 +301,20 @@ def release_share(base_dir: str, share_id_hex: str, vmachine_id: str) -> dict:
     **Or its last user left.** The exporter may have gone first, in which case
     what remains is a directory nobody owns; it is removed when the last VM
     holding it departs so nothing outlives everyone.
+
+    The daemon that served ``vmachine_id`` is taken out of the state and returned
+    as ``released``: it served that VM alone, so it goes with it either way. When
+    the share is spent, ``daemons`` still lists the ones serving the guests that
+    remain, which go too.
     """
     path = share_state_path(base_dir, share_id_hex)
     with _lock_for(path):
         state = load_share_state(base_dir, share_id_hex) or {"users": []}
         users = [u for u in state.get("users") or [] if u != vmachine_id]
         state["users"] = users
+        daemons = dict(state.get("daemons") or {})
+        state["released"] = daemons.pop(vmachine_id, None)
+        state["daemons"] = daemons
         state["spent"] = (state.get("owner") == vmachine_id) or not users
         if state["spent"]:
             try:
@@ -260,7 +322,9 @@ def release_share(base_dir: str, share_id_hex: str, vmachine_id: str) -> dict:
             except OSError:
                 pass
         else:
-            _save_share_state(path, state)
+            _save_share_state(
+                path, {k: v for k, v in state.items() if k not in ("released", "spent")}
+            )
         return state
 
 
@@ -283,7 +347,8 @@ def _default_pid_alive(pid: int) -> bool:
 def _default_spawn(command: List[str], log_path: Path) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "ab") as logf:
-        proc = subprocess.Popen(command, stdout=logf, stderr=logf)
+        args, _ = without_capabilities(command)
+        proc = subprocess.Popen(args, stdout=logf, stderr=logf)
     return proc.pid
 
 
@@ -300,33 +365,59 @@ def ensure_share_backend(
     seed_fn: Optional[Callable[[SharedMount, Path], None]] = None,
     logger_fn: Callable[[str], None] = lambda _m: None,
 ) -> Dict[str, object]:
-    """Reserve ``mount``'s share for this VM, make sure its daemon is running, and
+    """Reserve ``mount``'s share for this VM, start the daemon that serves it, and
     return the state needed to attach the guest and, later, release it.
 
-    Idempotent: a daemon already alive with its socket present is reused, so the
-    exporting parent and every co-located child share a single daemon and a
-    single host directory.
+    Every VM gets a daemon of its own for each share it takes part in -- a
+    virtiofsd answers one client -- and all of them export the same host
+    directory. Idempotent for the same VM: its daemon, alive with its socket
+    present, is reused.
 
     ``seed_fn(mount, export_dir)`` fills the directory the first time an export
-    is materialized. It runs before the daemon binds, only for the exporter, and
-    never for a directory the node does not own (a rundev sandbox's).
+    is materialized. It runs before the daemon binds, only for the exporter -- or,
+    for a network share, for the member that materializes it first -- and never
+    for a directory the node does not own (a rundev sandbox's).
+
+    For a network share, the check for a first materialization, the seed and the
+    reservation run under the share's lock. Two members that start together would
+    otherwise both see no directory and both seed it, and a member that starts
+    while the last one stops could reserve a directory that is then removed.
     """
     sid = mount.share_id_hex
     export_dir = Path(mount.host_dir)
-    socket_path = virtiofs_socket_path(socket_dir, sid)
+    socket_path = virtiofs_socket_path(socket_dir, sid, vmachine_id)
+    path = share_state_path(base_dir, sid)
 
-    first_materialization = not export_dir.exists()
-    export_dir.mkdir(parents=True, exist_ok=True)
-    if not mount.external:
-        os.chmod(share_state_dir(base_dir, sid), 0o700)
-        os.chmod(export_dir, 0o700)
-    Path(socket_dir).mkdir(parents=True, exist_ok=True)
+    def materialize() -> bool:
+        first = not export_dir.exists()
+        export_dir.mkdir(parents=True, exist_ok=True)
+        if not mount.external:
+            os.chmod(share_state_dir(base_dir, sid), 0o700)
+            os.chmod(export_dir, 0o700)
+        return first
 
-    if first_materialization and mount.exported and not mount.external and seed_fn:
-        logger_fn(f"[virtiofs] share={sid} seeding from packaged {mount.guest_path}")
-        seed_fn(mount, export_dir)
-
-    state = reserve_share(base_dir, mount, vmachine_id)
+    ensure_private_dir(socket_dir)
+    if mount.network:
+        with _lock_for(path):
+            if materialize() and not mount.external and seed_fn:
+                logger_fn(
+                    f"[virtiofs] share={sid} first member; seeding from its packaged "
+                    f"{mount.guest_path}"
+                )
+                try:
+                    seed_fn(mount, export_dir)
+                except Exception:
+                    # A half-seeded directory would be taken as seeded by the next
+                    # member. Remove it so the next one seeds it again.
+                    shutil.rmtree(share_state_dir(base_dir, sid), ignore_errors=True)
+                    raise
+            state = _reserve_locked(path, base_dir, mount, vmachine_id)
+    else:
+        first_materialization = materialize()
+        if first_materialization and mount.exported and not mount.external and seed_fn:
+            logger_fn(f"[virtiofs] share={sid} seeding from packaged {mount.guest_path}")
+            seed_fn(mount, export_dir)
+        state = reserve_share(base_dir, mount, vmachine_id)
     attached = {
         "share_id_hex": sid,
         "tag": mount.tag,
@@ -335,12 +426,14 @@ def ensure_share_backend(
         "readonly": mount.readonly,
         "guest_path": mount.guest_path,
         "external": mount.external,
+        "network": mount.network,
     }
 
-    # Reuse an existing healthy daemon if present.
-    pid = int(state.get("pid") or 0)
+    # This VM's daemon, if it is already running (the same VM ensured twice).
+    mine = (state.get("daemons") or {}).get(vmachine_id) or {}
+    pid = int(mine.get("pid") or 0)
     if pid and pid_alive_fn(pid) and socket_path.exists():
-        logger_fn(f"[virtiofs] share={sid} reusing daemon pid={pid}")
+        logger_fn(f"[virtiofs] share={sid} vm={vmachine_id} reusing its daemon pid={pid}")
         return {**attached, "pid": pid}
 
     # Stale socket from a dead daemon would block bind — clear it.
@@ -350,16 +443,23 @@ def ensure_share_backend(
         pass
 
     command = build_virtiofsd_command(
-        virtiofsd_binary, socket_path, export_dir, sandbox=sandbox
+        virtiofsd_binary, socket_path, export_dir, sandbox=sandbox, readonly=mount.readonly
     )
-    log_path = share_state_dir(base_dir, sid) / "virtiofsd.log"
-    logger_fn(f"[virtiofs] share={sid} starting daemon: {' '.join(command)}")
-    pid = spawn_fn(command, log_path)
+    log_path = virtiofsd_log_path(base_dir, sid, vmachine_id)
+    logger_fn(f"[virtiofs] share={sid} vm={vmachine_id} starting daemon: {' '.join(command)}")
+    try:
+        pid = spawn_fn(command, log_path)
+    except Exception:
+        # Reserved above but never served: give the reservation back, since the
+        # caller gets no state for this share to release later.
+        release_share(base_dir, sid, vmachine_id)
+        raise
 
-    path = share_state_path(base_dir, sid)
     with _lock_for(path):
         stored = load_share_state(base_dir, sid) or state
-        stored.update({"pid": pid, "socket": str(socket_path)})
+        daemons = dict(stored.get("daemons") or {})
+        daemons[vmachine_id] = {"pid": pid, "socket": str(socket_path)}
+        stored["daemons"] = daemons
         _save_share_state(path, stored)
     return {**attached, "pid": pid}
 
@@ -376,37 +476,50 @@ def attach_virtiofs_backends(
     pid_alive_fn: Callable[[int], bool] = _default_pid_alive,
     seed_fn: Optional[Callable[[SharedMount, Path], None]] = None,
     logger_fn: Callable[[str], None] = lambda _m: None,
+    kill_fn: Callable[[int], None] = lambda pid: os.kill(pid, signal.SIGTERM),
 ):
     """Ensure every shared filesystem in ``mounts`` has a running backend.
 
     Returns ``(fs_device_args, mounts_state)``:
       * ``fs_device_args``: flat argv to splice into the cloud-hypervisor command
-        (``["--fs", "<arg>", …]``), one per share.
+        (``["--fs", "<arg>", "<arg>", …]``): one ``--fs`` followed by one value per
+        share. cloud-hypervisor declares ``--fs <fs>...`` as a single option taking
+        several values and refuses it repeated ("cannot be used multiple times"), so a
+        guest with two shares cannot be started with ``--fs a --fs b``.
       * ``mounts_state``: JSON-serializable list persisted in the VM runtime
         state, which is what its teardown later releases.
 
     A VM with no shared filesystems yields empty lists — a complete no-op for
     ordinary services.
+
+    If one share fails, the ones already brought up for this VM are released
+    before the error propagates: the caller never got their state, so nothing
+    else would give back their reservations or stop their daemons.
     """
-    fs_device_args: List[str] = []
+    fs_device_values: List[str] = []
     mounts_state: List[Dict[str, object]] = []
-    for mount in mounts:
-        backend = ensure_share_backend(
-            mount,
-            vmachine_id,
-            base_dir=base_dir,
-            socket_dir=socket_dir,
-            virtiofsd_binary=virtiofsd_binary,
-            sandbox=sandbox,
-            spawn_fn=spawn_fn,
-            pid_alive_fn=pid_alive_fn,
-            seed_fn=seed_fn,
-            logger_fn=logger_fn,
+    try:
+        for mount in mounts:
+            backend = ensure_share_backend(
+                mount,
+                vmachine_id,
+                base_dir=base_dir,
+                socket_dir=socket_dir,
+                virtiofsd_binary=virtiofsd_binary,
+                sandbox=sandbox,
+                spawn_fn=spawn_fn,
+                pid_alive_fn=pid_alive_fn,
+                seed_fn=seed_fn,
+                logger_fn=logger_fn,
+            )
+            fs_device_values.append(build_fs_device_arg(mount.tag, backend["socket"]))
+            mounts_state.append(backend)
+    except Exception:
+        teardown_virtiofs_for_vm(
+            vmachine_id, mounts_state, base_dir=base_dir, kill_fn=kill_fn, logger_fn=logger_fn,
         )
-        fs_device_args.extend(
-            ["--fs", build_fs_device_arg(mount.tag, backend["socket"])]
-        )
-        mounts_state.append(backend)
+        raise
+    fs_device_args = ["--fs", *fs_device_values] if fs_device_values else []
     return fs_device_args, mounts_state
 
 
@@ -420,21 +533,51 @@ def teardown_virtiofs_for_vm(
 ) -> None:
     """Release the shares a VM used, taking down the ones that are over.
 
-    The share's own state decides, and a share ends when its **exporter** leaves
-    -- it is part of that instance's storage, so nothing is left to hold it or
-    pay for it -- or, if the exporter is already gone, when its last user does.
-    A directory the node does not own (a rundev sandbox's) is released but never
-    deleted.
+    The daemon that served this VM goes with it in every case: it served no one
+    else. Beyond that, the share's own state decides, and a share ends when its
+    **exporter** leaves -- it is part of that instance's storage, so nothing is
+    left to hold it or pay for it -- or, if the exporter is already gone, when its
+    last user does. Ending it stops the daemons of the guests that remain, which
+    lose the directory. A directory the node does not own (a rundev sandbox's) is
+    released but never deleted.
     """
+    def stop(sid: str, daemon: Optional[dict], whose: str) -> None:
+        pid = int((daemon or {}).get("pid") or 0)
+        socket_path = (daemon or {}).get("socket")
+        if pid > 0:
+            try:
+                kill_fn(pid)
+                logger_fn(f"[virtiofs] share={sid} {whose} daemon pid={pid} stopped.")
+            except ProcessLookupError:
+                logger_fn(f"[virtiofs] share={sid} {whose} daemon pid={pid} already gone.")
+            except Exception as e:  # noqa: BLE001 - best-effort cleanup
+                logger_fn(f"[virtiofs] share={sid} error stopping {whose} daemon pid={pid}: {e}")
+        if socket_path:
+            # virtiofsd keeps a `<socket>.pid` lock file beside its socket and leaves
+            # it behind; with a daemon per guest, one would pile up per launch.
+            for leftover in (Path(socket_path), Path(f"{socket_path}.pid")):
+                try:
+                    leftover.unlink(missing_ok=True)
+                except OSError as e:
+                    logger_fn(f"[virtiofs] share={sid} error removing {leftover}: {e}")
+
     for mount in mounts_state or []:
         sid = mount.get("share_id_hex")
         if not sid:
             continue
         state = release_share(base_dir, sid, vmachine_id)
+
+        # This VM's own daemon. The mount's record covers a share whose state file
+        # is gone.
+        own = state.get("released")
+        if own is None:
+            own = {"pid": mount.get("pid"), "socket": mount.get("socket")}
+        stop(sid, own, f"vm={vmachine_id}")
+
         if not state.get("spent"):
             logger_fn(
                 f"[virtiofs] share={sid} still used by "
-                f"{len(state.get('users') or [])} VM(s); keeping daemon."
+                f"{len(state.get('users') or [])} VM(s); keeping it."
             )
             continue
         if state.get("users"):
@@ -442,34 +585,34 @@ def teardown_virtiofs_for_vm(
                 f"[virtiofs] share={sid} exporter left; taking it down with "
                 f"{len(state['users'])} guest(s) still running, which lose the directory."
             )
-
-        pid = int(state.get("pid") or mount.get("pid") or 0)
-        socket_path = state.get("socket") or mount.get("socket")
-        if pid > 0:
-            try:
-                kill_fn(pid)
-                logger_fn(f"[virtiofs] share={sid} daemon pid={pid} stopped.")
-            except ProcessLookupError:
-                logger_fn(f"[virtiofs] share={sid} daemon pid={pid} already gone.")
-            except Exception as e:  # noqa: BLE001 - best-effort cleanup
-                logger_fn(f"[virtiofs] share={sid} error stopping daemon pid={pid}: {e}")
-        if socket_path:
-            try:
-                Path(socket_path).unlink(missing_ok=True)
-            except OSError as e:
-                logger_fn(f"[virtiofs] share={sid} error removing socket {socket_path}: {e}")
+        for other, daemon in (state.get("daemons") or {}).items():
+            stop(sid, daemon, f"vm={other}")
 
         if state.get("external") or mount.get("external"):
             logger_fn(f"[virtiofs] share={sid} released; external directory kept.")
             continue
         disk_dir = share_state_dir(base_dir, sid)
-        try:
-            shutil.rmtree(disk_dir, ignore_errors=False)
-            logger_fn(f"[virtiofs] share={sid} directory removed ({disk_dir}).")
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            logger_fn(f"[virtiofs] share={sid} error removing directory {disk_dir}: {e}")
+        # Under the share's lock, and only if nobody reserved it again after it was
+        # spent: a network share can get a new member at any time, and that member
+        # must not lose the directory it just reserved.
+        with _lock_for(share_state_path(base_dir, sid)):
+            if (load_share_state(base_dir, sid) or {}).get("users"):
+                logger_fn(
+                    f"[virtiofs] share={sid} reserved again before its removal; keeping it."
+                )
+                continue
+            try:
+                shutil.rmtree(disk_dir, ignore_errors=False)
+                logger_fn(f"[virtiofs] share={sid} directory removed ({disk_dir}).")
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger_fn(f"[virtiofs] share={sid} error removing directory {disk_dir}: {e}")
+
+
+def share_users(base_dir: str, share_id_hex: str) -> int:
+    """How many VMs use the share now, from its state file (0 if it has none)."""
+    return len((load_share_state(base_dir, share_id_hex) or {}).get("users") or [])
 
 
 def share_bytes(base_dir: str, share_ids: List[str]) -> int:

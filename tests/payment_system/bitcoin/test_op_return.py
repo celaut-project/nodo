@@ -131,36 +131,6 @@ class OpReturnValidationTests(unittest.TestCase):
                 script=script_pubkey_from_address(OTHER),
             ))
 
-    def test_a_read_only_backend_will_not_mint_an_address_even_from_init(self):
-        # It cannot ask a node for one, and inventing one would strand payments aimed
-        # at whatever peers were already told. With no cold wallet either, there is no
-        # address at all, and that is what it says.
-        with mock.patch.object(btc, "_signs", return_value=False), \
-                mock.patch.object(btc.env_manager, "get", return_value=""):
-            with self.assertRaisesRegex(ValueError, "read-only"):
-                btc.ensure_receiving_address()
-
-    def test_a_read_only_backend_is_paid_at_the_cold_wallet_and_asks_nobody(self):
-        """No key means no hot wallet to be paid into, and no sweep to cold later.
-
-        So the cold wallet is where payers are sent, which leaves the operator one
-        address to own rather than a second to configure by hand -- and nothing to ask
-        a node for, which is just as well, since this backend has none to ask.
-        """
-        chain = mock.Mock()
-        with mock.patch.object(btc, "_signs", return_value=False), \
-                mock.patch.object(btc, "backend", return_value=chain), \
-                mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
-                mock.patch.object(
-                    btc.env_manager, "get",
-                    side_effect=lambda key, default=None: (
-                        ADDRESS if key == btc.COLD_WALLET_KEY else ""
-                    )):
-            self.assertEqual(btc.ensure_receiving_address(), ADDRESS)
-
-        self.assertFalse(chain.new_address.called)
-        self.assertFalse(chain.receive_address.called)
-
     def test_the_receiving_path_never_mints_an_address(self):
         """Minting here would check the payment against a script no payer was told.
 
@@ -180,13 +150,10 @@ class OpReturnValidationTests(unittest.TestCase):
         self.assertFalse(chain.new_address.called, "the payment path minted an address")
 
     def test_init_is_what_mints_the_address(self):
-        # A wallet-bearing backend only: a read-only one cannot be asked for an address,
-        # which is why it is paid at the cold wallet instead.
         chain = mock.Mock()
         chain.receive_address.return_value = ""
         chain.new_address.return_value = ADDRESS
         with mock.patch.object(btc, "backend", return_value=chain), \
-                mock.patch.object(btc, "_signs", return_value=True), \
                 mock.patch.object(btc, "_read_cached_address", return_value=""), \
                 mock.patch.object(btc, "_remember_address") as remembered, \
                 mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \

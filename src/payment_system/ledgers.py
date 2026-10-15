@@ -78,7 +78,9 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
         if attribute(contract, "is_demo"):
             continue
         try:
-            rate = int(contract.mu_per_unit())
+            # Per base unit (nanoERG, satoshi, a token's smallest unit): between nodes
+            # the rate is never per whole unit, which is a presentation for a person.
+            rate = int(contract.mu_per_base_unit())
         except Exception as e:
             # A malformed rate is a configuration error, and advertising the contract
             # without one would have peers convert this node's prices by guessing.
@@ -103,9 +105,9 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
             # receiving side keys its row by.
             set_token_id(contract_ledger, contract.asset)
 
-            # What one unit of this contract is worth, in this node's MU. This is the
-            # only thing that makes a price quoted in MU actionable to whoever reads
-            # it, so it travels with every advertisement.
+            # What one base unit of this asset is worth, in this node's MU. This is
+            # the only thing that makes a price quoted in MU actionable to whoever
+            # reads it, so it travels with every advertisement.
             yield celaut.ContractRate(
                 contract=contract_ledger,
                 mu_per_unit=to_amount(rate),

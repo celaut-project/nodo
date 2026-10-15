@@ -42,12 +42,18 @@ from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm.host import ensure_private_dir
 from src.virtualizers.microvm.bundle_formats import (
     ROOTFS_FORMAT_EXT4,
     ROOTFS_IMAGE_NAMES,
     is_read_only_format,
 )
-from src.virtualizers.microvm.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
+from src.virtualizers.microvm.cgroups import (
+    apply_cpu_limit,
+    apply_memory_limit,
+    ensure_vm_cgroup,
+    leave_delegated_base,
+)
 from src.virtualizers.microvm.errors import MicroVMError
 from src.virtualizers.microvm.members import QEMU as QEMU_HYPERVISOR
 from src.virtualizers.microvm.process import generate_vmachine_id
@@ -56,7 +62,13 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     delete_runtime_state,
 )
-from src.virtualizers.microvm.shares import materialize_shares
+from src.virtualizers.microvm.shares import (
+    NO_SHARES,
+    materialize_shares,
+    network_share_bytes,
+    network_share_ids,
+    release_shares,
+)
 from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 from src.virtualizers.qemu.config import (
     QEMU_CONSOLE_BY_ARCH,
@@ -67,6 +79,7 @@ from src.virtualizers.qemu.config import (
 )
 from src.virtualizers.qemu.hotplug import settle_boot_balloon
 from src.utils.firewall import policy as fw_policy
+from src.utils.privileges import without_capabilities
 from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 env_manager = ConfigManager()
@@ -415,6 +428,8 @@ def execute(
     serial_log_path = runtime_dir / "qemu.serial.log"
     qmp_socket_path = _qmp_socket_path(vmachine_id)
     resolved_entrypoint: Optional[str] = None
+    # What the failure path gives back if the launch fails after shares are up.
+    shares = NO_SHARES
 
     try:
         log.LOGGER(f"[QEMU][{vmachine_id}] event=start")
@@ -457,7 +472,7 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] deterministic networking: ip={vm_ip}, mac={mac}")
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
-        qmp_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(qmp_socket_path.parent)
         log.LOGGER(f"[QEMU][{vmachine_id}] QMP socket dir prepared: {qmp_socket_path.parent}")
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
         log.LOGGER(f"[QEMU][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
@@ -576,6 +591,8 @@ def execute(
         disk_b += share_bytes(
             str(shared_fs_base_dir(paths.cache_root())), shares.exported_share_ids
         )
+        # A network share has no owner: this instance is counted its part of it.
+        disk_b += network_share_bytes(network_share_ids(shares.mounts_state))
         # Registered at the usable ceiling, not at `at_init`: until the balloon has
         # actually taken the headroom back, the guest holds all of it, and an
         # instance is priced by what it holds. The correction below is a *shrink* of
@@ -630,9 +647,12 @@ def execute(
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
             stderr_path, "w", encoding="utf-8"
         ) as stderr_file:
+            # Before the VM exists, as in src/virtualizers/ch/execute.py.
+            leave_delegated_base()
+            args, executable = without_capabilities(process_args, qemu_binary)
             process = subprocess.Popen(
-                process_args,
-                executable=qemu_binary,
+                args,
+                executable=executable,
                 stdout=stdout_file,
                 stderr=stderr_file,
             )
@@ -824,6 +844,10 @@ def execute(
             time.sleep(0.5)
             if process.poll() is None:
                 process.kill()
+
+        # The process is gone, so its daemons have no client left: release this VM's
+        # shares, which no runtime state will hand to a kill.
+        release_shares(vmachine_id, shares, f"[QEMU][{vmachine_id}]")
 
         if tap_name:
             network.delete_tap(tap_name)

@@ -1,5 +1,5 @@
 """Bounded peer gossip, behind the same caller gate as GetPeerInfo."""
-from protos import celaut_pb2
+from protos.gateway_bee import rpc_input, rpc_output
 from src.database.sql_connection import SQLConnection
 from src.gateway.client_gate import require_caller, simple_rpc_timeout_seconds
 from src.utils.bee_client import BeeClient
@@ -24,8 +24,8 @@ class ListPeersIterable:
 
     def __iter__(self):
         client = BeeClient.parse_one(
-            self.request_iterator, indices=celaut_pb2.Client,
+            self.request_iterator, indices=rpc_input("ListPeers"),
             timeout=simple_rpc_timeout_seconds(),
         )
         require_caller(self.context, client.client_id if client else "")
-        yield from BeeClient.respond(self._peers(), indices=celaut_pb2.Peer)
+        yield from BeeClient.respond(self._peers(), indices=rpc_output("ListPeers"))

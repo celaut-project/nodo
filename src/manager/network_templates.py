@@ -164,7 +164,7 @@ def has_placeholders(formal: bytes) -> bool:
 def _usable_value(raw: bytes) -> Union[str, None]:
     """One ``environment_variables`` value as a ``formal`` value, or None if it cannot be.
 
-    ``Configuration.environment_variables`` is ``map<string, bytes>``; a ``formal`` is
+    ``Configuration.environment_variables`` carries ``bytes`` values; a ``formal`` is
     UTF-8 ``key=value`` lines. Two things therefore disqualify a value, and both are
     returned as "unusable" rather than raised:
 

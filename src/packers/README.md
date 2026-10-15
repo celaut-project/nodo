@@ -83,8 +83,14 @@
 - Legacy `entrypoint` is still accepted in `service.json` and is mapped to `container.init.entry_path`.
 - If `service.json` provides slash-based input (for example `"/service/start"`), packer normalizes it to segmented form (`["service","start"]`).
 - `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
+- Every `service.json` object that becomes a key/value list on the wire (`init.xattrs`,
+  `api[].mu_per_call`, `resources.*.benchmark`, and the same fields inside embedded
+  services / workload groups) keeps its **object syntax**. The packer writes the list
+  sorted by key, so the order keys are typed in never changes the service id, and a key
+  written twice in one object is a packing error (JSON alone would silently keep the last).
+  See [`protos/README.md`](../../protos/README.md).
 - `read_only_filesystem` (boolean, optional, default `false`) is serialized to
-  `container.filesystem.xattrs["read_mode"] = "ro"` — the xattr map on the **filesystem
+  `container.filesystem.xattrs["read_mode"] = "ro"` — the xattr list on the **filesystem
   itself**, not on one of its entries, and only on the root tree that
   `container.filesystem` points at. A nested `Filesystem` (a subdirectory, reached via
   `ItemBranch.item.filesystem`) is not separately mounted, so nothing is written there.
@@ -122,6 +128,21 @@
   descriptors. Absent, both serialize exactly as before — the spec is hashed into the
   service id. See `docs/PACKING.md` and `docs/NETWORKS.md`.
 - `resources.start_time_ms` no longer exists.
+- `resources.at_init.benchmark` (object, optional) is serialized to
+  `Sysresources.benchmark`: the minimum **per-core, per-second** throughput the service
+  requires on named primitives, e.g. `"benchmark": { "int_ops_per_sec": 500000 }`.
+  Recognised keys are `BENCHMARK_KEYS` in `src/utils/benchmark.py` (`int_ops_per_sec`,
+  `flt_ops_per_sec`, `sha256_hashes_per_sec`, and one memory-bandwidth key per working
+  set: `mem_bandwidth_64mib_bytes_per_sec`, `…_256mib_…`, `…_1gib_…`; any other size
+  as `mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec` is read against the node's next larger
+  measured one). An
+  omitted key is no requirement; values must be non-negative JSON integers, anything else
+  is a packer error raised before the image is built. An unrecognised key is kept and
+  logged, not refused. `resources.at_most.benchmark` has no meaning and is refused, as are
+  the old name `min_benchmark` and the old keys `mem_bandwidth_bytes_per_sec` and
+  `mem_bandwidth_working_set_bytes`. Absent, nothing is written and the service id is
+  unchanged. Admission enforces it per architecture against the node's measured scores;
+  see `docs/PACKING.md`.
 - `possible_environment_workload[]` declares the **worst-case descendant workloads** the service
   may request during its lifetime, for scheduling admission decisions. It is serialized
   directly to `Service.possible_environment_workload`, outside `Service.Container`. Each entry is **one independent concurrent execution
@@ -129,7 +150,8 @@
   only checks whether each scenario, in isolation, could be satisfied. Each scenario's
   `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
   (a `Sysresources`: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`;
-  bytes / microseconds; an omitted field defaults to `0` = no limit). Unlike `resources`
+  bytes / microseconds; an omitted field defaults to `0` = no limit; plus an optional
+  `benchmark` object, as above). Unlike `resources`
   (this instance's own needs), these describe its descendants. At launch (`launch_service`),
   every group that declares `resources` is checked for existence — every limit it declares,
   not just memory — with local admission first, then known peers via

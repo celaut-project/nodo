@@ -128,6 +128,11 @@ TABLES = {
             UNIQUE (address, ledger, contract_hash, token_id, peer_id)
         )
     ''',
+    # A row with `killed_at` set is a dead instance, kept so the operator can read
+    # what happened. A row with `killed_at` NULL is alive. A dead row never becomes
+    # alive again (see TRIGGERS). `name` is unique among live rows only (see INDEXES),
+    # so the name of a dead instance can be used again.
+    #
     # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
     # maintenance tick prices an instance by, so all four have to be here: the tick
     # reads this row, not the service's manifest. Storing memory and disk but not
@@ -135,7 +140,7 @@ TABLES = {
     "local_instances": '''
         CREATE TABLE IF NOT EXISTS local_instances (
             id TEXT PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
             ip TEXT,
             father_id TEXT,
             balance_mu TEXT,
@@ -148,7 +153,9 @@ TABLES = {
             virtualizer TEXT DEFAULT NULL,
             envs TEXT DEFAULT NULL,
             arch TEXT DEFAULT NULL,
-            launched_at DATETIME DEFAULT NULL
+            launched_at DATETIME DEFAULT NULL,
+            killed_at DATETIME DEFAULT NULL,
+            death_reason TEXT DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -178,7 +185,9 @@ TABLES = {
             service_id TEXT,
             balance_mu TEXT,
             peer_balance_mu TEXT,
-            launched_at DATETIME DEFAULT NULL
+            launched_at DATETIME DEFAULT NULL,
+            killed_at DATETIME DEFAULT NULL,
+            death_reason TEXT DEFAULT NULL
         )
     ''',
     "deposit_tokens": '''
@@ -249,6 +258,19 @@ TABLES = {
     # nobody indexed, because the ledger cannot map an address back to a peer id.
     #
     # `status` is what happened, not what we hoped:
+    #   signed        -- outgoing, the transaction is signed and its id known, and
+    #                    it is being sent. Written BEFORE the send, so a daemon that
+    #                    stops between the send and any later write still has the row:
+    #                    the id is what a resume looks the transaction up by.
+    #   broadcast     -- outgoing, the network took the transaction and it is not yet
+    #                    confirmed, so a daemon that stops during the wait still knows
+    #                    the money left.
+    #   confirmed     -- outgoing, the transaction is confirmed and the peer has not
+    #                    been told yet. These three are resumed at startup (see
+    #                    `payment_process.resume_outgoing_payments`).
+    #   failed        -- outgoing, the transaction never reached the chain: the network
+    #                    refused it, or a 'signed' one never showed up before its
+    #                    deposit token expired. No money moved.
     #   communicated  -- outgoing, the peer acknowledged our Payable call
     #   unacknowledged-- outgoing, the transaction was broadcast and the call failed.
     #                    Money left, credit never arrived. The row an operator needs.
@@ -264,6 +286,10 @@ TABLES = {
     # rows, where the only address involved is this node's own wallet.
     # `amount_mu` is TEXT for the same reason every other balance in this schema is:
     # MU exceeds what SQLite stores as an integer.
+    # `peer_amount_mu` is the figure the peer is told, in the *peer's* MU. It is on the
+    # row because a resumed payment has to send the peer the same `Payable` the
+    # interrupted one would have sent, and it cannot be derived again from `amount_mu`
+    # once the rates have moved.
     # Tunnelled bytes relayed per local calendar day, so `host_limits.MAX_NET_GIB_PER_DAY`
     # is an allowance for the day rather than for the current run of the daemon: a
     # counter living only in memory would reset on every restart, which on a metered
@@ -307,7 +333,7 @@ TABLES = {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tx_id TEXT DEFAULT NULL,
             direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
-            status TEXT CHECK( status IN ('communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
+            status TEXT CHECK( status IN ('signed', 'broadcast', 'confirmed', 'communicated', 'unacknowledged', 'failed', 'accepted', 'rejected') ) NOT NULL,
             peer_id TEXT DEFAULT NULL,
             client_id TEXT DEFAULT NULL,
             deposit_token TEXT DEFAULT NULL,
@@ -320,6 +346,7 @@ TABLES = {
             token_id TEXT DEFAULT NULL,
             address TEXT DEFAULT NULL,
             amount_mu TEXT NOT NULL,
+            peer_amount_mu TEXT DEFAULT NULL,
             purpose TEXT DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -494,6 +521,8 @@ TABLES = {
             ts INTEGER NOT NULL,
             received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             conversation_id TEXT DEFAULT NULL,
+            service_id TEXT DEFAULT NULL,
+            service_metadata BLOB DEFAULT NULL,
             FOREIGN KEY (peer_id) REFERENCES peer (id),
             FOREIGN KEY (conversation_id) REFERENCES peer_chat_conversations (id)
         )
@@ -525,6 +554,19 @@ TABLES = {
 # tx-id lookup `tx_history` does per explorer transaction. The TUI runs the first on
 # every redraw of a selected peer.
 INDEXES = (
+    # Live instances are the hot path. The partial indexes hold live rows only, so
+    # the queries that filter on `killed_at IS NULL` do not read dead rows.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_local_instances_name_alive "
+    "ON local_instances (name) WHERE killed_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_local_instances_father_alive "
+    "ON local_instances (father_id) WHERE killed_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_delegated_instances_father_alive "
+    "ON delegated_instances (father_id) WHERE killed_at IS NULL",
+    # The retention sweep and the dead-instance lists read dead rows by age.
+    "CREATE INDEX IF NOT EXISTS idx_local_instances_killed "
+    "ON local_instances (killed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_delegated_instances_killed "
+    "ON delegated_instances (killed_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_peer ON payments (peer_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (client_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_tx ON payments (tx_id)",
@@ -551,6 +593,21 @@ INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_peer_chat_conversations_peer "
     "ON peer_chat_conversations (peer_id, opened_by_us, opened_at)",
 )
+
+
+def _dead_row_triggers(table: str) -> tuple:
+    """Triggers that make a dead row final: it cannot be revived or changed."""
+    return (
+        f"CREATE TRIGGER IF NOT EXISTS trg_{table}_no_revive "
+        f"BEFORE UPDATE ON {table} WHEN OLD.killed_at IS NOT NULL "
+        f"BEGIN SELECT RAISE(ABORT, 'dead instance cannot be changed'); END",
+    )
+
+
+# A dead instance is never revived. The trigger rejects any UPDATE of a dead row,
+# so a bug in the code cannot clear `killed_at` or spend the balance of a dead row.
+# Only DELETE (the retention sweep) is allowed.
+TRIGGERS = _dead_row_triggers("local_instances") + _dead_row_triggers("delegated_instances")
 
 
 def ensure_tables(cursor, names) -> None:
@@ -586,6 +643,12 @@ def create_tables(cursor):
             cursor.execute(index_sql)
         except sqlite3.Error as e:
             print(f"Error creating index: {e}")
+
+    for trigger_sql in TRIGGERS:
+        try:
+            cursor.execute(trigger_sql)
+        except sqlite3.Error as e:
+            print(f"Error creating trigger: {e}")
 
     # Additive column migrations for databases created before a column existed.
     # `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns
@@ -628,8 +691,13 @@ def create_tables(cursor):
         # existed: those peers all arrived directly.
         "learned_via_gossip": "INTEGER NOT NULL DEFAULT 0",
     })
+    # A service shared in the message (issue #438, `ChatMessage.service`): its
+    # serialized Metadata, and the registry id this node derived from it (NULL when
+    # the Metadata has no hash of this node's type). NULL on every ordinary message.
     ensure_columns(cursor, "peer_chat_messages", {
         "conversation_id": "TEXT DEFAULT NULL",
+        "service_id": "TEXT DEFAULT NULL",
+        "service_metadata": "BLOB DEFAULT NULL",
     })
     # What a payment was *for*, as opposed to how far it got. A donation this node
     # paid out of its own earnings is not a payment to a peer, and `status` cannot say
@@ -648,6 +716,7 @@ def create_tables(cursor):
     })
     retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
+    forget_peer_rates_per_whole_unit(cursor)
 
 
 def retire_slot_table(cursor) -> None:
@@ -704,6 +773,42 @@ def ensure_peer_address_uniqueness(cursor) -> None:
         )
     except sqlite3.Error as e:
         print(f"Error enforcing peer address uniqueness: {e}")
+
+
+def forget_peer_rates_per_whole_unit(cursor) -> None:
+    """Clear every peer's stored ``contract_instance.mu_per_unit``, once.
+
+    ``ContractRate.mu_per_unit`` used to be MU per whole unit (1e9 per ERG by default)
+    and is now MU per base unit (nanoERG, satoshi, a token's smallest unit). Nothing on
+    the wire marked the change, so a stored peer rate cannot be told apart from a new
+    one: read as per base unit, an old one is wrong by 10^9 (10^8 on Bitcoin). They are
+    set to NULL -- "no rate known", which every reader already handles -- and each peer's
+    next announcement stores its rate again; one from a node that still announces per
+    whole unit is refused, as it declares no ledger (``manager._accept_contract``).
+
+    This node's own rows (``peer_id = 'LOCAL'``) are not touched: they are written from
+    its own config at startup. Run once, recorded in ``applied_migrations``: after it, a
+    stored rate is per base unit and must survive a restart.
+    """
+    name = "peer_mu_per_unit_is_per_base_unit"
+    try:
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS applied_migrations "
+            "(name TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+        )
+        cursor.execute("SELECT 1 FROM applied_migrations WHERE name = ?", (name,))
+        if cursor.fetchone():
+            return
+        cursor.execute(
+            "UPDATE contract_instance SET mu_per_unit = NULL WHERE peer_id != 'LOCAL'"
+        )
+        cleared = cursor.rowcount
+        cursor.execute("INSERT INTO applied_migrations (name) VALUES (?)", (name,))
+        if cleared:
+            print(f"Cleared {cleared} peer rate(s) stored per whole unit; "
+                  "peers announce them again per base unit.")
+    except sqlite3.Error as e:
+        print(f"Error clearing peer rates stored per whole unit: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:

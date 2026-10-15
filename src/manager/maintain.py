@@ -1,12 +1,16 @@
 from time import sleep
 import os
+import shutil
+import threading
 import time
 import traceback
+
+import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer
+from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
@@ -16,14 +20,16 @@ from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.payment_system.mu_conversion import matching_payment_system
 from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
-from src.utils import activity_window, demand_history
+from src.tunneling import delegated_endpoints
+from src.utils import activity_window, dead_instances, demand_history
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.monetary import format_mu
-from src.utils.hashing import get_configured_hash_id
+from src.utils.hashing import get_configured_hash_id, get_configured_hash_spec, hash_stream
+from src.utils.service_content import read_service_content
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
 from src.virtualizers.microvm.shares import resolved_disk_bytes
@@ -32,7 +38,7 @@ from src.virtualizers.interface import (
     maintain as vm_maintain,
 )
 from src.core_services.low_demand import scheduler_tick
-from src.manager.network_change import network_change_tick
+from src.manager.announcement_change import announcement_change_tick
 from src.manager.gossip import gossip_pull_tick, gossip_push_tick
 
 env_manager = ConfigManager()
@@ -120,7 +126,108 @@ def drain_wanted_inbox():
 def check_wanted_service(wanted: str):
     log.LOGGER(f"Check wanted service {wanted}")
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
-    
+    if not fetch_service_from_peers(wanted):
+        wanted_services_retry.add(wanted)
+
+
+# How long a peer's `GetService` may send nothing before it is given up on, in seconds
+# (0: never). A silence, not a deadline: a large service takes long to arrive from a
+# peer that is still sending, and must not read as one that stopped.
+GET_SERVICE_IDLE_TIMEOUT = float(env_manager.get("GET_SERVICE_IDLE_TIMEOUT", 30))
+# The ceiling on the whole transfer, in seconds (0: none), so a peer that keeps sending
+# a byte now and then cannot hold the caller -- `nodo execute` among them -- forever.
+GET_SERVICE_TIMEOUT = float(env_manager.get("GET_SERVICE_TIMEOUT", 1800))
+
+# A peer that stalls costs what an unreachable one does (`PEER_REFRESH_FAILED`); one that
+# sends other bytes under the id asked for costs ten times that: it is not down, it is
+# wrong, and what it sent would have run had it not been hashed.
+GET_SERVICE_TIMEOUT_PENALTY = -100
+GET_SERVICE_WRONG_HASH_PENALTY = -1000
+
+# (peer, service, reason) already scored. `wanted_services_retry` asks again every long
+# interval for as long as no peer has the service, so without this one peer that stalls
+# would lose points every few minutes, forever, for the same request.
+_get_service_penalised = set()
+
+
+def _penalise_get_service_once(peer_id: str, wanted: str, amount: int, reason: str):
+    if (peer_id, wanted, reason) in _get_service_penalised:
+        return
+    _get_service_penalised.add((peer_id, wanted, reason))
+    _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=amount, reason=reason)
+
+
+class _IdleWatchdog(grpc.StreamStreamClientInterceptor):
+    """Cancels the call it intercepts once ``idle_s`` seconds pass with no response.
+
+    Every response message counts, so a large service sent in many chunks keeps the
+    call alive for as long as the chunks keep coming. ``fired`` tells a cancel by this
+    watchdog apart from any other end of the call.
+    """
+
+    def __init__(self, idle_s: float):
+        self.idle_s = idle_s
+        self.fired = False
+        self._last = time.monotonic()
+        self._done = threading.Event()
+
+    def intercept_stream_stream(self, continuation, client_call_details, request_iterator):
+        call = continuation(client_call_details, request_iterator)
+        self._last = time.monotonic()
+        threading.Thread(target=self._watch, args=(call,), daemon=True).start()
+
+        def responses():
+            try:
+                for response in call:
+                    self._last = time.monotonic()
+                    yield response
+            finally:
+                self._done.set()
+
+        return responses()
+
+    def _watch(self, call):
+        while not self._done.wait(min(self.idle_s, 1.0)):
+            if time.monotonic() - self._last >= self.idle_s:
+                self.fired = True
+                call.cancel()
+                return
+
+
+def _get_service_channel(peer: str):
+    """The channel to ask ``peer`` for a service on, and its watchdog (None if off)."""
+    channel = peer_channel(peer)
+    if GET_SERVICE_IDLE_TIMEOUT <= 0:
+        return channel, None
+    watchdog = _IdleWatchdog(GET_SERVICE_IDLE_TIMEOUT)
+    return grpc.intercept_channel(channel, watchdog), watchdog
+
+
+def _is_timeout(e: Exception, watchdog) -> bool:
+    if watchdog is not None and watchdog.fired:
+        return True
+    return isinstance(e, grpc.RpcError) and e.code() == grpc.StatusCode.DEADLINE_EXCEEDED
+
+
+def _peer_sent_wanted(service_dir: str, wanted: str) -> bool:
+    """Whether what a peer sent hashes to ``wanted``, the id the registry stores it under."""
+    try:
+        computed = hash_stream(read_service_content(service_dir), get_configured_hash_spec(env_manager)).hex()
+    except Exception as e:
+        log.LOGGER(f"Could not hash the service received for {wanted}: {e}")
+        return False
+    return computed == wanted
+
+
+def fetch_service_from_peers(wanted: str) -> bool:
+    """Ask each known peer's `GetService` for ``wanted``; True once one is in the registry.
+
+    A peer is only trusted with the bytes, not with the id: what it sends is stored
+    only if it hashes to ``wanted``, otherwise it is dropped, the peer penalised, and
+    the next peer asked. A peer that goes ``GET_SERVICE_IDLE_TIMEOUT`` seconds without
+    sending anything, or does not finish within ``GET_SERVICE_TIMEOUT``, is penalised
+    too, and the next one asked.
+    """
     _hash = celaut_pb2.Metadata.HashTag.Hash(
             type=CONFIGURED_HASH_ID,
             value=bytes.fromhex(wanted)
@@ -139,29 +246,59 @@ def check_wanted_service(wanted: str):
                                                                         'balance.')
         """
         log.LOGGER(f"Taking the service {wanted} using peer {peer}")
+        watchdog = None
         try:
             client_id = get_client_id_on_other_peer(peer_id=peer)
-            # TODO A timeout should be implemented when requesting a service.
-            for b in BeeClient.get_service(peer_channel(peer), _hash, client_id=client_id):
+            metadata = None
+            service_dir = None
+            channel, watchdog = _get_service_channel(peer)
+            for b in BeeClient.get_service(
+                    channel, _hash, client_id=client_id,
+                    timeout=GET_SERVICE_TIMEOUT if GET_SERVICE_TIMEOUT > 0 else None,
+            ):
                 if  type(b) == Dir:
                     log.LOGGER(f"    type of dir {b.type}")
 
                 if type(b) == celaut_pb2.Metadata:
-                    log.LOGGER("Store the metadata.")
-                    with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
-                        f.write(b.SerializeToString())
+                    metadata = b
                 elif type(b) == Dir and b.type == celaut_pb2.Service:
-                    log.LOGGER(f"Store the service {b.dir}")
-                    os.system(f"mv {b.dir} {REGISTRY}{wanted}")
-                    
+                    service_dir = b.dir
+
+            if not service_dir:
+                log.LOGGER(f"Peer {peer} sent no service for {wanted}.")
+                continue
+            if not _peer_sent_wanted(service_dir, wanted):
+                log.LOGGER(f"Peer {peer} sent a service that does not hash to {wanted}; dropped.")
+                _penalise_get_service_once(
+                    peer, wanted, GET_SERVICE_WRONG_HASH_PENALTY, Reason.GET_SERVICE_WRONG_HASH
+                )
+                if os.path.isdir(service_dir):
+                    shutil.rmtree(service_dir, ignore_errors=True)
+                elif os.path.exists(service_dir):
+                    os.remove(service_dir)
+                continue
+
+            log.LOGGER(f"Store the service {service_dir}")
+            shutil.move(service_dir, f"{REGISTRY}{wanted}")
+            if metadata is not None:
+                log.LOGGER("Store the metadata.")
+                with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
+                    f.write(metadata.SerializeToString())
+
             log.LOGGER(f"Wanted service {wanted} stored successfully.")
-            return
-        
+            return True
+
         except Exception as e:
+            if _is_timeout(e, watchdog):
+                log.LOGGER(f"Peer {peer} timed out sending the service {wanted}.")
+                _penalise_get_service_once(
+                    peer, wanted, GET_SERVICE_TIMEOUT_PENALTY, Reason.GET_SERVICE_TIMED_OUT
+                )
+                continue
             log.LOGGER(f"Exception on peer {peer} getting the service {wanted}. {str(e)}.")
             continue
     log.LOGGER(f"Any peer was able to get the service {wanted}. (maybe there are not peers available)")
-    wanted_services_retry.add(wanted)
+    return False
             
 
 
@@ -182,11 +319,11 @@ def _penalise_instance_once(vmachine_id: str, amount: int, reason: str):
 
 
 def maintain_vmachines(debug_mode: bool=False):
-    def remove_and_penalize_vmachine(vmachine_id: str):
+    def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
         _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
         log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
         try:
-            stop_instance(token=vmachine_id)
+            stop_instance(token=vmachine_id, reason=reason)
         except Exception as e:
             log.LOGGER(f"Error prunning container {vmachine_id}: {e}")
     
@@ -273,7 +410,7 @@ def maintain_vmachines(debug_mode: bool=False):
                     vmachine_id, -10, Reason.INSTANCE_OUT_OF_BALANCE
                 )
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
-                stop_instance(token=vmachine_id)
+                stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
@@ -352,7 +489,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
                     f"{vmachine_id} ({e}); stopping it here too."
                 )
                 try:
-                    stop_instance(token=vmachine_id)
+                    stop_instance(token=vmachine_id, reason=dead_instances.PEER_STOPPED)
                 except Exception as stop_error:
                     log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
             elif debug_mode:
@@ -396,7 +533,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
             # then only the part the deposit could not reach.
             sc.update_delegated_balance(token=token, balance_mu=0)
             try:
-                stop_instance(token=vmachine_id)
+                stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
                 log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {e}")
             continue
@@ -453,9 +590,21 @@ def enforce_activity_window(debug_mode: bool = False):
             f"window and activity_window.ON_CLOSE is 'stop'."
         )
         try:
-            stop_instance(token=vmachine_id)
+            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
         except Exception as e:
             log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
+
+
+def close_orphaned_delegated_endpoints() -> None:
+    """Close the local endpoints of delegated instances that are gone.
+
+    A delegated instance stopped outside the daemon (``nodo kill`` runs in the CLI
+    process) cannot close the daemon's listeners itself (issue #522). Never raises.
+    """
+    try:
+        delegated_endpoints.close_orphaned()
+    except Exception as e:
+        log.LOGGER(f"Could not close orphaned delegated endpoints: {e}")
 
 
 def maintain_clients(debug_mode: bool=False):
@@ -556,7 +705,7 @@ def peer_deposits(debug_mode: bool = False):
             if debug_mode: log.LOGGER(f"Peer {peer_id} needs a refresh. Attempting to fetch info.")
 
             try:
-                peer = BeeClient.get_peer_info(peer_channel(peer_id=peer_id))
+                peer = fetch_peer_info(peer_channel(peer_id=peer_id), peer_id)
                 _peer_is_reachable_again(peer_id)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
@@ -759,6 +908,40 @@ def _manager_loop() -> None:
             sleep(MANAGER_FAILURE_BACKOFF)
 
 
+DEAD_SWEEP_INTERVAL_S = 3600
+_last_dead_sweep = 0.0
+
+
+def sweep_dead_instances(force: bool = False) -> int:
+    """Delete the dead instances that are past the retention limits.
+
+    The limits are `instances.DEAD_RETENTION_DAYS` (age) and `instances.DEAD_MAX_ROWS`
+    (count). The sweep runs at most once per hour unless ``force`` is true. It also
+    removes the archive directories that have no row. Return the number of rows deleted.
+    """
+    global _last_dead_sweep
+    now = time.monotonic()
+    if not force and _last_dead_sweep and now - _last_dead_sweep < DEAD_SWEEP_INTERVAL_S:
+        return 0
+    _last_dead_sweep = now
+    try:
+        days = dead_instances.retention_days()
+        max_rows = dead_instances.retention_max_rows()
+        local_ids = sc.prune_dead_local_instances(max_age_days=days, max_rows=max_rows)
+        delegated_tokens = sc.prune_dead_delegated_instances(max_age_days=days, max_rows=max_rows)
+        dead_instances.remove_dirs(local_ids)
+        # Keep the directories of the dead rows that remain. The rest have no row.
+        kept = {row['id'] for row in sc.get_dead_local_instances()}
+        dead_instances.sweep_orphan_dirs(kept)
+        deleted = len(local_ids) + len(delegated_tokens)
+        if deleted:
+            log.LOGGER(f"Retention sweep deleted {deleted} dead instance(s).")
+        return deleted
+    except Exception as e:
+        log.LOGGER(f"Error in the dead instance retention sweep: {e}")
+        return 0
+
+
 def _manager_pass(short_interval_count: int) -> int:
     """One maintenance pass, ending in the wait. Returns the next interval count."""
     if short_interval_count == int(SHORT_INTERVAL_COUNT):
@@ -776,7 +959,9 @@ def _manager_pass(short_interval_count: int) -> int:
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
+    sweep_dead_instances()
     maintain_delegated_instances(debug_mode=DEBUG_MODE())
+    close_orphaned_delegated_endpoints()
     enforce_activity_window(debug_mode=DEBUG_MODE())
     maintain_clients(debug_mode=DEBUG_MODE())
     peer_deposits(debug_mode=DEBUG_MODE())
@@ -807,10 +992,11 @@ def _manager_pass(short_interval_count: int) -> int:
     gossip_pull_tick()
     gossip_push_tick()
 
-    # Tell known peers when this node's own address changes (moving off a LAN, a
-    # renewed dynamic public IP), rather than waiting for one of them to notice it
-    # went stale on their own refresh. Self-gates to its own interval, never raises.
-    network_change_tick()
+    # Tell known peers when this node's announcement changes -- its address (moving off
+    # a LAN, a renewed dynamic public IP), the resources it offers, its rates, contracts
+    # or proofs -- rather than waiting for one of them to re-fetch it on their own.
+    # Self-gates to its own interval, never raises.
+    announcement_change_tick()
 
     sleep(MANAGER_ITERATION_TIME)
     if DEBUG_MODE():

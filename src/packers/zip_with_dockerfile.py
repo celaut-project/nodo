@@ -15,6 +15,8 @@ from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import populate_possible_environment_workloads
+from src.utils import keyvalue
+from src.utils.benchmark import parse_benchmark, unrecognised_keys
 from src.utils.hashing import (
     BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
 )
@@ -30,13 +32,21 @@ from src.utils.filesystem_xattrs import (
     READ_MODE_RO,
     assert_complete_filesystem_metadata,
     describe_mode_type,
-    encode_filesystem_metadata_xattrs,
+    filesystem_metadata_xattrs,
     implicit_directory_metadata,
     is_supported_filesystem_entry_mode,
     metadata_from_lstat,
     metadata_from_tarinfo,
 )
-from src.utils.shared_filesystems import declarations_for_filesystem
+from src.utils.shared_filesystems import (
+    ACCESS_XATTR_KEY,
+    GUEST_XATTR_KEY,
+    SHARE_ENV_XATTR_KEY,
+    SHARE_NETWORK_XATTR_KEY,
+    SHARE_TAG_XATTR_KEY,
+    SHARED_XATTR_KEY,
+    declarations_for_filesystem,
+)
 from src.utils.verify import calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
@@ -73,6 +83,16 @@ DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile
 # and the manifest deliberately does not reach it. See docs/PACKING.md.
 READ_ONLY_FILESYSTEM_KEY = "read_only_filesystem"
 
+# `service.json` property that declares shared filesystems: a list of
+# {path, role, tag?, env?, access?}. It becomes the reserved xattrs of
+# src/utils/shared_filesystems.py on the directory's ItemBranch. See docs/PACKING.md.
+SHARED_FILESYSTEMS_KEY = "shared_filesystems"
+_SHARED_ROLE_XATTRS = {"shared": SHARED_XATTR_KEY, "guest": GUEST_XATTR_KEY}
+# A network share (#268) is not a side of a parent share: its role names no xattr
+# of its own, and its `network` field becomes `share_network`.
+_NETWORK_ROLE = "network"
+_SHARED_ENTRY_FIELDS = {"path", "role", "tag", "env", "access", "network"}
+
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
     os.makedirs(CACHE, exist_ok=True)
@@ -89,6 +109,49 @@ def _normalize_tar_member_path(name: str) -> str:
     # "" and is filtered out by the caller — it has no corresponding branch.
     normalized = posixpath.normpath(name).lstrip("/")
     return "" if normalized == "." else normalized
+
+
+class ImageLinkEscapeError(RuntimeError):
+    """A symlink of the image points outside the image root."""
+
+
+def _link_escapes_image(image_path: str, target: str) -> bool:
+    # Resolve the target by its text alone, against the image root: an absolute
+    # target starts at that root, a relative one at the link's own directory.
+    # It escapes if a ".." climbs above the root. Nothing on the packing host
+    # is read, so the answer is the same on every host.
+    if target.startswith("/"):
+        parts = []
+    else:
+        parts = [p for p in posixpath.dirname(image_path).split("/") if p]
+    for segment in target.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == "..":
+            if not parts:
+                return True
+            parts.pop()
+        else:
+            parts.append(segment)
+    return False
+
+
+def image_link_target(host_path: str, image_path: str) -> str:
+    # The link text exactly as the image has it. The guest resolves it against
+    # its own root at run time. Do not resolve it here: realpath follows an
+    # absolute target through the packing host's root, so the guest got the
+    # host's /etc/alternatives choices (awk -> gawk) and the host's usrmerge
+    # (/lib64/ld-linux-x86-64.so.2 -> /usr/lib/...), and the service id
+    # changed with the packing host (#485).
+    #
+    # A link whose target leaves the image root stops the pack: the service
+    # must not depend on, or point at, anything outside its own filesystem.
+    target = os.readlink(host_path)
+    if _link_escapes_image(image_path, target):
+        raise ImageLinkEscapeError(
+            f"Symlink '{image_path}' -> '{target}' points outside the image root."
+        )
+    return target
 
 
 # Every service carries these digests regardless of `hashing.HASH`, so any
@@ -163,7 +226,12 @@ class ZipContainerPacker:
         self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
         self.path = path
-        self.json = json.load(open(self.path + "service.json", "r"))
+        # `json_object_hook` remembers a key an object repeats, so the objects that
+        # become key/value lists can refuse it instead of silently taking the last.
+        self.json = json.load(
+            open(self.path + "service.json", "r"),
+            object_pairs_hook=keyvalue.json_object_hook,
+        )
         self.aux_id = aux_id
         self.error_msg = None
         self._tar_metadata_by_path = {}
@@ -290,14 +358,167 @@ class ZipContainerPacker:
         # Read for its side effect: a malformed declaration must be refused here,
         # in __init__, rather than after BuildKit has built the whole image.
         self._read_only_filesystem_requested()
+        self._shared_filesystems_declared()
+        self._benchmarks()
         # Same reason, and one more: a `pow:` network's `formal` is parsed by the
         # very code that will read it at launch, so an ask that cannot resolve is
         # a pack failure rather than an instance that boots and reaches nothing.
         self._parsed_networks()
 
     # ------------------------------------------------------------------ #
+    # resources.*.benchmark
+    # ------------------------------------------------------------------ #
+
+    def _benchmarks(self) -> dict:
+        """``resources.at_init.benchmark``: the per-core minimum the service requires.
+
+        Optional. Only ``at_init`` holds one: ``benchmark`` is a floor, and a floor is
+        what ``at_init`` says, so that is the half admission reads (see
+        Sysresources.benchmark in protos/celaut.proto). Under ``at_most`` it would carry
+        no meaning, so it is refused rather than packed into the service's hash to be
+        ignored by every node -- and so is the field's old name.
+        """
+        res = self.json.get("resources", {})
+        for end in ("at_init", "at_most"):
+            # Refused rather than ignored: a requirement silently dropped is a service
+            # admitted on hardware its author said it cannot run on (#459).
+            if "min_benchmark" in (res.get(end) or {}):
+                raise ValueError(
+                    f"service.json resources.{end}.min_benchmark was renamed to "
+                    "resources.at_init.benchmark."
+                )
+        if "benchmark" in (res.get("at_most") or {}):
+            raise ValueError(
+                "service.json resources.at_most.benchmark has no meaning: a per-core "
+                "minimum belongs in resources.at_init.benchmark."
+            )
+        return parse_benchmark(
+            (res.get("at_init") or {}).get("benchmark"), "resources.at_init.benchmark"
+        )
+
+    # ------------------------------------------------------------------ #
     # read_only_filesystem
     # ------------------------------------------------------------------ #
+    def _shared_filesystems_declared(self) -> list:
+        """``service.json`` ``shared_filesystems``, type-checked, as a list of dicts.
+
+        Absent or empty is an empty list. Each entry is an object with a string
+        ``path`` (absolute, not ``/``) and a ``role`` of ``shared``, ``guest`` or
+        ``network``; ``tag``, ``env`` and ``access`` are optional strings. A
+        ``network`` role requires a ``network`` string, the tag of an entry of the
+        service's ``network``, and no other role takes one. Nothing is coerced
+        and unknown fields are refused: a misspelt ``acces`` silently dropped
+        would pack a share with the wrong mode.
+        """
+        if SHARED_FILESYSTEMS_KEY not in self.json:
+            return []
+
+        declared = self.json[SHARED_FILESYSTEMS_KEY]
+        where = f"service.json: '{SHARED_FILESYSTEMS_KEY}'"
+        if not isinstance(declared, list):
+            raise ValueError(
+                f"{where} must be a list of objects, got {type(declared).__name__} {declared!r}."
+            )
+
+        entries, seen_paths = [], set()
+        for index, entry in enumerate(declared):
+            at = f"{where}[{index}]"
+            if not isinstance(entry, dict):
+                raise ValueError(f"{at} must be an object, got {type(entry).__name__} {entry!r}.")
+            unknown = sorted(set(entry) - _SHARED_ENTRY_FIELDS)
+            if unknown:
+                raise ValueError(
+                    f"{at} has unknown field(s) {unknown}; "
+                    f"allowed: {sorted(_SHARED_ENTRY_FIELDS)}."
+                )
+            for field in ("tag", "env", "access", "path", "role", "network"):
+                if field in entry and not isinstance(entry[field], str):
+                    raise ValueError(
+                        f"{at}.{field} must be a string, got "
+                        f"{type(entry[field]).__name__} {entry[field]!r}."
+                    )
+            if "path" not in entry or "role" not in entry:
+                raise ValueError(f"{at} requires both 'path' and 'role'.")
+            if entry["role"] not in (*_SHARED_ROLE_XATTRS, _NETWORK_ROLE):
+                raise ValueError(
+                    f"{at}.role must be 'shared', 'guest' or 'network', got {entry['role']!r}."
+                )
+            if entry["role"] == _NETWORK_ROLE:
+                if not entry.get("network"):
+                    raise ValueError(
+                        f"{at} has role 'network' and requires a 'network': the tag of "
+                        f"the service network that scopes the share."
+                    )
+                declared_tags = {t for n in self._parsed_networks() for t in n.tags}
+                if entry["network"].strip() not in declared_tags:
+                    raise ValueError(
+                        f"{at}.network {entry['network']!r} is not a tag of any entry "
+                        f"of the service's 'network'. A network share is a channel "
+                        f"inside that network, so the service must declare it."
+                    )
+            elif "network" in entry:
+                raise ValueError(
+                    f"{at}.network is only valid with role 'network', got role "
+                    f"{entry['role']!r}."
+                )
+            path = posixpath.normpath(entry["path"])
+            if not entry["path"].startswith("/") or path in ("/", "//"):
+                raise ValueError(
+                    f"{at}.path must be an absolute path to a directory other than "
+                    f"the root, got {entry['path']!r}."
+                )
+            if path in seen_paths:
+                raise ValueError(f"{at}.path {path!r} is declared twice.")
+            seen_paths.add(path)
+            entries.append({**entry, "path": path})
+        return entries
+
+    def _apply_shared_filesystems(
+        self,
+        root_filesystem: celaut.Service.Container.Filesystem,
+    ) -> None:
+        """Translate ``shared_filesystems`` into xattrs on the directories' branches.
+
+        The directory must already exist in the image: it is not created here, so
+        the author decides its owner, mode and content in the Dockerfile. Absent or
+        empty writes nothing, so no existing service gets a new id.
+
+        The result goes through ``declarations_for_filesystem`` so every rule of
+        ``src/utils/shared_filesystems.py`` (exclusivity, no nesting, unique names,
+        tag and env formats) applies unchanged.
+        """
+        entries = self._shared_filesystems_declared()
+        if not entries:
+            return
+
+        for entry in entries:
+            filesystem, branch = root_filesystem, None
+            for name in entry["path"].strip("/").split("/"):
+                branch = next((b for b in filesystem.branch if b.name == name), None)
+                if branch is None or not branch.HasField("filesystem"):
+                    raise ValueError(
+                        f"service.json: '{SHARED_FILESYSTEMS_KEY}' path {entry['path']!r} "
+                        f"is not a directory in the image. Create it in the Dockerfile "
+                        f"(e.g. RUN mkdir -p {entry['path']}); the packer does not."
+                    )
+                filesystem = branch.filesystem
+
+            if entry["role"] != _NETWORK_ROLE:
+                keyvalue.set_value(branch.xattrs, _SHARED_ROLE_XATTRS[entry["role"]], b"true")
+            for field, key in (
+                ("network", SHARE_NETWORK_XATTR_KEY),
+                ("tag", SHARE_TAG_XATTR_KEY),
+                ("env", SHARE_ENV_XATTR_KEY),
+                ("access", ACCESS_XATTR_KEY),
+            ):
+                if field in entry:
+                    keyvalue.set_value(branch.xattrs, key, entry[field].encode("utf-8"))
+
+        try:
+            declarations_for_filesystem(root_filesystem)
+        except ValueError as e:
+            raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
+
     def _read_only_filesystem_requested(self) -> bool:
         """Whether ``service.json`` asked for a read-only rootfs.
 
@@ -343,33 +564,13 @@ class ZipContainerPacker:
         if not self._read_only_filesystem_requested():
             return
 
-        # A ro service cannot export a shared filesystem. The node refuses this at
-        # launch (src/virtualizers/microvm/shares.py): a share is seeded from the
-        # exporter's own image with `debugfs rdump`, an ext4 reader that cannot open
-        # a squashfs/erofs image, and seeding from nothing would hide the content
-        # the service shipped behind an empty directory. The same condition is
-        # checked here, on the same declarations, so the operator finds out while
-        # packing rather than after publishing a service that cannot start.
-        try:
-            exported = [d for d in declarations_for_filesystem(root_filesystem) if d.shared]
-        except ValueError as e:
-            raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
-
-        if exported:
-            paths = ", ".join(sorted(d.path for d in exported))
-            raise ValueError(
-                f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' is true and this service "
-                f"exports {len(exported)} shared filesystem(s) ({paths}). A share is "
-                f"seeded from the exporter's own image, which the node reads with "
-                f"debugfs -- an ext4 reader that cannot open the squashfs/erofs image "
-                f"a read-only service is built into. Drop "
-                f"'{READ_ONLY_FILESYSTEM_KEY}' or drop the shared declaration."
-            )
+        # A read-only service may take part in shares, exported or not: the node
+        # seeds them from its squashfs/erofs image and mounts them read-only.
 
         # Per-entry metadata is mandatory for ro (assert_complete_filesystem_metadata
         # in src/utils/filesystem_xattrs.py refuses the build otherwise). Nothing to
         # emit here: recursive_parsing already calls
-        # encode_filesystem_metadata_xattrs on every branch it creates, root and
+        # filesystem_metadata_xattrs on every branch it creates, root and
         # nested alike, and that writes all of FILESYSTEM_METADATA_KEYS at once. The
         # gate exists for trees from other packers, and for services packed before
         # the metadata contract. Asserted here anyway, so that if that ever stops
@@ -383,7 +584,17 @@ class ZipContainerPacker:
                 f"tree is missing required per-entry filesystem metadata: {e}"
             ) from e
 
-        root_filesystem.xattrs[READ_MODE_KEY] = READ_MODE_RO.encode("utf-8")
+        keyvalue.set_value(root_filesystem.xattrs, READ_MODE_KEY, READ_MODE_RO.encode("utf-8"))
+
+    @staticmethod
+    def _init_xattrs(init: dict) -> dict:
+        """``init.xattrs`` from ``service.json`` (an object) as ``{key: bytes}``."""
+        declared = init.get("xattrs")
+        keyvalue.check_json_object(declared, "init.xattrs")
+        return {
+            key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
+            for key, value in (declared or {}).items()
+        }
 
     def parseContainer(self):
         def _normalize_path_segments(raw_path):
@@ -444,14 +655,16 @@ class ZipContainerPacker:
                         branch_metadata = implicit_directory_metadata()
                     else:
                         branch_metadata = metadata_from_lstat(branch_stat)
-                    encode_filesystem_metadata_xattrs(branch.xattrs, branch_metadata)
+                    keyvalue.from_dict(
+                        branch.xattrs, filesystem_metadata_xattrs(branch_metadata)
+                    )
 
                     # It's a link.
                     if os.path.islink(branch_host_path):
                         branch.link.dst = directory + b_name
-                        branch.link.src = os.path.realpath(branch_host_path)[
-                                          len(host_dir):] if host_dir in os.path.realpath(
-                            branch_host_path) else os.path.realpath(branch_host_path)
+                        branch.link.src = image_link_target(
+                            branch_host_path, directory + b_name
+                        )
                     # Device node (block/char): represent as file placeholder and recover via xattrs in CH build.
                     elif branch_metadata.is_device:
                         branch.file = b""
@@ -508,6 +721,8 @@ class ZipContainerPacker:
             # filesystem block's id, and the service id above it, are the same as
             # they would be with every type spelled out.
             root_filesystem = recursive_parsing(directory="/")
+            # Before read_only: its refusal of an exported share reads these xattrs.
+            self._apply_shared_filesystems(root_filesystem)
             self._apply_read_only_filesystem(root_filesystem)
 
             self.filesystem_block = _install_as_block(
@@ -563,6 +778,18 @@ class ZipContainerPacker:
         r.at_most.mem_limit = most_mem_limit
         r.at_most.disk_space = most_disk_space
 
+        # Minimum per-core benchmark scores. Serialized as declared, recognised key
+        # or not: a key this packer has no name for may be one a node does, so it is
+        # said out loud rather than refused (see src.utils.benchmark).
+        init_benchmark = self._benchmarks()
+        keyvalue.from_dict(r.at_init.benchmark, init_benchmark)
+        unknown = unrecognised_keys(init_benchmark)
+        if unknown:
+            log.LOGGER(
+                "service.json resources.at_init.benchmark declares primitive(s) this node "
+                f"does not recognise, kept as written: {', '.join(unknown)}."
+            )
+
         # Possible descendant workloads. Each scenario is one independent
         # worst-case concurrent execution the service may trigger through its
         # descendants (not cumulative, no ordering). Interpreted at launch time
@@ -584,11 +811,7 @@ class ZipContainerPacker:
             # Legacy compatibility: map service.json entrypoint -> container.init.entry_path
             entry_path = _normalize_path_segments(self.json.get("entrypoint"))
         self.service.container.init.entry_path.extend(entry_path)
-        for key, value in init.get("xattrs", {}).items():
-            if isinstance(value, str):
-                self.service.container.init.xattrs[key] = value.encode("utf-8")
-            else:
-                self.service.container.init.xattrs[key] = bytes(value)
+        keyvalue.from_dict(self.service.container.init.xattrs, self._init_xattrs(init))
         
         # Arch
         
@@ -606,12 +829,12 @@ class ZipContainerPacker:
         # Add container metadata to the global metadata.
         self.metadata.hashtag.attr_hashtag.append(
             celaut.Metadata.HashTag.AttrHashTag(
-                key=1,  # Container attr.
+                key=2,  # Service.container is field 2 (Service.prose is 1).
                 value=[
                     celaut.Metadata.HashTag(
                         attr_hashtag=[
                             celaut.Metadata.HashTag.AttrHashTag(
-                                key=2,  # Filesystem
+                                key=2,  # Service.Container.filesystem is field 2.
                                 value=[parseFilesys()]
                             )
                         ]
@@ -653,12 +876,7 @@ class ZipContainerPacker:
                 raise ValueError(
                     f"service.json api slot port={slot.port}: 'transport' contains no valid tags."
                 )
-            slot.protocol_stack.append(
-                self._parse_protocol_descriptor(
-                    item.get('protocol'),
-                    f"api slot port={slot.port}: 'protocol'",
-                )
-            )
+            slot.protocol_stack.extend(self._parse_api_protocol_stack(item, slot.port))
             # `gas_amount_per_call` was renamed to `mu_per_call` with the pricing
             # rework. Rejecting the old key rather than ignoring it is deliberate: a
             # service.json that still uses it would otherwise pack with no per-call
@@ -669,10 +887,45 @@ class ZipContainerPacker:
                     "renamed to 'mu_per_call' (amounts in MU, the node's unit of account). "
                     "See docs/PRICING.md."
                 )
-            for method, amount_mu in item.get("mu_per_call", {}).items():
-                slot.mu_per_call[method].n = str(amount_mu)
+            keyvalue.check_json_object(item.get("mu_per_call"), f"api[{slot.port}].mu_per_call")
+            keyvalue.from_dict(slot.mu_per_call, {
+                method: celaut.Amount(n=str(amount_mu))
+                for method, amount_mu in item.get("mu_per_call", {}).items()
+            })
             self.service.api.slot.append(slot)
-            
+
+    def _parse_api_protocol_stack(self, item, port):
+        """An api slot's ``protocol`` (one layer) or ``protocol_stack`` (layers) -> protocols.
+
+        ``protocol`` is the old key and gives exactly one entry, as it always did, so
+        the bytes of every service packed to date do not change. ``protocol_stack`` is
+        a list of descriptors from the bottom layer to the top, read like a network's
+        ``protocol_stack``. A convention on top of HTTP (for example the ``chat``
+        convention of chatui: ``http``, then ``chat``) needs more than one layer.
+        A slot declares one key or the other, not both.
+        """
+        if 'protocol_stack' not in item:
+            return [self._parse_protocol_descriptor(
+                item.get('protocol'), f"api slot port={port}: 'protocol'",
+            )]
+        if 'protocol' in item:
+            raise ValueError(
+                f"service.json api slot port={port}: declare 'protocol' or "
+                "'protocol_stack', not both."
+            )
+        stack = item['protocol_stack']
+        if not isinstance(stack, list) or not stack:
+            raise ValueError(
+                f"service.json api slot port={port}: 'protocol_stack' must be a "
+                "non-empty list of protocol descriptors (bottom layer first)."
+            )
+        return [
+            self._parse_protocol_descriptor(
+                declaration, f"api slot port={port}: 'protocol_stack'[{index}]",
+            )
+            for index, declaration in enumerate(stack)
+        ]
+
     # ------------------------------------------------------------------ #
     # network
     # ------------------------------------------------------------------ #
