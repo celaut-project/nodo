@@ -96,8 +96,9 @@ every refill-enabled node that learns it pays it.
 
 So provenance is recorded. `peer.learned_via_gossip` (an `INTEGER NOT NULL DEFAULT 0`
 column, added by the usual `ensure_columns` migration; existing rows are 0) is set when
-a peer is *first* registered through gossip pull, or through `IntroducePeer` from a
-caller whose client id is associated with a different known peer, i.e. a push relay.
+a peer is *first* registered over the network: through gossip pull, or through any
+`IntroducePeer`. The caller does not matter. A caller that is the subject of the claim,
+a known peer or a stranger all carry the same risk, because a keypair is free to mint.
 It never demotes a peer already known. The automatic refill skips a flagged peer
 unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is `true` (default `false`; read live
 each tick, anything other than `true` counts as `false`, and it only widens a refill
@@ -106,9 +107,9 @@ flag clears when the operator dials it (`nodo connect`) or any deposit to it set
 (`nodo pay`, `nodo increase_peer_deposit`), so a deliberately chosen peer is funded as
 before.
 
-Tradeoffs. An unassociated `IntroducePeer` caller cannot be told apart from a
-self-announcement and is treated as one; that is the pre-existing direct path and is
-not made worse. A flagged peer is still refreshed, listed and relayed; it is only
+Tradeoffs. A peer that announces itself with `IntroducePeer` is flagged too, so a node
+that wants to pay it automatically must run `nodo connect` or pay it once by hand. A
+flagged peer is still refreshed, listed and relayed; it is only
 unfunded, so delegating to it needs a deposit made by hand first. Being *used* for
 delegation does not by itself clear the flag, because delegation to a peer already
 depends on a deposit. A per-peer spend cap or reputation-weighted refill would be a

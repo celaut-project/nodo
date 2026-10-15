@@ -242,9 +242,9 @@ and apply normal registration rules. Gossip uses the same client-id/rate-limit g
 as other gateway calls, and does not relay queries recursively. See
 [the peer gossip proposal](proposals/427-peer-gossip.md) for bounds and tradeoffs.
 
-**Learned is not funded.** A peer registered from somebody else's gossip — pulled
-through `ListPeers`, or introduced by a *different* known peer's `IntroducePeer` — is
-marked as learned via gossip, and `deposits.AUTOMATIC_REFILL` does not top it up
+**Learned is not funded.** A peer that reached this node over the network — pulled
+through `ListPeers`, or sent in any `IntroducePeer` (by the peer itself or by another) —
+is marked as learned via gossip, and `deposits.AUTOMATIC_REFILL` does not top it up
 unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is `true` (default `false`).
 Keypairs and payment contracts are free to mint, so without this an `open-renter` node
 would send a full deposit to every reachable identity the network relayed to it.

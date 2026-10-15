@@ -429,7 +429,7 @@ class TestTransitiveRegistration(_PeerFixture):
         assert {call.kwargs["peer_id"] for call in payments.increase_deposit_on_peer.call_args_list} \
             == {b.public_key, c.public_key}
 
-    def test_introduce_peer_from_another_known_peer_is_a_relay(self, monkeypatch):
+    def test_every_introduce_peer_is_marked_learned_until_the_peer_is_chosen(self, monkeypatch):
         import src.gateway.gateway as gateway_module
         b = signed_peer(identity_index=1)
         c = signed_peer(identity_index=2)
@@ -444,9 +444,19 @@ class TestTransitiveRegistration(_PeerFixture):
             monkeypatch.setattr(gateway_module, "parse_with_client",
                                 lambda *a, claim=claim, client=client, **kw: (claim, client))
             list(Gateway().IntroducePeer(iter(()), MagicMock()))
-        # B introducing C is a relay; an unassociated caller introducing D reads as D itself.
+        # Relay (B introduces C) and unassociated caller (D) are marked the same way.
         assert manager.sc.peer_learned_via_gossip(peer_id=c.public_key)
-        assert not manager.sc.peer_learned_via_gossip(peer_id=d.public_key)
+        assert manager.sc.peer_learned_via_gossip(peer_id=d.public_key)
+        # The subject introducing itself is not a choice by this node either.
+        e = signed_peer(identity_index=4)
+        self.conn.execute("INSERT INTO clients (id, balance_mu) VALUES ('e-client', '0')")
+        self.conn.commit()
+        monkeypatch.setattr(gateway_module, "parse_with_client", lambda *a, **kw: (e, "e-client"))
+        list(Gateway().IntroducePeer(iter(()), MagicMock()))
+        assert manager.sc.peer_learned_via_gossip(peer_id=e.public_key)
+        # `nodo connect` marks it chosen, which is the only way to clear it.
+        manager.sc.mark_peer_chosen(peer_id=e.public_key)
+        assert not manager.sc.peer_learned_via_gossip(peer_id=e.public_key)
 
 
 def test_config_defaults():

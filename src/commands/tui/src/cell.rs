@@ -610,8 +610,8 @@ static LEVERS: &[Lever] = &[
         id: "fund-gossip-peers",
         organelle: Organelle::Vesicles,
         label: "fund gossip peers",
-        question: "Does auto-pay also fund peers I only heard about through gossip?",
-        consequence: "Identities are free to mint, so on this pays every relayed peer a full deposit. Off, a gossip peer is funded once you connect to it or pay it by hand. Does nothing unless auto-pay is on.",
+        question: "Does auto-pay also fund peers I did not choose myself?",
+        consequence: "Identities are free to mint, so on this pays every peer that gossip or an introduction brings in a full deposit. Off, such a peer is funded once you connect to it or pay it by hand. Does nothing unless auto-pay is on.",
         kind: LeverKind::Cycle(&[
             LeverState {
                 label: "no",
