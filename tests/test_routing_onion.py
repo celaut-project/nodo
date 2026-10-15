@@ -415,6 +415,29 @@ class OnionServerTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class OnionCallerRpcTests(unittest.TestCase):
+    """The RPCs that look for a local instance by the IP of the caller."""
+
+    def test_an_onion_caller_cannot_modify_the_resources_of_an_instance(self):
+        from src.gateway import gateway
+        context = onion_server.OnionContext(mock.Mock(peer=lambda: "ipv4:127.0.0.1:5555"))
+        with mock.patch.object(gateway, "get_internal_service_id_by_uri",
+                               side_effect=lambda uri: "local-instance" if uri == "127.0.0.1" else None), \
+                mock.patch.object(gateway, "spend_mu") as spend:
+            with self.assertRaises(Exception) as raised:
+                list(gateway.Gateway.ModifyServiceSystemResources(mock.Mock(), iter(()), context))
+        self.assertIn("has no IP address", str(raised.exception))
+        spend.assert_not_called()
+
+    def test_no_instance_is_looked_up_without_an_address(self):
+        from src.database.sql_connection import SQLConnection
+        connection = mock.Mock()
+        for uri in (None, ""):
+            self.assertIsNone(SQLConnection.get_local_instance_id_by_uri(connection, uri))
+        connection._execute.assert_not_called()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ServeOnionTests(unittest.TestCase):
     def setUp(self):
         from src import serve
