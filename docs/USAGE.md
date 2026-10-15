@@ -80,6 +80,17 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `sudo nodo remove 1234567890abcdef`
 
+- **tor `install | status [--json]`**  
+  Reach peers that announce a `.onion` address through Tor. `install` puts nodo's own
+  copy of Tor under `dependencies.tor.RUNTIME_ROOT` (no system package, no sudo). A
+  running node starts using it after `nodo daemon restart`. `status` shows
+  `routing.tor.ENABLED`, the installed version, and the state the running node reports.
+  Turning Tor on is a setting: `nodo config set routing.tor.ENABLED=true`, or the CONFIG
+  page of `nodo tui`. See [`CONFIG.md`](CONFIG.md#routing--peers-that-are-not-on-the-clearnet).  
+  **Example:**  
+  `nodo tor install`  
+  `nodo tor status`
+
 - **prune `[--all] [--dry-run]`** (requires root, except `--dry-run`)  
   Reclaims the cache disk that no other command owns. `nodo remove` frees the bundle
   of a service you name; two directories under `CACHE/microvm/` grow with no

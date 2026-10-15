@@ -588,6 +588,9 @@ pub fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
     match path {
         "network.DELEGATION_TUNNEL_POLICY" => Some(&["auto", "always", "never"]),
         "hashing.HASH" => Some(&["sha2_256", "sha3_256", "shake_256", "blake2b_256"]),
+        // Tor for .onion peers: `auto` uses nodo's own copy if it is installed, `true`
+        // also installs it on the next start, `false` never.
+        "routing.tor.ENABLED" => Some(&["auto", "true", "false"]),
         // The colour scheme, cycled with ↑/↓ rather than typed (issue #395). The one
         // key on this page whose whole set is known and short, and the one where a
         // typo costs nothing — an unrecognised name falls back to the default rather
@@ -11376,6 +11379,10 @@ ergo: Cold Wallet: 9cold\n";
         assert_eq!(
             known_enum_values("hashing.HASH"),
             Some(["sha2_256", "sha3_256", "shake_256", "blake2b_256"].as_slice())
+        );
+        assert_eq!(
+            known_enum_values("routing.tor.ENABLED"),
+            Some(["auto", "true", "false"].as_slice())
         );
         assert_eq!(known_enum_values("packer.local"), None);
     }

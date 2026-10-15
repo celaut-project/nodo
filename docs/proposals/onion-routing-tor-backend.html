@@ -355,7 +355,7 @@ a { color: var(--accent); }
           <tr><td>Ingesta<span class="where">manager.py:318</span></td><td>Guarda <code>transport="tor-onion-v3"</code> si el registry lo reconoce. Rechaza una URI con tags de dos familias.</td></tr>
           <tr><td>Selección<span class="where">utils.py:367</span></td><td>Pasa de filtrar "vacío o tcp" a "transporte con backend activo", con clearnet primero si el nodo no está oculto.</td></tr>
           <tr><td>Descriptor<span class="where">transport_stack.py:106</span></td><td><code>transport_component()</code> para cada backend; <code>nodo protocol</code> lo mostrará sin cambios.</td></tr>
-          <tr><td>Instalación<span class="where">install.sh</span></td><td>Paquete <code>tor</code> 0.4.8 o posterior, que trae vanguards-lite activo por defecto.</td></tr>
+          <tr><td>Instalación<span class="where">bash/install_tor.sh</span></td><td>Tor 0.4.9.14 propio del nodo en <code>runtime/tor</code>, bajo demanda (<code>nodo tor install</code> o <code>routing.tor.ENABLED: true</code>), con digests fijados. En x86_64 usa el Tor Expert Bundle; en aarch64 se compila desde el código fuente, porque no hay bundle prebuilt para Linux/arm64.</td></tr>
         </tbody>
       </table></div>
       <p class="tests"><b>Tests:</b> registry, ingesta de la URI tor (con nodo antiguo simulado), CONNECT contra un proxy falso sin DNS, digest.</p>

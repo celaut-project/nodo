@@ -90,6 +90,7 @@ GROUPS: List[Group] = [
             ("peer_reputation <peer> <N>", "move our local score of a peer (+/-)"),
             ("resources", "what this node announces it can run (--json)"),
             ("connect <ip:port>", "introduce this node to a peer"),
+            ("tor [install|status]", "reach .onion peers via nodo's own Tor"),
             ("disconnect <peer>", "forget a peer"),
             ("chat <peer> [message...]", "read a peer's chat history, or send it a message"),
             ("chat_open <peer> <msg...>", "start a new conversation with a peer"),

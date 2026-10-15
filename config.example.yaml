@@ -45,6 +45,29 @@ dependencies:
     BIN: "${main.MAIN_DIR}/bin/buildctl"
     DAEMON_BIN: "${main.MAIN_DIR}/bin/buildkitd"
     BUILDKIT_SOCKET: "${main.MAIN_DIR}/buildkit/buildkitd.sock"
+  # Tor, for peers that announce a .onion address (see `routing.tor`). It is an
+  # OPTIONAL, node-local dependency: it is NOT installed with the node. nodo runs
+  # bash/install_tor.sh on demand -- `nodo tor install`, or the first start with
+  # routing.tor.ENABLED true -- and installs it under RUNTIME_ROOT, nowhere else.
+  # The system's Tor and /etc/tor are never read or touched.
+  tor:
+    RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/tor"
+
+# How this node reaches the peers that are not on the clearnet. A peer address
+# declares the network it is reached over in its transport; `tcp` is the clearnet.
+# See docs/proposals/onion-routing-tor-backend.md.
+routing:
+  tor:
+    # Whether to call peers that announce a .onion address, through a Tor process
+    # nodo runs itself (loopback only; it listens for nothing).
+    #   auto  use Tor if nodo's own copy is installed; never install it. (default)
+    #   true  use Tor, and install it on the first start if it is missing.
+    #   false never.
+    # Turn it on with `nodo tor install` or `nodo config set routing.tor.ENABLED=true`.
+    ENABLED: auto
+    # Path of a `tor` executable (0.4.8 or later) to use instead of the installed
+    # copy. Empty uses the one under dependencies.tor.RUNTIME_ROOT.
+    BINARY: ""
 
 virtualizers:
   # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed

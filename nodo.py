@@ -807,6 +807,10 @@ if __name__ == '__main__':
                 from src.commands.remove import remove
                 remove(service=sys.argv[2])
 
+            case "tor":
+                from src.commands.tor import tor
+                sys.exit(tor(argv=sys.argv[2:]))
+
             case "prune":
                 from src.commands.prune import prune
                 prune(argv=sys.argv[2:])

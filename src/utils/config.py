@@ -800,6 +800,7 @@ class ConfigManager(metaclass=Singleton):
                 validate_bitcoin_config,
                 validate_host_policy_config,
                 validate_pricing_config,
+                validate_routing_config,
             )
             _removed = _find_removed_keys(self._config)
             if _removed:
@@ -842,6 +843,10 @@ class ConfigManager(metaclass=Singleton):
             validate_bitcoin_config(
                 self._config, warn=lambda message: self.log(f"[BITCOIN] {message}")
             )
+
+            # The routing backends (Tor). A mistyped ENABLED would read as "off" in one
+            # place and "on" in another, so it stops here.
+            validate_routing_config(self._config)
 
             # Note what is NOT here: the gateway port. Picking one writes a rule
             # into the host's firewall and a value into this file, and that used to
