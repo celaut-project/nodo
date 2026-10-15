@@ -213,6 +213,47 @@ instance never starts again.
 `DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH` (read by `src/commands/connect.py` and
 the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
 
+### Transitive peer discovery (gossip)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `communication.SHARE_KNOWN_PEERS` | `true` | Answer `Gateway.ListPeers` with known peers and periodically push their announcements with `IntroducePeer`. Off returns an empty list and disables push. |
+| `communication.DISCOVER_PEERS_VIA_GOSSIP` | `true` | Periodically pull advertisements from one randomly selected known peer. Each is registered through normal signature verification and anti-replay checks. |
+| `communication.MAX_PEERS_PER_GOSSIP_RESPONSE` | `100` | Maximum advertisements served per list request; also the local cap on messages consumed from a remote list, including rejected ones. Zero disables list/pull work. |
+| `communication.MAX_PEERS_PER_GOSSIP_PUSH` | `20` | Maximum other peers introduced to one random target per tick. Zero disables push work. |
+| `communication.GOSSIP_INTERVAL_SECONDS` | `300` | Independent pull/push intervals, measured with a monotonic clock. Invalid or nonpositive values use 300 seconds. |
+
+The two switches are independent of self-announcement and are read live. The POLICIES
+page (in the SETTINGS group) shows each switch as a lever. Profiles mirror
+self-announcement: `just-me`, `remote-only`, `cautious` and `workbench` disable both;
+`open-renter` and `lan-lab` enable both. A first peer still needs `nodo connect`;
+there is no bootstrap list or DHT.
+
+**Relay the claim as the peer signed it.** A peer's signature covers every address and
+its expiry. A relay that removes an address makes the signature invalid. A relay that
+signs the claim again attributes the addresses of the peer to the relay. Thus push and
+list send the original `Peer` message without changes. Private, loopback and DNS
+addresses travel as the peer declared them. The peer decides what it discloses, with
+`network.ANNOUNCE_PRIVATE_ADDRESSES` on its own node.
+
+A relay does not send an advertisement with no addresses, or with all addresses
+expired. Expiry zero means no declared expiry. Receivers verify the original signature
+and apply normal registration rules. Gossip uses the same client-id/rate-limit gate
+as other gateway calls, and does not relay queries recursively. See
+[the peer gossip proposal](proposals/427-peer-gossip.md) for bounds and tradeoffs.
+
+**Learned is not funded.** A peer that reached this node over the network — pulled
+through `ListPeers`, or sent in any `IntroducePeer` (by the peer itself or by another) —
+is marked as learned via gossip, and `deposits.AUTOMATIC_REFILL` does not top it up
+unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is `true` (default `false`).
+Keypairs and payment contracts are free to mint, so without this an `open-renter` node
+would send a full deposit to every reachable identity the network relayed to it.
+`nodo connect` to it, or paying it by hand (`nodo pay` / `nodo increase_peer_deposit`),
+marks it chosen, after which the automatic refill treats it like any other peer.
+Setting `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS: true` funds learned peers too; it
+reopens that Sybil drain and never turns the automatic refill on by itself. A
+node also refuses its own identity when a relay hands its advertisement back.
+
 ### Where the prose travels
 
 An announcement declares what it means — its signature scheme, and the protocol stack of
@@ -540,7 +581,8 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY` | `500` | How many clients `GenerateClient` hands out per proof-of-work difficulty level. The first 500 are free; the next 500 cost one Blake2b zero each, and so on — each step is 16x the work. Must be positive: it is the size of a step, so `0` has no meaning. See [`CONCEPTS.md`](CONCEPTS.md#creating-a-client). |
 | `ui.DISPLAY_UNIT` | `mu` | What you read and type. `mu` (the default: the node's own accounting unit, not money held anywhere; large figures take an exact `K`/`M`/`G` suffix, `5100000` shown as `5.1M`, and the suffixed form can be typed back), `erg`, `btc` once `ledgers.bitcoin.payments.MU_PER_SATOSHI` is set, or a name declared under `ui.UNITS`. Purely presentational. Edited from the TUI's All page (or the POLICIES page's `display unit` lever) as a picker over exactly these; picking `custom…` there asks for a new name and its `ui.UNITS.<name>.MU_PER_UNIT` rate together, since one without the other is a display unit the node refuses to start against. |
 | `ui.THEME` | `dark` | Colour scheme for `nodo tui`. `dark` (the palette before themes existed, and the default — `default` is an accepted spelling), `ubuntu` (the Ubuntu terminal palette), `light` (for a pale terminal), `mono` (no hue at all). Edited from the TUI's All page as a picker. An unrecognised name falls back to the default rather than refusing to start. `nodo tui --theme <name>` and `NODO_TUI_THEME` override it for one run, so two themes can be compared without a config write and the restart that carries. |
-| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
+| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. It does not pay one only learned via gossip unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is on ([see above](#transitive-peer-discovery-gossip)). Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
+| `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` | `false` | Whether the automatic refill also funds a peer learned only via gossip and never connected to or paid by hand. Off by default because identities are free to mint, so a relayed Sybil peer would draw a full deposit from every refill-enabled node that learns it. Only matters when `deposits.AUTOMATIC_REFILL` and `network.DELEGATE_EXECUTION` are on; it never enables refills by itself. Any value other than `true` counts as `false`. |
 | `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
 | `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
 | `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |

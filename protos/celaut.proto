@@ -1083,6 +1083,12 @@ service Gateway {
     // payment contracts, the rates and the reputation proofs. The signature of the
     // Peer covers all of these.
     rpc GetPeerInfo(stream buffer.Buffer) returns (stream buffer.Buffer) {}
+    // Returns a stream of Peer. Each Peer is a signed advertisement of a third party
+    // that this node knows. The node sends the advertisement as it is, never changed,
+    // because the signature covers all of it. The node does not send an advertisement
+    // with a non-global address or a DNS name, and the number of Peers has a limit. If
+    // the node does not share its known peers, the stream is empty.
+    rpc ListPeers(stream buffer.Buffer) returns (stream buffer.Buffer) {}
 
     // Any Service.Network, not one kind of it. If the caller must know the kind first,
     // the caller does the resolution itself. A `pow:` network has no name to look up,

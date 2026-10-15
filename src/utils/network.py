@@ -4,6 +4,16 @@ import socket
 from typing import Optional
 
 
+def is_globally_routable(host: str) -> bool:
+    """Public unicast address. A DNS name is accepted: it is the operator's choice."""
+    try:
+        address = ipaddress.ip_address(host)
+        return (address.is_global and not address.is_multicast
+                and not address.is_unspecified and "%" not in host)
+    except ValueError:
+        return bool(host)
+
+
 def uri_expiry(now: int) -> int:
     """Value for a URI's ``expiry_unix_timestamp``: when a just-signed address may
     stop being valid, or 0 for no estimate.

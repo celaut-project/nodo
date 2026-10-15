@@ -49,6 +49,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.ListPeers = channel.stream_stream(
+                '/celaut.Gateway/ListPeers',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
         self.ResolveNetwork = channel.stream_stream(
                 '/celaut.Gateway/ResolveNetwork',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -177,6 +182,17 @@ class GatewayServicer(object):
         """Returns the Peer of the node. The Peer gives all the addresses of the node, the
         payment contracts, the rates and the reputation proofs. The signature of the
         Peer covers all of these.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListPeers(self, request_iterator, context):
+        """Returns a stream of Peer. Each Peer is a signed advertisement of a third party
+        that this node knows. The node sends the advertisement as it is, never changed,
+        because the signature covers all of it. The node does not send an advertisement
+        with a non-global address or a DNS name, and the number of Peers has a limit. If
+        the node does not share its known peers, the stream is empty.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -351,6 +367,11 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
+            'ListPeers': grpc.stream_stream_rpc_method_handler(
+                    servicer.ListPeers,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
             'ResolveNetwork': grpc.stream_stream_rpc_method_handler(
                     servicer.ResolveNetwork,
                     request_deserializer=buffer__pb2.Buffer.FromString,
@@ -514,6 +535,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetPeerInfo',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def ListPeers(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ListPeers',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

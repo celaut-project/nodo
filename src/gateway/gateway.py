@@ -5,6 +5,7 @@ from protos.gateway_bee import rpc_input, rpc_output
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
+from src.gateway.iterables.list_peers_iterable import ListPeersIterable
 from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
@@ -92,6 +93,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         log.LOGGER(f'Request for instance by {context.peer()}')
         gateway_instance = generate_full_node_peer_info()
         yield from BeeClient.respond(gateway_instance)
+
+    def ListPeers(self, request_iterator, context, **kwargs):
+        yield from ListPeersIterable(request_iterator, context)
 
     def ResolveNetwork(self, request_iterator, context, **kwargs):
         """Answer with the peers this node knows in the communication domain asked for.
@@ -199,7 +203,11 @@ class Gateway(celaut_pb2_grpc.Gateway):
         require_caller(context, client_id)
 
         log.LOGGER('Introduce peer method.')
-        peer_id = add_peer_instance(peer=peer)
+        # Nobody here chose this peer: it came in over the network. Whether the caller is
+        # the subject, a known peer or a stranger, the risk is the same as for a relayed
+        # claim, so it is filed as one. Only `nodo connect` or a payment makes it chosen
+        # (issue #427).
+        peer_id = add_peer_instance(peer=peer, learned_via_gossip=True)
 
         # Answer with the id the peer was stored under, or REFUSED when it was not.
         # Refusal is a normal outcome now that an unverifiable announcement is turned

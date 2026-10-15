@@ -545,6 +545,9 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()
         }
+        (KeyModifiers::NONE, KeyCode::Char('a')) if app.page() == Page::Peers => {
+            app.open_choose_peer_confirm()
+        }
         (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(1)
         }

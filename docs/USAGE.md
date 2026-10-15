@@ -1169,6 +1169,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | PEERS: table | — | `nodo peers [--json]` (new `--json`) |
 | PEERS: payments + reputation events card | — | `nodo peers <peer> [--json]` (new) |
 | PEERS: connect | `c` | `nodo connect <host:port>` |
+| PEERS: choose a peer learned over the network (y/N) | `a` | `nodo connect <host:port>` of its first endpoint |
 | PEERS: forget | `d` | `nodo disconnect <peer>` |
 | PEERS: adjust local reputation | `+` / `-` | `nodo peer_reputation <peer> +1` / `-1` (new) |
 | CLIENTS: table | — | `nodo clients [--json]` (new `--json`) |
@@ -1295,7 +1296,8 @@ running on this host.
 
 - `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
 - `r` refreshes.
-- On Peers, `c` connects a peer, `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
+- On Peers, `c` connects a peer, `a` chooses a peer that only reached this node over the network (it runs
+  `nodo connect` on the peer's first endpoint, so the automatic refill may then fund it), `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
   reputation. The detail card shows what this node has paid that peer and the events behind its score.
 - On Clients, `+`/`-` credit/debit the selected client's balance (`nodo credit_client`/`debit_client`),
   and the detail card shows what a client has paid, its deposit tokens, and the instances it

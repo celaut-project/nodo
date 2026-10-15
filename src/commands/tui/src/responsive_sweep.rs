@@ -65,6 +65,7 @@ fn peer(id: &str) -> Peer {
         reputation_score: "7".to_string(),
         contracts: Vec::new(),
         resources: Default::default(),
+        learned_via_gossip: false,
     }
 }
 
