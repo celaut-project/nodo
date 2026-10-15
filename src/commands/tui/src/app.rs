@@ -680,6 +680,9 @@ pub enum PendingAction {
     /// moment it launches, and goes on burning MU until something stops it.
     ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Choose a peer this node only learned over the network: `nodo connect <target>`.
+    /// Confirmed because a chosen peer is funded by the automatic refill.
+    ChoosePeer { label: String, target: String },
     /// Re-fetch every peer and our balance there. Confirmed because it contacts all of
     /// them, which is heavy on network and disk I/O.
     RefreshPeers,
@@ -734,6 +737,10 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
+        )),
+        PendingAction::ChoosePeer { label, target } => Some((
+            format!("Choose peer {label}"),
+            vec!["connect".to_string(), target],
         )),
         PendingAction::RefreshPeers => {
             Some(("Refresh peers".to_string(), vec!["refresh_peers".to_string()]))
