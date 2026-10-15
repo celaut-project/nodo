@@ -119,6 +119,18 @@ provision_virtiofsd() {
     configured="$(read_config_path_or_default '.virtualizers.ch.VIRTIOFSD_BINARY' 'virtiofsd')"
     case "$configured" in
         virtiofsd|"$target") ;;
+        "${NODO_VIRTIOFSD_SYSTEM_PATH:-/usr/local/libexec/nodo/virtiofsd}")
+            # A node that does not run as root under AppArmor's userns restriction
+            # runs a root-owned copy of $target (bash/lib_privileged.sh). Keep $target
+            # current; install.sh refreshes the copy, and the config stays on it.
+            if virtiofsd_is_pinned_version "$target" || fetch_prebuilt_virtiofsd "$target" \
+                || build_virtiofsd_from_source "$target"; then
+                echo "virtiofsd ${VIRTIOFSD_VERSION} is at ${target}; the node runs its copy at ${configured}."
+            else
+                echo "Warning: could not install virtiofsd ${VIRTIOFSD_VERSION} at ${target}." >&2
+            fi
+            return 0
+            ;;
         *)
             echo "virtualizers.ch.VIRTIOFSD_BINARY is ${configured}; keeping it and installing no virtiofsd."
             return 0

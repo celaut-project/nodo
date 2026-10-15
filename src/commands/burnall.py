@@ -46,6 +46,7 @@ from typing import Dict, List, Sequence
 
 from src.database.sql_connection import SQLConnection
 from src.manager.manager import credit_father, stop_instance
+from src.utils import dead_instances
 from src.utils.monetary import format_mu
 
 sc = SQLConnection()
@@ -232,7 +233,7 @@ def burnall(argv: List[str] = None) -> None:
         # after it in the order are its children, and they are exactly what a
         # burnall is for.
         try:
-            refund = stop_instance(token=i, credit=False)
+            refund = stop_instance(token=i, credit=False, reason=dead_instances.BURNALL)
         except Exception as e:
             del creditor[i]
             failed.append((i, str(e)))

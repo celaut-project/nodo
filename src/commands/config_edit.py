@@ -50,6 +50,7 @@ from src.commands import _catalogue as catalogue
 Segment = Union[str, int]
 
 RESTART_READY_TIMEOUT = 120  # NODE_READY_TIMEOUT in the TUI
+PENDING_CONFIG_FILE = "config.pending.yaml"  # PENDING_CONFIG_FILE in the TUI
 MASK = "********"
 
 _SEGMENT = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
@@ -63,7 +64,9 @@ USAGE = """Usage:
 
 <value> is YAML: true, 5000, 1.5, null, [], "quoted text".
 Every write is backed up, and a serving node is restarted onto it (needs root)
-and rolled back if it does not come back."""
+and rolled back if it does not come back.
+Without root, a change to a serving node is staged in config.pending.yaml
+instead. The node swaps it in when it starts."""
 
 
 # --- the profile catalogue ----------------------------------------------------
@@ -84,8 +87,47 @@ PROFILES: List[Dict[str, Any]] = [
          ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
          ("network.DELEGATE_EXECUTION", "false"),
          ("deposits.AUTOMATIC_REFILL", "false"),
+        ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
          ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
          ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+        ("communication.SHARE_KNOWN_PEERS", "false"),
+        ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
+         ("service_networks.blacklist", "[]"),
+         ("service_networks.whitelist", "[]"),
+         ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
+         ("pricing.SCARCITY_CURVE", "1.0"),
+         ("free_tier.FREE_WHILE_SCARCITY_BELOW", "0.0"),
+         ("free_tier.CREDIT_MU_PER_NEW_CLIENT", "0"),
+         ("costs.ALLOW_DEBT", "false"),
+         ("misc.VALIDATE_ON_IMPORT", "true"),
+         ("hashing.CHECK_INTEGRITY_ON_SERVE", "false"),
+         ("virtualizers.qemu.ENABLE", "false"),
+         ("workload_admission.POLICY", "fail_fast"),
+         ("workload_admission.ON_UNSATISFIABLE", "reject"),
+         ("low_demand.ENABLED", "false"),
+         ("host_limits.ENABLED", "true"),
+         ("general_flags.SIMULATE_PAYMENTS", "false"),
+         ("logs.DEBUG_MODE", "false"),
+         ("logs.MEMORY_LOGS", "false"),
+         ("logs.TUNNEL_LOGS", "false"),
+     ]},
+    {"id": "remote-only", "label": "REMOTE ONLY",
+     "blurb": "I run nothing here. Every service runs on other nodes, and I pay for it.",
+     "writes": [
+         ("client.ACCEPT_NEW_DEPOSITS", "false"),
+         ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
+         ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+         ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
+         ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
+         ("network.EXECUTE_LOCALLY", "false"),
+         ("network.DELEGATE_EXECUTION", "true"),
+         ("network.DELEGATION_TUNNEL_POLICY", "always"),
+         ("deposits.AUTOMATIC_REFILL", "true"),
+        ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
+         ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
+         ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+        ("communication.SHARE_KNOWN_PEERS", "false"),
+        ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
          ("service_networks.blacklist", "[]"),
          ("service_networks.whitelist", "[]"),
          ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -115,9 +157,12 @@ PROFILES: List[Dict[str, Any]] = [
          ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
          ("network.DELEGATE_EXECUTION", "false"),
          ("deposits.AUTOMATIC_REFILL", "false"),
+        ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
          ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
          ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
          ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+        ("communication.SHARE_KNOWN_PEERS", "false"),
+        ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
          ("service_networks.blacklist", "[]"),
          ("service_networks.whitelist", "[]"),
          ("pricing.SCARCITY_MAX_MULTIPLIER", "10"),
@@ -149,9 +194,12 @@ PROFILES: List[Dict[str, Any]] = [
          ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
          ("network.DELEGATE_EXECUTION", "true"),
          ("deposits.AUTOMATIC_REFILL", "true"),
+        ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
          ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
          ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
          ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
+        ("communication.SHARE_KNOWN_PEERS", "true"),
+        ("communication.DISCOVER_PEERS_VIA_GOSSIP", "true"),
          ("service_networks.blacklist", "[]"),
          ("service_networks.whitelist", "[]"),
          ("pricing.SCARCITY_MAX_MULTIPLIER", "10"),
@@ -183,8 +231,11 @@ PROFILES: List[Dict[str, Any]] = [
          ("network.ANNOUNCE_PRIVATE_ADDRESSES", "true"),
          ("network.DELEGATE_EXECUTION", "true"),
          ("deposits.AUTOMATIC_REFILL", "false"),
+        ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
          ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
          ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
+        ("communication.SHARE_KNOWN_PEERS", "true"),
+        ("communication.DISCOVER_PEERS_VIA_GOSSIP", "true"),
          ("service_networks.blacklist", "[]"),
          ("service_networks.whitelist", "[]"),
          ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -215,8 +266,11 @@ PROFILES: List[Dict[str, Any]] = [
          ("network.CONSIDER_DEV_AS_INTERNAL", "true"),
          ("network.DELEGATE_EXECUTION", "false"),
          ("deposits.AUTOMATIC_REFILL", "false"),
+        ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
          ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
          ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+        ("communication.SHARE_KNOWN_PEERS", "false"),
+        ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
          ("service_networks.blacklist", "[]"),
          ("service_networks.whitelist", "[]"),
          ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -452,6 +506,94 @@ def _forget_gateway_verdicts(before: Any, after: Any) -> None:
         pass
 
 
+def pending_config_path(path: str) -> str:
+    """The file a change is staged in while the node cannot be restarted onto it."""
+    return os.path.join(os.path.dirname(path) or ".", PENDING_CONFIG_FILE)
+
+
+def _stage_change(yq: str, expression: str, values: List[str], label: str, path: str,
+                  result: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply the change to config.pending.yaml, and leave config.yaml and the node alone.
+
+    Restarting a node stops every instance it runs, and this process may not be
+    allowed to do it. The staged file is made from config.yaml when it does not exist,
+    and ``apply_pending_config`` swaps it in the next time the node starts.
+    """
+    from src.utils.config import _match_config_file
+
+    pending = pending_config_path(path)
+    created = not os.path.isfile(pending)
+    if created:
+        try:
+            shutil.copy2(path, pending)
+            _match_config_file(pending, path)
+        except OSError as e:
+            result["error"] = f"Could not create {pending}: {e}"
+            return result
+    env = dict(os.environ)
+    for index, value in enumerate(values):
+        env[f"NODO_CLI_V{index}"] = value
+    completed = subprocess.run([yq, "e", "-i", expression, pending],
+                               env=env, capture_output=True, text=True)
+    if completed.returncode != 0:
+        result["error"] = f"yq could not update configuration: {completed.stderr.strip()}"
+        if created:
+            os.remove(pending)
+        return result
+    result.update(ok=True, outcome="staged")
+    return result
+
+
+def apply_pending_config(manager: Any) -> Optional[str]:
+    """Swap config.pending.yaml in for config.yaml. Called as the node starts.
+
+    The old config.yaml stays as a timestamped backup beside it (the same one every
+    write makes), and the staged file is removed. Does nothing while a node is
+    already serving: that node is on config.yaml, and the staged file waits for the
+    start that follows its stop.
+
+    A staged file the node cannot load is not left in place. config.yaml is put back
+    and the staged file is kept as ``config.pending.rejected.yaml``, so a bad edit
+    costs the operator that edit and not the node. Returns a line to log, or None
+    when there was nothing to do.
+    """
+    from src.utils.config import backup_config_file
+
+    path = os.path.realpath(manager.config_path)
+    pending = pending_config_path(path)
+    if not os.path.isfile(pending):
+        return None
+    try:
+        before = read_document(path)
+    except (OSError, yaml.YAMLError):
+        return None  # config.yaml is not readable; the normal load reports it
+    if _serving_on(_gateway_port(before)):
+        return None
+    rejected = os.path.join(os.path.dirname(path), "config.pending.rejected.yaml")
+    try:
+        after = read_document(pending)
+        if not isinstance(after, dict):
+            raise ValueError("it is not a YAML mapping")
+    except (OSError, yaml.YAMLError, ValueError) as e:
+        os.replace(pending, rejected)
+        return f"Staged configuration not applied: {e}. It is kept as {rejected}."
+
+    backup = backup_config_file(path)
+    os.replace(pending, path)
+    try:
+        manager.load_config(force_reload=True)
+    except Exception as e:
+        shutil.copy2(path, rejected)
+        if backup:
+            shutil.copy2(backup, path)
+            os.remove(backup)
+        manager.load_config(force_reload=True)
+        return (f"Staged configuration not applied: {e}. config.yaml is back as it was; "
+                f"the staged file is kept as {rejected}.")
+    _forget_gateway_verdicts(before, after)
+    return f"Staged configuration applied. The previous one is {backup}."
+
+
 def apply_change(expression: str, values: List[str], label: str,
                  path: Optional[str] = None) -> Dict[str, Any]:
     """Back up, write with yq, restart if serving, roll back if it does not come up.
@@ -479,10 +621,10 @@ def apply_change(expression: str, values: List[str], label: str,
     except RuntimeError as e:
         result["error"] = str(e)
         return result
-    if was_serving and os.geteuid() != 0:
-        result["error"] = ("Configuration unchanged: nodo is serving and restarting it onto the "
-                           "change requires root. Run with sudo.")
-        return result
+    # A staged file takes every later edit, serving or not: the node swaps it in
+    # when it starts, so a write to config.yaml would be overwritten by it.
+    if os.path.isfile(pending_config_path(path)) or (was_serving and os.geteuid() != 0):
+        return _stage_change(yq, expression, values, label, path, result)
 
     try:
         backup = backup_config_file(path)
@@ -546,6 +688,9 @@ def _report(result: Dict[str, Any], as_json: bool, extra: Optional[Dict[str, Any
         return False
     if result["outcome"] == "restarted":
         print(f"{result['label']}: applied; nodo restarted onto it.", flush=True)
+    elif result["outcome"] == "staged":
+        print(f"{result['label']}: staged in {PENDING_CONFIG_FILE}. It applies when nodo "
+              "restarts, and a restart stops its instances.", flush=True)
     else:
         print(f"{result['label']}: applied. No node is serving, so the next start reads it.", flush=True)
     return True

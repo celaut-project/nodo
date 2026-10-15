@@ -10,12 +10,17 @@ class GatewayStub(object):
     GATEWAY SERVICE DEFINITION
     -----------------------
 
-    Every RPC below but GenerateClient itself requires a Client -- mint one there first
-    (issue #428). A local instance of this node is exempt, identified the way
-    ModifyServiceSystemResources identifies one (by its address); everyone else is
-    refused outright without a client_id this node already knows, and is then subject
-    to a shared per-client_id rate limit across every one of these RPCs together. See
-    src/gateway/client_gate.py.
+    The Gateway of a node. Each RPC is a stream of buffer.Buffer in each direction. The
+    celaut-gateway layer of each address gives the message type at each bee-rpc index and
+    the kind of authentication of each RPC:
+    * client: a Client in the request, at the index that the layer gives, in any
+    sequence. A local instance of the node is exempt. All these RPCs share one rate
+    limit for each client_id.
+    * token: a token in the payload (an instance token; GetMetrics also takes a
+    client_id).
+    * client-in-message: Chat, with the client_id in the ChatMessage.
+    * local-address: ModifyServiceSystemResources, only for a local instance.
+    * none: GenerateClient, which can answer with a PoWRequired.
     """
 
     def __init__(self, channel):
@@ -44,8 +49,18 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.ListPeers = channel.stream_stream(
+                '/celaut.Gateway/ListPeers',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
         self.ResolveNetwork = channel.stream_stream(
                 '/celaut.Gateway/ResolveNetwork',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
+        self.LocateShare = channel.stream_stream(
+                '/celaut.Gateway/LocateShare',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
@@ -121,136 +136,210 @@ class GatewayServicer(object):
     GATEWAY SERVICE DEFINITION
     -----------------------
 
-    Every RPC below but GenerateClient itself requires a Client -- mint one there first
-    (issue #428). A local instance of this node is exempt, identified the way
-    ModifyServiceSystemResources identifies one (by its address); everyone else is
-    refused outright without a client_id this node already knows, and is then subject
-    to a shared per-client_id rate limit across every one of these RPCs together. See
-    src/gateway/client_gate.py.
+    The Gateway of a node. Each RPC is a stream of buffer.Buffer in each direction. The
+    celaut-gateway layer of each address gives the message type at each bee-rpc index and
+    the kind of authentication of each RPC:
+    * client: a Client in the request, at the index that the layer gives, in any
+    sequence. A local instance of the node is exempt. All these RPCs share one rate
+    limit for each client_id.
+    * token: a token in the payload (an instance token; GetMetrics also takes a
+    client_id).
+    * client-in-message: Chat, with the client_id in the ChatMessage.
+    * local-address: ModifyServiceSystemResources, only for a local instance.
+    * none: GenerateClient, which can answer with a PoWRequired.
     """
 
     def StartService(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Starts a service. The caller sends a Client and the service as content hashes, as
+        Metadata or as the full Service. It can also send a Configuration and a
+        RecursionGuard. The node returns a ServiceInstance with the addresses of the
+        instance and its token. The node can start the service on a peer and give the
+        addresses of that instance. If the node does not have the service and the caller
+        does not send it, the node refuses with an error.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def StopService(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Stops an instance. The TokenMessage gives the instance token. The node gives the
+        balance that the instance did not use back to its parent, and returns a Refund
+        with that amount. If the node does not know the token, the Refund is 0.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ModifyDeposit(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Changes the balance of an instance. The service_token gives the instance. The
+        parent of the instance pays or gets the difference.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetPeerInfo(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Returns the Peer of the node. The Peer gives all the addresses of the node, the
+        payment contracts, the rates and the reputation proofs. The signature of the
+        Peer covers all of these.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListPeers(self, request_iterator, context):
+        """Returns a stream of Peer. Each Peer is a signed advertisement of a third party
+        that this node knows. The node sends the advertisement as it is, never changed,
+        because the signature covers all of it. The node does not send an advertisement
+        with a non-global address or a DNS name, and the number of Peers has a limit. If
+        the node does not share its known peers, the stream is empty.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ResolveNetwork(self, request_iterator, context):
-        """Ask this node to turn a communication domain into the peers it knows in it.
+        """Any Service.Network, not one kind of it. If the caller must know the kind first,
+        the caller does the resolution itself. A `pow:` network has no name to look up,
+        so the node must find its addresses (issue #78).
 
-        Any Service.Network, not one kind of it: a domain is declared the same way
-        whatever resolves it (tags/prose/formal), and a caller that had to know in
-        advance which kind it was holding would be doing the resolving itself. A `pow:`
-        network is the case that needs asking -- it has no name to look up, so its
-        addresses have to be found rather than resolved (issue #78) -- but nothing here
-        is about proof of work, and a node may answer for a DNS tag just as well.
+        Takes a Service.Network and returns the addresses of the members of that network
+        that the node can find. The node does not ask other nodes. This is what the node
+        believes, not a proof: the caller must make sure that each address is correct.
+        The node refuses a network that its policy does not allow, and a network with an
+        unfilled ${VAR}. For a local instance, the request must agree with a network that
+        its service declares. The node then also opens the addresses in the firewall of
+        that instance.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
-        The answer is what this node BELIEVES, not a grant and not a proof. The caller
-        verifies every address it is given, exactly as it would verify one an operator
-        typed into its own config, because a peer that names an address has staked
-        nothing on it. Nothing is opened on the strength of this reply.
+    def LocateShare(self, request_iterator, context):
+        """Takes a ShareLocationRequest with the id of a network share. Returns a
+        ShareLocation that tells if the node holds that share now. The node does not ask
+        other nodes. A node that launches a member of a network share asks its peers, and
+        runs the member on the node that holds the share. Only a network share is
+        reported, never a share from a parent to its children.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def IntroducePeer(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Sends the Peer of the caller, with a Client. The node returns a RecursionGuard.
+        Its token is the peer id (the public key) of the caller if the node knows the
+        caller now, or "REFUSED".
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GenerateClient(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Returns a new Client. The caller can send a Client with a proposed client_id. It
+        can also send a peer_id and a signature to bind the client to that peer. The node
+        binds it only if it already knows that peer. If not, use AssociateClient later.
+        If the node needs a proof of work, it returns a PoWRequired at index 2. Then the
+        caller sends the Client again, with the same client_id, the challenge and a
+        solution.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def AssociateClient(self, request_iterator, context):
-        """Bind an already-minted client_id to this caller's peer identity, once that peer
-        is actually known here -- the deferred half of Client.peer_id/signature, for
-        when GenerateClient's own attempt at mint time could not have succeeded yet
-        (see AssociateClientOutput). Not gated behind a separate client_id envelope:
-        the Client in the request already carries the one being associated.
+        """Binds a client_id to the identity of the caller, after IntroducePeer stored the
+        caller as a peer. The Client gives the client_id, the peer_id and a signature.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GenerateDepositToken(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Returns a TokenMessage with a new deposit token for the client. The payer writes
+        this token in its ledger transaction. The payment contract gives where and how.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Payable(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Tells the node about a payment. The Payment gives the deposit token, the contract
+        and the amount. The node examines the ledger. Then it adds the amount to the
+        client that got that deposit token. The node accepts each deposit token one time.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ModifyServiceSystemResources(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Changes the resource limits of an instance. Only a local instance of the node can
+        call it. The node identifies the instance by its address. The node takes a fee
+        from the balance of the instance. It returns the new resources and the balance.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetServiceEstimatedCost(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Takes the same objects as StartService. Returns the cost to run the service on
+        this node, and starts nothing. A node that cannot run the service now refuses
+        with the reason. If the node does not have the service and the caller does not
+        send it, the node refuses with an error. The node ignores a RecursionGuard here.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetResourceAvailability(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Asks if the node can run one instance with the given architecture and resources
+        now. The resources do not need to be those of a known service.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetService(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Takes a content hash. Returns the hashes at index 4, the Metadata at index 5 and
+        the Service at index 6. These are the StartService indices, so the caller can send
+        them to StartService without a change.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def GetMetrics(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Takes a token. For an instance token, returns the balance of the instance. For a
+        client_id, returns the balance of the client.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ServiceTunnel(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Opens a byte stream to a declared slot of a local instance. First, the caller
+        sends a TokenMessage with the instance token and the internal port in slot. Then
+        each side sends raw bytes at index 0. For a TCP slot, when the stream of the
+        caller stops, the node closes the write side of the connection to the service.
+        For a UDP slot, each message is one datagram. The node takes the traffic cost
+        from the balance of the instance.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Observe(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Takes an ObserveRequest and returns a stream of ObserveEvent. If the observation
+        starts, the first event is a session event. If not, the stream has only one
+        notice that tells why. The stream stops when the instance stops.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Chat(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Sends a ChatMessage to the operator of the node. The node returns a ChatAck.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -278,8 +367,18 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
+            'ListPeers': grpc.stream_stream_rpc_method_handler(
+                    servicer.ListPeers,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
             'ResolveNetwork': grpc.stream_stream_rpc_method_handler(
                     servicer.ResolveNetwork,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'LocateShare': grpc.stream_stream_rpc_method_handler(
+                    servicer.LocateShare,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -360,12 +459,17 @@ class Gateway(object):
     GATEWAY SERVICE DEFINITION
     -----------------------
 
-    Every RPC below but GenerateClient itself requires a Client -- mint one there first
-    (issue #428). A local instance of this node is exempt, identified the way
-    ModifyServiceSystemResources identifies one (by its address); everyone else is
-    refused outright without a client_id this node already knows, and is then subject
-    to a shared per-client_id rate limit across every one of these RPCs together. See
-    src/gateway/client_gate.py.
+    The Gateway of a node. Each RPC is a stream of buffer.Buffer in each direction. The
+    celaut-gateway layer of each address gives the message type at each bee-rpc index and
+    the kind of authentication of each RPC:
+    * client: a Client in the request, at the index that the layer gives, in any
+    sequence. A local instance of the node is exempt. All these RPCs share one rate
+    limit for each client_id.
+    * token: a token in the payload (an instance token; GetMetrics also takes a
+    client_id).
+    * client-in-message: Chat, with the client_id in the ChatMessage.
+    * local-address: ModifyServiceSystemResources, only for a local instance.
+    * none: GenerateClient, which can answer with a PoWRequired.
     """
 
     @staticmethod
@@ -437,6 +541,23 @@ class Gateway(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
+    def ListPeers(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ListPeers',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
     def ResolveNetwork(request_iterator,
             target,
             options=(),
@@ -448,6 +569,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ResolveNetwork',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def LocateShare(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/LocateShare',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

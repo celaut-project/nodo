@@ -113,6 +113,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.chat_attach_area = Rect::ZERO;
     app.chat_send_area = Rect::ZERO;
     app.peers_refresh_area = Rect::ZERO;
+    app.profile_button_area = Rect::ZERO;
 
     // Below the smallest size the pages are laid out for, say so instead of drawing
     // a tab bar squeezed to nothing over a table of one-character columns (issue
@@ -156,6 +157,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Overview => draw_overview(frame, app, layout[2]),
         Page::Instances => draw_instances(frame, app, layout[2]),
         Page::Tunnels => crate::tunnels::draw(frame, app, layout[2]),
+        Page::Dead => crate::dead::draw(frame, app, layout[2]),
         Page::Packs => crate::packs::draw(frame, app, layout[2]),
         Page::Services => draw_services(frame, app, layout[2]),
         Page::Peers => crate::peers::draw(frame, app, layout[2]),
@@ -175,10 +177,42 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match app.input_mode {
         InputMode::Normal => {}
         InputMode::Confirm => draw_confirm_popup(frame, app),
-        InputMode::AcceptKya | InputMode::Details | InputMode::ConfirmWrites => {
-            draw_details_popup(frame, app)
+        // The list of changes of a profile chosen in the deck stays in the deck's own
+        // style. Every other confirmation, and the list on a terminal too small for
+        // the deck, is the plain popup.
+        InputMode::ConfirmWrites => {
+            let deck = app.deck_confirm.and_then(|_| {
+                crate::profile_deck_ui::layout(frame.size(), cell::profiles().len(), false)
+            });
+            match deck {
+                Some(layout) => {
+                    let zones = crate::profile_deck_ui::draw_confirm(frame, app, &layout);
+                    app.deck_confirm_zones = Some(zones);
+                }
+                None => {
+                    app.deck_confirm_zones = None;
+                    draw_details_popup(frame, app)
+                }
+            }
         }
-        InputMode::PickProfile => draw_profile_popup(frame, app),
+        InputMode::AcceptKya | InputMode::Details => draw_details_popup(frame, app),
+        // The deck on a terminal big enough for it, the plain list otherwise.
+        InputMode::PickProfile => {
+            match crate::profile_deck_ui::layout(
+                frame.size(),
+                cell::profiles().len(),
+                app.profile_first_run,
+            ) {
+                Some(layout) => {
+                    crate::profile_deck_ui::draw(frame, app, &layout);
+                    app.deck_zones = Some(layout);
+                }
+                None => {
+                    app.deck_zones = None;
+                    draw_profile_popup(frame, app)
+                }
+            }
+        }
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
         InputMode::EditAssets => draw_assets_popup(frame, app),
         InputMode::AddAsset => draw_asset_form_popup(frame, app),
@@ -220,36 +254,73 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|title| Line::from(*title))
         .collect::<Vec<_>>();
-    let status_color = if app.node_info.service_status == "running" {
-        good()
-    } else {
-        warn()
-    };
-    let title = Line::from(vec![
-        Span::styled(
-            " NODO ",
-            Style::default().fg(inverse_text()).bg(accent()).bold(),
-        ),
-        // The tagline is the first thing to go on a narrow terminal: the status
-        // after it is the part of this border worth reading.
-        Span::raw(if area.width >= 60 { "  operations console  " } else { " " }),
-        Span::styled(
-            if app.node_info.service_status.is_empty() {
-                "unknown"
-            } else {
-                &app.node_info.service_status
-            },
-            Style::default().fg(status_color),
-        ),
-    ]);
     let tabs = Tabs::new(titles)
-        .block(Block::bordered().title(title))
+        .block(Block::bordered().title(header_title(app, area.width)))
         .select(app.tabs.group().index())
         .style(Style::default().fg(muted()))
         .highlight_style(Style::default().fg(accent()).bold())
         .padding(row.pad(), row.pad())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
+}
+
+/// The title on the tab bar's top border, on every page: whether the node is up and
+/// how many peers, clients and instances it has. Said once, here, so no page has to
+/// repeat it -- the Overview's cards break the figures down instead.
+///
+/// Segments are added in priority order while they fit, so a narrow terminal loses
+/// the tail rather than a half-cut word. The tagline is the first thing to go.
+fn header_title(app: &App, width: u16) -> Line<'static> {
+    let health = service_health(&app.node_info.service_status);
+    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let segments: Vec<Vec<Span<'static>>> = vec![
+        vec![
+            Span::styled(format!("{} ", health.glyph()), Style::default().fg(health.colour())),
+            Span::styled(
+                nonempty(&app.node_info.service_status, "checking…").to_uppercase(),
+                Style::default().fg(health.colour()).bold(),
+            ),
+        ],
+        vec![Span::styled(count(app.peers.items.len(), "peer", "peers"), Style::default().fg(text_colour()))],
+        vec![Span::styled(
+            count(app.clients.items.len(), "client", "clients"),
+            Style::default().fg(text_colour()),
+        )],
+        vec![Span::styled(
+            count(app.instances.items.len(), "instance", "instances"),
+            Style::default().fg(text_colour()),
+        )],
+    ];
+    const NAME: &str = " NODO ";
+    const TAGLINE: &str = " operations console";
+    const DIVIDER: &str = " │ ";
+    // The two corners, and a space after the last segment so it does not run into
+    // the border's line.
+    let room = (width as usize).saturating_sub(3);
+    let mut used = NAME.chars().count() + 1;
+    let mut body: Vec<Span<'static>> = Vec::new();
+    for (index, segment) in segments.into_iter().enumerate() {
+        let segment_width: usize = segment.iter().map(|span| span.content.chars().count()).sum();
+        let gap = if index == 0 { 0 } else { DIVIDER.chars().count() };
+        if used + gap + segment_width > room {
+            break;
+        }
+        if index > 0 {
+            body.push(Span::styled(DIVIDER, Style::default().fg(muted())));
+        }
+        body.extend(segment);
+        used += gap + segment_width;
+    }
+    let mut spans = vec![Span::styled(NAME, Style::default().fg(inverse_text()).bg(accent()).bold())];
+    if used + TAGLINE.chars().count() + DIVIDER.chars().count() <= room {
+        spans.push(Span::styled(TAGLINE, Style::default().fg(muted())));
+        spans.push(Span::styled(DIVIDER, Style::default().fg(muted())));
+    } else {
+        spans.push(Span::raw(" "));
+    }
+    spans.extend(body);
+    spans.push(Span::raw(" "));
+    Line::from(spans)
 }
 
 /// The second row: the pages inside the open group, and only those.
@@ -296,13 +367,8 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         area
     };
-    if area.width >= OVERVIEW_GRID_WIDTH && area.height > OVERVIEW_GRID_HEIGHT {
-        // One spare row buys the status bar, and the bar buys NODE two rows back.
-        let split = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
-        draw_status_bar(frame, app, split[0]);
-        draw_overview_grid(frame, app, split[1], true);
-    } else if area.width >= OVERVIEW_GRID_WIDTH && area.height >= OVERVIEW_GRID_HEIGHT {
-        draw_overview_grid(frame, app, area, false);
+    if area.width >= OVERVIEW_GRID_WIDTH && area.height >= OVERVIEW_GRID_HEIGHT {
+        draw_overview_grid(frame, app, area);
     } else {
         draw_overview_flow(frame, app, area);
     }
@@ -312,12 +378,15 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
 /// where this node is first, what it is running and holding next, the money and
 /// the machine after that, and the one-line summaries of other pages last -- each of
 /// those is a tab away.
+///
+/// No card for the node's state or its peer, client and instance counts: the
+/// header carries those on every page, and a second copy here would be a second
+/// place to disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OverviewCard {
     Node,
     Workload,
     Storage,
-    Network,
     Wallets,
     HostCapacity,
     NodeResources,
@@ -328,11 +397,10 @@ enum OverviewCard {
 }
 
 impl OverviewCard {
-    const ALL: [OverviewCard; 11] = [
+    const ALL: [OverviewCard; 10] = [
         OverviewCard::Node,
         OverviewCard::Workload,
         OverviewCard::Storage,
-        OverviewCard::Network,
         OverviewCard::Wallets,
         OverviewCard::HostCapacity,
         OverviewCard::NodeResources,
@@ -342,46 +410,45 @@ impl OverviewCard {
         OverviewCard::Energy,
     ];
 
-    /// Rows the card needs to show everything, borders included -- the heights the
-    /// grid's rows were sized from.
-    fn height(self) -> u16 {
+    /// Rows the card needs to show everything it has to say right now, borders
+    /// included. Measured from the same lines the card draws where those vary, so
+    /// the flowing layout neither pads a short card nor clips a long one.
+    fn height(self, app: &App) -> u16 {
+        // A box's two borders; a summary's heading.
+        let boxed = |lines: usize| lines as u16 + 2;
+        let summary = |lines: usize| lines as u16 + 1;
         match self {
-            OverviewCard::Node => 8,
-            OverviewCard::Workload | OverviewCard::Storage => 6,
-            OverviewCard::Network => 4,
-            OverviewCard::Wallets | OverviewCard::HostCapacity | OverviewCard::PeerResources => 9,
-            OverviewCard::NodeResources
-            | OverviewCard::Earnings
-            | OverviewCard::Schedule
-            | OverviewCard::Energy => 6,
+            OverviewCard::Node => 7,
+            OverviewCard::Workload => 5,
+            OverviewCard::Storage => 6,
+            OverviewCard::HostCapacity => 9,
+            OverviewCard::Wallets => boxed(wallets_lines(app).len()),
+            OverviewCard::NodeResources => boxed(node_resources_lines(app).len()),
+            OverviewCard::PeerResources => boxed(peer_resources_lines(app).len()),
+            OverviewCard::Earnings => summary(earnings_summary_lines(app, u16::MAX).len()),
+            OverviewCard::Schedule => summary(schedule_summary_lines(app).len()),
+            OverviewCard::Energy => summary(energy_summary_lines(app, u16::MAX).len()),
         }
     }
 }
 
-/// The widest and tallest page area the Overview's fixed grid is drawn in: four
-/// cards across, three rows. The 19 rows are what an 80×24 terminal leaves it.
+/// The smallest page area the Overview's fixed grid is drawn in: the rows of
+/// [`draw_overview_grid`], 7 + 9 + 3, which is what an 80×24 terminal leaves it.
+/// Anything smaller flows instead, rather than having the grid clip its cards.
 const OVERVIEW_GRID_WIDTH: u16 = 80;
 const OVERVIEW_GRID_HEIGHT: u16 = 19;
 /// The narrowest a card is drawn in the flowing layout: a metric label and a short
 /// value.
 const OVERVIEW_CARD_WIDTH: u16 = 26;
 
-fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Rect, bar: bool) {
+fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Rect) {
     match card {
-        OverviewCard::Node => draw_card_as(
-            frame,
-            area,
-            CardKind::Primary,
-            "NODE",
-            node_lines(app, bar),
-            accent(),
-        ),
+        OverviewCard::Node => draw_card_as(frame, area, CardKind::Primary, "NODE", node_lines(app), accent()),
         OverviewCard::Workload => draw_card(
             frame,
             area,
             "WORKLOAD",
             vec![
-                metric_line_right("Instances", app.instances.items.len().to_string(), area.width.saturating_sub(2)),
                 metric_line_right(
                     "Memory now",
                     format_bytes(app.stats.instance_memory_current),
@@ -429,16 +496,6 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
             ],
             series(1),
         ),
-        OverviewCard::Network => draw_card(
-            frame,
-            area,
-            "NETWORK",
-            vec![
-                metric_line_right("Peers", app.peers.items.len().to_string(), area.width.saturating_sub(2)),
-                metric_line_right("Clients", app.clients.items.len().to_string(), area.width.saturating_sub(2)),
-            ],
-            series(2),
-        ),
         OverviewCard::Wallets => draw_ergo(frame, app, area),
         OverviewCard::HostCapacity => draw_health(frame, app, area),
         OverviewCard::NodeResources => draw_card(
@@ -485,17 +542,10 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
     }
 }
 
-/// The NODE card. With the status bar above the grid, `bar`, the state and version
-/// are left to it: drawn twice they would be two places to disagree.
-fn node_lines(app: &App, bar: bool) -> Vec<Line<'static>> {
+/// The NODE card: who and where this node is, which build, and what it draws. Its
+/// state is not here: the header has it on every page.
+fn node_lines(app: &App) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    if !bar {
-        lines.push(status_line(
-            "Status",
-            service_health(&app.node_info.service_status),
-            nonempty(&app.node_info.service_status, "checking…"),
-        ));
-    }
     lines.push(metric_line("Address", nonempty(&app.node_info.address, "—")));
     // Who this node *is* on the network, beside where it is. Every opinion it
     // publishes and every opinion published about it is keyed by this string, so it
@@ -507,81 +557,23 @@ fn node_lines(app: &App, bar: bool) -> Vec<Line<'static>> {
         "Node id",
         shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
     ));
-    if !bar {
-        lines.push(metric_line("Version", shorten(&app.node_info.version, 18)));
-    }
+    lines.push(metric_line("Version", shorten(nonempty(&app.node_info.version, "—"), 18)));
     lines.push(metric_line("Power", node_power_line(&app.node_energy)));
     lines.push(metric_line("Elec.", node_cost_line(&app.node_energy)));
     lines
 }
 
-/// The one-line summary above the grid: whether the node is up, which build, and the
-/// counts the NETWORK and WORKLOAD cards break down. Segments are added in priority
-/// order while they fit, so a narrow terminal loses the tail rather than a half-cut
-/// word.
-fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let health = service_health(&app.node_info.service_status);
-    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
-    let segments: Vec<Vec<Span<'static>>> = vec![
-        vec![
-            Span::styled(format!("{} ", health.glyph()), Style::default().fg(health.colour())),
-            Span::styled(
-                nonempty(&app.node_info.service_status, "checking…").to_uppercase(),
-                Style::default().fg(health.colour()).bold(),
-            ),
-        ],
-        vec![Span::styled(
-            shorten(nonempty(&app.node_info.version, "version ?"), 18),
-            Style::default().fg(text_colour()),
-        )],
-        vec![Span::styled(
-            count(app.peers.items.len(), "peer", "peers"),
-            Style::default().fg(text_colour()),
-        )],
-        vec![Span::styled(
-            count(app.clients.items.len(), "client", "clients"),
-            Style::default().fg(text_colour()),
-        )],
-        vec![Span::styled(
-            count(app.instances.items.len(), "instance", "instances"),
-            Style::default().fg(text_colour()),
-        )],
-    ];
-    // Only a reading: a lone dash in the bar says nothing.
-    let power = node_power_line(&app.node_energy);
-    let mut segments = segments;
-    if power != "—" {
-        segments.push(vec![Span::styled(power, Style::default().fg(label_colour()))]);
-    }
-    let divider = " │ ";
-    let mut spans: Vec<Span<'static>> = vec![Span::raw(" ")];
-    let mut used = 1usize;
-    for (index, segment) in segments.into_iter().enumerate() {
-        let width: usize = segment.iter().map(|span| span.content.chars().count()).sum();
-        let gap = if index == 0 { 0 } else { divider.chars().count() };
-        if used + gap + width > area.width as usize {
-            break;
-        }
-        if index > 0 {
-            spans.push(Span::styled(divider, Style::default().fg(muted())));
-        }
-        spans.extend(segment);
-        used += gap + width;
-    }
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-/// Four cards across, three, then four: the Overview as it is drawn on a terminal
+/// Four cards across, three, then three: the Overview as it is drawn on a terminal
 /// of at least 80×24.
-fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect, bar: bool) {
+fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
-        // NODE's card is the tallest of the top row's four at six lines, plus the
-        // card's own border; four with the status bar carrying the other two.
-        Constraint::Length(if bar { 6 } else { 8 }),
+        // NODE's five lines, the tallest of the top row, plus the card's own border.
+        Constraint::Length(7),
         // HOST CAPACITY's CPU (title, bar, percentages) and RAM (the same, plus a
         // bytes line) breakdowns, plus the card's own border.
         Constraint::Length(9),
-        Constraint::Min(6),
+        // The summaries' heading and at least two lines; whatever is left over.
+        Constraint::Min(3),
     ])
     .split(area);
     let top = Layout::horizontal([
@@ -593,27 +585,17 @@ fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect, bar: bool) {
     .split(rows[0]);
     // Wallets and host capacity, then everything this node can reach, itself and its
     // peers (issue #455) -- the machine this node is beside the machines it reaches.
-    let middle = Layout::horizontal([
-        Constraint::Percentage(34),
-        Constraint::Percentage(33),
-        Constraint::Percentage(33),
-    ])
-    .split(rows[1]);
-    let summaries = Layout::horizontal([
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
-    ])
-    .split(rows[2]);
-    // In `OverviewCard::ALL` order. This node's own announcement sits under the total
-    // it is part of, at the end of the summaries row.
+    let thirds = [Constraint::Percentage(34), Constraint::Percentage(33), Constraint::Percentage(33)];
+    let middle = Layout::horizontal(thirds).split(rows[1]);
+    let summaries = Layout::horizontal(thirds).split(rows[2]);
+    // In `OverviewCard::ALL` order. This node's own announcement closes the top row,
+    // above the total it is part of, so the row of summaries holds only summaries.
     let areas = [
-        top[0], top[1], top[2], top[3], middle[0], middle[1], summaries[3], middle[2],
+        top[0], top[1], top[2], middle[0], middle[1], top[3], middle[2],
         summaries[0], summaries[1], summaries[2],
     ];
     for (card, area) in OverviewCard::ALL.into_iter().zip(areas) {
-        draw_overview_card(frame, app, card, area, bar);
+        draw_overview_card(frame, app, card, area);
     }
 }
 
@@ -632,7 +614,7 @@ fn draw_overview_flow(frame: &mut Frame, app: &App, area: Rect) {
         let last = index + 1 == rows.len();
         // A line for the "more" note under this row, unless it is the last one.
         let reserve = if last { 0 } else { 1 };
-        let want = row.iter().map(|card| card.height()).max().unwrap_or(MIN_CARD_HEIGHT);
+        let want = row.iter().map(|card| card.height(app)).max().unwrap_or(MIN_CARD_HEIGHT);
         let height = want.min(left.saturating_sub(reserve));
         if height < MIN_CARD_HEIGHT {
             break;
@@ -640,7 +622,7 @@ fn draw_overview_flow(frame: &mut Frame, app: &App, area: Rect) {
         let row_area = Rect { x: area.x, y, width: area.width, height };
         let cells = Layout::horizontal(vec![Constraint::Ratio(1, across as u32); across]).split(row_area);
         for (card, cell) in row.iter().zip(cells.iter()) {
-            draw_overview_card(frame, app, *card, *cell, false);
+            draw_overview_card(frame, app, *card, *cell);
         }
         drawn += row.len();
         y += height;
@@ -1153,6 +1135,7 @@ pub(crate) fn draw_card_as<'a>(
                     Style::default().fg(color).bold(),
                 ))
                 .border_style(Style::default().fg(if primary { accent() } else { muted() }));
+            let lines = fit_lines(lines, area.width.saturating_sub(2));
             frame.render_widget(Paragraph::new(lines).block(block), area);
         }
         CardKind::Summary => {
@@ -1172,9 +1155,42 @@ pub(crate) fn draw_card_as<'a>(
             // One column in from each edge, where a box's border would have been, so
             // two summaries side by side do not run into each other.
             let body = Rect { x: split[1].x + 1, width: split[1].width.saturating_sub(2), ..split[1] };
-            frame.render_widget(Paragraph::new(lines), body);
+            frame.render_widget(Paragraph::new(fit_lines(lines, body.width)), body);
         }
     }
+}
+
+/// `lines` cut to `width` columns each, ending in `…` where anything was cut, so a
+/// card too narrow for a value says so instead of ending mid-word as if that were
+/// the whole of it. Styles are kept; only the span holding the cut is shortened.
+fn fit_lines(lines: Vec<Line<'_>>, width: u16) -> Vec<Line<'_>> {
+    let width = width as usize;
+    lines
+        .into_iter()
+        .map(|mut line| {
+            if line.width() <= width {
+                return line;
+            }
+            let mut used = 0;
+            let mut kept = Vec::new();
+            for span in line.spans.drain(..) {
+                let span_width = display_width(&span.content);
+                if used + span_width < width {
+                    used += span_width;
+                    kept.push(span);
+                    continue;
+                }
+                // This span holds the cut: what fits of it, then the ellipsis. The
+                // ellipsis is appended first so a span that fills the line exactly,
+                // with more after it, still shows that something was cut.
+                let cut = truncate_ellipsis(&format!("{}…", span.content), width - used);
+                kept.push(Span::styled(cut, span.style));
+                break;
+            }
+            line.spans = kept;
+            line
+        })
+        .collect()
 }
 
 pub(crate) fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
@@ -1311,7 +1327,13 @@ fn service_health(status: &str) -> Health {
 /// only one can pay any given peer: a sum would name a figure the operator cannot
 /// spend, and picking one would hide the other.
 fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
-    let mut lines: Vec<Line> = Vec::new();
+    draw_card_as(frame, area, CardKind::Primary, "WALLETS", wallets_lines(app), series(2));
+}
+
+/// The WALLETS card's lines, apart from drawing them so the Overview's flowing
+/// layout can size the card to them.
+fn wallets_lines(app: &App) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
 
     if app.node_info.wallets.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -1359,15 +1381,15 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
         nonempty(
             &app.node_info.error,
             "On-chain, not node balances • every 60s",
-        ),
+        )
+        .to_string(),
         Style::default().fg(if app.node_info.error.is_empty() {
             muted()
         } else {
             warn()
         }),
     )));
-
-    draw_card_as(frame, area, CardKind::Primary, "WALLETS", lines, series(2));
+    lines
 }
 
 /// A balance with the unit the chain reported, or a dash when it could not be read.
@@ -1472,7 +1494,8 @@ fn draw_cpu_breakdown(
         (daemon_colour, instances_colour, host_colour),
     );
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
+        // Cut with an ellipsis on a narrow card rather than mid-label.
+        Paragraph::new(fit_lines(vec![Line::from(vec![
             Span::styled("Daemon ", Style::default().fg(muted())),
             Span::styled(
                 format!("{}%", breakdown.daemon_percent()),
@@ -1488,7 +1511,7 @@ fn draw_cpu_breakdown(
                 format!("{}%", breakdown.host_other_percent()),
                 Style::default().fg(host_colour).bold(),
             ),
-        ])),
+        ])], percent_area.width)),
         percent_area,
     );
 }
@@ -1521,7 +1544,8 @@ fn draw_memory_breakdown(
         (daemon_colour, instances_colour, host_colour),
     );
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
+        // Cut with an ellipsis on a narrow card rather than mid-label.
+        Paragraph::new(fit_lines(vec![Line::from(vec![
             Span::styled("Daemon ", Style::default().fg(muted())),
             Span::styled(
                 format!("{}%", breakdown.daemon_percent()),
@@ -1537,16 +1561,19 @@ fn draw_memory_breakdown(
                 format!("{}%", breakdown.host_other_percent()),
                 Style::default().fg(host_colour).bold(),
             ),
-        ])),
+        ])], percent_area.width)),
         percent_area,
     );
     frame.render_widget(
-        Paragraph::new(format!(
-            "{} · {} · {} of {}",
-            format_bytes(breakdown.daemon),
-            format_bytes(breakdown.instances_reserved),
-            format_bytes(breakdown.host_other),
-            format_bytes(breakdown.total),
+        Paragraph::new(truncate_ellipsis(
+            &format!(
+                "{} · {} · {} of {}",
+                format_bytes(breakdown.daemon),
+                format_bytes(breakdown.instances_reserved),
+                format_bytes(breakdown.host_other),
+                format_bytes(breakdown.total),
+            ),
+            bytes_area.width as usize,
         ))
         .style(Style::default().fg(muted())),
         bytes_area,
@@ -3265,27 +3292,67 @@ fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Which posture this node is closest to, and how to see where it differs.
-fn draw_profile_bar(frame: &mut Frame, app: &App, area: Rect) {
+/// The label of the button that opens the profile deck, in its two sizes.
+const PROFILE_BUTTON: &str = "[ CHANGE PROFILE · p ]";
+const PROFILE_BUTTON_SHORT: &str = "[ PROFILE · p ]";
+
+/// Which posture this node is closest to, and a button to change it.
+///
+/// The button is filled in the accent colour, so it reads as something to press and
+/// not as one more label on the row. It sits at the right end, and the text on the
+/// left gives way to it, never the other way round: on a narrow terminal the
+/// summary is clipped before the button is.
+fn draw_profile_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     let report = app.cell_profile();
     let colour = if report.deviations.is_empty() { good() } else { warn() };
+    let summary = format!(" closest profile {}", report.summary());
+    let keys = format!(" ({}/{} keys)", report.matched(), report.total);
+    let left_width = (summary.chars().count() + keys.chars().count()) as u16;
+
+    // The long label when it fits beside the summary, the short one when it only
+    // fits alone, and none on a row too narrow for either.
+    let button = [PROFILE_BUTTON, PROFILE_BUTTON_SHORT]
+        .into_iter()
+        .find(|label| {
+            let width = label.chars().count() as u16;
+            area.width >= width + 2 && area.width >= left_width.min(24) + width + 2
+        });
+    let (text_area, button) = match button {
+        Some(label) => {
+            let width = label.chars().count() as u16;
+            let button_area = Rect::new(area.right() - width - 1, area.y, width, 1);
+            let text_area = Rect::new(
+                area.x,
+                area.y,
+                area.width.saturating_sub(width + 2),
+                area.height,
+            );
+            (text_area, Some((label, button_area)))
+        }
+        None => (area, None),
+    };
+
+    // What the button does not say: `d`. Shown only where it fits after the summary.
+    let hint = "   d what differs";
+    let hint_fits = text_area.width >= left_width + hint.chars().count() as u16;
     let line = Line::from(vec![
         Span::styled(" closest profile ", Style::default().fg(muted())),
         Span::styled(report.summary(), Style::default().fg(colour).bold()),
-        Span::styled(
-            format!(" ({}/{} keys)", report.matched(), report.total),
-            Style::default().fg(muted()),
-        ),
-        Span::styled(
-            if area.width >= 92 {
-                "   p apply a profile · d what differs"
-            } else {
-                ""
-            },
-            Style::default().fg(muted()),
-        ),
+        Span::styled(keys, Style::default().fg(muted())),
+        Span::styled(if hint_fits { hint } else { "" }, Style::default().fg(muted())),
     ]);
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(Paragraph::new(line), text_area);
+
+    if let Some((label, button_area)) = button {
+        app.profile_button_area = button_area;
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                label,
+                Style::default().fg(inverse_text()).bg(accent()).bold(),
+            )),
+            button_area,
+        );
+    }
 }
 
 /// The outward-facing organelles above, the self-preserving ones below, and the
@@ -3450,7 +3517,13 @@ fn draw_organelle(
                 // select the wrong one.
                 app.cell.lever_areas.push((index, lever_index, *row));
                 frame.render_widget(
-                    Paragraph::new(lever_line(levers[lever_index], document, selected, row.width)),
+                    Paragraph::new(lever_line(
+                        levers[lever_index],
+                        document,
+                        selected,
+                        app.lever_is_staged(levers[lever_index]),
+                        row.width,
+                    )),
                     *row,
                 );
             }
@@ -3497,6 +3570,10 @@ fn draw_collapsed_organelle(
         .map(|lever| cell::status(lever, document).label(lever))
         .collect::<Vec<_>>()
         .join(" · ");
+    let staged = organelle
+        .levers()
+        .iter()
+        .any(|lever| app.lever_is_staged(lever));
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("  ", Style::default()),
@@ -3505,6 +3582,7 @@ fn draw_collapsed_organelle(
                 Style::default().fg(organelle_colour(organelle)),
             ),
             Span::styled(summary, Style::default().fg(muted())),
+            Span::styled(if staged { " ◆" } else { "" }, Style::default().fg(warn())),
         ])),
         area,
     );
@@ -3515,6 +3593,7 @@ fn lever_line(
     lever: &Lever,
     document: Option<&serde_yaml::Value>,
     selected: bool,
+    staged: bool,
     width: u16,
 ) -> Line<'static> {
     let status = cell::status(lever, document);
@@ -3545,7 +3624,10 @@ fn lever_line(
         ),
         Span::styled(
             format!("{label:<label_width$} "),
-            if selected {
+            if staged {
+                // Changed, and not yet on the running node.
+                Style::default().fg(warn())
+            } else if selected {
                 Style::default().fg(text_colour()).bold()
             } else {
                 Style::default().fg(muted())
@@ -3553,6 +3635,7 @@ fn lever_line(
         ),
         Span::styled(format!("{marker} "), Style::default().fg(value_colour)),
         Span::styled(value, Style::default().fg(value_colour)),
+        Span::styled(if staged { " ◆" } else { "" }, Style::default().fg(warn())),
     ])
 }
 
@@ -4617,11 +4700,18 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let money = app.money.clone();
+    let staged_rows: Vec<bool> = app
+        .prices
+        .items
+        .iter()
+        .map(|entry| app.path_is_staged(&entry.config_label()))
+        .collect();
     let rows: Vec<(Vec<TextCell>, Style)> = app
         .prices
         .items
         .iter()
-        .map(|entry| {
+        .zip(staged_rows)
+        .map(|(entry, staged)| {
             // A per-arch row config.yaml does not set shows the scalar it inherits,
             // not a price of its own -- the difference between "arm64 costs this" and
             // "arm64 has its own rate", which editing it is what creates.
@@ -4631,7 +4721,9 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 money.format_mu(entry.mu)
             };
             let cells = vec![entry.short.clone().into(), entry.mu.to_string().into(), amount.into()];
-            let style = if entry.arch.is_some() {
+            let style = if staged {
+                Style::default().fg(warn())
+            } else if entry.arch.is_some() {
                 Style::default().fg(muted())
             } else {
                 Style::default()
@@ -4959,6 +5051,8 @@ fn draw_energy_section(
         let marker = if selected { "> " } else { "  " };
         let key_style = if selected {
             selected_style()
+        } else if app.path_is_staged(entry.path) {
+            Style::default().fg(warn())
         } else {
             Style::default().fg(text_colour())
         };
@@ -5050,9 +5144,15 @@ fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
+    let staged = crate::app::pending_change_count(&app.config_all);
+    let staged_note = if staged > 0 {
+        format!(" • {staged} staged, apply on restart")
+    } else {
+        String::new()
+    };
     let title = if app.config_filter.is_empty() {
         format!(
-            " CONFIGURATION • {} values • all sections ",
+            " CONFIGURATION • {} values • all sections{staged_note} ",
             app.config_all.len()
         )
     } else {
@@ -5065,7 +5165,7 @@ fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
             })
             .count();
         format!(
-            " CONFIGURATION • {} values • filter \"{}\" • {} match ",
+            " CONFIGURATION • {} values • filter \"{}\" • {} match{staged_note} ",
             app.config_all.len(),
             app.config_filter,
             matches
@@ -5181,10 +5281,12 @@ fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
         .unwrap_or_default();
     let key_style = if highlighted {
         Style::default().fg(inverse_text()).bg(warn()).bold()
+    } else if entry.running.is_some() {
+        Style::default().fg(warn())
     } else {
         Style::default().fg(text_colour())
     };
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(key, key_style),
         Span::styled(": ", Style::default().fg(muted())),
         Span::styled(entry.display_value(), Style::default().fg(accent())),
@@ -5192,7 +5294,17 @@ fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
             format!("  [{}]", entry.value_type),
             Style::default().fg(muted()),
         ),
-    ])
+    ];
+    if let Some(running) = &entry.running {
+        // The running node still has the old value; the staged one shown above
+        // takes effect at the next start. A secret never shows its old value.
+        let was = if entry.secret { "changed".to_string() } else { format!("now {running}") };
+        spans.push(Span::styled(
+            format!("  ● staged (running: {was})"),
+            Style::default().fg(warn()).bold(),
+        ));
+    }
+    Line::from(spans)
 }
 
 /// A section branch: its name plus the number of direct children, highlighted
@@ -5249,6 +5361,9 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         Page::Tunnels => {
             "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  q quit"
         }
+        Page::Dead => {
+            "\u{2191}/\u{2193} select  \u{2022}  s stream  \u{2022}  PgUp/PgDn scroll log  \u{2022}  End latest  \u{2022}  q quit"
+        }
         Page::Packs => {
             "\u{2191}/\u{2193} select  \u{2022}  n new pack  \u{2022}  i log  \u{2022}  c cancel  \u{2022}  q quit"
         }
@@ -5256,7 +5371,7 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
             "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  p pack  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
         }
         Page::Peers => {
-            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  r/\u{27f3} refresh all  \u{2022}  d forget  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  a choose  \u{2022}  r/\u{27f3} refresh all  \u{2022}  d forget  \u{2022}  q quit"
         }
         Page::Clients => {
             "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  q quit"
@@ -5278,7 +5393,7 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         }
         Page::Energy => "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} / e edit  \u{2022}  q quit",
         Page::Config => {
-            "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  u reset staged  \u{2022}  U reset all  \u{2022}  / filter  \u{2022}  q quit"
         }
         Page::Logs => "q quit",
         Page::Docs => {
@@ -5529,7 +5644,7 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
     // therefore root -- so the same edit lands quietly on a stopped node and is
     // undone on a running one. That asymmetry is what made it look as though one
     // setting had been singled out.
-    let root_hint = app.config_write_root_hint().filter(|_| {
+    let root_hint = app.config_write_stage_hint().filter(|_| {
         matches!(
             app.input_mode,
             InputMode::EditConfig | InputMode::AddConfigItem
@@ -6344,6 +6459,86 @@ mod tests {
                 .join("\n")
         }
 
+        /// The button, drawn and clickable: it is the visible way to do what `p` does.
+        #[test]
+        fn a_button_opens_the_profile_deck() {
+            let mut app = App::new();
+            app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+            let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+
+            let area = app.profile_button_area;
+            assert!(area.width > 0 && area.height == 1, "no button: {area:?}");
+            let buffer = terminal.backend().buffer().clone();
+            let drawn: String = (area.x..area.x + area.width)
+                .map(|x| buffer.get(x, area.y).symbol())
+                .collect();
+            assert!(drawn.contains("CHANGE PROFILE"), "{drawn}");
+            // Filled, so it reads as a button and not as a label.
+            assert_ne!(buffer.get(area.x, area.y).bg, ratatui::style::Color::Reset);
+            assert!(drawn.contains('p'));
+        }
+
+        /// A click on the button is a click on the page, and it opens the same deck
+        /// as the key. A click beside it does not.
+        #[test]
+        fn clicking_the_button_opens_the_deck_and_clicking_beside_it_does_not() {
+            use crate::app::{InputMode, Page};
+            let mut app = App::new();
+            app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+            app.tabs.select_page(Page::Cell);
+            let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+            let area = app.profile_button_area;
+
+            app.click_at(area.x.saturating_sub(2), area.y);
+            assert_eq!(app.input_mode, InputMode::Normal, "beside the button");
+
+            app.click_at(area.x + area.width / 2, area.y);
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(!app.profile_first_run, "from POLICIES it is not the first run");
+        }
+
+        /// The button gives the summary no say: it is there at every size the page is
+        /// drawn at, in its short form where the long one does not fit.
+        #[test]
+        fn the_button_survives_a_narrow_terminal() {
+            for width in [60u16, 70, 80, 100, 140] {
+                let mut app = App::new();
+                app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+                let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+                terminal
+                    .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                    .unwrap();
+                let area = app.profile_button_area;
+                assert!(area.width > 0, "no button at {width} columns");
+                assert!(area.right() <= width, "{width}: {area:?}");
+                assert_eq!(area.y, 0, "{width}: it is on the profile bar");
+            }
+        }
+
+        #[test]
+        fn another_page_has_no_button_to_click() {
+            use crate::app::{InputMode, Page};
+            let mut app = App::new();
+            app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+            app.tabs.select_page(Page::Cell);
+            let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+            let area = app.profile_button_area;
+            app.tabs.select_page(Page::Overview);
+
+            app.click_at(area.x + 1, area.y);
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
         const RENTING: &str = "client:\n  ACCEPT_NEW_DEPOSITS: true\nnetwork:\n  GATEWAY_PORT: 58443\n  DISABLE_EXPOSE_OUTSIDE: true\ncosts:\n  ALLOW_DEBT: false\nidentity:\n  MNEMONIC: \"abandon abandon ability\"\n";
 
         /// Wide enough for the grid: every organelle is drawn, so the operator can
@@ -6556,7 +6751,7 @@ mod tests {
                 "workload_admission:\n  POLICY: full\n  ON_UNSATISFIABLE: reject\n",
             )
             .unwrap();
-            let line = lever_line(lever, Some(&document), false, 30);
+            let line = lever_line(lever, Some(&document), false, false, 30);
             let text: String = line
                 .spans
                 .iter()
@@ -8209,6 +8404,7 @@ mod tests {
                         reputation_score: "0".to_string(),
                         contracts: Vec::new(),
                         resources: Default::default(),
+                        learned_via_gossip: false,
                     })
                     .collect(),
             );
@@ -8957,6 +9153,7 @@ mod config_tree {
             edit_value: value.to_string(),
             value_type: value_type.to_string(),
             secret,
+            running: None,
         }
     }
 
@@ -9374,14 +9571,14 @@ mod alert_banner {
 }
 
 
-/// Why a config edit may not stick, said before the value is typed.
+/// Why a config edit does not apply at once, said before the value is typed.
 ///
-/// Never the file: config.yaml is world-writable by install.sh. What needs root is
-/// the *restart* the transaction owes a serving node (`nodo daemon restart` ->
-/// systemctl, refused under a non-zero euid), so a key the node re-reads from disk
-/// owes none and shows no hint.
+/// Never the file: config.yaml is writable by the installing user. A serving node
+/// cannot be restarted without root, and a restart stops its instances, so an
+/// unprivileged edit is staged in config.pending.yaml. A stopped node owes no
+/// restart and the edit goes to config.yaml.
 #[cfg(test)]
-mod config_write_root_hint {
+mod config_write_stage_hint {
     use super::render;
     use crate::app::{App, EditKind, InputMode, Page};
     use ratatui::backend::TestBackend;
@@ -9416,40 +9613,30 @@ mod config_write_root_hint {
             .join("\n")
     }
 
-    /// The whole point of the fix: the operator is told *before* typing, and told
-    /// the real reason, instead of watching a value be written and put back.
     #[test]
-    fn an_unprivileged_edit_against_a_serving_node_is_warned_about_up_front() {
+    fn an_unprivileged_edit_against_a_serving_node_is_staged_and_says_so() {
         let mut app = app_editing_the_kwh_price("running");
-        // The test process is not root on CI or on a developer's machine; if it
-        // somehow is, the hint is correctly absent and there is nothing to assert.
-        if !app.config_write_needs_root() {
+        // If the test process is root, nothing is staged and there is nothing to assert.
+        if !app.config_write_is_staged() {
             return;
         }
 
         let screen = screen(&mut app);
 
-        assert!(screen.contains("needs root"), "{screen}");
-        // And it names the actual cause, because "needs root" on its own is what
-        // sent the operator looking at the key and at the file permissions.
-        assert!(screen.contains("daemon restart"), "{screen}");
+        assert!(screen.contains("config.pending.yaml"), "{screen}");
+        assert!(screen.contains("restarts"), "{screen}");
     }
 
-    /// A stopped node owes no restart, so the same edit is unprivileged -- and this
-    /// is exactly the asymmetry that made the requirement look arbitrary.
     #[test]
-    fn the_same_edit_against_a_stopped_node_needs_nothing() {
+    fn the_same_edit_against_a_stopped_node_is_not_staged() {
         let mut app = app_editing_the_kwh_price("not running");
 
-        assert!(!app.config_write_needs_root());
-        assert!(!screen(&mut app).contains("needs root"));
+        assert!(!app.config_write_is_staged());
+        assert!(!screen(&mut app).contains("config.pending.yaml"));
     }
 
-    /// It is a property of the transaction, not of the key: the kWh price, a peer
-    /// price and a raw All row all answer the same way, because there is one
-    /// writer behind all three.
     #[test]
-    fn the_requirement_does_not_depend_on_which_key_is_being_edited() {
+    fn staging_does_not_depend_on_which_key_is_being_edited() {
         let mut energy = app_editing_the_kwh_price("running");
         let mut config = app_editing_the_kwh_price("running");
         config.tabs.index = Page::ALL
@@ -9458,26 +9645,20 @@ mod config_write_root_hint {
             .unwrap();
         config.input_title = "Edit main.STORAGE".to_string();
 
+        assert_eq!(energy.config_write_is_staged(), config.config_write_is_staged());
         assert_eq!(
-            energy.config_write_needs_root(),
-            config.config_write_needs_root()
-        );
-        assert_eq!(
-            screen(&mut energy).contains("needs root"),
-            screen(&mut config).contains("needs root")
+            screen(&mut energy).contains("config.pending.yaml"),
+            screen(&mut config).contains("config.pending.yaml")
         );
     }
 
-    /// The hint belongs to config editing. The Connect box and the All filter go
-    /// nowhere near `apply_config_change`, and a root warning on them would be a
-    /// claim that is simply false.
     #[test]
     fn the_hint_is_not_shown_on_modals_that_write_nothing() {
         let mut app = app_editing_the_kwh_price("running");
         app.input_mode = InputMode::FilterConfig;
         app.input_title = "Filter".to_string();
 
-        assert!(!screen(&mut app).contains("needs root"));
+        assert!(!screen(&mut app).contains("config.pending.yaml"));
     }
 }
 
@@ -9669,10 +9850,23 @@ mod themes {
         }
     }
 
-    /// The default really is the Ubuntu palette, on screen and not merely in a
-    /// struct: the orange accent and the white text are what the issue asks for.
+    /// The default really is dark, on screen and not merely in a struct: the cyan
+    /// accent on a black ground, and none of the Ubuntu palette.
     #[test]
-    fn the_default_theme_paints_the_ubuntu_palette() {
+    fn the_default_theme_paints_the_dark_palette() {
+        let colours = colours_drawn(Theme::default(), Page::Overview);
+
+        assert!(colours.contains(&Color::Cyan), "no cyan in {colours:?}");
+        assert!(
+            !colours.contains(&Color::Rgb(0xE9, 0x54, 0x20)),
+            "Ubuntu orange in {colours:?}"
+        );
+    }
+
+    /// The Ubuntu palette is still there to pick: the orange accent and the white
+    /// text, on screen.
+    #[test]
+    fn the_ubuntu_theme_paints_the_ubuntu_palette() {
         let colours = colours_drawn(UBUNTU, Page::Overview);
 
         assert!(
@@ -10030,37 +10224,92 @@ mod overview_summaries {
             .join("\n")
     }
 
-    /// With room to spare the state and version live in a bar above the cards and
-    /// not in NODE as well; at 80x24 there is no spare row, so NODE keeps them.
+    /// The state and the counts are said once, in the header: none of the Overview's
+    /// cards repeats them, at any size the grid or the flow is drawn at.
     #[test]
-    fn the_status_bar_takes_the_state_off_the_node_card_only_when_it_fits() {
+    fn the_header_alone_carries_the_state_and_the_counts() {
         let mut app = App::new();
         app.node_info.service_status = "running".to_string();
         app.node_info.version = "1.4.2".to_string();
-        app.peers.items = Vec::new();
-
-        let roomy = overview_at(&mut app, 120, 30);
-        assert!(roomy.contains("● RUNNING"), "{roomy}");
-        assert!(roomy.contains("0 peers"), "{roomy}");
-        assert!(!roomy.contains("Status"), "{roomy}");
-
-        let tight = overview_at(&mut app, 80, 24);
-        assert!(!tight.contains("0 peers"), "{tight}");
-        assert!(tight.contains("Status"), "{tight}");
-        assert!(tight.contains("running"), "{tight}");
+        for (width, height) in [(80, 24), (120, 30), (200, 60), (60, 40)] {
+            let screen = overview_at(&mut app, width, height);
+            let (header, page) = screen.split_once('\n').unwrap();
+            assert!(header.contains("● RUNNING"), "{width}x{height}:\n{screen}");
+            assert!(header.contains("0 peers"), "{width}x{height}:\n{screen}");
+            for word in ["RUNNING", "running", "Status", "0 peers", "0 clients", "0 instances", "NETWORK"] {
+                assert!(!page.contains(word), "{word:?} repeated at {width}x{height}:\n{screen}");
+            }
+            assert!(page.contains("1.4.2"), "{width}x{height}:\n{screen}");
+        }
     }
 
-    /// A narrow bar drops its tail, not half a word.
+    /// The header is the same on every page, not only the Overview's.
     #[test]
-    fn a_narrow_status_bar_loses_whole_segments() {
+    fn every_page_carries_the_header() {
         let mut app = App::new();
         app.node_info.service_status = "running".to_string();
-        let mut terminal = Terminal::new(TestBackend::new(34, 1)).unwrap();
-        terminal.draw(|frame| super::draw_status_bar(frame, &app, frame.size())).unwrap();
-        let buffer = terminal.backend().buffer().clone();
-        let bar: String = (0..34).map(|column| buffer.get(column, 0).symbol()).collect();
-        assert!(bar.contains("● RUNNING │ version ? │ 0 peers"), "{bar:?}");
-        assert!(!bar.contains("clients"), "{bar:?}");
+        for page in Page::ALL {
+            app.tabs.select_page(page);
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let header: String = (0..120).map(|column| buffer.get(column, 0).symbol()).collect();
+            assert!(header.contains("● RUNNING │ 0 peers │ 0 clients │ 0 instances"), "{page:?}: {header:?}");
+        }
+    }
+
+    /// A narrow header drops its tail, not half a word, and never runs into the
+    /// border's line.
+    #[test]
+    fn a_narrow_header_loses_whole_segments() {
+        let mut app = App::new();
+        app.node_info.service_status = "running".to_string();
+        let title: String = super::header_title(&app, 41).spans.iter().map(|span| span.content.to_string()).collect();
+        assert_eq!(title, " NODO  ● RUNNING │ 0 peers │ 0 clients ");
+        let title: String = super::header_title(&app, 120).spans.iter().map(|span| span.content.to_string()).collect();
+        assert!(title.contains("operations console"), "{title:?}");
+    }
+
+    /// A card too narrow for a value ends it in `…`, not mid-word as if that were all.
+    #[test]
+    fn a_cut_card_line_ends_in_an_ellipsis() {
+        let lines = super::fit_lines(vec![super::metric_line("Reserved", "0 B RAM / 0 B disk")], 18);
+        let text: String = lines[0].spans.iter().map(|span| span.content.to_string()).collect();
+        assert_eq!(text, "Reserved    0 B R…");
+        let lines = super::fit_lines(vec![super::metric_line("Version", "1.4.2")], 18);
+        let text: String = lines[0].spans.iter().map(|span| span.content.to_string()).collect();
+        assert_eq!(text, "Version     1.4.2");
+    }
+
+    /// The flowing layout sizes each card to what it says, so a 60×40 terminal
+    /// holds every card rather than padding some and hiding the rest.
+    #[test]
+    fn the_flowing_overview_fits_every_card_at_60x40() {
+        let mut app = App::new();
+        let screen = overview_at(&mut app, 60, 40);
+        assert!(!screen.contains("more card"), "{screen}");
+        for needle in ["NODE ", "WALLETS", "HOST CAPACITY", "TOTAL", "EARNINGS", "SCHEDULE", "ENERGY"] {
+            assert!(screen.contains(needle), "{needle:?} missing:\n{screen}");
+        }
+    }
+
+    /// `r` and `q` are said once in the footer, not again as the idle status.
+    #[test]
+    fn the_footer_names_refresh_and_quit_once() {
+        let mut app = App::new();
+        let screen = overview_at(&mut app, 120, 30);
+        let footer: Vec<&str> = screen.lines().rev().take(2).collect();
+        assert_eq!(footer.iter().filter(|line| line.contains("quit")).count(), 1, "{footer:?}");
+    }
+
+    /// At 80×24 the grid fits whole: nothing it needs is clipped off its cards.
+    #[test]
+    fn the_overview_grid_fits_an_80x24_terminal() {
+        let mut app = App::new();
+        let screen = overview_at(&mut app, 80, 24);
+        for needle in ["Elec.", "RAM", "Version", "EARNINGS", "SCHEDULE", "ENERGY", "Power"] {
+            assert!(screen.contains(needle), "{needle:?} missing:\n{screen}");
+        }
     }
 
     /// Summed across payment networks, which the EARNINGS page does not do: there a

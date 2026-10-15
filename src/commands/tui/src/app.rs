@@ -81,6 +81,10 @@ pub enum Page {
     /// The `nodo tunnel` processes running on this host: where each listens and
     /// what it reaches. Opened here or with `t` on INSTANCES; see `tunnels.rs`.
     Tunnels,
+    /// Instances that were killed or died, kept after the fact: why, when, and the
+    /// logs the node saved. Read-only; INSTANCES lists only the live ones. See
+    /// `dead.rs`.
+    Dead,
     Services,
     /// The `nodo pack` runs on this host, current and recent: what each packs, where
     /// it is, and the service id it produced. Launched here or with `p` on SERVICES;
@@ -221,7 +225,7 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 16] = [
+    pub const ALL: [Page; 17] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
@@ -229,6 +233,8 @@ impl Page {
         Page::Instances,
         // Beside Instances: a tunnel is a way into one of them.
         Page::Tunnels,
+        // Beside Instances too: it is where an instance goes when it stops.
+        Page::Dead,
         Page::Peers,
         Page::Services,
         // Beside Services: a pack is how a service gets into the registry.
@@ -261,6 +267,7 @@ impl Page {
             Page::Overview => "OVERVIEW",
             Page::Instances => "INSTANCES",
             Page::Tunnels => "TUNNELS",
+            Page::Dead => "DEAD",
             Page::Services => "SERVICES",
             Page::Packs => "PACKS",
             Page::Peers => "PEERS",
@@ -284,6 +291,7 @@ impl Page {
             Page::Overview => "OVER",
             Page::Instances => "INST",
             Page::Tunnels => "TUNL",
+            Page::Dead => "DEAD",
             Page::Services => "SERV",
             Page::Packs => "PACK",
             Page::Peers => "PEERS",
@@ -308,6 +316,7 @@ impl Page {
             Page::Overview => PageGroup::Status,
             Page::Instances
             | Page::Tunnels
+            | Page::Dead
             | Page::Peers
             | Page::Services
             | Page::Packs
@@ -671,6 +680,9 @@ pub enum PendingAction {
     /// moment it launches, and goes on burning MU until something stops it.
     ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Choose a peer this node only learned over the network: `nodo connect <target>`.
+    /// Confirmed because a chosen peer is funded by the automatic refill.
+    ChoosePeer { label: String, target: String },
     /// Re-fetch every peer and our balance there. Confirmed because it contacts all of
     /// them, which is heavy on network and disk I/O.
     RefreshPeers,
@@ -725,6 +737,10 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
+        )),
+        PendingAction::ChoosePeer { label, target } => Some((
+            format!("Choose peer {label}"),
+            vec!["connect".to_string(), target],
         )),
         PendingAction::RefreshPeers => {
             Some(("Refresh peers".to_string(), vec!["refresh_peers".to_string()]))
@@ -786,6 +802,10 @@ enum Applied {
     /// node to disagree with the file, so the change stands and the next start
     /// reads it.
     NotRunning,
+    /// Written to config.pending.yaml and not to config.yaml. Restarting the node
+    /// stops its instances and this process cannot do it, so the node picks the
+    /// file up the next time it starts.
+    Staged,
 }
 
 /// Result of a configuration transaction.
@@ -878,8 +898,11 @@ async fn apply_config_change(
         Ok(required) => required,
         Err(error) => return fail(error),
     };
-    if was_serving && !is_root() {
-        return fail("Configuration unchanged: restarting nodo requires root. Open the TUI with sudo nodo tui.".into());
+    // A staged file takes every later edit, serving or not: the node swaps it in
+    // when it starts, so a write to config.yaml would be overwritten by it.
+    let pending = pending_config_path(&config);
+    if pending.is_file() || (was_serving && !is_root()) {
+        return stage_config_change(&yq, &config, &pending, &write, label).await;
     }
 
     let backup = match backup_config(&config) {
@@ -947,6 +970,55 @@ async fn apply_config_change(
     ConfigTransaction {
         label,
         result: Ok(Applied::Restarted),
+    }
+}
+
+/// Apply the change to config.pending.yaml and leave config.yaml, and the node,
+/// alone. The file is made from config.yaml when it does not exist yet.
+async fn stage_config_change(
+    yq: &Path,
+    config: &Path,
+    pending: &Path,
+    write: &ConfigWrite,
+    label: String,
+) -> ConfigTransaction {
+    let fail = |error: String| ConfigTransaction {
+        label: label.clone(),
+        result: Err(error),
+    };
+    let created = !pending.is_file();
+    if created {
+        if let Err(error) = fs::copy(config, pending) {
+            return fail(format!("Could not create {}: {error}", pending.display()));
+        }
+        keep_config_owner(config, pending);
+    }
+    let mut command = Command::new(yq);
+    command
+        .arg("e")
+        .arg("-i")
+        .arg(&write.expression)
+        .arg(pending);
+    for (variable, value) in &write.values {
+        command.env(variable, value);
+    }
+    let failure = match command.output().await {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(format!(
+            "yq could not update configuration: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Some(format!("Could not run {}: {error}", yq.display())),
+    };
+    if let Some(error) = failure {
+        if created {
+            let _ = fs::remove_file(pending);
+        }
+        return fail(error);
+    }
+    ConfigTransaction {
+        label,
+        result: Ok(Applied::Staged),
     }
 }
 
@@ -1765,6 +1837,10 @@ pub struct ConfigEntry {
     pub edit_value: String,
     pub value_type: String,
     pub secret: bool,
+    /// Set when `config.pending.yaml` holds a different value than the config
+    /// the node runs on: what the running node has now, or `unset`. `None` when
+    /// both agree, or when nothing is staged.
+    pub running: Option<String>,
 }
 
 impl Identifiable for ConfigEntry {
@@ -2216,6 +2292,15 @@ impl Paths {
         self.storage.join(KYA_MARKER)
     }
 
+    /// Where the "profile picker was answered" marker lives: `<storage>/.profilepicked`.
+    ///
+    /// Needed because the active profile is derived from `config.yaml`, never stored
+    /// (see `cell.rs`): nothing else can say whether the first-run picker was shown.
+    /// Same directory and same empty-file convention as the KyA marker.
+    pub fn profile_marker(&self) -> PathBuf {
+        self.storage.join(PROFILE_MARKER)
+    }
+
     /// Where the KyA document itself lives, in the checkout this binary belongs to.
     pub fn kya_document(&self) -> PathBuf {
         self.root.join("docs").join("KyA.md")
@@ -2226,6 +2311,10 @@ impl Paths {
 /// out here rather than derived, because the two sides of this agreement are in
 /// different languages and the only thing tying them together is this string.
 pub const KYA_MARKER: &str = ".acceptedkya";
+
+/// The file that records the first-run profile picker was answered, by choosing a
+/// profile or by skipping it. Presence means "do not show it again".
+pub const PROFILE_MARKER: &str = ".profilepicked";
 
 /// How the operator's money is denominated.
 ///
@@ -3068,6 +3157,10 @@ pub struct App {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
+    /// The DEAD page: instances that are gone, newest death first.
+    pub dead: StatefulList<crate::dead::DeadInstance>,
+    /// What the DEAD page shows under the table for the selected row.
+    pub dead_view: crate::dead::DeadView,
     /// The TUNNELS page: running `nodo tunnel` processes, read from the registry.
     pub tunnels: StatefulList<crate::tunnels::Tunnel>,
     /// The TUNNELS page's second table: the `ServiceTunnel` streams this node relays
@@ -3098,6 +3191,9 @@ pub struct App {
     /// frame: the page is redrawn on every keystroke and tick, and re-parsing a
     /// 40 KB file that often is work nobody asked for.
     pub config_document: Option<Value>,
+    /// config.yaml itself: what the running node loaded. Differs from
+    /// `config_document` while a change is staged in config.pending.yaml.
+    pub running_document: Option<Value>,
     /// Editable price vector, and how the operator's money is denominated.
     pub prices: StatefulList<PriceEntry>,
     /// Which row of the ENERGY page's fixed catalogue the cursor is on (issue #395).
@@ -3229,6 +3325,25 @@ pub struct App {
     /// Off by default, so building an `App` does not consult the filesystem and a
     /// rendering test does not draw whatever banner its machine deserves.
     pub poll_alerts: bool,
+    /// True when `with_profile_gate` ran: the first-run profile picker is wanted
+    /// after the KyA. Off by default so constructing an `App` consults no files.
+    pub profile_gate: bool,
+    /// True while the picker is open as the first-run step, not from POLICIES. Then
+    /// Esc skips and records the marker instead of just closing.
+    pub profile_first_run: bool,
+    /// Where each part of the profile deck was drawn last, for clicks. `None` when
+    /// the picker is not open or the terminal showed the plain list instead.
+    pub deck_zones: Option<crate::profile_deck_ui::DeckLayout>,
+    /// The slide between two cards that is running, if any.
+    pub deck_anim: Option<crate::profile_deck_ui::DeckSlide>,
+    /// When the picker was opened: the clock of the blink of its title.
+    pub deck_opened: Option<Instant>,
+    /// The profile whose list of changes is waiting for `y` or `n`. While it is set,
+    /// the list is drawn inside the deck, not in the plain text popup, and `n` goes
+    /// back to the deck. Set only by a choice made in the deck.
+    pub deck_confirm: Option<usize>,
+    /// Where the buttons of that confirmation were drawn last, for clicks.
+    pub deck_confirm_zones: Option<crate::profile_deck_ui::ConfirmLayout>,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -3283,6 +3398,8 @@ pub struct App {
     pub chat_send_area: Rect,
     /// The ⟳ button on the PEERS table's border; `Rect::ZERO` when not drawn.
     pub peers_refresh_area: Rect,
+    /// The "change profile" button on the POLICIES page, where it was drawn last.
+    pub profile_button_area: Rect,
     /// The open right-click menu, while `input_mode` is `ContextMenu`.
     pub context_menu: Option<crate::context_menu::ContextMenu>,
     /// The DOCS page: its index, the page open in it, and where both were drawn.
@@ -3355,6 +3472,8 @@ impl Default for App {
             running: true,
             peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
+            dead: StatefulList::with_items(Vec::new()),
+            dead_view: crate::dead::DeadView::default(),
             tunnels: StatefulList::with_items(crate::tunnels::read_tunnels(
                 &crate::tunnels::tunnels_dir(&paths.storage),
             )),
@@ -3373,7 +3492,8 @@ impl Default for App {
             config_filter: String::new(),
             config_tree_state: TreeState::default(),
             cell: CellState::default(),
-            config_document: read_yaml(&paths.config).ok(),
+            config_document: read_effective_yaml(&paths.config).ok(),
+            running_document: read_yaml(&paths.config).ok(),
             prices: StatefulList::with_items(prices),
             energy_selected: 0,
             energy_row_areas: Vec::new(),
@@ -3426,6 +3546,13 @@ impl Default for App {
             energy_series: EnergySeries::default(),
             energy_history_hours: ENERGY_HISTORY_HOURS,
             poll_alerts: false,
+            profile_gate: false,
+            profile_first_run: false,
+            deck_zones: None,
+            deck_anim: None,
+            deck_opened: None,
+            deck_confirm: None,
+            deck_confirm_zones: None,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
             paths,
@@ -3451,10 +3578,13 @@ impl Default for App {
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
             peers_refresh_area: Rect::ZERO,
+            profile_button_area: Rect::ZERO,
             context_menu: None,
             docs: crate::docs::DocsState::default(),
             details: None,
-            status: "Press r to refresh • q to quit".to_string(),
+            // Nothing to report until something happens: the footer's first line
+            // already lists `r` and `q`, and saying them twice was noise.
+            status: String::new(),
             tabs_area: Rect::ZERO,
             page_tabs_area: Rect::ZERO,
             too_small: false,
@@ -3537,7 +3667,7 @@ impl App {
         // `None`: the first `nodo info` has not answered yet, so whether the node
         // is running is genuinely not known here. The next tick knows.
         self.alerts
-            .poll(&self.paths.config, self.config_document.as_ref(), None);
+            .poll(&self.paths.config, self.running_document.as_ref(), None);
         self
     }
 
@@ -3586,6 +3716,64 @@ impl App {
                 marker.display()
             ),
         };
+        self.raise_profile_gate();
+    }
+
+    /// Ask for a profile once, right after the KyA (see `docs/proposals/profile-deck.md`).
+    ///
+    /// Separate from construction and taken once in `main.rs`, for the same reason as
+    /// `with_kya_gate`. When the KyA is still unanswered the picker waits: it is
+    /// raised by `accept_kya`, so the order is always KyA first, profile second.
+    pub fn with_profile_gate(mut self) -> Self {
+        self.profile_gate = true;
+        if !self.awaiting_kya() {
+            self.raise_profile_gate();
+        }
+        self
+    }
+
+    /// Open the picker as the first-run step, if it was never answered.
+    fn raise_profile_gate(&mut self) {
+        if self.profile_gate && !self.paths.profile_marker().exists() {
+            self.show_profile_picker(true);
+        }
+    }
+
+    /// Record that the picker was answered. A marker that cannot be written is not
+    /// fatal, as for the KyA: the picker is shown again at the next start.
+    fn record_profile_picked(&mut self) -> bool {
+        if !self.profile_first_run {
+            return true;
+        }
+        self.profile_first_run = false;
+        let marker = self.paths.profile_marker();
+        let recorded = fs::create_dir_all(&self.paths.storage)
+            .and_then(|()| fs::OpenOptions::new().create(true).append(true).open(&marker))
+            .map(|_| ());
+        match recorded {
+            Ok(()) => true,
+            Err(error) => {
+                self.status = format!(
+                    "{} could not be written ({error}); the profile picker will be shown again",
+                    marker.display()
+                );
+                false
+            }
+        }
+    }
+
+    /// Leave the picker without choosing. On first run this is the SKIP button: it
+    /// records the marker and changes nothing.
+    pub fn skip_profile_picker(&mut self) {
+        let first_run = self.profile_first_run;
+        let recorded = self.record_profile_picked();
+        let failure = self.status.clone();
+        self.close_input();
+        if first_run && !recorded {
+            self.status = failure;
+        } else if first_run {
+            self.status = "Profile skipped • change it any time on the POLICIES page".to_string();
+        }
     }
 
     /// Decline the KyA: stop, exactly as the CLI does (`accept_kya.sh` exits 1).
@@ -3678,6 +3866,10 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
             Page::Tunnels => self.tunnels.previous(),
+            Page::Dead => {
+                self.dead.previous();
+                self.load_dead_view(true);
+            }
             Page::Packs => self.packs.previous(),
             Page::Services => {
                 self.services.previous();
@@ -3717,6 +3909,10 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
             Page::Tunnels => self.tunnels.next(),
+            Page::Dead => {
+                self.dead.next();
+                self.load_dead_view(true);
+            }
             Page::Packs => self.packs.next(),
             Page::Services => {
                 self.services.next();
@@ -3785,6 +3981,11 @@ impl App {
         }
         if self.page() == Page::Peers && self.peers_refresh_area.contains(position) {
             self.open_refresh_peers_confirm();
+            return;
+        }
+        // The same thing the `p` key does: open the profile deck.
+        if self.page() == Page::Cell && self.profile_button_area.contains(position) {
+            self.open_profile_picker();
             return;
         }
         // The config tree remembers where it drew each node, so it can resolve the
@@ -4031,6 +4232,10 @@ impl App {
         match self.page() {
             Page::Instances => self.instances.select_visible(visible),
             Page::Tunnels => self.tunnels.select_visible(visible),
+            Page::Dead => {
+                self.dead.select_visible(visible);
+                self.load_dead_view(true);
+            }
             Page::Packs => self.packs.select_visible(visible),
             Page::Services => {
                 self.services.select_visible(visible);
@@ -4115,6 +4320,8 @@ impl App {
 
     pub fn close_input(&mut self) {
         self.input_mode = InputMode::Normal;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
         self.input.clear();
         self.input_title.clear();
         self.edit_config_path = None;
@@ -4291,6 +4498,89 @@ impl App {
         self.input_mode = InputMode::Confirm;
         self.input_title = format!("Remove {label}? (y/N)");
         self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
+    }
+
+    /// Whether `path` (a dotted config path) or a key under it holds a value that
+    /// config.pending.yaml changes from config.yaml. What every page uses to mark a
+    /// setting the operator has changed and the running node does not have yet.
+    pub fn path_is_staged(&self, path: &str) -> bool {
+        self.config_all.iter().any(|entry| {
+            entry.running.is_some()
+                && entry.path.strip_prefix(path).is_some_and(|rest| {
+                    rest.is_empty() || rest.starts_with('.') || rest.starts_with('[')
+                })
+        })
+    }
+
+    /// Whether any key a lever writes is staged.
+    pub fn lever_is_staged(&self, lever: &crate::cell::Lever) -> bool {
+        lever.paths().iter().any(|path| self.path_is_staged(path))
+    }
+
+    /// Put the selected staged value back to what config.yaml (the running node) holds.
+    ///
+    /// Only a value marked as staged has anything to go back to. The change is made in
+    /// config.pending.yaml, like every edit while a staged file exists.
+    pub fn reset_selected_config_entry(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        let Some(entry) = self.selected_config_entry() else {
+            self.status = "Select a value to reset".to_string();
+            return;
+        };
+        if entry.running.is_none() {
+            self.status = format!("{} is not staged: nothing to reset", entry.path);
+            return;
+        }
+        let label = format!("Reset {}", entry.path);
+        let running = self
+            .running_document
+            .as_ref()
+            .and_then(|document| value_at(document, &entry.path_segments));
+        match running {
+            Some(value) => {
+                let writes = [(entry.path.clone(), yaml_edit_value(value))];
+                self.write_config_values(label, &writes, ConfigFollowUp::None);
+            }
+            // The running config has no such key: resetting means removing it.
+            None => self.start_config_write(ConfigWrite {
+                label,
+                expression: format!("del({})", yq_path_expression(&entry.path_segments)),
+                values: Vec::new(),
+                follow_up: ConfigFollowUp::None,
+            }),
+        }
+    }
+
+    /// Drop every staged value: delete config.pending.yaml, so the node keeps config.yaml.
+    pub fn reset_all_staged_config(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        if pending_change_count(&self.config_all) == 0 && !self.config_write_is_staged() {
+            self.status = "Nothing is staged".to_string();
+            return;
+        }
+        match fs::remove_file(pending_config_path(&self.paths.config)) {
+            Ok(()) => {
+                self.reload_after_config_write();
+                self.status = "All staged values reset to config.yaml".to_string();
+                self.app_logs
+                    .push("Staged configuration discarded".to_string());
+            }
+            Err(error) => {
+                self.status = format!("Could not remove {PENDING_CONFIG_FILE}: {error}");
+            }
+        }
     }
 
     /// Remove one element from a list in config.yaml.
@@ -4626,14 +4916,14 @@ impl App {
             self.status = "Busy: a command is already running".to_string();
             return;
         }
-        self.status = format!("{} • applying and restarting nodo…", write.label);
+        self.status = format!("{} • applying…", write.label);
         self.config_follow_up = write.follow_up.clone();
         // Said once, here, on the way in: this is the single funnel every config
         // write in the interface passes through, so one line covers the ENERGY
         // page's kWh price, a cell profile, a price nudge and a raw All row
         // alike. It was previously learned by watching a value be written and then
         // silently put back.
-        if let Some(hint) = self.config_write_root_hint() {
+        if let Some(hint) = self.config_write_stage_hint() {
             self.app_logs.push(hint.to_string());
         }
         self.config_task = Some(tokio::spawn(apply_config_change(
@@ -4650,51 +4940,37 @@ impl App {
         self.config_task.is_some()
     }
 
-    /// Whether a configuration change made right now would need root to land.
+    /// Whether a configuration change made right now is staged rather than applied.
     ///
-    /// **This is not about the file.** `config.yaml` is `chmod a+w` at install time
-    /// (`install.sh`) and rewritten `0o666` by `ConfigManager._atomic_write`, it is
-    /// `chown`ed to the installing user, and `yq -i` writes it through a rename in
-    /// the same directory. An unprivileged operator can write every key in it, and
-    /// the backup beside it, without ever being asked for a password.
+    /// **This is not about the file.** `config.yaml` is `chmod 0660` at install time
+    /// (`install.sh`) and `chown`ed to the installing user, so the operator who
+    /// installed the node can write every key in it. What cannot be done without
+    /// root is the **restart** that would make a serving node read the change:
+    /// `nodo daemon restart` is `systemctl`, and `daemon_command` in
+    /// `src/commands/daemon.py` refuses under a non-zero euid. A restart also stops
+    /// every instance the node runs, so it is not something to do for each edit.
     ///
-    /// What needs root is the **restart**. `apply_config_change` is a transaction:
-    /// write, restart, and put the file back if the node does not come back --
-    /// because the invariant this whole editor exists to hold is that *what the file
-    /// says is what the running node loaded*. The restart is `nodo daemon restart`,
-    /// which is `systemctl stop` + `systemctl start`, and `daemon_command` in
-    /// `src/commands/daemon.py` refuses outright under a non-zero euid. So an
-    /// unprivileged edit to a **serving** node writes the value, fails the restart,
-    /// and gets reverted -- which from the operator's chair looks exactly like "this
-    /// particular setting needs sudo".
-    ///
-    /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
-    /// by the same `write_config_value` as every price, every cell lever and every
-    /// raw All row; there is one writer and one transaction. It is a property of
-    /// **whether something is serving**, which is why the same edit succeeds
-    /// silently on a stopped node and is refused on a running one -- and why it
-    /// looked arbitrary.
+    /// So an unprivileged edit to a **serving** node goes to `config.pending.yaml`.
+    /// The running node keeps its config.yaml, and the next start swaps the staged
+    /// file in. The same edit on a stopped node, or from root, is written to
+    /// config.yaml as before; once a staged file exists, every edit goes into it.
     ///
     /// Read off `node_info.service_status`, which `nodo info` already reports and
     /// this interface already polls, rather than opening a socket per keystroke. It
     /// can be up to one wallet-refresh stale; that is acceptable for a *warning*,
     /// and the transaction itself still asks the live question
-    /// (`serving_on(port_before)`) before deciding whether a restart is owed.
-    pub fn config_write_needs_root(&self) -> bool {
-        !is_root() && self.node_info.service_status == "running"
+    /// (`serving_on(port_before)`) before deciding.
+    pub fn config_write_is_staged(&self) -> bool {
+        pending_config_path(&self.paths.config).is_file()
+            || (!is_root() && self.node_info.service_status == "running")
     }
 
-    /// The one-line warning shown beside a config editor that is about to fail, or
-    /// `None` when the change can land.
-    ///
-    /// Said before the value is typed. The revert stays -- a node running settings
-    /// that are not the settings on disk is worse -- but "your change was undone" is
-    /// a thing to learn from a message, not from watching a number go back.
-    pub fn config_write_root_hint(&self) -> Option<&'static str> {
-        self.config_write_needs_root().then_some(
-            "Applying this needs root: the node is serving, so the change is \
-             followed by `nodo daemon restart`, which is systemctl. Run the TUI \
-             with sudo, or stop the node and edit it here.",
+    /// The one-line note shown beside a config editor whose change will be staged,
+    /// or `None` when the change lands in config.yaml.
+    pub fn config_write_stage_hint(&self) -> Option<&'static str> {
+        self.config_write_is_staged().then_some(
+            "This change is staged in config.pending.yaml, not config.yaml. It applies \
+             when nodo restarts, and a restart stops its instances.",
         )
     }
 
@@ -4740,6 +5016,9 @@ impl App {
                     Applied::NotRunning => {
                         "applied • nodo is not serving, so it loads on next start".to_string()
                     }
+                    Applied::Staged => "staged in config.pending.yaml • restart nodo to apply \
+                         (its instances stop)"
+                        .to_string(),
                 };
                 self.status = format!("{} • {note}", transaction.label);
                 self.app_logs
@@ -5178,15 +5457,27 @@ impl App {
             self.status = "Busy: a configuration change is being applied".to_string();
             return;
         }
+        self.show_profile_picker(false);
+    }
 
+    /// Open the picker from POLICIES (`first_run = false`) or as the first-run step.
+    fn show_profile_picker(&mut self, first_run: bool) {
         let report = self.cell_profile();
         self.cell.profile = cell::profiles()
             .iter()
             .position(|profile| profile.id == report.profile.id)
             .unwrap_or(0);
+        self.profile_first_run = first_run;
+        self.deck_anim = None;
+        self.deck_opened = Some(Instant::now());
         self.input_mode = InputMode::PickProfile;
-        self.input_title = "Apply a profile".to_string();
-        self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
+        if first_run {
+            self.input_title = "Choose your profile".to_string();
+            self.status = "↑/↓ choose • Enter see what changes • Esc SKIP".to_string();
+        } else {
+            self.input_title = "Apply a profile".to_string();
+            self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
+        }
     }
 
     pub fn move_profile_selection(&mut self, delta: i32) {
@@ -5195,7 +5486,68 @@ impl App {
             return;
         }
         let current = self.cell.profile as i32;
-        self.cell.profile = (current + delta).rem_euclid(count as i32) as usize;
+        let target = (current + delta).rem_euclid(count as i32) as usize;
+        self.slide_to(target, delta > 0);
+    }
+
+    /// Change the open card, and start the slide when the deck is on screen.
+    ///
+    /// A move made during a slide starts the next one from where the last one was
+    /// going: the old slide jumps to its end rather than queuing behind it.
+    fn slide_to(&mut self, target: usize, forward: bool) {
+        let from = self.cell.profile;
+        if target == from {
+            return;
+        }
+        if self.deck_zones.is_some() && self.input_mode == InputMode::PickProfile {
+            self.deck_anim = Some(crate::profile_deck_ui::DeckSlide::new(
+                from,
+                forward,
+                Instant::now(),
+            ));
+        }
+        self.cell.profile = target;
+    }
+
+    /// True while a slide runs, which is when the loop must redraw each frame and
+    /// not each tick.
+    pub fn deck_animating(&self) -> bool {
+        self.input_mode == InputMode::PickProfile
+            && self
+                .deck_anim
+                .map(|slide| !slide.done(Instant::now()))
+                .unwrap_or(false)
+    }
+
+    /// Go to the profile at `index`, if there is one: a dot or a number key.
+    pub fn select_profile(&mut self, index: usize) {
+        if index < cell::profiles().len() {
+            self.slide_to(index, index > self.cell.profile);
+        }
+    }
+
+    /// What a click on the confirmation of a profile landed on, if the confirmation
+    /// is on screen.
+    pub fn confirm_hit(&self, position: Position) -> Option<crate::profile_deck_ui::ConfirmHit> {
+        let zones = self.deck_confirm_zones.as_ref()?;
+        crate::profile_deck_ui::confirm_hit(zones, position)
+    }
+
+    /// A left click on the deck. Does nothing when the deck is not on screen, as when
+    /// the plain list is shown instead.
+    pub fn click_deck(&mut self, position: Position) {
+        use crate::profile_deck_ui::{hit, Hit};
+        let Some(zones) = self.deck_zones.as_ref() else {
+            return;
+        };
+        match hit(zones, position) {
+            Some(Hit::Prev) => self.move_profile_selection(-1),
+            Some(Hit::Next) => self.move_profile_selection(1),
+            Some(Hit::Dot(index)) => self.select_profile(index),
+            Some(Hit::Choose | Hit::Card) => self.submit_profile_selection(),
+            Some(Hit::Skip) => self.skip_profile_picker(),
+            None => {}
+        }
     }
 
     /// Confirm the selected profile, showing every key it would change.
@@ -5206,6 +5558,7 @@ impl App {
         };
         let document = self.config_document.clone();
         let changes = cell::changes(profile.writes, document.as_ref());
+        let _ = self.record_profile_picked();
         self.close_input();
         if changes.is_empty() {
             self.status = format!("Already in {} — nothing to change", profile.label);
@@ -5223,6 +5576,9 @@ impl App {
             Some(profile.blurb),
             None,
         );
+        // After `confirm_writes`, which does not touch it, and after `close_input`
+        // above, which clears it.
+        self.deck_confirm = Some(self.cell.profile);
     }
 
     /// Show every key a change would touch, and hold it until the operator agrees.
@@ -5711,7 +6067,8 @@ impl App {
     }
 
     fn reload_after_config_write(&mut self) {
-        self.config_document = read_yaml(&self.paths.config).ok();
+        self.config_document = read_effective_yaml(&self.paths.config).ok();
+        self.running_document = read_yaml(&self.paths.config).ok();
         crate::theme::refresh_from_document(self.config_document.as_ref());
         self.reload_money();
         self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
@@ -5979,14 +6336,38 @@ impl App {
     /// Dismiss a writes confirmation without writing anything.
     pub fn cancel_pending_writes(&mut self) {
         self.pending_action = None;
-        self.close_details();
+        // A refusal in the deck goes back to the deck, with the same card open, so a
+        // user who looked at the changes and did not like them can try another
+        // profile. Anywhere else it closes, as it always did.
+        match self.deck_confirm {
+            Some(index) => self.return_to_deck(index),
+            None => self.close_details(),
+        }
+    }
+
+    /// Show the deck again at the card `index`, after a confirmation was refused.
+    ///
+    /// The first-run marker was written when the profile was chosen, so this is an
+    /// ordinary picker: Esc closes it and changes nothing.
+    fn return_to_deck(&mut self, index: usize) {
+        self.details = None;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
+        self.cell.profile = index.min(cell::profiles().len().saturating_sub(1));
+        self.profile_first_run = false;
+        self.deck_anim = None;
+        self.input_mode = InputMode::PickProfile;
+        self.input_title = "Apply a profile".to_string();
+        self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
     }
 
     /// Close the Details overlay and return to normal mode.
     pub fn close_details(&mut self) {
         self.details = None;
+        self.deck_confirm = None;
+        self.deck_confirm_zones = None;
         self.input_mode = InputMode::Normal;
-        self.status = "Press r to refresh • q to quit".to_string();
+        self.status.clear();
     }
 
     /// Spawn a `nodo` command in the background so the UI stays responsive.
@@ -6175,7 +6556,8 @@ impl App {
         self.paths = Paths::discover();
         // Picks up an edit made on the All page, or in a shell, so the cell's
         // levers describe the file as it is rather than as it was at start-up.
-        self.config_document = read_yaml(&self.paths.config).ok();
+        self.config_document = read_effective_yaml(&self.paths.config).ok();
+        self.running_document = read_yaml(&self.paths.config).ok();
 
         let services = get_services(&self.paths).unwrap_or_default();
         let service_names = services
@@ -6189,6 +6571,7 @@ impl App {
         self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.refresh_dead(&service_names);
         self.refresh_tunnels();
         self.refresh_packs();
         self.refresh_chat();
@@ -6210,7 +6593,7 @@ impl App {
             // answers, which is what the third wording is for.
             let serving = self.serving_for_alerts();
             self.alerts
-                .poll(&self.paths.config, self.config_document.as_ref(), serving);
+                .poll(&self.paths.config, self.running_document.as_ref(), serving);
         }
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
@@ -7435,6 +7818,13 @@ fn get_instances(
     } else {
         "NULL"
     };
+    // A dead instance has its own page (`dead.rs`). Same guard as above: a database
+    // the node has not migrated has no `killed_at`, and then every row is alive.
+    let alive = if column_exists(&connection, "local_instances", "killed_at") {
+        " WHERE li.killed_at IS NULL"
+    } else {
+        ""
+    };
     let base = format!(
         "SELECT li.id, li.name, li.ip, li.balance_mu, li.service_id, li.mem_limit,
                 li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota,
@@ -7445,10 +7835,10 @@ fn get_instances(
             "{base}, ic.mu_per_second, ic.sample_count,
                 CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', ic.last_refresh) AS INTEGER)
              FROM local_instances li
-             LEFT JOIN instance_consumption ic ON ic.instance_id = li.id"
+             LEFT JOIN instance_consumption ic ON ic.instance_id = li.id{alive}"
         )
     } else {
-        format!("{base} FROM local_instances li")
+        format!("{base} FROM local_instances li{alive}")
     };
     let mut statement = connection.prepare(&sql)?;
     let mut instances: Vec<Instance> = statement
@@ -7595,8 +7985,13 @@ fn get_delegated_instances(
     } else {
         "NULL"
     };
+    let alive = if column_exists(connection, "delegated_instances", "killed_at") {
+        " WHERE killed_at IS NULL"
+    } else {
+        ""
+    };
     let mut statement = connection.prepare(&format!(
-        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances"
+        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances{alive}"
     ))?;
     let instances = statement
         .query_map([], |row| {
@@ -7806,11 +8201,58 @@ fn read_service_tag(path: &Path) -> Option<String> {
     metadata.hashtag?.tag.first().cloned()
 }
 
+/// The file a configuration change is staged in while the node cannot be restarted.
+///
+/// Beside config.yaml. The node swaps it in when it starts (`apply_pending_config`
+/// in src/commands/config_edit.py), keeps the old config.yaml as a timestamped
+/// backup, and deletes this file.
+pub(crate) const PENDING_CONFIG_FILE: &str = "config.pending.yaml";
+
+pub(crate) fn pending_config_path(config: &Path) -> PathBuf {
+    config.with_file_name(PENDING_CONFIG_FILE)
+}
+
+/// The configuration the operator has asked for: the staged file when there is one,
+/// otherwise config.yaml. Every editor reads this, so a second edit builds on the
+/// first instead of on the file the node still runs on.
+fn read_effective_yaml(config: &Path) -> Result<Value, String> {
+    let pending = pending_config_path(config);
+    if pending.is_file() {
+        read_yaml(&pending)
+    } else {
+        read_yaml(config)
+    }
+}
+
+/// Every entry of the effective configuration, each marked when it differs from
+/// the config the node runs on.
 pub(crate) fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
-    let document = read_yaml(path)?;
+    let document = read_effective_yaml(path)?;
     let mut entries = Vec::new();
     flatten_yaml(&document, &mut Vec::new(), &mut entries);
+    if pending_config_path(path).is_file() {
+        if let Ok(running) = read_yaml(path) {
+            let mut before = Vec::new();
+            flatten_yaml(&running, &mut Vec::new(), &mut before);
+            let before: HashMap<String, String> = before
+                .into_iter()
+                .map(|entry| (entry.path, entry.value))
+                .collect();
+            for entry in &mut entries {
+                match before.get(&entry.path) {
+                    Some(value) if *value == entry.value => {}
+                    Some(value) => entry.running = Some(value.clone()),
+                    None => entry.running = Some("unset".to_string()),
+                }
+            }
+        }
+    }
     Ok(entries)
+}
+
+/// How many values of the staged configuration differ from the running one.
+pub fn pending_change_count(entries: &[ConfigEntry]) -> usize {
+    entries.iter().filter(|entry| entry.running.is_some()).count()
 }
 
 fn flatten_yaml(value: &Value, path: &mut Vec<ConfigPathSegment>, entries: &mut Vec<ConfigEntry>) {
@@ -7842,6 +8284,7 @@ fn flatten_yaml(value: &Value, path: &mut Vec<ConfigPathSegment>, entries: &mut 
                 value: yaml_value(value),
                 edit_value: yaml_edit_value(value),
                 value_type: yaml_type(value).to_string(),
+                running: None,
             });
         }
     }
@@ -7860,6 +8303,14 @@ fn yaml_value(value: &Value) -> String {
             .trim()
             .to_string(),
     }
+}
+
+/// The value at `path` in a parsed document, or `None` when the key is absent.
+fn value_at<'a>(document: &'a Value, path: &[ConfigPathSegment]) -> Option<&'a Value> {
+    path.iter().try_fold(document, |value, segment| match segment {
+        ConfigPathSegment::Key(key) => value.get(key.as_str()),
+        ConfigPathSegment::Index(index) => value.get(*index),
+    })
 }
 
 fn yaml_edit_value(value: &Value) -> String {
@@ -7961,7 +8412,7 @@ fn is_secret_path(path: &str) -> bool {
     leaf == "token" || leaf.ends_with("_token")
 }
 
-fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
+pub(crate) fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
     const TAIL_BYTES: u64 = 256 * 1024;
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
@@ -8374,9 +8825,30 @@ fn backup_config(config: &Path) -> io::Result<PathBuf> {
         backup_nonce(),
     ));
     fs::copy(config, &backup)?;
+    keep_config_owner(config, &backup);
     prune_config_backups(config)?;
     Ok(backup)
 }
+
+/// Give `copy` the owner of `config` when this TUI runs under sudo.
+///
+/// `fs::copy` keeps the mode (0660) but not the owner, so a backup taken as root
+/// would be root's and the installing user could no longer read it. Same rule as
+/// `_match_config_file` in src/utils/config.py. Best effort: the backup exists
+/// either way.
+#[cfg(unix)]
+fn keep_config_owner(config: &Path, copy: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    if !is_root() {
+        return;
+    }
+    if let Ok(meta) = fs::metadata(config) {
+        let _ = std::os::unix::fs::chown(copy, Some(meta.uid()), Some(meta.gid()));
+    }
+}
+
+#[cfg(not(unix))]
+fn keep_config_owner(_config: &Path, _copy: &Path) {}
 
 /// Four random digits for a backup filename.
 ///
@@ -8584,6 +9056,7 @@ mod tests {
                     Page::Overview,
                     Page::Instances,
                     Page::Tunnels,
+                    Page::Dead,
                     Page::Peers,
                     Page::Services,
                     Page::Packs,
@@ -9368,7 +9841,11 @@ mod tests {
     /// step, and the file goes back if the node does not come back. These pin the
     /// pieces of that transaction that can be exercised without systemd.
     mod config_transactions {
-        use super::super::{chained_write, revert, serving_on};
+        use super::super::{
+            apply_config_change, chained_write, get_config_entries, pending_change_count,
+            pending_config_path, revert, serving_on, Applied, ConfigFollowUp, ConfigWrite,
+        };
+        use serde_yaml::Value;
         use std::fs;
         use std::path::PathBuf;
 
@@ -9460,6 +9937,61 @@ mod tests {
             let message = revert(&missing, &config, "Set port NOT applied");
             assert!(message.contains("COULD NOT RESTORE"), "{message}");
             assert!(message.contains("config-20260101000000-0417.yaml"), "{message}");
+        }
+
+        /// Once a staged file exists every edit goes into it and config.yaml, the
+        /// file the running node loaded, is not touched.
+        #[tokio::test]
+        async fn an_edit_with_a_staged_file_changes_only_the_staged_file() {
+            let Some(yq) = which_yq() else {
+                eprintln!("yq not on PATH; skipping the staged write");
+                return;
+            };
+            let dir = TempDir::new("staged");
+            let config = dir.file("config.yaml");
+            let pending = pending_config_path(&config);
+            let original = "energy:\n  PRICE_PER_KWH: 0.1\nui:\n  DISPLAY_UNIT: erg\n";
+            fs::write(&config, original).unwrap();
+
+            let write = ConfigWrite {
+                label: "kWh price".to_string(),
+                expression: "energy.PRICE_PER_KWH = env(NODO_TUI_V0)".to_string(),
+                values: vec![("NODO_TUI_V0".to_string(), "0.3".to_string())],
+                follow_up: ConfigFollowUp::None,
+            };
+            // First edit creates the staged file from config.yaml.
+            let first = apply_config_change(yq.clone(), config.clone(), dir.file("cache"), write.clone()).await;
+            // A second edit finds it, and builds on it.
+            let write2 = ConfigWrite {
+                expression: "ui.DISPLAY_UNIT = env(NODO_TUI_V0)".to_string(),
+                values: vec![("NODO_TUI_V0".to_string(), "usd".to_string())],
+                ..write
+            };
+            let second = apply_config_change(yq, config.clone(), dir.file("cache"), write2).await;
+
+            assert!(matches!(first.result, Ok(Applied::Staged)), "{:?}", first.result);
+            assert!(matches!(second.result, Ok(Applied::Staged)), "{:?}", second.result);
+            assert_eq!(fs::read_to_string(&config).unwrap(), original);
+            let staged: Value = serde_yaml::from_str(&fs::read_to_string(&pending).unwrap()).unwrap();
+            assert_eq!(staged["energy"]["PRICE_PER_KWH"].as_f64(), Some(0.3));
+            assert_eq!(staged["ui"]["DISPLAY_UNIT"].as_str(), Some("usd"));
+        }
+
+        /// The tree marks the values that differ from the running config, and only those.
+        #[test]
+        fn entries_that_differ_from_the_running_config_are_marked() {
+            let dir = TempDir::new("marks");
+            let config = dir.file("config.yaml");
+            fs::write(&config, "a: 1\nb: 2\n").unwrap();
+            assert_eq!(pending_change_count(&get_config_entries(&config).unwrap()), 0);
+
+            fs::write(pending_config_path(&config), "a: 1\nb: 3\nc: 4\n").unwrap();
+            let entries = get_config_entries(&config).unwrap();
+            let mark = |path: &str| entries.iter().find(|e| e.path == path).unwrap().running.clone();
+            assert_eq!(mark("a"), None);
+            assert_eq!(mark("b"), Some("2".to_string()));
+            assert_eq!(mark("c"), Some("unset".to_string()));
+            assert_eq!(pending_change_count(&entries), 2);
         }
 
         /// `auto` is what an unassigned port reads as, and it is not a port: treating
@@ -10653,6 +11185,7 @@ ergo: Cold Wallet: 9cold\n";
             edit_value: edit_value.to_string(),
             value_type: value_type.to_string(),
             secret,
+            running: None,
         }
     }
 
@@ -12133,6 +12666,45 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(by_id("b"), None);
             let _ = fs::remove_dir_all(&dir);
         }
+
+        /// A dead instance has its own page; INSTANCES lists only the live ones, local
+        /// and delegated.
+        #[test]
+        fn a_dead_instance_is_not_listed_as_live() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-live-only");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = dir.join("database.sqlite");
+            Connection::open(&database)
+                .unwrap()
+                .execute_batch(
+                    "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, ip TEXT,
+                        father_id TEXT, balance_mu TEXT, mem_limit INTEGER,
+                        disk_space INTEGER, cpu_period INTEGER, cpu_quota INTEGER,
+                        serialized_instance TEXT, service_id TEXT, virtualizer TEXT,
+                        launched_at DATETIME, killed_at DATETIME, death_reason TEXT);
+                     INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
+                     VALUES ('alive', 'w', '10', NULL, NULL);
+                     INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
+                     VALUES ('dead', 'x', '10', '2026-01-01 10:00:00', 'manual_kill');
+                     CREATE TABLE delegated_instances (token_delegation TEXT, id TEXT,
+                        peer_id TEXT, father_id TEXT, service_id TEXT, launched_at DATETIME,
+                        killed_at DATETIME, death_reason TEXT);
+                     INSERT INTO delegated_instances (id, killed_at) VALUES ('r-alive', NULL);
+                     INSERT INTO delegated_instances (id, killed_at)
+                     VALUES ('r-dead', '2026-01-01 10:00:00');",
+                )
+                .unwrap();
+            let mut paths = Paths::discover();
+            paths.database = database;
+
+            let instances = get_instances(&paths, &HashMap::new()).unwrap();
+            let mut ids: Vec<&str> = instances.iter().map(|instance| instance.id.as_str()).collect();
+            ids.sort();
+
+            assert_eq!(ids, ["alive", "r-alive"]);
+            let _ = fs::remove_dir_all(&dir);
+        }
     }
 
     /// `g` on the Services page: fetch a service this node does not hold (#438).
@@ -12598,6 +13170,743 @@ ergo: Cold Wallet: 9cold\n";
             let alerts = main.find("with_operator_alerts()").unwrap();
             let gate = main.find("with_kya_gate()").unwrap();
             assert!(alerts < gate, "the alerts should be primed before the gate");
+        }
+    }
+
+    /// The first-run profile picker (docs/proposals/profile-deck.md, phase 1).
+    ///
+    /// Pinned here is the state machine: it comes after the KyA and never before,
+    /// it is not asked twice, and skipping records the marker without writing config.
+    mod profile_gate {
+        use super::super::*;
+        use crate::handler::handle_key_events;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+        struct Install(PathBuf);
+
+        impl Install {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir().join(format!("nodo-tui-profile-{name}"));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(path.join("storage")).unwrap();
+                Self(path)
+            }
+
+            /// The same steps `main.rs` takes, against a directory a test owns.
+            fn app(&self) -> App {
+                let mut app = App::default();
+                app.paths.root = self.0.clone();
+                app.paths.storage = self.0.join("storage");
+                app.with_kya_gate().with_profile_gate()
+            }
+
+            fn mark(&self, name: &str) {
+                fs::write(self.0.join("storage").join(name), "").unwrap();
+            }
+        }
+
+        impl Drop for Install {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        async fn send(app: &mut App, code: KeyCode) {
+            let key = KeyEvent {
+                code,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            };
+            handle_key_events(key, app).await.unwrap();
+        }
+
+        #[test]
+        fn the_marker_name_is_fixed() {
+            let install = Install::new("marker");
+            let app = install.app();
+
+            assert_eq!(PROFILE_MARKER, ".profilepicked");
+            assert_eq!(
+                app.paths.profile_marker(),
+                install.0.join("storage").join(".profilepicked")
+            );
+        }
+
+        /// The KyA is the question the node is conditional on, so it covers the
+        /// picker: with both unanswered the gate is the KyA.
+        #[test]
+        fn the_kya_comes_first() {
+            let install = Install::new("order");
+            let app = install.app();
+
+            assert!(app.awaiting_kya());
+            assert_eq!(app.input_mode, InputMode::AcceptKya);
+        }
+
+        #[tokio::test]
+        async fn accepting_the_kya_opens_the_picker() {
+            let install = Install::new("after-kya");
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Char('y')).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(app.profile_first_run);
+        }
+
+        #[test]
+        fn an_accepted_kya_with_no_profile_marker_opens_the_picker_at_start() {
+            let install = Install::new("existing");
+            install.mark(KYA_MARKER);
+
+            let app = install.app();
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(app.profile_first_run);
+        }
+
+        #[test]
+        fn an_answered_picker_is_not_shown_again() {
+            let install = Install::new("answered");
+            install.mark(KYA_MARKER);
+            install.mark(PROFILE_MARKER);
+
+            let app = install.app();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(!app.profile_first_run);
+        }
+
+        /// Without `with_profile_gate`, nothing consults the marker: the KyA tests and
+        /// every rendering test keep their behaviour.
+        #[test]
+        fn the_picker_is_off_unless_main_asks_for_it() {
+            let install = Install::new("off");
+            install.mark(KYA_MARKER);
+            let mut app = App::default();
+            app.paths.root = install.0.clone();
+            app.paths.storage = install.0.join("storage");
+
+            let app = app.with_kya_gate();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
+        #[tokio::test]
+        async fn skipping_records_the_marker_and_writes_nothing() {
+            let install = Install::new("skip");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.running, "skipping must not quit");
+            assert!(app.paths.profile_marker().exists());
+            assert!(app.pending_action.is_none(), "skipping must not queue a write");
+            assert!(!install.app().profile_first_run);
+        }
+
+        #[tokio::test]
+        async fn choosing_records_the_marker_and_shows_the_diff() {
+            let install = Install::new("choose");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            // A profile whose keys differ from an empty config.
+            app.config_document = None;
+
+            send(&mut app, KeyCode::Enter).await;
+
+            assert!(app.paths.profile_marker().exists());
+            assert!(!app.profile_first_run);
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+        }
+
+        /// Esc from POLICIES only closes: a second look at the profiles is not an
+        /// answer to the first-run question and must not write a marker.
+        #[tokio::test]
+        async fn the_policies_picker_does_not_write_the_marker() {
+            let install = Install::new("policies");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            app.input_mode = InputMode::Normal;
+            app.profile_first_run = false;
+            app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Cell).unwrap();
+
+            app.open_profile_picker();
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert!(!app.profile_first_run);
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(!app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn a_marker_that_cannot_be_written_is_not_fatal() {
+            let install = Install::new("unwritable");
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            let blocked = install.0.join("blocked");
+            fs::write(&blocked, "").unwrap();
+            app.paths.storage = blocked.join("storage");
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert!(app.running);
+            assert!(app.status.contains("shown again"), "{}", app.status);
+        }
+
+        /// An app with the picker open and the deck "drawn" at a known size.
+        fn deck_app(install: &Install) -> App {
+            install.mark(KYA_MARKER);
+            let mut app = install.app();
+            app.cell.profile = 0;
+            app.deck_zones = crate::profile_deck_ui::layout(
+                ratatui::layout::Rect::new(0, 0, 100, 32),
+                cell::profiles().len(),
+                true,
+            );
+            assert!(app.deck_zones.is_some());
+            app
+        }
+
+        async fn click(app: &mut App, x: u16, y: u16) {
+            use crate::handler::handle_mouse_events;
+            use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+            handle_mouse_events(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: x,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                },
+                app,
+            )
+            .await
+            .unwrap();
+        }
+
+        async fn wheel(app: &mut App, kind: crossterm::event::MouseEventKind) {
+            use crate::handler::handle_mouse_events;
+            use crossterm::event::MouseEvent;
+            handle_mouse_events(
+                MouseEvent {
+                    kind,
+                    column: 50,
+                    row: 10,
+                    modifiers: KeyModifiers::NONE,
+                },
+                app,
+            )
+            .await
+            .unwrap();
+        }
+
+        fn centre(rect: ratatui::layout::Rect) -> (u16, u16) {
+            (rect.x + rect.width / 2, rect.y + rect.height / 2)
+        }
+
+        #[tokio::test]
+        async fn the_arrow_keys_turn_the_cards_and_wrap() {
+            let install = Install::new("keys-arrows");
+            let mut app = deck_app(&install);
+            let count = cell::profiles().len();
+
+            send(&mut app, KeyCode::Right).await;
+            assert_eq!(app.cell.profile, 1);
+            send(&mut app, KeyCode::Left).await;
+            send(&mut app, KeyCode::Left).await;
+            assert_eq!(app.cell.profile, count - 1, "left of the first wraps");
+            send(&mut app, KeyCode::Right).await;
+            assert_eq!(app.cell.profile, 0, "right of the last wraps");
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        #[tokio::test]
+        async fn h_l_tab_and_shift_tab_do_the_same() {
+            let install = Install::new("keys-vi");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('l')).await;
+            send(&mut app, KeyCode::Tab).await;
+            assert_eq!(app.cell.profile, 2);
+            send(&mut app, KeyCode::Char('h')).await;
+            send(&mut app, KeyCode::BackTab).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        /// The plain list shown on a small terminal keeps its keys.
+        #[tokio::test]
+        async fn up_and_down_still_move_the_list() {
+            let install = Install::new("keys-updown");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Down).await;
+            assert_eq!(app.cell.profile, 1);
+            send(&mut app, KeyCode::Up).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        #[tokio::test]
+        async fn number_keys_home_and_end_jump() {
+            let install = Install::new("keys-jump");
+            let mut app = deck_app(&install);
+            let count = cell::profiles().len();
+
+            send(&mut app, KeyCode::Char('3')).await;
+            assert_eq!(app.cell.profile, 2);
+            send(&mut app, KeyCode::End).await;
+            assert_eq!(app.cell.profile, count - 1);
+            send(&mut app, KeyCode::Home).await;
+            assert_eq!(app.cell.profile, 0);
+            // A number with no profile behind it changes nothing.
+            send(&mut app, KeyCode::Char('9')).await;
+            assert_eq!(app.cell.profile, 0);
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        #[tokio::test]
+        async fn s_skips_like_escape() {
+            let install = Install::new("keys-s");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('s')).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn a_click_on_an_arrow_turns_the_card() {
+            let install = Install::new("mouse-arrows");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let (x, y) = centre(zones.next);
+            click(&mut app, x, y).await;
+            assert_eq!(app.cell.profile, 1);
+            let (x, y) = centre(zones.prev);
+            click(&mut app, x, y).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        #[tokio::test]
+        async fn a_click_on_a_dot_goes_to_that_card() {
+            let install = Install::new("mouse-dots");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let dot = zones.dots[3];
+            click(&mut app, dot.x, dot.y).await;
+
+            assert_eq!(app.cell.profile, 3);
+        }
+
+        #[tokio::test]
+        async fn a_click_on_the_card_or_the_choose_button_chooses() {
+            for target in ["card", "choose"] {
+                let install = Install::new(&format!("mouse-choose-{target}"));
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                let zones = app.deck_zones.clone().unwrap();
+
+                let (x, y) = centre(if target == "card" { zones.card } else { zones.choose });
+                click(&mut app, x, y).await;
+
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{target}");
+                assert!(app.paths.profile_marker().exists(), "{target}");
+            }
+        }
+
+        #[tokio::test]
+        async fn a_click_on_skip_skips() {
+            let install = Install::new("mouse-skip");
+            let mut app = deck_app(&install);
+            let zones = app.deck_zones.clone().unwrap();
+
+            let (x, y) = centre(zones.skip);
+            click(&mut app, x, y).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.paths.profile_marker().exists());
+            assert!(app.pending_action.is_none());
+        }
+
+        /// A click on the frame, or on the page behind it, does nothing: the deck is
+        /// a modal, and a click that fell through would act on a page nobody sees.
+        #[tokio::test]
+        async fn a_click_outside_the_parts_does_nothing() {
+            let install = Install::new("mouse-outside");
+            let mut app = deck_app(&install);
+            let page = app.page();
+
+            click(&mut app, 0, 0).await;
+            click(&mut app, 99, 31).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert_eq!(app.cell.profile, 0);
+            assert_eq!(app.page(), page);
+        }
+
+        #[tokio::test]
+        async fn the_wheel_turns_the_cards() {
+            use crossterm::event::MouseEventKind::{ScrollDown, ScrollLeft, ScrollRight, ScrollUp};
+            let install = Install::new("mouse-wheel");
+            let mut app = deck_app(&install);
+
+            wheel(&mut app, ScrollDown).await;
+            wheel(&mut app, ScrollRight).await;
+            assert_eq!(app.cell.profile, 2);
+            wheel(&mut app, ScrollUp).await;
+            wheel(&mut app, ScrollLeft).await;
+            assert_eq!(app.cell.profile, 0);
+        }
+
+        /// On a small terminal the plain list is shown, and nothing was drawn to click.
+        #[tokio::test]
+        async fn without_a_drawn_deck_a_click_does_nothing() {
+            let install = Install::new("mouse-list");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+
+            click(&mut app, 50, 16).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+        }
+
+        /// Drawing the picker records where its parts are, and drawing the list in
+        /// its place forgets them.
+        #[test]
+        fn drawing_records_the_zones_and_the_list_forgets_them() {
+            use ratatui::backend::TestBackend;
+            use ratatui::Terminal;
+            let install = Install::new("zones");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+
+            let mut terminal = Terminal::new(TestBackend::new(100, 32)).unwrap();
+            terminal.draw(|frame| crate::ui::render(&mut app, frame)).unwrap();
+            assert!(app.deck_zones.is_some(), "a big terminal draws the deck");
+
+            let mut terminal = Terminal::new(TestBackend::new(70, 20)).unwrap();
+            terminal.draw(|frame| crate::ui::render(&mut app, frame)).unwrap();
+            assert!(app.deck_zones.is_none(), "a small terminal draws the list");
+        }
+
+        #[tokio::test]
+        async fn a_move_starts_a_slide_in_the_direction_of_the_move() {
+            let install = Install::new("slide-direction");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Right).await;
+            let slide = app.deck_anim.expect("a slide");
+            assert_eq!((slide.from, slide.forward), (0, true));
+            assert!(app.deck_animating());
+
+            send(&mut app, KeyCode::Left).await;
+            let slide = app.deck_anim.unwrap();
+            assert_eq!((slide.from, slide.forward), (1, false));
+        }
+
+        /// From the first card, "left" wraps to the last one, and it is still a
+        /// backward move: the arrow the user pressed decides the side.
+        #[tokio::test]
+        async fn a_wrap_slides_the_way_the_key_points() {
+            let install = Install::new("slide-wrap");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Left).await;
+
+            assert_eq!(app.cell.profile, cell::profiles().len() - 1);
+            assert!(!app.deck_anim.unwrap().forward);
+        }
+
+        #[tokio::test]
+        async fn a_jump_slides_towards_the_card_it_goes_to() {
+            let install = Install::new("slide-jump");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Char('4')).await;
+            assert!(app.deck_anim.unwrap().forward);
+            send(&mut app, KeyCode::Char('1')).await;
+            assert!(!app.deck_anim.unwrap().forward);
+        }
+
+        /// A move during a slide starts the next slide from the card the last one was
+        /// going to: they do not queue.
+        #[tokio::test]
+        async fn a_move_during_a_slide_replaces_it() {
+            let install = Install::new("slide-replace");
+            let mut app = deck_app(&install);
+
+            send(&mut app, KeyCode::Right).await;
+            send(&mut app, KeyCode::Right).await;
+
+            assert_eq!(app.cell.profile, 2);
+            assert_eq!(app.deck_anim.unwrap().from, 1);
+        }
+
+        /// Without a deck on screen (the plain list), or when nothing moved, nothing
+        /// slides, and the loop is not asked for frames.
+        #[tokio::test]
+        async fn nothing_slides_without_a_deck_or_a_move() {
+            let install = Install::new("slide-none");
+            let mut app = deck_app(&install);
+            app.deck_zones = None;
+            send(&mut app, KeyCode::Right).await;
+            assert!(app.deck_anim.is_none());
+            assert!(!app.deck_animating());
+
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Char('1')).await;
+            assert!(app.deck_anim.is_none(), "already on the first card");
+        }
+
+        #[tokio::test]
+        async fn a_slide_that_is_over_does_not_ask_for_frames() {
+            let install = Install::new("slide-over");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+            let old = Instant::now() - crate::profile_deck_ui::SLIDE * 2;
+            app.deck_anim = Some(crate::profile_deck_ui::DeckSlide::new(0, true, old));
+
+            assert!(!app.deck_animating());
+        }
+
+        #[tokio::test]
+        async fn leaving_the_picker_stops_the_frames() {
+            let install = Install::new("slide-leave");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+            assert!(app.deck_animating());
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert!(!app.deck_animating());
+        }
+
+        #[tokio::test]
+        async fn opening_the_picker_again_starts_with_no_slide() {
+            let install = Install::new("slide-reopen");
+            let mut app = deck_app(&install);
+            send(&mut app, KeyCode::Right).await;
+
+            app.show_profile_picker(false);
+
+            assert!(app.deck_anim.is_none());
+        }
+
+        /// The loop wakes each frame only while a slide runs. Read off the source,
+        /// like the gates: dropping the line would make the slide a slideshow with
+        /// no failure anywhere.
+        #[test]
+        fn main_draws_each_frame_while_a_slide_runs() {
+            let main = include_str!("main.rs");
+            assert!(main.contains("deck_animating()"));
+            assert!(main.contains("profile_deck_ui::FRAME"));
+        }
+
+        fn screen_text(app: &mut App, width: u16, height: u16) -> String {
+            use ratatui::backend::TestBackend;
+            use ratatui::Terminal;
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let mut text = String::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    text.push_str(buffer.get(x, y).symbol());
+                }
+                text.push('\n');
+            }
+            text
+        }
+
+        /// The report of the bug: a click on the card chose the profile, and the list
+        /// of changes came up as the plain text popup, so the deck disappeared. It
+        /// has to stay the deck, with the list inside it.
+        #[tokio::test]
+        async fn a_click_keeps_the_deck_and_shows_the_changes_inside_it() {
+            for target in ["card", "choose"] {
+                let install = Install::new(&format!("confirm-style-{target}"));
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                app.deck_zones = None;
+                // One draw, so the zones are those of the real screen.
+                screen_text(&mut app, 100, 34);
+                let zones = app.deck_zones.clone().unwrap();
+
+                let (x, y) = centre(if target == "card" { zones.card } else { zones.choose });
+                click(&mut app, x, y).await;
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{target}");
+                assert!(app.deck_confirm.is_some(), "{target}");
+                let text = screen_text(&mut app, 100, 34);
+
+                assert!(text.contains("SELECT YOUR RIG"), "{target}: the deck is gone\n{text}");
+                assert!(text.contains("JACK IN · "), "{target}\n{text}");
+                assert!(text.contains(crate::profile_deck_ui::APPLY_LABEL), "{target}");
+                assert!(text.contains(crate::profile_deck_ui::BACK_LABEL), "{target}");
+                assert!(text.contains("client.ACCEPT_NEW_DEPOSITS"), "{target}\n{text}");
+                assert!(!text.contains("(y/N)"), "{target}: the plain popup came back");
+            }
+        }
+
+        /// The same on the keyboard: Enter and a click lead to one screen.
+        #[tokio::test]
+        async fn enter_shows_the_same_confirmation() {
+            let install = Install::new("confirm-enter");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+
+            send(&mut app, KeyCode::Enter).await;
+            let text = screen_text(&mut app, 100, 34);
+
+            assert!(text.contains("JACK IN · "), "{text}");
+            assert!(!text.contains("(y/N)"));
+        }
+
+        /// A terminal too small for the deck has the plain list, and so the plain
+        /// confirmation: the deck cannot be drawn there.
+        #[tokio::test]
+        async fn a_small_terminal_keeps_the_plain_confirmation() {
+            let install = Install::new("confirm-small");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+
+            let text = screen_text(&mut app, 70, 20);
+
+            assert!(app.deck_confirm_zones.is_none());
+            assert!(text.contains("(y/N)"), "{text}");
+            assert!(!text.contains("JACK IN · "));
+        }
+
+        /// Every other confirmation is untouched.
+        #[test]
+        fn another_confirmation_is_still_the_plain_popup() {
+            let install = Install::new("confirm-other");
+            let mut app = deck_app(&install);
+            app.input_mode = InputMode::Normal;
+            app.confirm_writes(
+                "Lever".to_string(),
+                vec![("ui.THEME".to_string(), "x".to_string())],
+                Vec::new(),
+                None,
+                None,
+            );
+
+            let text = screen_text(&mut app, 100, 34);
+
+            assert!(app.deck_confirm.is_none());
+            assert!(text.contains("(y/N)"), "{text}");
+            assert!(!text.contains("SELECT YOUR RIG"));
+        }
+
+        #[tokio::test]
+        async fn refusing_goes_back_to_the_same_card_in_the_deck() {
+            for key in [KeyCode::Char('n'), KeyCode::Esc] {
+                let install = Install::new("confirm-back-key");
+                let mut app = deck_app(&install);
+                app.config_document = None;
+                send(&mut app, KeyCode::Char('4')).await;
+                send(&mut app, KeyCode::Enter).await;
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+
+                send(&mut app, key).await;
+
+                assert_eq!(app.input_mode, InputMode::PickProfile, "{key:?}");
+                assert_eq!(app.cell.profile, 3, "{key:?}: the same card");
+                assert!(app.deck_confirm.is_none());
+                assert!(app.pending_action.is_none(), "nothing is left to apply");
+                assert!(app.details.is_none());
+                assert!(app.running);
+                let text = screen_text(&mut app, 100, 34);
+                assert!(text.contains("SELECT YOUR RIG"), "{key:?}");
+            }
+        }
+
+        /// The marker was written when the profile was chosen, so going back and then
+        /// leaving with Esc is an ordinary close: no second marker, no write.
+        #[tokio::test]
+        async fn leaving_after_going_back_changes_nothing() {
+            let install = Install::new("confirm-back-leave");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+            send(&mut app, KeyCode::Char('n')).await;
+
+            send(&mut app, KeyCode::Esc).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.paths.profile_marker().exists());
+        }
+
+        #[tokio::test]
+        async fn the_back_button_goes_back_and_the_buttons_have_zones() {
+            let install = Install::new("confirm-back-click");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Char('2')).await;
+            send(&mut app, KeyCode::Enter).await;
+            screen_text(&mut app, 100, 34);
+            let zones = app.deck_confirm_zones.clone().expect("zones after a draw");
+
+            // A click on the text of the changes does nothing.
+            click(&mut app, zones.body.x, zones.body.y).await;
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+
+            let (x, y) = centre(zones.back);
+            click(&mut app, x, y).await;
+
+            assert_eq!(app.input_mode, InputMode::PickProfile);
+            assert_eq!(app.cell.profile, 1);
+        }
+
+        #[tokio::test]
+        async fn the_wheel_scrolls_the_changes() {
+            use crossterm::event::MouseEventKind::{ScrollDown, ScrollUp};
+            let install = Install::new("confirm-wheel");
+            let mut app = deck_app(&install);
+            app.config_document = None;
+            send(&mut app, KeyCode::Enter).await;
+            screen_text(&mut app, 100, 34);
+
+            wheel(&mut app, ScrollDown).await;
+            wheel(&mut app, ScrollDown).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 2);
+            wheel(&mut app, ScrollUp).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 1);
+            assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+        }
+
+        /// Leaving through any other way forgets the confirmation, so a stale index
+        /// can never turn a later plain confirmation into a deck one.
+        #[test]
+        fn closing_forgets_the_confirmation() {
+            let install = Install::new("confirm-forget");
+            let mut app = deck_app(&install);
+            app.deck_confirm = Some(2);
+            app.close_input();
+            assert!(app.deck_confirm.is_none());
+
+            app.deck_confirm = Some(2);
+            app.close_details();
+            assert!(app.deck_confirm.is_none());
+        }
+
+        /// The gate is applied in `main.rs`, after the KyA gate. Read off the source
+        /// like `main_asks_the_kya_before_it_draws_anything`.
+        #[test]
+        fn main_raises_the_profile_gate_after_the_kya_gate() {
+            let main = include_str!("main.rs");
+            let kya = main.find("with_kya_gate()").unwrap();
+            let profile = main
+                .find("with_profile_gate()")
+                .expect("main.rs must build its App behind the profile gate");
+            assert!(kya < profile, "the KyA gate must come first");
         }
     }
 

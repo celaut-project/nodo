@@ -84,9 +84,19 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         output={1: celaut_pb2.Peer},
         auth="client",
     ),
+    "ListPeers": GatewayRpc(
+        input={1: celaut_pb2.Client},
+        output={1: celaut_pb2.Peer},
+        auth="client",
+    ),
     "ResolveNetwork": GatewayRpc(
         input={1: celaut_pb2.Service.Network, 2: celaut_pb2.Client},
         output={1: celaut_pb2.ConfigurationFile.NetworkResolution},
+        auth="client",
+    ),
+    "LocateShare": GatewayRpc(
+        input={1: celaut_pb2.ShareLocationRequest, 2: celaut_pb2.Client},
+        output={1: celaut_pb2.ShareLocation},
         auth="client",
     ),
     "IntroducePeer": GatewayRpc(

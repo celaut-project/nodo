@@ -31,6 +31,7 @@ from src.utils import logger as log
 from src.virtualizers.microvm import paths
 from src.virtualizers.microvm.guest_panic import guest_panic_line
 from src.virtualizers.microvm.hypervisor import Hypervisor
+from src.utils import dead_instances
 from src.virtualizers.microvm.kill import kill as kill_vm
 from src.virtualizers.microvm.members import member
 from src.virtualizers.microvm.process import pid_alive
@@ -122,10 +123,10 @@ def maintain(
         # for a process no liveness test will flag again. A double kill is
         # harmless; a missed one pins the resources for good.
         try:
-            kill_vm(hypervisor, vmachine_id=vmachine_id)
+            kill_vm(hypervisor, vmachine_id=vmachine_id, archive=True)
         except Exception as e:
             log.LOGGER(hypervisor.log(vmachine_id, f"event=maintain panic_kill_failed error={e}"))
-        remove_and_penalize(vmachine_id=vmachine_id)
+        remove_and_penalize(vmachine_id=vmachine_id, reason=dead_instances.GUEST_PANIC)
         return
 
     if debug_mode:
@@ -435,7 +436,7 @@ def _tear_down_runtime(entry: PruneEntry) -> Tuple[Optional[Hypervisor], Optiona
             # the virtualizer interface, which imports this family.
             from src.manager.manager import stop_instance
 
-            stop_instance(token=entry.vmachine_id)
+            stop_instance(token=entry.vmachine_id, reason=dead_instances.PROCESS_LOST)
             # Checked rather than assumed: `stop_instance` swallows a failed
             # purge and returns None, and reporting a stop that left the row
             # alive as done is how a balance nobody is spending goes

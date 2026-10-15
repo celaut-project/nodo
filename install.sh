@@ -5,15 +5,25 @@ if [ -z "${BASH_VERSION:-}" ]; then
   exit 1
 fi
 
-# Check if the script is running with root privileges
-if [ "$(id -u)" -ne 0 ]; then
-  printf "Error: This script needs to be run with sudo.\nPlease run: sudo $0\n" >&2
-  exit 1
+# Without sudo, the install does everything that does not need root itself, and
+# collects the rest as exact commands (bash/lib_privileged.sh): it prints them,
+# saves them, and asks before it runs them with sudo. The daemon then runs as the
+# installing user, with CAP_NET_ADMIN only (bash/nodo-nosudo.service.template).
+if [ "$(id -u)" -eq 0 ]; then
+  UNPRIVILEGED=false
+else
+  UNPRIVILEGED=true
+  # Debian leaves the sbin directories out of an ordinary user's PATH, and
+  # iptables, debugfs and mkfs.ext4 live there: without them the checks below
+  # would ask for packages the host already has.
+  PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
+  export PATH
 fi
 
 # Defaults
 REPO_URL="https://github.com/celaut-project/nodo.git"
-TARGET_DIR="/nodo"
+TARGET_DIR=""
+INTERACTIVE=true
 SERVICE_FILE="/etc/systemd/system/nodo.service"
 MAX_RETRIES=3
 USE_LOCAL_SOURCE=false
@@ -23,16 +33,30 @@ CH_VERSION="v51.1"
 # Guest kernel + busybox published by .github/workflows/guest-kernel.yml; bumped independently
 # of nodo releases so a kernel fix does not require cutting a node release.
 GUEST_KERNEL_VERSION="guest-kernel"
+SERVICE_USER=""
 
 print_usage() {
   cat <<EOF
-Usage: sudo ./install.sh [options]
+Usage: ./install.sh [options]        install as you; asks for the root steps
+       sudo ./install.sh [options]   install as root (the daemon runs as root)
+
+Without sudo, everything that does not need root is done as you, and the steps
+that do (missing packages, the systemd unit) are printed as exact commands,
+saved to <target-dir>/install-privileged.sh, and run with sudo only if you say
+so. The daemon then runs as you, with CAP_NET_ADMIN only.
 
 Options:
   --source-dir <path>  Use an existing local source directory instead of cloning.
-  --target-dir <path>  Install/clone into this directory (default: /nodo).
+  --target-dir <path>  Install/clone into this directory (default: /nodo with
+                       sudo, ~/.local/share/nodo without).
   --repo-url <url>     Repository URL for clone/pull.
   --branch <name>      Git branch for clone/pull (default: stable).
+  --service-user <name>
+                       Run the daemon as this system user, with CAP_NET_ADMIN
+                       only, instead of root (created if missing). Opt-in; see
+                       docs/ROOTLESS.md. Needs sudo. 'nodo update' keeps it;
+                       --service-user root goes back to a root daemon.
+  --no-input           Without sudo: print the root steps, do not offer to run them.
   -h, --help           Show this help message.
 EOF
 }
@@ -73,6 +97,18 @@ while [ $# -gt 0 ]; do
       BRANCH_EXPLICIT=true
       shift 2
       ;;
+    --service-user)
+      if [ -z "$2" ]; then
+        printf "Error: --service-user requires a user name.\n" >&2
+        exit 1
+      fi
+      SERVICE_USER="$2"
+      shift 2
+      ;;
+    --no-input)
+      INTERACTIVE=false
+      shift
+      ;;
     -h|--help)
       print_usage
       exit 0
@@ -84,6 +120,19 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+if [ -z "$TARGET_DIR" ]; then
+  if [ "$UNPRIVILEGED" = true ]; then
+    TARGET_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nodo"
+  else
+    TARGET_DIR="/nodo"
+  fi
+fi
+
+if [ "$UNPRIVILEGED" = true ] && [ -n "$SERVICE_USER" ] && [ "$SERVICE_USER" != "$(id -un)" ]; then
+  printf "Error: --service-user creates a system user and needs sudo. Without sudo the daemon runs as you (%s).\n" "$(id -un)" >&2
+  exit 1
+fi
 
 # Make TARGET_DIR absolute unconditionally, before the directory necessarily
 # exists (so this can't rely on `cd`+`pwd`). setup_linux_arm.sh/setup_linux_x86.sh
@@ -106,6 +155,27 @@ fi
 
 # Function to install git if it's not already installed
 install_git_if_needed() {
+  # Before the checkout, so bash/lib_privileged.sh is not there yet: the one
+  # command is asked for here.
+  if ! command -v git >/dev/null 2>&1 && [ "$UNPRIVILEGED" = true ]; then
+    local command=""
+    if command -v apt-get >/dev/null 2>&1; then
+      command="sudo apt-get update && sudo apt-get install -y git"
+    elif command -v dnf >/dev/null 2>&1; then
+      command="sudo dnf install -y git"
+    fi
+    printf "Git is not installed, and installing it needs root:\n\n  %s\n\n" "${command:-<install git with your package manager>}"
+    if [ -n "$command" ] && [ "$INTERACTIVE" = true ] && { : < /dev/tty; } 2>/dev/null; then
+      printf "Run it now with sudo? [y/N] "
+      local answer=""
+      read -r answer < /dev/tty || true
+      case "$answer" in
+        y|Y|yes|s|S|si|sí) bash -c "$command" < /dev/tty && return 0 ;;
+      esac
+    fi
+    printf "Install git, then run this installer again.\n" >&2
+    exit 1
+  fi
   if ! command -v git >/dev/null 2>&1; then
     printf "Git is not installed. Attempting to install git...\n"
     if [ -x "$(command -v apt)" ]; then
@@ -140,7 +210,7 @@ clone_repo() {
 }
 
 escape_for_sed() {
-  printf '%s' "$1" | sed 's/[&|]/\\&/g'
+  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
 sync_config_main_paths() {
@@ -242,8 +312,12 @@ fi
 if [ ! -f "$TARGET_DIR/config.yaml" ]; then
   printf "Creating configuration file $TARGET_DIR/config.yaml...\n"
   cp "$TARGET_DIR/config.example.yaml" "$TARGET_DIR/config.yaml"
-  chmod a+w "$TARGET_DIR/config.yaml"
 fi
+# config.yaml holds the wallet mnemonics and names the binaries the root daemon runs,
+# so only its owner (the installing user, after the chown below) and its group may
+# read or write it. Also tightens an install made when it was world-writable.
+chmod 0660 "$TARGET_DIR/config.yaml"
+chmod o-rwx "$TARGET_DIR"/config-*.yaml 2>/dev/null || true
 
 # Keep paths aligned with TARGET_DIR, including local-source installs.
 sync_config_main_paths
@@ -258,6 +332,80 @@ case "$(uname -m)" in
     ;;
 esac
 
+# resolve_admin_group() lives in bash/lib_pkg.sh so that install.sh and the setup
+# scripts cannot disagree about it -- they both render nodo.service.template, and
+# when only two of the three renderers knew about {{ADMIN_GROUP}} the third shipped
+# a unit systemd could not load. Sourced here rather than at the top of the file:
+# the repo only exists under TARGET_DIR after the checkout above.
+# shellcheck source=bash/lib_pkg.sh
+. "$TARGET_DIR/bash/lib_pkg.sh"
+# shellcheck source=bash/lib_privileged.sh
+. "$TARGET_DIR/bash/lib_privileged.sh"
+
+if [ "$UNPRIVILEGED" = true ]; then
+  SCRIPT_USER="$(id -un)"
+else
+  SCRIPT_USER="${SUDO_USER:-}"
+  if [ -z "$SCRIPT_USER" ]; then
+    SCRIPT_USER="$(logname 2>/dev/null || echo root)"
+  fi
+fi
+
+# Who the daemon runs as. --service-user names it (root: back to a root daemon).
+# Without the flag, as on 'nodo update', the node keeps what it has, read from
+# root's own record (bash/lib_privileged.sh) and never from config.yaml, which
+# that user can write.
+if [ "$UNPRIVILEGED" = true ]; then
+  # Without sudo there is no other user to run it as.
+  SERVICE_USER="$SCRIPT_USER"
+elif [ -z "$SERVICE_USER" ]; then
+  SERVICE_USER="$(installed_service_user "$SERVICE_FILE")" || exit 1
+elif [ "$SERVICE_USER" = root ]; then
+  SERVICE_USER=""
+fi
+# From here on, steps run as root and read config.yaml.
+if [ "$UNPRIVILEGED" != true ] && [ -n "$SERVICE_USER" ]; then
+  trap 'give_config_back "$TARGET_DIR" "$SERVICE_USER"' EXIT
+  take_config_from_service_user "$TARGET_DIR" "$SERVICE_USER" "$SCRIPT_USER"
+fi
+
+PRIVILEGED_SCRIPT="$TARGET_DIR/install-privileged.sh"
+if [ "$UNPRIVILEGED" = true ]; then
+  NODO_PRIV_FILE="$(mktemp)"
+  export NODO_PRIV_FILE NODO_UNPRIVILEGED=1
+  trap 'rm -f "$NODO_PRIV_FILE"' EXIT
+
+  # What the setup script needs from the host before it can run: the packages
+  # that are missing, and nothing else. A host that has them all is asked nothing.
+  detect_pkg_mgr
+  read -r -a missing_packages <<< "$(missing_host_packages)"
+  command -v newuidmap >/dev/null 2>&1 && command -v newgidmap >/dev/null 2>&1 \
+    || case "$PKG_MGR" in dnf) missing_packages+=(shadow-utils) ;; *) missing_packages+=(uidmap) ;; esac
+  command -v mksquashfs >/dev/null 2>&1 || missing_packages+=(squashfs-tools)
+  if [ "${#missing_packages[@]}" -gt 0 ]; then
+    priv_record "Host packages nodo needs: ${missing_packages[*]}" \
+      "$(pkg_install_command "${missing_packages[@]}")"
+  fi
+  if [ "$PKG_MGR" = apt ] && ! host_alias_present locale; then
+    priv_record "A UTF-8 locale (en_US.UTF-8)" "sudo locale-gen en_US.UTF-8"
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    printf "Error: systemctl was not found. nodo runs as a systemd service; install systemd first.\n" >&2
+    exit 1
+  fi
+
+  priv_offer "Before it can continue, the installer needs these steps, which need root:" \
+    "$INTERACTIVE" "$PRIVILEGED_SCRIPT"
+  case $? in
+    0) ;;
+    *)
+      printf "\nRun those commands, then run the same install command again (without sudo).\n" >&2
+      printf "The 'nodo' command is not installed until that second run is done.\n" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 printf "Running setup script $SETUP_SCRIPT...\n"
 if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION" "$GUEST_KERNEL_VERSION"; then
   printf "Error: The setup script %s failed to execute.\nPlease try running it at least once more. If the issue persists, contact the developers.\n" "$SETUP_SCRIPT" >&2
@@ -266,11 +414,6 @@ fi
 
 # No local Docker setup: nodo runs services under Cloud Hypervisor and delegates
 # packing to the external packer-service. Docker is never installed on this host.
-
-SCRIPT_USER="${SUDO_USER:-}"
-if [ -z "$SCRIPT_USER" ]; then
-  SCRIPT_USER="$(logname 2>/dev/null || echo root)"
-fi
 
 expand_main_dir_placeholder() {
   printf '%s' "$1" | sed "s|\${main.MAIN_DIR}|$TARGET_DIR|g"
@@ -310,19 +453,11 @@ install_java_if_needed() {
 
   printf "Java not found at %s. Installing it (provisional, until the Ergo service is ready)...\n" "$JAVA_HOME_PATH"
   if ! /bin/bash "$TARGET_DIR/bash/install_java.sh" "$TARGET_DIR"; then
-    printf "Warning: Java installation failed. Retry with: sudo /bin/bash %s/bash/install_java.sh %s\n" "$TARGET_DIR" "$TARGET_DIR" >&2
+    printf "Warning: Java installation failed. Retry with: /bin/bash %s/bash/install_java.sh %s\n" "$TARGET_DIR" "$TARGET_DIR" >&2
   fi
 }
 
 install_java_if_needed
-
-# resolve_admin_group() lives in bash/lib_pkg.sh so that install.sh and the setup
-# scripts cannot disagree about it -- they both render nodo.service.template, and
-# when only two of the three renderers knew about {{ADMIN_GROUP}} the third shipped
-# a unit systemd could not load. Sourced here rather than at the top of the file:
-# the repo only exists under TARGET_DIR after the checkout above.
-# shellcheck source=bash/lib_pkg.sh
-. "$TARGET_DIR/bash/lib_pkg.sh"
 
 ADMIN_GROUP="$(resolve_admin_group)"
 
@@ -332,6 +467,11 @@ create_service_file() {
   local escaped_java_home
   local escaped_python_runtime_bin_dir
   local escaped_python_venv_bin
+  require_unit_paths "the install directory=$TARGET_DIR" \
+    "dependencies.java.JAVA_HOME=$JAVA_HOME_PATH" \
+    "dependencies.python.RUNTIME_BIN=$PYTHON_RUNTIME_BIN_DIR_PATH" \
+    "dependencies.python.VENV_BIN=$PYTHON_VENV_BIN_PATH"
+  require_user_name "the admin group" "$ADMIN_GROUP"
   expected_file="$(mktemp)"
   escaped_target="$(escape_for_sed "$TARGET_DIR")"
   escaped_java_home="$(escape_for_sed "$JAVA_HOME_PATH")"
@@ -379,10 +519,108 @@ create_service_file() {
   printf "Systemd daemon reloaded and nodo service started/enabled.\n"
 }
 
-create_service_file
+# The install without sudo: the daemon runs as the installing user. Everything
+# under TARGET_DIR is already theirs, so what is left is what only root can do,
+# and each step is asked for only when it is not done already. Each path in a
+# recorded command is quoted with printf %q: the steps run through bash -c, and
+# a home can hold a space.
+prepare_unprivileged_service() {
+  local yq_bin="$TARGET_DIR/bin/yq"
+  local config_file="$TARGET_DIR/config.yaml"
+  local staging="$TARGET_DIR/storage/install"
+  local unit="$staging/nodo.service"
+  local start
+
+  "$yq_bin" -i '.virtualizers.ch.CGROUPS_BASE_DIR = "/sys/fs/cgroup/system.slice/nodo.service"' "$config_file"
+  "$yq_bin" -i '.virtualizers.ch.API_SOCKET_DIR = "/run/nodo/ch"' "$config_file"
+
+  getent group kvm >/dev/null 2>&1 \
+    || printf "Warning: group kvm does not exist; KVM is not set up on this host, and the unit cannot start.\n" >&2
+
+  # virtiofsd's namespace sandbox maps the user's subordinate ids.
+  if ! has_subids "$SCRIPT_USER"; then
+    start="$(next_free_subid_start /etc/subuid)"
+    local gstart
+    gstart="$(next_free_subid_start /etc/subgid)"
+    priv_record "Subordinate ids for $SCRIPT_USER (virtiofsd's sandbox and the local packer)" \
+      "sudo usermod --add-subuids $start-$((start + 65535)) --add-subgids $gstart-$((gstart + 65535)) $(printf '%q' "$SCRIPT_USER")"
+  fi
+
+  mkdir -p "$staging"
+
+  # Where 'sudo nodo update' and 'sudo nodo doctor' learn who the daemon runs as.
+  if [ "$(cat "$NODO_SERVICE_USER_RECORD" 2>/dev/null)" != "$SCRIPT_USER" ]; then
+    printf '%s' "$SCRIPT_USER" > "$staging/service-user"
+    priv_record "Record, in a file only root can write, that nodo runs as $SCRIPT_USER" \
+      "sudo install -D -o root -g root -m 0644 $(printf '%q' "$staging/service-user") $(printf '%q' "$NODO_SERVICE_USER_RECORD")"
+  fi
+
+  # Ubuntu 23.10+: a root-owned copy of virtiofsd, and the profile that lets that
+  # copy (and nothing else) create a user namespace. See bash/lib_privileged.sh.
+  if apparmor_restricts_userns && [ -x "$TARGET_DIR/bin/virtiofsd" ]; then
+    if command -v apparmor_parser >/dev/null 2>&1; then
+      if ! cmp -s "$TARGET_DIR/bin/virtiofsd" "$NODO_VIRTIOFSD_SYSTEM_PATH"; then
+        priv_record "A root-owned copy of virtiofsd, the one binary the AppArmor profile below lets create a user namespace" \
+          "sudo install -D -o root -g root -m 0755 $(printf '%q' "$TARGET_DIR/bin/virtiofsd") $(printf '%q' "$NODO_VIRTIOFSD_SYSTEM_PATH")"
+      fi
+      render_virtiofsd_apparmor_profile > "$staging/nodo-virtiofsd.apparmor"
+      if ! cmp -s "$staging/nodo-virtiofsd.apparmor" "$NODO_VIRTIOFSD_APPARMOR_PROFILE"; then
+        priv_record "The AppArmor profile for that copy (this host restricts unprivileged user namespaces)" \
+          "sudo install -m 0644 $(printf '%q' "$staging/nodo-virtiofsd.apparmor") $(printf '%q' "$NODO_VIRTIOFSD_APPARMOR_PROFILE") && sudo apparmor_parser -r $(printf '%q' "$NODO_VIRTIOFSD_APPARMOR_PROFILE")"
+      fi
+      VIRTIOFSD_PATH="$NODO_VIRTIOFSD_SYSTEM_PATH" "$yq_bin" -i \
+        '.virtualizers.ch.VIRTIOFSD_BINARY = strenv(VIRTIOFSD_PATH)' "$config_file"
+    else
+      printf "Warning: this host restricts unprivileged user namespaces and apparmor_parser was not found: services with shared directories will not start.\n" >&2
+    fi
+  fi
+
+  require_unit_paths "the install directory=$TARGET_DIR" \
+    "dependencies.java.JAVA_HOME=$JAVA_HOME_PATH" \
+    "dependencies.python.RUNTIME_BIN=$PYTHON_RUNTIME_BIN_DIR_PATH" \
+    "dependencies.python.VENV_BIN=$PYTHON_VENV_BIN_PATH"
+  require_user_name "your user name" "$SCRIPT_USER"
+  require_user_name "your primary group" "$(id -gn)"
+  sed \
+    -e "s|{{MAIN_DIR}}|$(escape_for_sed "$TARGET_DIR")|g" \
+    -e "s|{{JAVA_HOME}}|$(escape_for_sed "$JAVA_HOME_PATH")|g" \
+    -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$(escape_for_sed "$PYTHON_RUNTIME_BIN_DIR_PATH")|g" \
+    -e "s|{{PYTHON_VENV_BIN}}|$(escape_for_sed "$PYTHON_VENV_BIN_PATH")|g" \
+    -e "s|{{SERVICE_USER}}|$SCRIPT_USER|g" \
+    -e "s|{{SERVICE_GROUP}}|$(id -gn)|g" \
+    -e "s|{{RUNTIME_DIR_NAME}}|nodo|g" \
+    "$TARGET_DIR/bash/nodo-nosudo.service.template" > "$unit"
+  if grep -q '{{[A-Z_][A-Z_]*}}' "$unit"; then
+    printf "Error: Unresolved placeholders remain in generated service file:\n" >&2
+    grep -o '{{[A-Z_][A-Z_]*}}' "$unit" | sort -u >&2
+    exit 1
+  fi
+  if ! cmp -s "$unit" "$SERVICE_FILE"; then
+    priv_record "The systemd unit: runs nodo as $SCRIPT_USER with CAP_NET_ADMIN only, and starts it at boot" \
+      "sudo install -m 0644 $(printf '%q' "$unit") $(printf '%q' "$SERVICE_FILE") && sudo systemctl daemon-reload && sudo systemctl enable nodo.service"
+  fi
+  # Last, so the node starts on everything above, and on the code just installed.
+  if systemctl is-active --quiet nodo.service 2>/dev/null; then
+    warn_restart_stops_vms "$SCRIPT_USER"
+  fi
+  priv_record "Restart nodo on the new code (this stops every VM it runs)" "sudo systemctl restart nodo.service"
+}
+
+# A --service-user install gets its unit from bash/setup_service_user.sh instead,
+# after the chown below: that chown would otherwise take the storage tree back.
+if [ "$UNPRIVILEGED" = true ]; then
+  prepare_unprivileged_service
+elif [ -z "$SERVICE_USER" ]; then
+  write_service_user_record ""
+  create_service_file
+fi
 
 create_wrapper_script() {
   WRAPPER_SCRIPT="/usr/local/bin/nodo"
+  if [ "$UNPRIVILEGED" = true ]; then
+    WRAPPER_SCRIPT="$HOME/.local/bin/nodo"
+    mkdir -p "$(dirname "$WRAPPER_SCRIPT")"
+  fi
 
   # Check if the wrapper script already exists and remove it
   if [ -f "$WRAPPER_SCRIPT" ]; then
@@ -414,6 +652,13 @@ EOF
   chmod +x "$WRAPPER_SCRIPT"
 
   printf "Wrapper script %s created.\n" "$WRAPPER_SCRIPT"
+  case ":$PATH:" in
+    *":$(dirname "$WRAPPER_SCRIPT"):"*) ;;
+    *)
+      printf "Note: %s is not in your PATH, so the shell does not find the 'nodo' command yet.\n" "$(dirname "$WRAPPER_SCRIPT")"
+      printf "Open a new login session, or run this now and add it to ~/.profile:\n  export PATH=\"%s:\$PATH\"\n" "$(dirname "$WRAPPER_SCRIPT")"
+      ;;
+  esac
 }
 
 create_wrapper_script
@@ -422,9 +667,13 @@ install_shell_completion() {
   # Install bash/zsh tab-completion for commands and service/instance/peer ids.
   # Invoke the helper directly (not via the nodo wrapper) so this never triggers
   # nodo's heavy import graph or the KYA prompt during install.
+  # Without root, completion.py installs into the user's own completion dirs.
+  local scope="--system"
+  [ "$UNPRIVILEGED" != true ] || scope=""
   printf "Installing shell completion...\n"
+  # shellcheck disable=SC2086
   NODO_COMPLETION_DIR="$TARGET_DIR" NODO_COMPLETION_PY="$PYTHON_VENV_BIN_PATH" \
-    "$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/completion.py" install --system \
+    "$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/completion.py" install $scope \
     || printf "Shell completion install skipped (non-fatal).\n"
 }
 
@@ -480,11 +729,47 @@ assign_gateway_port() {
     || printf "Gateway port not assigned; 'sudo nodo serve' will report why.\n"
 }
 
+if [ "$UNPRIVILEGED" = true ]; then
+  # Opening the port needs CAP_NET_ADMIN, which the daemon has and this shell
+  # does not: the node assigns it when the unit starts it.
+  GATEWAY_NOTICE="$TARGET_DIR/.gateway_notice"
+  rm -f "$GATEWAY_NOTICE"
+  printf "\nnodo is installed in %s.\n" "$TARGET_DIR"
+  priv_offer "These last steps need root:" "$INTERACTIVE" "$PRIVILEGED_SCRIPT"
+  case $? in
+    0)
+      printf "\nnodo runs as %s with CAP_NET_ADMIN only. 'nodo doctor' checks the node; 'systemctl status nodo' shows the service.\n" "$SCRIPT_USER"
+      ;;
+    2)
+      printf "\nThe steps that did not run are in %s. Run it to finish: bash %s\n" "$PRIVILEGED_SCRIPT" "$PRIVILEGED_SCRIPT" >&2
+      exit 1
+      ;;
+    *)
+      if [ -s "$PRIVILEGED_SCRIPT" ]; then
+        printf "\nRun them to finish: bash %s\n" "$PRIVILEGED_SCRIPT"
+      fi
+      ;;
+  esac
+  exit 0
+fi
+
 assign_gateway_port
 
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 
+if [ -n "$SERVICE_USER" ]; then
+  /bin/bash "$TARGET_DIR/bash/setup_service_user.sh" \
+    --target-dir "$TARGET_DIR" --user "$SERVICE_USER" --operator "$SCRIPT_USER" \
+    --java-home "$JAVA_HOME_PATH" \
+    --python-runtime-bin-dir "$PYTHON_RUNTIME_BIN_DIR_PATH" \
+    --python-venv-bin "$PYTHON_VENV_BIN_PATH" || exit 1
+  systemctl enable nodo.service
+fi
+
 if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
+  if [ -n "$SERVICE_USER" ]; then
+    warn_restart_stops_vms "$SERVICE_USER"
+  fi
   printf "Restarting nodo.service...\n"
   systemctl restart nodo.service || systemctl start nodo.service
 else

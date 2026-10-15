@@ -66,6 +66,34 @@ pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<
                 app.click_env_form(mouse.column, mouse.row);
             }
         }
+        // The list of changes of a profile, in the deck: its two buttons and the wheel.
+        // Any other confirmation ignores the mouse, as it always did.
+        InputMode::ConfirmWrites if app.deck_confirm.is_some() => match mouse.kind {
+            MouseEventKind::ScrollUp => app.scroll_details(-1),
+            MouseEventKind::ScrollDown => app.scroll_details(1),
+            MouseEventKind::Down(MouseButton::Left) => {
+                match app.confirm_hit(Position::new(mouse.column, mouse.row)) {
+                    Some(crate::profile_deck_ui::ConfirmHit::Apply) => app.confirm_pending().await,
+                    Some(crate::profile_deck_ui::ConfirmHit::Back) => app.cancel_pending_writes(),
+                    None => {}
+                }
+            }
+            _ => {}
+        },
+        // The profile deck: the wheel turns the cards, a click acts on the part it is
+        // over. The page behind is not clickable.
+        InputMode::PickProfile => match mouse.kind {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollLeft => {
+                app.move_profile_selection(-1)
+            }
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollRight => {
+                app.move_profile_selection(1)
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                app.click_deck(Position::new(mouse.column, mouse.row))
+            }
+            _ => {}
+        },
         // The scrollable overlay is the one modal with anything to scroll.
         InputMode::Details => match mouse.kind {
             MouseEventKind::ScrollUp => app.scroll_details(-1),
@@ -229,13 +257,29 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             return Ok(());
         }
         // Profile picker: choose a posture, then see its diff.
+        //
+        // The deck and the plain list share these keys: the arrows of a card are
+        // left and right, the arrows of a list are up and down, and each works in
+        // both.
         InputMode::PickProfile => {
             match (key.modifiers, key.code) {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
-                (_, KeyCode::Up) => app.move_profile_selection(-1),
-                (_, KeyCode::Down) => app.move_profile_selection(1),
+                (_, KeyCode::Up | KeyCode::Left | KeyCode::BackTab | KeyCode::Char('h')) => {
+                    app.move_profile_selection(-1)
+                }
+                (_, KeyCode::Down | KeyCode::Right | KeyCode::Tab | KeyCode::Char('l')) => {
+                    app.move_profile_selection(1)
+                }
+                (_, KeyCode::Home) => app.select_profile(0),
+                (_, KeyCode::End) => {
+                    app.select_profile(crate::cell::profiles().len().saturating_sub(1))
+                }
+                // `1` is the first profile.
+                (_, KeyCode::Char(digit @ '1'..='9')) => {
+                    app.select_profile(digit as usize - '1' as usize)
+                }
                 (_, KeyCode::Enter) => app.submit_input().await,
-                (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_input(),
+                (_, KeyCode::Esc | KeyCode::Char('q' | 's')) => app.skip_profile_picker(),
                 _ => {}
             }
             return Ok(());
@@ -451,7 +495,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('r'))
             if matches!(
                 app.page(),
-                Page::Instances | Page::Tunnels | Page::Packs | Page::Clients | Page::Energy | Page::Logs
+                Page::Instances | Page::Tunnels | Page::Dead | Page::Packs | Page::Clients | Page::Energy | Page::Logs
             ) => {}
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
@@ -475,6 +519,14 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Tunnels => {
             app.open_tunnel_details()
         }
+        // Dead: read-only. `s` picks which saved log to read, the paging keys scroll it.
+        (KeyModifiers::NONE, KeyCode::Char('s')) if app.page() == Page::Dead => {
+            app.cycle_dead_stream()
+        }
+        (_, KeyCode::PageUp) if app.page() == Page::Dead => app.scroll_dead_log(10),
+        (_, KeyCode::PageDown) if app.page() == Page::Dead => app.scroll_dead_log(-10),
+        (_, KeyCode::Home) if app.page() == Page::Dead => app.scroll_dead_log(i64::MAX),
+        (_, KeyCode::End) if app.page() == Page::Dead => app.scroll_dead_log(i64::MIN),
         // Packs: `n` here (or `p` on SERVICES, where the result lands) packs a folder
         // or an https git URL in the background; `c` cancels, `i` shows the log. Every
         // action is the `nodo pack --detach` / `nodo pack_cancel` an operator would type.
@@ -492,6 +544,9 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('a')) if app.page() == Page::Peers => {
+            app.open_choose_peer_confirm()
         }
         (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(1)
@@ -593,6 +648,13 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Config => {
             app.open_delete_config_item_confirm()
+        }
+        // Staged values only: put one (u), or all (U), back to what config.yaml holds.
+        (KeyModifiers::NONE, KeyCode::Char('u')) if app.page() == Page::Config => {
+            app.reset_selected_config_entry()
+        }
+        (_, KeyCode::Char('U')) if app.page() == Page::Config => {
+            app.reset_all_staged_config()
         }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Services => {
             app.execute_selected_service()

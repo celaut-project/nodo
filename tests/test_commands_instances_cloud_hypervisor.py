@@ -43,7 +43,9 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     disk_space INTEGER,
                     serialized_instance BLOB,
                     service_id TEXT,
-                    virtualizer TEXT DEFAULT NULL
+                    virtualizer TEXT DEFAULT NULL,
+                    killed_at DATETIME DEFAULT NULL,
+                    death_reason TEXT DEFAULT NULL
                 )
                 """
             )
@@ -56,7 +58,9 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     peer_id TEXT,
                     father_id TEXT,
                     serialized_instance BLOB,
-                    service_id TEXT
+                    service_id TEXT,
+                    killed_at DATETIME DEFAULT NULL,
+                    death_reason TEXT DEFAULT NULL
                 )
                 """
             )

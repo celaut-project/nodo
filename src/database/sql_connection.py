@@ -89,7 +89,12 @@ TRACEABILITY_COLUMNS = {
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
     # upgraded in place would raise "no such column: local_client_id" on the first
     # Chat message a peer sends that names its client_id (see gateway.Chat).
-    "peer": {"local_client_id": "TEXT DEFAULT NULL"},
+    "peer": {
+        "local_client_id": "TEXT DEFAULT NULL",
+        # Read by every automatic-refill tick (issue #427), so it cannot wait for
+        # `nodo migrate` either.
+        "learned_via_gossip": "INTEGER NOT NULL DEFAULT 0",
+    },
     # A node that already deployed peer_chat_messages before conversations existed
     # has the table but not this column -- an ADD COLUMN, not ensure_tables, for the
     # same reason as `peer.local_client_id` above.
@@ -589,7 +594,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             self._execute(
-                "UPDATE local_instances SET serialized_instance = ? WHERE id = ?",
+                "UPDATE local_instances SET serialized_instance = ? WHERE id = ? AND killed_at IS NULL",
                 (serialized_instance, id),
             )
             return True
@@ -610,7 +615,7 @@ class SQLConnection(metaclass=Singleton):
             Optional[str]: The JSON-encoded env map, or ``None``.
         """
         cursor = self._execute('''
-            SELECT envs FROM local_instances WHERE id = ?
+            SELECT envs FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result and result[0] is not None else None
@@ -659,7 +664,7 @@ class SQLConnection(metaclass=Singleton):
         params.append(id)
         try:
             self._execute(
-                f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ?",
+                f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ? AND killed_at IS NULL",
                 tuple(params),
             )
             _local_capacity_changed()
@@ -680,7 +685,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT father_id
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else ""
@@ -698,7 +703,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT serialized_instance
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else None
@@ -716,7 +721,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT ip
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         result = cursor.fetchone()
         return result[0] if result else None
@@ -725,7 +730,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT name
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         return row['name'] if row else None
@@ -749,7 +754,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -767,7 +772,7 @@ class SQLConnection(metaclass=Singleton):
             int: The balance_mu amount.
         """
         result = self._execute('''
-            SELECT balance_mu FROM local_instances WHERE id = ?
+            SELECT balance_mu FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -788,7 +793,7 @@ class SQLConnection(metaclass=Singleton):
             Exception: If no service is found for the given container ID.
         """
         result = self._execute('''
-            SELECT service_id FROM local_instances WHERE id = ?
+            SELECT service_id FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -806,7 +811,7 @@ class SQLConnection(metaclass=Singleton):
             Optional[str]: The associated virtualizer, or None if not found.
         """
         result = self._execute('''
-            SELECT virtualizer FROM local_instances WHERE id = ?
+            SELECT virtualizer FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         return row['virtualizer'] if row else None
@@ -819,7 +824,7 @@ class SQLConnection(metaclass=Singleton):
             List[str]: A list of ids.
         """
         result = self._execute('''
-            SELECT father_id, ip, id FROM local_instances
+            SELECT father_id, ip, id FROM local_instances WHERE killed_at IS NULL
         ''')
         return [row['id'] for row in result.fetchall()]
 
@@ -836,7 +841,7 @@ class SQLConnection(metaclass=Singleton):
         the PC as any other.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE killed_at IS NULL
         ''')
         return [dict(row) for row in result.fetchall()]
 
@@ -864,7 +869,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT COUNT(*)
             FROM local_instances
-            WHERE name = ?
+            WHERE name = ? AND killed_at IS NULL
         ''', (name,))
         return result.fetchone()[0] > 0
 
@@ -913,7 +918,7 @@ class SQLConnection(metaclass=Singleton):
         
         balance_mu = str(balance_mu)
         self._execute('''
-            UPDATE local_instances SET balance_mu = ? WHERE id = ?
+            UPDATE local_instances SET balance_mu = ? WHERE id = ? AND killed_at IS NULL
         ''', (balance_mu, id))
 
     def spend_instance_balance(self, id: str, amount_mu: int, allow_debt: bool) -> Optional[bool]:
@@ -934,7 +939,7 @@ class SQLConnection(metaclass=Singleton):
         with SQLConnection._lock:
             try:
                 cursor = SQLConnection._connection.cursor()
-                cursor.execute('SELECT balance_mu FROM local_instances WHERE id = ?', (id,))
+                cursor.execute('SELECT balance_mu FROM local_instances WHERE id = ? AND killed_at IS NULL', (id,))
                 row = cursor.fetchone()
                 if row is None:
                     return None
@@ -942,7 +947,7 @@ class SQLConnection(metaclass=Singleton):
                 if current < amount_mu and not allow_debt:
                     return False
                 cursor.execute(
-                    'UPDATE local_instances SET balance_mu = ? WHERE id = ?',
+                    'UPDATE local_instances SET balance_mu = ? WHERE id = ? AND killed_at IS NULL',
                     (str(current - amount_mu), id),
                 )
                 SQLConnection._connection.commit()
@@ -964,13 +969,13 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT COUNT(*)
             FROM local_instances
-            WHERE id = ?
+            WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         return result.fetchone()[0] > 0
 
     def get_local_instance_id_by_name(self, name: str) -> Optional[str]:
         result = self._execute('''
-            SELECT id FROM local_instances WHERE name = ?
+            SELECT id FROM local_instances WHERE name = ? AND killed_at IS NULL
         ''', (name,))
         row = result.fetchone()
         if row:
@@ -984,9 +989,74 @@ class SQLConnection(metaclass=Singleton):
             return resolved_by_name
         return None
 
+    def mark_local_killed(self, id: str, reason: str) -> bool:
+        """Mark a local instance as dead. Keep the row for the operator to read.
+
+        Return True if this call killed the instance. Return False if the row does
+        not exist or is already dead, so the call is safe to repeat.
+
+        The burn-rate rows and the in-memory window are removed here: they describe a
+        live instance only. The trigger on the table makes the dead row final.
+        """
+        cursor = self._execute('''
+            UPDATE local_instances
+            SET killed_at = CURRENT_TIMESTAMP, death_reason = ?
+            WHERE id = ? AND killed_at IS NULL
+        ''', (reason, id))
+        killed = cursor.rowcount > 0
+        if killed:
+            _local_capacity_changed()
+        self._execute('DELETE FROM instance_consumption WHERE instance_id = ?', (id,))
+        self._execute('DELETE FROM instance_energy WHERE instance_id = ?', (id,))
+        with SQLConnection._consumption_lock:
+            SQLConnection._consumption_windows.pop(id, None)
+        return killed
+
+    def get_dead_local_instances(self) -> List[dict]:
+        """Return the dead local instances, the newest death first."""
+        result = self._execute('''
+            SELECT id, name, father_id, service_id, virtualizer, balance_mu,
+                   mem_limit, disk_space, cpu_period, cpu_quota,
+                   launched_at, killed_at, death_reason
+            FROM local_instances
+            WHERE killed_at IS NOT NULL
+            ORDER BY killed_at DESC, id
+        ''')
+        return [dict(row) for row in result.fetchall()]
+
+    def get_dead_local_instance_by_reference(self, reference: str) -> Optional[dict]:
+        """Find a dead local instance by id or by name. The newest death wins."""
+        result = self._execute('''
+            SELECT id, name, father_id, service_id, virtualizer, balance_mu,
+                   launched_at, killed_at, death_reason
+            FROM local_instances
+            WHERE killed_at IS NOT NULL AND (id = ? OR name = ?)
+            ORDER BY killed_at DESC
+            LIMIT 1
+        ''', (reference, reference))
+        row = result.fetchone()
+        return dict(row) if row else None
+
+    def prune_dead_local_instances(
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+    ) -> List[str]:
+        """Delete the old dead local instances. Return the ids that were deleted.
+
+        A dead row goes if it is older than ``max_age_days``, or if more than
+        ``max_rows`` dead rows exist (the oldest go first). A value of 0 or less
+        turns that limit off. With ``delete_all``, every dead row goes. With
+        ``dry_run``, nothing is deleted and the ids that would go are returned.
+        """
+        return self._prune_dead_rows(
+            'local_instances', 'id', max_age_days, max_rows, dry_run, delete_all
+        )
+
     def purge_internal(self, id: str):
         """
-        Purges an internal container
+        Delete the row of an internal container for good.
+
+        The normal stop path calls :meth:`mark_local_killed` instead, which keeps the
+        row. Only the retention sweep and a failed launch that never ran use this.
 
         Args:
             id (str): The id of the internal container.
@@ -1652,7 +1722,8 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error refreshing balance_mu for peer {peer_id}: {e}')
             return False
 
-    def add_peer(self, peer_id: str, advertisement: bytes) -> bool:
+    def add_peer(self, peer_id: str, advertisement: bytes,
+                 learned_via_gossip: bool = False) -> bool:
         """
         Adds a peer to the database.
 
@@ -1661,6 +1732,9 @@ class SQLConnection(metaclass=Singleton):
             advertisement (bytes): Serialized ``celaut.Peer`` holding what the peer
                 declares node-wide (payment contracts and rates). Its addresses are
                 stored separately, one ``uri`` row each.
+            learned_via_gossip (bool): The claim was relayed by a third party rather
+                than made by the peer to us or fetched by us from it; see
+                :meth:`peer_learned_via_gossip`.
 
         Returns:
             bool: True if the peer was successfully added, False otherwise.
@@ -1670,9 +1744,9 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, advertisement, remote_client_id, balance_mu)
-                    VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 balance_mu
-                ''', (peer_id, advertisement))
+                    INSERT INTO peer (id, advertisement, remote_client_id, balance_mu, learned_via_gossip)
+                    VALUES (?, ?, '', '0', ?)  -- Initialize with empty remote_client_id and 0 balance_mu
+                ''', (peer_id, advertisement, int(bool(learned_via_gossip))))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True
             except sqlite3.Error as e:
@@ -1959,6 +2033,24 @@ class SQLConnection(metaclass=Singleton):
         logger.LOGGER(f'Pruned {len(stale)} superseded URI(s) from peer {peer_id}.')
         return len(stale)
 
+    def peer_learned_via_gossip(self, peer_id: str) -> bool:
+        """Was ``peer_id`` registered from a third party's gossip, and not chosen since?
+
+        Issue #427. Minting a keypair is free, so a relayed claim is nobody's choice:
+        the automatic refill must not send it money until this node has dialled it
+        (``nodo connect``) or paid it by hand -- see :meth:`mark_peer_chosen`.
+        """
+        row = self._execute(
+            "SELECT learned_via_gossip FROM peer WHERE id = ?", (peer_id,)
+        ).fetchone()
+        return bool(row and row[0])
+
+    def mark_peer_chosen(self, peer_id: str) -> None:
+        """Clear :meth:`peer_learned_via_gossip`: this node has now chosen the peer."""
+        self._execute(
+            "UPDATE peer SET learned_via_gossip = 0 WHERE id = ?", (peer_id,)
+        )
+
     def get_peer_last_ts(self, peer_id: str) -> Optional[int]:
         """The ``ts`` of the last signed Peer message accepted from ``peer_id``.
 
@@ -2111,7 +2203,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT father_id
             FROM delegated_instances
-            WHERE token_delegation = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else ""
@@ -2129,7 +2221,7 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT serialized_instance
             FROM delegated_instances
-            WHERE token_delegation = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else None
@@ -2227,7 +2319,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT token_delegation, id, peer_id, father_id, serialized_instance,
                    balance_mu, peer_balance_mu
-            FROM delegated_instances
+            FROM delegated_instances WHERE killed_at IS NULL
         ''')
         return [
             {
@@ -2241,6 +2333,70 @@ class SQLConnection(metaclass=Singleton):
             }
             for row in result.fetchall()
         ]
+
+    def mark_delegated_killed(self, token: str, reason: str) -> bool:
+        """Mark a delegated instance as dead. Keep the row for the operator to read.
+
+        Return True if this call killed the instance, False if the row does not
+        exist or is already dead.
+        """
+        cursor = self._execute('''
+            UPDATE delegated_instances
+            SET killed_at = CURRENT_TIMESTAMP, death_reason = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
+        ''', (reason, token))
+        return cursor.rowcount > 0
+
+    def get_dead_delegated_instances(self) -> List[dict]:
+        """Return the dead delegated instances, the newest death first."""
+        result = self._execute('''
+            SELECT token_delegation, id, peer_id, father_id, service_id,
+                   balance_mu, peer_balance_mu, launched_at, killed_at, death_reason
+            FROM delegated_instances
+            WHERE killed_at IS NOT NULL
+            ORDER BY killed_at DESC, token_delegation
+        ''')
+        return [dict(row) for row in result.fetchall()]
+
+    def prune_dead_delegated_instances(
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+    ) -> List[str]:
+        """Delete the old dead delegated instances. Return the tokens deleted."""
+        return self._prune_dead_rows(
+            'delegated_instances', 'token_delegation', max_age_days, max_rows, dry_run, delete_all
+        )
+
+    def _prune_dead_rows(
+        self, table: str, key: str, max_age_days: int, max_rows: int,
+        dry_run: bool = False, delete_all: bool = False,
+    ) -> List[str]:
+        """Delete dead rows of ``table`` by age and by count. Return the deleted keys."""
+        doomed: List[str] = []
+        if delete_all:
+            result = self._execute(f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL")
+            doomed = [row[0] for row in result.fetchall()]
+            if not dry_run:
+                self._execute(f"DELETE FROM {table} WHERE killed_at IS NOT NULL")
+            return doomed
+        if max_age_days and max_age_days > 0:
+            result = self._execute(
+                f"SELECT {key} FROM {table} "
+                f"WHERE killed_at IS NOT NULL AND killed_at < datetime('now', ?)",
+                (f"-{int(max_age_days)} days",),
+            )
+            doomed.extend(row[0] for row in result.fetchall())
+        if max_rows and max_rows > 0:
+            result = self._execute(
+                f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL "
+                f"ORDER BY killed_at DESC, {key} LIMIT -1 OFFSET ?",
+                (int(max_rows),),
+            )
+            doomed.extend(row[0] for row in result.fetchall())
+        doomed = list(dict.fromkeys(doomed))
+        if not dry_run:
+            for key_value in doomed:
+                self._execute(f"DELETE FROM {table} WHERE {key} = ?", (key_value,))
+        return doomed
 
     def purgue_delegated(self, token: str):
         """
@@ -2600,7 +2756,7 @@ class SQLConnection(metaclass=Singleton):
             token (str): The token of the external container.
         """
         result = self._execute('''
-            SELECT balance_mu FROM delegated_instances WHERE token_delegation = ?
+            SELECT balance_mu FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         row = result.fetchone()
         return _as_int(row['balance_mu']) if row else 0
@@ -2613,7 +2769,7 @@ class SQLConnection(metaclass=Singleton):
             balance_mu (int): The new balance.
         """
         self._execute('''
-            UPDATE delegated_instances SET balance_mu = ? WHERE token_delegation = ?
+            UPDATE delegated_instances SET balance_mu = ? WHERE token_delegation = ? AND killed_at IS NULL
         ''', (str(int(balance_mu)), token))
 
     def update_delegated_deposit(self, token: str, balance_mu: int, peer_balance_mu: int):
@@ -2633,7 +2789,7 @@ class SQLConnection(metaclass=Singleton):
         """
         self._execute('''
             UPDATE delegated_instances SET balance_mu = ?, peer_balance_mu = ?
-            WHERE token_delegation = ?
+            WHERE token_delegation = ? AND killed_at IS NULL
         ''', (str(int(balance_mu)), str(int(peer_balance_mu)), token))
 
     def get_delegated_peer_balance(self, token: str) -> int:
@@ -2643,7 +2799,7 @@ class SQLConnection(metaclass=Singleton):
             token (str): The token of the external container.
         """
         result = self._execute('''
-            SELECT peer_balance_mu FROM delegated_instances WHERE token_delegation = ?
+            SELECT peer_balance_mu FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL
         ''', (token,))
         row = result.fetchone()
         return _as_int(row['peer_balance_mu']) if row else 0
@@ -2660,7 +2816,7 @@ class SQLConnection(metaclass=Singleton):
             peer_balance_mu (int): The peer's own figure, just read.
         """
         self._execute('''
-            UPDATE delegated_instances SET peer_balance_mu = ? WHERE token_delegation = ?
+            UPDATE delegated_instances SET peer_balance_mu = ? WHERE token_delegation = ? AND killed_at IS NULL
         ''', (str(int(peer_balance_mu)), token))
 
     def get_delegated_token_by_id(self, id: str) -> Optional[str]:
@@ -2675,7 +2831,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT token_delegation FROM delegated_instances WHERE id = ?
+                SELECT token_delegation FROM delegated_instances WHERE id = ? AND killed_at IS NULL
             ''', (id,))
             row = result.fetchone()
             if row:
@@ -2697,7 +2853,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT peer_id FROM delegated_instances WHERE token_delegation = ?
+                SELECT peer_id FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL
             ''', (token,))
             row = result.fetchone()
             if row:
@@ -2718,7 +2874,7 @@ class SQLConnection(metaclass=Singleton):
             str: The associated internal container id.
         """
         result = self._execute('''
-            SELECT id FROM local_instances WHERE ip = ?
+            SELECT id FROM local_instances WHERE ip = ? AND killed_at IS NULL
         ''', (uri,))
         row = result.fetchone()
         if row:

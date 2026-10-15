@@ -42,6 +42,7 @@ from src.utils.shared_filesystems import (
     ACCESS_XATTR_KEY,
     GUEST_XATTR_KEY,
     SHARE_ENV_XATTR_KEY,
+    SHARE_NETWORK_XATTR_KEY,
     SHARE_TAG_XATTR_KEY,
     SHARED_XATTR_KEY,
     declarations_for_filesystem,
@@ -87,7 +88,10 @@ READ_ONLY_FILESYSTEM_KEY = "read_only_filesystem"
 # src/utils/shared_filesystems.py on the directory's ItemBranch. See docs/PACKING.md.
 SHARED_FILESYSTEMS_KEY = "shared_filesystems"
 _SHARED_ROLE_XATTRS = {"shared": SHARED_XATTR_KEY, "guest": GUEST_XATTR_KEY}
-_SHARED_ENTRY_FIELDS = {"path", "role", "tag", "env", "access"}
+# A network share (#268) is not a side of a parent share: its role names no xattr
+# of its own, and its `network` field becomes `share_network`.
+_NETWORK_ROLE = "network"
+_SHARED_ENTRY_FIELDS = {"path", "role", "tag", "env", "access", "network"}
 
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
@@ -399,8 +403,10 @@ class ZipContainerPacker:
         """``service.json`` ``shared_filesystems``, type-checked, as a list of dicts.
 
         Absent or empty is an empty list. Each entry is an object with a string
-        ``path`` (absolute, not ``/``) and a ``role`` of ``shared`` or ``guest``;
-        ``tag``, ``env`` and ``access`` are optional strings. Nothing is coerced
+        ``path`` (absolute, not ``/``) and a ``role`` of ``shared``, ``guest`` or
+        ``network``; ``tag``, ``env`` and ``access`` are optional strings. A
+        ``network`` role requires a ``network`` string, the tag of an entry of the
+        service's ``network``, and no other role takes one. Nothing is coerced
         and unknown fields are refused: a misspelt ``acces`` silently dropped
         would pack a share with the wrong mode.
         """
@@ -425,7 +431,7 @@ class ZipContainerPacker:
                     f"{at} has unknown field(s) {unknown}; "
                     f"allowed: {sorted(_SHARED_ENTRY_FIELDS)}."
                 )
-            for field in ("tag", "env", "access", "path", "role"):
+            for field in ("tag", "env", "access", "path", "role", "network"):
                 if field in entry and not isinstance(entry[field], str):
                     raise ValueError(
                         f"{at}.{field} must be a string, got "
@@ -433,9 +439,27 @@ class ZipContainerPacker:
                     )
             if "path" not in entry or "role" not in entry:
                 raise ValueError(f"{at} requires both 'path' and 'role'.")
-            if entry["role"] not in _SHARED_ROLE_XATTRS:
+            if entry["role"] not in (*_SHARED_ROLE_XATTRS, _NETWORK_ROLE):
                 raise ValueError(
-                    f"{at}.role must be 'shared' or 'guest', got {entry['role']!r}."
+                    f"{at}.role must be 'shared', 'guest' or 'network', got {entry['role']!r}."
+                )
+            if entry["role"] == _NETWORK_ROLE:
+                if not entry.get("network"):
+                    raise ValueError(
+                        f"{at} has role 'network' and requires a 'network': the tag of "
+                        f"the service network that scopes the share."
+                    )
+                declared_tags = {t for n in self._parsed_networks() for t in n.tags}
+                if entry["network"].strip() not in declared_tags:
+                    raise ValueError(
+                        f"{at}.network {entry['network']!r} is not a tag of any entry "
+                        f"of the service's 'network'. A network share is a channel "
+                        f"inside that network, so the service must declare it."
+                    )
+            elif "network" in entry:
+                raise ValueError(
+                    f"{at}.network is only valid with role 'network', got role "
+                    f"{entry['role']!r}."
                 )
             path = posixpath.normpath(entry["path"])
             if not entry["path"].startswith("/") or path in ("/", "//"):
@@ -479,8 +503,10 @@ class ZipContainerPacker:
                     )
                 filesystem = branch.filesystem
 
-            keyvalue.set_value(branch.xattrs, _SHARED_ROLE_XATTRS[entry["role"]], b"true")
+            if entry["role"] != _NETWORK_ROLE:
+                keyvalue.set_value(branch.xattrs, _SHARED_ROLE_XATTRS[entry["role"]], b"true")
             for field, key in (
+                ("network", SHARE_NETWORK_XATTR_KEY),
                 ("tag", SHARE_TAG_XATTR_KEY),
                 ("env", SHARE_ENV_XATTR_KEY),
                 ("access", ACCESS_XATTR_KEY),
@@ -538,28 +564,8 @@ class ZipContainerPacker:
         if not self._read_only_filesystem_requested():
             return
 
-        # A ro service cannot export a shared filesystem. The node refuses this at
-        # launch (src/virtualizers/microvm/shares.py): a share is seeded from the
-        # exporter's own image with `debugfs rdump`, an ext4 reader that cannot open
-        # a squashfs/erofs image, and seeding from nothing would hide the content
-        # the service shipped behind an empty directory. The same condition is
-        # checked here, on the same declarations, so the operator finds out while
-        # packing rather than after publishing a service that cannot start.
-        try:
-            exported = [d for d in declarations_for_filesystem(root_filesystem) if d.shared]
-        except ValueError as e:
-            raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
-
-        if exported:
-            paths = ", ".join(sorted(d.path for d in exported))
-            raise ValueError(
-                f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' is true and this service "
-                f"exports {len(exported)} shared filesystem(s) ({paths}). A share is "
-                f"seeded from the exporter's own image, which the node reads with "
-                f"debugfs -- an ext4 reader that cannot open the squashfs/erofs image "
-                f"a read-only service is built into. Drop "
-                f"'{READ_ONLY_FILESYSTEM_KEY}' or drop the shared declaration."
-            )
+        # A read-only service may take part in shares, exported or not: the node
+        # seeds them from its squashfs/erofs image and mounts them read-only.
 
         # Per-entry metadata is mandatory for ro (assert_complete_filesystem_metadata
         # in src/utils/filesystem_xattrs.py refuses the build otherwise). Nothing to
@@ -870,12 +876,7 @@ class ZipContainerPacker:
                 raise ValueError(
                     f"service.json api slot port={slot.port}: 'transport' contains no valid tags."
                 )
-            slot.protocol_stack.append(
-                self._parse_protocol_descriptor(
-                    item.get('protocol'),
-                    f"api slot port={slot.port}: 'protocol'",
-                )
-            )
+            slot.protocol_stack.extend(self._parse_api_protocol_stack(item, slot.port))
             # `gas_amount_per_call` was renamed to `mu_per_call` with the pricing
             # rework. Rejecting the old key rather than ignoring it is deliberate: a
             # service.json that still uses it would otherwise pack with no per-call
@@ -892,7 +893,39 @@ class ZipContainerPacker:
                 for method, amount_mu in item.get("mu_per_call", {}).items()
             })
             self.service.api.slot.append(slot)
-            
+
+    def _parse_api_protocol_stack(self, item, port):
+        """An api slot's ``protocol`` (one layer) or ``protocol_stack`` (layers) -> protocols.
+
+        ``protocol`` is the old key and gives exactly one entry, as it always did, so
+        the bytes of every service packed to date do not change. ``protocol_stack`` is
+        a list of descriptors from the bottom layer to the top, read like a network's
+        ``protocol_stack``. A convention on top of HTTP (for example the ``chat``
+        convention of chatui: ``http``, then ``chat``) needs more than one layer.
+        A slot declares one key or the other, not both.
+        """
+        if 'protocol_stack' not in item:
+            return [self._parse_protocol_descriptor(
+                item.get('protocol'), f"api slot port={port}: 'protocol'",
+            )]
+        if 'protocol' in item:
+            raise ValueError(
+                f"service.json api slot port={port}: declare 'protocol' or "
+                "'protocol_stack', not both."
+            )
+        stack = item['protocol_stack']
+        if not isinstance(stack, list) or not stack:
+            raise ValueError(
+                f"service.json api slot port={port}: 'protocol_stack' must be a "
+                "non-empty list of protocol descriptors (bottom layer first)."
+            )
+        return [
+            self._parse_protocol_descriptor(
+                declaration, f"api slot port={port}: 'protocol_stack'[{index}]",
+            )
+            for index, declaration in enumerate(stack)
+        ]
+
     # ------------------------------------------------------------------ #
     # network
     # ------------------------------------------------------------------ #

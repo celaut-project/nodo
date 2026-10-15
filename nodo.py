@@ -11,6 +11,21 @@ from src.utils.network import get_local_ip, resolve_public_host, resolve_public_
 
 env_manager = ConfigManager(log=log.LOGGER)
 
+# A change staged while the node could not be restarted onto it (config.pending.yaml)
+# is swapped in as the node starts, before anything below reads the configuration.
+if len(sys.argv) > 1 and sys.argv[1] == "serve":
+    try:
+        from src.commands.config_edit import apply_pending_config
+
+        _pending_note = apply_pending_config(env_manager)
+    except Exception as _pending_error:
+        # The node must start on the config.yaml it has. A staged file that cannot
+        # be swapped in (a permission, a full disk) stays where it is.
+        _pending_note = (f"Staged configuration not applied: {_pending_error}. "
+                         "The node starts on config.yaml.")
+    if _pending_note:
+        print(_pending_note, flush=True)
+
 MEMORY_LOGS = env_manager.get("MEMORY_LOGS")
 REGISTRY = env_manager.get("REGISTRY")
 CACHE = env_manager.get("CACHE")
@@ -18,6 +33,10 @@ BLOCKDIR = env_manager.get("BLOCKDIR")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
+# The install this file belongs to. `update` and `doctor` run install.sh and
+# render the unit from here, as root, and not from main.MAIN_DIR: on a node whose
+# daemon is a service user, that user can write config.yaml.
+INSTALL_DIR = os.path.dirname(os.path.realpath(__file__))
 
 
 def _exit(code):
@@ -595,11 +614,43 @@ if __name__ == '__main__':
                 _exit(0 if service_envs_command(service=args[0], as_json=as_json) else 1)
 
             case "update":
-                if os.geteuid() != 0:
+                # A node installed without sudo runs as its operator and updates the
+                # same way: install.sh then asks for the root steps it needs. The
+                # directory is passed on, or install.sh would update its default.
+                import getpass
+                import shlex
+
+                from src.utils.privileges import installed_service_user
+
+                try:
+                    service_user = installed_service_user()
+                except (OSError, ValueError) as e:
+                    print(f"Error: {e}")
+                    sys.exit(1)
+                if os.geteuid() != 0 and service_user != getpass.getuser():
                     print("This script requires superuser privileges. Please run with sudo.")
                 else:
-                    os.system(f"/bin/bash {MAIN_DIR}/bash/restore_source.sh {MAIN_DIR}")
-                    os.system(f"/bin/bash {MAIN_DIR}/install.sh")
+                    main_dir = shlex.quote(INSTALL_DIR)
+                    os.system(f"/bin/bash {main_dir}/bash/restore_source.sh {main_dir}")
+                    os.system(f"/bin/bash {main_dir}/install.sh --target-dir {main_dir}")
+
+            case "uninstall":
+                # uninstall.sh does both modes itself: with sudo it removes all, and
+                # without it, it removes what the user owns and offers the root steps.
+                # The directory is passed on, as for `update`, and the script starts
+                # from /, because it removes the directory it was started from.
+                args = sys.argv[2:]
+                if any(a not in ("--no-input", "-h", "--help") for a in args):
+                    print("Usage: nodo uninstall [--no-input]", flush=True)
+                    _exit(1)
+                script = os.path.join(INSTALL_DIR, "uninstall.sh")
+                if not os.path.isfile(script):
+                    print(f"Error: {script} was not found.", flush=True)
+                    _exit(1)
+                _exit(subprocess.run(
+                    ["/bin/bash", script, "--target-dir", INSTALL_DIR, *args],
+                    cwd="/",
+                ).returncode)
 
             case "kill":
                 args = sys.argv[2:]
@@ -806,12 +857,20 @@ if __name__ == '__main__':
                 _exit(0 if ok else 1)
 
             case "instances":
-                from src.commands.instances import list_instances
+                from src.commands.instances import list_dead_instances, list_instances
                 args = sys.argv[2:]
                 groupable = "--grouped" in args and not args.remove("--grouped")
                 as_json = "--json" in args and not args.remove("--json")
+                dead = "--dead" in args and not args.remove("--dead")
+                everything = "--all" in args and not args.remove("--all")
                 search = " ".join(args)
-                ok = list_instances(groupable=groupable, search=search, as_json=as_json)
+                ok = list_instances(
+                    groupable=groupable, search=search, as_json=as_json,
+                    dead=dead, include_dead=everything,
+                )
+                if everything and not as_json and not dead:
+                    print("\nDead instances:\n")
+                    list_dead_instances(search=search)
                 _exit(0 if ok is not False else 1)
 
             case "refresh_peers":
@@ -1226,7 +1285,7 @@ if __name__ == '__main__':
 
             case "doctor":
                 from src.commands.doctor import doctor_command
-                doctor_command(main_dir=MAIN_DIR)
+                doctor_command(main_dir=INSTALL_DIR)
 
             case "nat-guide":
                 from src.commands.nat_guide import nat_guide

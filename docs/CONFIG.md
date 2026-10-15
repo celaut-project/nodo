@@ -22,6 +22,11 @@ page is the same mechanism at a coarser grain: it groups these keys into the dec
 an operator actually makes, and one of its levers or profiles writes several keys as a
 single change. See [the TUI reference](../src/commands/tui/README.md#applying-a-change).
 
+> **No root:** a restart needs root and stops all instances. If the node is serving and
+> you do not run as root, the change goes to `config.pending.yaml` and the node does not
+> restart. The node applies the file at its next start. See
+> [Staged changes](USAGE.md#staged-changes-no-root).
+
 > ⚠️ **`config.yaml` is read once, when the node starts.** Nothing watches the file.
 > A running node keeps serving the configuration it booted with, however many times
 > the file changes underneath it. That is deliberate: everything derived from a config
@@ -183,6 +188,18 @@ Do not confuse any of this with the packer-side pair below
 pin them to the host arch: a local build runs the target's own toolchain and nodo
 installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
 
+## `instances` — dead instances
+
+When an instance dies, the node keeps its row (`killed_at`, `death_reason`) and, for
+a local instance, its logs under `${main.STORAGE}/instances_dead/<id>/`. A dead
+instance never starts again.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `instances.DEAD_RETENTION_DAYS` | `14` | Delete a dead instance after this many days. `0` turns the limit off. |
+| `instances.DEAD_MAX_ROWS` | `200` | Keep at most this many dead instances. The oldest are deleted first. Local and delegated instances count separately. `0` turns the limit off. |
+| `instances.DEAD_LOG_MAX_BYTES` | `1048576` | Keep the last bytes of each guest log, up to this size. |
+
 ## `builder` — build tuning
 
 | Key | Default | Meaning |
@@ -195,6 +212,47 @@ installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
 `SELF_ANNOUNCE_TO_CONNECTING_PEERS`, `SEND_ONLY_HASHES_ASKING_COST`, and
 `DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH` (read by `src/commands/connect.py` and
 the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
+
+### Transitive peer discovery (gossip)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `communication.SHARE_KNOWN_PEERS` | `true` | Answer `Gateway.ListPeers` with known peers and periodically push their announcements with `IntroducePeer`. Off returns an empty list and disables push. |
+| `communication.DISCOVER_PEERS_VIA_GOSSIP` | `true` | Periodically pull advertisements from one randomly selected known peer. Each is registered through normal signature verification and anti-replay checks. |
+| `communication.MAX_PEERS_PER_GOSSIP_RESPONSE` | `100` | Maximum advertisements served per list request; also the local cap on messages consumed from a remote list, including rejected ones. Zero disables list/pull work. |
+| `communication.MAX_PEERS_PER_GOSSIP_PUSH` | `20` | Maximum other peers introduced to one random target per tick. Zero disables push work. |
+| `communication.GOSSIP_INTERVAL_SECONDS` | `300` | Independent pull/push intervals, measured with a monotonic clock. Invalid or nonpositive values use 300 seconds. |
+
+The two switches are independent of self-announcement and are read live. The POLICIES
+page (in the SETTINGS group) shows each switch as a lever. Profiles mirror
+self-announcement: `just-me`, `remote-only`, `cautious` and `workbench` disable both;
+`open-renter` and `lan-lab` enable both. A first peer still needs `nodo connect`;
+there is no bootstrap list or DHT.
+
+**Relay the claim as the peer signed it.** A peer's signature covers every address and
+its expiry. A relay that removes an address makes the signature invalid. A relay that
+signs the claim again attributes the addresses of the peer to the relay. Thus push and
+list send the original `Peer` message without changes. Private, loopback and DNS
+addresses travel as the peer declared them. The peer decides what it discloses, with
+`network.ANNOUNCE_PRIVATE_ADDRESSES` on its own node.
+
+A relay does not send an advertisement with no addresses, or with all addresses
+expired. Expiry zero means no declared expiry. Receivers verify the original signature
+and apply normal registration rules. Gossip uses the same client-id/rate-limit gate
+as other gateway calls, and does not relay queries recursively. See
+[the peer gossip proposal](proposals/427-peer-gossip.md) for bounds and tradeoffs.
+
+**Learned is not funded.** A peer that reached this node over the network — pulled
+through `ListPeers`, or sent in any `IntroducePeer` (by the peer itself or by another) —
+is marked as learned via gossip, and `deposits.AUTOMATIC_REFILL` does not top it up
+unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is `true` (default `false`).
+Keypairs and payment contracts are free to mint, so without this an `open-renter` node
+would send a full deposit to every reachable identity the network relayed to it.
+`nodo connect` to it, or paying it by hand (`nodo pay` / `nodo increase_peer_deposit`),
+marks it chosen, after which the automatic refill treats it like any other peer.
+Setting `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS: true` funds learned peers too; it
+reopens that Sybil drain and never turns the automatic refill on by itself. A
+node also refuses its own identity when a relay hands its advertisement back.
 
 ### Where the prose travels
 
@@ -356,6 +414,7 @@ Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) 
 
 | Key | Default | Meaning |
 |---|---|---|
+| `network.EXECUTE_LOCALLY` | `true` | Set `false` and this node never runs a service itself: the balancer stops pricing local execution and only selects a peer, so a service no peer will take fails instead of being run here. The mirror image of `DELEGATE_EXECUTION`, for a node that orchestrates rather than computes. The node then announces no resources, and the changed announcement is sent to every known peer. A peer that asks anyway gets a refusal with the reason: `GetServiceEstimatedCost` fails, and `GetResourceAvailability` answers that it cannot run the service. Workload admission does not count this machine either. A service that inherits a directory from its parent (`guest=true`) cannot run anywhere else, so it fails. With `DELEGATE_EXECUTION` also `false`, no launch can succeed. The `remote-only` profile sets this key to `false`, and turns delegation on. |
 | `network.DELEGATE_EXECUTION` | `true` | Set `false` and this node never asks a peer to run a service for it: the balancer stops polling peers for prices and only ever selects `local`, so a service it cannot run itself fails rather than being delegated. The automatic peer-deposit refill stops too — a deposit buys execution on that peer and nothing else. `nodo pay`, `nodo increase_peer_deposit` and `nodo force_execution` still work, since an operator typing the command overrides the default on purpose. |
 | `network.RECURSION_MAX_HOPS` | `16` | How many nodes one StartService tree (a StartService and everything it is delegated to) may span when it starts here or arrives without a hop count. Each node that passes the request on sends one hop less; a node given none left refuses it, and a node with one left runs it itself or fails rather than delegating. A count sent by a peer is clamped to this, never raised by it. Quotes and availability probes do not carry it: they use the query cache below. See [`RECURSION_GUARD.md`](RECURSION_GUARD.md). |
 | `network.QUERY_CACHE_TTL_SECONDS` | `30` | Seconds the price of a quote (`GetServiceEstimatedCost`) is remembered, keyed by the content of the question: the same service, configuration and metadata is priced once. Whether this node has room for it is not remembered: it is checked on every answer, so a full node never serves a remembered offer and a node that freed room never serves a remembered "no". `0` turns it off. Because the price is remembered, a change of price or network policy can show up up to this late. |
@@ -370,6 +429,7 @@ The two directions are separate settings, and neither implies the other:
 |---|---|
 | Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
+| Don't run services **here** at all (remote-only) | `network.EXECUTE_LOCALLY: false`, with `network.DELEGATE_EXECUTION: true` |
 | Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
 
 ### The plaintext gateway
@@ -520,8 +580,9 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `free_tier.FREE_WHILE_SCARCITY_BELOW` | `0.0` | Charge nothing while *every* resource is below this share of capacity. `0.0` disables it. |
 | `free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY` | `500` | How many clients `GenerateClient` hands out per proof-of-work difficulty level. The first 500 are free; the next 500 cost one Blake2b zero each, and so on — each step is 16x the work. Must be positive: it is the size of a step, so `0` has no meaning. See [`CONCEPTS.md`](CONCEPTS.md#creating-a-client). |
 | `ui.DISPLAY_UNIT` | `mu` | What you read and type. `mu` (the default: the node's own accounting unit, not money held anywhere; large figures take an exact `K`/`M`/`G` suffix, `5100000` shown as `5.1M`, and the suffixed form can be typed back), `erg`, `btc` once `ledgers.bitcoin.payments.MU_PER_SATOSHI` is set, or a name declared under `ui.UNITS`. Purely presentational. Edited from the TUI's All page (or the POLICIES page's `display unit` lever) as a picker over exactly these; picking `custom…` there asks for a new name and its `ui.UNITS.<name>.MU_PER_UNIT` rate together, since one without the other is a display unit the node refuses to start against. |
-| `ui.THEME` | `ubuntu` | Colour scheme for `nodo tui`. `ubuntu` (the Ubuntu terminal palette, and the default — `default` is an accepted spelling), `dark` (the palette before themes existed), `light` (for a pale terminal), `mono` (no hue at all). Edited from the TUI's All page as a picker. An unrecognised name falls back to the default rather than refusing to start. `nodo tui --theme <name>` and `NODO_TUI_THEME` override it for one run, so two themes can be compared without a config write and the restart that carries. |
-| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
+| `ui.THEME` | `dark` | Colour scheme for `nodo tui`. `dark` (the palette before themes existed, and the default — `default` is an accepted spelling), `ubuntu` (the Ubuntu terminal palette), `light` (for a pale terminal), `mono` (no hue at all). Edited from the TUI's All page as a picker. An unrecognised name falls back to the default rather than refusing to start. `nodo tui --theme <name>` and `NODO_TUI_THEME` override it for one run, so two themes can be compared without a config write and the restart that carries. |
+| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. It does not pay one only learned via gossip unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is on ([see above](#transitive-peer-discovery-gossip)). Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
+| `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` | `false` | Whether the automatic refill also funds a peer learned only via gossip and never connected to or paid by hand. Off by default because identities are free to mint, so a relayed Sybil peer would draw a full deposit from every refill-enabled node that learns it. Only matters when `deposits.AUTOMATIC_REFILL` and `network.DELEGATE_EXECUTION` are on; it never enables refills by itself. Any value other than `true` counts as `false`. |
 | `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
 | `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
 | `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |

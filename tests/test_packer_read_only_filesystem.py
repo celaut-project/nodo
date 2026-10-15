@@ -195,37 +195,23 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
         )
         self.assertIs(_packer({})._read_only_filesystem_requested(), False)
 
-    # -- refusal: shared-filesystem export ---------------------------------- #
+    # -- shared-filesystem export ------------------------------------------- #
 
-    def test_true_plus_a_shared_export_is_refused(self):
-        # Mirrors src/virtualizers/microvm/shares.py, which refuses this at launch:
-        # a share is seeded from the exporter's image with `debugfs rdump`, an ext4
-        # reader that cannot open a squashfs/erofs image. Refusing at pack time
-        # means the operator finds out before publishing.
-        tree = _tree(
-            _branch("mnt", directory=True, xattrs={"shared": b"true"}),
-        )
+    def test_true_plus_a_shared_export_is_allowed(self):
+        # The node seeds the share from the squashfs/erofs image and mounts it
+        # read-only in this instance.
+        tree = _tree(_branch("mnt", directory=True, xattrs={"shared": b"true"}))
 
-        with self.assertRaises(ValueError) as caught:
-            _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
+        _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        message = str(caught.exception)
-        self.assertIn(READ_ONLY_FILESYSTEM_KEY, message)
-        self.assertIn("/mnt", message)      # names the offending path
-        self.assertIn("debugfs", message)   # and says why
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
+        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
 
-    def test_a_nested_shared_export_is_also_caught(self):
-        outer = _branch("srv", directory=True)
-        outer.filesystem.branch.append(
-            _branch("photos", directory=True, xattrs={"shared": b"true"})
-        )
-        tree = _tree(outer)
+    def test_true_plus_a_network_share_is_allowed(self):
+        tree = _tree(_branch("mnt", directory=True, xattrs={"share_network": b"net"}))
 
-        with self.assertRaises(ValueError) as caught:
-            _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
+        _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertIn("/srv/photos", str(caught.exception))
+        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
 
     def test_an_inherited_guest_directory_is_allowed(self):
         # Only *exporting* is incompatible. A `guest` directory is mounted from the

@@ -61,7 +61,7 @@ async fn main() -> AppResult<()> {
     // inside `App::new()` so it is one visible line in the entry point, and so that
     // constructing an `App` stays a pure thing that does not consult the filesystem
     // for a marker.
-    let mut app = App::new().with_operator_alerts().with_kya_gate();
+    let mut app = App::new().with_operator_alerts().with_kya_gate().with_profile_gate();
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(io::stderr());
@@ -74,8 +74,18 @@ async fn main() -> AppResult<()> {
     while app.running {
         // Render the user interface.
         tui.draw(&mut app)?;
-        // Handle events.
-        match tui.events.next().await? {
+        // Handle events. While the profile deck slides, wait one frame at most and
+        // draw again: the 250 ms tick would make the slide a slideshow. At rest the
+        // wait is as long as it was.
+        let event = if app.deck_animating() {
+            match tokio::time::timeout(tui::profile_deck_ui::FRAME, tui.events.next()).await {
+                Ok(event) => event?,
+                Err(_) => continue,
+            }
+        } else {
+            tui.events.next().await?
+        };
+        match event {
             Event::Tick => app.refresh(false).await,
             Event::Key(key_event) => handle_key_events(key_event, &mut app).await?,
             Event::Mouse(mouse_event) => handle_mouse_events(mouse_event, &mut app).await?,

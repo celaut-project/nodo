@@ -57,6 +57,11 @@ pub struct Peer {
     /// #459), read from the same stored advertisement as `proof_ids`. Summed on the
     /// Overview and spelled out in the detail card (issue #455).
     pub resources: crate::peer_resources::Announced,
+    /// The peer reached this node over the network (a `ListPeers` answer or an
+    /// `IntroducePeer`) and this node has not chosen it since: `peer.learned_via_gossip`.
+    /// The automatic refill skips it until `nodo connect` or a payment clears the flag
+    /// (issue #427). False on a database from before the column existed.
+    pub learned_via_gossip: bool,
 }
 
 /// One `contract_instance` row: the ledger a peer settles on, the contract it
@@ -110,18 +115,26 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
     // `LEFT JOIN clients c ON p.client_id = c.id` was wrong: `peer.remote_client_id`
     // is our client id *inside the remote peer*, never a key into our local
     // `clients` table, so that join surfaced a bogus balance (issue #178).
-    let mut statement = connection.prepare(
+    // A database the node has not upgraded yet has no such column; every peer there
+    // arrived directly, so reading it as 0 is what the node itself would answer.
+    let learned = if crate::app::column_exists(&connection, "peer", "learned_via_gossip") {
+        "COALESCE(p.learned_via_gossip, 0)"
+    } else {
+        "0"
+    };
+    let mut statement = connection.prepare(&format!(
         "SELECT p.id,
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.balance_mu,
                 p.advertisement,
                 p.reputation_score,
                 COALESCE(p.remote_client_id, ''),
-                COALESCE(p.local_client_id, '')
+                COALESCE(p.local_client_id, ''),
+                {learned}
          FROM peer p
          LEFT JOIN uri u ON p.id = u.peer_id
          GROUP BY p.id",
-    )?;
+    ))?;
     let peers = statement
         .query_map([], |row| {
             let reputation_score = row
@@ -167,6 +180,7 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 reputation_score,
                 remote_client_id: row.get(5)?,
                 local_client_id: row.get(6)?,
+                learned_via_gossip: row.get::<_, i64>(7)? != 0,
                 // `contract_instance` isn't touched by the join above (it isn't
                 // keyed by uri), so its rows are fetched per peer below.
                 contracts: Vec::new(),
@@ -370,6 +384,39 @@ impl App {
         );
     }
 
+    /// Choose the selected peer: run `nodo connect` on one of its endpoints, which
+    /// handshakes it and clears `learned_via_gossip` (issue #427), so the automatic
+    /// refill treats it like any peer this node connected itself. Confirmed because
+    /// what it allows is spending: a funded peer is paid a full deposit.
+    pub fn open_choose_peer_confirm(&mut self) {
+        if self.page() != crate::app::Page::Peers {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(peer) = self.peers.selected().cloned() else {
+            self.status = "Select a peer first".to_string();
+            return;
+        };
+        if !peer.learned_via_gossip {
+            self.status = "Already chosen: auto-pay treats this peer like any other".to_string();
+            return;
+        }
+        let Some(target) = connect_target(&peer.uris) else {
+            self.status = "This peer has no endpoint to connect to".to_string();
+            return;
+        };
+        let label = shorten(&peer.id, 18);
+        self.input_mode = crate::app::InputMode::Confirm;
+        self.input_title = format!("Choose peer {label} via {target}? Auto-pay may fund it (y/N)");
+        self.pending_action = Some(PendingAction::ChoosePeer {
+            label,
+            target,
+        });
+    }
+
     /// Ask before forgetting a peer: its addresses and contract instances — the same
     /// thing the operator would type. The peer is *forgotten*, not banned: it can
     /// re-introduce itself, or be reconnected with `c`. That is exactly what makes
@@ -398,6 +445,22 @@ impl App {
             label,
         });
     }
+}
+
+/// The `host:port` that `nodo connect` takes for the first endpoint in the row's
+/// comma-joined list. The list has the address bare, so an IPv6 one needs the brackets
+/// back (`2001:db8::1:8080` is `[2001:db8::1]:8080`).
+fn connect_target(uris: &str) -> Option<String> {
+    let first = uris.split(',').next()?.trim();
+    let (host, port) = first.rsplit_once(':')?;
+    if host.is_empty() || port.parse::<u16>().ok()? == 0 {
+        return None;
+    }
+    Some(if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        first.to_string()
+    })
 }
 
 /// The refresh button: a clockwise open-circle arrow.
@@ -699,6 +762,16 @@ fn peer_detail_lines(
                     "client {} (see CLIENTS)",
                     shorten(&peer.local_client_id, 24)
                 )
+            },
+        ));
+        // Whether the automatic refill may pay this peer, which is the one thing a
+        // learned peer cannot do until it is chosen (`a`).
+        lines.push(metric_line(
+            "Chosen",
+            if peer.learned_via_gossip {
+                "no — learned over the network; auto-pay skips it (a to choose)".to_string()
+            } else {
+                "yes".to_string()
             },
         ));
         // The score is ours, first-hand, keyed by this peer's public key. The proofs
@@ -1054,6 +1127,7 @@ mod tests {
                 reputation_score: "0".to_string(),
                 contracts: Vec::new(),
                 resources: Default::default(),
+                learned_via_gossip: false,
             }
         }
 
@@ -1116,6 +1190,107 @@ mod tests {
             app.open_disconnect_peer_confirm();
             assert_eq!(app.input_mode, InputMode::Normal);
             assert!(app.pending_action.is_none());
+        }
+    }
+
+    mod choosing_a_peer {
+        use super::*;
+
+        fn peer(id: &str) -> Peer {
+            Peer {
+                id: id.to_string(),
+                uris: "10.0.0.1:8080".to_string(),
+                balance: "0".to_string(),
+                remote_client_id: String::new(),
+                local_client_id: String::new(),
+                proof_ids: Vec::new(),
+                reputation_score: "0".to_string(),
+                contracts: Vec::new(),
+                resources: Default::default(),
+                learned_via_gossip: false,
+            }
+        }
+
+        fn learned(id: &str, uris: &str) -> Peer {
+            Peer {
+                uris: uris.to_string(),
+                learned_via_gossip: true,
+                ..peer(id)
+            }
+        }
+
+        fn app_with(peer: Peer) -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Peers)
+                .unwrap();
+            app.peers = StatefulList::with_items(vec![peer]);
+            app.peers.next();
+            app
+        }
+
+        #[test]
+        fn it_asks_first_and_names_the_endpoint_it_will_dial() {
+            let mut app = app_with(learned("peer-abc", "8.8.8.8:40001, 1.1.1.1:40001"));
+            app.open_choose_peer_confirm();
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.input_title.contains("8.8.8.8:40001"), "{}", app.input_title);
+            assert!(matches!(
+                app.pending_action,
+                Some(PendingAction::ChoosePeer { ref target, .. }) if target == "8.8.8.8:40001"
+            ));
+        }
+
+        #[test]
+        fn confirming_runs_nodo_connect_which_clears_the_flag() {
+            let (label, args) = pending_command(PendingAction::ChoosePeer {
+                label: "peer-abc".to_string(),
+                target: "8.8.8.8:40001".to_string(),
+            })
+            .expect("choosing a peer is a `nodo` invocation");
+            assert_eq!(args, vec!["connect".to_string(), "8.8.8.8:40001".to_string()]);
+            assert_eq!(label, "Choose peer peer-abc");
+        }
+
+        #[test]
+        fn a_peer_that_is_already_chosen_is_not_asked_about() {
+            let mut app = app_with(Peer { learned_via_gossip: false, ..peer("peer-abc") });
+            app.open_choose_peer_confirm();
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.status.contains("Already chosen"), "{}", app.status);
+        }
+
+        #[test]
+        fn a_peer_with_no_endpoint_cannot_be_connected_to() {
+            let mut app = app_with(learned("peer-abc", ""));
+            app.open_choose_peer_confirm();
+            assert!(app.pending_action.is_none());
+            assert!(app.status.contains("no endpoint"), "{}", app.status);
+        }
+
+        #[test]
+        fn ipv6_gets_its_brackets_back() {
+            assert_eq!(connect_target("2001:db8::1:8080").as_deref(), Some("[2001:db8::1]:8080"));
+            assert_eq!(connect_target("host.example:9").as_deref(), Some("host.example:9"));
+            assert_eq!(connect_target("1.2.3.4:0"), None);
+            assert_eq!(connect_target(""), None);
+        }
+
+        #[test]
+        fn the_page_reads_the_flag_from_the_database() {
+            let dir = std::env::temp_dir().join(format!("nodo-choose-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let path = peer_database(&dir, &[]);
+            assert!(!get_peers(&path).unwrap()[0].learned_via_gossip);
+            Connection::open(&path)
+                .unwrap()
+                .execute("UPDATE peer SET learned_via_gossip = 1", [])
+                .unwrap();
+            assert!(get_peers(&path).unwrap()[0].learned_via_gossip);
+            let _ = fs::remove_dir_all(&dir);
         }
     }
 

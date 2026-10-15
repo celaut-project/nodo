@@ -20,6 +20,14 @@ there is no ancestor walk: a parent exports a directory out of its *own* image
 and needs no ancestor's permission to do so, so the grant is not inductive and
 stops at the direct parent (which is also the whole authorization -- no
 re-export, no transfer).
+
+A **network share** (#268) has no parent to ask: its scope is the
+``Service.Network`` it names. Authorizing one is the network's own authorization
+-- the operator's ``service_networks`` policy, which ``launch_service`` already
+enforces on every declared network, and, for an instance launched by another
+local instance, the ancestor chain of ``filter_networks_with_ancestors``. A
+network that the chain takes away is a network the instance is not in, so its
+share is not granted either.
 """
 import json
 from pathlib import Path
@@ -32,8 +40,11 @@ from src.utils import keyvalue
 from src.utils.shared_filesystems import (
     ShareRef,
     SharedDir,
+    UnresolvedNetworkShare,
+    declared_network,
     exported_refs,
     guest_refs,
+    network_refs,
     share_ref,
 )
 from src.utils.utils import load_service_from_disk
@@ -256,3 +267,63 @@ def authorize_shares(
                 f"cannot inherit '{ref.path}': {_explain(ref, exports)}"
             )
     return wanted
+
+
+def authorize_network_shares(
+    service: celaut.Service,
+    father_id: str,
+    config: Optional[celaut.Configuration] = None,
+) -> List[ShareRef]:
+    """The network shares this service takes part in, or raise
+    :class:`ShareAuthorizationError`.
+
+    No exporter has to exist: a network share is symmetric, and the first member
+    creates it. What has to hold is that the instance is in the network at all:
+
+    * the network's ``formal`` is complete, because the share id includes it;
+    * when a local instance launches this one, every ancestor declares the
+      network (``filter_networks_with_ancestors``). An instance whose parent may
+      not reach a domain cannot open a channel into it over disk.
+
+    The operator's policy is not judged here: ``launch_service`` enforces it on
+    every declared network before this runs.
+    """
+    env_values = keyvalue.to_dict(config.environment_variables) if config else {}
+    try:
+        refs = network_refs(service, env_values)
+    except UnresolvedNetworkShare as e:
+        raise ShareAuthorizationError(str(e)) from e
+    except ValueError as e:
+        raise ShareAuthorizationError(f"invalid network share declaration: {e}") from e
+    if not refs:
+        return []
+
+    if (
+        father_id
+        and RUNDEV_PREFIX not in father_id
+        and sc.internal_instance_exists(id=father_id)
+    ):
+        # Imported here: the networks module pulls in the firewall, which the
+        # parent-share path above does not need.
+        from src.manager.networks import (
+            NetworkAuthorizationError,
+            filter_networks_with_ancestors,
+        )
+
+        for ref in refs:
+            network = declared_network(service, ref.network)
+            try:
+                allowed = filter_networks_with_ancestors(
+                    networks=[network], father_id=father_id
+                )
+            except NetworkAuthorizationError as e:
+                raise ShareAuthorizationError(
+                    f"cannot share '{ref.path}': {e}"
+                ) from e
+            if not allowed:
+                raise ShareAuthorizationError(
+                    f"cannot share '{ref.path}' in network '{ref.network}': an "
+                    f"ancestor of this instance does not declare that network, so "
+                    f"the instance is not in it."
+                )
+    return refs

@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from src.utils import dead_instances
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
@@ -32,10 +33,15 @@ def _int_or_none(value):
         return None
 
 
-def _direct_purge_local_instance(instance_id: str) -> None:
+def _direct_kill_local_instance(instance_id: str, reason: str) -> None:
+    """Mark a local instance as dead without the manager. Keep its row."""
     conn = sqlite3.connect(DATABASE_FILE)
     try:
-        conn.execute("DELETE FROM local_instances WHERE id = ?", (instance_id,))
+        conn.execute(
+            "UPDATE local_instances SET killed_at = CURRENT_TIMESTAMP, death_reason = ? "
+            "WHERE id = ? AND killed_at IS NULL",
+            (reason, instance_id),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -87,7 +93,7 @@ def _prune_stale_instances() -> None:
     conn = sqlite3.connect(DATABASE_FILE)
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM local_instances")
+        cursor.execute("SELECT id FROM local_instances WHERE killed_at IS NULL")
         candidates = [row[0] for row in cursor.fetchall()]
     except sqlite3.Error:
         return
@@ -100,8 +106,8 @@ def _prune_stale_instances() -> None:
         try:
             from src.manager.manager import stop_instance
 
-            if stop_instance(token=instance_id) is None:
-                _direct_purge_local_instance(instance_id)
+            if stop_instance(token=instance_id, reason=dead_instances.PROCESS_LOST) is None:
+                _direct_kill_local_instance(instance_id, dead_instances.PROCESS_LOST)
         except Exception:
             # `stop_instance` is the normal teardown; this is the fallback for a
             # row it could not act on. Routed through the interface so the kill
@@ -112,7 +118,7 @@ def _prune_stale_instances() -> None:
                 vm_kill(vmachine_id=instance_id)
             except Exception:
                 pass
-            _direct_purge_local_instance(instance_id)
+            _direct_kill_local_instance(instance_id, dead_instances.PROCESS_LOST)
 
 def _live_usage(instance_id: str) -> dict:
     """Cumulative counters the TUI turns into CPU% and network rates.
@@ -153,13 +159,84 @@ def _live_usage(instance_id: str) -> dict:
     return usage
 
 
-def list_instances(groupable: bool = False, search: str = "", as_json: bool = False):
-    """``nodo instances [<search>] [--grouped] [--json]``.
+def _read_dead_instances(search: str = "") -> list:
+    """The dead instances, local and delegated, the newest death first."""
+    records = []
+    conn = sqlite3.connect(DATABASE_FILE)
+    conn.row_factory = sqlite3.Row
+    try:
+        for location, query in (
+            ("local",
+             "SELECT id, name, father_id, service_id, virtualizer, balance_mu, "
+             "launched_at, killed_at, death_reason FROM local_instances "
+             "WHERE killed_at IS NOT NULL"),
+            ("delegated",
+             "SELECT id, peer_id, father_id, service_id, balance_mu, "
+             "launched_at, killed_at, death_reason FROM delegated_instances "
+             "WHERE killed_at IS NOT NULL"),
+        ):
+            try:
+                for row in conn.execute(query):
+                    record = dict(row)
+                    record["location"] = location
+                    record["logs"] = (
+                        sorted(dead_instances.list_logs(record["id"]))
+                        if location == "local" else []
+                    )
+                    records.append(record)
+            except sqlite3.Error:
+                continue
+    finally:
+        conn.close()
+    records.sort(key=lambda r: r.get("killed_at") or "", reverse=True)
+    if search:
+        needle = search.lower()
+        records = [r for r in records if needle in " ".join(str(v).lower() for v in r.values())]
+    return records
+
+
+def _print_dead_instances(records: list) -> None:
+    for record in records:
+        print(f"ID: {record['id']}")
+        print(f"Name: {record.get('name') or 'N/A'}")
+        print(f"Location: {record['location']}")
+        print(f"Service: {record.get('service_id') or 'N/A'}")
+        print(f"Parent ID: {record.get('father_id') or 'N/A'}")
+        print(f"Launched at: {record.get('launched_at') or 'N/A'}")
+        print(f"Killed at: {record.get('killed_at')}")
+        print(f"Death reason: {record.get('death_reason') or 'N/A'}")
+        if record["logs"]:
+            print(f"Logs: {', '.join(record['logs'])} (nodo logs {record['id']})")
+        print()
+
+
+def list_dead_instances(search: str = "", as_json: bool = False) -> bool:
+    """``nodo instances --dead [<search>] [--json]``: the instances that died."""
+    records = _read_dead_instances(search)
+    if as_json:
+        from src.commands._catalogue import emit_json
+        emit_json({"dead_instances": records})
+        return True
+    if not records:
+        print("No dead instances found.")
+        return True
+    _print_dead_instances(records)
+    return True
+
+
+def list_instances(groupable: bool = False, search: str = "", as_json: bool = False,
+                   dead: bool = False, include_dead: bool = False):
+    """``nodo instances [<search>] [--grouped] [--dead | --all] [--json]``.
+
+    ``--dead`` lists only the dead instances. ``--all`` lists the live ones and then
+    the dead ones. Without them, only the live instances are listed.
 
     ``--json`` prints one object, ``{"instances": [...]}``, each record carrying the
     raw values (``balance_mu``, byte counts, URIs, live usage counters) beside the
     display strings the printed form uses. Returns whether the listing was read.
     """
+    if dead:
+        return list_dead_instances(search=search, as_json=as_json)
     _prune_stale_instances()
 
     conn = sqlite3.connect(DATABASE_FILE)
@@ -183,7 +260,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
         return [record["id"] for record in running_tunnels if reaches(record, references)]
 
     try:
-        cursor.execute("SELECT id FROM local_instances;")
+        cursor.execute("SELECT id FROM local_instances WHERE killed_at IS NULL;")
         internal_ids = {row[0] for row in cursor.fetchall()}
         cursor.execute("SELECT id FROM clients;")
         client_ids = {row[0] for row in cursor.fetchall()}
@@ -270,7 +347,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances"
+                "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances WHERE killed_at IS NULL"
             )
             for id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
                 parent_type = (
@@ -335,7 +412,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
         if cursor.fetchone():
             cursor.execute(
                 "SELECT token_delegation, id, peer_id, father_id, serialized_instance, service_id, "
-                "balance_mu FROM delegated_instances"
+                "balance_mu FROM delegated_instances WHERE killed_at IS NULL"
             )
             for external_token, id, peer_id, father_id, si, service, balance_mu in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
@@ -400,7 +477,10 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
 
     if as_json:
         from src.commands._catalogue import emit_json
-        emit_json({"instances": instances})
+        payload = {"instances": instances}
+        if include_dead:
+            payload["dead_instances"] = _read_dead_instances(search)
+        emit_json(payload)
         return True
 
     if not instances:

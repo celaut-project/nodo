@@ -15,8 +15,9 @@ See ``src/utils/firewall/compat.py`` for what it reaches -- and for firewalld,
 which it does not.
 """
 
-import os
 import sys
+
+from src.utils.privileges import can_admin_network
 
 USAGE = "Usage: nodo firewall-compat [status|apply|remove]"
 
@@ -67,7 +68,7 @@ def firewall_compat_command(subcommand=None) -> None:
         _print_state(compat_state(bridge, mode))
         # Reading iptables needs root too, so say which answer this is rather than
         # printing an empty ruleset as if it were the host's.
-        if os.geteuid() != 0:
+        if not can_admin_network():
             print(
                 "  Read without root, so this only reflects what this user can see; "
                 "run it with sudo for the host's real answer.",
@@ -75,8 +76,11 @@ def firewall_compat_command(subcommand=None) -> None:
             )
         return
 
-    if os.geteuid() != 0:
-        print("  This changes the host firewall and needs root. Re-run with sudo.", flush=True)
+    if not can_admin_network():
+        print(
+            "  This changes the host firewall and needs root or CAP_NET_ADMIN. Re-run with sudo.",
+            flush=True,
+        )
         sys.exit(1)
 
     if action == "apply":

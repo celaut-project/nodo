@@ -36,6 +36,10 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 # virtiofsd for shared filesystems, shared with the other setup script (#478).
 # shellcheck source=bash/lib_virtiofsd.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_virtiofsd.sh"
+# What an install without root (NODO_UNPRIVILEGED=1, set by install.sh) asks the
+# operator to run instead of running it.
+# shellcheck source=bash/lib_privileged.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_privileged.sh"
 CH_ARCH_TAG="linux/amd64"
 # The arch this host cannot run under KVM, and therefore the one QEMU emulates.
 # Its guest assets are installed too (see provision_guest_assets_for_arch).
@@ -266,6 +270,11 @@ download_ch_binary() {
 }
 
 install_local_yq() {
+    if [ -x "$YQ_BIN_DEFAULT" ] && "$YQ_BIN_DEFAULT" --version 2>/dev/null | grep -qF "$YQ_VERSION"; then
+        YQ_BIN="$YQ_BIN_DEFAULT"
+        return 0
+    fi
+    echo "Installing local yq runtime..."
     mkdir -p "$(dirname "$YQ_BIN_DEFAULT")"
     download_file "$YQ_URL" "$YQ_BIN_DEFAULT"
     chmod +x "$YQ_BIN_DEFAULT"
@@ -278,9 +287,15 @@ install_portable_python() {
     local checksums
     local install_dir
 
+    install_dir="${PYTHON_RUNTIME_ROOT}/${PYTHON_VERSION}+${PYTHON_BUILD_TAG}"
+
+    if [ -x "${install_dir}/bin/python3" ]; then
+        ln -sfn "$install_dir" "${PYTHON_RUNTIME_ROOT}/current"
+        return 0
+    fi
+
     archive="$(mktemp /tmp/nodo-python.XXXXXX.tar.gz)"
     checksums="$(mktemp /tmp/nodo-python-sha.XXXXXX)"
-    install_dir="${PYTHON_RUNTIME_ROOT}/${PYTHON_VERSION}+${PYTHON_BUILD_TAG}"
 
     mkdir -p "$PYTHON_RUNTIME_ROOT"
 
@@ -373,22 +388,25 @@ provision_cloud_hypervisor_assets() {
 echo "Detecting package manager..."
 detect_pkg_mgr
 
-echo "Updating package lists..."
-pkg_update
+# Without root, install.sh has already asked for the missing packages, and
+# verify_host_tools below says which are still missing.
+if [ "${NODO_UNPRIVILEGED:-}" != 1 ]; then
+    echo "Updating package lists..."
+    pkg_update
 
-pkg_install_host_dependencies
+    pkg_install_host_dependencies
 
-# The WSL image is a Debian rootfs exported by docs/RELEASING.md: it needs an
-# init system of its own so `nodo daemon` and nodo.service work once it boots.
-if [ "$PKG_MGR" = "apt" ]; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv \
-        || fail "Failed to install systemd."
+    # The WSL image is a Debian rootfs exported by docs/RELEASING.md: it needs an
+    # init system of its own so `nodo daemon` and nodo.service work once it boots.
+    if [ "$PKG_MGR" = "apt" ]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv \
+            || fail "Failed to install systemd."
+    fi
 fi
 
 ensure_utf8_locale
 verify_host_tools
 
-echo "Installing local yq runtime..."
 install_local_yq
 apply_configured_dependency_paths
 
@@ -486,7 +504,11 @@ default=root
 WSLCONF
 }
 
-echo "Configuring systemd service and WSL boot..."
-configure_systemd_service
+# The release rootfs is built as root. Without root, install.sh renders the unit
+# itself and asks the operator to install it.
+if [ "${NODO_UNPRIVILEGED:-}" != 1 ]; then
+    echo "Configuring systemd service and WSL boot..."
+    configure_systemd_service
+fi
 
 echo "All steps completed."

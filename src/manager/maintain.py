@@ -21,7 +21,7 @@ from src.payment_system.mu_conversion import matching_payment_system
 from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
 from src.tunneling import delegated_endpoints
-from src.utils import activity_window, demand_history
+from src.utils import activity_window, dead_instances, demand_history
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import peers_id_iterator
@@ -39,6 +39,7 @@ from src.virtualizers.interface import (
 )
 from src.core_services.low_demand import scheduler_tick
 from src.manager.announcement_change import announcement_change_tick
+from src.manager.gossip import gossip_pull_tick, gossip_push_tick
 
 env_manager = ConfigManager()
 
@@ -318,11 +319,11 @@ def _penalise_instance_once(vmachine_id: str, amount: int, reason: str):
 
 
 def maintain_vmachines(debug_mode: bool=False):
-    def remove_and_penalize_vmachine(vmachine_id: str):
+    def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
         _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
         log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
         try:
-            stop_instance(token=vmachine_id)
+            stop_instance(token=vmachine_id, reason=reason)
         except Exception as e:
             log.LOGGER(f"Error prunning container {vmachine_id}: {e}")
     
@@ -409,7 +410,7 @@ def maintain_vmachines(debug_mode: bool=False):
                     vmachine_id, -10, Reason.INSTANCE_OUT_OF_BALANCE
                 )
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
-                stop_instance(token=vmachine_id)
+                stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
@@ -488,7 +489,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
                     f"{vmachine_id} ({e}); stopping it here too."
                 )
                 try:
-                    stop_instance(token=vmachine_id)
+                    stop_instance(token=vmachine_id, reason=dead_instances.PEER_STOPPED)
                 except Exception as stop_error:
                     log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
             elif debug_mode:
@@ -532,7 +533,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
             # then only the part the deposit could not reach.
             sc.update_delegated_balance(token=token, balance_mu=0)
             try:
-                stop_instance(token=vmachine_id)
+                stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
                 log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {e}")
             continue
@@ -589,7 +590,7 @@ def enforce_activity_window(debug_mode: bool = False):
             f"window and activity_window.ON_CLOSE is 'stop'."
         )
         try:
-            stop_instance(token=vmachine_id)
+            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
         except Exception as e:
             log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
 
@@ -642,6 +643,17 @@ def _automatic_refill_enabled() -> bool:
             "is run by hand."
         )
     return False
+
+
+def _automatic_refill_of_gossip_peers_enabled() -> bool:
+    """May the automatic refill also fund a peer only learned via gossip (#427)?
+
+    Off unless the operator set it to exactly ``true``: a missing or malformed value is
+    read as off, because the failure mode of guessing wrong the other way is paying
+    every identity the network relays. Only narrows what ``_automatic_refill_enabled``
+    already allows -- it never turns refills on by itself. Re-read every tick.
+    """
+    return env_manager.get("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", False) is True
 
 
 # Peers already penalised for being unreachable, so an outage costs one penalty and not
@@ -742,6 +754,21 @@ def peer_deposits(debug_mode: bool = False):
                 log.LOGGER(
                     f"deposits.AUTOMATIC_REFILL is off; leaving peer {peer_id} to be "
                     "funded by hand."
+                )
+            continue
+
+        # A peer some third party's gossip told us about is not one anybody here chose
+        # (issue #427). Keypairs are free, so funding every relayed claim is a way to
+        # drain this wallet a full deposit at a time. `nodo connect` or paying it by
+        # hand is what makes it eligible; until then it is known, not funded -- unless
+        # the operator opted in with `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS`.
+        if not _automatic_refill_of_gossip_peers_enabled() \
+                and SQLConnection().peer_learned_via_gossip(peer_id=peer_id):
+            if debug_mode:
+                log.LOGGER(
+                    f"Peer {peer_id} was learned via gossip; not funding it until it "
+                    "is connected or paid by hand (deposits.AUTOMATIC_REFILL_GOSSIP_PEERS "
+                    "is off)."
                 )
             continue
 
@@ -881,6 +908,40 @@ def _manager_loop() -> None:
             sleep(MANAGER_FAILURE_BACKOFF)
 
 
+DEAD_SWEEP_INTERVAL_S = 3600
+_last_dead_sweep = 0.0
+
+
+def sweep_dead_instances(force: bool = False) -> int:
+    """Delete the dead instances that are past the retention limits.
+
+    The limits are `instances.DEAD_RETENTION_DAYS` (age) and `instances.DEAD_MAX_ROWS`
+    (count). The sweep runs at most once per hour unless ``force`` is true. It also
+    removes the archive directories that have no row. Return the number of rows deleted.
+    """
+    global _last_dead_sweep
+    now = time.monotonic()
+    if not force and _last_dead_sweep and now - _last_dead_sweep < DEAD_SWEEP_INTERVAL_S:
+        return 0
+    _last_dead_sweep = now
+    try:
+        days = dead_instances.retention_days()
+        max_rows = dead_instances.retention_max_rows()
+        local_ids = sc.prune_dead_local_instances(max_age_days=days, max_rows=max_rows)
+        delegated_tokens = sc.prune_dead_delegated_instances(max_age_days=days, max_rows=max_rows)
+        dead_instances.remove_dirs(local_ids)
+        # Keep the directories of the dead rows that remain. The rest have no row.
+        kept = {row['id'] for row in sc.get_dead_local_instances()}
+        dead_instances.sweep_orphan_dirs(kept)
+        deleted = len(local_ids) + len(delegated_tokens)
+        if deleted:
+            log.LOGGER(f"Retention sweep deleted {deleted} dead instance(s).")
+        return deleted
+    except Exception as e:
+        log.LOGGER(f"Error in the dead instance retention sweep: {e}")
+        return 0
+
+
 def _manager_pass(short_interval_count: int) -> int:
     """One maintenance pass, ending in the wait. Returns the next interval count."""
     if short_interval_count == int(SHORT_INTERVAL_COUNT):
@@ -898,6 +959,7 @@ def _manager_pass(short_interval_count: int) -> int:
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
+    sweep_dead_instances()
     maintain_delegated_instances(debug_mode=DEBUG_MODE())
     close_orphaned_delegated_endpoints()
     enforce_activity_window(debug_mode=DEBUG_MODE())
@@ -925,6 +987,10 @@ def _manager_pass(short_interval_count: int) -> int:
     # promise: self-gates to its own hourly interval, never raises, and is the only
     # place the reputation contract is read from a network -- the balancer reads rows.
     onchain_reputation_tick()
+
+    # Bounded third-party peer discovery; each tick gates itself on live config.
+    gossip_pull_tick()
+    gossip_push_tick()
 
     # Tell known peers when this node's announcement changes -- its address (moving off
     # a LAN, a renewed dynamic public IP), the resources it offers, its rates, contracts
