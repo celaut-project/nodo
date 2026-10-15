@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
@@ -10,6 +11,7 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.tunneling import delegated_endpoints
 
 from src.utils import logger as log
+from src.utils import dead_instances
 from src.utils import utils
 from src.utils.bee_client import BeeClient
 from src.routing import registry as routing
@@ -487,7 +489,8 @@ def _passes_anti_replay(peer_id: str, ts: int) -> bool:
 
 
 # Insert the instance if it does not exist, refresh it otherwise.
-def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
+def add_peer_instance(peer: celaut_pb2.Peer,
+                      learned_via_gossip: bool = False) -> Optional[str]:
     """Register or refresh a peer, identified by the key it signed its announcement with.
 
     An identity is mandatory: a ``Peer`` that carries no public key, or whose signature
@@ -498,6 +501,12 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     publish it). Every node derives an identity key from its wallet mnemonic, which
     ConfigManager generates on first load, so signing is not an extra requirement on
     anyone -- it is what every current node already does.
+
+    ``learned_via_gossip`` marks a *new* peer as one that came in over the network
+    (``ListPeers`` pull or ``IntroducePeer``) and that this node did not choose (issue
+    #427). The automatic refill will not fund it until this node chooses it with
+    ``nodo connect`` or a payment. It never touches a peer already known: an incoming
+    claim cannot demote a peer the operator connected.
     """
     peer_id = verified_peer_public_key(peer)
     if not peer_id:
@@ -505,6 +514,15 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
             "Refusing a peer announcement with no verifiable identity: a peer is "
             "identified by the key that signed it."
         )
+        return None
+
+    from src.identity.node_identity import get_node_public_key_hex
+
+    # Our own signed advertisement comes straight back from any peer we announced
+    # ourselves to, once gossip relays what it knows (issue #427). A row for this node
+    # in its own peer table would have it delegating to, and paying, itself.
+    if peer_id.lower() == (get_node_public_key_hex() or '').lower():
+        log.LOGGER("Refusing a peer announcement carrying this node's own identity.")
         return None
 
     if sc.peer_exists(peer_id=peer_id):
@@ -518,7 +536,8 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
         return peer_id
 
-    if not sc.add_peer(peer_id=peer_id, advertisement=_peer_advertisement(peer)):
+    if not sc.add_peer(peer_id=peer_id, advertisement=_peer_advertisement(peer),
+                       learned_via_gossip=learned_via_gossip):
         return None
 
     sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
@@ -1245,7 +1264,25 @@ def return_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, c
         )
 
 
-def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+def _death_record(token: str, father_id: Optional[str], reason: str, leftover_mu: int) -> dict:
+    """What `death.json` says about a local instance. Read it before the row is marked dead.
+
+    A field that cannot be read is left out. The record must never stop the stop.
+    """
+    record = {'id': token, 'father_id': father_id, 'reason': reason, 'leftover_mu': leftover_mu}
+    for key, read in (
+        ('name', sc.get_internal_name),
+        ('service_id', sc.get_service_id_by_container_id),
+        ('virtualizer', sc.get_internal_virtualizer),
+    ):
+        try:
+            record[key] = read(id=token)
+        except Exception as e:
+            log.LOGGER(f"Could not read {key} of {token} for its death record: {e}")
+    return record
+
+
+def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.MANUAL_KILL) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     """Stop an instance and hand its unspent deposit back, returning that figure.
 
     Both kinds of instance settle the same way, and the figure is always in this
@@ -1266,6 +1303,10 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
     before their children and so cannot let each child pay its own father, whose row
     is already gone by then. Every other caller stops one instance whose father is
     still there, and wants the default.
+
+    ``reason`` says why the instance dies. It is recorded in `death_reason`. The
+    row stays in the database with `killed_at` set, and a dead instance never
+    becomes alive again. A stop on an instance that is already dead does nothing.
     """
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
@@ -1281,7 +1322,7 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             context=f"stop-instance:before-kill token={token} reserved_mem_limit={reserved_mem_limit}"
         )
         
-        kill(vmachine_id=token)
+        kill(vmachine_id=token, archive=True)
         
         father_id = sc.get_internal_father_id(id=token)
         serialized_instance = sc.get_internal_instance(id=token)
@@ -1293,7 +1334,13 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
                 IOBigData().log_snapshot(
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )
-            sc.purge_internal(id=token)
+            death_record = _death_record(token, father_id, reason, refund)
+            if not sc.mark_local_killed(id=token, reason=reason):
+                # Another stop already killed it and settled the leftover.
+                log.LOGGER(f"Instance {token} is already dead.")
+                return None
+            death_record['killed_at'] = datetime.now(timezone.utc).isoformat()
+            dead_instances.write_death_record(token, death_record)
 
             # The child's unspent deposit goes back to whoever paid it in, and it goes
             # back *after* the row is gone.
@@ -1312,8 +1359,8 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             #
             # Crediting first, before the DELETE, would look safer and is not: the
             # amount is already in `refund`, a local read, so nothing about it depends
-            # on the row still existing. What does depend on the DELETE is whether this
-            # stop can happen twice. A `purge_internal` that raises leaves the row
+            # on the row still existing. What does depend on the kill mark is whether this
+            # stop can happen twice. A `mark_local_killed` that raises leaves the row
             # alive with its balance intact, and `maintain_vmachines` calls
             # `stop_instance` again on the next tick -- so a credit issued before it
             # would be issued again, and again, manufacturing MU out of a balance
@@ -1374,7 +1421,9 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             # if StopService raised we must keep the row so the stop can be
             # retried and the (remote-computed) refund reconciled, rather than
             # orphaning an instance the peer may still be running.
-            sc.purgue_delegated(token=external_token)
+            if not sc.mark_delegated_killed(token=external_token, reason=reason):
+                log.LOGGER(f"Delegated instance {token} is already dead.")
+                return None
 
             # And credit after the DELETE, for the reason spelled out on the
             # internal branch: this stop is retried while the row survives, and a

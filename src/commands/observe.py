@@ -872,7 +872,7 @@ def resolve_instance(instance_id: str) -> Optional[Dict[str, Any]]:
             return None
         cur = conn.execute(
             "SELECT id, ip, father_id, service_id, virtualizer, name, balance_mu "
-            "FROM local_instances WHERE id = ?",
+            "FROM local_instances WHERE id = ? AND killed_at IS NULL",
             (instance_id,),
         )
         row = cur.fetchone()
@@ -889,7 +889,7 @@ def build_instance_index() -> Dict[str, Dict[str, str]]:
         if not _local_instances_table_exists(conn):
             return index
         cur = conn.execute(
-            "SELECT id, ip, father_id, service_id FROM local_instances"
+            "SELECT id, ip, father_id, service_id FROM local_instances WHERE killed_at IS NULL"
         )
         for row in cur.fetchall():
             ip = row["ip"]
@@ -915,7 +915,7 @@ def read_instance_balance(instance_id: str) -> Optional[str]:
         if not _local_instances_table_exists(conn):
             return None
         cur = conn.execute(
-            "SELECT balance_mu FROM local_instances WHERE id = ?", (instance_id,)
+            "SELECT balance_mu FROM local_instances WHERE id = ? AND killed_at IS NULL", (instance_id,)
         )
         row = cur.fetchone()
         return row["balance_mu"] if row is not None else None

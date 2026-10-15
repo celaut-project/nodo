@@ -218,8 +218,20 @@ class BeeClient:
         )
 
     @staticmethod
+    def list_peers(channel, client_id: str = "", timeout: float = 10):
+        """Stream signed third-party advertisements; the caller bounds their count."""
+        return BeeClient.call(
+            method=celaut_pb2_grpc.GatewayStub(channel).ListPeers,
+            input=celaut_pb2.Client(client_id=client_id) if client_id else None,
+            indices_serializer=rpc_input("ListPeers"),
+            indices_parser=rpc_output("ListPeers"),
+            timeout=timeout,
+        )
+
+    @staticmethod
     def introduce_peer(
-            channel, peer: celaut_pb2.Peer, client_id: str = ""
+            channel, peer: celaut_pb2.Peer, client_id: str = "",
+            timeout: Optional[float] = None,
     ) -> Optional[celaut_pb2.RecursionGuard]:
         input_messages = [peer, celaut_pb2.Client(client_id=client_id)] if client_id else peer
         return BeeClient.call_one(
@@ -227,6 +239,7 @@ class BeeClient:
             input=input_messages,
             indices_serializer=rpc_input("IntroducePeer"),
             indices_parser=rpc_output("IntroducePeer"),
+            timeout=timeout,
         )
 
     @staticmethod
@@ -298,6 +311,23 @@ class BeeClient:
             input=message,
             indices_serializer=rpc_input("Chat"),
             indices_parser=rpc_output("Chat"),
+        )
+
+    @staticmethod
+    def locate_share(
+            channel, share_id: str, client_id: str, timeout: Optional[float] = None,
+    ) -> Optional[celaut_pb2.ShareLocation]:
+        """``Client & ShareLocationRequest -> ShareLocation``: does the peer hold this
+        network share now (#268)?"""
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).LocateShare,
+            input=[
+                celaut_pb2.ShareLocationRequest(share_id=share_id),
+                celaut_pb2.Client(client_id=client_id),
+            ],
+            indices_serializer=rpc_input("LocateShare"),
+            indices_parser=rpc_output("LocateShare"),
+            timeout=timeout,
         )
 
     @staticmethod

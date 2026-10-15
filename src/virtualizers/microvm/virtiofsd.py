@@ -19,7 +19,7 @@ import os
 import re
 import shutil
 import subprocess
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Sequence
 
 from src.virtualizers.microvm.errors import MicroVMError
 
@@ -77,8 +77,11 @@ def configured_binary() -> str:
     return ConfigManager().get(CONFIG_KEY, DEFAULT_BINARY) or DEFAULT_BINARY
 
 
-def probe(binary: Optional[str], timeout: float = 10) -> VirtiofsdProbe:
-    """Resolve ``binary`` the way the node does, run ``--version`` and classify it."""
+def probe(binary: Optional[str], timeout: float = 10, run_as: Sequence[str] = ()) -> VirtiofsdProbe:
+    """Resolve ``binary`` the way the node does, run ``--version`` and classify it.
+
+    ``run_as`` prefixes the command (``nodo doctor`` runs it as the daemon's user).
+    """
     configured = (binary or "").strip() or DEFAULT_BINARY
     path = shutil.which(configured)
     if not path:
@@ -95,7 +98,7 @@ def probe(binary: Optional[str], timeout: float = 10) -> VirtiofsdProbe:
 
     try:
         result = subprocess.run(
-            [path, "--version"], capture_output=True, text=True, timeout=timeout
+            [*run_as, path, "--version"], capture_output=True, text=True, timeout=timeout
         )
     except (OSError, subprocess.SubprocessError) as e:
         return VirtiofsdProbe(

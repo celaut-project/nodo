@@ -198,7 +198,13 @@ def _workload_group_is_satisfiable(
         request: celaut.ArchitectureResources,
         ignore_network: Optional[str],
 ) -> bool:
-    if _local_resource_availability(request)["can_execute"]:
+    from src.utils.cost_functions.architecture_resources import executes_locally
+
+    # This host counts only while the node runs work on it. With
+    # `network.EXECUTE_LOCALLY: false` the room it has is not on offer, and a group
+    # admitted on its strength would be refused at launch for want of a local
+    # candidate.
+    if executes_locally() and _local_resource_availability(request)["can_execute"]:
         return True
 
     if not env_manager.get("network.DELEGATE_EXECUTION", True):

@@ -34,6 +34,7 @@ class AutomaticRefillFlagTests(unittest.TestCase):
         connection = mock.MagicMock()
         connection.get_peers_id.return_value = ["peer-1"]
         connection.get_peer_expiry_unix_timestamp.return_value = None
+        connection.peer_learned_via_gossip.return_value = False
         payments = mock.MagicMock()
         payments.increase_deposit_on_peer.return_value = True
 

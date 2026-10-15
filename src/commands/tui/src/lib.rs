@@ -29,6 +29,9 @@ pub mod clients;
 /// The TUNNELS page: the `nodo tunnel` processes running on this host.
 pub mod tunnels;
 
+/// The DEAD page: instances that were killed or died, with the logs the node saved.
+pub mod dead;
+
 /// The PACKS page: the `nodo pack` runs on this host, current and recent.
 pub mod packs;
 
@@ -43,6 +46,13 @@ pub mod env_form;
 
 /// The DOCS page: the installation's `docs/` folder, indexed and rendered.
 pub mod docs;
+
+/// The first-run profile deck: a character, a colour scheme and attribute bars for
+/// each profile (docs/proposals/profile-deck.md).
+pub mod profile_deck;
+
+/// Drawing the profile deck and the geometry of its click zones.
+pub mod profile_deck_ui;
 
 /// Application.
 pub mod app;

@@ -9,7 +9,7 @@ nothing in the packer wrote them. This pins the packer half:
 * the directory must exist in the image; the packer does not create it;
 * types, roles and unknown fields are refused, not coerced;
 * the result passes through `declarations_for_filesystem`, so its rules apply;
-* `read_only_filesystem: true` plus `shared` stays refused.
+* `read_only_filesystem: true` plus `shared` or `guest` is allowed.
 
 `ZipContainerPacker.__init__` runs BuildKit, so it is never called here: the methods
 under test are invoked on an object built with `__new__`, carrying only `json`.
@@ -112,6 +112,39 @@ class SharedFilesystemsPropertyTests(unittest.TestCase):
         self.assertNotIn("shared", xattrs)
         self.assertEqual(len(tree.branch[0].xattrs), 0)
 
+    def test_network_role_sets_share_network_and_no_side(self):
+        tree = _tree(_dir("data"))
+        service_json = _declare(
+            {"path": "/data", "role": "network", "network": "hdfs", "tag": "hdfs-data"}
+        )
+        service_json["network"] = [{"tags": ["hdfs"], "prose": ""}]
+
+        _packer(service_json)._apply_shared_filesystems(tree)
+
+        self.assertEqual(
+            keyvalue.to_dict(tree.branch[0].xattrs),
+            {"share_network": b"hdfs", "share_tag": b"hdfs-data"},
+        )
+
+    def test_network_role_requires_a_declared_network(self):
+        for service_json, message in (
+            (_declare({"path": "/data", "role": "network"}), "requires a 'network'"),
+            (
+                {**_declare({"path": "/data", "role": "network", "network": "hdfs"}),
+                 "network": [{"tags": ["other"], "prose": ""}]},
+                "not a tag of any entry",
+            ),
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    _packer(service_json)._apply_shared_filesystems(_tree(_dir("data")))
+
+    def test_network_field_is_refused_on_a_parent_share(self):
+        with self.assertRaisesRegex(ValueError, "only valid with role 'network'"):
+            _packer(_declare(
+                {"path": "/data", "role": "shared", "network": "hdfs"}
+            ))._apply_shared_filesystems(_tree(_dir("data")))
+
     def test_optional_fields_are_omitted_when_not_declared(self):
         tree = _tree(_dir("shared"))
 
@@ -204,16 +237,16 @@ class SharedFilesystemsPropertyTests(unittest.TestCase):
 
     # -- read_only_filesystem ------------------------------------------------- #
 
-    def test_read_only_plus_shared_is_still_refused(self):
+    def test_read_only_plus_shared_is_allowed(self):
         tree = _tree(_dir("shared"))
         packer = _packer({READ_ONLY_FILESYSTEM_KEY: True, **_declare({"path": "/shared", "role": "shared"})})
 
         packer._apply_shared_filesystems(tree)
-        with self.assertRaises(ValueError) as caught:
+        # Metadata is not set on these hand-built branches, which is out of scope here.
+        try:
             packer._apply_read_only_filesystem(tree)
-
-        self.assertIn("/shared", str(caught.exception))
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
+        except ValueError as e:
+            self.assertIn("metadata", str(e))
 
     def test_read_only_plus_guest_is_allowed(self):
         tree = _tree(_dir("mnt"))

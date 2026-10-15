@@ -757,10 +757,10 @@ class InstanceBalanceCatalogueTests(unittest.TestCase):
         conn.execute(
             "CREATE TABLE local_instances ("
             "id TEXT, ip TEXT, father_id TEXT, service_id TEXT, "
-            "virtualizer TEXT, name TEXT, balance_mu TEXT)"
+            "virtualizer TEXT, name TEXT, balance_mu TEXT, killed_at DATETIME)"
         )
         conn.execute(
-            "INSERT INTO local_instances VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO local_instances (id, ip, father_id, service_id, virtualizer, name, balance_mu) VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("abc123", "10.0.0.2", "dad", "svc", "ch", "inst", "5000"),
         )
         conn.commit()

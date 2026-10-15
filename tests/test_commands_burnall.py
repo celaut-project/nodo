@@ -142,7 +142,7 @@ class BurnallOrderingTests(unittest.TestCase):
     def test_one_instance_that_will_not_stop_does_not_strand_the_rest(self):
         # The instances after it in the order are its children, which are
         # exactly what a burnall is for.
-        def stop(token, credit=True):
+        def stop(token, credit=True, reason=None):
             if token == "child":
                 raise RuntimeError("busy")
             return 1
@@ -257,12 +257,12 @@ class RefundRollupTests(unittest.TestCase):
     def test_nothing_is_credited_to_a_father_this_burn_already_purged(self):
         # The bug: `stop_instance`'s own credit would hand `child`'s leftover to
         # `parent`, whose row is gone by then, and the money would be dropped.
-        _, credits = _burn(lambda token, credit=True: self.LEFTOVERS[token])
+        _, credits = _burn(lambda token, credit=True, reason=None: self.LEFTOVERS[token])
         self.assertNotIn("parent", credits)
         self.assertNotIn("child", credits)
 
     def test_a_whole_subtree_is_refunded_to_the_client_that_asked_for_its_root(self):
-        _, credits = _burn(lambda token, credit=True: self.LEFTOVERS[token])
+        _, credits = _burn(lambda token, credit=True, reason=None: self.LEFTOVERS[token])
         self.assertEqual(credits, {"client-1": 10 + 20 + 30, "client-2": 40})
 
     def test_the_leftovers_are_read_without_being_credited_twice(self):
@@ -282,7 +282,7 @@ class RefundRollupTests(unittest.TestCase):
         # `parent` is still running, so it still has a row and the money is still
         # its own: crediting its client instead would fund the client out of a
         # live instance's balance.
-        def stop(token, credit=True):
+        def stop(token, credit=True, reason=None):
             if token == "parent":
                 raise RuntimeError("busy")
             return self.LEFTOVERS[token]
@@ -293,7 +293,7 @@ class RefundRollupTests(unittest.TestCase):
     def test_an_instance_that_reported_no_result_owes_nothing(self):
         # A failed purge leaves the balance on the row, so there is nothing to
         # roll up -- and crediting anyway would invent MU nobody paid in.
-        def stop(token, credit=True):
+        def stop(token, credit=True, reason=None):
             return None if token == "other-root" else self.LEFTOVERS[token]
 
         _, credits = _burn(stop)

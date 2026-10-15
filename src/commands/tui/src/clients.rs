@@ -119,10 +119,17 @@ fn get_client_instances(
     connection: &Connection,
     client_id: &str,
 ) -> SqlResult<Vec<ClientInstance>> {
-    let mut statement = connection.prepare(
+    // Only the live ones; a dead instance is on the DEAD page. The column is missing
+    // from a database the node has not migrated yet.
+    let alive = if crate::app::column_exists(connection, "local_instances", "killed_at") {
+        " AND killed_at IS NULL"
+    } else {
+        ""
+    };
+    let mut statement = connection.prepare(&format!(
         "SELECT id, COALESCE(name, '') FROM local_instances
-         WHERE father_id = ?1 ORDER BY name LIMIT ?2",
-    )?;
+         WHERE father_id = ?1{alive} ORDER BY name LIMIT ?2"
+    ))?;
     let instances = statement
         .query_map(
             rusqlite::params![client_id, crate::app::DETAIL_ROWS as i64],

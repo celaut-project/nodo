@@ -5,6 +5,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 from src.commands import completion
 
@@ -63,7 +64,7 @@ class DatabaseCandidateTests(unittest.TestCase):
         conn = sqlite3.connect(path)
         try:
             conn.execute(
-                "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT)"
+                "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, killed_at DATETIME)"
             )
             conn.executemany(
                 "INSERT INTO local_instances (id, name) VALUES (?, ?)",
@@ -85,6 +86,19 @@ class DatabaseCandidateTests(unittest.TestCase):
             self.assertIn("inst-aaa", result)
             self.assertIn("alpha", result)
             self.assertIn("inst-ccc", result)  # id present even with NULL name
+
+    def test_dead_instance_candidates_hold_only_dead_instances(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "db.sqlite")
+            self._build_db(db)
+            conn = sqlite3.connect(db)
+            conn.execute("UPDATE local_instances SET killed_at = '2026-01-01 00:00:00' WHERE id = 'inst-bbb'")
+            conn.commit()
+            conn.close()
+            self.assertEqual(sorted(completion.dead_instance_candidates(db)), ["beta", "inst-bbb"])
+            self.assertNotIn("inst-bbb", completion.instance_candidates(db))
+            self.assertEqual(completion.candidates("dead_instances", {"database": db}),
+                             completion.dead_instance_candidates(db))
 
     def test_peer_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -170,6 +184,29 @@ class ScriptGenerationTests(unittest.TestCase):
         system = completion._completion_targets(user=False)
         self.assertNotEqual(user["bash"], system["bash"])
         self.assertTrue(user["bash"].endswith("/completions/nodo"))
+
+
+class ZshFpathHintTests(unittest.TestCase):
+    def _hint(self, zshrc, user=True, zsh="/usr/bin/zsh"):
+        home = tempfile.mkdtemp(prefix="nodo-completion-home-")
+        if zshrc is not None:
+            with open(os.path.join(home, ".zshrc"), "w", encoding="utf-8") as handle:
+                handle.write(zshrc)
+        with mock.patch.dict(os.environ, {"HOME": home}), mock.patch(
+            "shutil.which", return_value=zsh
+        ):
+            return completion.zsh_fpath_hint(user)
+
+    def test_hint_when_zshrc_does_not_name_the_directory(self):
+        self.assertIn("fpath=(~/.zsh/completions", self._hint("# empty\n"))
+        self.assertIn("fpath=(~/.zsh/completions", self._hint(None))
+
+    def test_no_hint_when_zshrc_names_the_directory(self):
+        self.assertIsNone(self._hint("fpath=(~/.zsh/completions $fpath)\n"))
+
+    def test_no_hint_for_system_install_or_without_zsh(self):
+        self.assertIsNone(self._hint(None, user=False))
+        self.assertIsNone(self._hint(None, zsh=None))
 
 
 class ConfigDirResolutionTests(unittest.TestCase):

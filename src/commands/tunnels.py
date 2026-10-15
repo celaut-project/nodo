@@ -151,7 +151,7 @@ def instance_references(reference: str) -> Set[str]:
         connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
         try:
             rows = connection.execute(
-                "SELECT id, name FROM local_instances WHERE id = ? OR name = ?",
+                "SELECT id, name FROM local_instances WHERE (id = ? OR name = ?) AND killed_at IS NULL",
                 (reference, reference),
             ).fetchall()
         finally:

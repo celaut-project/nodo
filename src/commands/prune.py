@@ -106,6 +106,30 @@ def _parse_args(argv: Sequence[str]) -> Tuple[bool, bool, List[str]]:
     return dry_run, prune_all, unknown
 
 
+def _scan_dead_instances(dry_run: bool, prune_all: bool) -> Tuple[List[str], List[str]]:
+    """The dead local ids and dead delegated tokens that go. In a real run they are deleted.
+
+    A failure reading the database is reported and counts as nothing to prune.
+    """
+    try:
+        from src.database.sql_connection import SQLConnection
+        from src.utils import dead_instances
+
+        sc = SQLConnection()
+        days = dead_instances.retention_days()
+        rows = dead_instances.retention_max_rows()
+        local = sc.prune_dead_local_instances(
+            max_age_days=days, max_rows=rows, dry_run=dry_run, delete_all=prune_all
+        )
+        delegated = sc.prune_dead_delegated_instances(
+            max_age_days=days, max_rows=rows, dry_run=dry_run, delete_all=prune_all
+        )
+        return local, delegated
+    except Exception as e:
+        print(f"Warning: could not prune the dead instances: {e}")
+        return [], []
+
+
 def prune(argv: Optional[Sequence[str]] = None) -> None:
     dry_run, prune_all, unknown = _parse_args(argv if argv is not None else sys.argv[2:])
     if unknown:
@@ -151,8 +175,16 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
 
     reclaimable = list(runtimes) + list(failures)
 
-    if not reclaimable and not kept_failures:
-        print("Nothing to prune: no orphaned runtime directories and no preserved failures.")
+    # Dead instances: the same limits as the node's own hourly sweep, or all of them
+    # with --all. A dry run only counts them.
+    dead_local, dead_delegated = _scan_dead_instances(dry_run, prune_all)
+    dead_count = len(dead_local) + len(dead_delegated)
+
+    if not reclaimable and not kept_failures and not dead_count:
+        print(
+            "Nothing to prune: no orphaned runtime directories, no preserved failures "
+            "and no old dead instances."
+        )
         return
 
     if dry_run:
@@ -164,6 +196,8 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
             "Preserved launch failures (would be removed):", failures, verb="would remove"
         )
         _print_entries("Kept:", kept_failures, verb="kept")
+        if dead_count:
+            print(f"\nDead instances ({dead_count} would be deleted with their saved logs).")
         print(f"\nDry run: {format_size(total)} would be freed. Nothing was removed.")
         return
 
@@ -177,6 +211,12 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
             # nothing anyone can rely on; the total below only adds up disk
             # that was measured after the fact.
             entry.size_bytes = 0
+
+    if dead_count:
+        from src.utils import dead_instances
+
+        dead_instances.remove_dirs(dead_local)
+        print(f"\nDead instances: deleted {dead_count} with their saved logs.")
 
     freed_runtimes = _print_entries("Orphaned runtime directories:", runtimes, verb="removed")
     freed_failures = _print_entries("Preserved launch failures:", failures, verb="removed")

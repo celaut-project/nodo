@@ -17,6 +17,7 @@ Two entry points:
 """
 
 import os
+import shutil
 import sqlite3
 import sys
 from typing import Dict, List, Optional
@@ -41,6 +42,10 @@ SERVICE_COMMANDS = [
 
 # Commands whose first positional argument is an instance id.
 INSTANCE_COMMANDS = ["kill", "observe", "increase_deposit", "decrease_deposit", "tunnel"]
+
+# Commands whose first positional argument is a dead local instance (its saved
+# logs). `logs` takes no argument otherwise, so the instance is optional.
+DEAD_INSTANCE_COMMANDS = ["logs"]
 
 # Commands whose first positional argument is a peer id.
 PEER_COMMANDS = [
@@ -101,6 +106,7 @@ COMMANDS = sorted(
         "estimate",
         "service_envs",
         "update",
+        "uninstall",
         "kill",
         "burnall",
         "observe",
@@ -259,7 +265,14 @@ def _sqlite_column(database: Optional[str], query: str) -> List[str]:
 
 def instance_candidates(database: Optional[str]) -> List[str]:
     """Instance ids and their human-friendly names."""
-    return _sqlite_column(database, "SELECT id, name FROM local_instances")
+    return _sqlite_column(database, "SELECT id, name FROM local_instances WHERE killed_at IS NULL")
+
+
+def dead_instance_candidates(database: Optional[str]) -> List[str]:
+    """Ids and names of the dead local instances, for `nodo logs`."""
+    return _sqlite_column(
+        database, "SELECT id, name FROM local_instances WHERE killed_at IS NOT NULL"
+    )
 
 
 def peer_candidates(database: Optional[str]) -> List[str]:
@@ -318,6 +331,8 @@ def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> L
         return service_candidates(paths.get("registry"), paths.get("metadata"))
     if kind == "instances":
         return instance_candidates(paths.get("database"))
+    if kind == "dead_instances":
+        return dead_instance_candidates(paths.get("database"))
     if kind == "peers":
         return peer_candidates(paths.get("database"))
     if kind == "clients":
@@ -376,6 +391,7 @@ _nodo_completion() {{
         case "$cmd" in
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
+            {"|".join(DEAD_INSTANCE_COMMANDS)}) kind="dead_instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
@@ -436,6 +452,7 @@ _nodo() {{
         case $cmd in
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
+            {"|".join(DEAD_INSTANCE_COMMANDS)}) kind="dead_instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
             {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(TUNNEL_COMMANDS)}) kind="tunnels" ;;
@@ -479,6 +496,29 @@ def _completion_targets(user: bool) -> Dict[str, str]:
         "bash": "/etc/bash_completion.d/nodo",
         "zsh": "/usr/local/share/zsh/site-functions/_nodo",
     }
+
+
+def zsh_fpath_hint(user: bool) -> Optional[str]:
+    """Tell the user how to enable zsh completion after a per-user install.
+
+    zsh does not search ``~/.zsh/completions`` by default. Return ``None`` when
+    the note is not needed: system install, zsh not installed, or ``.zshrc``
+    already names the directory. We never edit ``.zshrc`` ourselves.
+    """
+    if not user or shutil.which("zsh") is None:
+        return None
+    zshrc = os.path.join(os.path.expanduser("~"), ".zshrc")
+    try:
+        with open(zshrc, "r", encoding="utf-8", errors="replace") as handle:
+            if ".zsh/completions" in handle.read():
+                return None
+    except OSError:
+        pass
+    return (
+        "zsh does not search ~/.zsh/completions by default. Add this line to "
+        "~/.zshrc, before `compinit`:\n"
+        "  fpath=(~/.zsh/completions $fpath)"
+    )
 
 
 def install(nodo_dir: str, python_bin: str, user: Optional[bool] = None) -> List[str]:
@@ -549,11 +589,14 @@ def main(argv: List[str]) -> int:
             "install directory is on your `fpath`.",
             flush=True,
         )
+        hint = zsh_fpath_hint(user if user is not None else os.geteuid() != 0)
+        if hint:
+            print(f"\n{hint}", flush=True)
         return 0
 
     print(
         "Usage: nodo completion <bash|zsh|install [--user|--system]>\n"
-        "       nodo completion list <commands|services|instances|peers|refs>",
+        "       nodo completion list <commands|daemon|services|instances|peers|clients|tunnels|packs|refs>",
         flush=True,
     )
     return 0 if action == "help" else 1

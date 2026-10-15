@@ -92,8 +92,12 @@ def control_socket_dir() -> Path:
     bytes, and a runtime directory is nested under ``CACHE`` and keyed by the
     full 64-hex ``vmachine_id``, which on its own can exceed that. So the sockets
     live in a short, flat directory and carry a truncated id.
+
+    The default is under ``/run``, not ``/tmp``: a fixed name in ``/tmp`` can be
+    created first by any local user. Callers create it through
+    ``host.ensure_private_dir``, which refuses a directory another user owns.
     """
-    return Path(env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch"))
+    return Path(env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/run/nodo/ch"))
 
 
 def control_socket_path(socket_prefix: str, vmachine_id: str) -> Path:

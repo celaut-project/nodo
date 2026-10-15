@@ -1279,10 +1279,10 @@ echo "Detected WSL2 outbound interface: $WSL_IFACE"
 # Patch config.yaml so instances started with `nodo execute` are also published on the
 # WSL2 interface (reachable from Windows, whose browser/tools cannot reach the microVM
 # network inside WSL). `ui.THEME` is
-# overridden from its "ubuntu" default too: that default assumes the console it draws
-# in is GNOME Terminal on an Ubuntu server (config.example.yaml's own comment on
-# THEME), which does not hold here -- the only console a Windows user opens is the
-# desktop shortcut into `nodo tui` inside Windows Terminal/conhost, not GNOME Terminal.
+# pinned to "dark" too. "dark" is the default now, but the pin keeps this console in the
+# palette that suits it if the default ever changes: the only console a Windows user
+# opens is the desktop shortcut into `nodo tui` inside Windows Terminal/conhost, not
+# GNOME Terminal on an Ubuntu server, which is what the "ubuntu" theme is made for.
 $YQ -i "
   .network.EXTERNAL_INTERFACE = \"$WSL_IFACE\" |
   .network.ISOLATE_INTERNAL_CHILDREN = true |

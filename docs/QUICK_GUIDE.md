@@ -2,6 +2,8 @@
 
 1. Setup
    nodo tui        (All page — edits config.yaml, backup included)
+                   The first time, nodo tui asks you to choose a profile.
+                   You can skip it. Press p on the Policies page to choose later.
 
 2. Get a service
    nodo download <url>

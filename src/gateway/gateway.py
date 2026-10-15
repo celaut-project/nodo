@@ -5,6 +5,7 @@ from protos.gateway_bee import rpc_input, rpc_output
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
+from src.gateway.iterables.list_peers_iterable import ListPeersIterable
 from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
@@ -93,6 +94,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         gateway_instance = generate_full_node_peer_info()
         yield from BeeClient.respond(gateway_instance)
 
+    def ListPeers(self, request_iterator, context, **kwargs):
+        yield from ListPeersIterable(request_iterator, context)
+
     def ResolveNetwork(self, request_iterator, context, **kwargs):
         """Answer with the peers this node knows in the communication domain asked for.
 
@@ -166,6 +170,29 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
         yield from BeeClient.respond(resolution)
 
+    def LocateShare(self, request_iterator, context, **kwargs):
+        """Say whether this node holds a network share now (#268).
+
+        A node that launches a member of a network share asks its peers this
+        before it places the member, and runs it where the share already is: the
+        directory is on one host, and a member on another node would get an empty
+        one under the same id.
+
+        The answer reveals only that a share id is in use here. Computing the id
+        takes the network tag, its ``formal`` and the share's name and value, which
+        is what joining the share takes anyway. A parent share is never reported.
+        """
+        request, client_id = parse_with_client(request_iterator, method="LocateShare")
+        require_caller(context, client_id)
+        share_id = (request.share_id if request else "").strip().lower()
+        if len(share_id) != 64 or any(c not in "0123456789abcdef" for c in share_id):
+            raise Exception("LocateShare needs the hex id of a network share.")
+
+        from src.virtualizers.microvm.shares import holds_network_share_locally
+        held = holds_network_share_locally(share_id)
+        log.LOGGER(f"Locate share request by {context.peer()}: share={share_id} held={held}")
+        yield from BeeClient.respond(celaut_pb2.ShareLocation(held=held))
+
     def IntroducePeer(self, request_iterator, context, **kwargs):
         # DDOS protection (issue #428): the signature check below already stops a
         # forged announcement, but minting a fresh Ed25519 keypair is free, so it
@@ -176,7 +203,11 @@ class Gateway(celaut_pb2_grpc.Gateway):
         require_caller(context, client_id)
 
         log.LOGGER('Introduce peer method.')
-        peer_id = add_peer_instance(peer=peer)
+        # Nobody here chose this peer: it came in over the network. Whether the caller is
+        # the subject, a known peer or a stranger, the risk is the same as for a relayed
+        # claim, so it is filed as one. Only `nodo connect` or a payment makes it chosen
+        # (issue #427).
+        peer_id = add_peer_instance(peer=peer, learned_via_gossip=True)
 
         # Answer with the id the peer was stored under, or REFUSED when it was not.
         # Refusal is a normal outcome now that an unverifiable announcement is turned

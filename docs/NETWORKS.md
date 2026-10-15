@@ -156,6 +156,18 @@ mechanism, packer-validated and enforced end to end.
 
 ---
 
+## Network shares
+
+A network is also the scope of a **network share** (#268): a directory that
+instances with no common parent share when they declare the same network
+(`share_network=<tag>`). The share id includes the tag and the `formal` after
+`${VAR}` substitution, so a selection key such as `cluster=${PG_CLUSTER}`
+partitions shares the same way it partitions peers. The node runs a member on the
+node that already holds the share, which it finds with `Gateway.LocateShare`. See
+[SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#network-shares--no-common-parent).
+
+---
+
 ## Network Instance Indexing
 
 A node indexes an instance as a member of a network only if **both** of the following conditions are satisfied:

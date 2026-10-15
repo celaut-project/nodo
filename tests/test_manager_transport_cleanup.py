@@ -41,7 +41,9 @@ class ManagerTransportCleanupTests(unittest.TestCase):
         ), patch.object(
             manager.sc, "get_instance_balance", return_value=42
         ), patch.object(
-            manager.sc, "purge_internal", return_value=None
+            manager.sc, "mark_local_killed", return_value=True
+        ), patch.object(
+            manager.dead_instances, "write_death_record"
         ), patch.object(
             manager, "remove_firewall_rule", return_value=True
         ) as remove_rule_mock:

@@ -106,6 +106,10 @@ These are the most commonly used commands for daily tasks:
     nothing. Entries older than `virtualizers.ch.FAILURE_RETENTION_DAYS` (7 by
     default) are reclaimable; `--all` takes them regardless of age.
 
+  It also deletes the dead instances that are past the limits of
+  [`instances` in CONFIG.md](CONFIG.md), with their saved logs. The node does
+  the same once per hour. `--all` deletes every dead instance.
+
   Orphaned VMs are torn down through `kill`, not deleted outright, so the tap device,
   cgroup, API socket and firewall rules go with the disk. Every entry is printed with
   its size and its reason — including the ones that were **kept** and why — and the
@@ -477,6 +481,13 @@ These are the most commonly used commands for daily tasks:
   `nodo logs`  
   `nodo logs -n 200`
 
+- **logs `<instance> [--stream stdout|stderr|serial] [-n <lines>] [--json]`**  
+  Shows the logs that the node saved when a local instance died. The instance
+  can be an id or a name. If two dead instances have the same name, the newest
+  one is used. A live instance has no saved logs.  
+  **Example:**  
+  `nodo logs web --stream serial -n 100`
+
 - **export `<service> <dir> [--raw]`**  
   Exports a service into the specified directory. Two modes:
   - **`nodo export <service> <dir>`** (default) → writes `<service>.celaut.bee`, a beerpc-framed package. This is the **importable / transmittable** artifact — share it and feed it to `nodo import`.
@@ -527,6 +538,14 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo instances`  
   `nodo instances web --json`
+
+- **instances `--dead` | `--all`**  
+  A dead instance is not deleted at once. Its row stays, with the time and the
+  reason of its death. `--dead` lists only the dead instances. `--all` lists the
+  live ones and then the dead ones. The node deletes old dead instances (see
+  [`instances` in CONFIG.md](CONFIG.md)). A dead instance never starts again.  
+  **Example:**  
+  `nodo instances --dead --json`
 
 - **instances --grouped**  
   Lists running instances grouped by their parent service.  
@@ -868,6 +887,30 @@ once it sees the file changed, which is why those need root on a running node. I
 restart cannot happen, the command says so and tells you to run it — the write is on
 disk but not live until you do.
 
+#### Staged changes (no root)
+
+A restart stops all instances of the node, and a restart needs root. If the node is
+serving and you do not run as root, `nodo tui` and `nodo config set` do not restart the
+node. They write the change to `config.pending.yaml`, beside `config.yaml`.
+
+The running node keeps `config.yaml`. In the `nodo tui` Config page, each value that
+differs from `config.yaml` shows `● staged (running: <old value>)`. The page title shows
+the number of staged values.
+
+To put a staged value back to its `config.yaml` value, select it and press `u`. To drop
+all staged values, press `U`.
+
+Each new change goes to `config.pending.yaml` while the file exists. To apply the
+changes, restart the node when you choose. At start, the node does these steps:
+
+1. It saves the old `config.yaml` as `config-<UTC stamp>-<nnnn>.yaml`.
+2. It replaces `config.yaml` with `config.pending.yaml`.
+3. It removes `config.pending.yaml`.
+
+If the node cannot load the staged file, it puts the old `config.yaml` back. It keeps
+the staged file as `config.pending.rejected.yaml`. To drop a staged change, delete
+`config.pending.yaml`.
+
 If you edit `config.yaml` by hand, restart the node yourself:
 
 ```bash
@@ -1006,8 +1049,8 @@ nodo tunnel_close <tunnel id> --json       # and close one
   ```
 
 - **config profile `[<profile>] [--apply] [--json]`**
-  The POLICIES page's postures — `just-me`, `cautious`, `open-renter`, `lan-lab`,
-  `workbench` (most closed to most open). No argument lists them with how far this
+  The POLICIES page's postures — `just-me`, `remote-only`, `cautious`, `open-renter`,
+  `lan-lab`, `workbench` (most closed to most open). No argument lists them with how far this
   node is from each and which is closest (ties go to the more closed one). A
   profile name lists exactly which keys differ (`from` → `to`); `--apply` writes
   those keys in one transaction. A profile writes policy only — never an identity,
@@ -1113,6 +1156,8 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | OVERVIEW: earnings / donations summary | — | `nodo earnings`, `nodo donations --json` |
 | OVERVIEW: energy / schedule summary | — | `nodo energy`, `nodo schedule` (new) |
 | INSTANCES: table, live CPU/RAM/net | — | `nodo instances --json` (new `--json`, live counters); `nodo observe <id>` (interactive stream) |
+| DEAD: table, detail card (instances that died, newest first) | — | `nodo instances --dead [--json]` (new) |
+| DEAD: saved logs of the selected local instance | `s` (stream), `PgUp`/`PgDn`, `Home`/`End` | `nodo logs <instance> [--stream stdout\|stderr\|serial] [-n <lines>] [--json]` (new) |
 | INSTANCES: dependency tree | `g` | `nodo instances --grouped`; `parent_id` in `--json` |
 | INSTANCES: kill (closes its tunnels too) | `k` | `nodo kill <instance> [--json]` (new: closes its tunnels; `--json`) |
 | INSTANCES: open a tunnel to the selected instance (y/N with the fee) | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`; fee in `open_fee_mu`) |
@@ -1135,6 +1180,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | PEERS: table | — | `nodo peers [--json]` (new `--json`) |
 | PEERS: payments + reputation events card | — | `nodo peers <peer> [--json]` (new) |
 | PEERS: connect | `c` | `nodo connect <host:port>` |
+| PEERS: choose a peer learned over the network (y/N) | `a` | `nodo connect <host:port>` of its first endpoint |
 | PEERS: forget | `d` | `nodo disconnect <peer>` |
 | PEERS: adjust local reputation | `+` / `-` | `nodo peer_reputation <peer> +1` / `-1` (new) |
 | CLIENTS: table | — | `nodo clients [--json]` (new `--json`) |
@@ -1197,6 +1243,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `firewall-compat status\|apply\|remove` | rules a coexisting firewall must keep |
 | `completion bash\|zsh\|install` | shell tab-completion |
 | `update` | update nodo itself (root) |
+| `uninstall [--no-input]` | remove nodo from this machine |
 | `pack <dir\|git url>` | package a project into a service |
 | `download <url> [-o <dir>]` | fetch a published service from its manifest |
 | `get <service> [--now]` | ask peers for a service not held locally |
@@ -1260,7 +1307,8 @@ running on this host.
 
 - `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
 - `r` refreshes.
-- On Peers, `c` connects a peer, `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
+- On Peers, `c` connects a peer, `a` chooses a peer that only reached this node over the network (it runs
+  `nodo connect` on the peer's first endpoint, so the automatic refill may then fund it), `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
   reputation. The detail card shows what this node has paid that peer and the events behind its score.
 - On Clients, `+`/`-` credit/debit the selected client's balance (`nodo credit_client`/`debit_client`),
   and the detail card shows what a client has paid, its deposit tokens, and the instances it
@@ -1295,15 +1343,16 @@ running on this host.
 - On Policies, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
-  "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where
+  "remote only", "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where
   this node differs from the one it is closest to. `n` prints the router steps.
 - **Every configuration change from the TUI backs up `config.yaml`, writes it, and restarts
   nodo — and puts the backup straight back if the node does not come up on it.** So the
   file always describes the node that is running, and no change is left waiting for a
   restart somebody has to remember. This is why the TUI is the supported editor: the node
   reads `config.yaml` once at start and never again, so a change that is not restarted
-  into is a change the node never sees. The restart drives `systemctl`, so editing
-  configuration on a serving node needs root.
+  into is a change the node never sees. The restart drives `systemctl`, so it needs root.
+  Without root, the TUI stages the change in `config.pending.yaml` and the node applies it
+  at its next start (see [Staged changes](#staged-changes-no-root)).
 - On Docs (`6`), the `docs/` folder is indexed on the left and the selected page rendered
   on the right: `/` searches it, `l` and Enter follow its links to other pages, and
   Backspace comes back.

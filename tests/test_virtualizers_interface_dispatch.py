@@ -68,12 +68,12 @@ class PerInstanceRoutingTests(unittest.TestCase):
     def test_kill_routes_to_the_recorded_backend(self):
         with self._recorded("qemu"):
             self.assertTrue(vm_interface.kill(vmachine_id="vm-q"))
-        self.qemu.kill.assert_called_once_with(vmachine_id="vm-q")
+        self.qemu.kill.assert_called_once_with(vmachine_id="vm-q", archive=False)
         self.ch.kill.assert_not_called()
 
         with self._recorded("ch"):
             self.assertTrue(vm_interface.kill(vmachine_id="vm-c"))
-        self.ch.kill.assert_called_once_with(vmachine_id="vm-c")
+        self.ch.kill.assert_called_once_with(vmachine_id="vm-c", archive=False)
 
     def test_a_row_naming_nothing_recognizable_still_gets_torn_down(self):
         """The one place a default is right: this decides *who acts*.
@@ -87,14 +87,14 @@ class PerInstanceRoutingTests(unittest.TestCase):
             with self.subTest(recorded=recorded), self._recorded(recorded):
                 self.ch.kill.reset_mock()
                 self.assertTrue(vm_interface.kill(vmachine_id="vm-u"))
-                self.ch.kill.assert_called_once_with(vmachine_id="vm-u")
+                self.ch.kill.assert_called_once_with(vmachine_id="vm-u", archive=False)
 
     def test_a_database_error_does_not_stop_a_teardown(self):
         with patch.object(
             vm_interface.sc, "get_internal_virtualizer", side_effect=RuntimeError("no db")
         ):
             self.assertTrue(vm_interface.kill(vmachine_id="vm-e"))
-        self.ch.kill.assert_called_once_with(vmachine_id="vm-e")
+        self.ch.kill.assert_called_once_with(vmachine_id="vm-e", archive=False)
 
     def test_maintain_routes_to_the_recorded_backend(self):
         callback = lambda vmachine_id: None

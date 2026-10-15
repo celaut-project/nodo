@@ -1470,6 +1470,7 @@ mod tests {
             reputation_score: "0".to_string(),
             contracts: Vec::new(),
             resources: Default::default(),
+            learned_via_gossip: false,
         }
     }
 

@@ -26,6 +26,68 @@ written** is not fatal either: the operator is told, and the question is asked a
 next start. Refusing to start over a dotfile would turn a full `storage/` into a node
 nobody can look at.
 
+## Choose a profile, once
+
+After the KyA, the first start of `nodo tui` shows the profile deck. The deck is a
+full-modal picker in a retro cyberpunk style. It shows one card for each profile, and
+the cards are in the order of the dial, from the most closed to the most open.
+
+Each card has a character on the left and the data of the profile on the right:
+
+- The name, the class and a short line of the character.
+- What the profile is for (the `blurb` of the profile).
+- Five bars: EXPOSURE, INCOME, OPENNESS, ISOLATION and RISK, from 0 to 5.
+- Three or four key traits, for example "Tunnel only: no direct exposure".
+- How many keys of `config.yaml` would change.
+
+The bars are not typed in. `src/profile_deck.rs` computes them from the `writes` of the
+profile, and a test pins the values of the profiles. If a profile changes and a
+bar moves, the test fails and the change is made on purpose.
+
+| Input | Action |
+|---|---|
+| `←` `→`, `↑` `↓`, `h` `l`, `Tab`, `Shift+Tab` | Previous or next card. The cards wrap. |
+| `1`…`9`, `Home`, `End` | Go to a card |
+| `Enter` | Choose the profile. The deck shows the list of changes in a panel over the card (see below). |
+| `Esc`, `q`, `s` | Skip. The skip button is always on screen. |
+| Click on an arrow or a dot | Previous card, next card, or go to that card |
+| Click on the card or on `JACK IN` | Choose the profile, and show the list of changes |
+| Click on `SKIP` | Skip |
+| Mouse wheel | Previous or next card |
+
+The cards slide to the left or to the right in 200 ms. During a slide the screen
+redraws about 30 times each second. At rest the loop waits as long as before.
+
+The deck needs a terminal of at least 80 columns and 26 rows. On a smaller terminal
+the TUI shows the plain list of profiles, with the same keys. On a terminal of 34 rows
+or more, the character is drawn at double size.
+
+Colours: the deck uses 24-bit colour when `COLORTERM` says `truecolor` or `24bit`. If
+not, it uses the nearest colour of the 256-colour palette. If `NO_COLOR` is set, it uses
+greys only. The text is the same in all three modes.
+
+The deck does not write the configuration itself. `Enter` or a click shows the same
+list of changes as the `p` key on Policies, and the same transaction applies them (see
+[Applying a change](#applying-a-change)).
+
+The list of changes stays in the style of the deck. It is a panel over the card, in the
+colour of the character, with the buttons `Y · APPLY AND RESTART` and `N · BACK`. `y`,
+`n`, `Esc`, a click on a button and the mouse wheel work there. `n` and `Esc` go back to
+the deck with the same card open, so you can try another profile. On a terminal too
+small for the deck, the list of changes is the plain text popup.
+
+The answer is recorded in `storage/.profilepicked`, an empty file like `.acceptedkya`.
+The marker is written when you choose a profile, before the list of changes, and when
+you skip. If you close the TUI before you answer, the deck shows again at the next
+start. A marker that cannot be written is not fatal: the TUI tells you, and the deck
+shows again at the next start. An installation that accepted the KyA before this
+feature sees the deck once.
+
+`p` on Policies opens the same deck. So does a click on the `CHANGE PROFILE · p` button, at the right end of the first row of that page. The button is filled in the accent colour. On a narrow terminal it shortens to `PROFILE · p`, and the summary on the left is clipped before the button is. In the deck from Policies, `Esc` closes it and writes no marker.
+
+The design and the plan are in
+[`docs/proposals/profile-deck.md`](../../../docs/proposals/profile-deck.md).
+
 ## Pages
 
 The tab bar is **two rows**. The top row is the six groups — where the node stands,
@@ -188,8 +250,8 @@ restart that carries — a heavy price for looking at a colour.
 
 | Theme | For |
 |---|---|
-| `ubuntu` (default) | The Ubuntu terminal palette: aubergine `#300A24`, orange `#E95420`, and the standard Ubuntu ANSI set. `nodo` is installed by a bash script onto a Linux server, and the terminal that script ran in is overwhelmingly GNOME Terminal on Ubuntu — so the console looks like part of the machine it is administering rather than like an application dropped on top of it. `default` is an accepted spelling. |
-| `dark` | The palette this console had before themes existed (cyan accent). |
+| `dark` (default) | The palette this console had before themes existed: cyan accent on a black ground, in the colours the terminal names itself. `default` is an accepted spelling. |
+| `ubuntu` | The Ubuntu terminal palette: aubergine `#300A24`, orange `#E95420`, and the standard Ubuntu ANSI set. `nodo` is installed by a bash script onto a Linux server, and the terminal that script ran in is overwhelmingly GNOME Terminal on Ubuntu — so this theme makes the console look like part of the machine it is administering rather than like an application dropped on top of it. |
 | `light` | A pale terminal, where `DarkGray` on white is unreadable and white text is simply not there. The roles keep their hues — red still has to mean trouble — and only the two chosen against a dark background change. |
 | `mono` | No hue at all. For a genuinely monochrome terminal, for an operator who cannot distinguish these hues, and for a screenshot that has to survive being printed. It is a constraint rather than an aesthetic: anything it cannot express is something the interface was saying with colour *alone*, which it should not be doing. |
 
@@ -236,7 +298,7 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 | `g` | Instances: dependency tree / flat list |
 | `i` | Service details, the selected tunnel with its log on Tunnels, or the selected pack with its log on Packs |
 | `e` | Execute the selected service, or edit the selected All, Pricing, Policies or Energy value |
-| `p` | Policies: apply a profile; Services: pack a folder or an https git URL (`nodo pack … --detach`) |
+| `p` | Policies: open the profile deck (the `CHANGE PROFILE` button does the same); Services: pack a folder or an https git URL (`nodo pack … --detach`) |
 | `+` / `-` | Adjust peer reputation on Peers, the selected price by 10 % on Pricing, or open a credit/debit amount modal on Clients |
 | `n` | Policies: the router steps (`nodo nat-guide`); Tunnels: open a new tunnel; Packs: pack a folder or an https git URL |
 | `Tab` | In the pack prompt: complete the folder name being typed (elsewhere: next page) |
@@ -248,6 +310,7 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 | `Ctrl+U` | Clear modal input |
 | `q` or `Ctrl+C` | Exit |
 | `y` / `n` | Answer the KyA gate on first run: accept, or decline and exit |
+| `←` `→` / `Enter` / `Esc` | In the profile deck: previous or next card, choose, skip (see [Choose a profile, once](#choose-a-profile-once)) |
 
 `d` on Peers runs `nodo disconnect <peer id>`, which drops the peer row together with
 its addresses and contract instances. The peer is **forgotten, not banned**: it can
@@ -438,16 +501,29 @@ and paying for it are separately answerable.
 
 ### Profiles
 
-`p` applies a posture — a whole set of policy keys at once, ordered from the most
-closed to the most open:
+`p` opens the profile deck (see [Choose a profile, once](#choose-a-profile-once)) and
+applies a posture — a whole set of policy keys at once, ordered from the most closed to
+the most open:
 
 | Profile | For |
 |---|---|
 | `JUST ME` | I run my own things here. Nothing from outside, nothing spent outside. |
+| `REMOTE ONLY` | I run nothing here. Every service runs on other nodes, and I pay for it. |
 | `CAUTIOUS RENTER` | I will rent this machine out, but on a short leash. |
 | `OPEN RENTER` | I want this machine earning: reachable, delegating, priced by load. |
 | `LAN LAB` | A few machines on my own network, sharing capacity for free. |
 | `WORKBENCH` | I am developing against this node. Nothing here is real money. |
+
+`REMOTE ONLY` turns off local execution (`network.EXECUTE_LOCALLY: false`) and turns
+on delegation, so every service runs on a peer. It also turns on the automatic refill of
+the deposit on the peer, because a node that only consumes has no income to pay with.
+The list of changes shows this line, as it does for `OPEN RENTER`. The other keys keep
+the node closed: no new deposits, no direct exposure, no low-demand fallback. A test
+makes sure that no profile turns local execution off without turning delegation on,
+because a node that runs nothing here and delegates nothing can run nothing anywhere.
+With that key off, the node also refuses to quote a price and answers "no room" when a
+peer asks, and it says why, so a peer that did not read its announcement does not select
+it. See `docs/CONFIG.md`.
 
 A profile writes **policy only**. None of them touches an identity, a wallet, a
 filesystem path, a port or a core-service id — a posture is a decision about how the

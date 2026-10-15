@@ -8,6 +8,7 @@ from src.virtualizers.architecture import UnsupportedArchitectureException, get_
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.manager.manager import default_initial_balance
 from src.utils.bee_client import BeeClient, Buffer
+from src.utils.cost_functions.architecture_resources import NOT_EXECUTING_REASON, executes_locally
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils import activity_window
@@ -61,6 +62,18 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             # Before the cache, so a closed node never serves a quote it remembers.
             if not activity_window.is_open():
                 raise Exception(activity_window.closed_reason())
+
+            # A node that runs nothing itself has no room to quote. The price below is
+            # the price of running the service HERE, and the room check after it is
+            # this machine's: answering would tell the asking peer's balancer that this
+            # node can take the work, and `launch_service` would then have no local
+            # candidate to run it on. The announcement already says the node offers no
+            # resources (`announced_resources`); this is the same answer given to a
+            # peer that asks anyway, as one that never read the announcement does.
+            # Before the cache and before the service is read, so a node that is not
+            # executing does neither.
+            if not executes_locally():
+                raise Exception(NOT_EXECUTING_REASON)
 
             # The question as received: the configuration before `_quote` fills in the
             # default `initial_mu`, and the metadata with its hashes in a fixed order

@@ -5,6 +5,58 @@ much work it would take to run without `sudo`. For the diagnostic command see
 `nodo doctor` in [`USAGE.md`](USAGE.md); for the privileged install steps see
 [`INSTALL.md`](INSTALL.md).
 
+> **Follow-up (2026-10-03):** [`proposals/rootless-nodo.md`](proposals/rootless-nodo.md)
+> re-audits this against `dev`, answers the open questions below by measurement
+> (Cloud Hypervisor boots with no capabilities given a pre-created, user-owned, UP
+> tap), and corrects Route A step 3: `CAP_NET_ADMIN` *does* allow writing `net.*`
+> sysctls.
+>
+> **Implemented (2026-10-10), opt-in:** `sudo ./install.sh --service-user nodo`
+> runs the daemon as a system user with `CAP_NET_ADMIN` only; cloud-hypervisor,
+> QEMU and virtiofsd run with no capabilities (#532, #533; results in §9 of the
+> proposal). Two statements below turned out wrong when it ran: the rootfs build
+> *does* need a privilege (it chowns the staged tree; #533 writes the owners into
+> the image instead), and virtiofsd's namespace sandbox needs an AppArmor
+> `userns` profile on Ubuntu 23.10+.
+>
+> **Install without sudo (#533):** `./install.sh` run as an ordinary user installs
+> into `~/.local/share/nodo` and runs the daemon as that user, with the same unit
+> (`CAP_NET_ADMIN` only). What needs root is collected by `bash/lib_privileged.sh`
+> and asked for only when it is missing: host packages, a `/etc/subuid` range,
+> the systemd unit, and on Ubuntu 23.10+ a root-owned copy of virtiofsd at
+> `/usr/local/libexec/nodo/virtiofsd` with the AppArmor profile that lets that copy
+> (and nothing else) create a user namespace. The profile never follows
+> `virtualizers.ch.VIRTIOFSD_BINARY`: config.yaml is writable by the daemon's user.
+>
+> **A restart stops the VMs.** With a service user, and in the install without
+> sudo, the unit has `Delegate=yes` and the VMs run inside its cgroup
+> (`nodo.service/nodo-ch/<vm>`). So `systemctl restart nodo.service`, and with it
+> `nodo update` and `nodo daemon restart`, stops every running VM; their clients
+> have to start them again. On a root install the VMs are in `/nodo-ch/`, outside
+> the unit, and keep running. The installer says so before it restarts the unit.
+>
+> **What root takes from the service user, and what it does not.** The daemon's
+> user can write config.yaml, and `sudo nodo update`, `sudo nodo doctor` and
+> `bash/setup_service_user.sh` run as root. None of them lets that file decide
+> what root does: the user comes from `/etc/nodo/service-user` (root's file; to
+> go back to root, `sudo ./install.sh --service-user root`), every value that
+> goes into the unit must be a plain absolute path (no newline, backslash, quote,
+> `$`, `%`, `:` or `;`), the storage that gets chowned must be
+> `<install dir>/storage`, the installer takes config.yaml back (root-only) before
+> its root steps read it and refuses a runtime, yq, buildkit or virtiofsd path the
+> user can change, `update` and `doctor` run from the install they belong to and
+> not from `main.MAIN_DIR`, doctor runs cloud-hypervisor and virtiofsd as the
+> daemon's user, and it asks before a rewrite changes the unit's `User=`.
+>
+> **Ports and the firewall.** Starting and stopping an instance opens and closes
+> its rules in nodo's own nftables tables, and creates and deletes its tap. All of
+> it needs `CAP_NET_ADMIN`, which the daemon holds, so no step needs sudo. Without
+> that capability none of it is possible: even a set created in advance needs it
+> to add an element. The paths to a daemon with no capability at all are the
+> proposal's phase 3 (a small privileged helper, `nodo-netd`) and phase 4
+> (user-mode networking). The host firewall (ufw, firewalld) is opened once, for
+> the gateway port, and nodo prints that command; it never writes to them.
+
 > **Audited against** `stable` @ `043d00a7` on 2026-08-02. Empirical checks were
 > run on Ubuntu 24.04.4 LTS, x86_64, 16 threads, cgroup v2, as a non-root user
 > in group `sudo`. Results marked *verified* were measured on that host; results

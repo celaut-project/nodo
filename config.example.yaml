@@ -87,17 +87,25 @@ virtualizers:
       linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/arm64/initramfs"
     CACHE_DIR: "${main.CACHE}/ch"
     # Keep this path short to avoid Unix socket SUN_LEN limits.
-    API_SOCKET_DIR: "/tmp/nodo-ch"
+    API_SOCKET_DIR: "/run/nodo/ch"
     # virtiofsd daemon for shared filesystems (parent -> child inheritance).
     # Only invoked for services that declare shared/guest directories. It must be
     # the Rust virtiofsd, not the old QEMU one in /usr/lib/qemu. The installer
     # puts it in ${main.MAIN_DIR}/bin and writes that absolute path here, unless
     # this is already set to a path of your own. `nodo doctor` checks it.
     VIRTIOFSD_BINARY: "virtiofsd"
+    # virtiofsd --sandbox mode. auto: chroot when the daemon is root, namespace
+    # (needs uidmap and a /etc/subuid range) when it runs as SERVICE_USER.
+    VIRTIOFSD_SANDBOX: "auto"
     NETWORK_MODE: "tap_bridge"
     NETWORK_BRIDGE_NAME: "nodo-br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
     NETWORK_GATEWAY_IP: "192.168.200.1"
+    # nodo's own nftables tables: `inet <NFT_TABLE>` (filter) and `ip <NFT_TABLE>`
+    # (NAT). Change it only for a second install on the same host, together with
+    # NETWORK_BRIDGE_NAME and NETWORK_SUBNET: two installs that share a table prune
+    # each other's rules.
+    NFT_TABLE: "nodo"
     # Whether nodo may write into the iptables compatibility table when something
     # else on this host filters the forward hook. nodo accepts guest traffic in its
     # own nftables table at priority -5, which does not survive a later DROP: with
@@ -270,6 +278,17 @@ virtualizers:
     # TCG reaches guest console much slower than KVM; allow more time than the CH
     # readiness timeout before declaring the guest network dead.
     GUEST_NETWORK_READY_TIMEOUT_S: 120
+
+instances:
+  # A dead instance keeps its row in the database and its logs on disk, so the
+  # operator can see what happened. The node deletes a dead instance when it is
+  # older than DEAD_RETENTION_DAYS, or when more than DEAD_MAX_ROWS dead instances
+  # exist (the oldest go first). Local and delegated instances count separately.
+  # A value of 0 turns that limit off.
+  DEAD_RETENTION_DAYS: 14
+  DEAD_MAX_ROWS: 200
+  # Keep at most this many bytes (the last ones) of each guest log at death.
+  DEAD_LOG_MAX_BYTES: 1048576
 
 builder:
   WAIT_FOR_CONTAINER: 60
@@ -485,6 +504,13 @@ network:
   # Off, this node announces no resources (Peer.resources is empty): peers stop counting
   # its machine in what they could reach, and the changed announcement is pushed to
   # every known peer (see REANNOUNCE_ON_CHANGE).
+  #
+  # A peer that asks anyway -- one that never read the announcement, or holds an old
+  # copy -- is told no, with the reason: GetServiceEstimatedCost is refused and
+  # GetResourceAvailability answers that nothing can run, so its balancer does not
+  # select a node that has no local candidate to run the work. The node's own workload
+  # admission does not count this machine's room either, and a launch that fails does
+  # not blame a "local preflight" that never ran.
   #
   # One exception, and it is a physical one rather than a carve-out: a service that
   # inherits a directory from its parent (a `guest=true` xattr) is materialized from
@@ -732,23 +758,24 @@ ui:
 
   # Colour scheme for `nodo tui`. Edited from the TUI's Config page.
   #
-  #   ubuntu  the Ubuntu terminal palette (aubergine #300A24, orange #E95420) and
-  #           the default -- nodo is installed by a bash script onto a Linux server,
-  #           and the terminal that script ran in is overwhelmingly GNOME Terminal on
-  #           Ubuntu, so the console looks like part of the machine it administers
-  #   dark    the palette this console had before themes existed (cyan accent)
+  #   dark    the default: the palette this console had before themes existed (cyan
+  #           accent on a black ground), in the colours the terminal itself names
+  #   ubuntu  the Ubuntu terminal palette (aubergine #300A24, orange #E95420) -- nodo
+  #           is installed by a bash script onto a Linux server, and the terminal that
+  #           script ran in is overwhelmingly GNOME Terminal on Ubuntu, so this makes
+  #           the console look like part of the machine it administers
   #   light   for a pale terminal, where white-on-white is simply not there
   #   mono    no hue at all: for a monochrome terminal, for an operator who cannot
   #           distinguish these hues, and for a screenshot that has to survive being
   #           printed. Nothing is conveyed by colour alone, so nothing is lost.
   #
-  # "default" is an accepted spelling of "ubuntu". An unrecognised name falls back to
+  # "default" is an accepted spelling of "dark". An unrecognised name falls back to
   # it rather than refusing to start: a console that will not open because of a
   # misspelt colour scheme is a console that cannot be used to fix the misspelling.
   #
   # `nodo tui --theme <name>` and NODO_TUI_THEME override this for one run, so two
   # themes can be compared without a config write and the node restart that carries.
-  THEME: ubuntu
+  THEME: dark
 
 # Deposit sizing. These are shares, not amounts: the node derives the figures from the
 # ledger's own floor (an Ergo transaction costs a fee and cannot create an output below
@@ -763,6 +790,13 @@ deposits:
   # pays nobody. Delegation keeps working with this off; the peer just has to be funded
   # by hand, which is the point.
   AUTOMATIC_REFILL: false
+  # Whether that automatic refill also funds peers that reached this node over the
+  # network (a ListPeers answer, or any IntroducePeer) and that it never chose itself.
+  # Keep false: keypairs and payment contracts are free to mint, so one Sybil identity
+  # would otherwise receive a full deposit from every node that learns it. `nodo connect` or paying the peer by hand makes it a chosen peer, which
+  # the refill funds as usual. Has no effect unless AUTOMATIC_REFILL (and
+  # network.DELEGATE_EXECUTION) are on; any value other than true reads as false.
+  AUTOMATIC_REFILL_GOSSIP_PEERS: false
   # Largest share of a peer deposit that may be lost to the transaction fee. 0.02 caps
   # the fee at 2 % of the deposit. Lower it for cheaper transfers, at the cost of
   # locking up more per peer.
@@ -1010,6 +1044,15 @@ communication:
   # prose is small already and is always republished whole.
   SHARE_PROSE_ON_LEDGER: false
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: true
+
+  # Relay each signed advertisement exactly as its peer signed it. The signature covers
+  # every address, so private and DNS addresses travel too. A relay never edits a claim.
+  # An advertisement with all of its addresses expired is not relayed.
+  SHARE_KNOWN_PEERS: true
+  DISCOVER_PEERS_VIA_GOSSIP: true
+  MAX_PEERS_PER_GOSSIP_RESPONSE: 100  # Also bounds how many replies a pull consumes.
+  MAX_PEERS_PER_GOSSIP_PUSH: 20
+  GOSSIP_INTERVAL_SECONDS: 300
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
 

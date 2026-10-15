@@ -95,7 +95,7 @@ class RegistrationOrderTests(unittest.TestCase):
         ), patch.object(
             local_execute.sc, "set_local_instance_definition", side_effect=_record("definition")
         ), patch.object(
-            local_execute.sc, "purge_internal", side_effect=_record("purge")
+            local_execute.sc, "mark_local_killed", side_effect=_record("purge")
         ), patch.object(
             local_execute, "execute", side_effect=execute_side_effect
         ):

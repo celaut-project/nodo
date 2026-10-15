@@ -27,17 +27,24 @@ from protos import celaut_pb2 as celaut
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.firewall import policy as fw_policy
+from src.utils.privileges import without_capabilities
 from src.virtualizers.ch import vgic
 from src.virtualizers.firewall import resolve_slot_transport_protocols, remove_vm_rules as vm_remove_vm_rules
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import guest as microvm_guest
 from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm.host import ensure_private_dir
 from src.virtualizers.microvm.bundle_formats import (
     ROOTFS_FORMAT_EXT4,
     ROOTFS_IMAGE_NAMES,
     is_read_only_format,
 )
-from src.virtualizers.microvm.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
+from src.virtualizers.microvm.cgroups import (
+    apply_cpu_limit,
+    apply_memory_limit,
+    ensure_vm_cgroup,
+    leave_delegated_base,
+)
 from src.virtualizers.microvm.errors import MicroVMError
 from src.virtualizers.microvm.members import CH
 from src.virtualizers.microvm.process import generate_vmachine_id
@@ -46,7 +53,13 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     save_runtime_state,
 )
-from src.virtualizers.microvm.shares import NO_SHARES, materialize_shares, release_shares
+from src.virtualizers.microvm.shares import (
+    NO_SHARES,
+    materialize_shares,
+    network_share_bytes,
+    network_share_ids,
+    release_shares,
+)
 from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 
 env_manager = ConfigManager()
@@ -290,7 +303,7 @@ def execute(
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
         log.LOGGER(f"[CH][{vmachine_id}] runtime dir prepared: {runtime_dir}")
-        api_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(api_socket_path.parent)
         log.LOGGER(f"[CH][{vmachine_id}] API socket dir prepared: {api_socket_path.parent}")
 
         try:
@@ -431,6 +444,8 @@ def execute(
         disk_b += share_bytes(
             str(shared_fs_base_dir(paths.cache_root())), shares.exported_share_ids
         )
+        # A network share has no owner: this instance is counted its part of it.
+        disk_b += network_share_bytes(network_share_ids(shares.mounts_state))
         resolved_resources = celaut.Sysresources(
             cpu_period=cpu_period,
             cpu_quota=cpu_quota,
@@ -512,9 +527,15 @@ def execute(
         with open(stdout_path, "w", encoding="utf-8") as stdout_file, open(
             stderr_path, "w", encoding="utf-8"
         ) as stderr_file:
+            # Leave the delegated base before the VM exists: on x86 KVM puts a
+            # kernel thread of each new VM in the cgroup of the process that
+            # creates it, and nothing can move it out. Born in the base, it would
+            # keep the base from giving its children controllers (EBUSY).
+            leave_delegated_base()
+            args, executable = without_capabilities(process_args, ch_binary)
             process = subprocess.Popen(
-                process_args,
-                executable=ch_binary,
+                args,
+                executable=executable,
                 stdout=stdout_file,
                 stderr=stderr_file,
             )

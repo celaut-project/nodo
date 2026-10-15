@@ -42,6 +42,7 @@ from src.utils.firewall.backends import (
 from src.utils.firewall.frontend import detect_frontend, open_port_advice
 from src.utils.firewall.rules import Chain
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
+from src.utils.privileges import can_admin_network
 
 GATEWAY_COMMENT_PREFIX = "nodo;gateway;port"
 # What nodo wrote before this module existed: same purpose, no port in the
@@ -301,9 +302,9 @@ def ensure_gateway_port_open(
     check on a *stopped* node is ``nodo doctor``'s job, and it drives
     ``probe_tcp_from_bridge`` directly with ``provide_listener``.
     """
-    if os.geteuid() != 0:
+    if not can_admin_network():
         raise GatewayPortUnavailable(
-            summary=f"Opening the gateway port {port} needs root.",
+            summary=f"Opening the gateway port {port} needs root or CAP_NET_ADMIN.",
             instructions=(
                 "Start the node with root privileges (e.g. 'sudo nodo serve'), or open "
                 f"TCP {port} yourself before starting it."

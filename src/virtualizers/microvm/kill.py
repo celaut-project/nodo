@@ -24,6 +24,7 @@ import signal
 from pathlib import Path
 from typing import List, Optional
 
+from src.utils import dead_instances
 from src.utils import logger as log
 from src.virtualizers.microvm import network, paths
 from src.virtualizers.microvm.cgroups import remove_vm_cgroup
@@ -90,7 +91,12 @@ def _cleanup_tap(hypervisor: Hypervisor, vmachine_id: str, tap_name: Optional[st
         log.LOGGER(hypervisor.log(vmachine_id, f"error cleaning tap {tap_name}: {e}"))
 
 
-def kill(hypervisor: Hypervisor, vmachine_id: str) -> bool:
+def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False) -> bool:
+    """Tear down one microVM. If ``archive`` is true, save its logs first.
+
+    Only an instance with a row in the database sets ``archive``. An orphan guest
+    has no row, so nobody can read its archive.
+    """
     state = load_runtime_state(vmachine_id) or {}
     pid = int(state.get("pid") or 0)
     tap_name = str(state.get("tap") or "")
@@ -126,6 +132,11 @@ def kill(hypervisor: Hypervisor, vmachine_id: str) -> bool:
         log.LOGGER(hypervisor.log(vmachine_id, f"event=cleanup control_socket_removed={socket_path}"))
     except Exception as e:
         log.LOGGER(hypervisor.log(vmachine_id, f"failed removing control socket {socket_path}: {e}"))
+
+    # The guest process is dead here, so its logs are complete. Save them before the
+    # runtime directory goes: it holds the only copy.
+    if archive:
+        dead_instances.archive_runtime(vmachine_id, state)
 
     try:
         if runtime_dir and runtime_dir.exists():

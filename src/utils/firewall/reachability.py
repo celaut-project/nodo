@@ -39,6 +39,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Set
 
+from src.utils.privileges import can_create_network_namespace
+
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
 
 PROBE_ATTEMPTS = 3
@@ -271,7 +273,7 @@ def sweep_leaked_probes(
     Returns what was deleted, for the log.
     """
     runner = run or _default_runner
-    if os.geteuid() != 0:
+    if not can_create_network_namespace():
         return []
 
     removed: List[str] = []
@@ -378,8 +380,10 @@ def probe_tcp_from_bridge(
     """
     runner = run or _default_runner
 
-    if os.geteuid() != 0:
-        return ProbeResult(None, "needs root to create a network namespace")
+    if not can_create_network_namespace():
+        return ProbeResult(
+            None, "needs root (CAP_SYS_ADMIN and CAP_NET_ADMIN) to create a network namespace"
+        )
 
     link = runner(["ip", "link", "show", bridge])
     if link.returncode != 0:
@@ -638,8 +642,10 @@ def probe_tcp_between_guests(
     runner = run or _default_runner
     spawner = spawn or _default_spawn
 
-    if os.geteuid() != 0:
-        return ProbeResult(None, "needs root to create a network namespace")
+    if not can_create_network_namespace():
+        return ProbeResult(
+            None, "needs root (CAP_SYS_ADMIN and CAP_NET_ADMIN) to create a network namespace"
+        )
 
     link = runner(["ip", "link", "show", bridge])
     if link.returncode != 0:

@@ -41,6 +41,13 @@ def executes_locally() -> bool:
     return bool(env_manager.get("network.EXECUTE_LOCALLY", True))
 
 
+# What a peer is told when it asks this node for room it does not offer: a price, or
+# whether an instance fits. One sentence in one place, so the two answers agree.
+NOT_EXECUTING_REASON = (
+    "This node does not run services itself (network.EXECUTE_LOCALLY is off)."
+)
+
+
 def _cores_bytes_disk() -> Tuple[Optional[float], Optional[int], Optional[int]]:
     """(cores, memory bytes, disk bytes) one instance could be granted, each None if unknown."""
     cores, ram, disk = host_limits.host_totals()
