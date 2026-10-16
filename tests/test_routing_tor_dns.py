@@ -71,8 +71,14 @@ class QueryTests(unittest.TestCase):
 
     def test_a_name_that_does_not_exist_is_an_error(self):
         server = self.serve(lambda q: reply(q, [], rcode=3))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(tor_dns.NameNotFound):
             tor_dns.query_a("nothing.example", server.address, timeout=2)
+
+    def test_a_transient_failure_is_not_a_name_that_does_not_exist(self):
+        server = self.serve(lambda q: reply(q, [], rcode=2))
+        with self.assertRaises(ValueError) as caught:
+            tor_dns.query_a("example.com", server.address, timeout=2)
+        self.assertNotIsInstance(caught.exception, tor_dns.NameNotFound)
 
     def test_an_answer_without_an_address_is_an_error(self):
         server = self.serve(lambda q: reply(q, []))
