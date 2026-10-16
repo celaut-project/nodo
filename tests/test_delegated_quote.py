@@ -181,28 +181,18 @@ class OneRoundPerServiceTests(_FreshCache, unittest.TestCase):
     def test_the_loop_key_does_not_see_the_deposit(self):
         # A -> B -> A converts the deposit twice, with a rounding: 100 comes back as 99.
         # A client that gives no deposit gets one from this node before the peers.
-        metadata = celaut.Metadata()
         keys = {
-            delegated_quote.loop_key("svc", celaut.Configuration(initial_mu=amount(mu)), metadata)
+            delegated_quote.loop_key("svc", celaut.Configuration(initial_mu=amount(mu)))
             for mu in (100, 99)
-        } | {delegated_quote.loop_key("svc", celaut.Configuration(), metadata)}
+        } | {delegated_quote.loop_key("svc", celaut.Configuration())}
         self.assertEqual(len(keys), 1)
 
     def test_the_loop_key_sees_the_rest_of_the_question(self):
-        base = delegated_quote.loop_key("svc", celaut.Configuration(), celaut.Metadata())
+        base = delegated_quote.loop_key("svc", celaut.Configuration())
         env = celaut.Configuration()
         env.environment_variables.add(key="MODE", value=b"fast")
-        self.assertNotEqual(delegated_quote.loop_key("svc", env, celaut.Metadata()), base)
-        self.assertNotEqual(delegated_quote.loop_key("other", celaut.Configuration(), celaut.Metadata()), base)
-
-    def test_the_loop_key_does_not_see_the_order_of_the_hashes(self):
-        a = celaut.Metadata.HashTag.Hash(type=b"\x01", value=b"a")
-        b = celaut.Metadata.HashTag.Hash(type=b"\x02", value=b"b")
-        one, two = celaut.Metadata(), celaut.Metadata()
-        one.hashtag.hash.extend([a, b])
-        two.hashtag.hash.extend([b, a])
-        self.assertEqual(delegated_quote.loop_key("svc", celaut.Configuration(), one),
-                         delegated_quote.loop_key("svc", celaut.Configuration(), two))
+        self.assertNotEqual(delegated_quote.loop_key("svc", env), base)
+        self.assertNotEqual(delegated_quote.loop_key("other", celaut.Configuration()), base)
 
     def test_the_offer_is_kept_for_the_launch(self):
         self.assertIsNone(delegated_quote.recall_offer("client-1", "svc"))
@@ -266,11 +256,11 @@ class BalancerSortTests(unittest.TestCase):
 class QuoteTests(_FreshCache, unittest.TestCase):
     def _quote(self, peers, *, executes=True, local=None, budget=8.0, delegates=True,
                hidden_rejection=False, policy_rejection=False, client_id="client-1",
-               deposit=1_000):
+               deposit=1_000, metadata=None):
         it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
         it.configuration = celaut.Configuration(initial_mu=amount(deposit))
         it.service_hash = "svc"
-        it.metadata = celaut.Metadata()
+        it.metadata = metadata or celaut.Metadata()
         it.client_id = client_id
         it.context = None
         rejection = Rejection(tag="*", network_index=1, rule="routing.HIDDEN", pattern=None,
@@ -347,17 +337,29 @@ class QuoteTests(_FreshCache, unittest.TestCase):
 
     def test_a_question_that_comes_back_through_a_loop_gets_the_local_price(self):
         # The round that is open had the deposit in other MU: 999, not 1 000.
+        # The client sent its own metadata, and the question that comes back has the
+        # metadata of the registry: the round stops on this node all the same.
         open_round = delegated_quote.loop_key(
-            "svc", celaut.Configuration(initial_mu=amount(999)), celaut.Metadata())
+            "svc", celaut.Configuration(initial_mu=amount(999)))
+        client_metadata = celaut.Metadata()
+        client_metadata.hashtag.hash.add(type=b"\x01", value=b"from-the-client")
         with delegated_quote.asking_peers_for(open_round):
-            offer, asked = self._quote({"peer-a": price(1)})
+            offer, asked = self._quote({"peer-a": price(1)}, metadata=client_metadata)
         self.assertEqual(offer.cost.n, "1300")
+        asked.assert_not_called()
+
+    def test_the_round_is_remembered_without_the_metadata(self):
+        # The peers get the hashes only, and read the metadata from their registry.
+        self._quote({"peer-a": price(1_200)})
+        other = celaut.Metadata()
+        other.hashtag.hash.add(type=b"\x01", value=b"from-the-client")
+        _, asked = self._quote({"peer-a": price(1)}, metadata=other)
         asked.assert_not_called()
 
     def test_a_round_on_another_question_does_not_stop_this_one(self):
         env = celaut.Configuration()
         env.environment_variables.add(key="MODE", value=b"fast")
-        with delegated_quote.asking_peers_for(delegated_quote.loop_key("svc", env, celaut.Metadata())):
+        with delegated_quote.asking_peers_for(delegated_quote.loop_key("svc", env)):
             offer, asked = self._quote({"peer-a": price(1_200)})
         self.assertEqual(offer.cost.n, "1210")
         asked.assert_called_once()
