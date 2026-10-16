@@ -590,6 +590,8 @@ class QuoteTests(unittest.TestCase):
                     side_effect=lambda message_iterator, indices: iter([message_iterator]))
             patched(cost_mod.activity_window, "is_open", return_value=True)
             patched(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount())
+            # The local price only. A peer offer while Tor is not ready: test_delegated_quote.py.
+            patched(cost_mod, "delegation_time_budget", return_value=None)
             return list(it.generate())
 
     def test_quotes_when_tor_is_ready(self):
@@ -645,6 +647,7 @@ class LaunchTests(unittest.TestCase):
             patched(mod.utils, "get_network_name", return_value="lan")
             patched(mod, "get_arch_tag", return_value="amd64")
             patched(mod, "default_initial_balance", return_value=1)
+            patched(mod, "_client_charge_mu", return_value=1)  # the commission is not tested here
             balancer.return_value = iter([(peer, cost) for peer in candidates])
             error = None
             try:

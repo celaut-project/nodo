@@ -318,6 +318,28 @@ PRICE_KEYS = (
 )
 
 
+def _validate_delegation_commission(config: Dict[str, Any]) -> None:
+    """``network.delegation``: the commission on a delegated service (#551) is money too."""
+    network = config.get("network") if isinstance(config.get("network"), dict) else {}
+    delegation = network.get("delegation")
+    if delegation is None:
+        return
+    if not isinstance(delegation, dict):
+        raise ConfigValidationError("network.delegation must be a mapping.")
+    if "COMMISSION_PERCENT" in delegation:
+        value = delegation["COMMISSION_PERCENT"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1000:
+            raise ConfigValidationError(
+                f"network.delegation.COMMISSION_PERCENT must be a number from 0 to 1000, not {value!r}."
+            )
+    if "COMMISSION_MIN_MU" in delegation:
+        value = delegation["COMMISSION_MIN_MU"]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ConfigValidationError(
+                f"network.delegation.COMMISSION_MIN_MU must be a whole number of MU, 0 or more, not {value!r}."
+            )
+
+
 def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
     """Validate the pricing / free-tier / display / deposit blocks (docs/PRICING.md).
 
@@ -330,6 +352,7 @@ def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
     pricing = config.get("pricing") or {}
     if not isinstance(pricing, dict):
         raise ConfigValidationError("Malformed 'pricing' mapping.")
+    _validate_delegation_commission(config)
     for key in PRICE_KEYS:
         _require_whole_mu(pricing, "pricing", key)
     _validate_pricing_by_arch(pricing)

@@ -12,6 +12,8 @@ from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
 from src.utils.cost_functions.architecture_resources import executes_locally
+from src.utils.cost_functions.delegated_quote import recall_offer
+from src.utils.cost_functions.delegation_commission import with_commission
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
@@ -82,6 +84,21 @@ def _format_launch_failure(
     return f"Unable to launch service {service_id}. Attempt details: {' | '.join(details[:8])}"
 
 
+def _client_charge_mu(peer: str, estimated_cost: celaut_pb2.EstimatedCost,
+                      configuration: celaut_pb2.Configuration) -> int:
+    """What the father pays at the start: the price, and for a peer its commission (#551).
+
+    ``estimated_cost`` is the price of the candidate. For ``local`` that is the whole
+    charge. For a peer, this node also charges its commission on the start charge of
+    the peer, but it deposits on the peer only the peer's own price
+    (``delegate_execution`` gets ``estimated_cost`` unchanged).
+    """
+    if peer == 'local':
+        return from_amount(estimated_cost.cost)
+    initial_mu = from_amount(configuration.initial_mu) if configuration.HasField("initial_mu") else 0
+    return from_amount(with_commission(estimated_cost, initial_mu).cost)
+
+
 def _force_delegate(
         forced_peer: str,
         service: celaut.Service,
@@ -133,7 +150,7 @@ def _force_delegate(
     refund_container = []
     if not spend_mu(
             id=father_id,
-            amount_mu=from_amount(estimated_cost.cost),
+            amount_mu=_client_charge_mu(forced_peer, estimated_cost, configuration),
             refund_function_container=refund_container
     ):
         raise Exception(f"force_execution: error charging {father_id}.")
@@ -382,6 +399,7 @@ def launch_service(
                 f"{father_id}; pinning execution to the local node (no delegation)."
             )
 
+        offered_mu = recall_offer(father_id, service_id) if father_id and service_id else None
         for peer, estimated_cost in execution_balancer(
                 resources=service.container.resources,
                 service_id=service_id,
@@ -414,13 +432,26 @@ def launch_service(
                             launch_failures.append(f"local: {failure}")
                     continue
 
+                # The quote is an offer (#551). If this node quoted the client less than a
+                # peer now costs with commission, it does not delegate to that peer: it
+                # neither pays the difference nor charges more than it offered. The next
+                # candidate may still fit.
+                if peer != 'local' and offered_mu is not None:
+                    charge_mu = _client_charge_mu(peer, estimated_cost, configuration)
+                    if charge_mu > offered_mu:
+                        launch_failures.append(
+                            f"{peer}: costs {charge_mu} MU now, more than the {offered_mu} MU "
+                            "this node offered"
+                        )
+                        continue
+
                 log.LOGGER(f'Service balancer select peer {peer}')
 
                 refund_container = []
 
                 if not spend_mu(
                         id=father_id,
-                        amount_mu=from_amount(estimated_cost.cost),
+                        amount_mu=_client_charge_mu(peer, estimated_cost, configuration),
                         refund_function_container=refund_container
                 ):
                     raise Exception('Launch service error charging ' + father_id)

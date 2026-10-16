@@ -36,6 +36,7 @@ try:
     from protos import celaut_pb2 as celaut
     from src.gateway.launcher.delegate_execution import delegate_execution as delegate_mod
     from src.manager import maintain, manager
+    from src.utils.cost_functions import delegation_commission
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
@@ -165,9 +166,15 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 ), \
                 patch.object(maintain, "stop_instance") as stop, \
                 patch.object(maintain, "ALLOW_DEBT", False), \
-                patch.object(maintain, "format_mu", str):
+                patch.object(maintain, "format_mu", str), \
+                patch.object(delegation_commission, "commission_percent",
+                             return_value=self.commission_percent):
             maintain.maintain_delegated_instances()
         return sc, stop
+
+    # The tests below are about the reading and the mark, so no commission (#551) unless
+    # a test sets one.
+    commission_percent = 0.0
 
     @staticmethod
     def _convert(peer_id, amount_mu, *, round_up=False):
@@ -183,6 +190,16 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
 
         sc.update_delegated_deposit.assert_called_once_with(
             token=PEER_TOKEN, balance_mu=700_000, peer_balance_mu=1_400_000
+        )
+        stop.assert_not_called()
+
+    def test_the_client_also_pays_the_commission_on_what_the_peer_metered(self):
+        """300 000 of ours metered, plus 5 %: 315 000. No minimum on a tick (#551)."""
+        self.commission_percent = 5.0
+        with patch.object(delegation_commission, "commission_min_mu", return_value=10**9):
+            sc, stop = self._tick(self._row(), peer_balance_now=1_400_000)
+        sc.update_delegated_deposit.assert_called_once_with(
+            token=PEER_TOKEN, balance_mu=685_000, peer_balance_mu=1_400_000
         )
         stop.assert_not_called()
 
@@ -280,7 +297,8 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 patch.object(maintain, "peer_mu_in_local", side_effect=self._convert), \
                 patch.object(maintain, "stop_instance", side_effect=[RuntimeError("no"), None]), \
                 patch.object(maintain, "ALLOW_DEBT", False), \
-                patch.object(maintain, "format_mu", str):
+                patch.object(maintain, "format_mu", str), \
+                patch.object(delegation_commission, "commission_percent", return_value=0.0):
             maintain.maintain_delegated_instances()
 
         sc.update_delegated_deposit.assert_called_once_with(

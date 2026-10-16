@@ -1,4 +1,5 @@
-from typing import Dict, Generator, Optional
+from concurrent.futures import ThreadPoolExecutor, wait
+from typing import Dict, Generator, List, Optional
 
 import grpc
 
@@ -38,6 +39,15 @@ def _timeout_for_cost_request() -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return timeout if timeout > 0 else None
+
+
+def _shorter(configured: Optional[float], budget: Optional[float]) -> Optional[float]:
+    """The shorter of two timeouts, where None means "no limit"."""
+    if budget is None:
+        return configured
+    if configured is None:
+        return budget
+    return min(configured, budget)
 
 
 def _log_cost_request_exception(peer_id: str, exc: Exception) -> None:
@@ -88,8 +98,12 @@ def estimate_cost_on_peer(
         resources: celaut.Service.Container.Resources,
         metadata: celaut.Metadata,
         configuration: celaut_pb2.Configuration,
+        timeout: Optional[float] = None,
 ) -> Optional[celaut_pb2.EstimatedCost]:
     """Ask exactly one peer for its `GetServiceEstimatedCost` on this service.
+
+    ``timeout`` (seconds) shortens the wait below ``EXTERNAL_COST_TIMEOUT``: the time
+    that is left for the answer when this node itself must answer by a deadline (#551).
 
     The configuration is converted to the target peer's MU before asking for a
     quote, and the returned quote is converted back to local MU.  This leaves
@@ -97,9 +111,9 @@ def estimate_cost_on_peer(
 
     A quote already obtained for this very question is reused for
     `network.QUERY_CACHE_PEER_TTL_SECONDS` (#456), so launches that price the same service
-    do not ask the same peer again. The question carries no recursion token: the peer
-    answers from its own machine and never passes it on, and what it remembers is keyed
-    by content (`src/utils/tools/query_cache.py`).
+    do not ask the same peer again. The question carries no recursion token: what the
+    peer remembers is keyed by content (`src/utils/tools/query_cache.py`). A peer that
+    delegates can ask its own peers, within the deadline this call gives it (#551).
     """
     try:
         payment_system = matching_payment_system(peer_id)
@@ -125,7 +139,7 @@ def estimate_cost_on_peer(
                 send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
                 client_id=get_client_id_on_other_peer(peer_id=peer_id),
             ),
-            timeout=_timeout_for_cost_request(),
+            timeout=_shorter(_timeout_for_cost_request(), timeout),
         )
         cost = estimated_cost_for_local(peer_cost, payment_system=payment_system)  # MUpeer -> MUlocal
         if key is not None and cost is not None:
@@ -136,6 +150,84 @@ def estimate_cost_on_peer(
     except Exception as e:
         _log_cost_request_exception(peer_id=peer_id, exc=e)
         return None
+
+
+# How many peers are asked for a price at the same time.
+MAX_PARALLEL_QUOTES = 16
+
+
+def quotes_from_peers(
+        resources: celaut.Service.Container.Resources,
+        metadata: celaut.Metadata,
+        configuration: celaut_pb2.Configuration,
+        peer_arch: Optional[str] = None,
+        ignore_network: str = None,
+        timeout: Optional[float] = None,
+) -> Dict[str, celaut_pb2.EstimatedCost]:
+    """The price of each peer that answers, in local MU, without commission.
+
+    The peers are asked at the same time, not one after the other. With ``timeout``
+    (seconds), only the answers that arrive in that time count: this node has its own
+    deadline to keep (#551). Each call also gets ``timeout`` as its gRPC deadline, so a
+    peer knows how long it has, and passes a shorter one to its own peers.
+    """
+    candidates = []
+    for peer_id in peers_id_iterator(ignore_network=ignore_network):
+        # The peer's own announcement already says it could never take this:
+        # it does not run the architecture, or the request exceeds what it
+        # announced (#454, #459). A peer that announced nothing is asked.
+        if should_skip_peer(peer_id, peer_arch, ask_of(resources), "GetServiceEstimatedCost"):
+            continue
+        candidates.append(peer_id)
+    if not candidates:
+        return {}
+
+    log.LOGGER(f"Check cost on peers {', '.join(candidates)}")
+    executor = ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_QUOTES, len(candidates)))
+    try:
+        futures = {
+            executor.submit(
+                estimate_cost_on_peer,
+                peer_id=peer_id, resources=resources, metadata=metadata,
+                configuration=configuration, timeout=timeout,
+            ): peer_id
+            for peer_id in candidates
+        }
+        done, _ = wait(futures, timeout=timeout)
+        quotes = {}
+        for future in done:
+            try:
+                cost = future.result()
+            except Exception as e:
+                _log_cost_request_exception(peer_id=futures[future], exc=e)
+                continue
+            if cost is not None:
+                quotes[futures[future]] = cost
+        return quotes
+    finally:
+        # Do not wait for a late peer: its call ends at its own gRPC deadline.
+        executor.shutdown(wait=False)
+
+
+def _sorted_with_commission(
+        costs: Dict[str, celaut_pb2.EstimatedCost],
+        configuration: celaut_pb2.Configuration,
+) -> List[tuple[str, celaut_pb2.EstimatedCost]]:
+    """``costs`` sorted as the client pays them, each with the price of the peer.
+
+    A peer is compared with its commission (#551): that is what the client pays when
+    this node delegates to it. The cost yielded is still the price of the peer, without
+    commission, because the launcher deposits that on the peer, and adds the commission
+    only to what it charges the client (``delegation_commission.with_commission``).
+    """
+    from src.utils.cost_functions.delegation_commission import with_commission
+
+    initial_mu = int(configuration.initial_mu.n or 0) if configuration.HasField("initial_mu") else 0
+    offered = {
+        peer: cost if peer == 'local' else with_commission(cost, initial_mu)
+        for peer, cost in costs.items()
+    }
+    return [(peer, costs[peer]) for peer, _ in estimated_cost_sorter(estimated_costs=offered)]
 
 
 def execution_balancer(
@@ -218,22 +310,10 @@ def execution_balancer(
             # `arch` (which is None for one this node cannot run, and that is exactly the
             # service a peer may be asked about).
             peer_arch = arch_from_tags(service.container.architecture.tags) if service else arch
-            for peer_id in peers_id_iterator(ignore_network=ignore_network):
-                # The peer's own announcement already says it could never take this:
-                # it does not run the architecture, or the request exceeds what it
-                # announced (#454, #459). A peer that announced nothing is asked.
-                if should_skip_peer(peer_id, peer_arch, ask_of(resources), "GetServiceEstimatedCost"):
-                    continue
-                log.LOGGER('Check cost on peer ' + peer_id)
-                # TODO could use async or concurrency
-                cost = estimate_cost_on_peer(
-                    peer_id=peer_id,
-                    resources=resources,
-                    metadata=metadata,
-                    configuration=configuration,
-                )
-                if cost is not None:
-                    peers[peer_id] = cost
+            peers.update(quotes_from_peers(
+                resources=resources, metadata=metadata, configuration=configuration,
+                peer_arch=peer_arch, ignore_network=ignore_network,
+            ))
         except Exception as e:
             log.LOGGER('Error iterating peers on service balancer:' + str(e))
     else:
@@ -241,7 +321,7 @@ def execution_balancer(
 
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")
-        return estimated_cost_sorter(estimated_costs=peers)
+        return _sorted_with_commission(peers, configuration)
     except Exception as e:
         log.LOGGER('Error during estimated cost sorter on execution balancer:' + str(e))
         raise StopIteration
