@@ -809,6 +809,13 @@ def validate_routing_config(config: Dict[str, Any]) -> None:
         if not isinstance(value, bool):
             raise ConfigValidationError(f"routing.tor.{key} must be true or false, not {value!r}.")
 
+    from src.routing.addresses import parse_local_networks
+
+    try:
+        parse_local_networks(routing.get("LOCAL_NETWORKS", []))
+    except ValueError as e:
+        raise ConfigValidationError(str(e)) from None
+
     if not hidden:
         return
     # Each of these would put the IP address in the announcement, or leave the node

@@ -89,6 +89,22 @@ class PolicyTests(unittest.TestCase):
         for host in ("172.15.255.255", "172.32.0.1", "11.0.0.1", "::ffff:8.8.8.8"):
             self.assertFalse(policy.is_local_address(host), host)
 
+    def test_the_operator_can_declare_its_own_ranges(self):
+        # routing.LOCAL_NETWORKS: for example the Tailscale network of the operator.
+        with override(routing__LOCAL_NETWORKS=["100.64.0.0/10"]):
+            self.assertTrue(policy.is_local_address("100.101.102.103"))
+            self.assertFalse(policy.is_local_address("93.184.216.34"))
+        with override(routing__LOCAL_NETWORKS=["100.101.102.0/24"]):
+            self.assertTrue(policy.is_local_address("100.101.102.9"))
+            self.assertFalse(policy.is_local_address("100.64.1.1"))
+        self.assertFalse(policy.is_local_address("100.101.102.103"))
+
+    def test_a_bad_value_at_run_time_gives_no_range_not_a_wider_one(self):
+        with override(routing__LOCAL_NETWORKS=["0.0.0.0/0"]):
+            self.assertFalse(policy.is_local_address("93.184.216.34"))
+            self.assertFalse(policy.is_local_address("100.64.1.1"))
+            self.assertTrue(policy.is_local_address("192.168.1.10"))
+
     def test_on_by_default_and_only_in_hidden_mode(self):
         with override(routing__HIDDEN=True):
             self.assertTrue(policy.service_egress_via_tor())
@@ -195,6 +211,20 @@ class GuestFirewallTests(unittest.TestCase):
                                                          TransportProtocol.TCP, source_ip=VM_IP))
         self.assertEqual([(r.chain, r.destination) for r in self.applied],
                          [(Chain.FORWARD, "100.64.1.9")])
+
+    def test_a_declared_own_range_is_reached_directly(self):
+        with hidden(routing__LOCAL_NETWORKS=["100.64.0.0/10"]):
+            self.assertTrue(vm_firewall.allow_connection(VM, "100.101.102.103", 22,
+                                                         TransportProtocol.TCP, source_ip=VM_IP))
+        self.assertEqual([(r.chain, r.destination) for r in self.applied],
+                         [(Chain.FORWARD, "100.101.102.103")])
+
+    def test_a_declared_own_range_is_still_not_open_to_a_star_service(self):
+        # As for the LAN (P3): '*' reaches only the guest subnet directly.
+        with hidden(routing__LOCAL_NETWORKS=["100.64.0.0/10"]):
+            self.assertTrue(vm_firewall.allow_all_egress(VM, source_ip=VM_IP))
+        self.assertEqual([r.destination for r in self.applied
+                          if r.chain is Chain.FORWARD and r.verdict is Verdict.ACCEPT], [SUBNET])
 
     def test_udp_to_the_outside_is_refused(self):
         with hidden():

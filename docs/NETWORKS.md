@@ -631,7 +631,9 @@ show that address, so:
 | A tag with seeds in `service_networks.default_instances` | Through Tor (a private seed address directly) | Not run here |
 | A tag that only local instances answer | Directly, on the bridge | Directly, on the bridge |
 
-For `*`, only the guest subnet is reached directly. The other TCP goes into Tor, also to
+"Directly" means a local address: loopback, the private ranges, link-local, and the
+ranges in `routing.LOCAL_NETWORKS` ([`CONFIG.md`](CONFIG.md#hidden-mode)). For `*`, only
+the guest subnet is reached directly. The other TCP goes into Tor, also to
 private addresses: Tor cannot reach them, so a `*` service cannot use the LAN of the
 operator. A tag that names a private address or a local instance is reached directly.
 
