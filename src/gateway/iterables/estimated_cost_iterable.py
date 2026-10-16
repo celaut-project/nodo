@@ -23,8 +23,8 @@ from src.balancers.execution_balancer.execution_balancer import quotes_from_peer
 from src.utils.arch_guard import arch_from_tags
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.delegated_quote import (
-    asking_peers_for,
     delegation_time_budget,
+    peer_round,
     remember_offer,
 )
 from src.utils.cost_functions.delegation_commission import with_commission
@@ -199,17 +199,19 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         configuration.CopyFrom(self.configuration)
         configuration.initial_mu.CopyFrom(to_amount(initial_mu))
 
-        with asking_peers_for(self.service_hash) as first:
-            if not first:
-                # This node is already asking its peers about this service: the question
-                # came back to it through a loop, or two clients asked at once. Answer
-                # with what is known here, without a second round of questions.
-                return local_price
-            peer_arch = arch_from_tags(service.container.architecture.tags)
-            quotes = quotes_from_peers(
+        peer_arch = arch_from_tags(service.container.architecture.tags)
+        quotes = peer_round(
+            self.service_hash, configuration, self.metadata,
+            ask=lambda: quotes_from_peers(
                 resources=service.container.resources, metadata=self.metadata,
                 configuration=configuration, peer_arch=peer_arch, timeout=budget,
-            )
+            ),
+        )
+        if quotes is None:
+            # This node is already asking its peers this question: the question came
+            # back to it through a loop, or two clients asked at once. Answer with what
+            # is known here, without a second round of questions.
+            return local_price
         if not quotes:
             # No peer answered in time: the same answer as a node that does not delegate.
             return local_price

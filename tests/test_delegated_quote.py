@@ -178,6 +178,32 @@ class OneRoundPerServiceTests(_FreshCache, unittest.TestCase):
         with delegated_quote.asking_peers_for("svc") as first:
             self.assertTrue(first)
 
+    def test_the_loop_key_does_not_see_the_deposit(self):
+        # A -> B -> A converts the deposit twice, with a rounding: 100 comes back as 99.
+        # A client that gives no deposit gets one from this node before the peers.
+        metadata = celaut.Metadata()
+        keys = {
+            delegated_quote.loop_key("svc", celaut.Configuration(initial_mu=amount(mu)), metadata)
+            for mu in (100, 99)
+        } | {delegated_quote.loop_key("svc", celaut.Configuration(), metadata)}
+        self.assertEqual(len(keys), 1)
+
+    def test_the_loop_key_sees_the_rest_of_the_question(self):
+        base = delegated_quote.loop_key("svc", celaut.Configuration(), celaut.Metadata())
+        env = celaut.Configuration()
+        env.environment_variables.add(key="MODE", value=b"fast")
+        self.assertNotEqual(delegated_quote.loop_key("svc", env, celaut.Metadata()), base)
+        self.assertNotEqual(delegated_quote.loop_key("other", celaut.Configuration(), celaut.Metadata()), base)
+
+    def test_the_loop_key_does_not_see_the_order_of_the_hashes(self):
+        a = celaut.Metadata.HashTag.Hash(type=b"\x01", value=b"a")
+        b = celaut.Metadata.HashTag.Hash(type=b"\x02", value=b"b")
+        one, two = celaut.Metadata(), celaut.Metadata()
+        one.hashtag.hash.extend([a, b])
+        two.hashtag.hash.extend([b, a])
+        self.assertEqual(delegated_quote.loop_key("svc", celaut.Configuration(), one),
+                         delegated_quote.loop_key("svc", celaut.Configuration(), two))
+
     def test_the_offer_is_kept_for_the_launch(self):
         self.assertIsNone(delegated_quote.recall_offer("client-1", "svc"))
         delegated_quote.remember_offer("client-1", "svc", 1_210)
@@ -239,9 +265,10 @@ class BalancerSortTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class QuoteTests(_FreshCache, unittest.TestCase):
     def _quote(self, peers, *, executes=True, local=None, budget=8.0, delegates=True,
-               hidden_rejection=False, policy_rejection=False, client_id="client-1"):
+               hidden_rejection=False, policy_rejection=False, client_id="client-1",
+               deposit=1_000):
         it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
-        it.configuration = celaut.Configuration(initial_mu=amount(1_000))
+        it.configuration = celaut.Configuration(initial_mu=amount(deposit))
         it.service_hash = "svc"
         it.metadata = celaut.Metadata()
         it.client_id = client_id
@@ -319,10 +346,46 @@ class QuoteTests(_FreshCache, unittest.TestCase):
         asked.assert_not_called()
 
     def test_a_question_that_comes_back_through_a_loop_gets_the_local_price(self):
-        with delegated_quote.asking_peers_for("svc"):
+        # The round that is open had the deposit in other MU: 999, not 1 000.
+        open_round = delegated_quote.loop_key(
+            "svc", celaut.Configuration(initial_mu=amount(999)), celaut.Metadata())
+        with delegated_quote.asking_peers_for(open_round):
             offer, asked = self._quote({"peer-a": price(1)})
         self.assertEqual(offer.cost.n, "1300")
         asked.assert_not_called()
+
+    def test_a_round_on_another_question_does_not_stop_this_one(self):
+        env = celaut.Configuration()
+        env.environment_variables.add(key="MODE", value=b"fast")
+        with delegated_quote.asking_peers_for(delegated_quote.loop_key("svc", env, celaut.Metadata())):
+            offer, asked = self._quote({"peer-a": price(1_200)})
+        self.assertEqual(offer.cost.n, "1210")
+        asked.assert_called_once()
+
+    def test_the_same_question_again_does_not_ask_the_peers_again(self):
+        first, asked_first = self._quote({"peer-a": price(1_200)})
+        second, asked_second = self._quote({"peer-a": price(1)})
+        asked_first.assert_called_once()
+        asked_second.assert_not_called()
+        self.assertEqual((first.cost.n, second.cost.n), ("1210", "1210"))
+
+    def test_the_round_is_remembered_by_the_full_question(self):
+        # Another deposit is another price on the peer: the round is not reused.
+        self._quote({"peer-a": price(1_200)})
+        _, asked = self._quote({"peer-a": price(1_300)}, deposit=1_100)
+        asked.assert_called_once()
+
+    def test_an_empty_round_is_not_remembered(self):
+        self._quote({})
+        offer, asked = self._quote({"peer-a": price(1_200)})
+        asked.assert_called_once()
+        self.assertEqual(offer.cost.n, "1210")
+
+    def test_with_no_peer_ttl_the_round_is_not_remembered(self):
+        with mock.patch.object(delegated_quote, "peer_quote_ttl", return_value=0.0):
+            self._quote({"peer-a": price(1_200)})
+            _, asked = self._quote({"peer-a": price(1_200)})
+        asked.assert_called_once()
 
     def test_the_offer_is_kept_for_the_launch(self):
         self._quote({"peer-a": price(1_200)}, executes=False)
