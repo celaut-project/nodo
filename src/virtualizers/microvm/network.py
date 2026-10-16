@@ -207,6 +207,7 @@ def preflight() -> ipaddress.IPv4Network:
     # claiming the network is fine: 'nodo doctor' settles that with a real packet.
     _ensure_forward_compat()
     ensure_masquerade(network)
+    ensure_guest_ipv6_drop()
 
     return network
 
@@ -274,6 +275,25 @@ def ensure_masquerade(network: ipaddress.IPv4Network) -> None:
             log.LOGGER(f"[FW] Masquerading {network.with_prefixlen} on egress.")
     except Exception as e:
         raise MicroVMError(f"Could not ensure the guest subnet masquerade: {e}") from e
+
+
+def ensure_guest_ipv6_drop() -> None:
+    """Drop all IPv6 that a guest sends through the host. Global, like the masquerade.
+
+    Fatal when it cannot be written, because without it a guest that sets its own
+    IPv6 address leaves the host outside every nodo rule, also on a hidden node.
+    A kernel without IPv6 has nothing to drop, so that case is skipped.
+    """
+    from src.virtualizers.microvm.firewall import backend
+
+    if not os.path.isdir("/proc/sys/net/ipv6"):
+        return
+    rule = fw_policy.guest_ipv6_drop_rule(NETWORK_BRIDGE_NAME)
+    try:
+        if backend().ensure(rule):
+            log.LOGGER(f"[FW] Dropping guest IPv6 from {NETWORK_BRIDGE_NAME}.")
+    except Exception as e:
+        raise MicroVMError(f"Could not ensure the guest IPv6 drop: {e}") from e
 
 
 def create_tap(vmachine_id: str) -> str:

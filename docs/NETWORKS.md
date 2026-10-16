@@ -633,7 +633,9 @@ show that address, so:
 
 "Through Tor": the firewall translates the guest's TCP to Tor's `TransPort` on the
 guest bridge (`policy.tor_redirect_rules`). Nothing is accepted in FORWARD towards a
-global address, so whatever is not translated stays dropped.
+global address, and `block_all` drops every new packet of the guest, of every protocol.
+So whatever is not translated stays dropped: UDP, ICMP and all other IP protocols. The
+guest's IPv6 is dropped too (see [`FIREWALL.md`](FIREWALL.md)).
 
 "Not run here" is not a refusal of the domain, unlike the operator lists above. The
 launcher skips this node and the balancer goes on to a peer. The peer's address is the

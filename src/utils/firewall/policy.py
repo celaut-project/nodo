@@ -25,6 +25,7 @@ from src.utils.firewall.rules import Chain, Rule, Verdict, truncate_comment
 PROTOCOLS: Tuple[str, ...] = ("tcp", "udp")
 
 FORWARD_RELATED_ESTABLISHED_COMMENT = "nodo;forward;related_established"
+GUEST_IPV6_DROP_COMMENT = "nodo;forward;guest_ipv6_drop"
 MASQUERADE_COMMENT_PREFIX = "nodo;masquerade;subnet="
 VM_COMMENT_ROOT = "nodo;vm="
 
@@ -138,20 +139,48 @@ def compat_rules(bridge: str) -> List[Rule]:
 
 
 def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:
-    """Drop every new connection a guest starts. The default it opts out of."""
+    """Drop every new connection a guest starts. The default it opts out of.
+
+    One rule with no protocol, so it drops ICMP and every other IP protocol too.
+    It used to be one rule for TCP and one for UDP, and everything else went
+    through: a guest with no allow at all could ping a server it controls and
+    reach it from the host's own address, through the masquerade. On a hidden
+    node that is the node's address. ICMP errors for an allowed flow are RELATED,
+    so the global accept still lets them through.
+    """
     source = validate_address(vm_ip, "VM address")
     return [
         Rule(
             chain=Chain.FORWARD,
-            comment=_comment(vmachine_id, f"block_all;{protocol}"),
+            comment=_comment(vmachine_id, "block_all"),
             verdict=Verdict.DROP,
             source=source,
-            protocol=protocol,
             ct_states=("NEW",),
             at_head=True,
         )
-        for protocol in PROTOCOLS
     ]
+
+
+def guest_ipv6_drop_rule(bridge: str) -> Rule:
+    """Drop all IPv6 that a guest sends through the host.
+
+    nodo gives a guest IPv4 only, and every per-VM rule matches an IPv4 address.
+    But a guest can set an IPv6 address itself and use the link-local address of
+    the bridge as its router. Without this rule, only the host's
+    ``net.ipv6.conf.all.forwarding`` decides whether that packet leaves -- with
+    no Tor redirect, no masquerade and no ``block_all``. Global, like the
+    masquerade, so it is never part of a VM teardown.
+    """
+    name = str(bridge or "").strip()
+    if not name:
+        raise RuleError("The guest IPv6 drop needs a bridge name.")
+    return Rule(
+        chain=Chain.FORWARD_V6,
+        comment=GUEST_IPV6_DROP_COMMENT,
+        verdict=Verdict.DROP,
+        in_interface=name,
+        at_head=True,
+    )
 
 
 def allow_connection_rule(
@@ -243,7 +272,7 @@ def tor_redirect_rules(
     For a hidden node (``routing.HIDDEN``): the connection is translated to Tor's
     ``TransPort`` on the host, which reads the original destination and opens it from a
     Tor exit. Nothing is accepted in FORWARD, so ``block_all`` still drops whatever this
-    does not translate -- UDP among it.
+    does not translate -- UDP and ICMP among it.
 
     ``except_subnet`` leaves a destination range alone (the guest subnet, for ``*``),
     so the guest still reaches the gateway and the instances that run on this node.
