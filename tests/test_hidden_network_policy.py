@@ -20,6 +20,7 @@ try:
     from protos import celaut_pb2 as celaut
     from src.gateway.launcher import launch_service as launch_mod
     from src.manager import network_defaults, networks, pow_networks
+    from src.routing import policy as routing_policy
     from src.utils import network_policy
     from src.utils.config import ConfigManager
     from src.utils.network_policy import (
@@ -55,6 +56,36 @@ class DirectEgressTests(unittest.TestCase):
         self.assertEqual(network_policy.POW_TAG_PREFIX, pow_networks.POW_TAG_PREFIX)
         self.assertEqual(network_policy.SEEDS_KEY, network_defaults.DEFAULT_INSTANCES_KEY)
 
+    def test_a_tag_that_names_ergo_has_no_outside_source(self):
+        # #550, P11: a dead `resolve_ergo_network` used to sit behind `"ergo" in tag`. If a
+        # source like it is enabled again, `direct_egress_reason` must learn it too, and
+        # this test fails until it does.
+        with override(service_networks__default_instances={}), \
+                mock.patch.object(networks, "_local_peers", return_value=[]):
+            self.assertEqual(networks.resolve_network(net("ergo")), [])
+            self.assertEqual(networks.resolve_network(net("ergo-mainnet", "ergo")), [])
+        self.assertIsNone(direct_egress_reason("ergo"))
+        self.assertIsNone(direct_egress_reason("ergo-mainnet"))
+
+    def test_the_rule_and_the_routing_policy_decide_the_same(self):
+        # #550, P8: network_policy keeps its own copy of "hidden, and the egress is not
+        # through Tor" to stay cheap to import. Nothing else makes the two agree, so this
+        # does. If one changes alone, the firewall refuses a guest that the launcher
+        # started, or the other way round.
+        for hidden in (True, False, None, "true", 1):
+            for egress in (True, False, None, "false", 0):
+                with self.subTest(hidden=hidden, egress=egress), \
+                        override(routing__HIDDEN=hidden, routing__tor__SERVICE_EGRESS=egress,
+                                 service_networks__default_instances={}):
+                    node_refuses = routing_policy.hidden_mode() and not routing_policy.service_egress_via_tor()
+                    self.assertEqual(hidden_mode_rejection([net("*")]) is not None, node_refuses)
+                    try:
+                        enforce_hidden_resolution(net("pow:ergo"))
+                        resolution_refused = False
+                    except HiddenModeRejection:
+                        resolution_refused = True
+                    self.assertEqual(resolution_refused, node_refuses)
+
     def test_what_leaves_the_host(self):
         seeds = {"redis": ["10.1.2.3:6379"], "empty": []}
         with override(service_networks__default_instances=seeds):
@@ -68,6 +99,15 @@ class DirectEgressTests(unittest.TestCase):
             self.assertIsNone(direct_egress_reason("bitcoin"))
             self.assertIsNone(direct_egress_reason("Api.Example.com"))  # not a host-name tag
             self.assertIsNone(direct_egress_reason("  "))
+
+    def test_a_seed_key_with_a_space_is_looked_up_as_the_resolver_does(self):
+        # #550, P10: the resolver reads the seeds with the raw tag, so the key "redis " is
+        # the seed of the tag "redis ". Looking up only "redis" let it run as local.
+        seeds = {"redis ": ["10.1.2.3:6379"]}
+        with override(service_networks__default_instances=seeds):
+            self.assertIn("seeds", direct_egress_reason("redis "))
+            self.assertEqual(network_defaults.configured_endpoints("redis ", config=ConfigManager()),
+                             ["10.1.2.3:6379"])
 
     def test_a_node_that_is_not_hidden_refuses_nothing_here(self):
         with override(routing__HIDDEN=False):
@@ -144,7 +184,10 @@ class DirectEgressTests(unittest.TestCase):
 class LaunchTests(unittest.TestCase):
     service_egress = False
 
-    def _launch(self, service, candidates, hidden=True):
+    def _launch_with_shares(self, service, candidates):
+        return self._launch(service, candidates, patch_declarations=False)
+
+    def _launch(self, service, candidates, hidden=True, patch_declarations=True):
         cost = SimpleNamespace(cost=SimpleNamespace())
         mod = launch_mod
         with ExitStack() as stack:
@@ -154,7 +197,8 @@ class LaunchTests(unittest.TestCase):
             stack.enter_context(override(routing__HIDDEN=hidden,
                                          routing__tor__SERVICE_EGRESS=self.service_egress,
                                          service_networks__default_instances={}))
-            patched(mod, "declarations_for_service", return_value=[])
+            if patch_declarations:
+                patched(mod, "declarations_for_service", return_value=[])
             patched(mod, "service_requires_parent_colocation", return_value=False)
             patched(mod, "authorize_shares", return_value=[])
             spend = patched(mod, "spend_mu", return_value=True)
@@ -200,6 +244,20 @@ class LaunchTests(unittest.TestCase):
         self.assertIn("hidden mode does not run 'pow:ergo'", str(r.error))
         r.spend.assert_not_called()
         r.local.assert_not_called()
+
+    def test_the_error_names_every_reason_of_the_local_node(self):
+        # #550, P9: no virtiofsd and hidden mode are two reasons, and the operator must
+        # fix both. The first one used to end the list.
+        from src.virtualizers.microvm.virtiofsd import VirtiofsdUnavailable
+
+        exporting = SimpleNamespace(guest=False)
+        with mock.patch.object(launch_mod, "declarations_for_service", return_value=[exporting]), \
+                mock.patch.object(launch_mod.virtiofsd, "require_usable",
+                                  side_effect=VirtiofsdUnavailable("virtiofsd is not installed")):
+            r = self._launch_with_shares(celaut.Service(network=[net("*")]), ["local"])
+        self.assertIsNotNone(r.error)
+        self.assertIn("virtiofsd is not installed", str(r.error))
+        self.assertIn("hidden mode does not run '*'", str(r.error))
 
     def test_local_members_only_still_run_here(self):
         r = self._launch(celaut.Service(network=[net("postgres")]), ["local"])
