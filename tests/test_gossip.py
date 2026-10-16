@@ -410,7 +410,10 @@ class TestTransitiveRegistration(_PeerFixture):
         assert manager.add_peer_instance(b) == b.public_key
         self._pull_from_b(monkeypatch, c)
         settings = {"network.DELEGATE_EXECUTION": True, "deposits.AUTOMATIC_REFILL": True}
-        monkeypatch.setattr(maintain.env_manager, "get", lambda k, d=None: settings.get(k, d))
+        # On the class, not on the instance: env_manager is the ConfigManager singleton,
+        # and undoing an instance patch leaves a bound `get` in its __dict__, which hides
+        # every later class patch of ConfigManager.get in other test files.
+        monkeypatch.setattr(type(maintain.env_manager), "get", lambda self, k, d=None: settings.get(k, d))
         monkeypatch.setattr(maintain, "is_peer_available", lambda **kw: True)
         monkeypatch.setattr(maintain, "balance_on_other_peer", lambda **kw: 0)
         monkeypatch.setattr(maintain, "matching_payment_system", lambda peer_id: MagicMock())
