@@ -400,9 +400,13 @@ class PowCheckTests(unittest.TestCase):
 
     def test_an_operator_name_on_the_lan_is_asked_directly(self):
         # #550, P5: the operator's own Ergo node at a name on the LAN. An exit cannot reach it.
+        from src.routing import tor_dns
+
         response = mock.Mock(status_code=200, json=lambda: {"ok": True})
         lan = [(pow_networks.socket.AF_INET, 1, 6, "", ("192.168.1.20", 0))]
         with hidden(ledgers__ergo__NODE_URL="http://ergo-node.lan:9053"), \
+                mock.patch.object(tor_dns, "resolve_ipv4",
+                                  side_effect=tor_dns.NameNotFound("nx")) as tor, \
                 mock.patch.object(pow_networks.socket, "getaddrinfo", return_value=lan), \
                 mock.patch.object(pow_networks.routing_http, "get") as tor_get, \
                 mock.patch.object(pow_networks.requests, "get", return_value=response):
@@ -410,19 +414,65 @@ class PowCheckTests(unittest.TestCase):
                              {"ok": True})
             self.assertEqual(pow_networks._resolve_host("ergo-node.lan", 9053),
                              ("192.168.1.20", 9053))
+        tor.assert_called_with("ergo-node.lan")
         tor_get.assert_not_called()
 
-    def test_an_operator_name_at_a_global_address_still_goes_through_tor(self):
-        out = [(pow_networks.socket.AF_INET, 1, 6, "", ("93.184.216.34", 0))]
+    def test_a_public_operator_name_is_never_resolved_by_the_host(self):
+        # A name on the public DNS resolves at an exit. The host's resolver does not see it.
+        from src.routing import tor_dns
+
         with hidden(ledgers__ergo__NODE_URL="http://ergo.example.org:9053"), \
-                mock.patch.object(pow_networks.socket, "getaddrinfo", return_value=out), \
+                mock.patch.object(tor_dns, "resolve_ipv4", return_value=["93.184.216.34"]), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo") as host, \
                 mock.patch.object(pow_networks.routing_http, "get",
                                   return_value=(200, b'{"ok": true}')) as tor_get, \
                 mock.patch.object(pow_networks.requests, "get") as direct:
             self.assertEqual(pow_networks._get_json("http://ergo.example.org:9053", "/info", 5),
                              {"ok": True})
+            self.assertEqual(pow_networks._resolve_host("ergo.example.org", 9030),
+                             ("93.184.216.34", 9030))
+        host.assert_not_called()
         tor_get.assert_called_once()
         direct.assert_not_called()
+
+    def test_an_operator_name_is_not_resolved_by_the_host_while_tor_is_not_ready(self):
+        # No fallback: the name can be a public one, and Tor cannot tell now.
+        with hidden(ledgers__ergo__NODE_URL="http://ergo.example.org:9053"), \
+                mock.patch.object(registry.TOR, "dns_port", return_value=None), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo") as host:
+            self.assertIsNone(pow_networks._resolve_host("ergo.example.org", 9030))
+            self.assertFalse(pow_networks._local_candidate("ergo.example.org"))
+        host.assert_not_called()
+
+    def test_an_operator_name_is_not_resolved_by_the_host_after_a_tor_timeout(self):
+        from src.routing import tor_dns
+
+        with hidden(ledgers__ergo__NODE_URL="http://ergo.example.org:9053"), \
+                mock.patch.object(tor_dns, "resolve_ipv4", side_effect=ValueError("timeout")), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo") as host:
+            self.assertIsNone(pow_networks._resolve_host("ergo.example.org", 9030))
+        host.assert_not_called()
+
+    def test_an_unknown_operator_name_at_a_global_address_is_not_used(self):
+        # The exit says that the name does not exist, and the host's resolver gives a
+        # global address: the name is not on the LAN, so it is not asked directly.
+        from src.routing import tor_dns
+
+        out = [(pow_networks.socket.AF_INET, 1, 6, "", ("93.184.216.34", 0))]
+        with hidden(ledgers__ergo__NODE_URL="http://ergo.example.org:9053"), \
+                mock.patch.object(tor_dns, "resolve_ipv4", side_effect=tor_dns.NameNotFound("nx")), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo", return_value=out):
+            self.assertIsNone(pow_networks._resolve_host("ergo.example.org", 9030))
+            self.assertFalse(pow_networks._local_candidate("ergo.example.org"))
+
+    def test_the_name_of_a_peer_is_not_resolved_by_the_host_when_tor_does_not_find_it(self):
+        from src.routing import tor_dns
+
+        with hidden(ledgers__ergo__NODE_URL="http://ergo-node.lan:9053"), \
+                mock.patch.object(tor_dns, "resolve_ipv4", side_effect=tor_dns.NameNotFound("nx")), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo") as host:
+            self.assertIsNone(pow_networks._resolve_host("evil.lan", 9030))
+        host.assert_not_called()
 
     def test_the_name_of_a_peer_is_never_resolved_by_the_host_to_decide(self):
         # The same name that a peer announces is not trusted: it goes through Tor, and the

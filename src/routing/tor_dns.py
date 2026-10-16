@@ -11,8 +11,10 @@ Only A records: guests get IPv4 only. This is a minimal client on purpose (one q
 one UDP datagram, no recursion of its own), because Tor's ``DNSPort`` does the work and
 nodo has no DNS library.
 
-Names from the operator's own config (seeds, ``ledgers.ergo.NODE_URL``) are not sent
-here: the operator chose them, and a name on the operator's LAN cannot resolve at an exit.
+The seeds of the operator (``service_networks.default_instances``) are not sent here: the
+operator chose them, and a name on the operator's LAN cannot resolve at an exit. The PoW
+check sends a name of the operator here first, and asks the host's resolver only when the
+exit says that the name does not exist (``src/manager/pow_networks.py``).
 """
 
 import ipaddress
@@ -26,6 +28,15 @@ from src.routing.base import RoutingUnavailable
 TIMEOUT_S = 15.0
 _TYPE_A = 1
 _CLASS_IN = 1
+_RCODE_NXDOMAIN = 3
+
+
+class NameNotFound(ValueError):
+    """The exit says that the name does not exist (NXDOMAIN).
+
+    Not a timeout and not a transient failure: only this answer tells that the name is
+    not on the public DNS, for example a name on the LAN of the operator.
+    """
 
 
 def resolve_ipv4(name: str, timeout: float = TIMEOUT_S) -> List[str]:
@@ -99,6 +110,8 @@ def _parse_a_answers(data: bytes, name: str) -> List[str]:
         raise ValueError("truncated DNS answer")
     _, flags, qdcount, ancount, _, _ = struct.unpack("!HHHHHH", data[:12])
     rcode = flags & 0x000F
+    if rcode == _RCODE_NXDOMAIN:
+        raise NameNotFound(f"{name!r} does not exist (through Tor)")
     if rcode != 0:
         raise ValueError(f"{name!r} did not resolve through Tor (DNS rcode {rcode})")
     offset = 12

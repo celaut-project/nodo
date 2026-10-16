@@ -588,9 +588,9 @@ def _operator_hosts() -> set:
     """The host names the operator wrote in the config, in lower case.
 
     ``ledgers.ergo.NODE_URL`` and every entry of ``service_networks.default_instances``.
-    The operator chose these names, so the host's resolver may look them up in hidden
-    mode. A name from a peer or from the crawl is not in this set (see
-    ``src/routing/tor_dns.py``).
+    In hidden mode, only these names can go to the host's resolver, and only when an
+    exit says that they do not exist (:func:`_hidden_addresses`). A name from a peer or
+    from the crawl is not in this set (see ``src/routing/tor_dns.py``).
     """
     urls = [str(env_manager.get("ledgers.ergo.NODE_URL", "") or "")]
     mapping = env_manager.get(DEFAULT_INSTANCES_KEY, {}) or {}
@@ -607,6 +607,46 @@ def _operator_hosts() -> set:
     return hosts
 
 
+def _hidden_addresses(host: str) -> List[str]:
+    """The IPv4 addresses of ``host`` for a hidden node. Empty when it does not resolve.
+
+    A Tor exit resolves the name first, so the host's resolver never sees a name that is
+    on the public DNS (an Ergo node at ``ergo.example.org``). The host's resolver gets
+    the name only when all of these are true (#550, P5):
+
+    - The exit says that the name does not exist (``tor_dns.NameNotFound``).
+    - The operator wrote the name in the config (:func:`_operator_hosts`).
+    - The host's resolver gives only local addresses (an Ergo node at ``ergo-node.lan``).
+
+    A timeout, a transient failure or Tor that is not ready gives no addresses: a
+    fallback there would send a public name to the host's resolver.
+    """
+    from src.routing import tor_dns
+    from src.routing.base import RoutingUnavailable
+
+    try:
+        return tor_dns.resolve_ipv4(host)
+    except tor_dns.NameNotFound as e:
+        not_found = e
+    except (RoutingUnavailable, ValueError, OSError) as e:
+        logger(f"[POW] cannot resolve {host} through Tor: {e}")
+        return []
+    name = str(host or "").strip().lower()
+    if name not in _operator_hosts():
+        logger(f"[POW] cannot resolve {host} through Tor: {not_found}")
+        return []
+    try:
+        infos = socket.getaddrinfo(name, None, socket.AF_INET, socket.SOCK_STREAM)
+    except OSError as e:
+        logger(f"[POW] cannot resolve {host}: {e}")
+        return []
+    addresses = list(dict.fromkeys(info[4][0] for info in infos))
+    if addresses and all(is_local_address(address) for address in addresses):
+        return addresses
+    logger(f"[POW] {host}: not on the public DNS, and the host's resolver gives an address that is not local")
+    return []
+
+
 def _local_candidate(host: str) -> bool:
     """Whether a hidden node asks the candidate at ``host`` directly, not through Tor.
 
@@ -620,11 +660,7 @@ def _local_candidate(host: str) -> bool:
     name = str(host or "").strip().lower()
     if not name or name not in _operator_hosts():
         return False
-    try:
-        infos = socket.getaddrinfo(name, None, socket.AF_INET, socket.SOCK_STREAM)
-    except OSError:
-        return False
-    addresses = {info[4][0] for info in infos}
+    addresses = _hidden_addresses(name)
     return bool(addresses) and all(is_local_address(address) for address in addresses)
 
 
@@ -636,19 +672,12 @@ def _resolve_host(host: str, port: int) -> Optional[Tuple[str, int]]:
 
     In hidden mode a name is resolved at a Tor exit (``src/routing/tor_dns.py``). The
     names here come from peers and from the crawl, so whoever announced one would
-    otherwise see the resolver of this node ask for it. The exception is a name that
-    the operator wrote in the config: the operator chose it, and it can be a name on
-    the LAN, which an exit cannot resolve (#550, P5).
+    otherwise see the resolver of this node ask for it. A name on the LAN of the
+    operator is the only exception (:func:`_hidden_addresses`).
     """
-    if hidden_mode() and str(host).strip().lower() not in _operator_hosts():
-        from src.routing import tor_dns
-        from src.routing.base import RoutingUnavailable
-
-        try:
-            return tor_dns.resolve_ipv4(host)[0], int(port)
-        except (RoutingUnavailable, ValueError, OSError, IndexError) as e:
-            logger(f"[POW] cannot resolve {host} through Tor: {e}")
-            return None
+    if hidden_mode():
+        addresses = _hidden_addresses(host)
+        return (addresses[0], int(port)) if addresses else None
     try:
         infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
     except socket.gaierror as e:
