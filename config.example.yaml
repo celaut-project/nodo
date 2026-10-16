@@ -71,6 +71,14 @@ routing:
   # network.PUBLIC_IP or network.ANNOUNCE_PRIVATE_ADDRESSES. An identity that was ever
   # announced with an IP is not hidden: use a new identity.mnemonic.
   HIDDEN: false
+  # Hidden mode only: ranges that are networks of the operator, in addition to the
+  # built-in ones (loopback, 10/8, 172.16/12, 192.168/16, link-local). A service
+  # reaches an address in them directly, not through Tor. For example the Tailscale
+  # network of the operator: ["100.64.0.0/10"]. Only ranges that are not on the public
+  # Internet are accepted. A '*' service still does not reach them: only the guest
+  # subnet is direct for '*'. Do not declare the CGNAT range of an ISP: other customers
+  # of the ISP are in it.
+  LOCAL_NETWORKS: []
   tor:
     # Whether to call peers that announce a .onion address, through a Tor process
     # nodo runs itself (loopback only).

@@ -1,7 +1,6 @@
 """What the operator decided about routing: ``routing.HIDDEN`` and ``routing.tor.*``."""
 
-import ipaddress
-
+from src.routing import addresses
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -58,35 +57,29 @@ def service_egress_via_tor() -> bool:
     return env_manager.get("routing.tor.SERVICE_EGRESS", True) is not False
 
 
-# The ranges that stay on the networks of this host: loopback, the private ranges of
-# RFC 1918, link-local, and the IPv6 equivalents. A fixed list, not ``is_global`` or
-# ``is_private``: those two give a different answer for the same address in different
-# Python versions, and they count as local some ranges that are not -- the shared address
-# space 100.64.0.0/10 (the network of the carrier, on an ISP with CGNAT), the benchmark
-# range 198.18.0.0/15, 192.0.0.0/24, 0.0.0.0/8 and the documentation ranges. A node
-# that sent those out directly would show its own address (#550, P4).
-_LOCAL_NETWORKS = tuple(ipaddress.ip_network(text) for text in (
-    "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
-    "::1/128", "fc00::/7", "fe80::/10",
-))
+LOCAL_NETWORKS_KEY = "routing.LOCAL_NETWORKS"
+
+
+def local_networks() -> tuple:
+    """``routing.LOCAL_NETWORKS``: the ranges the operator says are its own networks.
+
+    Validated when the config loads (``config_validation.validate_routing_config``). A
+    value that fails here anyway gives no range, never a wider one.
+    """
+    try:
+        return addresses.parse_local_networks(env_manager.get(LOCAL_NETWORKS_KEY, []))
+    except ValueError:
+        return ()
 
 
 def is_local_address(host: str) -> bool:
     """Whether ``host`` is an address that does not leave this host's own networks.
 
-    Loopback, private and link-local addresses, and ``localhost``. Traffic to them shows
-    the node's address only to its own LAN, never to a peer, so hidden mode does not
-    send it through Tor (an exit could not reach it anyway). Everything else is not
-    local, including the shared address space 100.64.0.0/10.
+    Loopback, private and link-local addresses, ``localhost``, and the ranges in
+    ``routing.LOCAL_NETWORKS``. Traffic to them shows the node's address only to the
+    operator's own networks, never to a peer, so hidden mode does not send it through
+    Tor (an exit could not reach it anyway). Everything else is not local, including
+    the shared address space 100.64.0.0/10 unless the operator declares it
+    (``src/routing/addresses.py``).
     """
-    text = str(host or "").strip().strip("[]").lower()
-    if text == "localhost":
-        return True
-    try:
-        address = ipaddress.ip_address(text)
-    except ValueError:
-        return False
-    # ::ffff:10.0.0.1 is the IPv4 address 10.0.0.1.
-    if address.version == 6 and address.ipv4_mapped is not None:
-        address = address.ipv4_mapped
-    return any(address in network for network in _LOCAL_NETWORKS if network.version == address.version)
+    return addresses.is_local_address(host, extra=local_networks())

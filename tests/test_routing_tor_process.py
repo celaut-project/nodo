@@ -283,6 +283,17 @@ class TorProcessTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class RoutingConfigTests(unittest.TestCase):
+    def test_local_networks_takes_only_private_ranges(self):
+        for good in ([], ["100.64.0.0/10"], ["100.101.102.0/24", "10.8.0.0/16"], ["fd7a:115c:a1e0::/48"],
+                     ["198.18.0.1"]):
+            with self.subTest(value=good):
+                validate_routing_config({"routing": {"LOCAL_NETWORKS": good}})
+        for bad in ("100.64.0.0/10", ["0.0.0.0/0"], ["8.8.8.0/24"], ["100.0.0.0/8"],
+                    ["2001:db8::/32"], ["not-a-cidr"], [""], [42]):
+            with self.subTest(value=bad):
+                with self.assertRaises(ConfigValidationError):
+                    validate_routing_config({"routing": {"LOCAL_NETWORKS": bad}})
+
     def test_defaults_and_missing_sections_are_valid(self):
         validate_routing_config({})
         validate_routing_config({"routing": {}})

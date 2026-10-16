@@ -560,8 +560,17 @@ Peers that call Tor use it.
   private address (for example a seed `192.168.1.20:5432`) is reached directly. A `*`
   service is different: it reaches only the guest subnet directly, and all its other TCP
   goes into Tor, private addresses of the LAN of the operator included. A `*` service
-  cannot reach the LAN. A tag that names the address of the LAN can. A `*`
-  service's DNS over UDP (port 53, to any resolver) is translated to a Tor `DNSPort` on
+  cannot reach the LAN. A tag that names the address of the LAN can.
+
+  "Local" is a fixed list: loopback, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  link-local, and the IPv6 equivalents. The shared address space `100.64.0.0/10` is
+  not local: an ISP with CGNAT puts its customers in it, so an address there is on the
+  network of the ISP, not of the operator. `routing.LOCAL_NETWORKS` adds ranges that
+  are the operator's own, for example a Tailscale network (`100.64.0.0/10`, or a part
+  of it). Only ranges that are not on the public Internet are accepted. Do not declare
+  the CGNAT range of your ISP.
+
+  A `*` service's DNS over UDP (port 53, to any resolver) is translated to a Tor `DNSPort` on
   the guest bridge. The rest of UDP to the outside is dropped: Tor has no path for it.
   The node checks `pow:` candidates through Tor too. Exits block many ports and add
   latency, so some destinations fail. While Tor is not ready, the launcher gives such a
