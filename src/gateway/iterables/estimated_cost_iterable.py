@@ -201,7 +201,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
 
         peer_arch = arch_from_tags(service.container.architecture.tags)
         quotes = peer_round(
-            self.service_hash, configuration, self.metadata,
+            self.service_hash, configuration,
             ask=lambda: quotes_from_peers(
                 resources=service.container.resources, metadata=self.metadata,
                 configuration=configuration, peer_arch=peer_arch, timeout=budget,
