@@ -289,6 +289,15 @@ def _report_network_policy() -> None:
     """
     try:
         log.LOGGER(f"Network policy -- {NetworkPolicy.from_config().describe()}")
+        if hidden_mode():
+            from src.routing.policy import service_egress_via_tor
+            log.LOGGER(
+                "Network policy -- hidden mode: the services' outside TCP goes through Tor; "
+                "their UDP to the outside is dropped."
+                if service_egress_via_tor() else
+                "Network policy -- hidden mode: services that reach '*', a pow: network, "
+                "a host name or a seeded tag are not run on this node (a peer may run them)."
+            )
     except NetworkPolicyConfigError as e:
         notice = operator_notice("refusing to start", str(e))
         log.LOGGER(notice)

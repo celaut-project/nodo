@@ -19,6 +19,8 @@ from src.database.sql_connection import SQLConnection
 from src.utils.firewall import policy
 from src.utils.firewall.backends import FirewallBackend, FirewallError, detect_backend
 from src.utils.firewall.rules import Chain, Rule
+from src.routing.policy import hidden_mode, is_local_address, service_egress_via_tor
+from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 from src.virtualizers.microvm.runtime_state import load_runtime_state
 from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
@@ -66,6 +68,20 @@ def _apply(rules: List[Rule], *, context: str) -> bool:
     return True
 
 
+def _guest_subnet() -> str:
+    return str(ConfigManager().get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+
+
+def _tor_proxy(context: str) -> Optional[tuple]:
+    """Tor's TransPort, or None (logged) if the guests' egress cannot go there now."""
+    from src.routing import registry
+
+    proxy = registry.TOR.transparent_proxy()
+    if proxy is None:
+        logger(f"[FW] {context}: hidden mode, and Tor is not ready for the services' egress.")
+    return proxy
+
+
 def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
     try:
         vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
@@ -87,6 +103,32 @@ def allow_connection(
     protocol: TransportProtocol = TransportProtocol.TCP,
     source_ip: Optional[str] = None,
 ) -> bool:
+    target = f"{ip}:{port}" if port is not None else str(ip)
+    # Hidden mode: only a destination on this host's own networks is reached directly.
+    # Anything else would show the node's address, so TCP goes into Tor and the rest is
+    # left to the blanket drop.
+    if hidden_mode() and not is_local_address(ip):
+        context = f"allow {vmachine_id} -> {target}/{protocol.value}"
+        if protocol is not TransportProtocol.TCP or not service_egress_via_tor():
+            logger(f"[FW] {context}: refused, hidden mode reaches it only through Tor (TCP).")
+            return False
+        proxy = _tor_proxy(context)
+        if proxy is None:
+            return False
+        try:
+            vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
+            rules = policy.tor_redirect_rules(
+                vmachine_id=vmachine_id, vm_ip=vm_ip, tor_ip=proxy[0], tor_port=proxy[1],
+                ip=ip, port=port,
+            )
+        except Exception as e:
+            logger(f"[FW] Failed to redirect {vmachine_id} into Tor: {e}")
+            return False
+        if not _apply(rules, context=context):
+            return False
+        logger(f"[FW] {vmachine_id} ({vm_ip}) reaches {target}/tcp through Tor")
+        return True
+
     try:
         vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
         rule = policy.allow_connection_rule(
@@ -100,7 +142,6 @@ def allow_connection(
         logger(f"[FW] Failed to allow connection for {vmachine_id}: {e}")
         return False
 
-    target = f"{ip}:{port}" if port is not None else str(ip)
     if not _apply([rule], context=f"allow {vm_ip} -> {target}/{protocol.value}"):
         return False
     logger(
@@ -233,6 +274,42 @@ def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
     Goes in at the head so it short-circuits the blanket drop ``block_all``
     installed. Return traffic is covered by the global RELATED,ESTABLISHED accept.
     """
+    if hidden_mode():
+        # All TCP outside the guest subnet into Tor, and the subnet itself (the gateway,
+        # the instances of this node) reached as before. DNS over UDP into Tor's
+        # DNSPort. The rest of UDP stays dropped.
+        context = f"allow_all_egress for {vmachine_id}"
+        if not service_egress_via_tor():
+            logger(f"[FW] {context}: refused, hidden mode without routing.tor.SERVICE_EGRESS.")
+            return False
+        proxy = _tor_proxy(context)
+        if proxy is None:
+            return False
+        from src.routing import registry
+
+        dns = registry.TOR.guest_dns()
+        if dns is None:
+            logger(f"[FW] {context}: hidden mode, and Tor is not ready for the services' DNS.")
+            return False
+        try:
+            vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
+            subnet = _guest_subnet()
+            rules = policy.tor_redirect_rules(
+                vmachine_id=vmachine_id, vm_ip=vm_ip, tor_ip=proxy[0], tor_port=proxy[1],
+                except_subnet=subnet,
+            ) + policy.tor_dns_redirect_rules(
+                vmachine_id=vmachine_id, vm_ip=vm_ip, dns_ip=dns[0], dns_port=dns[1],
+            ) + [policy.allow_connection_rule(
+                vmachine_id=vmachine_id, vm_ip=vm_ip, ip=subnet, protocol="tcp",
+            )]
+        except Exception as e:
+            logger(f"[FW] Failed to redirect {vmachine_id} into Tor: {e}")
+            return False
+        if not _apply(rules, context=context):
+            return False
+        logger(f"[FW] {vmachine_id} ({vm_ip}) reaches the Internet through Tor (TCP and DNS) [network tag '*']")
+        return True
+
     try:
         vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
         rule = policy.allow_all_egress_rule(vmachine_id=vmachine_id, vm_ip=vm_ip)

@@ -1,8 +1,9 @@
 """The Tor backend: ``.onion`` peers, reached through a Tor process nodo manages.
 
 nodo runs its own ``tor`` (installed by ``bash/install_tor.sh``) with a private
-data directory under ``STORAGE/tor``. It opens an ``HTTPTunnelPort`` on loopback and
-nothing else: no SOCKS port, no control port, no listener a peer could reach.
+data directory under ``STORAGE/tor``. It opens an ``HTTPTunnelPort`` on loopback and,
+in hidden mode, a ``DNSPort`` on loopback: no SOCKS port, no control port, no listener a
+peer could reach.
 
 If the node announces an onion address (``routing.tor.ANNOUNCE``), tor also hosts the
 gateway as an onion service. It forwards to a loopback-only gRPC server; no port of the
@@ -23,7 +24,7 @@ from typing import List, Optional, Tuple
 
 from src.routing import onion_key
 from src.routing.base import RoutingBackend, RoutingUnavailable
-from src.routing.policy import hidden_mode
+from src.routing.policy import hidden_mode, service_egress_via_tor
 from src.routing.tor_install import (
     TorInstallError,
     ensure_tor_installed,
@@ -96,6 +97,9 @@ class TorBackend(RoutingBackend):
         self._state = "stopped"
         self._detail = ""
         self._onion: Optional[Tuple[str, bytes, int, int]] = None
+        self._trans: Optional[Tuple[str, int]] = None
+        self._dns: Optional[int] = None
+        self._guest_dns: Optional[Tuple[str, int]] = None
 
     # --- the onion service -----------------------------------------------------
 
@@ -134,6 +138,40 @@ class TorBackend(RoutingBackend):
             }))
         except Exception:
             pass
+
+    # --- the services' egress --------------------------------------------------
+
+    def transparent_proxy(self) -> Optional[Tuple[str, int]]:
+        """``(ip, port)`` of the ``TransPort`` the guests' TCP is redirected to, once ready.
+
+        Only in hidden mode with ``routing.tor.SERVICE_EGRESS``. It listens on the guest
+        bridge address, so only guests reach it.
+        """
+        with self._lock:
+            return self._trans if self.available() else None
+
+    def guest_dns(self) -> Optional[Tuple[str, int]]:
+        """``(ip, port)`` of the ``DNSPort`` the guests' UDP 53 is redirected to, once ready.
+
+        Opened together with the ``TransPort``, on the guest bridge address.
+        """
+        with self._lock:
+            return self._guest_dns if self.available() else None
+
+    def dns_port(self) -> Optional[int]:
+        """The loopback ``DNSPort`` the host resolves names with in hidden mode, once ready.
+
+        A name that a service or a peer gives must not be resolved by the host's own
+        resolver: the authoritative server of that name would see where the query
+        comes from (``src/routing/tor_dns.py``).
+        """
+        with self._lock:
+            return self._dns if self.available() else None
+
+    def http_tunnel_port(self) -> Optional[int]:
+        """The ``HTTPTunnelPort`` on loopback, once ready (``src.routing.tunneled_http`` uses it)."""
+        with self._lock:
+            return self._http_port if self.available() else None
 
     # --- what the registry and the CLI ask -------------------------------------
 
@@ -263,6 +301,36 @@ class TorBackend(RoutingBackend):
             "AvoidDiskWrites 1",
             "Log notice stdout",
         ]
+        if hidden_mode():
+            dns_port = _free_udp_port("127.0.0.1")
+            lines.append(f"DNSPort 127.0.0.1:{dns_port}")
+            with self._lock:
+                self._dns = dns_port
+        with self._lock:
+            self._trans = self._guest_dns = None
+        bridge_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+        if service_egress_via_tor() and not _address_is_local(bridge_ip):
+            # Tor stops at start when it cannot bind a listener, and it hosts the onion
+            # service in the same process: one missing address would cost the node its
+            # only address. Without these listeners the launcher gives the services that
+            # need outside egress to a peer, and the onion service still starts.
+            log.LOGGER(
+                f"[TOR] {bridge_ip} (virtualizers.ch.NETWORK_GATEWAY_IP) is not on a local "
+                "interface: no TransPort and no guest DNSPort. Services that leave the host "
+                "are not run here until the daemon restarts with the guest bridge up."
+            )
+        elif service_egress_via_tor():
+            # The guests' outside TCP, redirected here by the firewall
+            # (policy.tor_redirect_rules). On the bridge address, so only guests reach
+            # it. Tor isolates the circuits of each client address, that is of each VM.
+            trans_port = get_free_port()
+            # And the guests' UDP DNS, redirected here the same way: a service with '*'
+            # uses its own resolver, usually over UDP, which has no other way out.
+            guest_dns_port = _free_udp_port(bridge_ip)
+            lines += [f"TransPort {bridge_ip}:{trans_port}", f"DNSPort {bridge_ip}:{guest_dns_port}"]
+            with self._lock:
+                self._trans = (bridge_ip, trans_port)
+                self._guest_dns = (bridge_ip, guest_dns_port)
         with self._lock:
             onion = self._onion
         if onion:
@@ -312,6 +380,9 @@ class TorBackend(RoutingBackend):
         with self._lock:
             process, self._process = self._process, None
             self._http_port = None
+            self._trans = None
+            self._dns = None
+            self._guest_dns = None
             self._set("stopped")
         if process is None or process.poll() is not None:
             return
@@ -320,6 +391,26 @@ class TorBackend(RoutingBackend):
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             process.kill()
+
+
+def _address_is_local(ip: str) -> bool:
+    """Whether ``ip`` is on an interface of this host, so that Tor can listen on it."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((ip, 0))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _free_udp_port(ip: str) -> int:
+    """A UDP port that is free on ``ip`` now, for a ``DNSPort``.
+
+    ``get_free_port`` checks TCP only, and Tor stops at start when a listener cannot bind.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.bind((ip, 0))
+        return sock.getsockname()[1]
 
 
 def _tor_version(binary: Path, env: dict) -> Optional[Tuple[int, int, int]]:

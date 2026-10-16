@@ -29,6 +29,11 @@ class Chain(Enum):
     rather than loose rules is that a named chain has an owner and a teardown.
     See ``compat.py``. It exists only under ``IptablesBackend``; asking
     ``NftBackend`` for it is an error, not a silent no-op.
+
+    ``FORWARD_V6`` is the forward hook for IPv6 only. Under ``NftBackend`` it is
+    the same ``inet nodo`` forward chain, and the rule gets ``meta nfproto ipv6``.
+    Under ``IptablesBackend`` it is the FORWARD chain of ``ip6tables``. A rule
+    there must not match an IPv4 address.
     """
 
     INPUT = "input"
@@ -36,6 +41,7 @@ class Chain(Enum):
     PREROUTING = "prerouting"
     POSTROUTING = "postrouting"
     FORWARD_COMPAT = "forward_compat"
+    FORWARD_V6 = "forward_v6"
 
     @property
     def is_nat(self) -> bool:
@@ -146,6 +152,8 @@ class Rule:
             raise RuleError("A JUMP rule needs jump_to.")
         if self.verdict is not Verdict.JUMP and self.jump_to:
             raise RuleError("jump_to only applies to a JUMP rule.")
+        if self.chain is Chain.FORWARD_V6 and (self.source or self.destination):
+            raise RuleError("An IPv6 forward rule cannot match an IPv4 address.")
 
 
 def truncate_comment(comment: str) -> str:

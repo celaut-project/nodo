@@ -16,7 +16,7 @@ import unittest
 from src.utils.firewall import policy
 from src.utils.firewall.backends import _render_iptables, _render_nft
 from src.utils.firewall.errors import RuleError
-from src.utils.firewall.rules import Chain, Verdict
+from src.utils.firewall.rules import Chain, Rule, Verdict
 
 VM = "d1cc08a0fb1cac5cb725d76629b7e06c186c7f0aa04d65fe469356f7f437e3c8"
 VM_IP = "192.168.200.148"
@@ -28,26 +28,27 @@ def iptables(rule):
 
 
 class BlockAllTests(unittest.TestCase):
-    def test_drops_new_connections_on_both_protocols(self):
-        rules = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
-        self.assertEqual([rule.protocol for rule in rules], ["tcp", "udp"])
-        for rule in rules:
-            self.assertIs(rule.chain, Chain.FORWARD)
-            self.assertIs(rule.verdict, Verdict.DROP)
-            self.assertEqual(rule.ct_states, ("NEW",))
-            self.assertEqual(rule.source, VM_IP)
+    def test_drops_every_new_connection_whatever_the_protocol(self):
+        # No protocol on purpose: with one rule for TCP and one for UDP, ICMP and
+        # every other IP protocol left a guest through the masquerade (#550, F1).
+        [rule] = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
+        self.assertIs(rule.chain, Chain.FORWARD)
+        self.assertIs(rule.verdict, Verdict.DROP)
+        self.assertEqual(rule.ct_states, ("NEW",))
+        self.assertEqual(rule.source, VM_IP)
+        self.assertIsNone(rule.protocol)
+        self.assertIsNone(rule.destination)
 
     def test_renders_the_same_intent_in_both_backends(self):
-        tcp = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)[0]
+        [rule] = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
         self.assertEqual(
-            iptables(tcp),
-            f"-p tcp -s {VM_IP} -m conntrack --ctstate NEW -j DROP "
-            f"-m comment --comment nodo;vm={VM};block_all;tcp",
+            iptables(rule),
+            f"-s {VM_IP} -m conntrack --ctstate NEW -j DROP "
+            f"-m comment --comment nodo;vm={VM};block_all",
         )
         self.assertEqual(
-            _render_nft(tcp),
-            f'ip saddr {VM_IP} meta l4proto tcp ct state new drop '
-            f'comment "nodo;vm={VM};block_all;tcp"',
+            _render_nft(rule),
+            f'ip saddr {VM_IP} ct state new drop comment "nodo;vm={VM};block_all"',
         )
 
     def test_a_malformed_address_never_reaches_the_firewall(self):
@@ -55,6 +56,35 @@ class BlockAllTests(unittest.TestCase):
             with self.subTest(address=bad):
                 with self.assertRaises(RuleError):
                     policy.block_all_rules(vmachine_id=VM, vm_ip=bad)
+
+
+class GuestIpv6DropTests(unittest.TestCase):
+    """A guest gets IPv4 only, so all its IPv6 is dropped on the bridge (#550, P14)."""
+
+    def test_drops_ipv6_from_the_bridge_in_both_backends(self):
+        rule = policy.guest_ipv6_drop_rule("nodo-br-ch")
+        self.assertIs(rule.chain, Chain.FORWARD_V6)
+        self.assertIs(rule.verdict, Verdict.DROP)
+        self.assertEqual(
+            _render_nft(rule),
+            f'iifname "nodo-br-ch" meta nfproto ipv6 drop comment "{policy.GUEST_IPV6_DROP_COMMENT}"',
+        )
+        self.assertEqual(
+            iptables(rule),
+            f"-i nodo-br-ch -j DROP -m comment --comment {policy.GUEST_IPV6_DROP_COMMENT}",
+        )
+
+    def test_is_not_part_of_a_vm_footprint(self):
+        rule = policy.guest_ipv6_drop_rule("nodo-br-ch")
+        self.assertFalse(rule.comment.startswith(policy.VM_COMMENT_ROOT))
+
+    def test_needs_a_bridge(self):
+        with self.assertRaises(RuleError):
+            policy.guest_ipv6_drop_rule("")
+
+    def test_an_ipv6_rule_cannot_match_an_ipv4_address(self):
+        with self.assertRaises(RuleError):
+            Rule(chain=Chain.FORWARD_V6, comment="nodo;x", source=VM_IP)
 
 
 class AllowTests(unittest.TestCase):

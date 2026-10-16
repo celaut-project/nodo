@@ -91,6 +91,13 @@ _NFT_CHAINS: Dict[Chain, Tuple[str, str, str]] = {
         "forward",
         f"type filter hook forward priority {NFT_FILTER_PRIORITY} ; policy accept ;",
     ),
+    # The same chain as FORWARD: ``inet`` holds both families. The rule itself
+    # carries ``meta nfproto ipv6``.
+    Chain.FORWARD_V6: (
+        NFT_FILTER_FAMILY,
+        "forward",
+        f"type filter hook forward priority {NFT_FILTER_PRIORITY} ; policy accept ;",
+    ),
     Chain.PREROUTING: (
         NFT_NAT_FAMILY,
         "prerouting",
@@ -113,6 +120,7 @@ _IPTABLES_CHAINS: Dict[Chain, str] = {
     Chain.PREROUTING: "PREROUTING",
     Chain.POSTROUTING: "POSTROUTING",
     Chain.FORWARD_COMPAT: COMPAT_CHAIN,
+    Chain.FORWARD_V6: "FORWARD",
 }
 
 
@@ -309,7 +317,9 @@ class FirewallBackend(ABC):
         reliance on remembering the exact arguments that created each rule.
         """
         removed = 0
-        for chain in chains or tuple(Chain):
+        # FORWARD_V6 holds only the global guest IPv6 drop, never a VM's rule. Under
+        # nft it is also the same chain as FORWARD, which would be listed twice.
+        for chain in chains or tuple(c for c in Chain if c is not Chain.FORWARD_V6):
             try:
                 applied_rules = self.list_rules(chain, comment_prefix)
             except FirewallError:
@@ -545,6 +555,8 @@ def _render_nft(rule: Rule) -> str:
     if rule.out_interface:
         operator = "!= " if rule.out_interface_is_negated else ""
         parts.append(f'oifname {operator}"{rule.out_interface}"')
+    if rule.chain is Chain.FORWARD_V6:
+        parts.append("meta nfproto ipv6")
     if rule.source:
         parts.append(f"ip saddr {rule.source}")
     if rule.destination:
@@ -597,7 +609,12 @@ class IptablesBackend(FirewallBackend):
 
     def _iptables(self, chain: Chain, *args: str) -> subprocess.CompletedProcess:
         table = ["-t", "nat"] if chain.is_nat else []
-        return self._run(["iptables", *table, *args])
+        binary = "ip6tables" if chain is Chain.FORWARD_V6 else "iptables"
+        try:
+            return self._run([binary, *table, *args])
+        except OSError as e:
+            # ip6tables is a separate binary, and a host can have iptables without it.
+            raise FirewallError(f"Could not run {binary}: {e}") from e
 
     def list_rules(self, chain: Chain, comment_prefix: str = "") -> List[AppliedRule]:
         name = _IPTABLES_CHAINS[chain]

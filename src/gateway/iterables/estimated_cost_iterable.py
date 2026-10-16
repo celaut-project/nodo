@@ -12,7 +12,7 @@ from src.utils.cost_functions.architecture_resources import NOT_EXECUTING_REASON
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils import activity_window
-from src.utils.network_policy import enforce_network_policy
+from src.utils.network_policy import enforce_hidden_mode, enforce_network_policy, tor_egress_unready_reason
 from src.utils.logger import LOGGER as logger
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 
@@ -84,11 +84,19 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 self.configuration,
                 with_sorted_hashes(self.metadata),
             )
-            price, resources, arch = QueryCache().get_or_compute(
+            price, resources, arch, networks = QueryCache().get_or_compute(
                 key,
                 quote_ttl(),
                 self._quote,
             )
+            # A hidden node whose services' egress goes through Tor does not offer what
+            # its launcher would then skip while Tor is not ready: the asking peer's
+            # balancer would select this node, pay it, and get the service from a third
+            # node. The peers that can run it answer for themselves. Outside the cache,
+            # like the room check below: Tor's state changes, the price does not.
+            tor_unready = tor_egress_unready_reason(networks)
+            if tor_unready:
+                raise Exception(f"This node cannot run the service right now: {tor_unready}.")
             # No room, no offer (#280): the same gate `generate_estimated_cost` applies
             # when it is not split from its price. Checked on every request, outside
             # the cache: the cache keeps the price, never the refusal, so a quote
@@ -115,8 +123,11 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             # raise BreakIteration
             yield Buffer(signal=True)
 
-    def _quote(self) -> Tuple[celaut_pb2.EstimatedCost, celaut_pb2.Service.Container.Resources, Optional[str]]:
-        """The price, whatever the load, with what `generate` checks the room for."""
+    def _quote(self) -> Tuple[
+        celaut_pb2.EstimatedCost, celaut_pb2.Service.Container.Resources, Optional[str],
+        Tuple[celaut_pb2.Service.Network, ...],
+    ]:
+        """The price, whatever the load, with what `generate` checks the room and Tor for."""
         service = read_service_from_disk(service_hash=self.service_hash)
 
         if not service:
@@ -127,6 +138,12 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         # networks the policy rejects only gets the peer's balancer to
         # select us and fail at launch (#280).
         enforce_network_policy(
+            networks=service.network,
+            subject=f"service {self.service_hash}",
+        )
+        # A hidden node quotes only what it would run itself, and it runs nothing whose
+        # traffic leaves this host directly: that traffic shows its IP address.
+        enforce_hidden_mode(
             networks=service.network,
             subject=f"service {self.service_hash}",
         )
@@ -169,7 +186,9 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             service=priced_service,
             check_availability=False,
         )
-        return price, resources, service_arch
+        networks = tuple(celaut_pb2.Service.Network.FromString(network.SerializeToString())
+                         for network in priced_service.network)
+        return price, resources, service_arch, networks
 
     def final(self):
         logger('End request for the cost of a service.')

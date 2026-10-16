@@ -25,6 +25,7 @@ from src.utils.firewall.rules import Chain, Rule, Verdict, truncate_comment
 PROTOCOLS: Tuple[str, ...] = ("tcp", "udp")
 
 FORWARD_RELATED_ESTABLISHED_COMMENT = "nodo;forward;related_established"
+GUEST_IPV6_DROP_COMMENT = "nodo;forward;guest_ipv6_drop"
 MASQUERADE_COMMENT_PREFIX = "nodo;masquerade;subnet="
 VM_COMMENT_ROOT = "nodo;vm="
 
@@ -138,20 +139,48 @@ def compat_rules(bridge: str) -> List[Rule]:
 
 
 def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:
-    """Drop every new connection a guest starts. The default it opts out of."""
+    """Drop every new connection a guest starts. The default it opts out of.
+
+    One rule with no protocol, so it drops ICMP and every other IP protocol too.
+    It used to be one rule for TCP and one for UDP, and everything else went
+    through: a guest with no allow at all could ping a server it controls and
+    reach it from the host's own address, through the masquerade. On a hidden
+    node that is the node's address. ICMP errors for an allowed flow are RELATED,
+    so the global accept still lets them through.
+    """
     source = validate_address(vm_ip, "VM address")
     return [
         Rule(
             chain=Chain.FORWARD,
-            comment=_comment(vmachine_id, f"block_all;{protocol}"),
+            comment=_comment(vmachine_id, "block_all"),
             verdict=Verdict.DROP,
             source=source,
-            protocol=protocol,
             ct_states=("NEW",),
             at_head=True,
         )
-        for protocol in PROTOCOLS
     ]
+
+
+def guest_ipv6_drop_rule(bridge: str) -> Rule:
+    """Drop all IPv6 that a guest sends through the host.
+
+    nodo gives a guest IPv4 only, and every per-VM rule matches an IPv4 address.
+    But a guest can set an IPv6 address itself and use the link-local address of
+    the bridge as its router. Without this rule, only the host's
+    ``net.ipv6.conf.all.forwarding`` decides whether that packet leaves -- with
+    no Tor redirect, no masquerade and no ``block_all``. Global, like the
+    masquerade, so it is never part of a VM teardown.
+    """
+    name = str(bridge or "").strip()
+    if not name:
+        raise RuleError("The guest IPv6 drop needs a bridge name.")
+    return Rule(
+        chain=Chain.FORWARD_V6,
+        comment=GUEST_IPV6_DROP_COMMENT,
+        verdict=Verdict.DROP,
+        in_interface=name,
+        at_head=True,
+    )
 
 
 def allow_connection_rule(
@@ -227,6 +256,75 @@ def allow_all_egress_rule(vmachine_id: str, vm_ip: str) -> Rule:
         source=validate_address(vm_ip, "VM address"),
         at_head=True,
     )
+
+
+def tor_redirect_rules(
+    vmachine_id: str,
+    vm_ip: str,
+    tor_ip: str,
+    tor_port: int,
+    ip: Optional[str] = None,
+    port: Optional[int] = None,
+    except_subnet: Optional[str] = None,
+) -> List[Rule]:
+    """Send a guest's TCP to one destination (or to all, without ``ip``) into Tor.
+
+    For a hidden node (``routing.HIDDEN``): the connection is translated to Tor's
+    ``TransPort`` on the host, which reads the original destination and opens it from a
+    Tor exit. Nothing is accepted in FORWARD, so ``block_all`` still drops whatever this
+    does not translate -- UDP and ICMP among it.
+
+    ``except_subnet`` leaves a destination range alone (the guest subnet, for ``*``),
+    so the guest still reaches the gateway and the instances that run on this node.
+    """
+    source = validate_address(vm_ip, "VM address")
+    tor = validate_address(tor_ip, "Tor address")
+    if ip is not None and except_subnet is not None:
+        raise RuleError("A redirect has either one destination or an excepted range.")
+    destination = validate_address(ip, "Destination address") if ip is not None else None
+    excepted = validate_address(except_subnet, "Excepted subnet") if except_subnet else None
+    if destination is not None:
+        target = f"{destination}:{port}" if port is not None else destination
+    else:
+        target = f"all-but-{excepted}" if excepted else "all"
+    return [
+        Rule(
+            chain=Chain.PREROUTING,
+            comment=_comment(vmachine_id, f"tor;{target}/tcp"),
+            verdict=Verdict.DNAT,
+            source=source,
+            destination=destination or excepted,
+            destination_is_negated=bool(excepted),
+            protocol="tcp",
+            dport=port,
+            dnat_to=f"{tor}:{int(tor_port)}",
+        ),
+        allow_host_connection_rule(vmachine_id, vm_ip, tor, int(tor_port), "tcp"),
+    ]
+
+
+def tor_dns_redirect_rules(vmachine_id: str, vm_ip: str, dns_ip: str, dns_port: int) -> List[Rule]:
+    """Send a guest's DNS over UDP into Tor's ``DNSPort``, whatever resolver it names.
+
+    For a hidden node with a ``*`` service. nodo gives the guest no resolver, so the
+    guest uses its own -- usually over UDP 53, which ``block_all`` drops. Translated
+    here, the query is answered by a Tor exit instead, and no resolver sees the node.
+    DNS over TCP already goes through the ``TransPort`` (``tor_redirect_rules``).
+    """
+    source = validate_address(vm_ip, "VM address")
+    dns = validate_address(dns_ip, "Tor DNS address")
+    return [
+        Rule(
+            chain=Chain.PREROUTING,
+            comment=_comment(vmachine_id, "tor_dns;53/udp"),
+            verdict=Verdict.DNAT,
+            source=source,
+            protocol="udp",
+            dport=53,
+            dnat_to=f"{dns}:{int(dns_port)}",
+        ),
+        allow_host_connection_rule(vmachine_id, vm_ip, dns, int(dns_port), "udp"),
+    ]
 
 
 def masquerade_rule(subnet: str) -> Rule:

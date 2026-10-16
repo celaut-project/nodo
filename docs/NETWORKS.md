@@ -616,3 +616,33 @@ Move existing `pow_networks.ENDPOINTS` entries here; the old setting is retired.
 Generic peer discovery and reputation readers remain reusable helpers, but their
 untrusted suggestions are only wired to the PoW verifier, not blindly granted as
 members of arbitrary domains. Operator defaults are explicit operator assertions.
+
+## Hidden mode
+
+A node with `routing.HIDDEN: true` hides its IP address from its peers
+([`CONFIG.md`](CONFIG.md#hidden-mode)). Traffic that would leave the host directly would
+show that address, so:
+
+| Network | `SERVICE_EGRESS: true` (default) | `SERVICE_EGRESS: false` |
+|---|---|---|
+| `*` | TCP and UDP DNS through Tor, the rest of UDP dropped | Not run here |
+| `pow:<chain>` | Through Tor, candidates checked through Tor | Not run here, no `ResolveNetwork` answer |
+| A host name (`api.example.com`) | Resolved through Tor, then through Tor | Not run here |
+| A tag with seeds in `service_networks.default_instances` | Through Tor (a private seed address directly) | Not run here |
+| A tag that only local instances answer | Directly, on the bridge | Directly, on the bridge |
+
+"Through Tor": the firewall translates the guest's TCP to Tor's `TransPort` on the
+guest bridge (`policy.tor_redirect_rules`). For `*`, UDP to port 53 is translated to
+Tor's `DNSPort` on the same bridge (`policy.tor_dns_redirect_rules`), so the guest's own
+resolver works. A host name, and the name of a `pow:` candidate, is resolved by the node
+through Tor's `DNSPort` on loopback, not by the host's resolver. Nothing is accepted in FORWARD towards a
+global address, and `block_all` drops every new packet of the guest, of every protocol.
+So whatever is not translated stays dropped: UDP, ICMP and all other IP protocols. The
+guest's IPv6 is dropped too (see [`FIREWALL.md`](FIREWALL.md)).
+
+"Not run here" is not a refusal of the domain, unlike the operator lists above. The
+launcher skips this node and the balancer goes on to a peer. The peer's address is the
+one that shows, and this node calls the peer through Tor. The cost quote of this node
+refuses the service, so a peer's balancer does not select it. The virtualizer checks
+again (`rootfs.build_network_resolution`). The check is `enforce_hidden_mode` in
+`src/utils/network_policy.py`.

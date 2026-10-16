@@ -499,6 +499,7 @@ The plan is in
 | `routing.tor.BINARY` | `""` | Path of a `tor` program (0.4.8 or later) to use in place of the installed copy. Empty uses the copy under `dependencies.tor.RUNTIME_ROOT`. |
 | `routing.tor.ANNOUNCE` | `auto` | Announce an onion address for the gateway. `auto`: announce if `ENABLED` is `true`, and in hidden mode. `true`: announce. `false`: never. |
 | `routing.tor.CLEARNET_VIA_EXIT` | `false` | Hidden mode only. Call peers that have a clearnet address through a Tor exit. |
+| `routing.tor.SERVICE_EGRESS` | `true` | Hidden mode only. Send the outside TCP of the services this node runs through Tor. `false`: do not run those services here. |
 
 ### Calling `.onion` peers
 
@@ -551,6 +552,35 @@ Peers that call Tor use it.
 - announces no address expiry, and rounds its benchmark scores to two digits;
 - does not check that the gateway port is reachable from a guest. The plaintext port
   is still checked.
+- sends the outside traffic of its services through Tor (`routing.tor.SERVICE_EGRESS`,
+  on by default). The firewall translates a guest's TCP towards a global address to a
+  Tor `TransPort` on the guest bridge, so the other end sees a Tor exit. This covers
+  `*`, `pow:<chain>`, host names and seeded tags. Traffic to the node's own networks
+  (the gateway, local instances, private addresses) is not sent into Tor. A `*`
+  service's DNS over UDP (port 53, to any resolver) is translated to a Tor `DNSPort` on
+  the guest bridge. The rest of UDP to the outside is dropped: Tor has no path for it.
+  The node checks `pow:` candidates through Tor too. Exits block many ports and add
+  latency, so some destinations fail. While Tor is not ready, the launcher gives such a
+  service to a peer, and the cost quote refuses it with the same reason, so no peer pays
+  this node for it. The `TransPort` and the guest `DNSPort` listen on
+  `virtualizers.ch.NETWORK_GATEWAY_IP`. If that address is not on the host when Tor
+  starts (the guest bridge could not be created), Tor starts without them: the onion
+  service still works, and services that leave the host go to a peer until the daemon
+  restarts with the bridge up.
+
+  With `SERVICE_EGRESS: false`, the node does not run a service whose traffic would
+  leave the host directly. A peer that is not hidden can run it: the launcher skips
+  this node, the cost quote says this node does not run it, and the virtualizer checks
+  again. This node then does not answer `ResolveNetwork` for a `pow:` network. See
+  [`NETWORKS.md`](NETWORKS.md).
+
+A host name from a service spec (a network tag) or from a peer (a `pow:` candidate) is
+resolved through Tor, at an exit, never by the host's own resolver. Tor opens a `DNSPort`
+on `127.0.0.1` for this. The service author selects the name, and so also controls its
+authoritative DNS server: that server would see the resolver that asks, which can be the
+node's own address or its /24 (EDNS Client Subnet). While Tor is not ready, such a name
+does not resolve and the tag gets no peers. Names from the operator's own config
+(seeds, `ledgers.ergo.NODE_URL`) stay on the host's resolver.
 
 The node refuses to start if `routing.tor.ENABLED` or `routing.tor.ANNOUNCE` is `false`,
 if `network.PUBLIC_IP` is set, or if `network.ANNOUNCE_PRIVATE_ADDRESSES` is on. It also

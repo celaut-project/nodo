@@ -311,6 +311,16 @@ and a test that a caller from `127.0.0.1` on the onion listener gets no instance
 
 ### Phase 3: network policy in hidden mode
 
+Implemented, with one change: the rejection applies to local execution only, not
+before the balancer. A peer that is not hidden can run the service, and this node
+calls the peer through Tor. The launcher skips the local candidate, as it does for a
+missing virtiofsd.
+
+Then extended (`routing.tor.SERVICE_EGRESS`, on by default): instead of not running such
+a service, the node sends its outside TCP through a Tor `TransPort` on the guest
+bridge, and checks `pow:` candidates through Tor. The rejection above stays for
+`SERVICE_EGRESS: false`, and for a launch while Tor is not ready.
+
 Apply the table in §2.4 in `enforce_network_policy` (`src/utils/network_policy.py`).
 Reject `ResolveNetwork` for `pow:` networks in `resolve_network_for_peer`
 (`networks.py:635`). Make the cost estimate answer "not supported".
@@ -319,7 +329,9 @@ Tests: a matrix of network type and `HIDDEN` in `test_network_policy_enforcement
 
 ### Phase 4: networks whose peers are instances on other nodes
 
-This phase needs its own proposal.
+The proposal is [`539-remote-network-members.md`](539-remote-network-members.md). It
+replaces the sketch below: the tunnel is opened by a member handle and charged to the
+caller, and a service sees only addresses.
 
 1. A node learns the members of a network from its peers. A peer answers with an
    `Instance` that has an empty `uri`.

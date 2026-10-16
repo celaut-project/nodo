@@ -474,6 +474,46 @@ class IptablesBackendTests(unittest.TestCase):
         self.assertIn("Permission denied", str(ctx.exception))
 
 
+class Ipv6ForwardTests(unittest.TestCase):
+    """FORWARD_V6 is nft's own forward chain, and ip6tables' FORWARD."""
+
+    RULE = Rule(chain=Chain.FORWARD_V6, comment="nodo;forward;guest_ipv6_drop",
+                verdict=Verdict.DROP, in_interface="nodo-br-ch", at_head=True)
+
+    def test_nft_writes_it_in_the_inet_forward_chain(self):
+        runner = FakeRunner({("nft", "-j", "list", "chain"): _proc(0, _nft_chain_listing([]))})
+        NftBackend(run=runner).ensure(self.RULE)
+        self.assertIn(
+            'nft insert rule inet nodo forward iifname "nodo-br-ch" meta nfproto ipv6 drop '
+            'comment "nodo;forward;guest_ipv6_drop"',
+            runner.commands(),
+        )
+
+    def test_iptables_uses_ip6tables(self):
+        runner = FakeRunner({("ip6tables", "-S", "FORWARD"): _proc(0, "")})
+        IptablesBackend(run=runner).ensure(self.RULE)
+        self.assertIn(
+            "ip6tables -I FORWARD -i nodo-br-ch -j DROP -m comment --comment "
+            "nodo;forward;guest_ipv6_drop",
+            runner.commands(),
+        )
+        self.assertFalse(any(call[0] == "iptables" for call in runner.calls), runner.commands())
+
+    def test_a_missing_ip6tables_is_a_firewall_error(self):
+        def runner(command):
+            if command[0] == "ip6tables":
+                raise FileNotFoundError("ip6tables")
+            return _proc(0, "")
+
+        with self.assertRaises(FirewallError):
+            IptablesBackend(run=runner).ensure(self.RULE)
+
+    def test_a_vm_teardown_does_not_touch_it(self):
+        runner = FakeRunner(default=_proc(0, ""))
+        IptablesBackend(run=runner).delete_by_comment_prefix("nodo;vm=abc;")
+        self.assertFalse(any(call[0] == "ip6tables" for call in runner.calls), runner.commands())
+
+
 class ValidationTests(unittest.TestCase):
     def test_rejects_unusable_ports_and_protocols(self):
         backend = NftBackend(run=FakeRunner())
@@ -548,7 +588,7 @@ class TeardownTests(unittest.TestCase):
         prefix = "nodo;vm=abc;"
         listings = {
             Chain.FORWARD: [
-                {"comment": prefix + "block_all;tcp", "handle": 1, "expr": []},
+                {"comment": prefix + "block_all", "handle": 1, "expr": []},
                 {"comment": prefix + "dnat_in;tcp;5000", "handle": 2, "expr": []},
             ],
             Chain.PREROUTING: [{"comment": prefix + "dnat;tcp;59629", "handle": 3, "expr": []}],
@@ -588,8 +628,8 @@ class TeardownTests(unittest.TestCase):
                     0,
                     _nft_chain_listing(
                         [
-                            {"comment": mine + "block_all;tcp", "handle": 1, "expr": []},
-                            {"comment": "nodo;vm=theirs;block_all;tcp", "handle": 2, "expr": []},
+                            {"comment": mine + "block_all", "handle": 1, "expr": []},
+                            {"comment": "nodo;vm=theirs;block_all", "handle": 2, "expr": []},
                         ]
                     ),
                 )
@@ -624,7 +664,7 @@ class EnsureFirstTests(unittest.TestCase):
                     _nft_chain_listing(
                         [
                             {"comment": self.COMMENT, "handle": 1, "expr": []},
-                            {"comment": "nodo;vm=x;block_all;tcp", "handle": 2, "expr": []},
+                            {"comment": "nodo;vm=x;block_all", "handle": 2, "expr": []},
                         ]
                     ),
                 )
@@ -641,7 +681,7 @@ class EnsureFirstTests(unittest.TestCase):
                     0,
                     _nft_chain_listing(
                         [
-                            {"comment": "nodo;vm=x;block_all;tcp", "handle": 2, "expr": []},
+                            {"comment": "nodo;vm=x;block_all", "handle": 2, "expr": []},
                             {"comment": self.COMMENT, "handle": 1, "expr": []},
                         ]
                     ),

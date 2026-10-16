@@ -13,7 +13,8 @@ document is expected to be set up by hand except the host-owned parts in
 
 A guest starts with **no egress at all** and earns destinations one at a time:
 
-- `block_all` drops every NEW connection leaving the VM, for TCP and UDP.
+- `block_all` drops every NEW connection leaving the VM, of every protocol: TCP,
+  UDP, ICMP and all other IP protocols. It is one rule with no protocol match.
 - Each `allow` opens exactly one destination — the node gateway, DNS, an address
   resolved from a `Service.Network` tag, or one `uri` of a dependency the node
   launched for it. Allows are inserted *above* the blanket drop, so a later allow
@@ -22,6 +23,10 @@ A guest starts with **no egress at all** and earns destinations one at a time:
   for the whole VM, still above the drop.
 - Return traffic is covered once, globally, by a `RELATED,ESTABLISHED` accept
   pinned to the head of the forward chain.
+- A guest gets IPv4 only. All IPv6 that comes in on the guest bridge is dropped on
+  the forward hook by one global rule (`policy.guest_ipv6_drop_rule`): a guest can
+  set its own IPv6 address, and no per-VM rule matches it. With iptables, this rule
+  is in the FORWARD chain of `ip6tables`.
 
 The decision of *which* rules a policy consists of lives in
 `src/utils/firewall/policy.py` as pure functions, separate from the code that
@@ -32,7 +37,7 @@ applies them.
 | Table | Chain | Hook / priority | Contents |
 |---|---|---|---|
 | `inet nodo` | `input` | filter, **-5** | the gateway port accept |
-| `inet nodo` | `forward` | filter, **-5** | guest egress policy, published-port pass-through |
+| `inet nodo` | `forward` | filter, **-5** | guest egress policy, published-port pass-through, guest IPv6 drop |
 | `ip nodo` | `prerouting` | nat, -100 | published-port DNAT |
 | `ip nodo` | `postrouting` | nat, 100 | guest subnet masquerade |
 
@@ -41,12 +46,13 @@ NAT is a separate `ip` table because all of it is IPv4; filter is `inet`.
 Every rule carries a comment that identifies what it is and who it belongs to:
 
 ```
-nodo;vm=<vmachine_id>;block_all;tcp
+nodo;vm=<vmachine_id>;block_all
 nodo;vm=<vmachine_id>;allow;192.168.200.1:58614/tcp
 nodo;vm=<vmachine_id>;dnat;tcp;57545
 nodo;gateway;port=58614/tcp
 nodo;masquerade;subnet=192.168.200.0/24
 nodo;forward;related_established
+nodo;forward;guest_ipv6_drop
 ```
 
 So an instance's whole footprint is removed by prefix (`nodo;vm=<id>;`) on stop,

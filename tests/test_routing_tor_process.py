@@ -155,6 +155,79 @@ class TorProcessTests(unittest.TestCase):
         state = json.loads((self.dir / "storage" / "tor" / "state.json").read_text())
         self.assertEqual(state["onion"], host)
 
+    def test_a_hidden_node_opens_a_transport_on_the_guest_bridge(self):
+        self._fake_tor()
+        self.settings.update({"routing.HIDDEN": True,
+                              "virtualizers.ch.NETWORK_GATEWAY_IP": "192.168.200.1"})
+        backend = self._backend()
+        with mock.patch.object(tor_module, "service_egress_via_tor", return_value=True), \
+                mock.patch.object(tor_module, "_address_is_local", return_value=True), \
+                mock.patch.object(tor_module, "_free_udp_port", side_effect=[9053, 9054]):
+            backend.start()
+            self.assertTrue(wait_for(backend.available), backend.status())
+        ip, port = backend.transparent_proxy()
+        self.assertEqual(ip, "192.168.200.1")
+        torrc = self.seen.read_text()
+        self.assertIn(f"TransPort 192.168.200.1:{port}", torrc)
+        # The guests' UDP DNS goes to a DNSPort on the bridge, the host's to loopback.
+        dns_ip, dns_port = backend.guest_dns()
+        self.assertEqual(dns_ip, "192.168.200.1")
+        self.assertIn(f"DNSPort 192.168.200.1:{dns_port}", torrc)
+        self.assertIn(f"DNSPort 127.0.0.1:{backend.dns_port()}", torrc)
+        backend.stop()
+        self.assertIsNone(backend.transparent_proxy())
+        self.assertIsNone(backend.guest_dns())
+        self.assertIsNone(backend.dns_port())
+
+    def test_without_the_bridge_address_tor_still_starts_without_the_guest_listeners(self):
+        # Tor stops at start when it cannot bind a listener, and the onion service is in
+        # the same process (#550, P7). So no TransPort and no guest DNSPort instead.
+        self._fake_tor()
+        self.settings.update({"routing.HIDDEN": True,
+                              "virtualizers.ch.NETWORK_GATEWAY_IP": "192.0.2.1"})
+        backend = self._backend()
+        with mock.patch.object(tor_module, "service_egress_via_tor", return_value=True):
+            backend.start()
+            self.assertTrue(wait_for(backend.available), backend.status())
+        torrc = self.seen.read_text()
+        self.assertNotIn("TransPort", torrc)
+        self.assertNotIn("192.0.2.1", torrc)
+        self.assertIsNone(backend.transparent_proxy())
+        self.assertIsNone(backend.guest_dns())
+        # The host still resolves through Tor.
+        self.assertIn(f"DNSPort 127.0.0.1:{backend.dns_port()}", torrc)
+        backend.stop()
+
+    def test_the_bridge_address_check_binds_the_address(self):
+        self.assertTrue(tor_module._address_is_local("127.0.0.1"))
+        self.assertFalse(tor_module._address_is_local("192.0.2.1"))
+        self.assertFalse(tor_module._address_is_local("not-an-ip"))
+
+    def test_a_hidden_node_without_service_egress_still_resolves_through_tor(self):
+        self._fake_tor()
+        self.settings["routing.HIDDEN"] = True
+        backend = self._backend()
+        with mock.patch.object(tor_module, "service_egress_via_tor", return_value=False):
+            backend.start()
+            self.assertTrue(wait_for(backend.available))
+        torrc = self.seen.read_text()
+        self.assertIn(f"DNSPort 127.0.0.1:{backend.dns_port()}", torrc)
+        self.assertEqual(torrc.count("DNSPort"), 1)
+        self.assertIsNone(backend.guest_dns())
+        backend.stop()
+
+    def test_no_transport_without_service_egress(self):
+        self._fake_tor()
+        backend = self._backend()
+        with mock.patch.object(tor_module, "service_egress_via_tor", return_value=False):
+            backend.start()
+            self.assertTrue(wait_for(backend.available))
+        self.assertNotIn("TransPort", self.seen.read_text())
+        self.assertIsNone(backend.transparent_proxy())
+        # Not hidden: the host resolver is the operator's business, no DNSPort.
+        self.assertNotIn("DNSPort", self.seen.read_text())
+        self.assertIsNone(backend.dns_port())
+
     def test_a_tor_older_than_0_4_8_is_refused(self):
         self._fake_tor(version="0.4.7.16")
         backend = self._backend()
