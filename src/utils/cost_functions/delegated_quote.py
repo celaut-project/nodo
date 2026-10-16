@@ -8,11 +8,15 @@ plus commission. Three rules keep that from turning one question into a flood:
   ``OWN_MIN_S``) and gives the rest to its peers, as their deadline. Each hop gets less
   time, so the tree of questions stops by itself. Below ``MIN_PEER_TIME_S`` the node
   answers with its local price only.
-* **One round per service at a time.** A node that is already asking its peers about a
-  service does not ask them again for it. A question that comes back through a loop
+* **One round per question at a time.** A node that is already asking its peers a
+  question does not ask them again. A question that comes back through a loop
   (A asks B, B asks A) gets the local answer at once, instead of a new round that waits
-  on the first one. The cache key cannot do this: each hop converts the configuration
-  to the MU of the peer, so the question comes back with another key.
+  on the first one. The key of the round (``loop_key``) has no MU in it: each hop
+  converts the deposit to the MU of the peer, with a rounding, so a key with the deposit
+  does not find the question again. The key of the cache cannot do this either.
+* **A round is remembered.** The answers of one round are kept for
+  ``network.QUERY_CACHE_PEER_TTL_SECONDS``, by the full question. The same question
+  asked again in that time does not ask the peers again (``peer_round``).
 * **The quote is an offer.** The price given to a client is kept for
   ``network.QUERY_CACHE_TTL_SECONDS``. If the launch would cost more, the launcher does
   not delegate to that peer (``launch_service``).
@@ -20,10 +24,12 @@ plus commission. Three rules keep that from turning one question into a flood:
 
 import threading
 from contextlib import contextmanager
-from typing import Iterator, Optional
+from typing import Callable, Dict, Iterator, Optional
 
 from src.utils.config import ConfigManager
-from src.utils.tools.query_cache import HIT, QueryCache, canonical_key, quote_ttl
+from src.utils.tools.query_cache import (
+    HIT, QueryCache, canonical_key, peer_quote_ttl, quote_ttl, with_sorted_hashes,
+)
 
 env_manager = ConfigManager()
 
@@ -60,19 +66,79 @@ def delegation_time_budget(context) -> Optional[float]:
     return budget if budget >= MIN_PEER_TIME_S else None
 
 
+def loop_key(service_hash: str, configuration, metadata) -> str:
+    """The question without its MU: the same key at each hop of a loop.
+
+    Each hop converts ``initial_mu`` to the MU of the peer, and a node fills it in when
+    the client did not give it. So the deposit is not in the key. The rest of the
+    configuration goes to the peers unchanged.
+
+    The metadata of a question from a peer is the metadata in the registry of this node,
+    because the peers send the hashes only (``SEND_ONLY_HASHES_ASKING_COST``). The
+    metadata of a client can be different. Then the loop stops one hop later, on the
+    next node.
+    """
+    without_mu = type(configuration)()
+    without_mu.CopyFrom(configuration)
+    without_mu.ClearField("initial_mu")
+    return canonical_key("delegated-loop", service_hash, without_mu, with_sorted_hashes(metadata))
+
+
 @contextmanager
-def asking_peers_for(service_hash: str) -> Iterator[bool]:
-    """True if this is the only round of questions about ``service_hash`` now."""
+def asking_peers_for(key: str) -> Iterator[bool]:
+    """True if this is the only round of questions with ``key`` (``loop_key``) now."""
     with _IN_FLIGHT_LOCK:
-        first = service_hash not in _IN_FLIGHT
+        first = key not in _IN_FLIGHT
         if first:
-            _IN_FLIGHT.add(service_hash)
+            _IN_FLIGHT.add(key)
     try:
         yield first
     finally:
         if first:
             with _IN_FLIGHT_LOCK:
-                _IN_FLIGHT.discard(service_hash)
+                _IN_FLIGHT.discard(key)
+
+
+def _copy_quotes(quotes: Dict[str, object]) -> Dict[str, object]:
+    copies = {}
+    for peer, cost in quotes.items():
+        copies[peer] = type(cost)()
+        copies[peer].CopyFrom(cost)
+    return copies
+
+
+def peer_round(
+        service_hash: str,
+        configuration,
+        metadata,
+        ask: Callable[[], Dict[str, object]],
+) -> Optional[Dict[str, object]]:
+    """The price of each peer for this question, or None if a round for it is open now.
+
+    ``configuration`` is the one that goes to the peers, with ``initial_mu`` in local MU.
+    ``ask`` asks the peers. Its answers are kept for
+    ``network.QUERY_CACHE_PEER_TTL_SECONDS``: they are prices of peers, as the quotes that
+    ``estimate_cost_on_peer`` keeps. An empty round is not kept, as an error is not.
+
+    None is the answer to a loop, and also to a second client with the same question
+    while the first round is open. The two look the same here, and to wait for the
+    first round in a loop is to wait for itself.
+    """
+    ttl = peer_quote_ttl()
+    key = canonical_key(
+        "delegated-round", service_hash, configuration, with_sorted_hashes(metadata),
+    )
+    if ttl > 0:
+        status, remembered = QueryCache().recall(key)
+        if status == HIT:
+            return _copy_quotes(remembered)
+    with asking_peers_for(loop_key(service_hash, configuration, metadata)) as first:
+        if not first:
+            return None
+        quotes = ask()
+    if quotes and ttl > 0:
+        QueryCache().remember(key, _copy_quotes(quotes), ttl)
+    return quotes
 
 
 def _offer_key(client_id: str, service_hash: str) -> str:
