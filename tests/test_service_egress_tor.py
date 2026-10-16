@@ -391,6 +391,70 @@ class HiddenNameResolutionTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class QuoteTests(unittest.TestCase):
+    """The quote refuses what the launcher would skip (#550, P2): no offer, no payment."""
+
+    def setUp(self):
+        from src.utils.singleton import Singleton
+        from src.utils.tools.query_cache import QueryCache
+
+        previous = Singleton._instances.pop(QueryCache, None)
+
+        def restore():
+            Singleton._instances.pop(QueryCache, None)
+            if previous is not None:
+                Singleton._instances[QueryCache] = previous
+
+        self.addCleanup(restore)
+
+    def _quote(self, service, tor_proxy):
+        from src.gateway.iterables import estimated_cost_iterable as cost_mod
+
+        it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
+        it.configuration = celaut.Configuration()
+        it.service_hash = "abc123"
+        it.metadata = celaut.Metadata()
+        with ExitStack() as stack:
+            def patched(target, name, **kwargs):
+                return stack.enter_context(mock.patch.object(target, name, **kwargs))
+
+            stack.enter_context(hidden(service_networks__default_instances={}))
+            patched(registry.TOR, "transparent_proxy", return_value=tor_proxy)
+            patched(cost_mod, "executes_locally", return_value=True)
+            patched(cost_mod, "read_service_from_disk", return_value=service)
+            patched(cost_mod, "enforce_network_policy")
+            patched(cost_mod, "default_initial_balance", return_value=1)
+            patched(cost_mod, "generate_estimated_cost", side_effect=lambda **_: celaut.EstimatedCost())
+            patched(cost_mod, "get_resource_availability", return_value={"can_execute": True})
+            patched(cost_mod.BeeClient, "respond",
+                    side_effect=lambda message_iterator, indices: iter([message_iterator]))
+            patched(cost_mod.activity_window, "is_open", return_value=True)
+            patched(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount())
+            return list(it.generate())
+
+    def test_quotes_when_tor_is_ready(self):
+        out = self._quote(celaut.Service(network=[net("*")]), (BRIDGE_IP, TRANS_PORT))
+        self.assertIsInstance(out[0], celaut.EstimatedCost)
+
+    def test_refuses_with_the_launchers_reason_while_tor_is_not_ready(self):
+        with self.assertRaises(Exception) as ctx:
+            self._quote(celaut.Service(network=[net("*")]), None)
+        self.assertIn("hidden mode sends '*' through Tor, and Tor is not ready", str(ctx.exception))
+
+    def test_a_remembered_price_is_not_served_while_tor_is_not_ready(self):
+        service = celaut.Service(network=[net("*")])
+        self._quote(service, (BRIDGE_IP, TRANS_PORT))
+        with self.assertRaises(Exception):
+            self._quote(service, None)
+        # And offered again as soon as Tor is back.
+        self.assertIsInstance(self._quote(service, (BRIDGE_IP, TRANS_PORT))[0], celaut.EstimatedCost)
+
+    def test_local_members_need_no_tor(self):
+        out = self._quote(celaut.Service(network=[net("postgres")]), None)
+        self.assertIsInstance(out[0], celaut.EstimatedCost)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchTests(unittest.TestCase):
     def _launch(self, service, candidates, tor_proxy):
         cost = SimpleNamespace(cost=SimpleNamespace())

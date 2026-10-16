@@ -390,6 +390,31 @@ def needs_outside_egress(
     return None
 
 
+def tor_egress_unready_reason(
+        networks: Sequence[celaut.Service.Network],
+) -> Optional[str]:
+    """Why this node cannot run ``networks`` right now because Tor is not ready, or None.
+
+    In hidden mode with ``routing.tor.SERVICE_EGRESS``, the outside traffic of a service
+    goes through Tor. While Tor's ``TransPort`` is not up, a guest started now would get
+    no egress. The launcher then skips this node, and the cost quote must refuse for the
+    same reason, or a peer selects this node, pays it, and gets the service from a third
+    node. One function, so that the two always agree.
+    """
+    from src.routing.policy import service_egress_via_tor
+
+    if not service_egress_via_tor():
+        return None
+    from src.routing import registry
+
+    if registry.TOR.transparent_proxy() is not None:
+        return None
+    outside_tag = needs_outside_egress(networks)
+    if not outside_tag:
+        return None
+    return f"hidden mode sends '{outside_tag}' through Tor, and Tor is not ready"
+
+
 class HiddenModeRejection(NetworkPolicyRejection):
     """A hidden node refuses to reach a network itself. A peer may still run it."""
 
