@@ -1,4 +1,4 @@
-import socket, os, json
+import socket
 from typing import Dict, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
@@ -147,25 +147,6 @@ def resolve_domain(domain: str, ports=DEFAULT_HOSTNAME_PORTS) -> List[celaut.Ins
 # statement instead of an accident.
 LEDGERS_WITHOUT_URIS = ("bitcoin",)
 
-
-def resolve_ergo_network() -> List[celaut.Instance.Uri]:
-    return []
-
-    # TODO Needs to get the ip and port from the data, actually is the restApiUrl.
-    try:
-        http_peers_file = env_manager.get("ledgers.ergo.HTTP_PEERS_PATH")
-        if os.path.exists(http_peers_file):         
-            with open(http_peers_file, 'r') as f:
-                ergo_peers = json.load(f)
-
-            result=[]
-            for uri in ergo_peers.keys():
-                ip, port = uri.split(":")
-                result.append(celaut.Instance.Uri(ip=ip, port=int(port)))
-            
-            return result
-    except:
-        return []
 
 def _slot_exposes(slot: celaut.Service.Api.Slot, network: celaut.Service.Network) -> bool:
     """Whether one API slot offers what peers of ``network`` are expected to speak.
@@ -361,11 +342,6 @@ def resolve_network(
 
         if tag in LEDGERS_WITHOUT_URIS:
             continue
-
-        if "ergo" in tag:
-            uris = resolve_ergo_network()
-            if uris:
-                break
 
         if not tag.islower() or '.' not in tag:
             continue

@@ -332,6 +332,7 @@ def direct_egress_reason(tag: str, env_manager: Optional[ConfigManager] = None) 
     answer resolves only to the instances this node runs.
     """
     manager = env_manager if env_manager is not None else _env_manager
+    raw_tag = tag
     tag = str(tag or "").strip()
     if not tag:
         return None
@@ -340,7 +341,9 @@ def direct_egress_reason(tag: str, env_manager: Optional[ConfigManager] = None) 
     if tag.startswith(POW_TAG_PREFIX):
         return "proof-of-work peers are checked from this host and reached directly"
     seeds = manager.get(SEEDS_KEY, {}) or {}
-    if isinstance(seeds, dict) and seeds.get(tag):
+    # The resolver looks the seeds up with the raw tag (``configured_endpoints``), not the
+    # stripped one: a key "redis " is a seed for the tag "redis ". Look up both (#550, P10).
+    if isinstance(seeds, dict) and (seeds.get(raw_tag) or seeds.get(tag)):
         return f"the operator's seeds for it ({SEEDS_KEY}) are outside addresses"
     if tag.islower() and "." in tag:
         return "a host name is reached directly"

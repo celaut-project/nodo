@@ -406,11 +406,12 @@ def launch_service(
                         f"Skipping peer {peer}: the network share is held on {', '.join(share_nodes)}."
                     )
                     continue
-                if local_virtiofsd_failure and peer == 'local':
-                    launch_failures.append(f"local: {local_virtiofsd_failure}")
-                    continue
-                if local_hidden_failure and peer == 'local':
-                    launch_failures.append(f"local: {local_hidden_failure}")
+                if peer == 'local' and (local_virtiofsd_failure or local_hidden_failure):
+                    # Every reason, not the first: a node without virtiofsd that is
+                    # also hidden has two, and the operator must fix both.
+                    for failure in (local_virtiofsd_failure, local_hidden_failure):
+                        if failure:
+                            launch_failures.append(f"local: {failure}")
                     continue
 
                 log.LOGGER(f'Service balancer select peer {peer}')
