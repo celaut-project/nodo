@@ -12,6 +12,7 @@ stronger: ``drop`` is terminal for the whole hook, so a guest's isolation now ru
 ahead of anything a host firewall might accept.
 """
 
+import ipaddress
 from typing import List, Optional
 
 from protos import celaut_pb2 as celaut
@@ -72,6 +73,21 @@ def _guest_subnet() -> str:
     return str(ConfigManager().get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
 
 
+def _reached_directly(ip: str) -> bool:
+    """Whether a hidden node reaches ``ip`` without Tor: its own networks and the guest subnet.
+
+    The subnet is named on its own because the operator can set ``NETWORK_SUBNET`` to a
+    range that is not a private one (for example 100.64.0.0/10), and the instances of
+    this node must stay reachable on the bridge whatever the range is.
+    """
+    if is_local_address(ip):
+        return True
+    try:
+        return ipaddress.ip_address(str(ip).strip()) in ipaddress.ip_network(_guest_subnet(), strict=False)
+    except ValueError:
+        return False
+
+
 def _tor_proxy(context: str) -> Optional[tuple]:
     """Tor's TransPort, or None (logged) if the guests' egress cannot go there now."""
     from src.routing import registry
@@ -107,7 +123,7 @@ def allow_connection(
     # Hidden mode: only a destination on this host's own networks is reached directly.
     # Anything else would show the node's address, so TCP goes into Tor and the rest is
     # left to the blanket drop.
-    if hidden_mode() and not is_local_address(ip):
+    if hidden_mode() and not _reached_directly(ip):
         context = f"allow {vmachine_id} -> {target}/{protocol.value}"
         if protocol is not TransportProtocol.TCP or not service_egress_via_tor():
             logger(f"[FW] {context}: refused, hidden mode reaches it only through Tor (TCP).")

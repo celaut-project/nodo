@@ -74,6 +74,21 @@ class PolicyTests(unittest.TestCase):
         for host in ("93.184.216.34", "2606:4700::1", "node.example.com", ""):
             self.assertFalse(policy.is_local_address(host), host)
 
+    def test_a_range_that_is_not_the_operators_is_not_local(self):
+        # #550, P4: none of these is a network of the operator. The shared address space
+        # is the network of the carrier on an ISP with CGNAT. A direct accept to them
+        # leaves from the address of the node.
+        for host in ("100.64.1.1", "100.127.255.254", "192.0.0.170", "198.18.0.1",
+                     "0.0.0.0", "2001:db8::1", "224.0.0.1", "255.255.255.255"):
+            self.assertFalse(policy.is_local_address(host), host)
+
+    def test_the_edges_of_the_private_ranges(self):
+        for host in ("172.16.0.1", "172.31.255.254", "169.254.1.1", "fd00::1", "fc00::1",
+                     "::ffff:10.0.0.1"):
+            self.assertTrue(policy.is_local_address(host), host)
+        for host in ("172.15.255.255", "172.32.0.1", "11.0.0.1", "::ffff:8.8.8.8"):
+            self.assertFalse(policy.is_local_address(host), host)
+
     def test_on_by_default_and_only_in_hidden_mode(self):
         with override(routing__HIDDEN=True):
             self.assertTrue(policy.service_egress_via_tor())
@@ -166,6 +181,21 @@ class GuestFirewallTests(unittest.TestCase):
         self.assertEqual([(r.chain, r.destination) for r in self.applied],
                          [(Chain.FORWARD, "192.168.200.9")])
 
+    def test_a_shared_address_space_destination_goes_into_tor(self):
+        # #550, P4: 100.64.0.0/10 is the network of the carrier, not of the operator.
+        with hidden():
+            self.assertTrue(vm_firewall.allow_connection(VM, "100.64.1.1", 80,
+                                                         TransportProtocol.TCP, source_ip=VM_IP))
+        self.assertEqual([r.chain for r in self.applied], [Chain.PREROUTING, Chain.INPUT])
+        self.assertEqual(self._forward_accepts_to_outside(), [])
+
+    def test_an_instance_on_a_guest_subnet_that_is_not_private_stays_on_the_bridge(self):
+        with override(routing__HIDDEN=True, virtualizers__ch__NETWORK_SUBNET="100.64.0.0/10"):
+            self.assertTrue(vm_firewall.allow_connection(VM, "100.64.1.9", 5432,
+                                                         TransportProtocol.TCP, source_ip=VM_IP))
+        self.assertEqual([(r.chain, r.destination) for r in self.applied],
+                         [(Chain.FORWARD, "100.64.1.9")])
+
     def test_udp_to_the_outside_is_refused(self):
         with hidden():
             self.assertFalse(vm_firewall.allow_connection(VM, "93.184.216.34", 53,
@@ -197,6 +227,17 @@ class GuestFirewallTests(unittest.TestCase):
         # Never the unrestricted accept: that would let UDP and any TCP out directly.
         self.assertFalse([r for r in self.applied if r.comment.endswith("allow_all_egress")])
         self.assertEqual(self._forward_accepts_to_outside(), [])
+
+    def test_all_egress_sends_the_private_addresses_of_the_lan_into_tor_too(self):
+        # #550, P3: the docs say it. Only the guest subnet is excepted from the DNAT, so
+        # a '*' service does not reach the LAN of the operator.
+        with hidden():
+            self.assertTrue(vm_firewall.allow_all_egress(VM, source_ip=VM_IP))
+        [dnat] = [r for r in self.applied
+                  if r.chain is Chain.PREROUTING and r.protocol == "tcp"]
+        self.assertEqual((dnat.destination, dnat.destination_is_negated), (SUBNET, True))
+        self.assertEqual([r.destination for r in self.applied
+                          if r.chain is Chain.FORWARD and r.verdict is Verdict.ACCEPT], [SUBNET])
 
     def test_all_egress_sends_udp_dns_into_tor(self):
         # A '*' service uses its own resolver, usually over UDP 53 (#550, P6).
@@ -326,6 +367,45 @@ class PowCheckTests(unittest.TestCase):
             self.assertEqual(pow_networks._get_json("http://127.0.0.1:9053", "/info", 5),
                              {"ok": True})
         tor_get.assert_not_called()
+
+    def test_an_operator_name_on_the_lan_is_asked_directly(self):
+        # #550, P5: the operator's own Ergo node at a name on the LAN. An exit cannot reach it.
+        response = mock.Mock(status_code=200, json=lambda: {"ok": True})
+        lan = [(pow_networks.socket.AF_INET, 1, 6, "", ("192.168.1.20", 0))]
+        with hidden(ledgers__ergo__NODE_URL="http://ergo-node.lan:9053"), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo", return_value=lan), \
+                mock.patch.object(pow_networks.routing_http, "get") as tor_get, \
+                mock.patch.object(pow_networks.requests, "get", return_value=response):
+            self.assertEqual(pow_networks._get_json("http://ergo-node.lan:9053", "/info", 5),
+                             {"ok": True})
+            self.assertEqual(pow_networks._resolve_host("ergo-node.lan", 9053),
+                             ("192.168.1.20", 9053))
+        tor_get.assert_not_called()
+
+    def test_an_operator_name_at_a_global_address_still_goes_through_tor(self):
+        out = [(pow_networks.socket.AF_INET, 1, 6, "", ("93.184.216.34", 0))]
+        with hidden(ledgers__ergo__NODE_URL="http://ergo.example.org:9053"), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo", return_value=out), \
+                mock.patch.object(pow_networks.routing_http, "get",
+                                  return_value=(200, b'{"ok": true}')) as tor_get, \
+                mock.patch.object(pow_networks.requests, "get") as direct:
+            self.assertEqual(pow_networks._get_json("http://ergo.example.org:9053", "/info", 5),
+                             {"ok": True})
+        tor_get.assert_called_once()
+        direct.assert_not_called()
+
+    def test_the_name_of_a_peer_is_never_resolved_by_the_host_to_decide(self):
+        # The same name that a peer announces is not trusted: it goes through Tor, and the
+        # host resolver is not asked, even if the name would resolve to a local address.
+        with hidden(ledgers__ergo__NODE_URL="http://ergo-node.lan:9053"), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo") as host, \
+                mock.patch.object(pow_networks.routing_http, "get",
+                                  return_value=(200, b'{"ok": true}')) as tor_get, \
+                mock.patch.object(pow_networks.requests, "get") as direct:
+            pow_networks._get_json("http://evil.example:9053", "/info", 5)
+        host.assert_not_called()
+        tor_get.assert_called_once()
+        direct.assert_not_called()
 
     def test_without_tor_egress_a_hidden_node_asks_nobody(self):
         with hidden(routing__tor__SERVICE_EGRESS=False), \
