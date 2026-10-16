@@ -60,7 +60,7 @@ from src.identity.node_identity import (
     parse_component_formal,
 )
 from src.manager.ergo import MAINNET_P2P_PORT, MAINNET_REST_PORT
-from src.manager.network_defaults import configured_endpoints
+from src.manager.network_defaults import DEFAULT_INSTANCES_KEY, configured_endpoints
 from src.routing import tunneled_http as routing_http
 from src.routing.policy import hidden_mode, is_local_address, service_egress_via_tor
 from src.utils.config import ConfigManager
@@ -584,6 +584,50 @@ def _p2p_uri_for(url: str, p2p_address: Optional[str] = None) -> Optional[Tuple[
     return _resolve_host(host, port)
 
 
+def _operator_hosts() -> set:
+    """The host names the operator wrote in the config, in lower case.
+
+    ``ledgers.ergo.NODE_URL`` and every entry of ``service_networks.default_instances``.
+    The operator chose these names, so the host's resolver may look them up in hidden
+    mode. A name from a peer or from the crawl is not in this set (see
+    ``src/routing/tor_dns.py``).
+    """
+    urls = [str(env_manager.get("ledgers.ergo.NODE_URL", "") or "")]
+    mapping = env_manager.get(DEFAULT_INSTANCES_KEY, {}) or {}
+    if isinstance(mapping, dict):
+        for tag in mapping:
+            urls.extend(configured_endpoints(tag, config=env_manager))
+    hosts = set()
+    for url in urls:
+        url = url.strip()
+        if url:
+            host = urlsplit(url if "//" in url else f"//{url}").hostname
+            if host:
+                hosts.add(host.lower())
+    return hosts
+
+
+def _local_candidate(host: str) -> bool:
+    """Whether a hidden node asks the candidate at ``host`` directly, not through Tor.
+
+    An address that is local. Also a name that the operator wrote in the config and that
+    resolves only to local addresses (an Ergo node at ``ergo-node.lan``): an exit could
+    not reach it. The name of a peer or of the crawl is never resolved here, because
+    whoever announced it would see the resolver of this node ask for it.
+    """
+    if is_local_address(host):
+        return True
+    name = str(host or "").strip().lower()
+    if not name or name not in _operator_hosts():
+        return False
+    try:
+        infos = socket.getaddrinfo(name, None, socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        return False
+    addresses = {info[4][0] for info in infos}
+    return bool(addresses) and all(is_local_address(address) for address in addresses)
+
+
 def _resolve_host(host: str, port: int) -> Optional[Tuple[str, int]]:
     """``(ip, port)`` for a host that may be a name. Shared by both uri builders.
 
@@ -592,9 +636,11 @@ def _resolve_host(host: str, port: int) -> Optional[Tuple[str, int]]:
 
     In hidden mode a name is resolved at a Tor exit (``src/routing/tor_dns.py``). The
     names here come from peers and from the crawl, so whoever announced one would
-    otherwise see the resolver of this node ask for it.
+    otherwise see the resolver of this node ask for it. The exception is a name that
+    the operator wrote in the config: the operator chose it, and it can be a name on
+    the LAN, which an exit cannot resolve (#550, P5).
     """
-    if hidden_mode():
+    if hidden_mode() and str(host).strip().lower() not in _operator_hosts():
         from src.routing import tor_dns
         from src.routing.base import RoutingUnavailable
 
@@ -640,7 +686,7 @@ def _get_json(url: str, path: str, timeout: int) -> Optional[Any]:
     is an absence, but neither can qualify a peer, so both collapse to None here and
     the caller reads them the same way: not a peer for this network.
     """
-    if hidden_mode() and not is_local_address(urlsplit(url).hostname or ""):
+    if hidden_mode() and not _local_candidate(urlsplit(url).hostname or ""):
         # A hidden node never checks a candidate from its own address: the candidate
         # would see it. Through Tor when its services' egress goes there, else not at all.
         if not service_egress_via_tor():

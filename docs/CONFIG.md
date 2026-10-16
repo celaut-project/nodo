@@ -555,8 +555,12 @@ Peers that call Tor use it.
 - sends the outside traffic of its services through Tor (`routing.tor.SERVICE_EGRESS`,
   on by default). The firewall translates a guest's TCP towards a global address to a
   Tor `TransPort` on the guest bridge, so the other end sees a Tor exit. This covers
-  `*`, `pow:<chain>`, host names and seeded tags. Traffic to the node's own networks
-  (the gateway, local instances, private addresses) is not sent into Tor. A `*`
+  `*`, `pow:<chain>`, host names and seeded tags. Traffic to the gateway and to the
+  instances of this node (the guest subnet) is not sent into Tor. A tag that names one
+  private address (for example a seed `192.168.1.20:5432`) is reached directly. A `*`
+  service is different: it reaches only the guest subnet directly, and all its other TCP
+  goes into Tor, private addresses of the LAN of the operator included. A `*` service
+  cannot reach the LAN. A tag that names the address of the LAN can. A `*`
   service's DNS over UDP (port 53, to any resolver) is translated to a Tor `DNSPort` on
   the guest bridge. The rest of UDP to the outside is dropped: Tor has no path for it.
   The node checks `pow:` candidates through Tor too. Exits block many ports and add
@@ -593,6 +597,10 @@ What hidden mode does not hide:
 
 - The own outbound traffic of the node (the Ergo explorer and node, Bitcoin, the energy
   meter) still shows the IP to the operator of that service.
+- The Ergo crawl (`src/manager/ergo.py`) asks the nodes that other Ergo nodes announce.
+  It does this from the host, not through Tor. The crawl writes the file that is a
+  source of `pow:` candidates. A node that an attacker runs can announce its own server
+  as a node, and that server sees the IP address. This is issue #552.
 - Payments and reputation on the ledger are public. If the identity is funded from an
   account that is linked to a person, the identity is linked too.
 - Tor does not protect against an observer that sees both ends of a circuit.

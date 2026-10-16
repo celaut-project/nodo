@@ -631,6 +631,10 @@ show that address, so:
 | A tag with seeds in `service_networks.default_instances` | Through Tor (a private seed address directly) | Not run here |
 | A tag that only local instances answer | Directly, on the bridge | Directly, on the bridge |
 
+For `*`, only the guest subnet is reached directly. The other TCP goes into Tor, also to
+private addresses: Tor cannot reach them, so a `*` service cannot use the LAN of the
+operator. A tag that names a private address or a local instance is reached directly.
+
 "Through Tor": the firewall translates the guest's TCP to Tor's `TransPort` on the
 guest bridge (`policy.tor_redirect_rules`). For `*`, UDP to port 53 is translated to
 Tor's `DNSPort` on the same bridge (`policy.tor_dns_redirect_rules`), so the guest's own
