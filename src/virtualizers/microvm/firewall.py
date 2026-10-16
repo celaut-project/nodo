@@ -276,7 +276,8 @@ def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
     """
     if hidden_mode():
         # All TCP outside the guest subnet into Tor, and the subnet itself (the gateway,
-        # the instances of this node) reached as before. UDP stays dropped.
+        # the instances of this node) reached as before. DNS over UDP into Tor's
+        # DNSPort. The rest of UDP stays dropped.
         context = f"allow_all_egress for {vmachine_id}"
         if not service_egress_via_tor():
             logger(f"[FW] {context}: refused, hidden mode without routing.tor.SERVICE_EGRESS.")
@@ -284,12 +285,20 @@ def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
         proxy = _tor_proxy(context)
         if proxy is None:
             return False
+        from src.routing import registry
+
+        dns = registry.TOR.guest_dns()
+        if dns is None:
+            logger(f"[FW] {context}: hidden mode, and Tor is not ready for the services' DNS.")
+            return False
         try:
             vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
             subnet = _guest_subnet()
             rules = policy.tor_redirect_rules(
                 vmachine_id=vmachine_id, vm_ip=vm_ip, tor_ip=proxy[0], tor_port=proxy[1],
                 except_subnet=subnet,
+            ) + policy.tor_dns_redirect_rules(
+                vmachine_id=vmachine_id, vm_ip=vm_ip, dns_ip=dns[0], dns_port=dns[1],
             ) + [policy.allow_connection_rule(
                 vmachine_id=vmachine_id, vm_ip=vm_ip, ip=subnet, protocol="tcp",
             )]
@@ -298,7 +307,7 @@ def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
             return False
         if not _apply(rules, context=context):
             return False
-        logger(f"[FW] {vmachine_id} ({vm_ip}) reaches the Internet through Tor (TCP) [network tag '*']")
+        logger(f"[FW] {vmachine_id} ({vm_ip}) reaches the Internet through Tor (TCP and DNS) [network tag '*']")
         return True
 
     try:

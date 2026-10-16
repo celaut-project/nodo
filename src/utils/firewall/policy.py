@@ -303,6 +303,30 @@ def tor_redirect_rules(
     ]
 
 
+def tor_dns_redirect_rules(vmachine_id: str, vm_ip: str, dns_ip: str, dns_port: int) -> List[Rule]:
+    """Send a guest's DNS over UDP into Tor's ``DNSPort``, whatever resolver it names.
+
+    For a hidden node with a ``*`` service. nodo gives the guest no resolver, so the
+    guest uses its own -- usually over UDP 53, which ``block_all`` drops. Translated
+    here, the query is answered by a Tor exit instead, and no resolver sees the node.
+    DNS over TCP already goes through the ``TransPort`` (``tor_redirect_rules``).
+    """
+    source = validate_address(vm_ip, "VM address")
+    dns = validate_address(dns_ip, "Tor DNS address")
+    return [
+        Rule(
+            chain=Chain.PREROUTING,
+            comment=_comment(vmachine_id, "tor_dns;53/udp"),
+            verdict=Verdict.DNAT,
+            source=source,
+            protocol="udp",
+            dport=53,
+            dnat_to=f"{dns}:{int(dns_port)}",
+        ),
+        allow_host_connection_rule(vmachine_id, vm_ip, dns, int(dns_port), "udp"),
+    ]
+
+
 def masquerade_rule(subnet: str) -> Rule:
     """Source-NAT the guest subnet on its way off this host.
 

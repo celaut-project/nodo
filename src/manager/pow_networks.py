@@ -589,7 +589,20 @@ def _resolve_host(host: str, port: int) -> Optional[Tuple[str, int]]:
 
     ``getaddrinfo`` on a numeric literal is a parse, not a lookup, so the crawl's
     already-numeric addresses cost nothing and take no DNS caveat.
+
+    In hidden mode a name is resolved at a Tor exit (``src/routing/tor_dns.py``). The
+    names here come from peers and from the crawl, so whoever announced one would
+    otherwise see the resolver of this node ask for it.
     """
+    if hidden_mode():
+        from src.routing import tor_dns
+        from src.routing.base import RoutingUnavailable
+
+        try:
+            return tor_dns.resolve_ipv4(host)[0], int(port)
+        except (RoutingUnavailable, ValueError, OSError, IndexError) as e:
+            logger(f"[POW] cannot resolve {host} through Tor: {e}")
+            return None
     try:
         infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
     except socket.gaierror as e:

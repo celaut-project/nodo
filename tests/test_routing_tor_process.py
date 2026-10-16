@@ -165,9 +165,30 @@ class TorProcessTests(unittest.TestCase):
             self.assertTrue(wait_for(backend.available), backend.status())
         ip, port = backend.transparent_proxy()
         self.assertEqual(ip, "192.168.200.1")
-        self.assertIn(f"TransPort 192.168.200.1:{port}", self.seen.read_text())
+        torrc = self.seen.read_text()
+        self.assertIn(f"TransPort 192.168.200.1:{port}", torrc)
+        # The guests' UDP DNS goes to a DNSPort on the bridge, the host's to loopback.
+        dns_ip, dns_port = backend.guest_dns()
+        self.assertEqual(dns_ip, "192.168.200.1")
+        self.assertIn(f"DNSPort 192.168.200.1:{dns_port}", torrc)
+        self.assertIn(f"DNSPort 127.0.0.1:{backend.dns_port()}", torrc)
         backend.stop()
         self.assertIsNone(backend.transparent_proxy())
+        self.assertIsNone(backend.guest_dns())
+        self.assertIsNone(backend.dns_port())
+
+    def test_a_hidden_node_without_service_egress_still_resolves_through_tor(self):
+        self._fake_tor()
+        self.settings["routing.HIDDEN"] = True
+        backend = self._backend()
+        with mock.patch.object(tor_module, "service_egress_via_tor", return_value=False):
+            backend.start()
+            self.assertTrue(wait_for(backend.available))
+        torrc = self.seen.read_text()
+        self.assertIn(f"DNSPort 127.0.0.1:{backend.dns_port()}", torrc)
+        self.assertEqual(torrc.count("DNSPort"), 1)
+        self.assertIsNone(backend.guest_dns())
+        backend.stop()
 
     def test_no_transport_without_service_egress(self):
         self._fake_tor()
@@ -177,6 +198,9 @@ class TorProcessTests(unittest.TestCase):
             self.assertTrue(wait_for(backend.available))
         self.assertNotIn("TransPort", self.seen.read_text())
         self.assertIsNone(backend.transparent_proxy())
+        # Not hidden: the host resolver is the operator's business, no DNSPort.
+        self.assertNotIn("DNSPort", self.seen.read_text())
+        self.assertIsNone(backend.dns_port())
 
     def test_a_tor_older_than_0_4_8_is_refused(self):
         self._fake_tor(version="0.4.7.16")

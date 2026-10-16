@@ -1,8 +1,9 @@
 """The Tor backend: ``.onion`` peers, reached through a Tor process nodo manages.
 
 nodo runs its own ``tor`` (installed by ``bash/install_tor.sh``) with a private
-data directory under ``STORAGE/tor``. It opens an ``HTTPTunnelPort`` on loopback and
-nothing else: no SOCKS port, no control port, no listener a peer could reach.
+data directory under ``STORAGE/tor``. It opens an ``HTTPTunnelPort`` on loopback and,
+in hidden mode, a ``DNSPort`` on loopback: no SOCKS port, no control port, no listener a
+peer could reach.
 
 If the node announces an onion address (``routing.tor.ANNOUNCE``), tor also hosts the
 gateway as an onion service. It forwards to a loopback-only gRPC server; no port of the
@@ -97,6 +98,8 @@ class TorBackend(RoutingBackend):
         self._detail = ""
         self._onion: Optional[Tuple[str, bytes, int, int]] = None
         self._trans: Optional[Tuple[str, int]] = None
+        self._dns: Optional[int] = None
+        self._guest_dns: Optional[Tuple[str, int]] = None
 
     # --- the onion service -----------------------------------------------------
 
@@ -146,6 +149,24 @@ class TorBackend(RoutingBackend):
         """
         with self._lock:
             return self._trans if self.available() else None
+
+    def guest_dns(self) -> Optional[Tuple[str, int]]:
+        """``(ip, port)`` of the ``DNSPort`` the guests' UDP 53 is redirected to, once ready.
+
+        Opened together with the ``TransPort``, on the guest bridge address.
+        """
+        with self._lock:
+            return self._guest_dns if self.available() else None
+
+    def dns_port(self) -> Optional[int]:
+        """The loopback ``DNSPort`` the host resolves names with in hidden mode, once ready.
+
+        A name that a service or a peer gives must not be resolved by the host's own
+        resolver: the authoritative server of that name would see where the query
+        comes from (``src/routing/tor_dns.py``).
+        """
+        with self._lock:
+            return self._dns if self.available() else None
 
     def http_tunnel_port(self) -> Optional[int]:
         """The ``HTTPTunnelPort`` on loopback, once ready (``src.routing.tunneled_http`` uses it)."""
@@ -280,15 +301,24 @@ class TorBackend(RoutingBackend):
             "AvoidDiskWrites 1",
             "Log notice stdout",
         ]
+        if hidden_mode():
+            dns_port = get_free_port()
+            lines.append(f"DNSPort 127.0.0.1:{dns_port}")
+            with self._lock:
+                self._dns = dns_port
         if service_egress_via_tor():
             # The guests' outside TCP, redirected here by the firewall
             # (policy.tor_redirect_rules). On the bridge address, so only guests reach
             # it. Tor isolates the circuits of each client address, that is of each VM.
             bridge_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
             trans_port = get_free_port()
-            lines.append(f"TransPort {bridge_ip}:{trans_port}")
+            # And the guests' UDP DNS, redirected here the same way: a service with '*'
+            # uses its own resolver, usually over UDP, which has no other way out.
+            guest_dns_port = get_free_port()
+            lines += [f"TransPort {bridge_ip}:{trans_port}", f"DNSPort {bridge_ip}:{guest_dns_port}"]
             with self._lock:
                 self._trans = (bridge_ip, trans_port)
+                self._guest_dns = (bridge_ip, guest_dns_port)
         with self._lock:
             onion = self._onion
         if onion:
@@ -339,6 +369,8 @@ class TorBackend(RoutingBackend):
             process, self._process = self._process, None
             self._http_port = None
             self._trans = None
+            self._dns = None
+            self._guest_dns = None
             self._set("stopped")
         if process is None or process.poll() is not None:
             return

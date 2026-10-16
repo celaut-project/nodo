@@ -44,7 +44,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
 VM, VM_IP = "vm-1", "192.168.200.7"
-BRIDGE_IP, TRANS_PORT = "192.168.200.1", 9040
+BRIDGE_IP, TRANS_PORT, DNS_PORT = "192.168.200.1", 9040, 9053
 SUBNET = "192.168.200.0/24"
 
 
@@ -142,6 +142,9 @@ class GuestFirewallTests(unittest.TestCase):
                                        return_value=(BRIDGE_IP, TRANS_PORT))
         self.proxy.start()
         self.addCleanup(self.proxy.stop)
+        self.dns = mock.patch.object(registry.TOR, "guest_dns", return_value=(BRIDGE_IP, DNS_PORT))
+        self.dns.start()
+        self.addCleanup(self.dns.stop)
 
     def _forward_accepts_to_outside(self):
         return [r for r in self.applied
@@ -194,6 +197,26 @@ class GuestFirewallTests(unittest.TestCase):
         # Never the unrestricted accept: that would let UDP and any TCP out directly.
         self.assertFalse([r for r in self.applied if r.comment.endswith("allow_all_egress")])
         self.assertEqual(self._forward_accepts_to_outside(), [])
+
+    def test_all_egress_sends_udp_dns_into_tor(self):
+        # A '*' service uses its own resolver, usually over UDP 53 (#550, P6).
+        with hidden():
+            self.assertTrue(vm_firewall.allow_all_egress(VM, source_ip=VM_IP))
+        [dnat] = [r for r in self.applied if r.chain is Chain.PREROUTING and r.protocol == "udp"]
+        self.assertEqual((dnat.source, dnat.dport, dnat.destination), (VM_IP, 53, None))
+        self.assertEqual(dnat.dnat_to, f"{BRIDGE_IP}:{DNS_PORT}")
+        self.assertIn((Chain.INPUT, BRIDGE_IP, DNS_PORT, "udp"),
+                      [(r.chain, r.destination, r.dport, r.protocol) for r in self.applied])
+        # Only port 53: the rest of UDP stays dropped.
+        self.assertFalse([r for r in self.applied if r.protocol == "udp" and r.dport != 53
+                          and r.chain is not Chain.INPUT])
+
+    def test_all_egress_is_refused_while_tor_dns_is_not_ready(self):
+        self.dns.stop()
+        with mock.patch.object(registry.TOR, "guest_dns", return_value=None), hidden():
+            self.assertFalse(vm_firewall.allow_all_egress(VM, source_ip=VM_IP))
+        self.dns.start()
+        self.assertEqual(self.applied, [])
 
     def test_a_node_that_is_not_hidden_is_unchanged(self):
         with override(routing__HIDDEN=False):
@@ -311,6 +334,60 @@ class PowCheckTests(unittest.TestCase):
             self.assertIsNone(pow_networks._get_json("http://node.example:9053", "/info", 5))
         tor_get.assert_not_called()
         direct.assert_not_called()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class HiddenNameResolutionTests(unittest.TestCase):
+    """A hidden node never resolves a name of a service or a peer itself (#550, F2)."""
+
+    def test_a_host_name_tag_is_resolved_through_tor(self):
+        from src.manager import networks
+        from src.routing import tor_dns
+
+        with hidden(), \
+                mock.patch.object(tor_dns, "resolve_ipv4", return_value=["93.184.216.34"]) as tor, \
+                mock.patch.object(networks.socket, "getaddrinfo") as host:
+            uris = networks.resolve_domain("n1.attacker.example", ports=[443])
+        tor.assert_called_once_with("n1.attacker.example")
+        host.assert_not_called()
+        self.assertEqual([(u.ip, u.port) for u in uris], [("93.184.216.34", 443)])
+
+    def test_a_host_name_tag_does_not_resolve_while_tor_is_not_ready(self):
+        from src.manager import networks
+
+        with hidden(), mock.patch.object(registry.TOR, "dns_port", return_value=None), \
+                mock.patch.object(networks.socket, "getaddrinfo") as host:
+            with self.assertRaises(ValueError):
+                networks.resolve_domain("n1.attacker.example", ports=[443])
+        host.assert_not_called()
+
+    def test_a_pow_candidate_name_is_resolved_through_tor(self):
+        from src.routing import tor_dns
+
+        with hidden(), \
+                mock.patch.object(tor_dns, "resolve_ipv4", return_value=["93.184.216.34"]), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo") as host:
+            self.assertEqual(pow_networks._resolve_host("node.example", 9030),
+                             ("93.184.216.34", 9030))
+        host.assert_not_called()
+
+    def test_a_pow_candidate_is_dropped_while_tor_is_not_ready(self):
+        with hidden(), mock.patch.object(registry.TOR, "dns_port", return_value=None), \
+                mock.patch.object(pow_networks.socket, "getaddrinfo") as host:
+            self.assertIsNone(pow_networks._resolve_host("node.example", 9030))
+        host.assert_not_called()
+
+    def test_a_node_that_is_not_hidden_uses_its_own_resolver(self):
+        from src.manager import networks
+        from src.routing import tor_dns
+
+        info = [(networks.socket.AF_INET, 1, 6, "", ("93.184.216.34", 0))]
+        with override(routing__HIDDEN=False), \
+                mock.patch.object(tor_dns, "resolve_ipv4") as tor, \
+                mock.patch.object(networks.socket, "getaddrinfo", return_value=info):
+            uris = networks.resolve_domain("example.com", ports=[443])
+        tor.assert_not_called()
+        self.assertEqual([u.ip for u in uris], ["93.184.216.34"])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

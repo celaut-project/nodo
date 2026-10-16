@@ -625,14 +625,17 @@ show that address, so:
 
 | Network | `SERVICE_EGRESS: true` (default) | `SERVICE_EGRESS: false` |
 |---|---|---|
-| `*` | TCP through Tor, UDP dropped | Not run here |
+| `*` | TCP and UDP DNS through Tor, the rest of UDP dropped | Not run here |
 | `pow:<chain>` | Through Tor, candidates checked through Tor | Not run here, no `ResolveNetwork` answer |
-| A host name (`api.example.com`) | Through Tor | Not run here |
+| A host name (`api.example.com`) | Resolved through Tor, then through Tor | Not run here |
 | A tag with seeds in `service_networks.default_instances` | Through Tor (a private seed address directly) | Not run here |
 | A tag that only local instances answer | Directly, on the bridge | Directly, on the bridge |
 
 "Through Tor": the firewall translates the guest's TCP to Tor's `TransPort` on the
-guest bridge (`policy.tor_redirect_rules`). Nothing is accepted in FORWARD towards a
+guest bridge (`policy.tor_redirect_rules`). For `*`, UDP to port 53 is translated to
+Tor's `DNSPort` on the same bridge (`policy.tor_dns_redirect_rules`), so the guest's own
+resolver works. A host name, and the name of a `pow:` candidate, is resolved by the node
+through Tor's `DNSPort` on loopback, not by the host's resolver. Nothing is accepted in FORWARD towards a
 global address, and `block_all` drops every new packet of the guest, of every protocol.
 So whatever is not translated stays dropped: UDP, ICMP and all other IP protocols. The
 guest's IPv6 is dropped too (see [`FIREWALL.md`](FIREWALL.md)).

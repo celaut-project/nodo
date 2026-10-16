@@ -13,6 +13,7 @@ from src.identity.node_identity import (
 )
 from src.manager.network_templates import find_placeholders
 from src.utils.logger import LOGGER
+from src.routing.policy import hidden_mode
 from src.utils.network_policy import enforce_hidden_resolution, enforce_network_policy
 from src.manager.network_defaults import configured_endpoints, endpoint_addresses
 from src.manager.pow_networks import (
@@ -110,7 +111,21 @@ def resolve_domain(domain: str, ports=DEFAULT_HOSTNAME_PORTS) -> List[celaut.Ins
 
     ``ports`` is what :func:`hostname_ports` read out of the network entry, defaulting
     to what a bare hostname tag has always opened.
+
+    In hidden mode the name is resolved at a Tor exit, never by the host's resolver:
+    the service author selects the name, so the author also sees which resolver asks
+    for it (``src/routing/tor_dns.py``). While Tor is not ready the name does not
+    resolve, and the tag gets no peers.
     """
+    if hidden_mode():
+        from src.routing import tor_dns
+        from src.routing.base import RoutingUnavailable
+
+        try:
+            ips = sorted(set(tor_dns.resolve_ipv4(domain)))
+        except (RoutingUnavailable, ValueError, OSError) as e:
+            raise ValueError(f"Cannot resolve domain through Tor: {domain} ({e})")
+        return [celaut.Instance.Uri(ip=ip, port=port) for ip in ips for port in ports]
     try:
         ips = list({
             info[4][0]

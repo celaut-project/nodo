@@ -556,9 +556,10 @@ Peers that call Tor use it.
   on by default). The firewall translates a guest's TCP towards a global address to a
   Tor `TransPort` on the guest bridge, so the other end sees a Tor exit. This covers
   `*`, `pow:<chain>`, host names and seeded tags. Traffic to the node's own networks
-  (the gateway, local instances, private addresses) is not sent into Tor. UDP to the
-  outside is dropped: Tor has no path for it. The node checks `pow:` candidates through
-  Tor too. Exits block many ports and add latency, so some destinations fail. While Tor
+  (the gateway, local instances, private addresses) is not sent into Tor. A `*`
+  service's DNS over UDP (port 53, to any resolver) is translated to a Tor `DNSPort` on
+  the guest bridge. The rest of UDP to the outside is dropped: Tor has no path for it.
+  The node checks `pow:` candidates through Tor too. Exits block many ports and add latency, so some destinations fail. While Tor
   is not ready, the launcher gives such a service to a peer.
 
   With `SERVICE_EGRESS: false`, the node does not run a service whose traffic would
@@ -567,8 +568,13 @@ Peers that call Tor use it.
   again. This node then does not answer `ResolveNetwork` for a `pow:` network. See
   [`NETWORKS.md`](NETWORKS.md).
 
-A host name is still resolved by the host's own resolver. The resolver learns the name,
-but no peer and no destination learns the node's address.
+A host name from a service spec (a network tag) or from a peer (a `pow:` candidate) is
+resolved through Tor, at an exit, never by the host's own resolver. Tor opens a `DNSPort`
+on `127.0.0.1` for this. The service author selects the name, and so also controls its
+authoritative DNS server: that server would see the resolver that asks, which can be the
+node's own address or its /24 (EDNS Client Subnet). While Tor is not ready, such a name
+does not resolve and the tag gets no peers. Names from the operator's own config
+(seeds, `ledgers.ergo.NODE_URL`) stay on the host's resolver.
 
 The node refuses to start if `routing.tor.ENABLED` or `routing.tor.ANNOUNCE` is `false`,
 if `network.PUBLIC_IP` is set, or if `network.ANNOUNCE_PRIVATE_ADDRESSES` is on. It also
