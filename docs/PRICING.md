@@ -329,13 +329,18 @@ decision about its own guest, and the row records what it holds either way.
 
 ### An instance that runs on a peer
 
-A delegated instance is priced to its father exactly like a local one, and the two
-have nothing to do with each other beyond that. There are two accounts, in two units,
+A delegated instance is priced to its father like a local one, plus the commission of
+this node (`network.delegation.COMMISSION_PERCENT`, #551). The commission applies to
+what the child consumes: the peer's one-off start charge (at least
+`COMMISSION_MIN_MU`), and what each tick charges. It never applies to the deposit,
+which goes back to the father. The peer gets only its own price: this node deposits
+that on it, and keeps the commission. Apart from that, the two accounts have nothing
+to do with each other. There are two accounts, in two units,
 and this node stands between them:
 
 | Account | Unit | Who moves it |
 | --- | --- | --- |
-| the child's deposit, on `delegated_instances.balance_mu` | our MU | the father pays it at StartService; the maintenance tick spends it down by what the peer metered; the stop refunds what is left |
+| the child's deposit, on `delegated_instances.balance_mu` | our MU | the father pays it at StartService; the maintenance tick spends it down by what the peer metered plus the commission; the stop refunds what is left |
 | this node's deposit with the peer, against the client row it holds for us there | the peer's MU | the peer charges the child's real cost against it, and refunds the unspent part when the child stops |
 
 The father's claim is the first row and only the first row. It is opened with the

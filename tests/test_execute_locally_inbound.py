@@ -67,6 +67,9 @@ class QuoteWhileNotExecutingTests(unittest.TestCase):
         manager.__enter__()
         self.addCleanup(manager.__exit__, None, None, None)
         self.executes = True
+        # These tests are about the local price. With delegation on, a node that does
+        # not execute asks its peers instead (#551): tests/test_delegated_quote.py.
+        self.delegates = False
 
     def _quote(self):
         it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
@@ -86,6 +89,9 @@ class QuoteWhileNotExecutingTests(unittest.TestCase):
                 patch.object(cost_mod.BeeClient, "respond",
                              side_effect=lambda message_iterator, indices: iter([message_iterator])), \
                 patch.object(cost_mod.activity_window, "is_open", return_value=True), \
+                patch.object(cost_mod, "delegation_time_budget", return_value=None), \
+                patch.object(cost_mod.env_manager, "get",
+                             side_effect=lambda k, d=None: self.delegates if k == "network.DELEGATE_EXECUTION" else d), \
                 patch.object(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount()):
             self.read, self.price, self.room = read, price, room
             return list(it.generate())

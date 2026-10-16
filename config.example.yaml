@@ -521,6 +521,16 @@ network:
   # typing the command is overriding this default on purpose. Peers can still ask THIS
   # node to run services for them -- that direction is client.ACCEPT_NEW_DEPOSITS.
   DELEGATE_EXECUTION: true
+  # What this node charges on top of a peer when it delegates a service (#551). The
+  # client pays COMMISSION_PERCENT of what it consumes on the peer: the start charge
+  # of the peer (at least COMMISSION_MIN_MU), and each maintenance tick. The deposit
+  # (initial_mu) pays no commission: it goes back to the client. The traffic of a
+  # tunnel through this node is charged by its own rates (TUNNEL_OPEN_MU, NET_MU_PER_GIB).
+  # The quote of this node offers the best of its local price and a peer with this
+  # commission, so a client that does not know the peer can still get it.
+  delegation:
+    COMMISSION_PERCENT: 5
+    COMMISSION_MIN_MU: 0
   # If false, this node never runs a service itself: the balancer stops pricing local
   # execution and only ever selects a peer, so a service no peer will take fails
   # instead of being run here. The mirror image of DELEGATE_EXECUTION, for a node that

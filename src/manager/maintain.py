@@ -12,6 +12,7 @@ from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
+from src.utils.cost_functions.delegation_commission import commission_on
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
 from src.reputation_system.onchain_indexer import tick as onchain_reputation_tick
@@ -518,6 +519,9 @@ def maintain_delegated_instances(debug_mode: bool = False):
                 f"not charging this tick."
             )
             continue
+        # What the peer metered, and this node's commission on it (#551). No minimum
+        # here: the minimum is for the start, and a tick can be very small.
+        charge_mu += commission_on(charge_mu)
 
         balance_mu = int(row.get('balance_mu') or 0)
         if balance_mu < charge_mu and not ALLOW_DEBT:
