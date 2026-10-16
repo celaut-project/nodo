@@ -560,7 +560,11 @@ Peers that call Tor use it.
   service's DNS over UDP (port 53, to any resolver) is translated to a Tor `DNSPort` on
   the guest bridge. The rest of UDP to the outside is dropped: Tor has no path for it.
   The node checks `pow:` candidates through Tor too. Exits block many ports and add latency, so some destinations fail. While Tor
-  is not ready, the launcher gives such a service to a peer.
+  is not ready, the launcher gives such a service to a peer. The `TransPort` and the
+  guest `DNSPort` listen on `virtualizers.ch.NETWORK_GATEWAY_IP`. If that address is not
+  on the host when Tor starts (the guest bridge could not be created), Tor starts without
+  them: the onion service still works, and services that leave the host go to a peer
+  until the daemon restarts with the bridge up.
 
   With `SERVICE_EGRESS: false`, the node does not run a service whose traffic would
   leave the host directly. A peer that is not hidden can run it: the launcher skips
