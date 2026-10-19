@@ -147,6 +147,11 @@ def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:
     reach it from the host's own address, through the masquerade. On a hidden
     node that is the node's address. ICMP errors for an allowed flow are RELATED,
     so the global accept still lets them through.
+
+    INVALID and UNTRACKED are dropped too (#555). A packet conntrack marks
+    INVALID -- a TCP RST or SYN+FIN, an echo reply nobody asked for -- is not
+    NEW, and it has no conntrack entry, so the masquerade does not touch it
+    either: without them here it left with the guest's own address, outside Tor.
     """
     source = validate_address(vm_ip, "VM address")
     return [
@@ -155,7 +160,7 @@ def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:
             comment=_comment(vmachine_id, "block_all"),
             verdict=Verdict.DROP,
             source=source,
-            ct_states=("NEW",),
+            ct_states=("NEW", "INVALID", "UNTRACKED"),
             at_head=True,
         )
     ]

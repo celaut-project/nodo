@@ -34,21 +34,30 @@ class BlockAllTests(unittest.TestCase):
         [rule] = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
         self.assertIs(rule.chain, Chain.FORWARD)
         self.assertIs(rule.verdict, Verdict.DROP)
-        self.assertEqual(rule.ct_states, ("NEW",))
+        self.assertIn("NEW", rule.ct_states)
         self.assertEqual(rule.source, VM_IP)
         self.assertIsNone(rule.protocol)
         self.assertIsNone(rule.destination)
+
+    def test_drops_what_conntrack_cannot_follow(self):
+        # A RST, a SYN+FIN or an unsolicited echo reply is INVALID, not NEW, and
+        # the masquerade does not rewrite it: it left with the guest's own
+        # address, past block_all and outside Tor (#555).
+        [rule] = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
+        self.assertEqual(rule.ct_states, ("NEW", "INVALID", "UNTRACKED"))
+        self.assertNotIn("ESTABLISHED", rule.ct_states)
+        self.assertNotIn("RELATED", rule.ct_states)
 
     def test_renders_the_same_intent_in_both_backends(self):
         [rule] = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
         self.assertEqual(
             iptables(rule),
-            f"-s {VM_IP} -m conntrack --ctstate NEW -j DROP "
+            f"-s {VM_IP} -m conntrack --ctstate NEW,INVALID,UNTRACKED -j DROP "
             f"-m comment --comment nodo;vm={VM};block_all",
         )
         self.assertEqual(
             _render_nft(rule),
-            f'ip saddr {VM_IP} ct state new drop comment "nodo;vm={VM};block_all"',
+            f'ip saddr {VM_IP} ct state new,invalid,untracked drop comment "nodo;vm={VM};block_all"',
         )
 
     def test_a_malformed_address_never_reaches_the_firewall(self):
