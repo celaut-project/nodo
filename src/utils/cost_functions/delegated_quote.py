@@ -42,9 +42,25 @@ OWN_MIN_S = 0.2
 # Less time than this for the peers, and the node does not ask them.
 MIN_PEER_TIME_S = 0.5
 DEFAULT_TIMEOUT_S = 10.0
+# More time than this is no deadline (``_seconds``).
+NO_DEADLINE_S = 24 * 60 * 60.0
 
 _IN_FLIGHT = set()
 _IN_FLIGHT_LOCK = threading.Lock()
+
+
+def _seconds(value) -> Optional[float]:
+    """``value`` as seconds, or None if it is not a time this node can wait (#556).
+
+    grpc does not give None to a call with no deadline: its ``time_remaining()`` is
+    about 9.2e18 s. With that, ``wait()`` raises ``OverflowError``. So more than
+    ``NO_DEADLINE_S`` is no deadline, and the budget always stays below it.
+    """
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value <= NO_DEADLINE_S else None  # NaN is not <= either
 
 
 def delegation_time_budget(context) -> Optional[float]:
@@ -54,16 +70,14 @@ def delegation_time_budget(context) -> Optional[float]:
     deadline the caller sent (``grpc-timeout``). A caller with no deadline gets
     ``EXTERNAL_COST_TIMEOUT``, the time this node gives to a peer itself.
     """
-    remaining = None
     try:
-        remaining = context.time_remaining() if context is not None else None
+        remaining = _seconds(context.time_remaining()) if context is not None else None
     except Exception:
         remaining = None
     if remaining is None:
-        try:
-            remaining = float(env_manager.get("EXTERNAL_COST_TIMEOUT", DEFAULT_TIMEOUT_S))
-        except (TypeError, ValueError):
-            remaining = DEFAULT_TIMEOUT_S
+        remaining = _seconds(env_manager.get("EXTERNAL_COST_TIMEOUT", DEFAULT_TIMEOUT_S))
+    if remaining is None:
+        remaining = DEFAULT_TIMEOUT_S
     budget = remaining - max(remaining * OWN_SHARE, OWN_MIN_S)
     return budget if budget >= MIN_PEER_TIME_S else None
 
