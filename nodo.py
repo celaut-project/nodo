@@ -639,9 +639,11 @@ if __name__ == '__main__':
                 # without it, it removes what the user owns and offers the root steps.
                 # The directory is passed on, as for `update`, and the script starts
                 # from /, because it removes the directory it was started from.
+                # It asks before it removes anything (--yes skips that), and keeps
+                # the wallet mnemonics unless --delete-wallets.
                 args = sys.argv[2:]
-                if any(a not in ("--no-input", "-h", "--help") for a in args):
-                    print("Usage: nodo uninstall [--no-input]", flush=True)
+                if any(a not in ("--yes", "-y", "--no-input", "--delete-wallets", "-h", "--help") for a in args):
+                    print("Usage: nodo uninstall [--yes] [--no-input] [--delete-wallets]", flush=True)
                     _exit(1)
                 script = os.path.join(INSTALL_DIR, "uninstall.sh")
                 if not os.path.isfile(script):

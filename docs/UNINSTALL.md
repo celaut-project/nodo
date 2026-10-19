@@ -11,11 +11,46 @@ It is aligned with the current runtime model:
 ## 1) Automatic uninstall (`nodo uninstall`)
 
 Run `nodo uninstall` (or `sudo nodo uninstall`). The command runs `uninstall.sh`
-for the installation root of the `nodo` that you run. It accepts `--no-input`,
-which has the same meaning as for the script. The sections below describe the
-script, and you can also run it directly.
+for the installation root of the `nodo` that you run. It accepts the options of
+the script below except `--target-dir`. The sections below describe the script,
+and you can also run it directly.
 
 The script has two modes. It selects the mode with the user that runs it.
+
+Options:
+
+- `-y`, `--yes`: do not ask before removing.
+- `--no-input`: ask nothing. Without sudo, print the root steps and save them.
+  It removes nothing unless `--yes` is given too.
+- `--delete-wallets`: also delete the wallet mnemonics (see below).
+- `--target-dir <path>`: the installation root (script only).
+
+Before it removes anything, the script prints what it removes and what it keeps,
+and asks `Remove it? [y/N]`. Without a terminal to ask at, it removes nothing
+unless `--yes` is given.
+
+It removes only what belongs to the installation root:
+
+- `nodo.service` and `/etc/systemd/system/nodo.service` only when the unit's
+  `ExecStart` or `WorkingDirectory` names the root. Another unit that runs from
+  the root is stopped too.
+- The wrapper (`/usr/local/bin/nodo`, or `~/.local/bin/nodo` without sudo) only
+  when it runs `nodo.py` from the root.
+- `/etc/nodo/service-user`, `/usr/local/libexec/nodo/virtiofsd` and the AppArmor
+  profile `/etc/apparmor.d/nodo-virtiofsd` only with the unit: they are the files
+  of the node that the unit runs.
+- Only processes that run from the root, and only mounts under it.
+
+Anything that names another directory belongs to another install. The script
+keeps it, and says so in the list it prints.
+
+**Wallets.** `config.yaml` holds the identity mnemonic and every
+`ledgers.*.WALLET_MNEMONIC`, and its backups (`config-<time>.yaml`) are beside
+it. The script keeps them: before it removes the root, it moves them to
+`<root>.wallets-<time>` (mode 0700) and prints that path. With
+`--delete-wallets` it deletes them with the root. That option asks for a second
+answer at a terminal, the words `delete wallets`, even with `--yes`. Without a
+copy of the mnemonics, the funds on those wallets are lost.
 
 ### 1.1) With sudo
 
@@ -27,16 +62,17 @@ sudo chmod +x uninstall.sh
 sudo ./uninstall.sh
 ```
 
-What it does (best effort):
+What it does (best effort), for what belongs to the root (see above):
 
-- Stops/disables `nodo.service`.
-- Stops any systemd `--type=service` units whose `ExecStart` references `/nodo`,
-  stops the rootless BuildKit builder (and any `dockerd` left over from the
-  retired Docker toolchain), and unmounts everything under `/nodo`.
-- Removes `/etc/systemd/system/nodo.service`, `/usr/local/bin/nodo`, and `/nodo`.
+- Stops/disables `nodo.service`, and any other systemd `--type=service` unit
+  whose `ExecStart` or `WorkingDirectory` names `/nodo`.
+- Stops the rootless BuildKit builder (and any `dockerd` left over from the
+  retired Docker toolchain) of `/nodo`, and unmounts everything under `/nodo`.
+- Removes `/etc/systemd/system/nodo.service` and `/usr/local/bin/nodo`.
 - Removes the files that a node with a service user or without sudo adds:
   `/etc/nodo/service-user`, `/usr/local/libexec/nodo/virtiofsd` and the AppArmor
   profile `/etc/apparmor.d/nodo-virtiofsd`. It does not delete the service user.
+- Moves the wallet mnemonics to `/nodo.wallets-<time>`, then removes `/nodo`.
 
 ### 1.2) Without sudo
 
@@ -50,13 +86,14 @@ cd ~/.local/share/nodo
 
 The script removes the files that you own:
 
-- The BuildKit builder processes.
-- The wrapper `~/.local/bin/nodo`.
+- The BuildKit builder processes of the installation root.
+- The wrapper `~/.local/bin/nodo`, when it runs this root.
 - The shell completion in `~/.local/share/bash-completion/completions/nodo`
-  and `~/.zsh/completions/_nodo`.
-- The installation root.
+  and `~/.zsh/completions/_nodo`, unless the wrapper runs another root.
+- The installation root, after it moves the wallet mnemonics out of it.
 
-The script cannot do these steps without root:
+The script cannot do these steps without root, and lists each one only when it
+belongs to the installation root (see above):
 
 - Stop and disable `nodo.service`. This stops every VM that the service runs.
 - Remove the unit `/etc/systemd/system/nodo.service`.
@@ -70,8 +107,8 @@ The script prints each of these steps as an exact `sudo` command. It saves them
 to `<target-dir>/uninstall-privileged.sh`. It runs them only if you answer yes.
 It removes nothing from the installation root until the root steps are done.
 
-With `--no-input`, the script only prints and saves the steps, and stops. Run the
-saved script, then run `./uninstall.sh` again. The second run asks for no root
+With `--no-input --yes`, the script only prints and saves the steps, and stops.
+Run the saved script, then run `./uninstall.sh` again. The second run asks for no root
 steps and removes your files. A step is only listed when it is still necessary.
 
 > **Note:** the script does **not** clean up running Cloud Hypervisor microVMs.
@@ -127,6 +164,9 @@ SERVICE_FILE="/etc/systemd/system/nodo.service"
 
 ### 2.3 Stop and disable service
 
+Check first that the unit runs `$TARGET_DIR` (`systemctl cat nodo.service`): if
+it runs another install, skip 2.3 and the unit, wrapper and root files of 2.4.
+
 ```bash
 sudo systemctl stop nodo.service 2>/dev/null || true
 sudo systemctl disable nodo.service 2>/dev/null || true
@@ -144,7 +184,12 @@ sudo rm -f /etc/bash_completion.d/nodo /usr/local/share/zsh/site-functions/_nodo
 
 ### 2.5 Remove installation directory
 
+`config.yaml` and its backups hold the wallet mnemonics. Move them out first,
+unless you have a copy:
+
 ```bash
+sudo install -d -m 0700 "$TARGET_DIR.wallets"
+sudo mv "$TARGET_DIR"/config.yaml "$TARGET_DIR"/config-*.yaml "$TARGET_DIR.wallets/"
 sudo rm -rf "$TARGET_DIR"
 ```
 

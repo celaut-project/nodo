@@ -40,7 +40,7 @@ GROUPS: List[Group] = [
             ("firewall-compat status|apply|remove", "rules a coexisting firewall must keep"),
             ("completion bash|zsh|install", "tab-completion for commands and ids"),
             ("update", "update nodo itself"),
-            ("uninstall [--no-input]", "remove nodo from this machine"),
+            ("uninstall [--yes]", "remove this install (keeps the wallets)"),
             ("help", "this list"),
         ],
     ),
