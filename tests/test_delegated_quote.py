@@ -158,6 +158,18 @@ class TimeBudgetTests(unittest.TestCase):
         with mock.patch.object(delegated_quote.env_manager, "get", return_value=5):
             self.assertAlmostEqual(delegated_quote.delegation_time_budget(None), 4.0)
 
+    def test_the_no_deadline_of_grpc_gets_the_cost_timeout(self):
+        # What grpcio gives a call with no deadline: not None (#556).
+        context = SimpleNamespace(time_remaining=lambda: 9.223372036854776e18)
+        with mock.patch.object(delegated_quote.env_manager, "get", return_value=5):
+            self.assertAlmostEqual(delegated_quote.delegation_time_budget(context), 4.0)
+
+    def test_the_budget_is_never_too_long_for_wait(self):
+        for configured in (9.2e18, float("inf"), float("nan"), "x"):
+            with mock.patch.object(delegated_quote.env_manager, "get", return_value=configured):
+                budget = delegated_quote.delegation_time_budget(None)
+            self.assertAlmostEqual(budget, 8.0)
+
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class OneRoundPerServiceTests(_FreshCache, unittest.TestCase):
@@ -236,6 +248,58 @@ class QuotesFromPeersTests(unittest.TestCase):
         self.assertEqual(balancer_mod._shorter(10, 0.4), 0.4)
         self.assertEqual(balancer_mod._shorter(10, None), 10)
         self.assertEqual(balancer_mod._shorter(None, 0.4), 0.4)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class RealGrpcDeadlineTests(unittest.TestCase):
+    """The budget and the wait for the peers, on the context of a real grpc call (#556)."""
+
+    def setUp(self):
+        try:
+            import grpc
+        except ImportError as exc:  # pragma: no cover - environment-dependent
+            self.skipTest(f"needs grpc: {exc}")
+        from concurrent import futures
+
+        def ask_the_peers(request, context):
+            budget = delegated_quote.delegation_time_budget(context)
+            quotes = balancer_mod.quotes_from_peers(
+                resources=celaut.Service.Container.Resources(), metadata=celaut.Metadata(),
+                configuration=celaut.Configuration(), timeout=budget,
+            )
+            return f"{budget!r} {sorted(quotes)}".encode()
+
+        self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
+        self.server.add_generic_rpc_handlers((grpc.method_handlers_generic_handler(
+            "test.Quote", {"Ask": grpc.unary_unary_rpc_method_handler(ask_the_peers)}),))
+        port = self.server.add_insecure_port("127.0.0.1:0")
+        self.server.start()
+        self.channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+        self.ask = self.channel.unary_unary("/test.Quote/Ask")
+        self.addCleanup(self.server.stop, None)
+        self.addCleanup(self.channel.close)
+
+        settings = {"EXTERNAL_COST_TIMEOUT": 5}
+        for patcher in (
+            mock.patch.object(delegated_quote.env_manager, "get",
+                              side_effect=lambda k, d=None: settings.get(k, d)),
+            mock.patch.object(balancer_mod, "peers_id_iterator", side_effect=lambda **_: iter(["peer-a"])),
+            mock.patch.object(balancer_mod, "should_skip_peer", return_value=False),
+            # A peer that takes a moment, so that wait() waits with the budget.
+            mock.patch.object(balancer_mod, "estimate_cost_on_peer",
+                              side_effect=lambda **_: time.sleep(0.05) or price(1_200)),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_call_with_no_deadline_gets_the_cost_timeout(self):
+        self.assertEqual(self.ask(b""), b"4.0 ['peer-a']")
+
+    def test_a_call_with_a_deadline_gets_a_part_of_it(self):
+        budget, peers = self.ask(b"", timeout=10).decode().split(" ", 1)
+        # The grpc-timeout header rounds up a little: about 8 s.
+        self.assertTrue(7.0 < float(budget) < 8.5, budget)
+        self.assertEqual(peers, "['peer-a']")
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
