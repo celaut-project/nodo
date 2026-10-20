@@ -151,15 +151,17 @@ def launch_price_bp(scarcity: Optional[Dict[str, float]] = None) -> Dict[str, in
 
     This is what `local_instances` records for an instance, and what the bound of
     `pricing.MAX_PRICE_VOLATILITY` is measured from. A launch while the node is free
-    (`is_free`) records 0 for every resource: the instance was admitted for nothing, and
-    0 times any bound is 0, so it stays free for as long as it runs.
+    (`is_free`) records 1x for every resource, the base price: the node charges nothing
+    while it is free, but the bound still needs a price to be measured from, and 0 times
+    any bound is 0, which would keep the instance free for as long as it runs. Anchored
+    at 1x, a rise stops at the bound times the base price.
 
     The multiplier is recorded, not an amount of MU, because an instance can be resized
     (`ModifyServiceSystemResources`) and an amount would then price the old shape.
     """
     current = scarcity if scarcity is not None else system_scarcity()
     if is_free(current):
-        return {resource: 0 for resource in RESOURCES}
+        return {resource: SCARCITY_SCALE for resource in RESOURCES}
     p = prices()
     return {resource: scarcity_bp(current.get(resource, 1.0), p) for resource in RESOURCES}
 
