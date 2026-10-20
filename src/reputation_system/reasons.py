@@ -5,9 +5,9 @@ Stable strings, not free text and not an enum of the moment: they are written to
 one silently splits a subject's history in two, so add rather than rename.
 
 Each is a statement about the *counterparty*, which is what keeps a score meaningful.
-Nothing here describes something this node did to itself: an instance of ours running
-out of balance is our client's doing and scores the service it ran, never the peer
-that happened to host it.
+Nothing here describes something this node did to itself: an instance of ours that
+the service lost scores the service it ran, never the peer that happened to host it.
+An instance that runs out of balance scores nothing, because the father holds its balance.
 """
 
 
@@ -49,7 +49,12 @@ class Reason:
     """The instance's virtual machine no longer exists and had to be pruned."""
 
     INSTANCE_OUT_OF_BALANCE = "instance_out_of_balance"
-    """The instance could not pay for the interval it had just used."""
+    """The instance could not pay for the interval it had just used.
+
+    Retired: the node does not write this reason any more (#562). The father holds the
+    balance of the instance and can empty it on purpose, so the death is not a fault of
+    the service. The constant stays because old rows of `reputation_events` hold the
+    string, and a reader must still find its name."""
 
     # There is deliberately no reason for "the interval was charged and nothing went
     # wrong". The maintenance tick runs every ten seconds, so scoring a routine success

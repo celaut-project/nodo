@@ -239,8 +239,8 @@ Scarcity is read from the load of the moment and applies to every running instan
 whenever it was launched. A resource that is scarce now is scarce for everybody who holds
 it. Without a bound, an instance that was funded at 1x can be charged up to
 `SCARCITY_MAX_MULTIPLIER` when the node fills up. With the shipped values it then runs out
-in about six minutes instead of one hour. It is stopped, and it takes an
-`INSTANCE_OUT_OF_BALANCE` penalty for a price that nobody quoted to it.
+in about six minutes instead of one hour. It is stopped. The
+service takes no reputation penalty for this death.
 
 `pricing.MAX_PRICE_VOLATILITY` bounds that. At launch, the node records the scarcity
 multiplier of each resource in `local_instances` (`launch_cpu_bp`, `launch_mem_bp`,

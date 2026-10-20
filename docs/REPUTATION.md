@@ -142,6 +142,25 @@ peer, so that another start of this node cannot read as a charge of the peer. A 
 of the same peer that runs at the same time can still read as a charge. A reading that
 fails is skipped, and nobody is penalized for it.
 
+## Why an instance died, and what it costs the service
+
+When an instance of this node dies, the reason goes in `death_reason`. Only some reasons
+lower the reputation of the service that the instance ran (#562).
+
+The father holds the balance of the instance. He can empty it on purpose with small
+top-ups (see "Limit what an instance can spend" in [`CONCEPTS.md`](CONCEPTS.md)). A death
+that the father can cause is not a fault of the service. A death that the service causes
+is a fault.
+
+| Death | Reason in `death_reason` | Service penalty |
+|---|---|---|
+| The virtual machine does not exist any more | `process_lost` | `instance_lost`, -100 |
+| The guest kernel panicked | `guest_panic` | `instance_lost`, -100 |
+| The balance is empty (local or delegated instance) | `out_of_balance` | None |
+
+The reason `instance_out_of_balance` is retired. The node does not write it. Old rows of
+`reputation_events` can still hold it. Each instance is scored once for each reason.
+
 ## See also
 
 - [`CONFIG.md`](CONFIG.md#balancers) — every `balancers:` key and its default.

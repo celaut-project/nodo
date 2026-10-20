@@ -431,10 +431,12 @@ def maintain_vmachines(debug_mode: bool=False):
             log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {MANAGER_ITERATION_TIME}s")
 
         if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode):
+            # No penalty for the service here. The father holds the balance of the
+            # instance, and he can empty it on purpose with small top-ups (see
+            # "Limit what an instance can spend" in docs/CONCEPTS.md). A death that the
+            # father can cause is not evidence against the service. The cause stays on
+            # record in `death_reason`. The delegated tick below has the same rule.
             try:
-                _penalise_instance_once(
-                    vmachine_id, -10, Reason.INSTANCE_OUT_OF_BALANCE
-                )
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
                 stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
@@ -446,8 +448,9 @@ def maintain_vmachines(debug_mode: bool=False):
             # that it scores the service, a tick is the wrong thing to score by: at ten
             # seconds a service running a month would earn +2.6M, drowning every
             # penalty it ever took. A successful interval is the absence of a problem,
-            # not a judgement about the service; the judgements are the two penalties
-            # above (a machine lost, an instance that could not pay).
+            # not a judgement about the service; the only judgement left here is the
+            # penalty for a machine lost. An instance that could not pay is not one:
+            # the father controls the balance.
             #
             # The charge just succeeded, so this interval is a real cost the operator
             # paid: sample it for the burn-rate figure. Sourced from charge_mu (not a
@@ -567,6 +570,8 @@ def maintain_delegated_instances(debug_mode: bool = False):
             # runtime this node has paid for, and the shortfall the node absorbs is
             # then only the part the deposit could not reach.
             sc.update_delegated_balance(token=token, balance_mu=0)
+            # No reputation penalty, the same as in the local tick: the father holds
+            # the balance, so this death is not a fault of the service.
             try:
                 stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
