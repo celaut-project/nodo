@@ -1051,13 +1051,28 @@ def _validate(amount: int, token: str, ledger: str, script: bytes,
             else rate.mu_to_base_units(amount, asset)
         )
         wanted = token.encode("utf-8")
-        found = False
-        # Stops at the first box that pays enough, so the rest of a long list is
-        # never requested.
+        found = 0
+        total = 0
+        seen = set()
+        # Stops as soon as the sum is enough, so the rest of a long list is never
+        # requested.
         for box_dict in _address_boxes(explorer_api, address):
             if _r4_bytes(box_dict) != wanted:
                 continue
-            found = True
+            # A box can show up twice if it is confirmed between the two reads.
+            box_id = box_dict.get("boxId")
+            if box_id is not None:
+                if box_id in seen:
+                    continue
+                seen.add(box_id)
+            found += 1
+            # The payer may split a deposit over several boxes (a retry, a top-up),
+            # all with the same R4. The credit is the sum of them.
+            if asset is None:
+                paid = box_dict.get("value")
+            else:
+                paid = _box_token_amount(box_dict, asset.token_id)
+            total += paid if isinstance(paid, int) else 0
             # At least, not exactly: the payer converts our MU figure from
             # its own scale and has to round down to a whole MU of ours,
             # so a correct payment routinely carries a few nanoERG more
@@ -1067,23 +1082,17 @@ def _validate(amount: int, token: str, ledger: str, script: bytes,
             # and the excess stays in this wallet rather than being returned:
             # sending it back would mean building and paying for a
             # transaction nobody asked for.
-            if asset is None:
-                paid = box_dict.get("value")
-                rendered = f"{paid} nanoERG"
-            else:
-                paid = _box_token_amount(box_dict, asset.token_id)
-                rendered = f"{paid} base units of {asset.symbol}"
-            if paid is not None and paid >= expected:
+            if total >= expected:
                 return True
-            # Not a verdict yet: the payer may have sent the deposit twice, and a
-            # later box with the same token can be the one that pays enough.
-            LOGGER(
-                f"Insufficient amount for token {token}. Was {rendered}, "
-                f"expected at least {expected}"
-            )
 
         if not found:
             LOGGER(f"Token {token} not found in R4.")
+        else:
+            unit = "nanoERG" if asset is None else f"base units of {asset.symbol}"
+            LOGGER(
+                f"Insufficient amount for token {token}. Was {total} {unit} "
+                f"in {found} box(es), expected at least {expected}"
+            )
         return False
 
     except Exception as e:
