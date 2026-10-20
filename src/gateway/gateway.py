@@ -2,6 +2,7 @@ import grpc
 
 from protos import celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import rpc_input, rpc_output
+from src.database import ledger
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
@@ -12,7 +13,8 @@ from src.utils.contract_xattrs import get_script, get_contract_type, get_token_i
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
 from src.gateway.client_gate import parse_with_client, require_caller, simple_rpc_timeout_seconds
-from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
+from src.manager import balance_statement
+from src.manager.manager import ALLOW_DEBT, add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
 from src.manager.chat import ChatError, receive_chat_message
 from src.manager.metrics import get_metrics
@@ -290,7 +292,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
         if not spend_mu(
                 id=token,
                 amount_mu=prices().modify_resources_mu,
-                refund_function_container=refund_container
+                refund_function_container=refund_container,
+                kind=ledger.RESOURCE_CHANGE,
         ): raise Exception('Error charging for the resource change of ' + context.peer())
         if not hotplug(
                 vmachine_id=token,
@@ -359,6 +362,29 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 ),
                 indices=rpc_output("GetMetrics"),
         )
+
+    def GetBalanceStatement(self, request_iterator, context, **kwargs):
+        """The movements of the caller's account, or of a child of the caller (#570).
+
+        The caller is identified as for every gated RPC: a local instance by its
+        address, anyone else by its client_id. It pays for the answer, and the charge is
+        written before the node answers.
+        """
+        request, client_id = parse_with_client(request_iterator, method="GetBalanceStatement")
+        caller = require_caller(context, client_id)
+        request = request or celaut_pb2.BalanceStatementRequest()
+        try:
+            statement = balance_statement.answer(
+                caller=caller,
+                token=request.token,
+                since_seconds=request.since_seconds,
+                last=request.last,
+                allow_debt=ALLOW_DEBT,
+            )
+        except (balance_statement.StatementRefused, ledger.NoSuchAccount,
+                ledger.InsufficientBalance) as e:
+            raise Exception(f"No balance statement. {e}")
+        yield from BeeClient.respond(statement)
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):
         try:

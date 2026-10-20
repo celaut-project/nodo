@@ -675,6 +675,77 @@ message Metrics {
     Amount balance = 1;
 }
 
+// The request of GetBalanceStatement. With since_seconds and last, both apply: the
+// answer has the last `last` movements that are also in the span. With neither, the
+// node applies its own limit.
+message BalanceStatementRequest {
+    // The instance token of a child of the caller, to read the account of that child.
+    // Empty to read the account of the caller: its client_id, or the local instance
+    // that calls, by its address.
+    string token = 1;
+    // A time span back from now, in seconds. Only the movements in it. 0 for no span.
+    uint64 since_seconds = 2;
+    // Only the last movements, at most this number. 0 for no count. The charge of this
+    // request is not counted.
+    uint32 last = 3;
+}
+
+// One movement of a balance.
+message BalanceMovement {
+    // The number of the movement in its account. The first movement is 1, and each
+    // movement adds 1, with no gap.
+    uint64 seq = 1;
+    // When the node wrote the movement, in unix seconds, on the clock of the node.
+    int64 ts = 2;
+    // The change of the balance, in MU. A charge is negative.
+    Amount amount = 3;
+    // The balance after the movement, in MU.
+    Amount balance_after = 4;
+    // What the movement is: "deposit" (a payment), "credit" (MU that nobody paid in),
+    // "debit" (the operator took MU), "start" (the initial_mu that the instance got),
+    // "build", "commission" (of a node that delegated the instance), "maintenance" (one
+    // period), "child_start" (the account paid the start of a child), "top_up",
+    // "withdrawal", "refund" (MU that goes back to the parent), "tunnel",
+    // "resource_change" or "statement_query". A reader treats a kind that it does not
+    // know as a charge that it did not cause.
+    string kind = 5;
+    // The instance that the movement concerns, when it is not the account: the child of
+    // a child_start, top_up, withdrawal or refund. In a statement_query, the account
+    // that was read. An empty instance_token in a child_start is a start that is not
+    // complete. The node sets it one time, when the child exists. It is the one part of
+    // a movement that can change.
+    string instance_token = 6;
+    // The cause of the movement, as JSON with sorted keys and no spaces. Empty if there
+    // is none. For a maintenance period: "seconds", and the resources that the node
+    // priced ("mem_limit", "disk_space", "cpu_period", "cpu_quota"). For a refund of a
+    // charge that was not used: "refunds_seq", the seq of that charge.
+    string detail = 7;
+}
+
+// The answer of GetBalanceStatement.
+message BalanceStatement {
+    // The account: a client_id or an instance token.
+    string account = 1;
+    // The span of the request, in seconds. 0 for no span.
+    uint64 since_seconds = 2;
+    // The count of the request. 0 for no count.
+    uint32 last = 3;
+    // The movements, in seq order. When the caller reads its own account, the last
+    // movement is the charge for this answer.
+    repeated BalanceMovement movements = 4;
+    // The balance of the account at the answer, in MU.
+    Amount balance = 5;
+    // True if the node returned fewer movements than the filters select, because of
+    // its limit. The caller can ask again with a smaller span.
+    bool truncated = 6;
+    // When the node answered, in unix seconds, on the clock of the node.
+    int64 ts = 7;
+    // The signature of the node, with the key and the scheme of its Peer, in lowercase
+    // hexadecimal. The celaut-gateway layer gives the text that it signs. A statement
+    // without a valid signature is not valid.
+    string signature = 8;
+}
+
 // The answer of StartService.
 message ServiceInstance {
     // The instance token. It is the credential for StopService, ModifyDeposit,
@@ -744,7 +815,8 @@ message Peer {
     // The rates of the node. Keys: "ram_mu_per_gib_second" (and
     // "ram_mu_per_gib_second:<architecture>"), "cpu_mu_per_vcpu_second",
     // "disk_mu_per_gib_second", "net_mu_per_gib", "build_mu", "tunnel_open_mu",
-    // "modify_resources_mu", "scarcity_max_multiplier". The values of the "_mu" keys
+    // "modify_resources_mu", "statement_query_mu", "statement_row_mu",
+    // "scarcity_max_multiplier". The values of the "_mu" keys
     // are in MU. Each RAM, CPU and disk rate is a base price. When a resource is scarce,
     // the node multiplies its rate by a factor from 1 to scarcity_max_multiplier. The
     // other rates do not change. scarcity_max_multiplier has no unit. The node does not
@@ -1165,6 +1237,12 @@ service Gateway {
     // Takes a token. For an instance token, returns the balance of the instance. For a
     // client_id, returns the balance of the client.
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {}
+    // Takes a BalanceStatementRequest and returns a BalanceStatement: the movements of
+    // the balance of the caller, or of a child of the caller, signed by the node. The
+    // caller pays for it: a fixed part and a part for each movement returned (the
+    // rates "statement_query_mu" and "statement_row_mu"). The node writes the charge
+    // as a "statement_query" movement before it answers.
+    rpc GetBalanceStatement(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Opens a byte stream to a declared slot of a local instance. First, the caller
     // sends a TokenMessage with the instance token and the internal port in slot. Then
     // each side sends raw bytes at index 0. For a TCP slot, when the stream of the

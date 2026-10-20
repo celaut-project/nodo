@@ -1223,6 +1223,8 @@ static LEVERS: &[Lever] = &[
                 "pricing.BUILD_MU",
                 "pricing.TUNNEL_OPEN_MU",
                 "pricing.MODIFY_RESOURCES_MU",
+                "pricing.STATEMENT_QUERY_MU",
+                "pricing.STATEMENT_ROW_MU",
             ],
         ),
         warning: None,

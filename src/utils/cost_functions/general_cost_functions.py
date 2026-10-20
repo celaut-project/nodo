@@ -39,6 +39,8 @@ RATE_NET_PER_GIB = "net_mu_per_gib"
 RATE_BUILD = "build_mu"
 RATE_TUNNEL_OPEN = "tunnel_open_mu"
 RATE_MODIFY_RESOURCES = "modify_resources_mu"
+RATE_STATEMENT_QUERY = "statement_query_mu"
+RATE_STATEMENT_ROW = "statement_row_mu"
 RATE_SCARCITY_MAX_MULTIPLIER = "scarcity_max_multiplier"
 
 
@@ -135,6 +137,8 @@ def node_advertised_rates() -> Dict[str, int]:
         RATE_BUILD: p.build_mu,
         RATE_TUNNEL_OPEN: p.tunnel_open_mu,
         RATE_MODIFY_RESOURCES: p.modify_resources_mu,
+        RATE_STATEMENT_QUERY: p.statement_query_mu,
+        RATE_STATEMENT_ROW: p.statement_row_mu,
         RATE_SCARCITY_MAX_MULTIPLIER: p.scarcity_max_multiplier,
     }
 

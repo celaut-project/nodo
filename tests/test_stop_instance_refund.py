@@ -30,6 +30,7 @@ from unittest.mock import MagicMock, patch
 IMPORT_ERROR = None
 try:
     import src.manager.manager as manager
+    from src.database import ledger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     manager = None  # type: ignore[assignment]
@@ -60,21 +61,19 @@ class _Harness:
         self.sc.get_internal_father_id.return_value = father_id
         self.sc.get_internal_instance.return_value = None
         self.sc.get_instance_balance.side_effect = self._balance
-        self.sc.update_instance_balance.side_effect = self._record_instance_credit
-        self.sc.add_balance.side_effect = self._record_client_credit
+        self.sc.move_balance.side_effect = self._record_credit
         self.sc.mark_local_killed.side_effect = self._record_purge
         self.balances = {CHILD: LEFTOVER, father_id: 0}
 
     def _balance(self, id):
         return self.balances.get(id, 0)
 
-    def _record_instance_credit(self, id, balance_mu):
-        self.calls.append(("credit_instance", id, balance_mu))
-        self.balances[id] = balance_mu
-
-    def _record_client_credit(self, client_id, balance_mu):
-        self.calls.append(("credit_client", client_id, balance_mu))
-        self.balances[client_id] = self.balances.get(client_id, 0) + balance_mu
+    def _record_credit(self, account_id, amount_mu, kind, **kwargs):
+        if not account_id:
+            raise ledger.NoSuchAccount(account_id)
+        self.calls.append(("credit", account_id, amount_mu, kind, kwargs.get("instance_token")))
+        self.balances[account_id] = self.balances.get(account_id, 0) + amount_mu
+        return 1
 
     def _record_purge(self, id, reason=None):
         self.calls.append(("purge", id))
@@ -99,7 +98,7 @@ class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
         refund = harness.run()
 
         self.assertEqual(refund, LEFTOVER)
-        self.assertIn(("credit_instance", FATHER_INSTANCE, LEFTOVER), harness.calls)
+        self.assertIn(("credit", FATHER_INSTANCE, LEFTOVER, ledger.REFUND, CHILD), harness.calls)
 
     def test_a_client_father_is_credited_too(self):
         """A top-level instance's father is a client row, not an instance.
@@ -112,7 +111,7 @@ class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
         refund = harness.run()
 
         self.assertEqual(refund, LEFTOVER)
-        self.assertIn(("credit_client", FATHER_CLIENT, LEFTOVER), harness.calls)
+        self.assertIn(("credit", FATHER_CLIENT, LEFTOVER, ledger.REFUND, CHILD), harness.calls)
 
     def test_the_credit_happens_after_the_row_is_deleted(self):
         """Order matters, and not in the direction it first looks.
@@ -128,9 +127,9 @@ class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
         harness.run()
 
         kinds = [call[0] for call in harness.calls]
-        self.assertIn("credit_instance", kinds)
+        self.assertIn("credit", kinds)
         self.assertIn("purge", kinds)
-        self.assertLess(kinds.index("purge"), kinds.index("credit_instance"))
+        self.assertLess(kinds.index("purge"), kinds.index("credit"))
 
     def test_a_purge_that_fails_credits_nothing_so_a_retry_cannot_pay_twice(self):
         """A stop that does not delete the row must not have moved any money.
@@ -177,37 +176,31 @@ class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
 class CreditFatherTests(unittest.TestCase):
     """The refund primitive itself, used by both `stop_instance` and `modify_deposit`."""
 
-    def _sc(self, *, instance=False, client=False):
+    def test_the_father_is_credited_with_a_row_that_names_the_child(self):
         sc = MagicMock()
-        sc.internal_instance_exists.return_value = instance
-        sc.client_exists.return_value = client
-        sc.get_instance_balance.return_value = 10
-        return sc
-
-    def test_an_instance_father_gets_its_existing_balance_plus_the_refund(self):
-        sc = self._sc(instance=True)
         with patch.object(manager, "sc", sc):
-            self.assertTrue(manager.credit_father(father_id="f", amount_mu=5))
-        sc.update_instance_balance.assert_called_once_with(id="f", balance_mu=15)
+            self.assertTrue(manager.credit_father(father_id="f", amount_mu=5,
+                                                  instance_token="child"))
+        sc.move_balance.assert_called_once_with("f", 5, ledger.REFUND, instance_token="child")
 
-    def test_a_client_father_is_credited_the_refund(self):
-        sc = self._sc(client=True)
+    def test_a_withdrawal_is_written_as_one(self):
+        sc = MagicMock()
         with patch.object(manager, "sc", sc):
-            self.assertTrue(manager.credit_father(father_id="f", amount_mu=5))
-        sc.add_balance.assert_called_once_with(client_id="f", balance_mu=5)
+            self.assertTrue(manager.credit_father(father_id="f", amount_mu=5,
+                                                  kind=ledger.WITHDRAWAL))
+        sc.move_balance.assert_called_once_with("f", 5, ledger.WITHDRAWAL, instance_token=None)
 
     def test_an_unknown_father_is_reported_rather_than_silently_swallowed(self):
-        sc = self._sc()
+        sc = MagicMock()
+        sc.move_balance.side_effect = ledger.NoSuchAccount("nobody")
         with patch.object(manager, "sc", sc):
             self.assertFalse(manager.credit_father(father_id="nobody", amount_mu=5))
-        sc.update_instance_balance.assert_not_called()
-        sc.add_balance.assert_not_called()
 
     def test_nothing_to_refund_touches_no_account(self):
-        sc = self._sc(instance=True)
+        sc = MagicMock()
         with patch.object(manager, "sc", sc):
             self.assertTrue(manager.credit_father(father_id="f", amount_mu=0))
-        sc.update_instance_balance.assert_not_called()
+        sc.move_balance.assert_not_called()
 
 
 if __name__ == "__main__":

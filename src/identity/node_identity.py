@@ -69,6 +69,10 @@ _ATTESTATION_PREFIX: Final[str] = "celaut-ledger-attestation:"
 # distinct prefix a signature made for one could be replayed as another.
 _CLIENT_BINDING_PREFIX: Final[str] = "celaut-client-binding:"
 
+# Domain separation for a balance statement (#570): the movements of an account that
+# this node signs for its owner, who can hold it up as evidence of a charge.
+_STATEMENT_PREFIX: Final[str] = "celaut-balance-statement:"
+
 
 def component_formal(pairs: Dict[str, str]) -> bytes:
     """``key=value`` lines, sorted by key, UTF-8: the canonical body of a ``formal``.
@@ -695,6 +699,16 @@ def attestation_payload(peer_id: str) -> str:
     other things an Ergo key is asked to sign.
     """
     return _ATTESTATION_PREFIX + peer_id
+
+
+def statement_payload(peer_id: str, statement_digest: str) -> str:
+    """The exact string a node signs to vouch for a balance statement (#570).
+
+    ``statement_digest`` is ``balance_statement.statement_digest``, which covers every
+    field of the statement. Prefixed, as a receipt is (docs/EXECUTION_RECEIPTS.md), so
+    that this signature cannot be read as any other thing that the key signs.
+    """
+    return f"{_STATEMENT_PREFIX}{peer_id}|{statement_digest}"
 
 
 def client_binding_payload(peer_id: str, client_id: str) -> str:

@@ -73,6 +73,8 @@ class NodeAdvertisedRatesTests(unittest.TestCase):
                 "build_mu": 10_000_000,
                 "tunnel_open_mu": 10_000,
                 "modify_resources_mu": 10_000,
+                "statement_query_mu": 100,
+                "statement_row_mu": 1,
                 "scarcity_max_multiplier": 10,
             },
         )
@@ -169,6 +171,8 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
                 "build_mu": "10000000",
                 "tunnel_open_mu": "10000",
                 "modify_resources_mu": "10000",
+                "statement_query_mu": "100",
+                "statement_row_mu": "1",
                 "scarcity_max_multiplier": "10",
             },
         )

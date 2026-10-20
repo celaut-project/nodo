@@ -16,7 +16,8 @@ wholesale position with that peer. It is to give the delegated child the same ki
 local account a local child has:
 
 * the father's deposit is parked on the delegation row, in our MU;
-* the maintenance tick charges it what the peer's own meter says the child spent;
+* the maintenance tick charges it what the child's statement on the peer says it
+  spent (#570);
 * the stop hands whatever is left back to the father, after the row is gone;
 * the peer's own refund settles on the peer, and is only logged here.
 
@@ -34,8 +35,10 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from protos import celaut_pb2 as celaut
+    from src.database import ledger
     from src.gateway.launcher.delegate_execution import delegate_execution as delegate_mod
-    from src.manager import maintain, manager
+    from src.manager import maintain, manager, statement_check
+    from src.utils import dead_instances
     from src.utils.cost_functions import delegation_commission
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -66,8 +69,9 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
     )
 
     def _delegate(self, *, initial_mu, commission_mu=0, build_mu=0, child_balance=None,
-                  start_error=None):
-        """Run a delegation. ``child_balance`` is what the peer reports, in its MU."""
+                  start_error=None, mark=None):
+        """Run a delegation. ``child_balance`` is what the peer reports, in its MU, and
+        ``mark`` the last movement of its statement."""
         config = celaut.Configuration()
         if initial_mu is not None:
             config.initial_mu.n = str(initial_mu)
@@ -92,8 +96,8 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         ) as start, patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(
-            delegate_mod, "_child_balance_on_peer", return_value=child_balance
-        ), patch.object(
+            delegate_mod, "_check_start", return_value=(child_balance, mark)
+        ) as check_start, patch.object(
             delegate_mod, "peer_mu_in_local", side_effect=lambda peer, amount, **_: amount // 2
         ), patch.object(delegate_mod, "SQLConnection") as sql_connection:
             error = None
@@ -113,6 +117,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
                 error = e
         return SimpleNamespace(
             error=error, refunds=refunds, sent=sent.get("config"), start=start,
+            check_start=check_start,
             written=(
                 sql_connection.return_value.add_delegated_instance.call_args.kwargs
                 if sql_connection.return_value.add_delegated_instance.called else None
@@ -144,10 +149,31 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         A mark at the amount sent would charge the build to the client again at the first
         tick, as consumption.
         """
+        mark = {"seq": 2, "ts": 100, "read_at": 101.0}
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=1_580_000, mark=mark)
+
+        self.assertEqual(r.written["peer_balance_mu"], 1_580_000)
+        self.assertEqual(r.written["mark"], mark)
+
+    def test_the_start_is_checked_against_what_was_sent_and_the_quote(self):
+        """The build of 200 000 of ours is 400 000 of the peer's, with no variance."""
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
                            child_balance=1_580_000)
 
-        self.assertEqual(r.written["peer_balance_mu"], 1_580_000)
+        r.check_start.assert_called_once_with(
+            PEER_ID, "client-on-peer", PEER_TOKEN, 1_980_000, 400_000
+        )
+
+    def test_the_account_opens_with_the_start_the_commission_and_the_build(self):
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=1_580_000)
+
+        movements = r.written["movements"]
+        self.assertEqual([m.kind for m in movements],
+                         [ledger.START, ledger.COMMISSION, ledger.BUILD])
+        self.assertEqual([m.amount_mu for m in movements], [1_000_000, -10_000, -200_000])
+        self.assertEqual(r.written["sent_peer_mu"], 1_980_000)
 
     def test_an_unreadable_peer_leaves_the_balance_that_its_quote_says(self):
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
@@ -201,6 +227,7 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
     PAYMENT_SYSTEM = SimpleNamespace(
         local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
     )
+    MARK = {"peer_balance_mu": 1_400_000, "seq": 9, "ts": 190, "read_at": 191.0}
 
     def _row(self, **overrides):
         row = {
@@ -215,16 +242,17 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         row.update(overrides)
         return row
 
-    def _tick(self, row, *, peer_balance_now=1_400_000, peer_raises=None,
-              peer_reachable=True, rates=True):
+    def _tick(self, row, *, spent=600_000, read_raises=None, peer_reachable=True,
+              rates=True, rows=None):
         sc = MagicMock()
-        sc.get_delegated_instances.return_value = [row]
-        reading = (
-            MagicMock(side_effect=peer_raises) if peer_raises
-            else MagicMock(return_value=peer_balance_now)
+        sc.get_delegated_instances.return_value = rows or [row]
+        read = (
+            MagicMock(side_effect=read_raises) if read_raises
+            else MagicMock(return_value=(spent, self.MARK))
         )
         with patch.object(maintain, "sc", sc), \
-                patch.object(maintain, "instance_balance_on_peer", reading), \
+                patch.object(maintain, "_check_our_account") as check_account, \
+                patch.object(maintain, "_read_child", read), \
                 patch.object(maintain, "is_peer_available", return_value=peer_reachable), \
                 patch.object(
                     maintain, "peer_mu_in_local",
@@ -236,6 +264,7 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 patch.object(delegation_commission, "commission_percent",
                              return_value=self.commission_percent):
             maintain.maintain_delegated_instances()
+        self.check_account = check_account
         return sc, stop
 
     # The tests below are about the reading and the mark, so no commission (#551) unless
@@ -250,12 +279,18 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
             return -(-numerator // 2_000_000_000)
         return numerator // 2_000_000_000
 
-    def test_the_client_pays_what_the_peer_metered_since_the_last_reading(self):
-        """600 000 of the peer's MU spent, worth 300 000 of ours."""
-        sc, stop = self._tick(self._row(), peer_balance_now=1_400_000)
+    def test_our_account_on_each_peer_is_checked_once(self):
+        self._tick(None, rows=[self._row(), self._row(token="second-token")])
 
-        sc.update_delegated_deposit.assert_called_once_with(
-            token=PEER_TOKEN, balance_mu=700_000, peer_balance_mu=1_400_000
+        self.check_account.assert_called_once_with(PEER_ID, debug_mode=False)
+
+    def test_the_client_pays_what_the_peer_metered_since_the_mark(self):
+        """600 000 of the peer's MU spent, worth 300 000 of ours."""
+        sc, stop = self._tick(self._row(), spent=600_000)
+
+        sc.settle_delegated_tick.assert_called_once_with(
+            token=PEER_TOKEN, charge_mu=300_000, mark=self.MARK,
+            detail={"peer_id": PEER_ID, "peer_mu": "600000", "commission_mu": "0"},
         )
         stop.assert_not_called()
 
@@ -263,27 +298,10 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         """300 000 of ours metered, plus 5 %: 315 000. No minimum on a tick (#551)."""
         self.commission_percent = 5.0
         with patch.object(delegation_commission, "commission_min_mu", return_value=10**9):
-            sc, stop = self._tick(self._row(), peer_balance_now=1_400_000)
-        sc.update_delegated_deposit.assert_called_once_with(
-            token=PEER_TOKEN, balance_mu=685_000, peer_balance_mu=1_400_000
-        )
+            sc, stop = self._tick(self._row(), spent=600_000)
+
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 315_000)
         stop.assert_not_called()
-
-    def test_the_mark_advances_in_the_same_write_as_the_charge(self):
-        """Both or neither, and in one statement rather than two.
-
-        Every `_execute` commits on its own, so a charge written and a mark left
-        behind is a state a failure can leave: the next tick measures against the old
-        mark and bills the client for the same consumption twice. The reverse order
-        writes the consumption off instead. One write has neither failure.
-        """
-        sc, _ = self._tick(self._row(), peer_balance_now=1_400_000)
-
-        sc.update_delegated_balance.assert_not_called()
-        sc.update_delegated_peer_balance.assert_not_called()
-        sc.update_delegated_deposit.assert_called_once_with(
-            token=PEER_TOKEN, balance_mu=700_000, peer_balance_mu=1_400_000
-        )
 
     def test_an_instance_that_cannot_pay_what_it_consumed_is_stopped(self):
         """The same reaper a local instance gets, and the row is emptied first.
@@ -293,11 +311,10 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         paid for. What the node absorbs is only the part the deposit could not
         reach.
         """
-        sc, stop = self._tick(self._row(balance_mu=100), peer_balance_now=1_400_000)
+        sc, stop = self._tick(self._row(balance_mu=100), spent=600_000)
 
-        stop.assert_called_once_with(token=OUR_ALIAS)
-        sc.update_delegated_balance.assert_called_once_with(token=PEER_TOKEN, balance_mu=0)
-        sc.update_delegated_deposit.assert_not_called()
+        stop.assert_called_once_with(token=OUR_ALIAS, reason=dead_instances.OUT_OF_BALANCE)
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 100)
 
     def test_a_peer_that_cannot_be_reached_charges_nothing_and_loses_nothing(self):
         """The mark stays put, so the next reading that works charges the whole gap.
@@ -306,11 +323,10 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         would turn an unreachable peer into free runtime or into an invented bill.
         """
         sc, stop = self._tick(
-            self._row(), peer_raises=RuntimeError("unreachable"), peer_reachable=False
+            self._row(), read_raises=RuntimeError("unreachable"), peer_reachable=False
         )
 
-        sc.update_delegated_deposit.assert_not_called()
-        sc.update_delegated_peer_balance.assert_not_called()
+        sc.settle_delegated_tick.assert_not_called()
         stop.assert_not_called()
 
     def test_a_peer_that_no_longer_knows_the_instance_stops_it_here_too(self):
@@ -320,22 +336,16 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         that no longer runs anywhere.
         """
         sc, stop = self._tick(
-            self._row(), peer_raises=RuntimeError("unknown token"), peer_reachable=True
+            self._row(), read_raises=RuntimeError("unknown token"), peer_reachable=True
         )
 
-        stop.assert_called_once_with(token=OUR_ALIAS)
+        stop.assert_called_once_with(token=OUR_ALIAS, reason=dead_instances.PEER_STOPPED)
 
-    def test_a_child_that_holds_more_than_the_mark_is_only_re_marked(self):
-        """A top-up between readings, not negative consumption.
+    def test_a_child_that_spent_nothing_is_only_re_marked(self):
+        sc, stop = self._tick(self._row(), spent=0)
 
-        Crediting the difference would pay a client for MU he was already refunded
-        on the local side of the same top-up.
-        """
-        sc, stop = self._tick(self._row(), peer_balance_now=3_000_000)
-
-        sc.update_delegated_deposit.assert_not_called()
-        sc.update_delegated_peer_balance.assert_called_once_with(
-            token=PEER_TOKEN, peer_balance_mu=3_000_000
+        sc.settle_delegated_tick.assert_called_once_with(
+            token=PEER_TOKEN, charge_mu=0, mark=self.MARK
         )
         stop.assert_not_called()
 
@@ -347,8 +357,7 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         """
         sc, stop = self._tick(self._row(), rates=False)
 
-        sc.update_delegated_deposit.assert_not_called()
-        sc.update_delegated_peer_balance.assert_not_called()
+        sc.settle_delegated_tick.assert_not_called()
         stop.assert_not_called()
 
     def test_one_instance_that_will_not_stop_does_not_strand_the_rest(self):
@@ -358,7 +367,8 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
             self._row(token="second-token"),
         ]
         with patch.object(maintain, "sc", sc), \
-                patch.object(maintain, "instance_balance_on_peer", return_value=1_400_000), \
+                patch.object(maintain, "_check_our_account"), \
+                patch.object(maintain, "_read_child", return_value=(600_000, self.MARK)), \
                 patch.object(maintain, "is_peer_available", return_value=True), \
                 patch.object(maintain, "peer_mu_in_local", side_effect=self._convert), \
                 patch.object(maintain, "stop_instance", side_effect=[RuntimeError("no"), None]), \
@@ -367,9 +377,208 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 patch.object(delegation_commission, "commission_percent", return_value=0.0):
             maintain.maintain_delegated_instances()
 
-        sc.update_delegated_deposit.assert_called_once_with(
-            token="second-token", balance_mu=700_000, peer_balance_mu=1_400_000
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["token"], "second-token")
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 300_000)
+
+
+def _statement(*movements, balance=None):
+    """A statement of (seq, amount, kind[, detail]), adding up from 0 before seq 1."""
+    out = celaut.BalanceStatement(ts=1000)
+    running = 0
+    for movement in movements:
+        seq, amount, kind = movement[:3]
+        running += amount
+        out.movements.add(seq=seq, ts=100 + seq * 10, kind=kind,
+                          detail=movement[3] if len(movement) > 3 else "",
+                          amount=celaut.Amount(n=str(amount)),
+                          balance_after=celaut.Amount(n=str(running)))
+    out.balance.n = str(running if balance is None else balance)
+    return out
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ReadChildTests(unittest.TestCase):
+    """What the tick reads of a child: its statement when it adds up, else its balance."""
+
+    ROW = {'token': PEER_TOKEN, 'id': OUR_ALIAS, 'peer_id': PEER_ID,
+           'peer_balance_mu': 70, 'peer_statement_seq': 2, 'peer_statement_ts': 120,
+           'peer_statement_read_at': 50.0}
+
+    def setUp(self):
+        statement_check._penalised.clear()
+
+    def _read(self, statement=None, fetch_error=None, balance=None, row=None):
+        fetch = MagicMock(return_value=statement, side_effect=fetch_error)
+        with patch.object(maintain.balance_statement, "fetch", fetch), \
+                patch.object(maintain, "get_client_id_on_other_peer", return_value="client-on-peer"), \
+                patch.object(maintain, "_peer_rates", return_value={}), \
+                patch.object(maintain, "instance_balance_on_peer",
+                             side_effect=RuntimeError("gone") if balance is None else None,
+                             return_value=balance), \
+                patch.object(statement_check, "penalise_once") as penalise, \
+                patch.object(statement_check, "_short_of_statement_price", return_value=False):
+            try:
+                result = maintain._read_child(dict(row or self.ROW))
+            except Exception as e:
+                result = e
+        return result, penalise, fetch
+
+    def test_the_child_pays_what_its_statement_says_since_the_mark(self):
+        statement = _statement((1, 100, "start"), (2, -30, "build"),
+                               (3, -5, "maintenance"), (4, 50, "top_up"),
+                               (5, -7, "child_start"))
+
+        (spent, mark), penalise, fetch = self._read(statement)
+
+        # The top-up is the father's, not consumption.
+        self.assertEqual(spent, 12)
+        self.assertEqual((mark["peer_balance_mu"], mark["seq"], mark["ts"]), (108, 5, 150))
+        penalise.assert_not_called()
+        self.assertGreater(fetch.call_args.kwargs["since_seconds"], 0)
+
+    def test_a_statement_that_does_not_add_up_is_penalised_and_charged_by_the_balance(self):
+        statement = _statement((1, 100, "start"), (2, -30, "build"), (3, -5, "maintenance"),
+                               balance=60)
+
+        (spent, mark), penalise, _ = self._read(statement)
+
+        self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
+        self.assertEqual(spent, 10)
+        self.assertEqual((mark["peer_balance_mu"], mark["seq"]), (60, 3))
+
+    def test_an_overcharge_is_penalised_and_still_charged(self):
+        statement = _statement((1, 100, "start"), (2, -30, "build"), (3, -5, "build"))
+
+        (spent, _), penalise, _ = self._read(statement)
+
+        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
+        self.assertEqual(spent, 5)
+
+    def test_a_peer_that_knows_the_child_and_gives_no_statement_is_penalised(self):
+        (spent, mark), penalise, _ = self._read(fetch_error=RuntimeError("refused"), balance=50)
+
+        self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
+        self.assertEqual(spent, 20)
+        self.assertIsNone(mark["seq"])
+
+    def test_a_child_the_peer_does_not_know_raises_for_the_tick_to_stop_it(self):
+        result, penalise, _ = self._read(fetch_error=RuntimeError("no such child"))
+
+        self.assertIsInstance(result, RuntimeError)
+        penalise.assert_not_called()
+
+    def test_with_no_mark_the_balance_is_charged_and_the_statement_marks(self):
+        row = dict(self.ROW, peer_statement_seq=None, peer_statement_read_at=None)
+        statement = _statement((1, 100, "start"), (2, -30, "build"), (3, -5, "maintenance"))
+
+        (spent, mark), penalise, fetch = self._read(statement, row=row)
+
+        self.assertEqual(spent, 5)
+        self.assertEqual(mark["seq"], 3)
+        self.assertEqual(fetch.call_args.kwargs["since_seconds"], 0)
+        penalise.assert_not_called()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CheckStartTests(unittest.TestCase):
+    """The statement of a new child, read right after StartService (#570)."""
+
+    def setUp(self):
+        statement_check._penalised.clear()
+
+    def _check(self, statement=None, fetch_error=None, bound=40):
+        with patch.object(delegate_mod.balance_statement, "fetch",
+                          MagicMock(return_value=statement, side_effect=fetch_error)), \
+                patch.object(delegate_mod.statement_check, "stored_rates", return_value={}), \
+                patch.object(delegate_mod, "_child_balance_on_peer", return_value=55), \
+                patch.object(statement_check, "_short_of_statement_price", return_value=False), \
+                patch.object(statement_check, "penalise_once") as penalise:
+            result = delegate_mod._check_start(PEER_ID, "client-on-peer", PEER_TOKEN, 100, bound)
+        return result, penalise
+
+    def test_a_start_within_its_rule_marks_its_last_movement(self):
+        (balance, mark), penalise = self._check(_statement((1, 100, "start"), (2, -30, "build")))
+
+        self.assertEqual(balance, 70)
+        self.assertEqual((mark["seq"], mark["ts"]), (2, 120))
+        penalise.assert_not_called()
+
+    def test_a_build_above_the_quote_is_an_overcharge(self):
+        (balance, mark), penalise = self._check(
+            _statement((1, 100, "start"), (2, -30, "build")), bound=20
         )
+
+        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
+        self.assertEqual((balance, mark["seq"]), (70, 2))
+
+    def test_a_statement_that_does_not_start_at_its_first_movement_does_not_add_up(self):
+        statement = _statement((1, 100, "start"), (2, -30, "build"))
+        statement.movements.pop(0)
+
+        (balance, mark), penalise = self._check(statement)
+
+        self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
+        self.assertEqual((balance, mark), (55, None))
+
+    def test_no_statement_from_the_peer_that_just_started_the_child(self):
+        (balance, mark), penalise = self._check(fetch_error=RuntimeError("refused"))
+
+        self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
+        self.assertEqual((balance, mark), (55, None))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CheckOurAccountTests(unittest.TestCase):
+    """The statement of our own account on a peer, read at each tick (#570)."""
+
+    def setUp(self):
+        statement_check._penalised.clear()
+
+    def _check(self, statement, stored=None, starts=None):
+        sc = MagicMock()
+        sc.get_peer_client.return_value = "client-on-peer"
+        sc.get_peer_statement_mark.return_value = stored or {}
+        sc.delegated_starts_on_peer.return_value = starts or {PEER_TOKEN: 100}
+        with patch.object(maintain, "sc", sc), \
+                patch.object(maintain.balance_statement, "fetch", return_value=statement), \
+                patch.object(statement_check, "penalise_once") as penalise:
+            maintain._check_our_account(PEER_ID)
+        return sc, penalise
+
+    def test_our_own_movements_move_the_mark_to_the_last_one(self):
+        statement = _statement((1, 500, "credit"), (2, -100, "child_start"),
+                               (3, -1, "statement_query"))
+        statement.movements[1].instance_token = PEER_TOKEN
+
+        sc, penalise = self._check(statement)
+
+        penalise.assert_not_called()
+        peer, seq, balance, _ = sc.set_peer_statement_mark.call_args.args
+        self.assertEqual((peer, seq, balance), (PEER_ID, 3, 399))
+
+    def test_a_charge_we_did_not_cause_is_an_overcharge(self):
+        statement = _statement((1, 500, "credit"), (2, -100, "debit"))
+
+        _, penalise = self._check(statement)
+
+        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
+
+    def test_a_start_in_progress_holds_the_mark_before_it(self):
+        statement = _statement((1, 500, "credit"), (2, -100, "child_start"))
+        statement.movements[1].ts = statement.ts
+
+        sc, penalise = self._check(statement, stored={"seq": 0, "balance_mu": 0, "read_at": 5.0})
+
+        penalise.assert_not_called()
+        sc.set_peer_statement_mark.assert_called_once_with(PEER_ID, 1, 500, 5.0)
+
+    def test_a_statement_that_does_not_add_up_from_the_mark_is_penalised(self):
+        statement = _statement((1, 500, "credit"), (2, -100, "statement_query"))
+
+        sc, penalise = self._check(statement, stored={"seq": 1, "balance_mu": 499})
+
+        self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
+        sc.set_peer_statement_mark.assert_called_once()
 
 
 class _StopHarness:
@@ -394,23 +603,21 @@ class _StopHarness:
         self.sc.get_external_father_id.return_value = father_id
         self.sc.get_delegated_instance.return_value = None
         self.sc.get_instance_balance.return_value = 0
-        self.sc.purgue_delegated.side_effect = self._record_purge
-        self.sc.add_balance.side_effect = self._record_client_credit
-        self.sc.update_instance_balance.side_effect = self._record_instance_credit
+        self.sc.mark_delegated_killed.side_effect = self._record_purge
+        self.sc.move_balance.side_effect = self._record_credit
         self.purge_raises = purge_raises
 
         self.peer_refund = celaut.Refund(amount=celaut.Amount(n=str(peer_refund)))
 
-    def _record_purge(self, token):
+    def _record_purge(self, token, reason=None):
         self.calls.append(("purge", token))
         if self.purge_raises:
             raise RuntimeError("database is locked")
+        return True
 
-    def _record_client_credit(self, client_id, balance_mu):
-        self.calls.append(("credit_client", client_id, balance_mu))
-
-    def _record_instance_credit(self, id, balance_mu):
-        self.calls.append(("credit_instance", id, balance_mu))
+    def _record_credit(self, account_id, amount_mu, kind, **kwargs):
+        self.calls.append(("credit", account_id, amount_mu, kind, kwargs.get("instance_token")))
+        return 1
 
     def _stop_service(self, **kwargs):
         self.calls.append(("stop_service_on_peer", PEER_TOKEN))
@@ -439,7 +646,8 @@ class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
         refund = harness.run()
 
         self.assertEqual(refund, LEFTOVER)
-        self.assertIn(("credit_client", FATHER_CLIENT, LEFTOVER), harness.calls)
+        self.assertIn(("credit", FATHER_CLIENT, LEFTOVER, ledger.REFUND, OUR_ALIAS),
+                      harness.calls)
 
     def test_the_peers_own_refund_is_not_credited_to_the_father(self):
         """It is a different account, in a different unit.
@@ -455,13 +663,14 @@ class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
 
         self.assertEqual(refund, LEFTOVER)
         credits = [c for c in harness.calls if c[0].startswith("credit")]
-        self.assertEqual(credits, [("credit_client", FATHER_CLIENT, LEFTOVER)])
+        self.assertEqual(credits, [("credit", FATHER_CLIENT, LEFTOVER, ledger.REFUND, OUR_ALIAS)])
 
     def test_an_instance_father_is_credited_too(self):
         harness = _StopHarness(father_id="father-instance", father_is_instance=True)
         harness.run()
 
-        self.assertIn(("credit_instance", "father-instance", LEFTOVER), harness.calls)
+        self.assertIn(("credit", "father-instance", LEFTOVER, ledger.REFUND, OUR_ALIAS),
+                      harness.calls)
 
     def test_the_credit_happens_after_the_delegation_row_is_deleted(self):
         """The ordering lesson from #297, on this branch too.
@@ -474,7 +683,7 @@ class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
         harness.run()
 
         kinds = [call[0] for call in harness.calls]
-        self.assertLess(kinds.index("purge"), kinds.index("credit_client"))
+        self.assertLess(kinds.index("purge"), kinds.index("credit"))
 
     def test_a_purge_that_fails_credits_nothing_so_a_retry_cannot_pay_twice(self):
         harness = _StopHarness(purge_raises=True)
@@ -528,8 +737,7 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         sc.get_external_father_id.return_value = FATHER_CLIENT
         sc.get_peer_id_by_external_service.return_value = PEER_ID
         sc.get_delegated_balance.return_value = balance
-        sc.get_delegated_peer_balance.return_value = 2 * balance
-        sc.get_client_balance.return_value = (10 ** 12, 0, 0)
+        sc.move_balance.return_value = 7
         payment_system = SimpleNamespace(
             local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
         )
@@ -562,32 +770,26 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         ok, _, sc, sent = self._modify(500_000)
 
         self.assertTrue(ok)
-        self.assertEqual(
-            sc.update_delegated_deposit.call_args.kwargs["balance_mu"], 1_500_000
-        )
+        self.assertEqual(sc.move_balance.call_args_list[0].args,
+                         (FATHER_CLIENT, -500_000, ledger.TOP_UP))
+        self.assertEqual(sc.move_balance.call_args_list[0].kwargs["instance_token"], OUR_ALIAS)
+        self.assertEqual(sc.move_balance.call_args_list[1].args,
+                         (OUR_ALIAS, 500_000, ledger.TOP_UP))
         self.assertEqual(int(sent[0].difference.n), 1_000_000)
 
-    def test_a_top_up_moves_the_mark_the_tick_measures_against(self):
-        """Or the interval it lands in reads as no consumption at all.
-
-        The tick charges the fall in the peer's figure. A top-up raises that figure
-        without the child having spent anything, so the mark has to rise with it --
-        otherwise the next reading looks like a child that used nothing, and a whole
-        interval of real usage is written off.
-        """
+    def test_a_top_up_does_not_move_the_mark_the_tick_measures_against(self):
+        """The peer writes the top-up in the statement of the child, and the tick does
+        not count it as consumption: moving the mark too would count it twice."""
         _, _, sc, _ = self._modify(500_000)
 
-        sc.update_delegated_deposit.assert_called_once_with(
-            token=PEER_TOKEN, balance_mu=1_500_000, peer_balance_mu=3_000_000
-        )
+        sc.settle_delegated_tick.assert_not_called()
 
     def test_a_withdrawal_moves_both_the_same_way(self):
         ok, _, sc, sent = self._modify(-400_000)
 
         self.assertTrue(ok)
-        sc.update_delegated_deposit.assert_called_once_with(
-            token=PEER_TOKEN, balance_mu=600_000, peer_balance_mu=1_200_000
-        )
+        sc.transfer.assert_called_once_with(OUR_ALIAS, FATHER_CLIENT, 400_000,
+                                            ledger.WITHDRAWAL, child=OUR_ALIAS)
         self.assertEqual(int(sent[0].difference.n), -800_000)
 
     def test_a_peer_that_refuses_leaves_the_local_row_alone(self):
@@ -599,38 +801,35 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         ok, _, sc, _ = self._modify(500_000, peer_accepts=False)
 
         self.assertFalse(ok)
-        sc.update_delegated_deposit.assert_not_called()
+        self.assertNotIn(OUR_ALIAS, [c.args[0] for c in sc.move_balance.call_args_list])
 
     def test_taking_out_more_than_is_there_is_refused(self):
         ok, message, sc, sent = self._modify(-2_000_000)
 
         self.assertFalse(ok)
-        sc.update_delegated_deposit.assert_not_called()
         self.assertEqual(sent, [])
 
     def test_taking_out_more_than_is_there_credits_nobody(self):
         # The father used to be credited before the check, which made MU.
         _, _, sc, _ = self._modify(-2_000_000)
 
-        sc.add_balance.assert_not_called()
-        sc.update_instance_balance.assert_not_called()
+        sc.move_balance.assert_not_called()
+        sc.transfer.assert_not_called()
 
     def test_a_withdrawal_the_peer_refuses_credits_nobody(self):
         ok, _, sc, _ = self._modify(-400_000, peer_accepts=False)
 
         self.assertFalse(ok)
-        sc.add_balance.assert_not_called()
-
-    def test_a_withdrawal_credits_the_father_once_the_peer_moved(self):
-        _, _, sc, _ = self._modify(-400_000)
-
-        sc.add_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=400_000)
+        sc.move_balance.assert_not_called()
+        sc.transfer.assert_not_called()
 
     def test_a_top_up_the_peer_refuses_goes_back_to_the_father(self):
         _, _, sc, _ = self._modify(500_000, peer_accepts=False)
 
-        sc.reduce_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=500_000)
-        sc.add_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=500_000)
+        charge, refund = sc.move_balance.call_args_list
+        self.assertEqual(charge.args, (FATHER_CLIENT, -500_000, ledger.TOP_UP))
+        self.assertEqual(refund.args, (FATHER_CLIENT, 500_000, ledger.REFUND))
+        self.assertEqual(refund.kwargs["detail"], {"refunds_seq": "7"})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -653,15 +852,34 @@ class LocalDepositModificationTests(unittest.TestCase):
         ok, _, sc = self._modify(-2_000_000)
 
         self.assertFalse(ok)
-        sc.add_balance.assert_not_called()
-        sc.update_instance_balance.assert_not_called()
+        sc.transfer.assert_not_called()
+        sc.move_balance.assert_not_called()
 
     def test_a_withdrawal_moves_the_balance_to_the_father(self):
         ok, _, sc = self._modify(-400_000)
 
         self.assertTrue(ok)
-        sc.add_balance.assert_called_once_with(client_id=FATHER_CLIENT, balance_mu=400_000)
-        sc.update_instance_balance.assert_called_once_with(id="instance-token", balance_mu=600_000)
+        sc.transfer.assert_called_once_with("instance-token", FATHER_CLIENT, 400_000,
+                                            ledger.WITHDRAWAL, child="instance-token")
+
+    def test_a_top_up_moves_the_balance_from_the_father(self):
+        ok, _, sc = self._modify(500_000)
+
+        self.assertTrue(ok)
+        sc.transfer.assert_called_once_with(FATHER_CLIENT, "instance-token", 500_000,
+                                            ledger.TOP_UP, child="instance-token",
+                                            allow_debt=manager.ALLOW_DEBT)
+
+    def test_a_father_that_cannot_pay_tops_up_nothing(self):
+        sc = MagicMock()
+        sc.internal_instance_exists.side_effect = lambda id: id == "instance-token"
+        sc.get_internal_father_id.return_value = FATHER_CLIENT
+        sc.get_instance_balance.return_value = 0
+        sc.transfer.side_effect = ledger.InsufficientBalance("no")
+        with patch.object(manager, "sc", sc), patch.object(manager, "format_mu", str):
+            ok, _ = manager.modify_deposit(amount_mu=500_000, service_token="instance-token")
+
+        self.assertFalse(ok)
 
     def test_an_instance_name_is_not_a_token(self):
         # The RPC takes a token. A name is guessable; only `nodo modify_deposit`
@@ -671,7 +889,7 @@ class LocalDepositModificationTests(unittest.TestCase):
         self.assertFalse(ok)
         sc.resolve_local_instance_reference.assert_not_called()
         sc.get_local_instance_id_by_name.assert_not_called()
-        sc.reduce_balance.assert_not_called()
+        sc.move_balance.assert_not_called()
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

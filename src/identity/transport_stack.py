@@ -75,6 +75,7 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
     same_component,
+    statement_payload,
 )
 from src.identity import protocol_doc
 from src.identity.protocol_schema import schema_pairs
@@ -447,6 +448,15 @@ def gateway_component() -> Layer:
         "peer.digest.sysresources": "','.join(name=value or name= for blkio_weight,"
                                     "cpu_period,cpu_quota,mem_limit,disk_space)"
                                     "~';'.join(sorted(key=value or key=))",
+        "statement.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
+        "statement.signature.payload": statement_payload(peer_id, "<statement_digest>"),
+        "statement.digest": "blake2b-256 hex of UTF-8 of "
+                            "hex(account)|since_seconds|last|ts|balance.n|truncated|movements",
+        "statement.digest.truncated": "1 or 0",
+        "statement.digest.movements": "'/'.join(movement in seq order)",
+        "statement.digest.movement": "seq~ts~amount.n~balance_after.n~kind"
+                                     "~hex(instance_token)~hex(detail)",
+        "statement.digest.hex": "lowercase hex of UTF-8; empty for an empty text",
         "client_binding.payload": client_binding_payload(peer_id, client_id),
         "client_binding.signature": "Peer.signature_scheme, lowercase hex",
         "ledger_attestation.payload": attestation_payload(peer_id),
@@ -495,6 +505,13 @@ def gateway_component() -> Layer:
         "contains all the fields of the Peer, in a sorted sequence. The ts is in unix "
         "seconds. Accept a Peer only if its ts is more than the last ts that you "
         "accepted for the same public key.\n"
+        "\n"
+        "STATEMENT SIGNATURE. The node signs each BalanceStatement with the key and "
+        "the scheme of its Peer. The signed text is \"" + statement_payload(
+            "<public_key>", "<statement_digest>") + "\". The statement digest is a "
+        "BLAKE2b-256 hash of a text that the formal field specifies. This text contains "
+        "all the fields of the statement except the signature. A statement with no "
+        "valid signature is not valid.\n"
         "\n"
         "OTHER SIGNATURES. To bind a client_id to its identity, a peer signs the "
         "text \"" + client_binding_payload("<peer_id>", "<client_id>") + "\". The wallet "

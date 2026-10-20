@@ -253,6 +253,12 @@ class Prices:
     build_mu: int
     tunnel_open_mu: int
     modify_resources_mu: int
+    # A balance statement (#570): a fixed part for the call, the authentication and the
+    # signature, and a part for each movement returned. Finding where the statement
+    # starts costs the same whatever the size of the account, so the price follows only
+    # the rows that the answer carries.
+    statement_query_mu: int
+    statement_row_mu: int
     # Scarcity surcharge: 1.0x when the resource is plentiful, up to this when it is
     # exhausted. The curve shapes how fast the surcharge arrives (1.0 = linear; higher
     # stays flat until the resource is genuinely scarce).
@@ -427,6 +433,8 @@ def prices() -> Prices:
         build_mu=_price_mu("BUILD_MU"),
         tunnel_open_mu=_price_mu("TUNNEL_OPEN_MU"),
         modify_resources_mu=_price_mu("MODIFY_RESOURCES_MU"),
+        statement_query_mu=_price_mu("STATEMENT_QUERY_MU"),
+        statement_row_mu=_price_mu("STATEMENT_ROW_MU"),
         scarcity_max_multiplier=max_multiplier,
         scarcity_curve=curve,
         max_price_volatility=volatility,

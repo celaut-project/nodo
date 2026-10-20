@@ -1,11 +1,16 @@
+import time
 from hashlib import sha256
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 
 from protos import celaut_pb2
+from src.database import ledger
+from src.manager import balance_statement, statement_check
 from src.manager.manager import get_client_id_on_other_peer
+from src.reputation_system.reasons import Reason
+from src.utils.utils import from_amount
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
@@ -78,6 +83,47 @@ def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
         return None
 
 
+def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: int,
+                 start_bound_peer_mu: int) -> Tuple[Optional[int], Optional[dict]]:
+    """Read the statement of the new child on ``peer`` and check its start (#570).
+
+    Returns the balance of the child there, in the MU of the peer, and the mark that the
+    maintenance tick goes on from: ``seq``, ``ts`` and ``read_at``. The mark is None when
+    the statement could not be used, and the balance then comes from ``GetMetrics``.
+
+    A statement that does not add up, or that does not come from a peer that just
+    answered ``StartService``, costs the peer the penalty for a statement that does not
+    add up. One that takes more than this node sent, or a build above the quote, costs
+    it the penalty for an overcharge. The start goes on in both cases: the child runs.
+    """
+    read_at = time.time()
+    try:
+        statement = balance_statement.fetch(peer, client_id, token=external_token)
+    except Exception as e:
+        statement_check.penalise_no_statement(peer, external_token, e)
+        return _child_balance_on_peer(peer, external_token), None
+
+    # A new account: its movement 1 starts from 0.
+    start = statement_check.Mark(0, 0)
+    rows, problem = statement_check.new_rows(statement, start)
+    if rows is None:
+        if problem:
+            statement_check.penalise_once(peer, external_token, Reason.STATEMENT_INCONSISTENT, problem)
+        return _child_balance_on_peer(peer, external_token), None
+
+    problems = statement_check.child_problems(
+        rows, mark=start,
+        rates=statement_check.stored_rates(peer),
+        sent_peer_mu=sent_peer_mu, start_bound_peer_mu=start_bound_peer_mu,
+    )
+    if problems:
+        statement_check.penalise_once(
+            peer, external_token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
+        )
+    mark = {"seq": rows[-1].seq, "ts": rows[-1].ts, "read_at": read_at} if rows else None
+    return from_amount(statement.balance), mark
+
+
 def delegate_execution(
                         service_id: str,
                         peer: str,
@@ -88,27 +134,25 @@ def delegate_execution(
                         father_ip: str = "",
                         commission_mu: int = 0,
                         build_mu: int = 0,
+                        variance: float = 0.0,
                    ) -> celaut_pb2.ServiceInstance:
     """Run this service on ``peer`` and open the child's local account.
 
     ``config.initial_mu`` is what the father paid, in local MU (#563). This node keeps
     ``commission_mu`` of it and sends the peer the rest, in the MU of the peer. The peer
     takes its own build from that amount, and what is left is the balance of the child
-    there. ``build_mu`` is the build that the peer quoted, in local MU. It is only the
-    fallback for a balance of the child that cannot be read: the peer sets the real build.
+    there. ``build_mu`` is the build that the peer quoted, in local MU, and ``variance``
+    the variance of that quote: together they bound the build that the peer may take.
 
     A delegated child keeps its deposit on this node, exactly as a local one does, so
     the father is refunded from this node's own books when the child stops. That deposit
     is what the father can get back: the amount that was sent, less the build of the
-    peer, in local MU. The peer reports the balance of the child, and that figure is
-    read, because the maintenance tick charges the client by re-reading it and taking
-    the difference. What the peer holds against our client there is the node's own
-    wholesale position and is not mirrored per instance.
+    peer, in local MU. Its account here opens with the ``start``, the ``commission`` of
+    this node and that ``build``.
 
-    This node does not check what the peer charged for the start. Two readings of a
-    balance cannot tell the build from the other movements on the same account: a
-    top-up of another child, a tunnel, a tick, or what the child spends on its own
-    dependencies. Only a statement of the movements, from the peer, can.
+    The balance of the child on the peer comes from its statement (#570), which also
+    shows what the peer took for the start: ``_check_start`` checks it, and the mark it
+    returns is where the maintenance tick goes on from.
     """
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
@@ -143,6 +187,7 @@ def delegate_execution(
             )
 
         log.LOGGER('Go to launch the service on ' + str(peer))
+        client_id = get_client_id_on_other_peer(peer_id=peer)
         service_instance = BeeClient.start_service(
             peer_channel(peer),
             utils.service_extended(
@@ -150,7 +195,7 @@ def delegate_execution(
                 config=peer_config,
                 # TODO: Could pass only the previously selected configuration with the estimate cost
                 #  request, now is allowing to select another (that could be reasonable).
-                client_id=get_client_id_on_other_peer(peer_id=peer),
+                client_id=client_id,
                 recursion_guard_token=recursion_guard_token
             ),
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
@@ -158,15 +203,18 @@ def delegate_execution(
         external_token: str = service_instance.token
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 
-        # What the peer says the child holds now: the amount that we sent, less the build
-        # that it took. Read, not computed: the peer sets its own build, and the tick
-        # below measures the consumption from this very figure.
-        child_balance_peer = _child_balance_on_peer(peer, external_token)
         build_peer_mu = convert_mu(
             int(build_mu),
             from_mu_per_unit=payment_system.local_mu_per_unit,
             to_mu_per_unit=payment_system.peer_mu_per_unit,
             round_up=True,
+        )
+        # What the peer says the child holds now: the amount that we sent, less the build
+        # that it took. Read, not computed: the peer sets its own build, and the tick
+        # below measures the consumption from this very figure.
+        child_balance_peer, mark = _check_start(
+            peer, client_id, external_token, sent_peer_mu,
+            statement_check.build_bound(build_peer_mu, variance),
         )
         if child_balance_peer is None:
             # The peer could not be read: use what its quote says. The tick corrects the
@@ -213,6 +261,14 @@ def delegate_execution(
             # still the client's to pay, and the build is not, because the build was
             # taken from the amount before the child had a balance.
             peer_balance_mu=peer_balance_mu,
+            movements=(
+                ledger.Movement(ledger.START, initial_mu),
+                ledger.Movement(ledger.COMMISSION, -int(commission_mu)),
+                ledger.Movement(ledger.BUILD, balance_mu - sent_mu,
+                                detail={"peer_id": peer}),
+            ),
+            sent_peer_mu=sent_peer_mu,
+            mark=mark,
         )
         service_instance.token = encrypted_external_token
         service_instance.instance.CopyFrom(published_instance)

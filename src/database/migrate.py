@@ -47,6 +47,9 @@ def connect_to_database(db_file):
 # do; see docs/CONCEPTS.md's "Peers and clients" -- simply stays unassociated,
 # same as `remote_client_id` stays unset for a peer this node has never needed to
 # call.
+#
+# `statement_seq`, `statement_balance_mu` and `statement_read_at` are the mark of the
+# statement of `remote_client_id` on that peer (#570), as on `delegated_instances`.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
@@ -60,7 +63,10 @@ TABLES = {
             reputation_index INTEGER,
             last_index_on_ledger INTEGER,
             last_ts INTEGER DEFAULT NULL,
-            learned_via_gossip INTEGER NOT NULL DEFAULT 0
+            learned_via_gossip INTEGER NOT NULL DEFAULT 0,
+            statement_seq INTEGER DEFAULT NULL,
+            statement_balance_mu TEXT DEFAULT NULL,
+            statement_read_at REAL DEFAULT NULL
         )
     ''',
     "clients": '''
@@ -186,6 +192,14 @@ TABLES = {
     # child bigger than the shape it was quoted at. Storing it unconverted is what
     # makes that possible; a figure converted at write time goes stale the moment
     # either node moves its rate (same reason as `peer.balance_mu`).
+    #
+    # The mark is a movement of the child's statement on the peer (#570):
+    # `peer_statement_seq` is its seq, `peer_balance_mu` the balance after it and
+    # `peer_statement_ts` its time, on the clock of the peer. `peer_statement_read_at`
+    # is when this node read it, on its own clock: the next read asks for the span
+    # since then. `sent_peer_mu` is the `initial_mu` that this node sent the peer, in
+    # the MU of the peer: the most that the peer can take from our account for this
+    # start.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -196,6 +210,10 @@ TABLES = {
             service_id TEXT,
             balance_mu TEXT,
             peer_balance_mu TEXT,
+            peer_statement_seq INTEGER DEFAULT NULL,
+            peer_statement_ts INTEGER DEFAULT NULL,
+            peer_statement_read_at REAL DEFAULT NULL,
+            sent_peer_mu TEXT DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL
@@ -558,6 +576,26 @@ TABLES = {
             closed_at DATETIME DEFAULT NULL,
             FOREIGN KEY (peer_id) REFERENCES peer (id)
         )
+    ''',
+    # One row per movement of a balance (#570): see src/database/ledger.py. The rows of
+    # an account add up to its balance, because each one is written in the same
+    # transaction as the balance. `seq` counts from 1 for each account, with no gaps.
+    # `ts` is unix seconds. `amount_mu` is signed; both MU columns are TEXT, as every
+    # balance is. `detail` is the cause, as canonical JSON. The retention sweep deletes
+    # rows older than `ledger.RETENTION_DAYS`, but keeps the last row of a live account,
+    # so that the next row still knows its seq.
+    "balance_movements": '''
+        CREATE TABLE IF NOT EXISTS balance_movements (
+            account_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            amount_mu TEXT NOT NULL,
+            balance_after_mu TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            instance_token TEXT DEFAULT NULL,
+            detail TEXT DEFAULT NULL,
+            PRIMARY KEY (account_id, seq)
+        )
     '''
 }
 
@@ -603,6 +641,12 @@ INDEXES = (
     # (the two TUI pages: ours, and our clients').
     "CREATE INDEX IF NOT EXISTS idx_peer_chat_conversations_peer "
     "ON peer_chat_conversations (peer_id, opened_by_us, opened_at)",
+    # A statement reads one account from a time on, and finding where it starts
+    # costs the same whatever the size of the account (#570).
+    "CREATE INDEX IF NOT EXISTS idx_balance_movements_account_ts "
+    "ON balance_movements (account_id, ts)",
+    # The retention sweep deletes by age, across every account.
+    "CREATE INDEX IF NOT EXISTS idx_balance_movements_ts ON balance_movements (ts)",
 )
 
 

@@ -8,6 +8,8 @@ import traceback
 import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
+from src.database import ledger
+from src.manager import balance_statement, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
@@ -25,7 +27,7 @@ from src.tunneling import delegated_endpoints
 from src.utils import activity_window, dead_instances, demand_history
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
-from src.utils.utils import peers_id_iterator
+from src.utils.utils import from_amount, peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.monetary import format_mu
@@ -430,7 +432,11 @@ def maintain_vmachines(debug_mode: bool=False):
         if debug_mode:
             log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {MANAGER_ITERATION_TIME}s")
 
-        if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode):
+        if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode,
+                        kind=ledger.MAINTENANCE,
+                        # What the father checks this charge against (#570): the
+                        # resources and the seconds it priced.
+                        detail=statement_check.tick_detail(sys_req, MANAGER_ITERATION_TIME)):
             # No penalty for the service here. The father holds the balance of the
             # instance, and he can empty it on purpose with small top-ups (see
             # "Limit what an instance can spend" in docs/CONCEPTS.md). A death that the
@@ -474,6 +480,142 @@ def maintain_vmachines(debug_mode: bool=False):
     vm_janitor_cleanup_orphans(debug_mode=debug_mode)
 
 
+def _peer_rates(peer_id: str, refresh: bool = False) -> dict:
+    """The rates that ``peer_id`` announces. ``refresh`` asks the peer for its ``Peer``
+    first: a period above the stored rates may be a new price that this node did not
+    read yet, and that is not an overcharge."""
+    if refresh:
+        try:
+            peer = fetch_peer_info(peer_channel(peer_id=peer_id), peer_id)
+            if peer:
+                accept_peer_refresh(peer=peer, peer_id=peer_id)
+        except Exception as e:
+            log.LOGGER(f"Could not refresh the rates of {peer_id}: {e}")
+    return statement_check.stored_rates(peer_id)
+
+
+def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
+    """Read the statement of our account on ``peer_id`` and check it (#570).
+
+    Our account there pays the start of each child that this node delegates, and its
+    top-ups; it gets our payments and the refunds. Nothing else may take MU from it.
+    The mark moves to the last movement that was checked. It stops before a start that
+    may still be in progress, and the next read asks again from there.
+    """
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if not client_id:
+        return
+    stored = sc.get_peer_statement_mark(peer_id)
+    # An account starts at 0 before its movement 1, so a peer read for the first time
+    # is checked from there.
+    mark = statement_check.Mark(stored.get("seq", 0), stored.get("balance_mu", 0))
+    read_at = time.time()
+    try:
+        statement = balance_statement.fetch(
+            peer_id, client_id,
+            since_seconds=statement_check.since_seconds(stored.get("read_at")),
+        )
+    except Exception as e:
+        statement_check.penalise_no_statement(peer_id, client_id, e)
+        if debug_mode:
+            log.LOGGER(f"No statement of our account on {peer_id}: {e}")
+        return
+
+    rows, problem = statement_check.new_rows(statement, mark)
+    if rows is None:
+        if problem:
+            statement_check.penalise_once(peer_id, client_id, Reason.STATEMENT_INCONSISTENT, problem)
+        # Go on from what the peer says now: the movements up to here cannot be
+        # checked, and asking for them again would only fail again.
+        last = statement.movements[-1].seq if statement.movements else None
+        sc.set_peer_statement_mark(peer_id, last, from_amount(statement.balance), read_at)
+        return
+
+    problems, stop_at = statement_check.account_problems(
+        rows, sc.delegated_starts_on_peer(peer_id), now_ts=statement.ts
+    )
+    if problems:
+        statement_check.penalise_once(
+            peer_id, client_id, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
+        )
+    if stop_at is None:
+        sc.set_peer_statement_mark(
+            peer_id, rows[-1].seq if rows else mark.seq, from_amount(statement.balance), read_at
+        )
+        return
+    checked = [row for row in rows if row.seq < stop_at]
+    if checked:
+        # The read time stays: the next span must still reach the start that waits.
+        sc.set_peer_statement_mark(
+            peer_id, checked[-1].seq, checked[-1].balance_after, stored.get("read_at")
+        )
+
+
+def _read_child(row: dict, debug_mode: bool = False):
+    """What the child consumed on its peer since its mark, and the new mark.
+
+    Returns ``(spent_peer_mu, mark)``, and raises when nothing could be read. From the
+    statement when it adds up from the mark (#570): the movements since the mark,
+    without those of the father. Otherwise from two readings of the balance: the
+    difference against the mark, and the next tick goes on from the end of this
+    statement.
+    """
+    peer_id, token = row.get('peer_id'), row['token']
+    mark = statement_check.Mark(row.get('peer_statement_seq'), int(row.get('peer_balance_mu') or 0),
+                                row.get('peer_statement_ts'))
+    read_at = time.time()
+    statement, error = None, None
+    try:
+        statement = balance_statement.fetch(
+            peer_id, get_client_id_on_other_peer(peer_id=peer_id), token=token,
+            since_seconds=statement_check.since_seconds(
+                row.get('peer_statement_read_at') if mark.seq is not None else None
+            ),
+        )
+    except Exception as e:
+        error = e
+
+    if statement is not None:
+        rows, problem = statement_check.new_rows(statement, mark)
+        # With no mark, nothing says which movements are new.
+        if rows is not None and mark.seq is not None:
+            problems = statement_check.child_problems(rows, mark=mark, rates=_peer_rates(peer_id))
+            if problems:
+                problems = statement_check.child_problems(
+                    rows, mark=mark, rates=_peer_rates(peer_id, refresh=True)
+                )
+            if problems:
+                statement_check.penalise_once(
+                    peer_id, token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
+                )
+            last = rows[-1] if rows else None
+            return statement_check.consumption(rows), {
+                "peer_balance_mu": from_amount(statement.balance),
+                "seq": last.seq if last else mark.seq,
+                "ts": last.ts if last else mark.ts,
+                "read_at": read_at,
+            }
+        if problem:
+            statement_check.penalise_once(peer_id, token, Reason.STATEMENT_INCONSISTENT, problem)
+        balance = from_amount(statement.balance)
+        last = statement.movements[-1] if statement.movements else None
+        new_mark = {"peer_balance_mu": balance, "seq": last.seq if last else None,
+                    "ts": last.ts if last else None, "read_at": read_at}
+    else:
+        try:
+            balance = instance_balance_on_peer(peer_id=peer_id, token=token)
+        except Exception:
+            # Neither answer: the peer is down, or it does not know the instance. The
+            # caller tells the two apart.
+            raise error from None
+        # The peer knows the instance and does not give its statement.
+        statement_check.penalise_no_statement(peer_id, token, error)
+        new_mark = {"peer_balance_mu": balance, "seq": None, "ts": None, "read_at": None}
+    if debug_mode:
+        log.LOGGER(f"Charging {row.get('id')} from the balance on {peer_id}, not from its statement.")
+    return mark.balance - balance, new_mark
+
+
 def maintain_delegated_instances(debug_mode: bool = False):
     """Charge a delegated instance for what the peer actually metered.
 
@@ -485,14 +627,18 @@ def maintain_delegated_instances(debug_mode: bool = False):
     be whole when the instance stopped and the father would be handed back runtime he
     really used.
 
-    What it costs is *measured*, not predicted: the peer's own figure for the child is
-    read again and the difference against the last reading is what the client pays,
-    converted at today's rate. A quote frozen at delegation would drift three ways at
-    once -- the peer repricing its resources, the two nodes' MU rates moving against
-    each other, and a hotplug making the child bigger than the shape it was quoted at
-    -- and every one of those drifts is invisible from here. The subtraction happens
-    on the peer's scale, before any conversion, so a rate that moved between two
-    readings cannot read as consumption.
+    What it costs is *measured*, not predicted: the statement of the child on the peer
+    (#570) says what it spent since the last movement checked, and each movement is
+    checked against its rule (`statement_check`). A quote frozen at delegation would
+    drift three ways at once -- the peer repricing its resources, the two nodes' MU
+    rates moving against each other, and a hotplug making the child bigger than the
+    shape it was quoted at -- and every one of those drifts is invisible from here. The
+    sum happens on the peer's scale, before any conversion, so a rate that moved
+    between two readings cannot read as consumption. When the statement cannot be
+    used, the charge is the fall of the balance since the last reading.
+
+    Our own account on each peer is checked first: it pays the starts and the top-ups
+    of these children, and nothing else may take MU from it.
 
     A tick that cannot reach the peer charges nothing and loses nothing: the mark is
     only advanced by a reading that succeeded, so the next one that does charges
@@ -507,11 +653,18 @@ def maintain_delegated_instances(debug_mode: bool = False):
     An instance that cannot pay is stopped, exactly as a local one is, and
     `stop_instance` hands its father whatever is left.
     """
-    for row in sc.get_delegated_instances():
+    delegated = sc.get_delegated_instances()
+    for peer_id in sorted({row.get('peer_id') for row in delegated if row.get('peer_id')}):
+        try:
+            _check_our_account(peer_id, debug_mode=debug_mode)
+        except Exception as e:
+            log.LOGGER(f"Error checking our account on {peer_id}: {e}")
+
+    for row in delegated:
         peer_id, token, vmachine_id = row.get('peer_id'), row['token'], row.get('id')
 
         try:
-            peer_balance_mu = instance_balance_on_peer(peer_id=peer_id, token=token)
+            read = _read_child(row, debug_mode=debug_mode)
         except Exception as e:
             if is_peer_available(peer_id=peer_id):
                 # The peer is up and does not know this instance: it is gone there,
@@ -534,12 +687,11 @@ def maintain_delegated_instances(debug_mode: bool = False):
                 )
             continue
 
-        spent_peer_mu = int(row.get('peer_balance_mu') or 0) - peer_balance_mu
+        spent_peer_mu, mark = read
         if spent_peer_mu <= 0:
-            # Nothing metered, or the child was topped up between readings and holds
-            # more than the mark. Either way there is nothing to charge; re-mark and
-            # measure from here.
-            sc.update_delegated_peer_balance(token=token, peer_balance_mu=peer_balance_mu)
+            # Nothing metered, or the child got more than it spent. Either way there
+            # is nothing to charge; re-mark and measure from here.
+            sc.settle_delegated_tick(token=token, charge_mu=0, mark=mark)
             continue
 
         # Rounds up, and the client pays the remainder: this is a cost already
@@ -555,7 +707,10 @@ def maintain_delegated_instances(debug_mode: bool = False):
             continue
         # What the peer metered, and this node's commission on it (#551). No minimum
         # here: the minimum is for the start, and a tick can be very small.
-        charge_mu += commission_on(charge_mu)
+        commission_mu = commission_on(charge_mu)
+        charge_mu += commission_mu
+        detail = {"peer_id": peer_id, "peer_mu": str(spent_peer_mu),
+                  "commission_mu": str(commission_mu)}
 
         balance_mu = int(row.get('balance_mu') or 0)
         if balance_mu < charge_mu and not ALLOW_DEBT:
@@ -569,7 +724,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
             # owed to the peer. Refunding it to the father would hand him back
             # runtime this node has paid for, and the shortfall the node absorbs is
             # then only the part the deposit could not reach.
-            sc.update_delegated_balance(token=token, balance_mu=0)
+            sc.settle_delegated_tick(token=token, charge_mu=balance_mu, mark=mark, detail=detail)
             # No reputation penalty, the same as in the local tick: the father holds
             # the balance, so this death is not a fault of the service.
             try:
@@ -578,13 +733,10 @@ def maintain_delegated_instances(debug_mode: bool = False):
                 log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {e}")
             continue
 
-        # Deposit and mark in one write, because they are one fact. Charging first and
-        # marking second bills this same consumption again on the next tick if the
-        # second never lands -- every `_execute` commits on its own, so two calls are
-        # two transactions -- and marking first writes the consumption off instead.
-        sc.update_delegated_deposit(
-            token=token, balance_mu=balance_mu - charge_mu, peer_balance_mu=peer_balance_mu
-        )
+        # Charge and mark in one transaction, because they are one fact. Charging first
+        # and marking second bills this same consumption again on the next tick if the
+        # second never lands, and marking first writes the consumption off instead.
+        sc.settle_delegated_tick(token=token, charge_mu=charge_mu, mark=mark, detail=detail)
         if debug_mode:
             log.LOGGER(
                 f"Charged delegated instance {vmachine_id} {format_mu(charge_mu)} for "
@@ -982,6 +1134,30 @@ def sweep_dead_instances(force: bool = False) -> int:
         return 0
 
 
+LEDGER_SWEEP_INTERVAL_S = 3600
+_last_ledger_sweep = 0.0
+
+
+def sweep_balance_movements(force: bool = False) -> int:
+    """Delete the movements older than `ledger.RETENTION_DAYS` (#570).
+
+    At most once per hour unless ``force`` is true. Returns the number of rows deleted.
+    """
+    global _last_ledger_sweep
+    now = time.monotonic()
+    if not force and _last_ledger_sweep and now - _last_ledger_sweep < LEDGER_SWEEP_INTERVAL_S:
+        return 0
+    _last_ledger_sweep = now
+    try:
+        deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
+        if deleted:
+            log.LOGGER(f"Retention sweep deleted {deleted} balance movement(s).")
+        return deleted
+    except Exception as e:
+        log.LOGGER(f"Error in the balance movement retention sweep: {e}")
+        return 0
+
+
 def _manager_pass(short_interval_count: int) -> int:
     """One maintenance pass, ending in the wait. Returns the next interval count."""
     if short_interval_count == int(SHORT_INTERVAL_COUNT):
@@ -1000,6 +1176,7 @@ def _manager_pass(short_interval_count: int) -> int:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
     sweep_dead_instances()
+    sweep_balance_movements()
     maintain_delegated_instances(debug_mode=DEBUG_MODE())
     close_orphaned_delegated_endpoints()
     enforce_activity_window(debug_mode=DEBUG_MODE())

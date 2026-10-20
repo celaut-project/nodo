@@ -1,3 +1,4 @@
+from src.database import ledger
 from src.database.sql_connection import SQLConnection
 from src.manager.manager import ALLOW_DEBT
 from src.utils.monetary import display_unit, format_mu, parse_to_mu
@@ -37,10 +38,10 @@ def credit_client(client_id: str, amount: str, decrement: bool = False):
                 f"{format_mu(current_mu)} available, needed {format_mu(amount_mu)}."
             )
             return
-        sc.reduce_balance(client_id, amount_mu)
+        sc.move_balance(client_id, -amount_mu, ledger.DEBIT, detail={"reason": "operator"})
         verb = "debited"
     else:
-        sc.add_balance(client_id, amount_mu)
+        sc.move_balance(client_id, amount_mu, ledger.CREDIT, detail={"reason": "operator"})
         verb = "credited"
 
     print(f"Client {client_id} {verb} {format_mu(amount_mu)}.")

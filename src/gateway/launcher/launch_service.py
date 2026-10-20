@@ -5,7 +5,8 @@ from protos import celaut_pb2 as celaut, celaut_pb2
 from src.balancers.execution_balancer.execution_balancer import execution_balancer, estimate_cost_on_peer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
-from src.manager.manager import default_initial_balance, descends_from_dev_client, spend_mu
+from src.database import ledger
+from src.manager.manager import bind_child_token, default_initial_balance, descends_from_dev_client, spend_mu
 from src.utils import activity_window, demand_history, utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
@@ -241,10 +242,13 @@ def _force_delegate(
         raise Exception(f"force_execution: {e}") from e
 
     refund_container = []
+    start_charge = []
     if not spend_mu(
             id=father_id,
             amount_mu=initial_mu,
-            refund_function_container=refund_container
+            refund_function_container=refund_container,
+            kind=ledger.CHILD_START,
+            movement=start_charge,
     ):
         raise Exception(f"force_execution: error charging {father_id}.")
 
@@ -262,7 +266,9 @@ def _force_delegate(
         father_ip=father_ip,
         commission_mu=commission_mu,
         build_mu=build_mu,
+        variance=estimated_cost.variance,
     )
+    bind_child_token(start_charge, instance.token)
 
     # Mirrors the same post-delegation firewall step the balancer-driven loop
     # below runs for a delegated instance (see launch_service).
@@ -576,11 +582,16 @@ def launch_service(
                 log.LOGGER(f'Service balancer select peer {peer}')
 
                 refund_container = []
+                # The `child_start` of the father. The child does not exist yet, so
+                # its token is set on the row once it does (`bind_child_token`).
+                start_charge = []
 
                 if not spend_mu(
                         id=father_id,
                         amount_mu=initial_mu,
-                        refund_function_container=refund_container
+                        refund_function_container=refund_container,
+                        kind=ledger.CHILD_START,
+                        movement=start_charge,
                 ):
                     raise Exception('Launch service error charging ' + father_id)
 
@@ -607,6 +618,7 @@ def launch_service(
                         father_ip=father_ip,
                         commission_mu=commission_mu,
                         build_mu=build_mu,
+                        variance=estimated_cost.variance,
                     )
 
                 else:
@@ -618,6 +630,7 @@ def launch_service(
                         metadata=metadata, service=service, service_id=service_id,
                         refund_container=refund_container
                     )
+                bind_child_token(start_charge, instance.token)
 
                 #  If the service was from an internal instance, allow it to connect to it's new dependency.
                 #   There is an exception for instances with the "rundev" refix. In such cases there is no container.
