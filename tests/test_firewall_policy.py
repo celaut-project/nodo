@@ -28,7 +28,7 @@ def iptables(rule):
 
 
 class BlockAllTests(unittest.TestCase):
-    def test_drops_every_new_connection_whatever_the_protocol(self):
+    def test_drops_new_packets_whatever_the_protocol(self):
         # No protocol on purpose: with one rule for TCP and one for UDP, ICMP and
         # every other IP protocol left a guest through the masquerade (#550, F1).
         [rule] = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
@@ -40,9 +40,9 @@ class BlockAllTests(unittest.TestCase):
         self.assertIsNone(rule.destination)
 
     def test_drops_what_conntrack_cannot_follow(self):
-        # A RST, a SYN+FIN or an unsolicited echo reply is INVALID, not NEW, and
-        # the masquerade does not rewrite it: it left with the guest's own
-        # address, past block_all and outside Tor (#555).
+        # A RST, a SYN+FIN or an echo reply that nobody asked for is INVALID, not
+        # NEW. The masquerade does not change it. It left with the own address of
+        # the guest, past block_all and outside Tor (#555).
         [rule] = policy.block_all_rules(vmachine_id=VM, vm_ip=VM_IP)
         self.assertEqual(rule.ct_states, ("NEW", "INVALID", "UNTRACKED"))
         self.assertNotIn("ESTABLISHED", rule.ct_states)
