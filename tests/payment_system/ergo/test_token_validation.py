@@ -45,13 +45,26 @@ def _token(token_id=TOKEN, amount=100):
 
 
 class _Response:
-    status_code = 200
-
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
+        self.text = ""
 
     def json(self):
         return self._payload
+
+
+def _explorer(boxes, mempool=(), calls=None):
+    """A fake ``requests.get`` that serves the confirmed boxes in pages, like the explorer."""
+    def get(url, params=None, timeout=None):
+        if calls is not None:
+            calls.append((url, params, timeout))
+        params = params or {}
+        if "/mempool/transactions/byAddress/" in url:
+            return _Response({"items": [{"outputs": list(mempool)}], "total": 1})
+        offset, limit = params.get("offset", 0), params.get("limit", 100)
+        return _Response({"items": list(boxes)[offset:offset + limit], "total": len(boxes)})
+    return get
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -81,8 +94,8 @@ class TokenValidationTests(unittest.TestCase):
         address.start()
         self.addCleanup(address.stop)
 
-    def _validate(self, boxes, amount=100, asset=None):
-        with mock.patch.object(interface.requests, "get", return_value=_Response(boxes)):
+    def _validate(self, boxes, amount=100, asset=None, mempool=(), calls=None):
+        with mock.patch.object(interface.requests, "get", _explorer(boxes, mempool, calls)):
             return interface._validate(
                 amount=amount, token=DEPOSIT, ledger=self.ledger, script=SCRIPT,
                 asset=asset,
@@ -147,6 +160,70 @@ class TokenValidationTests(unittest.TestCase):
         boxes = [_box(assets=[None, {"tokenId": TOKEN, "amount": "not-a-number"},
                               _token(amount=100)])]
         self.assertTrue(self._validate(boxes, asset=_asset()))
+
+    def test_a_box_with_a_non_text_r4_does_not_block_the_deposit(self):
+        # Anyone can send a box to the node address. Its R4 must not stop the boxes after it.
+        for rendered in ("1", "zz", "ff", ""):
+            odd = _box(assets=[_token(amount=100)])
+            odd["additionalRegisters"]["R4"] = {"renderedValue": rendered}
+            boxes = [odd, _box(assets=[_token(amount=100)])]
+            self.assertTrue(self._validate(boxes, asset=_asset()), rendered)
+
+    def test_a_box_without_r4_or_with_a_null_r4_is_skipped(self):
+        bare = {"value": 1, "assets": []}
+        null = {"value": 1, "assets": [], "additionalRegisters": {"R4": None}}
+        boxes = [bare, null, _box(assets=[_token(amount=100)])]
+        self.assertTrue(self._validate(boxes, asset=_asset()))
+
+    def test_r4_is_read_from_the_serialized_value(self):
+        raw = DEPOSIT.encode("utf-8")
+        good = _box(assets=[_token(amount=100)])
+        good["additionalRegisters"]["R4"] = {
+            "serializedValue": ("0e" + bytes([len(raw)]).hex() + raw.hex()),
+            "renderedValue": "not-hex",
+        }
+        self.assertTrue(self._validate([good], asset=_asset()))
+        # A Coll[Byte] whose length does not match its bytes is not a deposit.
+        bad = _box(assets=[_token(amount=100)])
+        bad["additionalRegisters"]["R4"] = {"serializedValue": "0e05" + raw.hex()}
+        self.assertFalse(self._validate([bad], asset=_asset()))
+
+    def test_a_later_box_with_the_same_token_can_pay_enough(self):
+        boxes = [_box(assets=[_token(amount=1)]), _box(assets=[_token(amount=100)])]
+        self.assertTrue(self._validate(boxes, asset=_asset()))
+        self.assertTrue(self._validate(boxes[::-1], asset=_asset()))
+
+    def test_every_page_of_the_list_is_read(self):
+        filler = [_box(r4="other", assets=[_token(amount=100)])] * (interface.EXPLORER_PAGE_SIZE + 5)
+        boxes = filler + [_box(assets=[_token(amount=100)])]
+        calls = []
+        self.assertTrue(self._validate(boxes, asset=_asset(), calls=calls))
+        self.assertEqual([c[1]["offset"] for c in calls[:2]], [0, interface.EXPLORER_PAGE_SIZE])
+
+    def test_the_search_stops_at_the_first_valid_box(self):
+        calls = []
+        self.assertTrue(self._validate([_box(assets=[_token(amount=100)])],
+                                       asset=_asset(), calls=calls))
+        self.assertEqual(len(calls), 1)
+
+    def test_every_request_has_a_timeout(self):
+        calls = []
+        self._validate([_box(assets=[_token(amount=1)])], asset=_asset(), calls=calls)
+        self.assertTrue(calls)
+        self.assertTrue(all(c[2] == interface.EXPLORER_TIMEOUT_SECONDS for c in calls))
+
+    def test_a_payment_still_in_the_mempool_is_accepted(self):
+        mempool = [dict(_box(assets=[_token(amount=100)]), address=WALLET)]
+        self.assertTrue(self._validate([], asset=_asset(), mempool=mempool))
+        # An output to another address is not a payment to this node.
+        elsewhere = [dict(_box(assets=[_token(amount=100)]), address="9other")]
+        self.assertFalse(self._validate([], asset=_asset(), mempool=elsewhere))
+
+    def test_an_explorer_error_refuses_the_payment(self):
+        with mock.patch.object(interface.requests, "get", return_value=_Response({}, 500)):
+            self.assertFalse(interface._validate(
+                amount=100, token=DEPOSIT, ledger=self.ledger, script=SCRIPT, asset=_asset()
+            ))
 
 
 if __name__ == "__main__":
