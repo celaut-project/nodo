@@ -378,6 +378,22 @@ def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
         if curve <= 0:
             raise ConfigValidationError(f"pricing.SCARCITY_CURVE must be positive, got {curve}")
 
+    if "MAX_PRICE_VOLATILITY" in pricing:
+        raw_volatility = pricing["MAX_PRICE_VOLATILITY"]
+        try:
+            if isinstance(raw_volatility, bool):
+                raise TypeError("a boolean is not a number")
+            volatility = float(raw_volatility)
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                f"pricing.MAX_PRICE_VOLATILITY must be a number, got {raw_volatility!r}"
+            ) from exc
+        if volatility != 0 and not volatility >= 1:
+            raise ConfigValidationError(
+                "pricing.MAX_PRICE_VOLATILITY must be 0 (no bound) or at least 1 "
+                f"(1 = the price is fixed for the life of the instance), got {volatility}"
+            )
+
     free = config.get("free_tier") or {}
     if not isinstance(free, dict):
         raise ConfigValidationError("Malformed 'free_tier' mapping.")

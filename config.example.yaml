@@ -752,6 +752,23 @@ pricing:
   # How fast the surcharge arrives. 1.0 is linear in the missing supply; higher values
   # stay near 1x until the resource is genuinely scarce, then rise sharply.
   SCARCITY_CURVE: 1.0
+  # How far the price of a RUNNING instance may rise above the price it was launched at
+  # (issue #335). Scarcity is read from the load now, so without a bound an instance that
+  # was funded at 1x can be charged up to SCARCITY_MAX_MULTIPLIER when the node fills up,
+  # run out of balance, be stopped, and take an INSTANCE_OUT_OF_BALANCE penalty for a
+  # price it never saw. With 2.0 a tick charges at most twice the launch price, and the
+  # balance that an instance starts with is funded at that worst case, so it cannot be
+  # stopped for a rise. 1.0 fixes the price for the life of the instance. 0, or any
+  # value from SCARCITY_MAX_MULTIPLIER up, leaves it unbounded.
+  #
+  # The bound is a ceiling only: a fall of the load reaches a running instance in full.
+  # A bound in both directions would keep an instance paying more than the load asks for
+  # when the node empties. The risk that this key covers is only the rise. An instance
+  # launched while free_tier.FREE_WHILE_SCARCITY_BELOW made the node free stays free.
+  # It works per resource, on the scarcity multiplier; the base prices above are not
+  # bounded. It does not apply to an instance that a peer runs for you: that peer meters
+  # the price. Must be 0 or at least 1.
+  MAX_PRICE_VOLATILITY: 2.0
 
 # What this node gives away.
 free_tier:
@@ -759,7 +776,9 @@ free_tier:
   # with costs.ALLOW_DEBT off, which is the default, a client credited nothing is
   # refused at its first launch (issue #324). So the default funds one hour of the
   # smallest useful guest at the prices above: 0.5 GiB of RAM (500_000) plus one vCPU
-  # (4_000_000), on an unloaded node. Derived from those prices, not a round number:
+  # (4_000_000), on an unloaded node, times pricing.MAX_PRICE_VOLATILITY (2.0), because
+  # a launch is funded at the worst price that the instance can reach: 9_000_000. With
+  # MAX_PRICE_VOLATILITY off, set it back to 4_500_000. Derived from those prices, not a round number:
   # an operator who changes a price and wants the credit to keep meaning "one hour"
   # has to recompute it.
   #
@@ -767,7 +786,7 @@ free_tier:
   # has not built yet), so a new client's first launch of an unbuilt service still
   # needs funding. Covering that by default would give away 10_000_000 MU to anyone
   # who calls GenerateClient.
-  CREDIT_MU_PER_NEW_CLIENT: 4500000
+  CREDIT_MU_PER_NEW_CLIENT: 9000000
   # Charge nothing while EVERY resource sits below this share of its capacity (0.0 to
   # 1.0). 0.0 disables it (always charge); 0.5 means "free while the node is under half
   # load". This is how you run a node that is free until it is actually busy.

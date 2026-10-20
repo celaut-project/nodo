@@ -57,6 +57,27 @@ DEBUG_MODE = lambda: env_manager.get("DEBUG_MODE")
 sc = SQLConnection()
 
 
+def _row_launch_bp(sys_req):
+    """The price the instance was launched at, or None when the row does not carry it.
+
+    None means no bound: the row is from before the columns existed, or a column is
+    NULL for another reason, and the instance is charged at the current load. Indexed
+    defensively for the same reason as `_row_arch`: a missing column costs one instance
+    its bound, never the tick of every instance.
+    """
+    try:
+        found = {
+            "cpu": sys_req["launch_cpu_bp"],
+            "mem": sys_req["launch_mem_bp"],
+            "disk": sys_req["launch_disk_bp"],
+        }
+    except (KeyError, IndexError, TypeError):
+        return None
+    if any(value is None for value in found.values()):
+        return None
+    return {resource: int(value) for resource, value in found.items()}
+
+
 def _row_arch(sys_req) -> str:
     """The ``arch`` column of a ``get_sys_req`` row, or None.
 
@@ -401,6 +422,10 @@ def maintain_vmachines(debug_mode: bool=False):
             seconds=MANAGER_ITERATION_TIME,
             scarcity=scarcity,
             arch=_row_arch(sys_req),
+            # What this instance was launched at, so that a rise of the load since
+            # then reaches it only as far as `pricing.MAX_PRICE_VOLATILITY` allows.
+            # The clamp is in the cost function, the same one that the quote uses.
+            launch_bp=_row_launch_bp(sys_req),
         )
         if debug_mode:
             log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {MANAGER_ITERATION_TIME}s")
@@ -469,6 +494,11 @@ def maintain_delegated_instances(debug_mode: bool = False):
     only advanced by a reading that succeeded, so the next one that does charges
     everything metered since. A peer that answers but no longer knows the instance has
     stopped it on its own, and the row here follows it down.
+
+    No price bound applies here (`pricing.MAX_PRICE_VOLATILITY`). The peer meters the
+    price of a delegated child with its own scarcity and its own bound, and this node
+    has no launch price to measure from: it never priced the child. What this node
+    can do is quote the peer's price plus the commission before it delegates.
 
     An instance that cannot pay is stopped, exactly as a local one is, and
     `stop_instance` hands its father whatever is left.

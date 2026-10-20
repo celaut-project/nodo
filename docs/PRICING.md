@@ -194,9 +194,10 @@ pricing:
   # Scarcity: per resource, never global.
   SCARCITY_MAX_MULTIPLIER: 10        # ceiling of the surcharge when a resource runs out
   SCARCITY_CURVE: 1.0                # 1.0 = linear; >1 stays flat until real scarcity
+  MAX_PRICE_VOLATILITY: 2.0          # a running instance pays at most 2x its launch multiplier; 0 = no bound
 
 free_tier:
-  CREDIT_MU_PER_NEW_CLIENT: 4500000  # one hour of 0.5 GiB + 1 vCPU at the prices above
+  CREDIT_MU_PER_NEW_CLIENT: 9000000  # one hour of 0.5 GiB + 1 vCPU at the prices above, at 2x
   FREE_WHILE_SCARCITY_BELOW: 0.0     # charge nothing while every resource is under this load
 ```
 
@@ -232,6 +233,68 @@ linear would charge. Raising `lack` to the *reciprocal* of the curve does the op
 and is the shape this shipped with — the two agree only at `1.0`, which was the one
 value under test.
 
+### Bounding the price of a running instance
+
+Scarcity is read from the load of the moment and applies to every running instance,
+whenever it was launched. A resource that is scarce now is scarce for everybody who holds
+it. Without a bound, an instance that was funded at 1x can be charged up to
+`SCARCITY_MAX_MULTIPLIER` when the node fills up. With the shipped values it then runs out
+in about six minutes instead of one hour. It is stopped, and it takes an
+`INSTANCE_OUT_OF_BALANCE` penalty for a price that nobody quoted to it.
+
+`pricing.MAX_PRICE_VOLATILITY` bounds that. At launch, the node records the scarcity
+multiplier of each resource in `local_instances` (`launch_cpu_bp`, `launch_mem_bp`,
+`launch_disk_bp`, in basis points). Each tick then charges, per resource:
+
+```
+multiplier[r] = min(current_multiplier[r], launch_multiplier[r] * MAX_PRICE_VOLATILITY)
+```
+
+- `2.0` lets a tick charge at most twice the launch price.
+- `1.0` fixes the multiplier for the life of the instance.
+- `0`, or a value from `SCARCITY_MAX_MULTIPLIER` up, is no bound. This was the
+  behaviour before the key existed.
+- A value between `0` and `1` is refused.
+
+**The bound is a ceiling only.** It is not symmetric, for this reason: the risk that it
+covers is a rise that the funding of the instance did not cover. A fall of the load
+reaches a running instance in full, so a client never pays more than the current load
+asks. A symmetric bound would also keep the price up while the node empties out. The
+cost is a one-way bet in favour of the client, which the node accepts, because the
+instance is funded at the worst case.
+
+Three more facts:
+
+- **A launch while the node is free stays free.** An instance launched while
+  `free_tier.FREE_WHILE_SCARCITY_BELOW` made the node free records 0 for each resource.
+  0 times the bound is 0, so the first tick after the node crosses the threshold does
+  not stop it. This holds only with the bound on.
+- **Only the multiplier is bounded.** A change of the base prices (`RAM_MU_PER_GIB_HOUR`
+  and the others) reaches a running instance in full.
+- **A row with no recorded launch price is not bounded.** Its columns are NULL (an instance
+  from before the columns existed), and it is charged at the current load as before. An
+  instance that a peer runs for you (delegated) is not bounded either. The peer meters
+  its price, and this node never priced the instance.
+
+The clamp is in `execution_cost.maintenance_charge_mu`, not in the maintenance loop, so
+the tick and the quote come from the same function.
+
+**What the quote shows with the bound on.** `GetServiceEstimatedCost` has these figures:
+
+| Field | Meaning |
+|---|---|
+| `init_maintenance_cost` | One tick for the resources at the start, at the load now. This is the launch price. |
+| `max_maintenance_cost` | One tick for the maximum resources, at the highest multiplier that the bound allows. No tick can charge more. |
+| `cost` | The build, plus the initial balance. The balance is `INITIAL_RUNTIME_HOURS` at the worst case (launch multiplier times the bound). |
+| `variance` | Not computed (0). The node does not need it: `max_maintenance_cost` is the limit. |
+
+With the bound off, `max_maintenance_cost` is the charge at the current load, as before:
+the node does not promise a limit, and the client has no worst case to read.
+
+The quote and the funding are exact only when the load does not move between the quote and
+the launch. A launch at a higher load than its quote records a higher launch price and
+is funded for it.
+
 ### Starting an instance
 
 ```
@@ -243,6 +306,12 @@ The balance is what buys runtime, and it is derived from the requested resources
 `deposits.INITIAL_RUNTIME_HOURS` (`manager.default_initial_balance`) — so a 128 MiB
 instance and an 8 GiB one no longer start with the same funding. The maintenance ticks
 then spend that balance down.
+
+With `pricing.MAX_PRICE_VOLATILITY` on, the hours are priced at the launch multiplier times
+the bound (see [above](#bounding-the-price-of-a-running-instance)): twice the price at an
+idle node with the shipped `2.0`. No tick can charge more, so a price rise cannot stop the
+instance. `free_tier.CREDIT_MU_PER_NEW_CLIENT` follows, or a new client is refused at its
+first launch (issue #324).
 
 Occupancy is deliberately **not** charged again as part of the start. Doing both billed
 the same window twice: the client paid for the hour once as a start charge that bought

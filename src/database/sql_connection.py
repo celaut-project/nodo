@@ -8,7 +8,7 @@ from collections import deque
 from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
-from typing import Callable, Dict, Generator, Iterable, List, Sequence, Tuple, Optional
+from typing import Callable, Dict, Generator, Iterable, List, Mapping, Sequence, Tuple, Optional
 from src.utils.keyvalue import message_to_json
 
 from protos import celaut_pb2
@@ -536,6 +536,7 @@ class SQLConnection(metaclass=Singleton):
         cpu_period: int = 0,
         cpu_quota: int = 0,
         arch: Optional[str] = None,
+        launch_bp: Optional[Mapping[str, int]] = None,
     ):
         """
         Adds an internal container to the database.
@@ -569,17 +570,24 @@ class SQLConnection(metaclass=Singleton):
                 this row rather than re-reading the service's manifest -- a
                 resolution that needs the service on disk, which an instance can
                 outlive. NULL is charged the node's scalar memory price.
+            launch_bp (Optional[Mapping[str, int]]): The scarcity multiplier of each
+                resource ("cpu", "mem", "disk") at launch, in basis points
+                (``execution_cost.launch_price_bp``). The tick bounds its charge
+                against it when ``pricing.MAX_PRICE_VOLATILITY`` is on. A free launch
+                is 0 for each. None stores NULL, which means no bound.
         """
+        launch_bp = launch_bp or {}
         # `launched_at` is written here rather than left to a column default: SQLite
         # refuses a non-constant default on `ALTER TABLE ADD COLUMN`, so a migrated
         # database's column defaults to NULL however the fresh schema is declared.
         # Writing it at the one insert is what makes the two agree.
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
-              serialized_instance, service_id, virtualizer, envs, arch))
+              serialized_instance, service_id, virtualizer, envs, arch,
+              launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk")))
         _local_capacity_changed()
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
@@ -745,7 +753,9 @@ class SQLConnection(metaclass=Singleton):
 
         ``arch`` rides along for the same reason: it is not a resource, but it selects
         the memory *price* when the operator has set one per architecture, so the tick
-        needs it from the same read rather than from a second lookup per instance.
+        needs it from the same read rather than from a second lookup per instance. The
+        three ``launch_*_bp`` columns ride along for the same reason: they are the price
+        the instance was launched at, which the bound on the charge is measured from.
 
         Args:
             id (str): The id of the internal container.
@@ -754,7 +764,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch FROM local_instances WHERE id = ? AND killed_at IS NULL
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:

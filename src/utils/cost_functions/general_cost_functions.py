@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Mapping, Optional
 
 from protos import celaut_pb2 as celaut
 from src.utils.config import ConfigManager
@@ -6,6 +6,7 @@ from src.utils.cost_functions.execution_cost import (
     build_charge_mu,
     is_free,
     maintenance_charge_mu,
+    worst_case_charge_mu,
 )
 from src.utils.monetary import HOUR_SECONDS, prices
 
@@ -66,6 +67,7 @@ def compute_maintenance_cost(
     seconds: float,
     scarcity: Optional[Dict[str, float]] = None,
     arch: Optional[str] = None,
+    launch_bp: Optional[Mapping[str, int]] = None,
 ) -> int:
     """MU owed for holding `system_resources` for `seconds`.
 
@@ -74,8 +76,23 @@ def compute_maintenance_cost(
 
     `arch` selects the per-architecture memory price when one is configured; omitted,
     the node's scalar memory price applies.
+
+    `launch_bp` is the price the instance was launched at; see `maintenance_charge_mu`.
     """
     return maintenance_charge_mu(
+        system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch,
+        launch_bp=launch_bp,
+    )
+
+
+def compute_worst_case_maintenance_cost(
+    system_resources: celaut.Sysresources,
+    seconds: float,
+    scarcity: Optional[Dict[str, float]] = None,
+    arch: Optional[str] = None,
+) -> int:
+    """The most a tick can charge an instance launched now; see `worst_case_charge_mu`."""
+    return worst_case_charge_mu(
         system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch
     )
 

@@ -55,6 +55,9 @@ HOUR_SECONDS = 3600
 # Scarcity multipliers are fractional, and every charge must stay integer, so they are
 # carried as basis points: 10_000 bp == 1.0x (no surcharge).
 SCARCITY_SCALE = 10_000
+# Used when `pricing.MAX_PRICE_VOLATILITY` is absent. It is the value that
+# config.example.yaml ships, so a node with no such key behaves like one that has it.
+DEFAULT_MAX_PRICE_VOLATILITY = 2.0
 
 # The one display unit that needs no rate, because it *is* the unit of account. Every
 # other unit comes from a payment contract or from `ui.UNITS.<name>` (see `display_unit`).
@@ -276,6 +279,25 @@ class Prices:
     # vCPU is worth, not a claim that the node reserves more of them -- a different
     # decision, and not one to smuggle in here.)
     ram_mu_per_gib_hour_by_arch: Mapping[str, int] = field(default_factory=dict)
+    # How far a running instance's scarcity multiplier may rise above the one it was
+    # launched at (`pricing.MAX_PRICE_VOLATILITY`). 0 is unbounded. Read it through
+    # `volatility_bound`, never raw: a value at or above `scarcity_max_multiplier` also
+    # means unbounded, because no multiplier can climb that far. Last, with a default,
+    # so a construction of this vector that omits it is valid.
+    max_price_volatility: float = 0.0
+
+    def volatility_bound(self) -> Optional[float]:
+        """The factor a launch multiplier may grow by, or None when nothing is bounded.
+
+        None for 0 (the operator switched the bound off) and for any value from
+        `scarcity_max_multiplier` up: a launch multiplier is at least 1x, so the bound
+        would then sit at or above the highest multiplier that exists and never clamp.
+        Answering None for both gives every caller one test for "no bound".
+        """
+        bound = float(self.max_price_volatility)
+        if bound <= 0 or bound >= self.scarcity_max_multiplier:
+            return None
+        return bound
 
     def ram_for_arch(self, arch: Optional[str]) -> int:
         """The memory price a guest of ``arch`` pays, per GiB-hour.
@@ -386,6 +408,15 @@ def prices() -> Prices:
     curve = _number("pricing.SCARCITY_CURVE", 1.0)
     if curve <= 0:
         raise ValueError(f"pricing.SCARCITY_CURVE must be positive, got {curve}.")
+    # 0 is "unbounded"; 1.0 fixes the multiplier for the life of the instance. Between
+    # 0 and 1 is refused: the bound only ever limits a rise, so a value under 1 would
+    # also cut the price of an instance below the one it was launched at, while the
+    # load did not move.
+    volatility = _number("pricing.MAX_PRICE_VOLATILITY", DEFAULT_MAX_PRICE_VOLATILITY)
+    if volatility != 0 and not volatility >= 1:
+        raise ValueError(
+            f"pricing.MAX_PRICE_VOLATILITY must be 0 (unbounded) or at least 1, got {volatility}."
+        )
 
     return Prices(
         ram_mu_per_gib_hour=_price_mu("RAM_MU_PER_GIB_HOUR"),
@@ -398,15 +429,18 @@ def prices() -> Prices:
         modify_resources_mu=_price_mu("MODIFY_RESOURCES_MU"),
         scarcity_max_multiplier=max_multiplier,
         scarcity_curve=curve,
+        max_price_volatility=volatility,
     )
 
 
 def free_tier() -> FreeTier:
     # One hour of the smallest useful guest at the shipped prices -- 0.5 GiB of RAM plus
-    # one vCPU -- matching config.example.yaml. Not 0: with costs.ALLOW_DEBT off, which
+    # one vCPU -- at the worst case that `pricing.MAX_PRICE_VOLATILITY` allows (2x at the
+    # shipped value), because that is what the first launch of a client is funded at.
+    # Matches config.example.yaml. Not 0: with costs.ALLOW_DEBT off, which
     # is the default, a client credited nothing is refused at its first launch and the
     # node does no work for anybody it did not fund by hand (issue #324).
-    raw_credit = _config().get("free_tier.CREDIT_MU_PER_NEW_CLIENT", 4_500_000)
+    raw_credit = _config().get("free_tier.CREDIT_MU_PER_NEW_CLIENT", 9_000_000)
     credit = _decimal(raw_credit if raw_credit not in (None, "") else 0,
                       what="free_tier.CREDIT_MU_PER_NEW_CLIENT")
     return FreeTier(
