@@ -215,10 +215,13 @@ def _sorted_with_commission(
 ) -> List[tuple[str, celaut_pb2.EstimatedCost]]:
     """``costs`` sorted as the client pays them, each with the price of the peer.
 
-    A peer is compared with its commission (#551): that is what the client pays when
-    this node delegates to it. The cost yielded is still the price of the peer, without
-    commission, because the launcher deposits that on the peer, and adds the commission
-    only to what it charges the client (``delegation_commission.with_commission``).
+    A peer is compared with its commission (#551): that is the least ``initial_mu`` that
+    starts the service when this node delegates to it (``with_commission``). The cost
+    yielded is still the quote of the peer, without commission. The client pays
+    ``initial_mu`` and nothing else (#563). The launcher keeps the commission out of it,
+    sends the peer the rest, and the peer takes its build from what it gets. The quote of
+    the peer says what the peer needs, and the commission is added to it only to compare
+    and to offer.
     """
     from src.utils.cost_functions.delegation_commission import with_commission
 

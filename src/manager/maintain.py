@@ -474,9 +474,10 @@ def maintain_vmachines(debug_mode: bool=False):
 def maintain_delegated_instances(debug_mode: bool = False):
     """Charge a delegated instance for what the peer actually metered.
 
-    A delegated child is funded exactly like a local one -- its father is charged the
-    whole deposit at StartService -- and that deposit sits on the delegation row, in
-    this node's MU. Nothing else charges it: the sweep above prices `local_instances`,
+    A delegated child is funded like a local one -- its father is charged `initial_mu`
+    at StartService, and the build comes out of it (#563) -- and what the father can get
+    back sits on the delegation row, in this node's MU: `initial_mu` less the commission
+    of this node and less the build of the peer. Nothing else charges it: the sweep above prices `local_instances`,
     and a delegated instance has no row there. Left unbilled, the deposit would still
     be whole when the instance stopped and the father would be handed back runtime he
     really used.

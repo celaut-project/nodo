@@ -56,16 +56,17 @@ def resolve_service_hash(service: str) -> str:
 # What the throwaway local dev client is funded with, in *our* MU.
 #
 # Not a price, and deliberately not an ERG figure: no real money moves for a dev
-# client, so this only has to sit comfortably above whatever the node quotes
+# client, so this only has to sit comfortably above whatever the node quotes. The
+# quote is the least `initial_mu` that starts the service
 # (`build + default_initial_balance`), which the `pricing` config puts in the
-# millions of MU per hour.
+# millions of MU per hour. The client pays `initial_mu` and nothing else (#563).
 #
-# It is emphatically *not* the instance's balance. The node derives that from the
-# resources actually requested (`manager.default_initial_balance`) and, when the
-# service is delegated, `configuration_for_peer` converts it to the executor's own
-# MU scale. Passing one figure for both -- as this did -- made the quote come out
-# above the very balance meant to pay it, and shipped a local MU figure to a peer
-# that reads MU on a different scale.
+# It is emphatically *not* the instance's balance. The node sets `initial_mu` from the
+# resources actually requested (`manager.default_initial_balance`) plus the build, and
+# takes the build out of it. When the service is delegated, `delegate_execution` sends
+# the peer that amount less the commission, in the executor's own MU scale. Passing one
+# figure for both -- as this did -- made the quote come out above the very balance meant
+# to pay it, and shipped a local MU figure to a peer that reads MU on a different scale.
 DEV_CLIENT_FUNDING_MU = 10**12
 
 
@@ -83,8 +84,9 @@ def generator(
     try:
         yield celaut_pb2.Client(client_id=client_id)
 
-        # No initial_mu: the node fills it from the requested resources, priced for
-        # deposits.INITIAL_RUNTIME_HOURS, in its own MU.
+        # No initial_mu: the node uses the build plus a balance that it fills from the
+        # requested resources, priced for deposits.INITIAL_RUNTIME_HOURS, in its own MU.
+        # The client pays that amount, and the node takes the build out of it (#563).
         config = celaut_pb2.Configuration()
         if envs:
             keyvalue.update(config.environment_variables, {

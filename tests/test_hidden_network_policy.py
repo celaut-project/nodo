@@ -188,7 +188,7 @@ class LaunchTests(unittest.TestCase):
         return self._launch(service, candidates, patch_declarations=False)
 
     def _launch(self, service, candidates, hidden=True, patch_declarations=True):
-        cost = SimpleNamespace(cost=SimpleNamespace())
+        cost = SimpleNamespace(cost=SimpleNamespace(), variance=0.0)
         mod = launch_mod
         with ExitStack() as stack:
             def patched(target, name, **kwargs):
@@ -206,6 +206,9 @@ class LaunchTests(unittest.TestCase):
             local = patched(mod, "local_execution", return_value=SimpleNamespace(instance=None))
             delegate = patched(mod, "delegate_execution", return_value=SimpleNamespace(instance=None))
             patched(mod, "from_amount", return_value=1)
+            # Pricing is not tested here: what funds a start has its own tests (#563).
+            patched(mod, "_funding_failure", return_value=None)
+            patched(mod, "_delegation_terms", return_value=(0, 0))
             patched(mod, "enforce_network_policy")
             patched(mod, "evaluate_possible_environment_workloads", return_value=None)
             patched(mod, "_detect_local_preflight_failure", return_value=None)

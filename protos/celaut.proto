@@ -488,9 +488,15 @@ message Configuration {
     repeated BytesKeyValue environment_variables = 1;
     // Not used. Senders do not set it, and receivers ignore it.
     repeated int32 spec_slot = 2;
-    // The balance of the instance at the start, in MU. The node charges it to the
-    // caller. If it is absent or zero, the node calculates a default from the
-    // resources at the start.
+    // The most that the start can cost the caller, in MU. The node charges all of it to
+    // the caller, and only this: no node charges the build of the service to the account
+    // of the caller. The node takes the cost of the build from this amount. What is left
+    // is the balance of the new instance, and the caller gets back what the instance
+    // does not spend. If the build does not fit in the amount, or if the balance that
+    // is left is less than one maintenance period with the resources at the start, the
+    // node rejects the start and charges nothing. If it is absent or zero, the node uses
+    // the cost of the build plus a default balance that it calculates from the resources
+    // at the start.
     optional Amount initial_mu = 3;
 }
 
@@ -575,10 +581,12 @@ message TokenMessage {
 
 // The cost to run a service on the node. The node that answers sets it.
 message EstimatedCost {
-    // The cost at the start, in MU: the cost to build the service, plus the balance of
-    // the instance at the start. This balance is Configuration.initial_mu. If the
-    // request has no initial_mu, the node uses its own default balance for the
-    // resources at the start.
+    // The least Configuration.initial_mu with which the node starts the service, in MU.
+    // It is the cost to build the service, plus the balance that the instance has after
+    // the build. This balance is the initial_mu of the request. If the request has no
+    // initial_mu, the node uses its own default balance for the resources at the start.
+    // A caller that sets initial_mu to this value pays no more than this value for the
+    // start, because the node takes the cost of the build from initial_mu.
     Amount cost = 1;
     // The cost of one maintenance period with the resources at the start, in MU.
     Amount init_maintenance_cost = 2;

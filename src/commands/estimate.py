@@ -38,10 +38,11 @@ def estimate(service: str) -> None:
         print("There is no dev client available with enough balance.")
         return
 
-    # No `initial_mu`: the quote's "to start" is the build plus the balance the instance
-    # starts with, so asking with the throwaway balance would report that balance as the
-    # cost. Left unset, the node funds the quote with its own default (the requested
-    # resources for `deposits.INITIAL_RUNTIME_HOURS`), which is what a real launch pays.
+    # No `initial_mu`: the quote's "to start" is the least `initial_mu` that starts the
+    # service (#563). It is the build plus the balance that the instance has after it.
+    # Asking with the throwaway balance would report that balance as the cost. Left
+    # unset, the node funds the quote with its own default (the requested resources for
+    # `deposits.INITIAL_RUNTIME_HOURS`), which is what a real launch pays.
     configuration = celaut_pb2.Configuration()
 
     channel = local_channel()
@@ -76,7 +77,7 @@ def estimate(service: str) -> None:
     per_hour = lambda amount: format_mu(int(from_amount(amount) * 3600 / loop_seconds))
 
     print("Estimated costs:")
-    print(f"- To start:                 {format_mu(from_amount(estimated_cost.cost))}")
+    print(f"- To start (initial_mu):    {format_mu(from_amount(estimated_cost.cost))}")
     print(f"- Maintenance, as started:  {per_hour(estimated_cost.init_maintenance_cost)} per hour")
     print(f"- Maintenance, at its most: {per_hour(estimated_cost.max_maintenance_cost)} per hour")
     print(f"- Charged every:            {estimated_cost.maintenance_seconds_loop} seconds")

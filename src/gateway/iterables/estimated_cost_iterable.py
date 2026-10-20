@@ -225,10 +225,12 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         return None
 
     def _initial_mu(self, service: celaut_pb2.Service) -> Optional[int]:
-        """The deposit of the instance, in local MU: the one asked for, or this node's default.
+        """The balance that the quote asks for, in local MU: the one asked for, or this node's default.
 
-        The commission does not apply to it (``delegation_commission``), so it has to be
-        known before a peer's price can be offered. None if it cannot be known.
+        The cost of a quote is the build plus this balance (#563), so the build of a peer
+        is what its cost has above it, and the commission is on that build only
+        (``delegation_commission``). It has to be known before a peer's price can be
+        offered. None if it cannot be known.
         """
         if self.configuration.HasField("initial_mu") and self.configuration.initial_mu.n:
             return int(self.configuration.initial_mu.n)

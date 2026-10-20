@@ -253,15 +253,23 @@ def peer_mu_in_local(peer_id: str, amount_mu: int, *, round_up: bool = False) ->
     )
 
 
-def configuration_for_peer(config, *, payment_system: MatchingPaymentSystem):
+def configuration_for_peer(config, *, payment_system: MatchingPaymentSystem,
+                           initial_mu: Optional[int] = None):
     """Copy ``config`` and express its initial balance in the peer's MU.
 
     A configuration arrives at a node in that node's MU.  Do not mutate it:
     the same configuration may be used to quote several peers, each with a
     different scale, or to launch locally after those quotes.
+
+    ``initial_mu`` replaces the amount of ``config``, in local MU, before the
+    conversion. A start through a peer sends the peer less than the caller paid:
+    the commission of this node stays here (#563), and the peer takes its own build
+    from what it gets. The amount rounds **down**, as every amount handed to a peer.
     """
     peer_config = type(config)()
     peer_config.CopyFrom(config)
+    if initial_mu is not None:
+        peer_config.initial_mu.n = str(int(initial_mu))
     if peer_config.HasField("initial_mu"):
         peer_initial_mu = convert_mu(
             int(peer_config.initial_mu.n),

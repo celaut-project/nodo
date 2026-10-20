@@ -115,6 +115,33 @@ first ERG burned is worth more than the first ERG donated — comparing `W_o / H
 index has never been filled, that term is zero for *every* candidate — never for some of
 them, which would rank peers on the shape of a failure.
 
+## A peer that charges the start in the wrong way
+
+The balancer ranks a peer by what this node saw. Two faults at the start of a delegated
+instance lower `r` (#563). Both use the amount that this node sent, and the quote that
+the peer signed. The reasons are in `src/reputation_system/reasons.py`.
+
+This node pays `initial_mu` for a start and sends the peer that amount less its own
+commission. The peer takes its build from the amount that it got. The peer must take
+nothing else from the account of this node for the start.
+
+| Reason | When | Penalty |
+|---|---|---|
+| `start_charged_outside_amount` | The account of this node on the peer fell by more than the amount that was sent. The peer charged the build to the account of the caller, which is the old rule of the network, or it took money for no reason. | -1000 |
+| `start_overcharged` | The child holds less than the amount that was sent, less the build that the peer quoted and its `variance` allow. The peer took too much from the amount. | -100 |
+
+A peer that rejects a start because the amount is too small is **not** penalized. The
+amount was the choice of this node, and nobody did wrong.
+
+There is no version check and no fallback for an old peer. An old peer keeps the old
+rule, takes money for no reason from this node at each start, and loses reputation at
+each start. This gives its operator a reason to update.
+
+The account is read before and after the start, and only one start at a time runs on one
+peer, so that another start of this node cannot read as a charge of the peer. A top-up
+of the same peer that runs at the same time can still read as a charge. A reading that
+fails is skipped, and nobody is penalized for it.
+
 ## See also
 
 - [`CONFIG.md`](CONFIG.md#balancers) — every `balancers:` key and its default.

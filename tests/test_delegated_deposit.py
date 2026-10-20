@@ -36,6 +36,7 @@ try:
     from protos import celaut_pb2 as celaut
     from src.gateway.launcher.delegate_execution import delegate_execution as delegate_mod
     from src.manager import maintain, manager
+    from src.reputation_system.reasons import Reason
     from src.utils.cost_functions import delegation_commission
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -54,76 +55,219 @@ LEFTOVER = 400_000
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
-    """What `delegate_execution` writes on the row it creates."""
+    """What `delegate_execution` sends to the peer, and what it writes on the row it creates.
 
-    def _delegate(self, *, initial_mu, peer_initial_mu=None):
+    The father pays `initial_mu` and nothing else (#563). This node keeps its commission
+    and sends the peer the rest, in the MU of the peer. The peer takes its build from
+    that amount. The peer MU are worth half of ours here (two of them for one local MU).
+    """
+
+    PAYMENT_SYSTEM = SimpleNamespace(
+        local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
+    )
+
+    def _delegate(self, *, initial_mu, commission_mu=0, build_mu=0, child_balance=None,
+                  account=(None, None), variance=0.0, start_error=None):
+        """Run a delegation. ``child_balance`` is what the peer reports, in its MU.
+
+        ``account`` is our account on the peer before and after the start, in its MU.
+        """
         config = celaut.Configuration()
         if initial_mu is not None:
             config.initial_mu.n = str(initial_mu)
-        peer_config = celaut.Configuration()
-        if peer_initial_mu is not None:
-            peer_config.initial_mu.n = str(peer_initial_mu)
-        payment_system = SimpleNamespace(
-            local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
-        )
         instance = celaut.ServiceInstance(token=PEER_TOKEN)
+        refunds = []
+        sent = {}
+
+        def capture(**kwargs):
+            sent["config"] = kwargs["config"]
+            return MagicMock()
 
         with patch.object(
-            delegate_mod, "matching_payment_system", return_value=payment_system
-        ), patch.object(
-            delegate_mod, "configuration_for_peer", return_value=peer_config
+            delegate_mod, "matching_payment_system", return_value=self.PAYMENT_SYSTEM
         ), patch.object(
             delegate_mod, "balance_on_other_peer", return_value=10 ** 12
         ), patch.object(
             delegate_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(delegate_mod, "peer_channel"), patch.object(
-            delegate_mod.BeeClient, "start_service", return_value=instance
+            delegate_mod.utils, "service_extended", side_effect=capture
         ), patch.object(
+            delegate_mod.BeeClient, "start_service", return_value=instance, side_effect=start_error
+        ) as start, patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
-        ), patch.object(delegate_mod, "SQLConnection") as sql_connection:
-            delegate_mod.delegate_execution(
-                service_id="service-a",
-                peer=PEER_ID,
-                father_id=FATHER_CLIENT,
-                cost=1_500_000,
-                metadata=celaut.Metadata(),
-                config=config,
-                recursion_guard_token="token-a",
-                refund_container=[],
+        ), patch.object(
+            delegate_mod, "_account_on_peer", side_effect=list(account)
+        ), patch.object(
+            delegate_mod, "_child_balance_on_peer", return_value=child_balance
+        ), patch.object(
+            delegate_mod, "peer_mu_in_local", side_effect=lambda peer, amount, **_: amount // 2
+        ), patch.object(delegate_mod, "_penalize") as penalize, patch.object(
+            delegate_mod, "SQLConnection"
+        ) as sql_connection:
+            error = None
+            try:
+                delegate_mod.delegate_execution(
+                    service_id="service-a",
+                    peer=PEER_ID,
+                    father_id=FATHER_CLIENT,
+                    metadata=celaut.Metadata(),
+                    config=config,
+                    recursion_guard_token="token-a",
+                    refund_container=[lambda: refunds.append(True)],
+                    commission_mu=commission_mu,
+                    build_mu=build_mu,
+                    variance=variance,
+                )
+            except Exception as e:
+                error = e
+        return SimpleNamespace(
+            error=error, refunds=refunds, sent=sent.get("config"), start=start, penalize=penalize,
+            written=(
+                sql_connection.return_value.add_delegated_instance.call_args.kwargs
+                if sql_connection.return_value.add_delegated_instance.called else None
+            ),
+        )
+
+    def test_the_peer_is_sent_what_the_father_paid_less_the_commission(self):
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=1_580_000)
+
+        self.assertIsNone(r.error)
+        # 990 000 of ours, and two peer MU for each.
+        self.assertEqual(int(r.sent.initial_mu.n), 1_980_000)
+
+    def test_the_row_keeps_what_the_father_can_get_back_in_our_mu(self):
+        """The amount sent, less the build of the peer, as the peer reports it.
+
+        The peer took 400 000 of its MU for the build: 200 000 of ours. So the father can
+        get back 990 000 - 200 000, and never the commission or the build.
+        """
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=1_580_000)
+
+        self.assertEqual(r.written["balance_mu"], 790_000)
+
+    def test_the_mark_of_the_tick_is_the_balance_that_the_peer_reports(self):
+        """Not the amount that travelled: the peer already took its build from it.
+
+        A mark at the amount sent would charge the build to the client again at the first
+        tick, as consumption.
+        """
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=1_580_000)
+
+        self.assertEqual(r.written["peer_balance_mu"], 1_580_000)
+
+    def test_an_unreadable_peer_leaves_the_balance_that_its_quote_says(self):
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=None)
+
+        self.assertIsNone(r.error)
+        self.assertEqual(r.written["balance_mu"], 790_000)
+        self.assertEqual(r.written["peer_balance_mu"], 1_580_000)
+
+    def test_a_peer_cannot_report_more_than_it_was_sent(self):
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=0,
+                           child_balance=9_000_000)
+
+        self.assertEqual(r.written["balance_mu"], 990_000)
+
+    def test_an_amount_that_the_commission_takes_whole_is_refused_and_refunded(self):
+        r = self._delegate(initial_mu=10_000, commission_mu=10_000)
+
+        self.assertIsNotNone(r.error)
+        self.assertEqual(r.refunds, [True])
+        r.start.assert_not_called()
+
+    def test_a_start_that_the_peer_rejects_refunds_the_father_and_scores_nobody(self):
+        """A peer that rejects an amount that is too small has done nothing wrong."""
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           account=(5_000_000, 5_000_000),
+                           start_error=Exception("initial_mu is less than the build"))
+
+        self.assertIsNotNone(r.error)
+        self.assertEqual(r.refunds, [True])
+        r.penalize.assert_not_called()
+        self.assertIsNone(r.written)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DelegationChecksWhatThePeerChargedTests(unittest.TestCase):
+    """A peer that takes more than the amount it was sent lowers its reputation (#563)."""
+
+    SENT = 1_980_000
+    BUILD = 400_000
+
+    def _check(self, *, before, after, child, variance=0.0, build=BUILD):
+        with patch.object(delegate_mod, "_penalize") as penalize:
+            delegate_mod.check_start_charge(
+                PEER_ID, sent_peer_mu=self.SENT, build_peer_mu=build, variance=variance,
+                account_before=before, account_after=after, child_balance=child,
             )
-        return sql_connection.return_value.add_delegated_instance.call_args.kwargs
+        return penalize
 
-    def test_the_deposit_the_father_paid_is_parked_on_the_row(self):
-        """In *our* MU -- the local configuration's figure, not the one that travelled.
+    def test_a_peer_that_follows_the_rule_is_not_scored(self):
+        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
+                               child=self.SENT - self.BUILD)
 
-        `configuration_for_peer` makes a peer-scaled copy for the wire; the father was
-        charged in our scale and is refunded in our scale, so the row keeps ours.
-        """
-        written = self._delegate(initial_mu=1_000_000, peer_initial_mu=2_000_000)
+        penalize.assert_not_called()
 
-        self.assertEqual(written["balance_mu"], 1_000_000)
+    def test_a_peer_that_charges_the_build_to_our_account_is_scored_down(self):
+        """The old rule of the network: the account pays the build, and the amount too."""
+        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT - self.BUILD,
+                               child=self.SENT)
 
-    def test_the_same_deposit_is_marked_as_the_peer_will_count_it(self):
-        """The figure that travelled, on the peer's scale, is the tick's starting mark.
+        penalize.assert_called_once_with(
+            PEER_ID, delegate_mod.CHARGED_OUTSIDE_AMOUNT_PENALTY,
+            Reason.START_CHARGED_OUTSIDE_AMOUNT,
+        )
+        self.assertLess(delegate_mod.CHARGED_OUTSIDE_AMOUNT_PENALTY, 0)
 
-        It has to be what the peer started the child with rather than a reading taken
-        afterwards: anything the child spends between the launch and the first tick
-        is still the client's to pay, and a mark set later would write it off.
-        """
-        written = self._delegate(initial_mu=1_000_000, peer_initial_mu=2_000_000)
+    def test_a_peer_that_takes_more_of_the_amount_than_it_quoted_is_scored_down(self):
+        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
+                               child=self.SENT - self.BUILD - 100_000)
 
-        self.assertEqual(written["peer_balance_mu"], 2_000_000)
+        penalize.assert_called_once_with(
+            PEER_ID, delegate_mod.OVERCHARGED_PENALTY, Reason.START_OVERCHARGED,
+        )
+        self.assertLess(delegate_mod.OVERCHARGED_PENALTY, 0)
 
-    def test_a_configuration_with_no_deposit_opens_an_empty_account(self):
-        """Never the whole charge: the difference is the peer's one-off start charge.
+    def test_the_variance_of_the_quote_is_allowed(self):
+        # 10 % of variance on a build of 400 000 allows 440 000.
+        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
+                               child=self.SENT - 430_000, variance=0.1)
+        penalize.assert_not_called()
 
-        That part buys the launch itself and is gone, exactly as a local instance's
-        start charge is. Parking all of it would refund a father for work really done.
-        """
-        written = self._delegate(initial_mu=None)
+        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
+                               child=self.SENT - 450_000, variance=0.1)
+        penalize.assert_called_once()
 
-        self.assertEqual(written["balance_mu"], 0)
-        self.assertEqual(written["peer_balance_mu"], 0)
+    def test_a_peer_that_takes_less_than_it_quoted_is_not_scored(self):
+        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
+                               child=self.SENT)
+
+        penalize.assert_not_called()
+
+    def test_a_reading_that_failed_scores_nobody(self):
+        self._check(before=None, after=None, child=None).assert_not_called()
+        self._check(before=9_000_000, after=None, child=None).assert_not_called()
+
+    def test_a_credit_in_the_meantime_does_not_read_as_a_charge(self):
+        # A payment reached the account while the start ran: it only hides a charge.
+        penalize = self._check(before=9_000_000, after=9_500_000, child=self.SENT - self.BUILD)
+
+        penalize.assert_not_called()
+
+    def test_the_penalty_reaches_the_reputation_of_the_peer(self):
+        interface = MagicMock()
+        with patch.dict("sys.modules", {}), patch(
+            "src.reputation_system.interface.update_peer_reputation", interface
+        ):
+            delegate_mod._penalize(PEER_ID, -1000, Reason.START_CHARGED_OUTSIDE_AMOUNT)
+
+        interface.assert_called_once_with(
+            peer_id=PEER_ID, amount=-1000, reason=Reason.START_CHARGED_OUTSIDE_AMOUNT
+        )
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
