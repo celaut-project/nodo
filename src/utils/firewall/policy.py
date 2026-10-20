@@ -7,9 +7,9 @@ config. Keeping the decision pure means it can be tested exhaustively without a
 node, which is the only way this code gets real coverage.
 
 Rule ordering matters and is preserved from the iptables implementation this
-replaces: ``block_all`` installs a blanket drop of NEW packets, and each
-subsequent allow is inserted *above* it. So an allow added later wins, exactly as
-``iptables -I`` behaved.
+replaces: ``block_all`` installs a blanket drop of NEW, INVALID and UNTRACKED
+packets, and each subsequent allow is inserted *above* it. So an allow added
+later wins, exactly as ``iptables -I`` behaved.
 
 Every rule carries a comment that is unique for what it does and prefixed with
 the VM it belongs to, so a whole instance's footprint can be torn down with one
@@ -139,7 +139,9 @@ def compat_rules(bridge: str) -> List[Rule]:
 
 
 def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:
-    """Drop every new connection a guest starts. The default it opts out of.
+    """Drop every NEW, INVALID and UNTRACKED packet of a guest.
+
+    This is the default that a guest opts out of with an allow rule.
 
     One rule with no protocol, so it drops ICMP and every other IP protocol too.
     It used to be one rule for TCP and one for UDP, and everything else went
@@ -148,10 +150,10 @@ def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:
     node that is the node's address. ICMP errors for an allowed flow are RELATED,
     so the global accept still lets them through.
 
-    INVALID and UNTRACKED are dropped too (#555). A packet conntrack marks
-    INVALID -- a TCP RST or SYN+FIN, an echo reply nobody asked for -- is not
-    NEW, and it has no conntrack entry, so the masquerade does not touch it
-    either: without them here it left with the guest's own address, outside Tor.
+    INVALID and UNTRACKED are dropped too (#555). Conntrack marks a TCP RST,
+    a SYN+FIN, or an echo reply that nobody asked for as INVALID. Such a packet
+    is not NEW and has no conntrack entry, so the masquerade does not change it.
+    Without this rule, it left with the own address of the guest, outside Tor.
     """
     source = validate_address(vm_ip, "VM address")
     return [
