@@ -265,10 +265,10 @@ instance is funded at the worst case.
 
 Three more facts:
 
-- **A launch while the node is free stays free.** An instance launched while
-  `free_tier.FREE_WHILE_SCARCITY_BELOW` made the node free records 0 for each resource.
-  0 times the bound is 0, so the first tick after the node crosses the threshold does
-  not stop it. This holds only with the bound on.
+- **A launch while the node is free is anchored at 1x.** An instance launched while
+  `free_tier.FREE_WHILE_SCARCITY_BELOW` made the node free records 1x (the base price)
+  for each resource. It pays nothing while the node stays free; once the node crosses
+  the threshold its multiplier may rise to the bound times 1x, and no further.
 - **Only the multiplier is bounded.** A change of the base prices (`RAM_MU_PER_GIB_HOUR`
   and the others) reaches a running instance in full.
 - **A row with no recorded launch price is not bounded.** Its columns are NULL (an instance

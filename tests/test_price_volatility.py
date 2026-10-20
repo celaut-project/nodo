@@ -164,14 +164,15 @@ class TheClampTests(unittest.TestCase):
         with _config():
             self.assertEqual(_tick(FULL, None), _tick(FULL))
 
-    def test_an_instance_launched_free_stays_free(self):
+    def test_an_instance_launched_free_is_anchored_at_the_base_price(self):
         with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5):
             launch = launch_price_bp(IDLE)
-            self.assertEqual(launch, {CPU: 0, MEM: 0, DISK: 0})
+            self.assertEqual(launch, {CPU: 10000, MEM: 10000, DISK: 10000})
             self.assertEqual(_tick(IDLE, launch), 0)
-            # The node crosses the threshold, and the instance still pays nothing.
-            self.assertEqual(_tick(FULL, launch), 0)
-            self.assertGreater(_tick(FULL), 0)
+            # The node crosses the threshold: the instance pays, but only up to 2x base.
+            capped = _tick(FULL, launch)
+        with _config():
+            self.assertEqual(capped, 2 * _tick(IDLE))
 
     def test_a_free_launch_is_charged_when_there_is_no_bound(self):
         with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5, pricing__MAX_PRICE_VOLATILITY=0):
