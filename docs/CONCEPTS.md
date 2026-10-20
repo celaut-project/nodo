@@ -111,6 +111,30 @@ The flow for each implemented ledger is in [`ERGO.md`](ERGO.md) and
 [`BITCOIN.md`](BITCOIN.md) — a node may offer either, both or neither — and what things
 cost is in [`PRICING.md`](PRICING.md).
 
+### Limit what an instance can spend
+
+An instance can spend only the balance that it holds. When the balance is empty, the
+node stops the instance. The balance is therefore a hard limit on the spend of the
+instance. No other cost limit is necessary in the start configuration.
+
+A father limits the spend of a child in this way:
+
+1. Start the child with a small `initial_mu`.
+2. Add a small amount to the balance of the child at short intervals.
+3. Let the child die if it needs more than one amount between two intervals.
+
+If a price rises suddenly, for example with scarcity, the child can spend only the
+amount that the father added. The father can then start a new child. This is the same
+as the statement "if the child spends more than X at one time, I prefer that it dies".
+
+A client that thinks a node charged too much does not need a limit in advance. The node
+signs each `EstimatedCost`, and that message has a `variance`. The client keeps the
+signed quote. If the real cost is more than the quote allows, the quote and the real
+cost are the proof for a negative reputation.
+
+The cost of the start is different. The client pays it in full at the start, and it
+is the `cost` field of the quote. See [`PRICING.md`](PRICING.md).
+
 ## Address and token provisioning
 
 To talk to a running instance you need its **communication address** (`ip:port`, from
