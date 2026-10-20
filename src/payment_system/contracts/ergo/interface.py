@@ -953,6 +953,81 @@ def _box_token_amount(box_dict: dict, token_id: str) -> int:
     return total
 
 
+EXPLORER_TIMEOUT_SECONDS = 20
+EXPLORER_PAGE_SIZE = 100
+
+
+def _explorer_json(url: str, params: Optional[dict] = None) -> dict:
+    """One explorer GET with a timeout. A bad status raises, so the proof fails closed."""
+    response = requests.get(url, params=params, timeout=EXPLORER_TIMEOUT_SECONDS)
+    if response.status_code != 200:
+        raise RuntimeError(f"Error fetching UTXOs: {response.status_code} - {response.text}")
+    return response.json()
+
+
+def _address_boxes(explorer_api: str, address: str):
+    """Yield the unspent boxes of ``address``, confirmed first, then the mempool outputs.
+
+    The confirmed list is read page by page: the node wallet gets one box per deposit
+    and keeps it until it spends it, so the list only grows, and the endpoint without
+    ``/unconfirmed/`` honours ``offset`` and ``limit`` where the old one did not. A
+    generator lets the caller stop at the first box that pays enough.
+    """
+    offset = 0
+    while True:
+        page = _explorer_json(
+            f"{explorer_api}/api/v1/boxes/unspent/byAddress/{address}",
+            params={"offset": offset, "limit": EXPLORER_PAGE_SIZE},
+        )
+        items = page.get("items") or []
+        yield from items
+        offset += len(items)
+        if not items or offset >= int(page.get("total") or 0):
+            break
+
+    # A deposit is accepted at 0 confirmations, so the outputs still in the mempool count.
+    mempool = _explorer_json(
+        f"{explorer_api}/api/v1/mempool/transactions/byAddress/{address}",
+        params={"offset": 0, "limit": EXPLORER_PAGE_SIZE},
+    )
+    for tx in mempool.get("items") or []:
+        for output in tx.get("outputs") or []:
+            if output.get("address") == address:
+                yield output
+
+
+def _r4_bytes(box_dict: dict) -> Optional[bytes]:
+    """The bytes held by the R4 of a box, or ``None`` if R4 is not a ``Coll[Byte]``.
+
+    Anyone can send a box to the node address, so R4 may hold anything: an ``SInt``,
+    a tuple, bytes that are not text. Such a box is not a deposit and must not stop the
+    boxes after it, so nothing here raises. Bytes are compared, never decoded to text.
+    """
+    try:
+        r4 = (box_dict.get("additionalRegisters") or {}).get("R4")
+        if not isinstance(r4, dict):
+            return None
+        serialized = r4.get("serializedValue")
+        if serialized:
+            raw = bytes.fromhex(serialized)
+            # 0x0e is the type tag of Coll[Byte]; then the length as a VLQ.
+            if not raw or raw[0] != 0x0E:
+                return None
+            length, shift, index = 0, 0, 1
+            while True:
+                byte = raw[index]
+                length |= (byte & 0x7F) << shift
+                index += 1
+                if not byte & 0x80:
+                    break
+                shift += 7
+            body = raw[index:]
+            return body if len(body) == length else None
+        return bytes.fromhex(r4.get("renderedValue"))
+    except (TypeError, ValueError, IndexError, AttributeError):
+        return None
+
+
 def _validate(amount: int, token: str, ledger: str, script: bytes,
               asset) -> bool:
     """Prove one incoming payment: ERG when ``asset`` is ``None``, that token otherwise.
@@ -971,46 +1046,44 @@ def _validate(amount: int, token: str, ledger: str, script: bytes,
 
         ergo = __init_ergo()
         explorer_api = ergo.get_api_url()
-        url = f"{explorer_api}/api/v1/boxes/unspent/unconfirmed/byAddress/{address}"
-        response = requests.get(url)
-        if response.status_code != 200:
-            LOGGER(f"Error fetching UTXOs: {response.status_code} - {response.text}")
-            return False
-
-        utxos = response.json()
         expected = (
             __mu_to_nanoerg(amount) if asset is None
             else rate.mu_to_base_units(amount, asset)
         )
-        for box_dict in utxos:
-            if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
-                r4_value = box_dict["additionalRegisters"]["R4"]["renderedValue"]
-                decoded_r4 = bytes.fromhex(r4_value).decode("utf-8")
-                if decoded_r4 == token:
-                    # At least, not exactly: the payer converts our MU figure from
-                    # its own scale and has to round down to a whole MU of ours,
-                    # so a correct payment routinely carries a few nanoERG more
-                    # than the credit it asks for. Demanding equality rejected
-                    # those with the money already on-chain. More than asked for
-                    # is never a problem -- the credit is what `expected` covers,
-                    # and the excess stays in this wallet rather than being returned:
-                    # sending it back would mean building and paying for a
-                    # transaction nobody asked for.
-                    if asset is None:
-                        paid = box_dict.get("value")
-                        rendered = f"{paid} nanoERG"
-                    else:
-                        paid = _box_token_amount(box_dict, asset.token_id)
-                        rendered = f"{paid} base units of {asset.symbol}"
-                    if paid is not None and paid >= expected:
-                        return True
-                    LOGGER(
-                        f"Insufficient amount for token {token}. Was {rendered}, "
-                        f"expected at least {expected}"
-                    )
-                    return False
+        wanted = token.encode("utf-8")
+        found = False
+        # Stops at the first box that pays enough, so the rest of a long list is
+        # never requested.
+        for box_dict in _address_boxes(explorer_api, address):
+            if _r4_bytes(box_dict) != wanted:
+                continue
+            found = True
+            # At least, not exactly: the payer converts our MU figure from
+            # its own scale and has to round down to a whole MU of ours,
+            # so a correct payment routinely carries a few nanoERG more
+            # than the credit it asks for. Demanding equality rejected
+            # those with the money already on-chain. More than asked for
+            # is never a problem -- the credit is what `expected` covers,
+            # and the excess stays in this wallet rather than being returned:
+            # sending it back would mean building and paying for a
+            # transaction nobody asked for.
+            if asset is None:
+                paid = box_dict.get("value")
+                rendered = f"{paid} nanoERG"
+            else:
+                paid = _box_token_amount(box_dict, asset.token_id)
+                rendered = f"{paid} base units of {asset.symbol}"
+            if paid is not None and paid >= expected:
+                return True
+            # Not a verdict yet: the payer may have sent the deposit twice, and a
+            # later box with the same token can be the one that pays enough.
+            LOGGER(
+                f"Insufficient amount for token {token}. Was {rendered}, "
+                f"expected at least {expected}"
+            )
 
-        LOGGER(f"Token {token} not found in R4.")
+        if not found:
+            LOGGER(f"Token {token} not found in R4.")
         return False
 
     except Exception as e:
