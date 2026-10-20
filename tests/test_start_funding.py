@@ -20,7 +20,6 @@ load_example_config()
 from protos import celaut_pb2 as celaut  # noqa: E402
 from src.gateway.launcher.local_execution import local_execution as local_execute
 from src.payment_system.mu_conversion import MatchingPaymentSystem, configuration_for_peer
-from src.reputation_system.reasons import Reason
 from src.utils.cost_functions import start_funding
 from src.utils.cost_functions.delegation_commission import start_commission, with_commission
 from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, worst_case_charge_mu
@@ -277,13 +276,6 @@ class TheQuoteTests(unittest.TestCase):
         self.assertEqual((build_mu, commission_mu), (200, 10))
         # The least `initial_mu` through this node: the quote of the peer and the commission.
         self.assertEqual(int(offer.cost.n), 1_210)
-
-
-class TheReasonsTests(unittest.TestCase):
-    def test_a_charge_outside_the_amount_has_a_reason_of_its_own(self):
-        self.assertEqual(Reason.START_CHARGED_OUTSIDE_AMOUNT, "start_charged_outside_amount")
-        self.assertEqual(Reason.START_OVERCHARGED, "start_overcharged")
-        self.assertNotEqual(Reason.START_CHARGED_OUTSIDE_AMOUNT, Reason.START_OVERCHARGED)
 
 
 if __name__ == "__main__":

@@ -36,7 +36,6 @@ try:
     from protos import celaut_pb2 as celaut
     from src.gateway.launcher.delegate_execution import delegate_execution as delegate_mod
     from src.manager import maintain, manager
-    from src.reputation_system.reasons import Reason
     from src.utils.cost_functions import delegation_commission
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -67,11 +66,8 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
     )
 
     def _delegate(self, *, initial_mu, commission_mu=0, build_mu=0, child_balance=None,
-                  account=(None, None), variance=0.0, start_error=None):
-        """Run a delegation. ``child_balance`` is what the peer reports, in its MU.
-
-        ``account`` is our account on the peer before and after the start, in its MU.
-        """
+                  start_error=None):
+        """Run a delegation. ``child_balance`` is what the peer reports, in its MU."""
         config = celaut.Configuration()
         if initial_mu is not None:
             config.initial_mu.n = str(initial_mu)
@@ -96,14 +92,10 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         ) as start, patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(
-            delegate_mod, "_account_on_peer", side_effect=list(account)
-        ), patch.object(
             delegate_mod, "_child_balance_on_peer", return_value=child_balance
         ), patch.object(
             delegate_mod, "peer_mu_in_local", side_effect=lambda peer, amount, **_: amount // 2
-        ), patch.object(delegate_mod, "_penalize") as penalize, patch.object(
-            delegate_mod, "SQLConnection"
-        ) as sql_connection:
+        ), patch.object(delegate_mod, "SQLConnection") as sql_connection:
             error = None
             try:
                 delegate_mod.delegate_execution(
@@ -116,12 +108,11 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
                     refund_container=[lambda: refunds.append(True)],
                     commission_mu=commission_mu,
                     build_mu=build_mu,
-                    variance=variance,
                 )
             except Exception as e:
                 error = e
         return SimpleNamespace(
-            error=error, refunds=refunds, sent=sent.get("config"), start=start, penalize=penalize,
+            error=error, refunds=refunds, sent=sent.get("config"), start=start,
             written=(
                 sql_connection.return_value.add_delegated_instance.call_args.kwargs
                 if sql_connection.return_value.add_delegated_instance.called else None
@@ -179,95 +170,26 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         self.assertEqual(r.refunds, [True])
         r.start.assert_not_called()
 
-    def test_a_start_that_the_peer_rejects_refunds_the_father_and_scores_nobody(self):
-        """A peer that rejects an amount that is too small has done nothing wrong."""
+    def test_a_start_that_the_peer_rejects_refunds_the_father(self):
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           account=(5_000_000, 5_000_000),
                            start_error=Exception("initial_mu is less than the build"))
 
         self.assertIsNotNone(r.error)
         self.assertEqual(r.refunds, [True])
-        r.penalize.assert_not_called()
         self.assertIsNone(r.written)
 
+    def test_a_child_that_already_spent_keeps_the_instance_and_is_charged(self):
+        """The child reads less than the amount less the build: a tick, or its dependencies.
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class DelegationChecksWhatThePeerChargedTests(unittest.TestCase):
-    """A peer that takes more than the amount it was sent lowers its reputation (#563)."""
+        Two readings of a balance cannot tell that from a peer that took too much, so the
+        start goes on, and the father pays what the peer reports the child spent.
+        """
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=0,
+                           child_balance=1_000_000)
 
-    SENT = 1_980_000
-    BUILD = 400_000
-
-    def _check(self, *, before, after, child, variance=0.0, build=BUILD):
-        with patch.object(delegate_mod, "_penalize") as penalize:
-            delegate_mod.check_start_charge(
-                PEER_ID, sent_peer_mu=self.SENT, build_peer_mu=build, variance=variance,
-                account_before=before, account_after=after, child_balance=child,
-            )
-        return penalize
-
-    def test_a_peer_that_follows_the_rule_is_not_scored(self):
-        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
-                               child=self.SENT - self.BUILD)
-
-        penalize.assert_not_called()
-
-    def test_a_peer_that_charges_the_build_to_our_account_is_scored_down(self):
-        """The old rule of the network: the account pays the build, and the amount too."""
-        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT - self.BUILD,
-                               child=self.SENT)
-
-        penalize.assert_called_once_with(
-            PEER_ID, delegate_mod.CHARGED_OUTSIDE_AMOUNT_PENALTY,
-            Reason.START_CHARGED_OUTSIDE_AMOUNT,
-        )
-        self.assertLess(delegate_mod.CHARGED_OUTSIDE_AMOUNT_PENALTY, 0)
-
-    def test_a_peer_that_takes_more_of_the_amount_than_it_quoted_is_scored_down(self):
-        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
-                               child=self.SENT - self.BUILD - 100_000)
-
-        penalize.assert_called_once_with(
-            PEER_ID, delegate_mod.OVERCHARGED_PENALTY, Reason.START_OVERCHARGED,
-        )
-        self.assertLess(delegate_mod.OVERCHARGED_PENALTY, 0)
-
-    def test_the_variance_of_the_quote_is_allowed(self):
-        # 10 % of variance on a build of 400 000 allows 440 000.
-        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
-                               child=self.SENT - 430_000, variance=0.1)
-        penalize.assert_not_called()
-
-        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
-                               child=self.SENT - 450_000, variance=0.1)
-        penalize.assert_called_once()
-
-    def test_a_peer_that_takes_less_than_it_quoted_is_not_scored(self):
-        penalize = self._check(before=9_000_000, after=9_000_000 - self.SENT,
-                               child=self.SENT)
-
-        penalize.assert_not_called()
-
-    def test_a_reading_that_failed_scores_nobody(self):
-        self._check(before=None, after=None, child=None).assert_not_called()
-        self._check(before=9_000_000, after=None, child=None).assert_not_called()
-
-    def test_a_credit_in_the_meantime_does_not_read_as_a_charge(self):
-        # A payment reached the account while the start ran: it only hides a charge.
-        penalize = self._check(before=9_000_000, after=9_500_000, child=self.SENT - self.BUILD)
-
-        penalize.assert_not_called()
-
-    def test_the_penalty_reaches_the_reputation_of_the_peer(self):
-        interface = MagicMock()
-        with patch.dict("sys.modules", {}), patch(
-            "src.reputation_system.interface.update_peer_reputation", interface
-        ):
-            delegate_mod._penalize(PEER_ID, -1000, Reason.START_CHARGED_OUTSIDE_AMOUNT)
-
-        interface.assert_called_once_with(
-            peer_id=PEER_ID, amount=-1000, reason=Reason.START_CHARGED_OUTSIDE_AMOUNT
-        )
+        self.assertIsNone(r.error)
+        self.assertEqual(r.written["balance_mu"], 500_000)
+        self.assertEqual(r.written["peer_balance_mu"], 1_000_000)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
