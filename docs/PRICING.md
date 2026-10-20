@@ -285,7 +285,7 @@ the tick and the quote come from the same function.
 |---|---|
 | `init_maintenance_cost` | One tick for the resources at the start, at the load now. This is the launch price. |
 | `max_maintenance_cost` | One tick for the maximum resources, at the highest multiplier that the bound allows. No tick can charge more. |
-| `cost` | The build, plus the initial balance. The balance is `INITIAL_RUNTIME_HOURS` at the worst case (launch multiplier times the bound). |
+| `cost` | The least `initial_mu` that starts the service: the build, plus the balance that the instance has after it. The balance is `INITIAL_RUNTIME_HOURS` at the worst case (launch multiplier times the bound). |
 | `variance` | Not computed (0). The node does not need it: `max_maintenance_cost` is the limit. |
 
 With the bound off, `max_maintenance_cost` is the charge at the current load, as before:
@@ -297,12 +297,40 @@ is funded for it.
 
 ### Starting an instance
 
+The caller pays `initial_mu` and nothing else (#563). Every node takes the cost of the
+build from the balance of the instance that it starts. No node takes it from the account
+of the caller.
+
 ```
-start_MU = BUILD_MU (if it is not built already)
-         + the balance the instance starts with
+balance of the new instance = initial_mu - BUILD_MU (if it is not built already)
 ```
 
-The balance is what buys runtime, and it is derived from the requested resources for
+The most that a start can cost the caller is therefore `initial_mu`, less what the
+instance does not spend and the refund when it stops. The caller does not add the build
+to its own estimate.
+
+Two rules apply, and the node rejects the start and charges nothing if one fails:
+
+- **The build must fit.** `initial_mu` is at least the build.
+- **Minimum runtime.** The balance after the build is at least one maintenance period
+  (`MANAGER_ITERATION_TIME`) with the resources at the start. The period is priced at the
+  launch price times `MAX_PRICE_VOLATILITY` when the bound is on, and at the current price
+  when it is off (`start_funding.minimum_runtime_mu`). Without this rule, a caller could
+  pay the build and get an instance that dies at the first tick.
+
+If the request has no `initial_mu`, the node uses the build plus the default balance:
+
+```
+initial_mu (default) = BUILD_MU (if it is not built already)
+                     + the balance the instance starts with by default
+```
+
+`EstimatedCost.cost` has this value for a request with no `initial_mu`. Its meaning is
+the least `initial_mu` that starts the service. A caller that wants "start this service
+only if the start costs at most X" sets `initial_mu` to X plus the minimum runtime. No
+new field is necessary.
+
+The default balance is what buys runtime, and it is derived from the requested resources for
 `deposits.INITIAL_RUNTIME_HOURS` (`manager.default_initial_balance`) — so a 128 MiB
 instance and an 8 GiB one no longer start with the same funding. The maintenance ticks
 then spend that balance down.
@@ -402,19 +430,42 @@ A delegated instance is priced to its father like a local one, plus the commissi
 this node (`network.delegation.COMMISSION_PERCENT`, #551). The commission applies to
 what the child consumes: the peer's one-off start charge (at least
 `COMMISSION_MIN_MU`), and what each tick charges. It never applies to the deposit,
-which goes back to the father. The peer gets only its own price: this node deposits
-that on it, and keeps the commission. Apart from that, the two accounts have nothing
-to do with each other. There are two accounts, in two units,
-and this node stands between them:
+which goes back to the father.
+
+The father pays `initial_mu`, as for a local instance (#563). The commission of the
+start is calculated on the build that the peer quoted, with the minimum of
+`with_commission`. This node keeps it, and sends the peer the amount `initial_mu` less
+the commission, in the MU of the peer. The peer takes its own build from that amount, and
+the rest is the balance of the child on the peer.
+
+- If the amount does not cover the build of the peer and the minimum runtime, the peer
+  rejects the start and charges nothing. The father is refunded, and this node does not
+  lower the reputation of the peer.
+- `peer_balance_mu` is the balance that the peer reports for the child after the start.
+  It is not the amount that this node sent, because the peer already took its build from
+  it.
+- `balance_mu` of the delegated row is what the father can get back: `initial_mu` less
+  the commission and less the build of the peer, in local MU.
+- The peer must not take anything from the account of this node for the start. The only
+  source is the amount that this node sent.
+
+There is no version check and no fallback for an old peer. An old peer takes the build
+from the account of the caller, and also takes the whole amount. This node treats that
+peer as malicious (see [`REPUTATION.md`](REPUTATION.md#a-peer-that-charges-the-start-in-the-wrong-way)).
+The new rule is a condition of the network.
+
+Apart from the start, the two accounts have nothing to do with each other. There are
+two accounts, in two units, and this node stands between them:
 
 | Account | Unit | Who moves it |
 | --- | --- | --- |
-| the child's deposit, on `delegated_instances.balance_mu` | our MU | the father pays it at StartService; the maintenance tick spends it down by what the peer metered plus the commission; the stop refunds what is left |
-| this node's deposit with the peer, against the client row it holds for us there | the peer's MU | the peer charges the child's real cost against it, and refunds the unspent part when the child stops |
+| the child's deposit, on `delegated_instances.balance_mu` | our MU | the father pays `initial_mu` at StartService; the row holds what he can get back; the maintenance tick spends it down by what the peer metered plus the commission; the stop refunds what is left |
+| this node's deposit with the peer, against the client row it holds for us there | the peer's MU | the peer takes the amount that this node sent for the start, charges the child's real cost against the balance of the child, and refunds the unspent part when the child stops |
 
-The father's claim is the first row and only the first row. It is opened with the
-deposit he was charged (`config.initial_mu`, in our MU — the rest of the quote is the
-peer's one-off start charge, borne exactly as a local one is), and it is spent by
+The father's claim is the first row and only the first row. It is opened with what he
+can get back: `config.initial_mu`, in our MU, less the commission and less the build of
+the peer (the commission and the build are the one-off start charge, borne exactly as a
+local one is). It is spent by
 `maintain.maintain_delegated_instances`. When the instance stops, `stop_instance` hands
 the remainder back through the same `credit_father` a local stop uses — after the row
 is deleted, so a stop that is retried cannot pay twice.

@@ -43,7 +43,12 @@ RATE_SCARCITY_MAX_MULTIPLIER = "scarcity_max_multiplier"
 
 
 def compute_start_service_cost(metadata: celaut.Metadata, initial_balance_mu: int) -> int:
-    """Total MU to start an instance: the one-off build, plus the balance it starts with.
+    """The least ``initial_mu`` that starts an instance: the one-off build, plus the balance it has after it.
+
+    The caller pays ``initial_mu`` and nothing else, and the node takes the build from it
+    (#563, ``start_funding``). So this total is the quote of what the caller must send for
+    the instance to be left with ``initial_balance_mu``. It is not a second charge on top
+    of the balance.
 
     The build is the only thing the *start* charges for. The runtime window is priced
     once, as ``initial_balance_mu`` -- the balance the instance holds and the maintenance

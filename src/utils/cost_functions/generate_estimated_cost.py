@@ -65,8 +65,10 @@ def generate_estimated_cost(
     if check_availability and not get_resource_availability(resources=resources, arch=arch)["can_execute"]:
         return
 
-    # What the client pays up front: the one-off build, plus the balance the instance
-    # starts with. That balance is what buys the runtime window (it is derived from the
+    # The least `initial_mu` that starts the service: the one-off build, plus the balance
+    # the instance has after it (#563). The caller pays `initial_mu` and nothing else, and
+    # this node takes the build out of it, so this figure is not a second charge on top
+    # of the balance. The balance is what buys the runtime window (it is derived from the
     # requested resources by `default_initial_balance`), so the window is not also
     # charged here -- doing both billed it twice.
     initial_cost_mu = compute_start_service_cost(

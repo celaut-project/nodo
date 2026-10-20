@@ -460,10 +460,19 @@ class QuoteTests(_FreshCache, unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchTests(_FreshCache, unittest.TestCase):
-    def _launch(self, candidates, offered=None):
+    def _launch(self, candidates, offered=None, initial_mu=None, build_mu=0, minimum_mu=0):
+        """Launch with ``candidates``. ``initial_mu`` None is a request with no amount.
+
+        The default balance that the quotes ask for is 1 000 MU. ``build_mu`` and
+        ``minimum_mu`` are what the local node would take for the build and for one
+        maintenance period.
+        """
         mod = launch_mod
         if offered is not None:
             delegated_quote.remember_offer("client-1", "svc", offered)
+        configuration = celaut.Configuration()
+        if initial_mu is not None:
+            configuration.initial_mu.CopyFrom(amount(initial_mu))
         with ExitStack() as stack:
             def patched(target, name, **kwargs):
                 return stack.enter_context(mock.patch.object(target, name, **kwargs))
@@ -474,7 +483,7 @@ class LaunchTests(_FreshCache, unittest.TestCase):
             patched(mod, "authorize_shares", return_value=[])
             spend = patched(mod, "spend_mu", return_value=True)
             balancer = patched(mod, "execution_balancer")
-            patched(mod, "local_execution", return_value=SimpleNamespace(instance=None))
+            local = patched(mod, "local_execution", return_value=SimpleNamespace(instance=None))
             delegate = patched(mod, "delegate_execution", return_value=SimpleNamespace(instance=None))
             patched(mod, "enforce_network_policy")
             patched(mod, "hidden_mode_rejection", return_value=None)
@@ -482,6 +491,8 @@ class LaunchTests(_FreshCache, unittest.TestCase):
             patched(mod, "evaluate_possible_environment_workloads", return_value=None)
             patched(mod, "_detect_local_preflight_failure", return_value=None)
             patched(mod, "descends_from_dev_client", return_value=True)
+            patched(mod, "start_build_mu", return_value=build_mu)
+            patched(mod, "minimum_runtime_mu", return_value=minimum_mu)
             patched(mod.activity_window, "is_open", return_value=True)
             patched(mod.demand_history, "record_admission")
             patched(mod.demand_history, "record_refusal")
@@ -494,17 +505,32 @@ class LaunchTests(_FreshCache, unittest.TestCase):
             error = None
             try:
                 mod.launch_service(service=celaut.Service(), metadata=celaut.Metadata(),
-                                   configuration=celaut.Configuration(initial_mu=amount(1_000)),
+                                   configuration=configuration,
                                    father_id="client-1", father_ip="", service_id="svc")
             except Exception as e:
                 error = e
-            return SimpleNamespace(error=error, spend=spend, delegate=delegate)
+            return SimpleNamespace(error=error, spend=spend, delegate=delegate, local=local)
 
-    def test_the_client_pays_the_commission_and_the_peer_gets_its_price(self):
+    def test_the_client_pays_its_initial_mu_and_the_commission_comes_out_of_it(self):
+        # The quotes ask for a balance of 1 500, and the peer quotes it with a build of
+        # 200: 1 700. The commission of this node on the build is 10.
+        r = self._launch([("peer-a", price(1_700))], initial_mu=1_500)
+        self.assertIsNone(r.error)
+        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_500)
+        kwargs = r.delegate.call_args.kwargs
+        self.assertEqual(int(kwargs["config"].initial_mu.n), 1_500)
+        self.assertEqual(kwargs["commission_mu"], 10)
+        self.assertEqual(kwargs["build_mu"], 200)
+
+    def test_with_no_amount_the_client_pays_the_quote_of_the_peer_and_its_commission(self):
         r = self._launch([("peer-a", price(1_200))])
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_210)
-        self.assertEqual(r.delegate.call_args.kwargs["cost"], 1_200)
+        kwargs = r.delegate.call_args.kwargs
+        self.assertEqual(int(kwargs["config"].initial_mu.n), 1_210)
+        # The peer gets 1 210 - 10 = 1 200: its build and the default balance.
+        self.assertEqual(kwargs["commission_mu"], 10)
+        self.assertEqual(kwargs["build_mu"], 200)
 
     def test_a_peer_that_costs_more_than_the_offer_is_not_used(self):
         r = self._launch([("peer-a", price(1_300)), ("peer-b", price(1_200))], offered=1_210)
@@ -518,10 +544,47 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         self.assertIn("more than the 1210 MU this node offered", str(r.error))
         r.spend.assert_not_called()
 
-    def test_the_local_node_is_charged_its_price_as_before(self):
+    def test_a_client_that_sets_its_amount_is_never_charged_more_than_it_set(self):
+        # The offer was 1 210, and the peer now costs more: a build of 300 on 1 500. The
+        # client set 1 500: it is charged 1 500 and no more, and the start fits.
+        r = self._launch([("peer-a", price(1_800))], offered=1_210, initial_mu=1_500)
+        self.assertIsNone(r.error)
+        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_500)
+
+    def test_the_local_node_is_charged_its_quote_when_there_is_no_amount(self):
         r = self._launch([("local", price(1_300))], offered=1_210)
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_300)
+
+    def test_the_local_node_is_charged_the_amount_that_the_client_set_and_no_build(self):
+        r = self._launch([("local", price(1_300))], initial_mu=1_100, build_mu=300, minimum_mu=500)
+        self.assertIsNone(r.error)
+        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_100)
+        self.assertEqual(int(r.local.call_args.kwargs["config"].initial_mu.n), 1_100)
+
+    def test_an_amount_that_does_not_fit_the_build_charges_nothing(self):
+        r = self._launch([("local", price(1_300))], initial_mu=200, build_mu=300)
+        self.assertIsNotNone(r.error)
+        self.assertIn("does not cover the build", str(r.error))
+        r.spend.assert_not_called()
+        r.local.assert_not_called()
+
+    def test_an_amount_that_leaves_less_than_one_period_charges_nothing(self):
+        r = self._launch([("local", price(1_300))], initial_mu=700, build_mu=300, minimum_mu=500)
+        self.assertIsNotNone(r.error)
+        self.assertIn("One maintenance period costs 500 MU", str(r.error))
+        r.spend.assert_not_called()
+
+    def test_a_peer_that_the_amount_does_not_fund_is_skipped_and_the_next_one_runs_it(self):
+        # After the commission of 10 and the build of 200 of peer-a, 20 MU is left. One
+        # period costs 50. The quote of peer-b has no build: 500 MU are left.
+        cheap = price(430, init=50)
+        free = price(230, init=50)
+        r = self._launch([("peer-a", cheap), ("peer-b", free)], initial_mu=230)
+        self.assertIsNone(r.error)
+        self.assertEqual(r.delegate.call_args.kwargs["peer"], "peer-b")
+        self.assertEqual(r.spend.call_count, 1)
+        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 230)
 
 
 if __name__ == "__main__":

@@ -83,6 +83,11 @@ class RegistrationOrderTests(unittest.TestCase):
         ), patch.object(
             local_execute, "build", return_value="svc-hash"
         ), patch.object(
+            # What funds a start has its own tests (#563).
+            local_execute, "start_build_mu", return_value=0
+        ), patch.object(
+            local_execute, "minimum_runtime_mu", return_value=0
+        ), patch.object(
             local_execute, "reserve_instance_name", return_value="tidy-island"
         ), patch.object(
             local_execute.sc, "internal_instance_exists", return_value=False

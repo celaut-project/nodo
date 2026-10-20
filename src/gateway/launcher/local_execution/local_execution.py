@@ -16,6 +16,12 @@ from src.utils import dead_instances, keyvalue
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
+from src.utils.cost_functions.start_funding import (
+    StartAmountTooSmall,
+    balance_after_build,
+    minimum_runtime_mu,
+    start_build_mu,
+)
 from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
@@ -71,6 +77,14 @@ def _serialize_envs(config: Optional[celaut.Configuration]) -> str:
     return json.dumps(envs, sort_keys=True) if envs else ""
 
 
+def _refund(refund_container: List[Callable]) -> None:
+    """Give the charge of the start back to the father, if it was taken."""
+    try:
+        refund_container.pop()()
+    except IndexError:
+        log.LOGGER('Error refunding the charge.')
+
+
 def local_execution(
         config: Optional[celaut_pb2.Configuration],
         resources: celaut_pb2.Service.Container.Resources,
@@ -107,14 +121,44 @@ def local_execution(
     launch_scarcity = system_scarcity()
     launch_bp = launch_price_bp(launch_scarcity)
 
-    initial_mu: int = from_amount(config.initial_mu) \
-        if config.HasField("initial_mu") \
-        else default_initial_balance(
-            system_resources=resources.at_init,
-            service_hash=service_id,
-            arch=service_arch,
-            scarcity=launch_scarcity,
+    # The father paid `initial_mu`, and only that (#563). The build is taken out of it,
+    # and what is left is the balance of the instance. A request that carries no amount
+    # (a direct call: `launch_service` always sets one) is funded with the build plus
+    # the default balance, so that the instance still has the default runtime.
+    #
+    # Settled before the build, so that a start that does not fit costs nothing: the
+    # father is given the whole charge back, and nothing is built for it.
+    try:
+        build_mu = start_build_mu(metadata=metadata, scarcity=launch_scarcity)
+        initial_mu: int = from_amount(config.initial_mu) \
+            if config.HasField("initial_mu") \
+            else build_mu + default_initial_balance(
+                system_resources=resources.at_init,
+                service_hash=service_id,
+                arch=service_arch,
+                scarcity=launch_scarcity,
+            )
+        start_balance_mu: int = balance_after_build(
+            initial_mu=initial_mu,
+            build_mu=build_mu,
+            minimum_mu=minimum_runtime_mu(
+                resources=resources,
+                service_hash=service_id,
+                arch=service_arch,
+                service=service,
+                scarcity=launch_scarcity,
+            ),
         )
+    except Exception as e:
+        # A start that is too small is the caller's figure, and it is not an error of
+        # the node. Any other failure here is a reason not to run it, and the charge
+        # goes back for the same reason.
+        if isinstance(e, StartAmountTooSmall):
+            log.LOGGER(f'Rejecting the start of {service_id}: {e}')
+        else:
+            log.LOGGER(f'Error pricing the start of {service_id}: {e}')
+        _refund(refund_container)
+        raise
 
     # The initial end of the declared range. The virtualizer is handed the whole
     # `resources` (both ends): which of them it has to reserve at boot is the
@@ -338,7 +382,7 @@ def local_execution(
             container_id=vmachine_id,
             name=instance_name,
             container_ip=vmachine_ip,
-            balance_mu=initial_mu,
+            balance_mu=start_balance_mu,
             serialized_instance=None,
             service_id=service_id,
             virtualizer=configured_virtualizer,

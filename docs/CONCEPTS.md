@@ -119,7 +119,7 @@ instance. No other cost limit is necessary in the start configuration.
 
 A father limits the spend of a child in this way:
 
-1. Start the child with a small `initial_mu`.
+1. Start the child with a small `initial_mu`. The build of the service comes out of it.
 2. Add a small amount to the balance of the child at short intervals.
 3. Let the child die if it needs more than one amount between two intervals.
 
@@ -132,8 +132,20 @@ signs each `EstimatedCost`, and that message has a `variance`. The client keeps 
 signed quote. If the real cost is more than the quote allows, the quote and the real
 cost are the proof for a negative reputation.
 
-The cost of the start is different. The client pays it in full at the start, and it
-is the `cost` field of the quote. See [`PRICING.md`](PRICING.md).
+The cost of the start is inside this limit. The client pays `initial_mu` and nothing
+else (#563). The node takes the cost of the build from the balance of the new instance,
+so the balance is `initial_mu` less the build. The maximum spend of the father is
+`initial_mu`, less the refund when the instance stops. The `cost` field of the quote is
+the least `initial_mu` that starts the service. See [`PRICING.md`](PRICING.md).
+
+- If the build does not fit in `initial_mu`, the node rejects the start and charges
+  nothing.
+- The balance after the build must be at least one maintenance period with the resources
+  at the start. If it is less, the node rejects the start. This stops an instance that
+  dies at the first tick after the father paid the build.
+- A father that wants "start this service only if the start costs at most X" sets
+  `initial_mu` to X plus the minimum runtime. No new field is necessary.
+- If the request has no `initial_mu`, the node uses the build plus its default balance.
 
 ## Address and token provisioning
 

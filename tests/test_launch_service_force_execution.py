@@ -12,6 +12,7 @@ from unittest.mock import patch
 IMPORT_ERROR = None
 try:
     from src.gateway.launcher import launch_service as launch_service_mod
+    from src.utils.cost_functions import delegation_commission
     from protos import celaut_pb2 as celaut
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -23,9 +24,11 @@ class ForceDelegateTests(unittest.TestCase):
     def setUp(self):
         self.service = celaut.Service()
         self.metadata = celaut.Metadata()
+        # The quote asked for a balance of 1 000 MU, and the peer quoted a build of 100 on it.
         self.configuration = celaut.Configuration()
+        self.configuration.initial_mu.n = "1000"
         self.cost = celaut.EstimatedCost()
-        self.cost.cost.n = "100"
+        self.cost.cost.n = "1100"
 
     def _call(self):
         return launch_service_mod._force_delegate(
@@ -106,6 +109,48 @@ class ForceDelegateTests(unittest.TestCase):
         self.assertEqual(mock_delegate.call_args.kwargs["service_id"], "svc-1")
         self.assertEqual(mock_delegate.call_args.kwargs["recursion_guard_token"], "tok-1")
 
+    def test_the_father_pays_its_initial_mu_and_the_peer_build_comes_out_of_it(self):
+        # `initial_mu` is 1 000 and the quote has a build of 100. The commission is 5 % of
+        # the build, 5 MU. The charge is 1 000 and not 1 100 or 1 105.
+        with patch.object(launch_service_mod.sc, "peer_exists", return_value=True), patch.object(
+            launch_service_mod, "service_requires_parent_colocation", return_value=False
+        ), patch.object(
+            launch_service_mod, "estimate_cost_on_peer", return_value=self.cost
+        ), patch.object(
+            launch_service_mod, "spend_mu", return_value=True
+        ) as mock_spend, patch.object(
+            launch_service_mod, "delegate_execution", return_value=celaut.ServiceInstance()
+        ) as mock_delegate, patch.object(
+            launch_service_mod.sc, "internal_instance_exists", return_value=False
+        ), patch.object(
+            delegation_commission, "commission_percent", return_value=5.0
+        ), patch.object(delegation_commission, "commission_min_mu", return_value=0):
+            self._call()
+
+        self.assertEqual(mock_spend.call_args.kwargs["amount_mu"], 1000)
+        kwargs = mock_delegate.call_args.kwargs
+        self.assertEqual(int(kwargs["config"].initial_mu.n), 1000)
+        self.assertEqual(kwargs["commission_mu"], 5)
+        self.assertEqual(kwargs["build_mu"], 100)
+
+    def test_an_amount_that_does_not_fund_the_peer_charges_nothing(self):
+        self.configuration.initial_mu.n = "50"
+        self.cost.cost.n = "150"
+        self.cost.init_maintenance_cost.n = "60"
+        with patch.object(launch_service_mod.sc, "peer_exists", return_value=True), patch.object(
+            launch_service_mod, "service_requires_parent_colocation", return_value=False
+        ), patch.object(
+            launch_service_mod, "estimate_cost_on_peer", return_value=self.cost
+        ), patch.object(launch_service_mod, "spend_mu") as mock_spend, patch.object(
+            launch_service_mod, "delegate_execution"
+        ) as mock_delegate:
+            with self.assertRaises(Exception) as caught:
+                self._call()
+
+        self.assertIn("does not cover", str(caught.exception))
+        mock_spend.assert_not_called()
+        mock_delegate.assert_not_called()
+
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchServiceDispatchTests(unittest.TestCase):
@@ -180,6 +225,7 @@ class LaunchServiceDispatchTests(unittest.TestCase):
                     return_value=iter([("peer-a", cost), ("local", cost)]),
                 ), \
                 patch.object(launch_service_mod, "_detect_local_preflight_failure", return_value=None), \
+                patch.object(launch_service_mod, "_funding_failure", return_value=None), \
                 patch.object(launch_service_mod, "spend_mu", return_value=True), \
                 patch.object(launch_service_mod, "delegate_execution") as mock_delegate, \
                 patch.object(launch_service_mod, "local_execution", return_value=instance) as mock_local, \

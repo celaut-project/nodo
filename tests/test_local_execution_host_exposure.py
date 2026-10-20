@@ -128,6 +128,9 @@ class LocalExecutionHostExposureTests(unittest.TestCase):
             enter(patch.object(local_execute, "get_configured_virtualizer", return_value="ch"))
             enter(patch.object(local_execute, "select_virtualizer", return_value="ch"))
             enter(patch.object(local_execute, "build", return_value="svc-hash"))
+            # What funds a start has its own tests (#563).
+            enter(patch.object(local_execute, "start_build_mu", return_value=0))
+            enter(patch.object(local_execute, "minimum_runtime_mu", return_value=0))
             enter(patch.object(local_execute, "reserve_instance_name", return_value="tidy-island"))
             enter(patch.object(local_execute.sc, "internal_instance_exists",
                                return_value=father_is_local_instance))

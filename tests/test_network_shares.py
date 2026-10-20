@@ -373,6 +373,9 @@ class LaunchPlacementTests(unittest.TestCase):
             "descends_from_dev_client": True,
             "get_arch_tag": "amd64",
             "default_initial_balance": 1,
+            # Pricing is not tested here: what funds a start has its own tests (#563).
+            "_funding_failure": None,
+            "_delegation_terms": (0, 0),
         }
         with ExitStack() as stack:
             for name, value in patches.items():

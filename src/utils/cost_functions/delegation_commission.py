@@ -7,11 +7,18 @@ charged the client exactly the price of the peer, so it got nothing for this.
 The commission applies to what the client consumes, never to the deposit:
 
 * the start charge of the peer (the build, the part of ``EstimatedCost.cost`` above
-  the initial balance), once, with ``COMMISSION_MIN_MU`` as a floor;
+  the balance that the quote asked for), once, with ``COMMISSION_MIN_MU`` as a floor;
 * each maintenance tick: what the peer metered (``maintain_delegated_instances``).
 
-The deposit (``Configuration.initial_mu``) goes back to the client when the instance
-stops, so a commission on it would be a charge for nothing.
+The commission of the start is paid from ``Configuration.initial_mu``, as the build is
+(#563). The client pays ``initial_mu`` and nothing else. This node keeps its commission
+and sends the peer ``initial_mu`` less the commission. The peer takes its build from
+that amount, and the rest is the balance of the child. So a quote of this node, as the
+least ``initial_mu`` that starts the service, is the quote of the peer plus the
+commission (``with_commission``).
+
+The deposit goes back to the client when the instance stops, so a commission on it
+would be a charge for nothing.
 
 The traffic of a tunnel through this node is not here: ``tunnel_open_mu`` and
 ``net_mu_per_gib`` already charge it (``src/tunneling/rpc_tunnel.py``).
@@ -72,6 +79,19 @@ def _amount(value: int) -> celaut_pb2.Amount:
     return celaut_pb2.Amount(n=str(int(value)))
 
 
+def start_commission(peer_cost: celaut_pb2.EstimatedCost, initial_mu: int) -> tuple[int, int]:
+    """The build of the peer and the commission of this node on it, both in local MU.
+
+    ``peer_cost`` is the quote of the peer, already in local MU
+    (``estimated_cost_for_local``). ``initial_mu`` is the balance that the quote asked
+    for, in local MU. The quote is the build plus that balance, so the build is what is
+    left above it. The commission is on the build only, with ``COMMISSION_MIN_MU`` as a
+    floor.
+    """
+    build_mu = max(_mu(peer_cost.cost) - max(int(initial_mu), 0), 0)
+    return build_mu, commission_on(build_mu, with_minimum=True)
+
+
 def with_commission(
         peer_cost: celaut_pb2.EstimatedCost,
         initial_mu: int,
@@ -79,13 +99,15 @@ def with_commission(
     """The price this node offers for a service that ``peer_cost`` says a peer runs.
 
     ``peer_cost`` is already in local MU (``estimated_cost_for_local``). ``initial_mu``
-    is the deposit in it, in local MU: the start charge is what is left above it.
+    is the balance that the quote of the peer asked for, in local MU: the build is what
+    is left of the cost above it. The ``cost`` of the offer is the least ``initial_mu``
+    that starts the service through this node: the least of the peer, plus the
+    commission. The client pays that amount, and no other.
     """
     offer = celaut_pb2.EstimatedCost()
     offer.CopyFrom(peer_cost)
-    cost = _mu(peer_cost.cost)
-    start_charge = max(cost - max(int(initial_mu), 0), 0)
-    offer.cost.CopyFrom(_amount(cost + commission_on(start_charge, with_minimum=True)))
+    _, start_commission_mu = start_commission(peer_cost, initial_mu)
+    offer.cost.CopyFrom(_amount(_mu(peer_cost.cost) + start_commission_mu))
     for field in ("init_maintenance_cost", "max_maintenance_cost"):
         if peer_cost.HasField(field):
             value = _mu(getattr(peer_cost, field))

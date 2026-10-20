@@ -318,6 +318,7 @@ class TheWiringTests(unittest.TestCase):
                 patch.object(local_execute, "get_configured_virtualizer", return_value="ch"), \
                 patch.object(local_execute, "select_virtualizer", return_value="ch"), \
                 patch.object(local_execute, "build", return_value="svc-hash"), \
+                patch.object(local_execute, "start_build_mu", return_value=0), \
                 patch.object(local_execute, "reserve_instance_name", return_value="tidy-island"), \
                 patch.object(local_execute.sc, "internal_instance_exists", return_value=False), \
                 patch.object(local_execute, "resolve_slot_transport_protocols", return_value="tcp"), \
