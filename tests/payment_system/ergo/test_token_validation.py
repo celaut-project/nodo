@@ -188,10 +188,29 @@ class TokenValidationTests(unittest.TestCase):
         bad["additionalRegisters"]["R4"] = {"serializedValue": "0e05" + raw.hex()}
         self.assertFalse(self._validate([bad], asset=_asset()))
 
-    def test_a_later_box_with_the_same_token_can_pay_enough(self):
-        boxes = [_box(assets=[_token(amount=1)]), _box(assets=[_token(amount=100)])]
+    def test_boxes_with_the_same_token_are_summed(self):
+        # A deposit sent twice (a retry, a top-up) counts as one payment, in any order.
+        boxes = [_box(assets=[_token(amount=60)]), _box(assets=[_token(amount=40)])]
         self.assertTrue(self._validate(boxes, asset=_asset()))
         self.assertTrue(self._validate(boxes[::-1], asset=_asset()))
+        self.assertFalse(self._validate(
+            [_box(assets=[_token(amount=60)]), _box(assets=[_token(amount=39)])],
+            asset=_asset()))
+
+    def test_the_boxes_of_another_token_are_not_summed(self):
+        boxes = [_box(assets=[_token(amount=60)]),
+                 _box(r4="another-deposit", assets=[_token(amount=40)])]
+        self.assertFalse(self._validate(boxes, asset=_asset()))
+
+    def test_erg_boxes_are_summed(self):
+        with mock.patch.object(rate, "mu_per_nanoerg", return_value=Decimal(1)):
+            self.assertTrue(self._validate(
+                [_box(value=60, assets=[]), _box(value=40, assets=[])], amount=100))
+
+    def test_a_box_seen_twice_is_counted_once(self):
+        # Confirmed between the page read and the mempool read: same boxId in both.
+        box = dict(_box(assets=[_token(amount=60)]), boxId="b1", address=WALLET)
+        self.assertFalse(self._validate([box], asset=_asset(), mempool=[box]))
 
     def test_every_page_of_the_list_is_read(self):
         filler = [_box(r4="other", assets=[_token(amount=100)])] * (interface.EXPLORER_PAGE_SIZE + 5)
