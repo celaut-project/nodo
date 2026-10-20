@@ -147,6 +147,35 @@ the least `initial_mu` that starts the service. See [`PRICING.md`](PRICING.md).
   `initial_mu` to X plus the minimum runtime. No new field is necessary.
 - If the request has no `initial_mu`, the node uses the build plus its default balance.
 
+### Read where a balance went
+
+Every change of a balance is one movement in the ledger of the node, written with the
+balance itself: a payment, the start of an instance and its build, each maintenance
+period, a top-up, a refund, a tunnel. Each movement says what it was (`kind`), what it
+concerns (the child, for a start that the account paid), and its cause (for a period,
+the resources and the seconds that the node priced). The movements of an account add up
+to its balance.
+
+`GetBalanceStatement` returns the movements of an account, signed by the node:
+
+- A client reads its own account with its client_id, and a local instance reads its own
+  by its address.
+- With `token`, the caller reads the account of a child of its own instead: an instance
+  that it started. One statement is one account. The movements of a child are not in the
+  account of its father: the father has the `child_start` that paid for the child, with
+  the token of the child, and reads the child for the rest.
+- `since_seconds` limits it to a span back from now, `last` to the last movements. With
+  both, both apply. The node never returns more than its own limit, and says when it cut
+  the answer.
+
+The caller pays for it, a fixed part and a part for each movement
+([`PRICING.md`](PRICING.md)). A node that delegates work reads the statements of its
+peers to check what each one charges it, and a peer whose statement does not add up, or
+shows a charge beyond its rule, loses reputation
+([`REPUTATION.md`](REPUTATION.md#what-a-peer-charges-from-its-statements)). A signed
+statement is also evidence that a client can show, as a receipt is
+([`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md)).
+
 ## Address and token provisioning
 
 To talk to a running instance you need its **communication address** (`ip:port`, from

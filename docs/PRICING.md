@@ -191,6 +191,8 @@ pricing:
   BUILD_MU:            10000000
   TUNNEL_OPEN_MU:         10000
   MODIFY_RESOURCES_MU:    10000
+  STATEMENT_QUERY_MU:       100     # a balance statement, plus...
+  STATEMENT_ROW_MU:           1     # ...this for each movement that it returns
   # Scarcity: per resource, never global.
   SCARCITY_MAX_MULTIPLIER: 10        # ceiling of the surcharge when a resource runs out
   SCARCITY_CURVE: 1.0                # 1.0 = linear; >1 stays flat until real scarcity
@@ -226,6 +228,15 @@ charge grows with the instance's actual size.
 
 One-off operations (`BUILD_MU`, `TUNNEL_OPEN_MU`, `MODIFY_RESOURCES_MU`) are flat
 and not scarcity-scaled: they price work done once, not occupancy.
+
+A balance statement (`GetBalanceStatement`, #570) costs `STATEMENT_QUERY_MU` plus
+`STATEMENT_ROW_MU` for each movement that it returns, charged to the account that asks
+and written as its `statement_query` movement before the node answers. The fixed part
+pays for the call, the authentication and the signature. The rest follows the rows: the
+index on `(account_id, ts)` finds where a statement starts at the same cost whatever the
+size of the account, and what grows is reading, signing and sending each row. A node that
+delegates reads one statement of its own account and one of each child at every tick, so
+these prices are the cost to a peer of checking this node.
 
 `SCARCITY_CURVE` is the exponent applied to the missing supply, so raising it holds the
 surcharge back: at `2.0`, a tenth of a resource gone costs 1.09x rather than the 1.90x
@@ -441,19 +452,19 @@ the rest is the balance of the child on the peer.
 - If the amount does not cover the build of the peer and the minimum runtime, the peer
   rejects the start and charges nothing. The father is refunded, and this node does not
   lower the reputation of the peer.
-- `peer_balance_mu` is the balance that the peer reports for the child after the start.
-  It is not the amount that this node sent, because the peer already took its build from
-  it.
+- `peer_balance_mu` is the balance of the child in its statement on the peer, right
+  after the start (#570). It is not the amount that this node sent, because the peer
+  already took its build from it. The statement also shows what the peer took, and this
+  node checks it (see
+  [`REPUTATION.md`](REPUTATION.md#what-a-peer-charges-from-its-statements)).
 - `balance_mu` of the delegated row is what the father can get back: `initial_mu` less
   the commission and less the build of the peer, in local MU.
 - The peer must not take anything from the account of this node for the start. The only
   source is the amount that this node sent.
 
 There is no version check and no fallback for an old peer. An old peer takes the build
-from the account of the caller, and also takes the whole amount. The new rule is a
-condition of the network, but this node does not check it yet: readings of a balance
-cannot tell the build from the other movements on it (see
-[`REPUTATION.md`](REPUTATION.md#what-the-start-of-a-delegated-instance-does-not-score)).
+from the account of the caller, and also takes the whole amount. Its statement shows
+that, and the peer loses reputation for it.
 
 Apart from the start, the two accounts have nothing to do with each other. There are
 two accounts, in two units, and this node stands between them:
@@ -471,15 +482,18 @@ local one is). It is spent by
 the remainder back through the same `credit_father` a local stop uses — after the row
 is deleted, so a stop that is retried cannot pay twice.
 
-What the tick charges is **measured, not predicted**. The row also keeps
-`peer_balance_mu`: the child's balance as the peer's own books hold it, in the peer's
-MU, as of the last reading. Each tick reads it again and charges the difference,
-converted at today's rate. A quote frozen at delegation would drift three ways that are
-all invisible from here — the peer repricing its resources (nothing advertises a price
-vector; `node_advertised_rates` went with the gas model), the two `mu_per_unit` rates
-moving against each other, and a `hotplug` making the child bigger than the shape it
-was quoted at. The subtraction happens on the peer's scale before any conversion, so a
-rate that moved between two readings cannot read as consumption.
+What the tick charges is **measured, not predicted**. The row keeps a *mark*: the last
+movement of the child's statement on the peer that this node checked, with the balance
+after it, in the peer's MU (`peer_balance_mu`). Each tick reads the statement since then
+and charges the movements after the mark, converted at today's rate: what the child
+spent, and not what its father moved (a `top_up` or a `withdrawal` of this node). A quote
+frozen at delegation would drift three ways that are all invisible from here — the peer
+repricing its resources, the two `mu_per_unit` rates moving against each other, and a
+`hotplug` making the child bigger than the shape it was quoted at. The sum happens on the
+peer's scale before any conversion, so a rate that moved between two readings cannot read
+as consumption. When the statement cannot be used (it does not add up, the peer cut it,
+or there is none), the tick charges the fall of the balance since the mark instead, and
+goes on from the end of what it read.
 
 An instance that consumed more than its deposit holds is stopped, and its row is
 emptied first rather than refunded: every MU on it is already owed to the peer for
@@ -487,9 +501,8 @@ runtime that happened, so what the node absorbs is only the part the deposit cou
 reach. That reading is also the liveness check. A peer that answers but no longer knows the
 instance has stopped it on its own, and the row here follows it down; a peer that
 cannot be reached charges nothing and loses nothing, because the mark only advances
-with a charge, so the next successful reading bills everything metered since. A deposit
-change moves the mark by the same amount it moves the deposit, or the interval it lands
-in would read as a child that consumed nothing.
+with a charge, so the next successful reading bills everything metered since. The charge
+and its mark are written in one transaction (`settle_delegated_tick`).
 
 What the peer refunds at that moment is the *other* account. It is credited to this
 node's deposit there, in the peer's MU, and is logged rather than forwarded: paying a
@@ -501,7 +514,8 @@ between the two meters is the node's position to hold.
 Top-ups move both halves. `ModifyDeposit` charges the father here, converts the figure
 to the peer's MU (`mu_conversion.convert_mu`, rounding the direction that cannot pay
 the client's costs out of the node's pocket) and forwards it — and only writes the
-local row and its mark once the peer has confirmed its side.
+local row once the peer has confirmed its side. The mark does not move: the peer writes
+the change in the statement of the child, and the tick leaves it out of the consumption.
 
 ### Worked example
 

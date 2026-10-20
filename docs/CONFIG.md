@@ -204,6 +204,18 @@ instance never starts again.
 | `instances.DEAD_MAX_ROWS` | `200` | Keep at most this many dead instances. The oldest are deleted first. Local and delegated instances count separately. `0` turns the limit off. |
 | `instances.DEAD_LOG_MAX_BYTES` | `1048576` | Keep the last bytes of each guest log, up to this size. |
 
+## `ledger` — balance movements
+
+Every change of the balance of a client or an instance is one row of the ledger, written
+in the same transaction as the balance. The owner of the account reads its rows with
+`GetBalanceStatement`, signed by this node; a peer that delegated work here reads them
+to check what this node charges it. See [`REPUTATION.md`](REPUTATION.md#what-a-peer-charges-from-its-statements).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ledger.RETENTION_DAYS` | `30` | Delete movements older than this. The last movement of a live account stays, whatever its age. |
+| `ledger.MAX_STATEMENT_ROWS` | `1000` | The most movements that one statement returns. A statement that is cut says so (`truncated`). |
+
 ## `builder` — build tuning
 
 | Key | Default | Meaning |
@@ -709,6 +721,8 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `pricing.BUILD_MU` | `10000000` | Building a service container, charged once. |
 | `pricing.TUNNEL_OPEN_MU` | `10000` | Opening a tunnel, charged once. |
 | `pricing.MODIFY_RESOURCES_MU` | `10000` | Changing a running instance's resources. |
+| `pricing.STATEMENT_QUERY_MU` | `100` | A balance statement (`GetBalanceStatement`), charged to the account that asks. |
+| `pricing.STATEMENT_ROW_MU` | `1` | Each movement that a balance statement returns, on top of `STATEMENT_QUERY_MU`. |
 | `pricing.SCARCITY_MAX_MULTIPLIER` | `10` | Ceiling of the surcharge when a resource runs out. `1` prices purely by consumption. |
 | `pricing.SCARCITY_CURVE` | `1.0` | How fast the surcharge arrives. `1.0` is linear; higher stays near 1x until the resource is genuinely scarce. |
 | `pricing.MAX_PRICE_VOLATILITY` | `2.0` | How far the scarcity multiplier of a running instance may rise above the one it was launched at. `2.0`: a tick charges at most twice the launch price. `1.0`: the price is fixed for the life of the instance. `0`, or a value from `SCARCITY_MAX_MULTIPLIER` up: no bound. Any other value under `1` is refused. A ceiling only: a fall of the load always reaches the instance. See [`PRICING.md`](PRICING.md#bounding-the-price-of-a-running-instance). |

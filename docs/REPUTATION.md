@@ -115,29 +115,61 @@ first ERG burned is worth more than the first ERG donated — comparing `W_o / H
 index has never been filled, that term is zero for *every* candidate — never for some of
 them, which would rank peers on the shape of a failure.
 
-## What the start of a delegated instance does not score
+## What a peer charges, from its statements
 
 This node pays `initial_mu` for a start and sends the peer that amount less its own
 commission (#563). The peer takes its build from the amount that it got, and must take
-nothing else from the account of this node.
+nothing else from the account of this node. While the child runs, the peer charges its
+maintenance to the balance of the child.
 
-This node does **not** check that rule, and a start lowers no `r` for what the peer
-charged. A balance on the peer is the sum of every movement on it, and two readings of it
-cannot tell the build apart from the rest:
+A balance cannot check any of this. It is the sum of every movement on it, and two
+readings of it cannot tell a wrong charge from the rest: our account on the peer also
+moves for a top-up of another child or a tunnel, and the balance of a child also moves
+for what it spends on its own dependencies. A check on readings like these penalizes
+honest peers (#565, #569).
 
-- the account of this node on the peer also moves for a top-up of another child, or for a
-  tunnel, while a build runs for minutes;
-- the balance of the child also moves for a maintenance tick, and for what the child
-  spends on its own dependencies as soon as it boots.
+What holds is the **statement** of the account (#570): every movement, with its kind and
+its cause, signed by the peer (`GetBalanceStatement`). This node reads the statement of
+its own account on each peer where it has a delegated child, and the statement of each
+child, at every maintenance tick and right after `StartService`. It checks two things,
+from the last movement that it already checked:
 
-A check on readings like these penalizes honest peers. The check that holds is a statement
-of the movements of an account, from the peer: each charge with its cause, so that this
-node can add them up against the balance and see which ones were applied to it. See
-[`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md) for signed statements of a node about its
-own executions.
+1. **It adds up.** Each movement takes the balance to its `balance_after`, the seqs have
+   no gap, the last one is the balance of the answer, and the signature is the peer's.
+2. **Each movement follows its rule.** On a child: the start is what this node sent, the
+   build and the commission of the peer are within its quote (`build × (1 + variance)`),
+   a maintenance period is within the rates that the peer announces for the resources
+   that it names, at `scarcity_max_multiplier`, and the periods do not add up to more
+   time than passed. On our account: nothing takes MU from it but the start of a child
+   of ours (no more than what was sent for it), a top-up of a child of ours, or a
+   statement that we asked for.
 
-A peer that rejects a start because the amount is too small is not at fault either. The
-amount was the choice of this node.
+| What the peer did | Reason | Change of `r` |
+|---|---|---|
+| A statement that does not add up, is not signed by it, or does not come at all from a peer that answers | `statement_inconsistent` | -1000 |
+| A charge beyond its rule | `statement_overcharged` | -1000 |
+
+The same scale as a service that does not hash to its id (`get_service_wrong_hash`): in
+every case the peer signed or reported something false about money. Each fault is scored
+once for each account and reason, not at every tick.
+
+Some things are not faults, and score nothing:
+
+- A peer that cannot be reached. That costs `peer_refresh_failed` instead.
+- A peer that refuses a statement while our account there cannot pay for it.
+- A statement that the peer cut at its limit (`truncated`) before the movement after the
+  mark. The span was too long to ask for. The tick goes on from the end of it.
+- A `child_start` with no token, or with a token that this node has not stored yet. The
+  start may be in progress, so the check stops there and looks again at the next tick.
+  After `START_SERVICE_ON_PEER_TIMEOUT` and two ticks, it is a start that this node did
+  not ask for.
+- A child that spends on its own dependencies, tunnels or statements. The movement says
+  so, and it is the child's to spend.
+- A peer that rejects a start because the amount is too small. The amount was the choice
+  of this node.
+
+When a statement cannot be used, the tick charges the father the fall of the balance of
+the child since the last reading.
 
 ## Why an instance died, and what it costs the service
 
