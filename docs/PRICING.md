@@ -450,9 +450,10 @@ the rest is the balance of the child on the peer.
   source is the amount that this node sent.
 
 There is no version check and no fallback for an old peer. An old peer takes the build
-from the account of the caller, and also takes the whole amount. This node treats that
-peer as malicious (see [`REPUTATION.md`](REPUTATION.md#a-peer-that-charges-the-start-in-the-wrong-way)).
-The new rule is a condition of the network.
+from the account of the caller, and also takes the whole amount. The new rule is a
+condition of the network, but this node does not check it yet: readings of a balance
+cannot tell the build from the other movements on it (see
+[`REPUTATION.md`](REPUTATION.md#what-the-start-of-a-delegated-instance-does-not-score)).
 
 Apart from the start, the two accounts have nothing to do with each other. There are
 two accounts, in two units, and this node stands between them:

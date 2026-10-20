@@ -1,14 +1,12 @@
-import math
-import threading
 from hashlib import sha256
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 
 from protos import celaut_pb2
 from src.manager.manager import get_client_id_on_other_peer
-from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer, refresh_balance_on_peer
+from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
@@ -20,7 +18,6 @@ from src.payment_system.mu_conversion import (
     matching_payment_system,
     peer_mu_in_local,
 )
-from src.reputation_system.reasons import Reason
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
 
 
@@ -72,41 +69,6 @@ def _mu(amount) -> int:
     return int(amount.n or 0)
 
 
-# What a peer costs in reputation when it breaks the rule of the start (#563). The scale
-# is the one of the other penalties: a payment that the peer does not acknowledge is
-# -100, a service that does not hash to its id is -1000. Taking money from the account of
-# this node outside the amount that it sent is theft, or the old rule of the network
-# (the caller pays the build), and it repeats on every start. Taking too much from the
-# amount is a smaller fault: the money was the amount that this node chose to send.
-CHARGED_OUTSIDE_AMOUNT_PENALTY = -1000
-OVERCHARGED_PENALTY = -100
-
-# One start at a time on each peer. The account of this node on the peer is read before
-# and after the start, and the fall is compared with the amount that was sent. Another
-# start on the same peer between the two reads would be a fall that the peer did not
-# cause. A start is rare, so the wait is short against the build that it often includes.
-_START_LOCKS: Dict[str, threading.Lock] = {}
-_START_LOCKS_GUARD = threading.Lock()
-
-
-def _start_lock(peer: str) -> threading.Lock:
-    with _START_LOCKS_GUARD:
-        return _START_LOCKS.setdefault(peer, threading.Lock())
-
-
-def _account_on_peer(peer: str) -> Optional[int]:
-    """What this node holds on ``peer`` now, in the MU of the peer, or None if unknown.
-
-    Read from the peer on purpose: the cached figure of ``balance_on_other_peer`` can be
-    ten seconds old. None is not an error: the check that needs it is skipped.
-    """
-    try:
-        return int(refresh_balance_on_peer(peer))
-    except Exception as e:
-        log.LOGGER(f'Cannot read our account on {peer} to check the start charge: {e}')
-        return None
-
-
 def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
     """The balance that ``peer`` reports for the child after the start, in its own MU."""
     try:
@@ -114,58 +76,6 @@ def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
     except Exception as e:
         log.LOGGER(f'Cannot read the balance of the child {external_token[:8]} on {peer}: {e}')
         return None
-
-
-def _penalize(peer: str, amount: int, reason: str) -> None:
-    try:
-        from src.reputation_system import interface
-        interface.update_peer_reputation(peer_id=peer, amount=amount, reason=reason)
-    except Exception as e:
-        log.LOGGER(f'Cannot lower the reputation of {peer} ({reason}): {e}')
-
-
-def check_start_charge(
-        peer: str,
-        *,
-        sent_peer_mu: int,
-        build_peer_mu: int,
-        variance: float,
-        account_before: Optional[int],
-        account_after: Optional[int],
-        child_balance: Optional[int],
-) -> None:
-    """Lower the reputation of ``peer`` if it charged the start in a way the rule does not allow.
-
-    All figures are in the MU of the peer. The only source of the start cost is the
-    amount that this node sent (``sent_peer_mu``). Two things are wrong:
-
-    * The account of this node fell by more than ``sent_peer_mu``. The peer took money
-      outside the amount. A peer that keeps the old rule does this: it charges the build
-      to the account of the caller, and also takes the whole amount.
-    * The child holds less than ``sent_peer_mu`` less the build that the peer quoted and
-      its variance allow. The peer took more from the amount than it said.
-
-    A peer that rejects the start because the amount is too small is not here at all:
-    that is an error of the start, and nobody did wrong.
-    """
-    if account_before is not None and account_after is not None:
-        fall = int(account_before) - int(account_after)
-        if fall > sent_peer_mu:
-            log.LOGGER(
-                f'Peer {peer} took {fall} MU of its own from our account for a start. '
-                f'We sent {sent_peer_mu} MU. It took money outside the amount that we sent.'
-            )
-            _penalize(peer, CHARGED_OUTSIDE_AMOUNT_PENALTY, Reason.START_CHARGED_OUTSIDE_AMOUNT)
-    if child_balance is not None:
-        taken = int(sent_peer_mu) - int(child_balance)
-        # One MU of slack for the rounding of the conversion of the quote to the MU of the peer.
-        allowed = math.ceil(int(build_peer_mu) * (1 + max(float(variance), 0.0))) + 1
-        if taken > allowed:
-            log.LOGGER(
-                f'Peer {peer} took {taken} MU from the amount for the start. '
-                f'Its quote and variance allow {allowed} MU.'
-            )
-            _penalize(peer, OVERCHARGED_PENALTY, Reason.START_OVERCHARGED)
 
 
 def delegate_execution(
@@ -178,16 +88,14 @@ def delegate_execution(
                         father_ip: str = "",
                         commission_mu: int = 0,
                         build_mu: int = 0,
-                        variance: float = 0.0,
                    ) -> celaut_pb2.ServiceInstance:
     """Run this service on ``peer`` and open the child's local account.
 
     ``config.initial_mu`` is what the father paid, in local MU (#563). This node keeps
     ``commission_mu`` of it and sends the peer the rest, in the MU of the peer. The peer
     takes its own build from that amount, and what is left is the balance of the child
-    there. ``build_mu`` is the build that the peer quoted, in local MU, and ``variance``
-    is the variance of its quote. They are only the measure that the peer is checked
-    against afterwards (``check_start_charge``): the peer sets the real build.
+    there. ``build_mu`` is the build that the peer quoted, in local MU. It is only the
+    fallback for a balance of the child that cannot be read: the peer sets the real build.
 
     A delegated child keeps its deposit on this node, exactly as a local one does, so
     the father is refunded from this node's own books when the child stops. That deposit
@@ -197,8 +105,10 @@ def delegate_execution(
     the difference. What the peer holds against our client there is the node's own
     wholesale position and is not mirrored per instance.
 
-    The peer must take nothing from our account for the start but the amount that was
-    sent. If the account falls by more, the peer is treated as malicious.
+    This node does not check what the peer charged for the start. Two readings of a
+    balance cannot tell the build from the other movements on the same account: a
+    top-up of another child, a tunnel, a tick, or what the child spends on its own
+    dependencies. Only a statement of the movements, from the peer, can.
     """
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
@@ -233,21 +143,18 @@ def delegate_execution(
             )
 
         log.LOGGER('Go to launch the service on ' + str(peer))
-        with _start_lock(peer):
-            account_before = _account_on_peer(peer)
-            service_instance = BeeClient.start_service(
-                peer_channel(peer),
-                utils.service_extended(
-                    metadata=metadata,
-                    config=peer_config,
-                    # TODO: Could pass only the previously selected configuration with the estimate cost
-                    #  request, now is allowing to select another (that could be reasonable).
-                    client_id=get_client_id_on_other_peer(peer_id=peer),
-                    recursion_guard_token=recursion_guard_token
-                ),
-                timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
-            )
-            account_after = _account_on_peer(peer)
+        service_instance = BeeClient.start_service(
+            peer_channel(peer),
+            utils.service_extended(
+                metadata=metadata,
+                config=peer_config,
+                # TODO: Could pass only the previously selected configuration with the estimate cost
+                #  request, now is allowing to select another (that could be reasonable).
+                client_id=get_client_id_on_other_peer(peer_id=peer),
+                recursion_guard_token=recursion_guard_token
+            ),
+            timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
+        )
         external_token: str = service_instance.token
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 
@@ -270,23 +177,8 @@ def delegate_execution(
             peer_balance_mu = child_balance_peer
             balance_in_local = peer_mu_in_local(peer, child_balance_peer)
             # Never more than what was sent: the child cannot hold more than it got.
-            balance_mu = sent_mu - int(build_mu) if balance_in_local is None \
+            balance_mu = max(sent_mu - int(build_mu), 0) if balance_in_local is None \
                 else min(balance_in_local, sent_mu)
-
-        # The peer is checked after the child is safe on a row, and a failure of the
-        # check never takes the instance away.
-        try:
-            check_start_charge(
-                peer,
-                sent_peer_mu=sent_peer_mu,
-                build_peer_mu=build_peer_mu,
-                variance=variance,
-                account_before=account_before,
-                account_after=account_after,
-                child_balance=child_balance_peer,
-            )
-        except Exception as e:
-            log.LOGGER(f'Error checking the start charge of {peer}: {e}')
 
         # The peer advertised its own addresses. If our client cannot reach them,
         # stand in for the service locally and hand over our endpoints instead —

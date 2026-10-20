@@ -48,8 +48,6 @@ class DelegateExecutionMuConversionTests(unittest.TestCase):
         ), patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(
-            delegate_mod, "_account_on_peer", return_value=None
-        ), patch.object(
             delegate_mod, "_child_balance_on_peer", return_value=None
         ), patch.object(delegate_mod, "SQLConnection") as sql_connection:
             result = delegate_mod.delegate_execution(

@@ -33,17 +33,6 @@ class Reason:
     """The peer answered `GetService` with a service that does not hash to the id we
     asked for. Dropped, never stored; scored far below a timeout."""
 
-    START_CHARGED_OUTSIDE_AMOUNT = "start_charged_outside_amount"
-    """We started a service on the peer and sent it an amount for the child. The peer took
-    more than that amount from our account for the start. The only source of the start
-    cost is the amount that we sent. A peer that takes more is a peer that keeps the old
-    rule (it charged the build to the account of the caller), or a peer that steals."""
-
-    START_OVERCHARGED = "start_overcharged"
-    """We started a service on the peer. The peer took from the amount that we sent more
-    than its quote of the build and its variance allow. Scored below a charge outside the
-    amount: the money came from the amount that we chose to send."""
-
     # Services.
     INSTANCE_LOST = "instance_lost"
     """The instance's virtual machine no longer exists and had to be pruned."""
