@@ -15,6 +15,7 @@ from src.utils import utils, logger as log
 from src.utils import dead_instances, keyvalue
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
+from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
 from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
@@ -99,12 +100,20 @@ def local_execution(
     # `deposits.INITIAL_RUNTIME_HOURS` promises.
     service_arch = get_arch_tag(service=service, metadata=metadata)
 
+    # One reading of the load prices the whole launch. The balance below is funded at
+    # the worst case of this price, and the instance row records this price, which is
+    # what the ticks measure the bound from: two readings could differ, and then the
+    # funding would not cover the ceiling that the row allows.
+    launch_scarcity = system_scarcity()
+    launch_bp = launch_price_bp(launch_scarcity)
+
     initial_mu: int = from_amount(config.initial_mu) \
         if config.HasField("initial_mu") \
         else default_initial_balance(
             system_resources=resources.at_init,
             service_hash=service_id,
             arch=service_arch,
+            scarcity=launch_scarcity,
         )
 
     # The initial end of the declared range. The virtualizer is handed the whole
@@ -339,6 +348,7 @@ def local_execution(
             cpu_period=int(resolved_resources.cpu_period),
             cpu_quota=int(resolved_resources.cpu_quota),
             arch=service_arch,
+            launch_bp=launch_bp,
         )
         registered_id = vmachine_id
 

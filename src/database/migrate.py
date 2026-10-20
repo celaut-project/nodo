@@ -133,6 +133,14 @@ TABLES = {
     # alive again (see TRIGGERS). `name` is unique among live rows only (see INDEXES),
     # so the name of a dead instance can be used again.
     #
+    # launch_cpu_bp, launch_mem_bp and launch_disk_bp are the scarcity multiplier of
+    # each resource at the moment the instance launched, in basis points (10000 is 1x).
+    # `pricing.MAX_PRICE_VOLATILITY` bounds the tick charge against them, and the tick
+    # should not have to re-derive a load that is gone. 0 in all three means that the
+    # node was free when the instance launched, so it stays free. NULL (a row from
+    # before the columns existed, or a dev instance) means no bound: that instance is
+    # charged at the current load, as it always was.
+    #
     # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
     # maintenance tick prices an instance by, so all four have to be here: the tick
     # reads this row, not the service's manifest. Storing memory and disk but not
@@ -153,6 +161,9 @@ TABLES = {
             virtualizer TEXT DEFAULT NULL,
             envs TEXT DEFAULT NULL,
             arch TEXT DEFAULT NULL,
+            launch_cpu_bp INTEGER DEFAULT NULL,
+            launch_mem_bp INTEGER DEFAULT NULL,
+            launch_disk_bp INTEGER DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL
@@ -676,6 +687,9 @@ def create_tables(cursor):
     ensure_columns(cursor, "local_instances", {
         "envs": "TEXT DEFAULT NULL",
         "arch": "TEXT DEFAULT NULL",
+        "launch_cpu_bp": "INTEGER DEFAULT NULL",
+        "launch_mem_bp": "INTEGER DEFAULT NULL",
+        "launch_disk_bp": "INTEGER DEFAULT NULL",
         "launched_at": "DATETIME DEFAULT NULL",
     })
     ensure_columns(cursor, "delegated_instances", {

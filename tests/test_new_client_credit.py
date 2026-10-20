@@ -5,7 +5,9 @@ cover. A client created at zero was therefore refused at its first launch: the t
 shipped defaults only ever worked together while debt was on.
 
 The credit is one hour of the smallest useful guest -- 0.5 GiB of RAM and one vCPU -- at
-this node's own prices. Asserted against those prices rather than against the literal
+this node's own prices, at the worst case that `pricing.MAX_PRICE_VOLATILITY` allows: a
+launch is funded at that price (issue #335), and a credit below it refuses the client at
+its first launch again. Asserted against those prices rather than against the literal
 number, so that changing a price and leaving the credit behind fails here instead of
 quietly making the default mean something else.
 """
@@ -16,7 +18,7 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from protos import celaut_pb2 as celaut
-    from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, maintenance_charge_mu
+    from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, worst_case_charge_mu
     from src.utils.monetary import free_tier
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -29,8 +31,8 @@ UNLOADED = {CPU: 0.0, MEM: 0.0, DISK: 0.0}
 class NewClientCreditTests(unittest.TestCase):
     @staticmethod
     def _smallest_guest_hour() -> int:
-        """MU for holding 0.5 GiB and one vCPU for an hour, on an unloaded node."""
-        return maintenance_charge_mu(
+        """MU to fund 0.5 GiB and one vCPU for an hour, launched on an unloaded node."""
+        return worst_case_charge_mu(
             system_resources=celaut.Sysresources(
                 mem_limit=GIB // 2, cpu_period=100000, cpu_quota=100000, disk_space=0
             ),

@@ -1,7 +1,11 @@
 from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.resource_availability import get_resource_availability
-from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
+from src.utils.cost_functions.general_cost_functions import (
+    compute_maintenance_cost,
+    compute_start_service_cost,
+    compute_worst_case_maintenance_cost,
+)
 from src.utils.utils import from_amount, to_amount
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
@@ -92,8 +96,13 @@ def generate_estimated_cost(
             arch=arch,
         )) if resources.HasField('at_init') else to_amount(0),
 
-        # Maintenance cost per manager iteration, at the most it may grow to.
-        max_maintenance_cost=to_amount(compute_maintenance_cost(
+        # Maintenance cost per manager iteration, at the most it may grow to. Of the
+        # resources AND of the price: with `pricing.MAX_PRICE_VOLATILITY` on, this is
+        # priced at the highest multiplier the bound lets a tick reach, so no tick
+        # charges the instance more than this figure. With it off, it is priced at the
+        # current load, as before. The charge that the tick levies comes from the same
+        # clamp (`execution_cost.maintenance_charge_mu`).
+        max_maintenance_cost=to_amount(compute_worst_case_maintenance_cost(
             system_resources=resolve_billable_resources(
                 resources.at_most, service_hash, service=service
             ),

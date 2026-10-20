@@ -1150,6 +1150,7 @@ def default_initial_balance(
     system_resources: celaut_pb2.Sysresources = None,
     service_hash: Optional[str] = None,
     arch: Optional[str] = None,
+    scarcity: Optional[Dict[str, float]] = None,
 ) -> int:
     """MU to fund a new instance with when nobody asked for a specific amount.
 
@@ -1166,15 +1167,23 @@ def default_initial_balance(
     price when the operator prices memory per arch -- the same rate the ticks that
     spend this balance will charge, or the balance funds a different number of hours
     than INITIAL_RUNTIME_HOURS says.
+
+    The hours are priced at the worst case that the ticks can reach, not at the load of
+    the moment. With `pricing.MAX_PRICE_VOLATILITY` on, that is the launch price times
+    the bound, and no tick of this instance can charge more -- so the instance is never
+    stopped for a rise that its funding did not cover. With it off, the price is the
+    one at the current load, as it was before the bound existed. `scarcity` is the load
+    sample the launch is priced against; omitted, it is read here.
     """
     hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
     if hours <= 0 or system_resources is None:
         return 0
-    from src.utils.cost_functions.execution_cost import maintenance_charge_mu
+    from src.utils.cost_functions.execution_cost import worst_case_charge_mu
 
-    return maintenance_charge_mu(
+    return worst_case_charge_mu(
         system_resources=resolve_billable_resources(system_resources, service_hash),
         seconds=hours * 3600,
+        scarcity=scarcity,
         arch=arch,
     )
 
