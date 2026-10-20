@@ -582,13 +582,22 @@ message EstimatedCost {
     Amount cost = 1;
     // The cost of one maintenance period with the resources at the start, in MU.
     Amount init_maintenance_cost = 2;
-    // The cost of one maintenance period with the maximum resources, in MU.
+    // The cost of one maintenance period with the maximum resources, in MU. This is the
+    // statement that the node signs about the price. If the node sets
+    // `pricing.MAX_PRICE_VOLATILITY`, the figure is a hard ceiling: it is priced at the
+    // worst-case price multiplier that the bound allows, and no maintenance period of the
+    // instance charges more. A client that sees a charge above this figure has proof
+    // that the node broke its quote. If the node does not set the bound, the figure is
+    // only the charge at the current load of the node, and a later period can charge
+    // more. In that case the figure is not a ceiling.
     Amount max_maintenance_cost = 3;
     // The length of one maintenance period, in seconds.
     int32 maintenance_seconds_loop = 4;
     // How much the real costs can be different from the estimate, with no unit. A
     // reader multiplies each cost by (1 + variance * k). The reader selects the factor
-    // k. A node that cannot estimate the difference sends 0.
+    // k. A node that cannot estimate the difference sends 0. The variance does not
+    // limit the price of a running instance. The ceiling of the price is in
+    // max_maintenance_cost, and only when the node sets the bound.
     float variance = 5;
 }
 

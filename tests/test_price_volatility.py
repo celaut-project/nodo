@@ -12,7 +12,7 @@ test of money that is skipped says that the sums were checked when they were not
 
 import sqlite3
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from tests.config_bootstrap import load_example_config
 
@@ -244,6 +244,107 @@ class TheQuoteAndTheFundingTests(unittest.TestCase):
         self.assertEqual(
             from_amount(quote.max_maintenance_cost), 2 * from_amount(quote.init_maintenance_cost)
         )
+
+
+class TheWiringTests(unittest.TestCase):
+    """The two places where the bound is connected to the node.
+
+    The tests above call the cost functions and the row reader by themselves. These
+    run the tick and the launch, so that a call without its `launch_bp` argument turns
+    a test red: the bound would stop, and no other test would show it.
+    """
+
+    ROW = {
+        "mem_limit": GIB, "disk_space": GIB, "cpu_period": 100000, "cpu_quota": 100000,
+    }
+
+    def _sweep(self, row, scarcity):
+        from src.manager import maintain
+
+        spend = MagicMock(return_value=True)
+        with _config(), \
+                patch.object(maintain.sc, "get_all_internal_containers_ids", return_value=["vm-1"]), \
+                patch.object(maintain.sc, "get_sys_req", return_value=row), \
+                patch.object(maintain.sc, "record_instance_consumption"), \
+                patch.object(maintain, "vm_maintain"), \
+                patch.object(maintain, "spend_mu", spend), \
+                patch.object(maintain, "system_scarcity", return_value=scarcity), \
+                patch.object(maintain, "_reputation_interface"), \
+                patch.object(maintain, "vm_janitor_cleanup_orphans"), \
+                patch.object(maintain, "MANAGER_ITERATION_TIME", HOUR):
+            maintain.maintain_vmachines(debug_mode=False)
+        spend.assert_called_once()
+        return spend.call_args.kwargs["amount_mu"]
+
+    def test_the_tick_charges_a_row_up_to_its_bound(self):
+        with _config():
+            launch = launch_price_bp(IDLE)
+            at_launch = _tick(IDLE)
+        row = dict(self.ROW, launch_cpu_bp=launch[CPU], launch_mem_bp=launch[MEM],
+                   launch_disk_bp=launch[DISK])
+        # The node is full, which is 10x unbounded. The row holds the tick at 2x.
+        self.assertEqual(self._sweep(row, FULL), 2 * at_launch)
+
+    def test_the_tick_does_not_bound_a_row_with_no_launch_price(self):
+        with _config():
+            at_launch = _tick(IDLE)
+        self.assertEqual(self._sweep(dict(self.ROW), FULL), 10 * at_launch)
+
+    def _launch(self, scarcity):
+        import src.gateway.launcher.local_execution.local_execution as local_execute
+
+        values = {
+            "network.ISOLATE_INTERNAL_CHILDREN": True,
+            "network.CONSIDER_DEV_AS_INTERNAL": True,
+            "network.DISABLE_EXPOSE_OUTSIDE": False,
+            "network.FREE_PORTS_RANGE": [],
+        }
+        resolved = celaut.Sysresources(
+            mem_limit=GIB, disk_space=GIB, cpu_period=100000, cpu_quota=100000
+        )
+
+        def execute(**kwargs):
+            kwargs["register_instance"]("vm-1", "192.168.200.38", resolved)
+            return ("vm-1", "192.168.200.38", resolved)
+
+        resources = celaut.Service.Container.Resources(at_init=_guest())
+        service = celaut.Service(api=celaut.Service.Api(slot=[
+            celaut.Service.Api.Slot(port=5000, transport=celaut.Service.Api.Protocol(tags=["tcp"]))
+        ]))
+        add = MagicMock(return_value=True)
+        with _config(**values), \
+                patch.object(local_execute, "system_scarcity", return_value=scarcity), \
+                patch.object(local_execute, "get_configured_virtualizer", return_value="ch"), \
+                patch.object(local_execute, "select_virtualizer", return_value="ch"), \
+                patch.object(local_execute, "build", return_value="svc-hash"), \
+                patch.object(local_execute, "reserve_instance_name", return_value="tidy-island"), \
+                patch.object(local_execute.sc, "internal_instance_exists", return_value=False), \
+                patch.object(local_execute, "resolve_slot_transport_protocols", return_value="tcp"), \
+                patch.object(local_execute, "get_free_port", return_value=51000), \
+                patch.object(local_execute.sc, "add_local_instance", add), \
+                patch.object(local_execute.sc, "set_local_instance_definition"), \
+                patch.object(local_execute.sc, "mark_local_killed"), \
+                patch.object(local_execute, "execute", side_effect=execute):
+            local_execute.local_execution(
+                config=celaut.Configuration(), resources=resources,
+                father_id="dev-1", father_ip="127.0.0.1", metadata=celaut.Metadata(),
+                service=service, service_id="svc-hash", refund_container=[],
+            )
+        add.assert_called_once()
+        return add.call_args.kwargs
+
+    def test_the_launch_records_its_price_and_funds_the_worst_case_of_it(self):
+        recorded = self._launch(IDLE)
+        with _config():
+            self.assertEqual(recorded["launch_bp"], launch_price_bp(IDLE))
+            # One sample prices both: the balance is the worst case of the recorded price.
+            self.assertEqual(recorded["balance_mu"], 2 * _tick(IDLE))
+
+    def test_a_launch_on_a_loaded_node_records_the_loaded_price(self):
+        recorded = self._launch(FULL)
+        with _config():
+            self.assertEqual(recorded["launch_bp"], launch_price_bp(FULL))
+            self.assertEqual(recorded["balance_mu"], _tick(FULL))
 
 
 class TheRecordTests(unittest.TestCase):
