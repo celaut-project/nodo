@@ -755,8 +755,9 @@ pricing:
   # How far the price of a RUNNING instance may rise above the price it was launched at
   # (issue #335). Scarcity is read from the load now, so without a bound an instance that
   # was funded at 1x can be charged up to SCARCITY_MAX_MULTIPLIER when the node fills up,
-  # run out of balance, be stopped, and take an INSTANCE_OUT_OF_BALANCE penalty for a
-  # price it never saw. With 2.0 a tick charges at most twice the launch price, and the
+  # run out of balance, and be stopped for a price it never saw. The service takes no
+  # reputation penalty for this stop (issue #562), but the client loses the instance
+  # anyway. With 2.0 a tick charges at most twice the launch price, and the
   # balance that an instance starts with is funded at that worst case, so it cannot be
   # stopped for a rise. 1.0 fixes the price for the life of the instance. 0, or any
   # value from SCARCITY_MAX_MULTIPLIER up, leaves it unbounded.
