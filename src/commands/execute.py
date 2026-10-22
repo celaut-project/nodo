@@ -283,11 +283,7 @@ def print_host_exposure_note(response) -> None:
 
 
 def _describe_env(spec: service_envs.EnvSpec) -> str:
-    if spec.required:
-        need = f"required by network {'; '.join(spec.networks)}"
-    else:
-        need = "optional, Enter to skip"
-    lines = [f"  {spec.name} ({need})"]
+    lines = [f"  {spec.name}"]
     if spec.tags:
         lines.append(f"    format: {', '.join(spec.tags)}")
     if spec.prose:
@@ -302,9 +298,9 @@ def complete_envs(
 ) -> dict[str, str] | None:
     """``envs`` plus whatever the service declares and the caller left out, or None to abort.
 
-    Interactive: asks for each missing variable; a required one is asked again until it
-    has a value, an optional one is skipped on Enter. Otherwise nothing is asked: a
-    missing required variable aborts the launch and a missing optional one is reported.
+    Interactive: asks for each missing variable, one by one; Enter leaves it unset. The
+    node does not say which ones the service needs, so none is forced. Otherwise nothing
+    is asked and the missing ones are reported.
 
     Values are never printed, only names: one of them may be a secret.
     """
@@ -320,37 +316,29 @@ def complete_envs(
         return envs
 
     if not interactive:
-        required = [spec.name for spec in missing if spec.required]
-        if required:
-            print(
-                f"❌ Missing required env var{'s' if len(required) > 1 else ''}: "
-                f"{', '.join(required)}. Give each with -e <key> <value>.",
-                flush=True,
-            )
-            return None
         print(
-            f"⚠️  Optional env vars not given, so not set: "
-            f"{', '.join(spec.name for spec in missing)}. Give them with -e <key> <value>.",
+            f"⚠️  Env vars not given, so not set: {', '.join(spec.name for spec in missing)}. "
+            "The service may not work without them. Give each with -e <key> <value>.",
             flush=True,
         )
         return envs
 
-    print("The service declares env vars that were not given with -e:", flush=True)
-    for spec in missing:
+    print("The service declares env vars that were not given with -e. Enter leaves one unset:", flush=True)
+    skipped = []
+    for index, spec in enumerate(missing, start=1):
+        print(f"[{index}/{len(missing)}]", flush=True)
         print(_describe_env(spec), flush=True)
-        while True:
-            try:
-                value = input(f"  {spec.name} = ")
-            except (EOFError, KeyboardInterrupt):
-                print("\n❌ Cancelled.", flush=True)
-                return None
-            candidate = {**envs, spec.name: value}
-            if value == "" and not spec.required:
-                break
-            if service_envs.is_answered(spec, candidate):
-                envs = candidate
-                break
-            print(f"  {spec.name} is required and needs a value on one line.", flush=True)
+        try:
+            value = input(f"  {spec.name} = ")
+        except (EOFError, KeyboardInterrupt):
+            print("\n❌ Cancelled.", flush=True)
+            return None
+        if value == "":
+            skipped.append(spec.name)
+        else:
+            envs[spec.name] = value
+    if skipped:
+        print(f"⚠️  Not set: {', '.join(skipped)}. The service may not work without them.", flush=True)
     return envs
 
 
