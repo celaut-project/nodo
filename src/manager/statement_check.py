@@ -157,7 +157,8 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
     1. The head is not behind the mark, is the mark when nothing came after it, and is
        dated near the clock of this node.
     2. The movements are consecutive, each one hangs from the hash of the one before and
-       adds to the balance, and none is dated after the statement.
+       adds to the balance, none is dated after the statement, and the dates do not go
+       back (more than the clocks may differ), not even before the mark.
     3. The first movement of an account hangs from its genesis.
     4. When the last movement is the head, it is the head: its hash and its balance.
     5. The first movement joins the mark: the next seq, hanging from its hash. When it
@@ -192,6 +193,9 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
                 return invalid(f"movement {row.seq} does not hang from movement {previous_row.seq}", row.seq)
             if previous_row.balance_after + row.amount != row.balance_after:
                 return invalid(f"movement {row.seq} does not add up", row.seq)
+            if row.ts < previous_row.ts - CLOCK_SKEW_SECONDS:
+                return invalid(f"movement {row.seq} is dated before movement {previous_row.seq}",
+                               row.seq)
         if row.ts > statement.ts:
             return invalid(f"movement {row.seq} is dated after the statement", row.seq)
         previous_hash, previous_row = row.hash, row
@@ -212,6 +216,8 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
         if mark.seq is not None:
             if head.seq <= mark.seq:
                 return invalid(f"movement {head.seq} was not asked for", head.seq)
+            if mark.ts is not None and head.ts < mark.ts - CLOCK_SKEW_SECONDS:
+                return invalid(f"movement {head.seq} is dated before the mark", head.seq)
             if head.seq == mark.seq + 1:
                 if statement.movements[0].prev_hash != mark.hash:
                     return invalid(
@@ -353,11 +359,12 @@ class AccountCheck:
     faults: List[Tuple[int, str]]
     attempts_used: List[int] = field(default_factory=list)
     top_ups_taken: Dict[str, int] = field(default_factory=dict)
+    children_started: List[str] = field(default_factory=list)
 
 
 def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
                    attempts: Iterable[StartAttempt], top_up_allowances: Mapping[str, int],
-                   now: float) -> AccountCheck:
+                   now: float, started: Iterable[str] = ()) -> AccountCheck:
     """What the peer took from our account that this node did not cause.
 
     A start is written down before the peer is asked (``attempts``), so every
@@ -366,7 +373,8 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
 
     * a child of ours (``starts``, by the ``instance_ref`` of its token on the peer, with
       what was sent for it) is named by the ``child_bound`` row that follows its start,
-      and may take up to what was sent;
+      and may take up to what was sent, once: ``started`` are the children whose start
+      an earlier read already showed;
     * a start with no child of ours (the peer finished one that timed out, or has not
       named it) is matched with an attempt that has no child and was not matched yet: it
       was written at most ``start_grace_seconds`` before the movement, and it took no more
@@ -394,6 +402,8 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
             except (KeyError, TypeError, ValueError):
                 pass
     open_attempts = list(attempts)
+    seen = set(started)
+    children: List[str] = []
     used: List[int] = []
     allowance = dict(top_up_allowances)
     taken: Dict[str, int] = {}
@@ -406,6 +416,11 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
                 continue
             child = bound.get(row.seq, "")
             if child in starts:
+                if child in seen:
+                    faults.append((row.seq, f"the start of {child[:8]} was paid more than once"))
+                    continue
+                seen.add(child)
+                children.append(child)
                 if -row.amount > starts[child]:
                     faults.append((
                         row.seq,
@@ -441,7 +456,7 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
             faults.append((
                 row.seq, f"movement {row.seq} is a {row.kind!r} charge that this node did not cause"
             ))
-    return AccountCheck(faults, used, taken)
+    return AccountCheck(faults, used, taken, children)
 
 
 def stale_mark(mark_ts: Optional[int], now: float) -> bool:

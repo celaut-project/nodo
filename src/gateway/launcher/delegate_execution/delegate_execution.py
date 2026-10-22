@@ -97,9 +97,12 @@ def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
         return None
 
 
-def _check_start(peer: str, client_id: str, external_token: str
-                 ) -> Tuple[Optional[int], Optional[dict]]:
+def _check_start(peer: str, client_id: str, external_token: str,
+                 started_at: Optional[float] = None) -> Tuple[Optional[int], Optional[dict]]:
     """Read the statement of the new child on ``peer`` and check its chain (#570).
+
+    ``started_at`` is when this node asked the peer to start the child: the account was
+    written after that, and a build may take minutes before ``StartService`` answers.
 
     Returns the balance of the child there, in the MU of the peer, and the mark that the
     maintenance tick goes on from: ``seq``, ``hash`` and ``ts``. The mark is None when
@@ -134,7 +137,8 @@ def _check_start(peer: str, client_id: str, external_token: str
 
     # A new account: its movement 1 hangs from its genesis.
     now = time.time()
-    start = statement_check.Mark.new_account(external_token, ts=now)
+    start = statement_check.Mark.new_account(
+        external_token, ts=now if started_at is None else started_at)
     chain = statement_check.verify_chain(statement, start, now=now, from_seq=1)
     if chain.rows is None:
         statement_check.penalise_once(
@@ -216,6 +220,7 @@ def delegate_execution(
         # Written down before the peer is asked: the peer takes MU from our account for
         # this start, and the movement may show before this node knows the child, or when
         # it never does (a timeout). See `statement_check.account_faults`.
+        started_at = time.time()
         attempt_id = SQLConnection().add_start_attempt(peer, sent_peer_mu)
         service_instance = BeeClient.start_service(
             peer_channel(peer),
@@ -242,7 +247,7 @@ def delegate_execution(
         # What the peer says the child holds now: the amount that we sent, less the build
         # that it took. Read, not computed: the peer sets its own build, and the tick
         # below measures the consumption from this very figure.
-        child_balance_peer, mark = _check_start(peer, client_id, external_token)
+        child_balance_peer, mark = _check_start(peer, client_id, external_token, started_at)
         if child_balance_peer is None:
             # The peer could not be read: use what its quote says. The tick corrects the
             # mark at the next reading, and the instance is not lost over a failed read.

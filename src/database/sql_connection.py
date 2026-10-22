@@ -3304,13 +3304,16 @@ class SQLConnection(metaclass=Singleton):
     def set_peer_statement_mark(self, peer_id: str, seq: Optional[int], hash: Optional[str],
                                 balance_mu: Optional[int], ts: Optional[int],
                                 attempts_used: Iterable[int] = (),
-                                top_ups_taken: Optional[Mapping[str, int]] = None) -> None:
+                                top_ups_taken: Optional[Mapping[str, int]] = None,
+                                children_started: Iterable[str] = ()) -> None:
         """Write the mark of the statement of our account on ``peer_id``. None clears it.
 
         In the same transaction, the movements that the mark goes past are accounted
         for: ``attempts_used`` are the start attempts that a ``child_start`` was matched
         with, and ``top_ups_taken`` is what the peer took for the top-ups of each child
-        (by ``instance_ref``), which leaves the allowance of the child.
+        (by ``instance_ref``), which leaves the allowance of the child, and
+        ``children_started`` are the children whose start the movements showed: a start
+        is paid once.
         """
         taken = {ref: int(mu) for ref, mu in (top_ups_taken or {}).items() if int(mu) > 0}
 
@@ -3323,6 +3326,9 @@ class SQLConnection(metaclass=Singleton):
             for attempt_id in attempts_used:
                 cursor.execute('UPDATE start_attempts SET consumed = 1 WHERE id = ?',
                                (int(attempt_id),))
+            for ref in children_started:
+                cursor.execute('UPDATE start_attempts SET consumed = 1 '
+                               'WHERE peer_id = ? AND ref = ?', (peer_id, ref))
             if taken:
                 for row in cursor.execute(
                         'SELECT token_delegation, top_up_allowance_peer_mu '
@@ -3357,6 +3363,13 @@ class SQLConnection(metaclass=Singleton):
                     'SELECT id, ts, sent_peer_mu FROM start_attempts '
                     'WHERE peer_id = ? AND ref IS NULL AND consumed = 0 ORDER BY ts, id',
                     (peer_id,)).fetchall()]
+
+    def started_children_on_peer(self, peer_id: str) -> List[str]:
+        """The ``instance_ref`` of the children of ``peer_id`` whose start was already
+        shown in our account there."""
+        return [row['ref'] for row in self._execute(
+            'SELECT ref FROM start_attempts WHERE peer_id = ? AND ref IS NOT NULL AND consumed = 1',
+            (peer_id,)).fetchall()]
 
     def prune_start_attempts(self, max_age_days: int) -> int:
         """Delete the attempts older than ``max_age_days``. Returns how many."""

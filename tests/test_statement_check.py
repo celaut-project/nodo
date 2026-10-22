@@ -111,6 +111,28 @@ class ChainTests(unittest.TestCase):
         self.assertIsNone(chain.rows)
         self.assertIn("were deleted before", chain.problem)
 
+    def test_movements_dated_back_are_not_a_chain(self):
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"))
+        book.rows[2]["ts"] = book.rows[1]["ts"] - check.CLOCK_SKEW_SECONDS - 1
+        book.rows[2]["hash"] = ledger.movement_hash(
+            book.rows[2]["prev_hash"], 3, book.rows[2]["ts"], -5, book.rows[2]["balance_after"],
+            "maintenance", None, None)
+
+        chain, _ = verify(book, Mark.new_account("acct", ts=0))
+
+        self.assertIsNone(chain.rows)
+        self.assertIn("dated before movement 2", chain.problem)
+
+    def test_a_movement_dated_before_the_mark_does_not_continue_it(self):
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"))
+        mark = book.mark_at(2)
+        later = Mark(mark.seq, mark.hash, mark.balance, mark.ts + check.CLOCK_SKEW_SECONDS + 100)
+
+        chain, _ = verify(book, later)
+
+        self.assertIsNone(chain.rows)
+        self.assertIn("dated before the mark", chain.problem)
+
     def test_a_new_account_excuses_nothing_that_a_node_hides(self):
         """The mark of an account that was just created is as young as the account, so a
         first read cannot excuse a movement that the node does not show."""
@@ -317,6 +339,11 @@ class ConsumptionTests(unittest.TestCase):
         self.assertEqual(check.father_net(rows), 300)
 
 
+def self_bound(seq, child="child", starts_seq=None):
+    return Row(seq, 0, 0, 0, ledger.CHILD_BOUND, child,
+               {"starts_seq": str(seq - 1 if starts_seq is None else starts_seq)})
+
+
 def _check_account(rows, starts=None, attempts=(), allowances=None, now=10 ** 6):
     return check.account_faults(
         rows, {"child": 100} if starts is None else starts, attempts,
@@ -409,6 +436,22 @@ class StartAttemptTests(unittest.TestCase):
         self.assertEqual(len(faults(1000 + window + 1)), 1)
         self.assertEqual(faults(1000 - check.CLOCK_SKEW_SECONDS), [])
         self.assertEqual(len(faults(1000 - check.CLOCK_SKEW_SECONDS - 1)), 1)
+
+    def test_the_start_of_a_child_of_ours_is_paid_once(self):
+        rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""), self_bound(4),
+                Row(5, 0, -100, 0, ledger.CHILD_START, ""), self_bound(6, starts_seq=5)]
+
+        result = _check_account(rows)
+
+        self.assertEqual([seq for seq, _ in result.faults], [5])
+        self.assertEqual(result.children_started, ["child"])
+
+    def test_a_start_that_an_earlier_read_showed_is_not_paid_again(self):
+        rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""), self_bound(4)]
+
+        result = check.account_faults(rows, {"child": 100}, [], {}, now=10 ** 6, started=["child"])
+
+        self.assertEqual([seq for seq, _ in result.faults], [3])
 
     def test_a_start_with_a_child_of_ours_does_not_use_an_attempt(self):
         rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),

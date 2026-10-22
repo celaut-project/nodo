@@ -332,13 +332,25 @@ instances:
 # The ledger of balance movements (issue #570): one row for each change of the balance
 # of a client or an instance, which its owner reads with GetBalanceStatement.
 ledger:
-  # Rows older than this are deleted. A peer checks the statements of the work it
-  # delegated here every few seconds, so it needs minutes; the rest is margin to dispute
-  # a charge or to show a signed statement as evidence.
+  # Rows older than this are deleted. A peer reads the statements of its account, and of
+  # the work it delegated here, every STATEMENT_READ_EVERY_TICKS ticks; the rest is margin
+  # to dispute a charge or to show a signed statement as evidence.
   RETENTION_DAYS: 30
-  # The most movements that one statement returns. A statement that is cut says so,
-  # and the caller can ask again for a smaller span.
+  # The most movements that one statement returns. The statement holds the first ones
+  # of the range, and the caller asks again from the last seq that it got.
   MAX_STATEMENT_ROWS: 1000
+  # The shortest retention that a peer is held to. A gap in its statement after the last
+  # movement that this node checked is excused by the retention that the peer announces,
+  # and never by less than this. Where there is no child, our account is read again when
+  # its mark is older than a tenth of this.
+  MIN_PEER_RETENTION_DAYS: 7
+  # The most pages that one read of our account on a peer takes. A reader that is behind
+  # goes on at the next read.
+  MAX_STATEMENT_PAGES_PER_TICK: 4
+  # The ticks between two reads of our account on a peer, and between two reads of the
+  # statement of a delegated child. A read costs MU, so reading less often only delays a
+  # detection.
+  STATEMENT_READ_EVERY_TICKS: 30
 
 builder:
   WAIT_FOR_CONTAINER: 60

@@ -165,7 +165,11 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
                            child_balance=1_580_000)
 
-        r.check_start.assert_called_once_with(PEER_ID, "client-on-peer", PEER_TOKEN)
+        r.check_start.assert_called_once()
+        args = r.check_start.call_args.args
+        self.assertEqual(args[:3], (PEER_ID, "client-on-peer", PEER_TOKEN))
+        # The mark is as old as the request: the account was written after it.
+        self.assertLessEqual(args[3], time.time())
 
     def test_the_account_opens_with_the_start_the_commission_and_the_build(self):
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
@@ -765,7 +769,8 @@ class CheckStartTests(unittest.TestCase):
                 patch.object(statement_check, "penalise_no_statement",
                              side_effect=lambda peer, account, error, seq=0, **kw: penalise(
                                  peer, account, "statement_inconsistent", str(error), seq)):
-            result = delegate_mod._check_start(PEER_ID, "client-on-peer", PEER_TOKEN)
+            result = delegate_mod._check_start(
+                PEER_ID, "client-on-peer", PEER_TOKEN, started_at=1000)
         self.fetch = fetch
         return result, penalise
 

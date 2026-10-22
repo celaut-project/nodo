@@ -508,7 +508,8 @@ def _save_our_mark(peer_id: str, mark: statement_check.Mark,
     sc.set_peer_statement_mark(
         peer_id, mark.seq, mark.hash, mark.balance, mark.ts,
         attempts_used=check.attempts_used if check else (),
-        top_ups_taken=check.top_ups_taken if check else None)
+        top_ups_taken=check.top_ups_taken if check else None,
+        children_started=check.children_started if check else ())
 
 
 def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
@@ -580,7 +581,8 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
         check = statement_check.account_faults(
             chain.rows, sc.delegated_starts_on_peer(peer_id),
             [statement_check.StartAttempt(*a) for a in sc.open_start_attempts(peer_id)],
-            sc.top_up_allowances(peer_id), now=read_at)
+            sc.top_up_allowances(peer_id), now=read_at,
+            started=sc.started_children_on_peer(peer_id))
         faults = check.faults
         charge_problems = statement_check.query_charge_problems(
             chain.rows, sc.get_statement_counters(peer_id), rates)

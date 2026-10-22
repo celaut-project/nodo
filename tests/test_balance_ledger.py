@@ -577,6 +577,16 @@ class OurAccountOnAPeerTests(_Database):
         self.assertEqual([a[0] for a in self.sc.open_start_attempts("p")], [third])
         self.assertEqual(self.sc.delegated_starts_on_peer("p")[ledger.instance_ref("token-1")], 100)
 
+    def test_the_children_whose_start_was_shown_are_remembered_with_the_mark(self):
+        attempt = self.sc.add_start_attempt("p", 100)
+        self.sc.bind_start_attempt(attempt, "token-1")
+        self.assertEqual(self.sc.started_children_on_peer("p"), [])
+
+        self.sc.set_peer_statement_mark(
+            "p", 1, "h", 0, 5, children_started=[ledger.instance_ref("token-1")])
+
+        self.assertEqual(self.sc.started_children_on_peer("p"), [ledger.instance_ref("token-1")])
+
     def test_old_attempts_are_swept(self):
         self.sc.add_start_attempt("p", 100)
         SQLConnection._connection.execute("UPDATE start_attempts SET ts = 0")

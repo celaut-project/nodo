@@ -146,8 +146,8 @@ is no child, the account is read when its mark is older than a tenth of
 `ledger.MIN_PEER_RETENTION_DAYS`, so a peer cannot hide recent movements as retention.
 Nothing may take MU from the account but:
 
-- the start of a child of ours, no more than what was sent for it (`child_start`, and the
-  `child_bound` row that names the child once it exists);
+- the start of a child of ours, no more than what was sent for it, and once (`child_start`,
+  and the `child_bound` row that names the child once it exists);
 - a top-up of a child of ours, no more than what this node sent for it with
   `ModifyDeposit` (it is written down before the peer is asked, and taken off as the
   statement shows it);
