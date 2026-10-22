@@ -233,10 +233,13 @@ A balance statement (`GetBalanceStatement`, #570) costs `STATEMENT_QUERY_MU` plu
 `STATEMENT_ROW_MU` for each movement that it returns, charged to the account that asks
 and written as its `statement_query` movement before the node answers. The fixed part
 pays for the call, the authentication and the signature. The rest follows the rows: the
-index on `(account_id, ts)` finds where a statement starts at the same cost whatever the
-size of the account, and what grows is reading, signing and sending each row. A node that
-delegates reads one statement of its own account and one of each child at every tick, so
-these prices are the cost to a peer of checking this node.
+key on `(account_id, seq)` finds where a statement starts at the same cost whatever the
+size of the account, and what grows is reading, signing and sending each row. Reading only
+the head of an account asks for no row and pays the fixed part. A node that delegates
+reads its own account on each peer, and the statement of each child, every
+`ledger.STATEMENT_READ_EVERY_TICKS` ticks, so these prices are the cost to a peer of
+checking this node. A read asks for no more rows than the balance of the reader pays for,
+and the peer may charge the account only for the statements that it asked for.
 
 `SCARCITY_CURVE` is the exponent applied to the missing supply, so raising it holds the
 surcharge back: at `2.0`, a tenth of a resource gone costs 1.09x rather than the 1.90x
@@ -454,8 +457,9 @@ the rest is the balance of the child on the peer.
   lower the reputation of the peer.
 - `peer_balance_mu` is the balance of the child in its statement on the peer, right
   after the start (#570). It is not the amount that this node sent, because the peer
-  already took its build from it. The statement also shows what the peer took, and this
-  node checks it (see
+  already took its build from it. What the peer took for the build is not judged: the
+  child holds what is left, and the chain of its statement is the only thing that is
+  checked (see
   [`REPUTATION.md`](REPUTATION.md#what-a-peer-charges-from-its-statements)).
 - `balance_mu` of the delegated row is what the father can get back: `initial_mu` less
   the commission and less the build of the peer, in local MU.
@@ -464,7 +468,8 @@ the rest is the balance of the child on the peer.
 
 There is no version check and no fallback for an old peer. An old peer takes the build
 from the account of the caller, and also takes the whole amount. Its statement shows
-that, and the peer loses reputation for it.
+that in our account on it, which nothing but the start of a child of ours may take MU
+from.
 
 Apart from the start, the two accounts have nothing to do with each other. There are
 two accounts, in two units, and this node stands between them:
@@ -482,27 +487,52 @@ local one is). It is spent by
 the remainder back through the same `credit_father` a local stop uses — after the row
 is deleted, so a stop that is retried cannot pay twice.
 
-What the tick charges is **measured, not predicted**. The row keeps a *mark*: the last
-movement of the child's statement on the peer that this node checked, with the balance
-after it, in the peer's MU (`peer_balance_mu`). Each tick reads the statement since then
-and charges the movements after the mark, converted at today's rate: what the child
-spent, and not what its father moved (a `top_up` or a `withdrawal` of this node). A quote
-frozen at delegation would drift three ways that are all invisible from here — the peer
-repricing its resources, the two `mu_per_unit` rates moving against each other, and a
+What the tick charges is **measured, not predicted**. The row keeps four totals, in the
+peer's MU: what the statements that were checked show the child spent
+(`verified_consumption_peer_mu`, every movement but those of its father), the top-ups of
+its father less the withdrawals among them (`verified_father_net_peer_mu`), the same for
+all the `ModifyDeposit` that this node has sent (`father_net_peer_mu`), and what was
+charged for it (`charged_peer_mu`). A *mark* is the last movement of the child's statement
+that was checked, with its hash and the balance after it (`peer_balance_mu`). What the
+child owes is
+
+```
+owed   = verified + (balance at the mark - balance now) + (sent - verified sent)
+charge = owed - charged
+```
+
+The balance now is read at every tick from the `Metrics` of the peer, which is free: what
+it has fallen by since the mark is what the child consumed, once what its father moved is
+taken out. Every `ledger.STATEMENT_READ_EVERY_TICKS` ticks the statement is read as well,
+and what its movements say replaces the estimate for what they cover. A late statement
+corrects an early estimate in either direction, and only a statement that continues the
+mark gives MU back: a balance that the peer reports could credit the child with a lie, so
+a charge that comes from a balance alone is never negative. What this node has sent is
+read before the peer is asked, so a `ModifyDeposit` that lands in between can only make a
+charge smaller for a moment, and no instance is stopped for what its father caused.
+
+A quote frozen at delegation would drift three ways that are all invisible from here — the
+peer repricing its resources, the two `mu_per_unit` rates moving against each other, and a
 `hotplug` making the child bigger than the shape it was quoted at. The sum happens on the
 peer's scale before any conversion, so a rate that moved between two readings cannot read
-as consumption. When the statement cannot be used (it does not add up, the peer cut it,
-or there is none), the tick charges the fall of the balance since the mark instead, and
-goes on from the end of what it read.
+as consumption. A correction that gives MU back rounds down, and the commission with it;
+a charge rounds up.
+
+When the statement does not continue the mark, nothing can be checked up to its head. What
+the balance says is taken for what was spent, never below zero, and the mark goes to the
+head. A fault of the peer is scored; a gap that its retention explains is not.
+
+The stop reads the child's statement one last time before `StopService`, because its
+account on the peer ends there, and closes the charge with it.
 
 An instance that consumed more than its deposit holds is stopped, and its row is
 emptied first rather than refunded: every MU on it is already owed to the peer for
 runtime that happened, so what the node absorbs is only the part the deposit could not
 reach. That reading is also the liveness check. A peer that answers but no longer knows the
 instance has stopped it on its own, and the row here follows it down; a peer that
-cannot be reached charges nothing and loses nothing, because the mark only advances
-with a charge, so the next successful reading bills everything metered since. The charge
-and its mark are written in one transaction (`settle_delegated_tick`).
+cannot be reached charges nothing and loses nothing, because the totals only advance
+with a reading that succeeded, so the next one bills everything metered since. The
+charge, the totals and the mark are written in one transaction (`settle_delegated_tick`).
 
 What the peer refunds at that moment is the *other* account. It is credited to this
 node's deposit there, in the peer's MU, and is logged rather than forwarded: paying a
@@ -514,8 +544,9 @@ between the two meters is the node's position to hold.
 Top-ups move both halves. `ModifyDeposit` charges the father here, converts the figure
 to the peer's MU (`mu_conversion.convert_mu`, rounding the direction that cannot pay
 the client's costs out of the node's pocket) and forwards it — and only writes the
-local row once the peer has confirmed its side. The mark does not move: the peer writes
-the change in the statement of the child, and the tick leaves it out of the consumption.
+local rows once the peer has confirmed its side, together with the net that it has sent
+(`father_net_peer_mu`), in one transaction. The peer writes the change in the statement of
+the child, and the tick leaves it out of the consumption.
 
 ### Worked example
 

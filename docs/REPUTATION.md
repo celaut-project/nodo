@@ -124,52 +124,78 @@ maintenance to the balance of the child.
 
 A balance cannot check any of this. It is the sum of every movement on it, and two
 readings of it cannot tell a wrong charge from the rest: our account on the peer also
-moves for a top-up of another child or a tunnel, and the balance of a child also moves
-for what it spends on its own dependencies. A check on readings like these penalizes
-honest peers (#565, #569).
+moves for a top-up of another child or a tunnel. A check on readings like these
+penalizes honest peers (#565, #569).
 
 What holds is the **statement** of the account (#570): every movement, with its kind and
-its cause, signed by the peer (`GetBalanceStatement`). This node reads the statement of
-its own account on each peer where it has a delegated child, and the statement of each
-child, at every maintenance tick and right after `StartService`. It checks two things,
-from the last movement that it already checked:
+its cause, signed by the peer (`GetBalanceStatement`). The movements of an account are a
+chain: each one carries the hash of the one before it, and the signed head commits to all
+of them. A peer that signed a statement cannot show other movements for the same seqs
+later, and a reader that goes on from the last movement that it checked never has to
+trust a summary of the ones that came before.
 
-1. **It adds up.** Each movement takes the balance to its `balance_after`, the seqs have
-   no gap, the last one is the balance of the answer, and the signature is the peer's.
-2. **Each movement follows its rule.** On a child: the start is what this node sent, the
-   build and the commission of the peer are within its quote (`build × (1 + variance)`),
-   a maintenance period is within the rates that the peer announces for the resources
-   that it names, at `scarcity_max_multiplier`, and the periods do not add up to more
-   time than passed. On our account: nothing takes MU from it but the start of a child
-   of ours (no more than what was sent for it), a top-up of a child of ours, or a
-   statement that we asked for.
+### Our account on a peer
+
+This node reads the statement of its own account on each peer where it has a delegated
+child, every `ledger.STATEMENT_READ_EVERY_TICKS` ticks. It reads from the last movement
+that it checked (the *mark*), in pages that its balance on the peer pays for, up to
+`ledger.MAX_STATEMENT_PAGES_PER_TICK` pages. Each page continues the chain: the next seq,
+hanging from the hash of the mark, adding to its balance, and ending in the head that the
+peer signed. Nothing may take MU from the account but:
+
+- the start of a child of ours, no more than what was sent for it (`child_start`, and the
+  `child_bound` row that names the child once it exists);
+- a top-up of a child of ours;
+- a statement that we asked for. What the peer shows never exceeds what this node asked
+  for, in number and in MU at the rates that the peer announces: each read is counted
+  when it is asked, before the peer can charge it.
+
+### A child
+
+For a child, this node checks the chain and nothing else. What the peer charges a child
+is the business of whoever runs it: the father is charged what the child consumed, and
+the peer's build, ticks and tunnels are not judged. See [`PRICING.md`](PRICING.md) for
+how that charge is found.
+
+### What costs a peer reputation
 
 | What the peer did | Reason | Change of `r` |
 |---|---|---|
-| A statement that does not add up, is not signed by it, or does not come at all from a peer that answers | `statement_inconsistent` | -1000 |
-| A charge beyond its rule | `statement_overcharged` | -1000 |
+| A statement that does not continue the chain, is not signed by it, or does not come at all from a peer that answers | `statement_inconsistent` | -1000 |
+| A charge to our account that this node did not cause | `statement_overcharged` | -1000 |
 
 The same scale as a service that does not hash to its id (`get_service_wrong_hash`): in
-every case the peer signed or reported something false about money. Each fault is scored
-once for each account and reason, not at every tick.
+every case the peer signed or reported something false about money. A fault is scored
+once for each peer, account, reason and movement where it shows, and that is kept in the
+database (`statement_faults`): it is not scored again at the next tick or after a
+restart, and a different fault, at another movement, is. After a statement that does not
+continue the chain the mark goes to the head, and the movements up to there are not
+checked.
+
+A statement that does not continue the chain is any of these: the head is behind the
+mark, or is dated far from the clock of this node; a movement does not hang from the one
+before it, does not add up, or is dated after the statement; the first movement after the
+mark does not hang from its hash; the peer holds movements and does not show them; or the
+peer deleted movements after the mark before its retention allows it.
 
 Some things are not faults, and score nothing:
 
 - A peer that cannot be reached. That costs `peer_refresh_failed` instead.
-- A peer that refuses a statement while our account there cannot pay for it.
-- A statement that the peer cut at its limit (`truncated`) before the movement after the
-  mark. The span was too long to ask for. The tick goes on from the end of it.
-- A `child_start` with no token, or with a token that this node has not stored yet. The
-  start may be in progress, so the check stops there and looks again at the next tick.
-  After `START_SERVICE_ON_PEER_TIMEOUT` and two ticks, it is a start that this node did
-  not ask for.
-- A child that spends on its own dependencies, tunnels or statements. The movement says
-  so, and it is the child's to spend.
+- A read that our balance on the peer does not pay for. It is not asked for. A peer that
+  refuses one that the balance does pay for contradicts the balance that it reports, and
+  that is a fault.
+- A first read, or a read after a long time, where the peer has already deleted the
+  oldest movements. It announces its retention (`retention_days`, never less than
+  `ledger.MIN_PEER_RETENTION_DAYS` for this purpose), and what it deleted after that
+  time is not checkable. A reader that stays up to date, and keeps what it reads, can
+  check all of it.
+- A `child_start` with no `child_bound`, or with a child that this node has not stored
+  yet. The start may be in progress, so the check stops there and looks again at the next
+  read. The wait is measured on the clock of this node, never on the date of the peer's
+  statement. After `START_SERVICE_ON_PEER_TIMEOUT` and two ticks it is logged and not
+  scored: the peer may have finished a start that this node gave up on (#578).
 - A peer that rejects a start because the amount is too small. The amount was the choice
   of this node.
-
-When a statement cannot be used, the tick charges the father the fall of the balance of
-the child since the last reading.
 
 ## Why an instance died, and what it costs the service
 
