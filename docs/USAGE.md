@@ -348,6 +348,19 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
+- **invite `[--raw <file|->]`**  
+  Prints this node's peer invitation as a QR code in the terminal, with its size in
+  bytes and the QR version. The invitation holds the node's identity key and its
+  addresses (`ip4`, `ip6` and `tor3`; a host name is left out), in order of preference —
+  no signature, resources or proofs. `--raw` writes the bytes to a file (`-` for stdout)
+  instead. It is refused over 1000 bytes, saying which addresses to remove.
+
+- **connect `--invite <file|->`**  
+  Reads an invitation (the bytes `nodo invite --raw` writes; `-` reads stdin) and tries
+  its addresses in order, skipping kinds this node does not know. An address is only
+  accepted if the node that answers there holds the invited identity key; then the full
+  signed peer is fetched and registered, as with `nodo connect <ip:port>`.
+
 - **pack `<project directory | https git URL[#subdir]> [--local] [--detach] [--json]`**  
   Packages a project into a service. The source is a local directory (relative
   paths are read from the shell you typed in) or an **https** git URL, optionally

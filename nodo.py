@@ -884,8 +884,21 @@ if __name__ == '__main__':
                 _exit(0 if refresh_peers_command(sys.argv[2:]) else 1)
 
             case 'connect':
+                if len(sys.argv) < 3:
+                    print("Usage: nodo connect <ip:port> | nodo connect --invite <file|->", flush=True)
+                    _exit(1)
+                if sys.argv[2] == "--invite":
+                    if len(sys.argv) < 4:
+                        print("Usage: nodo connect --invite <file|->", flush=True)
+                        _exit(1)
+                    from src.commands.connect import connect_invite
+                    _exit(0 if connect_invite(sys.argv[3]) else 1)
                 from src.commands.connect import connect
                 connect(sys.argv[2])
+
+            case 'invite':
+                from src.commands.invite import invite_command
+                _exit(0 if invite_command(argv=sys.argv[2:]) else 1)
 
             case 'disconnect':
                 from src.commands.disconnect import disconnect

@@ -1,3 +1,5 @@
+import sys
+
 from src.manager.manager import add_peer_instance, verified_peer_public_key, \
     associate_client_id_on_channel, get_client_id_on_other_peer, mint_client_id_on_channel
 from src.database.sql_connection import SQLConnection
@@ -10,7 +12,12 @@ SELF_ANNOUNCE_TO_CONNECTING_PEERS = env_manager.get("SELF_ANNOUNCE_TO_CONNECTING
 
 sc = SQLConnection()
 
-def connect(peer: str):
+def connect(peer: str, expected_peer_id: str = ""):
+    """Handshake with ``peer`` and register what it advertises; True when it was added.
+
+    ``expected_peer_id`` is the identity the address is supposed to hold (an invitation
+    names it). The address alone proves nothing, so one held by another key is refused.
+    """
     print('Connecting to peer ->', peer)
 
     # A known peer is re-handshaked rather than skipped: that is how a payment
@@ -23,6 +30,13 @@ def connect(peer: str):
         # peer's identity key and proves it (issue #257), so this learns *and* verifies
         # who holds the address in one step, with no trust-on-first-use.
         channel, certificate_peer_id = channel_and_peer_id(peer)
+        if expected_peer_id and certificate_peer_id != expected_peer_id:
+            channel.close()
+            print(
+                f"Refused peer {peer}: the address is held by {certificate_peer_id}, "
+                f"not by the invited peer {expected_peer_id}."
+            )
+            return False
         try:
             # GetPeerInfo now requires a client_id like every other RPC but
             # GenerateClient (issue #428), and this is the first RPC ever called on a
@@ -45,7 +59,7 @@ def connect(peer: str):
                 f"Refused peer {peer}: the address is held by {certificate_peer_id} but "
                 f"it advertised the identity {peer_info.public_key}."
             )
-            return
+            return False
         
         peer_id = add_peer_instance(peer_info)
         if not peer_id:
@@ -93,7 +107,7 @@ def connect(peer: str):
                 gateway_instance = generate_full_node_peer_info()
             except Exception as e:
                 print(f"Error generating instance for peer {peer}. {e}")
-                return
+                return bool(peer_id)
             
             try:
                 channel = node_channel(peer, expected_peer_id=certificate_peer_id)
@@ -145,6 +159,35 @@ def connect(peer: str):
 
             except Exception as e:
                 print(f"Error sending instance to peer {peer}. {e}")
-            
+
+        return bool(peer_id)
+
     except Exception as e:
         print(f"Error connecting to peer {peer}. {e}")
+        return False
+
+
+def connect_invite(source: str) -> bool:
+    """Connect to the peer in an invitation file (``-`` is stdin), trying its addresses in order."""
+    from src.utils.peer_invite import InviteError, invite_targets, parse_invite, peer_id_of
+
+    try:
+        if source == "-":
+            raw = sys.stdin.buffer.read()
+        else:
+            with open(source, "rb") as f:
+                raw = f.read()
+        invite = parse_invite(raw)
+    except (OSError, InviteError) as e:
+        print(f"Cannot read the invitation: {e}")
+        return False
+
+    targets = invite_targets(invite)
+    if not targets:
+        print("The invitation has no address of a kind this node knows.")
+        return False
+    for target in targets:
+        if connect(target, expected_peer_id=peer_id_of(invite)):
+            return True
+    print("Could not connect to the invited peer at any of its addresses.")
+    return False
