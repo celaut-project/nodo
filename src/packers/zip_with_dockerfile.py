@@ -823,6 +823,15 @@ class ZipContainerPacker:
             celaut.DataFormat()
         )
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
+
+        # `envs` names the variables the service asks for, with an empty DataFormat.
+        envs = self.json.get('envs') or []
+        if not isinstance(envs, list) or not all(isinstance(name, str) and name for name in envs):
+            raise ValueError("service.json 'envs' must be a list of non-empty variable names.")
+        keyvalue.from_dict(
+            self.service.container.environment_variables,
+            {name: celaut.DataFormat() for name in envs},
+        )
         
         # Expected Gateway.
         
@@ -844,15 +853,6 @@ class ZipContainerPacker:
         )
     
     def parseApi(self):
-
-        # Envs: `service.json` may declare environment-variable NAMES via `envs`.
-        # Per-variable `<ENV>.field` descriptors are NOT embedded: there is no
-        # target field for them in the packed schema. `Service.Api` has no
-        # `environment_variables` field (it lives on `celaut.Container`), and
-        # `pack.proto`'s Container omits it too, so the previous write crashed
-        # with AttributeError whenever a `.field` descriptor was actually
-        # present. Embedding descriptors would require adding the field to
-        # pack.proto first (deferred design decision — see issue #192).
 
         if not self.json.get('api'): return
         

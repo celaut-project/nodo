@@ -403,7 +403,7 @@ message Service {
         // now.
         repeated Api.Protocol node_protocol_stack = 6;
         // The environment variables that the service declares, each with its format.
-        // Senders do not set it now. A caller gives the values in
+        // The packer sets the names (service.json envs). A caller gives the values in
         // Configuration.environment_variables.
         repeated DataFormatKeyValue environment_variables = 7;
 
