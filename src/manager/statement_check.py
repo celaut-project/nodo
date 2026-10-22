@@ -1,28 +1,31 @@
-"""Checking what a peer charges, from its signed statements (#570).
+"""Checking a peer from its signed statements (#570).
 
 A balance cannot tell a wrong charge from a legitimate one: it is the sum of every
-movement, and many movements move it. A statement can. This node reads the statement
-of its own account on a peer and of each child that it delegated there, and checks
-two things:
+movement, and many movements move it. A statement is a chain of movements that the peer
+signed, and this node reads the statement of its own account on a peer, and of each child
+that it delegated there.
 
-1. It adds up. From the last movement that this node checked (the *mark*), each new
-   movement takes the balance to its ``balance_after``, the seqs have no gap, and the
-   last one is the balance of the answer.
-2. Each movement follows its rule. On a child: the start is what this node sent, the
-   build is within the quote, a maintenance period is within the rates and the
-   resources that it names, and the periods do not add up to more time than passed.
-   On our account: nothing takes MU from it that this node did not cause.
+Of its own account it checks two things:
 
-A peer whose statement does not add up, or shows that it took more than its rule
-allows, loses ``STATEMENT_PENALTY``: the same as a service that does not hash to its
-id, because in every case the peer signed something false about money.
+1. It continues the mark (``verify_chain``): the mark is the last movement that this node
+   checked, and each new movement hangs from the hash of the one before it, adds to the
+   balance, and ends in the head that the peer signed. A peer that shows other movements
+   than it showed before cannot keep the chain.
+2. Nothing takes MU from it that this node did not cause: the start of its own children,
+   their top-ups, and the statements that it asked for.
 
-The functions here are pure; ``maintain`` and ``delegate_execution`` read the
-statements and act on what these return.
+Of a child it checks the chain, and nothing else. What the peer charges a child is the
+business of whoever runs the child, and this node only charges its father what the child
+consumed, which the movements say (``consumption``).
+
+A peer whose statement does not continue the chain, or that charges our account what
+this node did not cause, loses ``STATEMENT_PENALTY``: the same as a service that does
+not hash to its id, because in every case the peer signed something false about money.
+
+The functions here are pure unless they say otherwise; ``maintain`` and
+``delegate_execution`` read the statements and act on what these return.
 """
 import json
-import math
-import time
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -33,14 +36,6 @@ from src.database import ledger
 from src.reputation_system.reasons import Reason
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.cost_functions.general_cost_functions import (
-    RATE_CPU_PER_VCPU_SECOND,
-    RATE_DISK_PER_GIB_SECOND,
-    RATE_RAM_PER_GIB_SECOND,
-    RATE_RAM_PER_GIB_SECOND_ARCH_PREFIX,
-    RATE_SCARCITY_MAX_MULTIPLIER,
-)
-from src.utils.monetary import GIB
 from src.utils.utils import from_amount
 
 env_manager = ConfigManager()
@@ -53,11 +48,6 @@ CLOCK_SLACK_SECONDS = 2
 # How far the clock of a peer may be from this node's: a statement dated further away is
 # not valid, so a peer cannot choose the time that its own movements are judged at.
 CLOCK_SKEW_SECONDS = 120
-
-# The factor k of EstimatedCost.variance: a build may cost (1 + variance * k) times its
-# quote.
-VARIANCE_FACTOR = 1
-
 
 @dataclass(frozen=True)
 class Row:
@@ -95,7 +85,7 @@ NO_MARK = Mark(None, "", 0)
 
 
 def tick_detail(sys_req, seconds: int) -> dict:
-    """The cause of a maintenance period: what a father checks it against."""
+    """The cause of a maintenance period: what it was priced for, and for how long."""
     return {
         "seconds": int(seconds),
         "mem_limit": int(sys_req["mem_limit"] or 0),
@@ -305,108 +295,6 @@ def stored_rates(peer_id: str) -> Dict[str, int]:
     return advertised_rates(peer)
 
 
-def maintenance_bound(detail: Mapping, rates: Mapping[str, int]) -> Optional[int]:
-    """The most that a maintenance period with this ``detail`` can cost on the peer.
-
-    The resources and the seconds come from the period itself; the prices from the
-    rates that the peer announces, at their highest multiplier. Each per-second rate
-    gets 1 MU more, because the peer announces its hourly price divided and truncated.
-    None when the period does not name its resources: a peer that delegated the
-    instance again meters it from its own peer, and cannot.
-    """
-    try:
-        seconds = int(detail["seconds"])
-        mem = int(detail["mem_limit"])
-        disk = int(detail["disk_space"])
-        period = int(detail["cpu_period"])
-        quota = int(detail["cpu_quota"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    ram_rates = [v for k, v in rates.items()
-                 if k == RATE_RAM_PER_GIB_SECOND or k.startswith(RATE_RAM_PER_GIB_SECOND_ARCH_PREFIX)]
-    ram = max(ram_rates or [0]) + 1
-    cpu = rates.get(RATE_CPU_PER_VCPU_SECOND, 0) + 1
-    disk_rate = rates.get(RATE_DISK_PER_GIB_SECOND, 0) + 1
-    multiplier = max(1, rates.get(RATE_SCARCITY_MAX_MULTIPLIER, 1))
-    vcpus = quota / period if period > 0 else 0
-    per_second = ram * mem / GIB + cpu * vcpus + disk_rate * disk / GIB
-    return math.ceil(per_second * max(0, seconds) * multiplier)
-
-
-def build_bound(build_peer_mu: int, variance: float) -> int:
-    """The most that the start of a child can take for its build, in the MU of the peer."""
-    return math.ceil(int(build_peer_mu) * (1 + max(0.0, float(variance)) * VARIANCE_FACTOR))
-
-
-# What a child does on its own, with its own balance: spend on its own children,
-# tunnels, a resize, its statements; or get MU back from them. None of it is a charge
-# of the peer on this node.
-_CHILD_ACTIVITY = (
-    ledger.CHILD_START, ledger.CHILD_BOUND, ledger.TOP_UP, ledger.WITHDRAWAL, ledger.REFUND, ledger.TUNNEL,
-    ledger.RESOURCE_CHANGE, ledger.STATEMENT_QUERY, ledger.DEPOSIT, ledger.CREDIT,
-)
-
-
-def child_problems(rows: Iterable[Row], *, mark: Mark, rates: Mapping[str, int],
-                   sent_peer_mu: int = 0, start_bound_peer_mu: Optional[int] = None
-                   ) -> List[str]:
-    """What the peer took from a child beyond its rule.
-
-    ``start_bound_peer_mu`` is the most that the start may take for the build and the
-    commission of the peer: given at the start, None at a tick, where a start cost is
-    not expected at all.
-    """
-    rows = list(rows)
-    problems = []
-    start_cost = 0
-    for row in rows:
-        if row.kind == ledger.START:
-            if row.seq != 1:
-                problems.append(f"a second start at movement {row.seq}")
-            elif row.amount < sent_peer_mu:
-                problems.append(f"the start got {row.amount} MU, and {sent_peer_mu} were sent")
-        elif row.kind in (ledger.BUILD, ledger.COMMISSION):
-            start_cost -= row.amount
-            if start_bound_peer_mu is None:
-                problems.append(f"a {row.kind} after the start, at movement {row.seq}")
-        elif row.kind == ledger.MAINTENANCE:
-            bound = maintenance_bound(row.detail, rates)
-            if bound is not None and -row.amount > bound:
-                problems.append(
-                    f"maintenance {row.seq} took {-row.amount} MU, more than the "
-                    f"{bound} MU that its resources cost at the rates of the peer"
-                )
-        elif row.kind not in _CHILD_ACTIVITY and row.amount < 0:
-            problems.append(f"movement {row.seq} is a {row.kind!r} charge")
-    if start_bound_peer_mu is not None and not any(row.kind == ledger.START for row in rows):
-        problems.append("the start is not in the statement")
-    if start_bound_peer_mu is not None and start_cost > start_bound_peer_mu:
-        problems.append(
-            f"the start took {start_cost} MU for the build, more than the "
-            f"{start_bound_peer_mu} MU of the quote"
-        )
-    problems.extend(_time_problems(rows, mark))
-    return problems
-
-
-def _time_problems(rows: List[Row], mark: Mark) -> List[str]:
-    """Maintenance periods that add up to more time than passed since the mark."""
-    periods = [row for row in rows if row.kind == ledger.MAINTENANCE]
-    if mark.ts is None or not periods:
-        return []
-    seconds = []
-    for row in periods:
-        try:
-            seconds.append(int(row.detail["seconds"]))
-        except (KeyError, TypeError, ValueError):
-            return []
-    elapsed = rows[-1].ts - mark.ts
-    # One period of room: the first one may be charged right after the mark.
-    if sum(seconds) > elapsed + max(seconds) + CLOCK_SLACK_SECONDS:
-        return [f"{len(periods)} maintenance periods charge {sum(seconds)} s in {elapsed} s"]
-    return []
-
-
 def caused_by_father(row: Row) -> bool:
     """The child's side of a ModifyDeposit of its father: not consumption."""
     return (row.kind == ledger.TOP_UP and row.amount > 0) or \
@@ -417,6 +305,12 @@ def consumption(rows: Iterable[Row]) -> int:
     """What the child spent in ``rows``, in the MU of the peer: every movement but
     those of its father. Never below 0."""
     return max(0, -sum(row.amount for row in rows if not caused_by_father(row)))
+
+
+def father_net(rows: Iterable[Row]) -> int:
+    """The top-ups of the father in ``rows`` less its withdrawals, in the MU of the peer
+    and signed as the child sees them: a top-up is positive."""
+    return sum(row.amount for row in rows if caused_by_father(row))
 
 
 def start_grace_seconds() -> int:

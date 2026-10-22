@@ -215,6 +215,15 @@ TABLES = {
     # which nothing after it was written. `sent_peer_mu` is the `initial_mu` that this
     # node sent the peer, in the MU of the peer: the most that the peer can take from our
     # account for this start.
+    #
+    # What the child has consumed is kept in four totals, in the MU of the peer, so that a charge is the difference between what is owed and what was
+    # charged, and a reading that comes late corrects the ones before it:
+    # `verified_consumption_peer_mu` is what the statements checked so far show it spent
+    # (every movement but those of its father); `verified_father_net_peer_mu` the top-ups
+    # less the withdrawals of its father among them; `father_net_peer_mu` the same for all
+    # the `ModifyDeposit` that this node has sent, written with the rows that they leave
+    # here; `charged_peer_mu` what the tick has taken from the deposit for it.
+    # `statement_ticks` counts the ticks since the statement of the child was last read.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -228,6 +237,11 @@ TABLES = {
             peer_statement_seq INTEGER DEFAULT NULL,
             peer_statement_ts INTEGER DEFAULT NULL,
             peer_statement_hash TEXT DEFAULT NULL,
+            statement_ticks INTEGER NOT NULL DEFAULT 0,
+            verified_consumption_peer_mu TEXT NOT NULL DEFAULT '0',
+            verified_father_net_peer_mu TEXT NOT NULL DEFAULT '0',
+            father_net_peer_mu TEXT NOT NULL DEFAULT '0',
+            charged_peer_mu TEXT NOT NULL DEFAULT '0',
             sent_peer_mu TEXT DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,

@@ -2660,7 +2660,8 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT token_delegation, id, peer_id, father_id, serialized_instance,
                    balance_mu, peer_balance_mu, peer_statement_seq, peer_statement_ts,
-                   peer_statement_hash
+                   peer_statement_hash, verified_consumption_peer_mu,
+                   verified_father_net_peer_mu, father_net_peer_mu, charged_peer_mu
             FROM delegated_instances WHERE killed_at IS NULL
         ''')
         return [
@@ -2675,6 +2676,10 @@ class SQLConnection(metaclass=Singleton):
                 'peer_statement_seq': row[7],
                 'peer_statement_ts': row[8],
                 'peer_statement_hash': row[9],
+                'verified_consumption_peer_mu': _as_int(row[10]),
+                'verified_father_net_peer_mu': _as_int(row[11]),
+                'father_net_peer_mu': _as_int(row[12]),
+                'charged_peer_mu': _as_int(row[13]),
             }
             for row in result.fetchall()
         ]
@@ -3127,8 +3132,10 @@ class SQLConnection(metaclass=Singleton):
         return _as_int(row['balance_mu']) if row else 0
 
     def settle_delegated_tick(self, token: str, charge_mu: int, mark: Mapping,
-                              detail: Optional[Mapping] = None) -> Optional[int]:
-        """Charge a delegated instance and move its mark, in one transaction.
+                              detail: Optional[Mapping] = None, refund_mu: int = 0
+                              ) -> Optional[int]:
+        """Charge (or give back to) a delegated instance and move its mark, in one
+        transaction.
 
         The charge and the mark are one fact. What the maintenance tick charges is what
         the peer metered since the mark, so a charge without its mark bills the same
@@ -3138,31 +3145,105 @@ class SQLConnection(metaclass=Singleton):
         there is written as NULL. The charge is taken whole, debt or not: the caller
         decided what the instance owes.
 
-        Returns the seq of the charge, or None when nothing was charged.
+        ``mark`` may also hold the totals of `delegated_instances`:
+        ``verified_consumption`` and ``verified_father_net`` (what they become) and
+        ``charged_delta`` (what is added to ``charged_peer_mu``, in the MU of the peer,
+        and is negative for a correction that gives back). A total that is not there is
+        left as it is.
+
+        ``refund_mu`` is MU that goes back to the instance, as a ``maintenance`` row with
+        ``adjustment`` in its detail: a charge that a later reading showed to be too
+        much. It is never given together with a charge.
+
+        Returns the seq of the row that was written, or None when nothing was.
 
         Args:
             token (str): The token of the external container.
             charge_mu (int): What the instance consumed, in our MU, with the commission.
             mark (Mapping): The new mark.
             detail (Optional[Mapping]): The cause of the charge.
+            refund_mu (int): What goes back to it, in our MU.
         """
         def work(cursor):
             row = cursor.execute(
-                'SELECT id FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL',
-                (token,),
+                'SELECT id, charged_peer_mu FROM delegated_instances '
+                'WHERE token_delegation = ? AND killed_at IS NULL', (token,),
             ).fetchone()
             if row is None:
                 raise ledger.NoSuchAccount(token)
-            seq = self._move(cursor, row['id'], -int(charge_mu), ledger.MAINTENANCE,
-                             detail=detail) if int(charge_mu) > 0 else None
-            cursor.execute('''
+            seq = None
+            if int(charge_mu) > 0:
+                seq = self._move(cursor, row['id'], -int(charge_mu), ledger.MAINTENANCE,
+                                 detail=detail)
+            elif int(refund_mu) > 0:
+                seq = self._move(cursor, row['id'], int(refund_mu), ledger.MAINTENANCE,
+                                 detail=dict(detail or {}, adjustment="1"))
+            totals, params = '', []
+            if "verified_consumption" in mark:
+                totals += ', verified_consumption_peer_mu = ?'
+                params.append(str(int(mark["verified_consumption"])))
+            if "verified_father_net" in mark:
+                totals += ', verified_father_net_peer_mu = ?'
+                params.append(str(int(mark["verified_father_net"])))
+            if "charged_delta" in mark:
+                totals += ', charged_peer_mu = ?'
+                params.append(str(_as_int(row['charged_peer_mu']) + int(mark["charged_delta"])))
+            cursor.execute(f'''
                 UPDATE delegated_instances
                 SET peer_balance_mu = ?, peer_statement_seq = ?, peer_statement_ts = ?,
-                    peer_statement_hash = ?
+                    peer_statement_hash = ?{totals}
                 WHERE token_delegation = ? AND killed_at IS NULL
             ''', (str(int(mark["peer_balance_mu"])), mark.get("seq"), mark.get("ts"),
-                  mark.get("hash"), token))
+                  mark.get("hash"), *params, token))
             return seq
+
+        return self._transaction(work)
+
+    def move_delegated_deposit(self, alias: str, father_id: str, amount_mu: int,
+                               peer_mu: int) -> None:
+        """A ``ModifyDeposit`` of a delegated instance, once the peer has moved its side:
+        the rows here and the net that this node has sent, in one transaction.
+
+        ``amount_mu`` is the change of the deposit in our MU: a top-up (positive) is a row
+        on the instance, a withdrawal (negative) is one on the instance and one on the
+        father, who names the instance. ``peer_mu`` is what travelled to the peer, in its
+        MU and signed the same way, added to ``father_net_peer_mu``. The tick takes that
+        net out of what the balance of the child fell by, so it is written with the rows
+        and never apart from them.
+        """
+        def work(cursor):
+            if int(amount_mu) < 0:
+                self._move(cursor, alias, int(amount_mu), ledger.WITHDRAWAL)
+                self._move(cursor, father_id, -int(amount_mu), ledger.WITHDRAWAL,
+                           instance_token=alias)
+            else:
+                self._move(cursor, alias, int(amount_mu), ledger.TOP_UP)
+            row = cursor.execute(
+                'SELECT father_net_peer_mu FROM delegated_instances '
+                'WHERE id = ? AND killed_at IS NULL', (alias,)
+            ).fetchone()
+            cursor.execute(
+                'UPDATE delegated_instances SET father_net_peer_mu = ? '
+                'WHERE id = ? AND killed_at IS NULL',
+                (str(_as_int(row['father_net_peer_mu']) + int(peer_mu)), alias))
+
+        self._transaction(work)
+
+    def child_statement_due(self, token: str, every: int) -> bool:
+        """Count one tick for the statement of a delegated child; True once ``every``
+        have passed. The count goes back to 0 when it says True."""
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT statement_ticks FROM delegated_instances '
+                'WHERE token_delegation = ? AND killed_at IS NULL', (token,)
+            ).fetchone()
+            if row is None:
+                return False
+            ticks = int(row['statement_ticks']) + 1
+            due = ticks >= int(every)
+            cursor.execute('UPDATE delegated_instances SET statement_ticks = ? '
+                           'WHERE token_delegation = ?', (0 if due else ticks, token))
+            return due
 
         return self._transaction(work)
 

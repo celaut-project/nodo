@@ -90,6 +90,10 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'peer_statement_seq': None,
                 'peer_statement_ts': None,
                 'peer_statement_hash': None,
+                'verified_consumption_peer_mu': 0,
+                'verified_father_net_peer_mu': 0,
+                'father_net_peer_mu': 0,
+                'charged_peer_mu': 0,
             },
         )
 

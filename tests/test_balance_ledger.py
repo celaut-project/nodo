@@ -437,6 +437,72 @@ class WritersInOtherProcessesTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DelegatedDepositRowsTests(_Database):
+    """``ModifyDeposit`` on a delegated instance: its rows and the net sent to the peer."""
+
+    def setUp(self):
+        super().setUp()
+        self.sc.add_client("c1", 1000, None)
+        self.sc.add_delegated_instance(
+            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            peer_id="p", serialized_instance=b"", service_id="s", balance_mu=500,
+            peer_balance_mu=1000, movements=(ledger.Movement(ledger.START, 500),),
+            sent_peer_mu=1000, mark={},
+        )
+
+    def net(self):
+        return self.sc.get_delegated_instances()[0]["father_net_peer_mu"]
+
+    def test_a_top_up_is_a_row_on_the_instance_and_a_positive_net(self):
+        self.sc.move_delegated_deposit("alias", "c1", 100, 200)
+
+        self.assertEqual(self.sc.get_delegated_balance("peer-token"), 600)
+        self.assertEqual(self.rows("alias")[-1]["kind"], ledger.TOP_UP)
+        self.assertEqual(self.net(), 200)
+        self.assert_adds_up("alias", 600)
+
+    def test_a_withdrawal_is_a_row_on_each_side_and_a_negative_net(self):
+        self.sc.move_delegated_deposit("alias", "c1", -100, -200)
+
+        self.assertEqual(self.sc.get_delegated_balance("peer-token"), 400)
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1100)
+        self.assertEqual(self.rows("c1")[-1]["instance_ref"], ledger.instance_ref("alias"))
+        self.assertEqual(self.net(), -200)
+        self.assert_chained("alias")
+        self.assert_chained("c1")
+
+    def test_the_net_is_the_sum_of_what_was_sent(self):
+        self.sc.move_delegated_deposit("alias", "c1", 100, 200)
+        self.sc.move_delegated_deposit("alias", "c1", -50, -100)
+        self.sc.move_delegated_deposit("alias", "c1", 10, 20)
+
+        self.assertEqual(self.net(), 120)
+
+    def test_a_withdrawal_to_a_father_that_is_gone_writes_nothing_and_leaves_the_net(self):
+        with self.assertRaises(ledger.NoSuchAccount):
+            self.sc.move_delegated_deposit("alias", "gone", -100, -200)
+
+        self.assertEqual(self.sc.get_delegated_balance("peer-token"), 500)
+        self.assertEqual(self.net(), 0)
+
+    def test_a_correction_is_a_row_with_its_detail_and_updates_the_totals(self):
+        self.sc.settle_delegated_tick(
+            "peer-token", 30, {"peer_balance_mu": 970, "verified_consumption": 30,
+                               "verified_father_net": 0, "charged_delta": 30})
+        self.sc.settle_delegated_tick(
+            "peer-token", 0, {"peer_balance_mu": 975, "verified_consumption": 25,
+                              "charged_delta": -5}, refund_mu=5, detail={"peer_id": "p"})
+
+        row = self.sc.get_delegated_instances()[0]
+        self.assertEqual((row["verified_consumption_peer_mu"], row["charged_peer_mu"]), (25, 25))
+        self.assertEqual(self.sc.get_delegated_balance("peer-token"), 475)
+        last = self.rows("alias")[-1]
+        self.assertEqual((last["kind"], int(last["amount_mu"])), (ledger.MAINTENANCE, 5))
+        self.assertIn('"adjustment":"1"', last["detail"])
+        self.assert_adds_up("alias", 475)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class StatementBooksTests(_Database):
     """What a node keeps about the statements of a peer: ticks, counters, mark."""
 

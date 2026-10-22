@@ -74,6 +74,20 @@ def _mu(amount) -> int:
     return int(amount.n or 0)
 
 
+def _stop_on_peer(peer: str, external_token: str) -> None:
+    """Stop a child that ``peer`` started and that this node will not keep.
+
+    The father got his MU back and an error, so nobody holds this instance. Left alone it
+    would run on the MU that this node sent until they ran out. The peer writes what it
+    leaves in our account as a ``refund`` of the ``child_start``. Never raises: the
+    start has failed already, and this is only the cleanup of it.
+    """
+    try:
+        BeeClient.stop_service(peer_channel(peer), token=external_token)
+    except Exception as e:
+        log.LOGGER(f"Could not stop the child {external_token[:8]} that {peer} started: {e}")
+
+
 def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
     """The balance that ``peer`` reports for the child after the start, in its own MU."""
     try:
@@ -83,19 +97,19 @@ def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
         return None
 
 
-def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: int,
-                 start_bound_peer_mu: int) -> Tuple[Optional[int], Optional[dict]]:
-    """Read the statement of the new child on ``peer`` and check its start (#570).
+def _check_start(peer: str, client_id: str, external_token: str
+                 ) -> Tuple[Optional[int], Optional[dict]]:
+    """Read the statement of the new child on ``peer`` and check its chain (#570).
 
     Returns the balance of the child there, in the MU of the peer, and the mark that the
     maintenance tick goes on from: ``seq``, ``hash`` and ``ts``. The mark is None when
     the statement could not be used, and the balance then comes from ``GetMetrics``.
 
-    A statement that does not continue from the start of the account, or that does not
+    A statement that does not start from the genesis of the account, or that does not
     come from a peer that just answered ``StartService``, costs the peer the penalty for
-    a statement that does not add up. One that takes more than this node sent, or a
-    build above the quote, costs it the penalty for an overcharge. The start goes on in
-    both cases: the child runs.
+    a statement that does not add up. What the start took is not judged: the child holds
+    what is left of what was sent, and whoever runs the child is who pays the build. The
+    start goes on in both cases: the child runs.
     """
     try:
         statement = statement_check.read(peer, client_id, token=external_token, from_seq=1)
@@ -113,15 +127,6 @@ def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: i
             chain.fault_seq if chain.fault_seq is not None else 1)
         return _child_balance_on_peer(peer, external_token), None
 
-    problems = statement_check.child_problems(
-        chain.rows, mark=statement_check.Mark(0, "", 0),
-        rates=statement_check.stored_rates(peer),
-        sent_peer_mu=sent_peer_mu, start_bound_peer_mu=start_bound_peer_mu,
-    )
-    if problems:
-        statement_check.penalise_once(
-            peer, external_token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems), 1
-        )
     new = statement_check.mark_after(chain, statement, start)
     mark = {"seq": new.seq, "hash": new.hash, "ts": new.ts} if chain.rows else None
     return from_amount(statement.balance), mark
@@ -137,15 +142,13 @@ def delegate_execution(
                         father_ip: str = "",
                         commission_mu: int = 0,
                         build_mu: int = 0,
-                        variance: float = 0.0,
                    ) -> celaut_pb2.ServiceInstance:
     """Run this service on ``peer`` and open the child's local account.
 
     ``config.initial_mu`` is what the father paid, in local MU (#563). This node keeps
     ``commission_mu`` of it and sends the peer the rest, in the MU of the peer. The peer
     takes its own build from that amount, and what is left is the balance of the child
-    there. ``build_mu`` is the build that the peer quoted, in local MU, and ``variance``
-    the variance of that quote: together they bound the build that the peer may take.
+    there. ``build_mu`` is the build that the peer quoted, in local MU.
 
     A delegated child keeps its deposit on this node, exactly as a local one does, so
     the father is refunded from this node's own books when the child stops. That deposit
@@ -157,6 +160,9 @@ def delegate_execution(
     shows what the peer took for the start: ``_check_start`` checks it, and the mark it
     returns is where the maintenance tick goes on from.
     """
+    # The token of the child once the peer has started it. A start that times out has none
+    # to stop: TODO(#578).
+    external_token: Optional[str] = None
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
@@ -203,7 +209,7 @@ def delegate_execution(
             ),
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
         )
-        external_token: str = service_instance.token
+        external_token = service_instance.token
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 
         build_peer_mu = convert_mu(
@@ -215,10 +221,7 @@ def delegate_execution(
         # What the peer says the child holds now: the amount that we sent, less the build
         # that it took. Read, not computed: the peer sets its own build, and the tick
         # below measures the consumption from this very figure.
-        child_balance_peer, mark = _check_start(
-            peer, client_id, external_token, sent_peer_mu,
-            statement_check.build_bound(build_peer_mu, variance),
-        )
+        child_balance_peer, mark = _check_start(peer, client_id, external_token)
         if child_balance_peer is None:
             # The peer could not be read: use what its quote says. The tick corrects the
             # mark at the next reading, and the instance is not lost over a failed read.
@@ -278,6 +281,8 @@ def delegate_execution(
         return service_instance
     except Exception as e:
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
+        if external_token:
+            _stop_on_peer(peer, external_token)
         try:
             refund_container.pop()()
         except IndexError:

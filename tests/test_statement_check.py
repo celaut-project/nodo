@@ -273,82 +273,9 @@ class ChainTests(unittest.TestCase):
         self.assertEqual((mark.seq, mark.hash, mark.balance), (2, book.rows[-1]["hash"], 70))
 
 
-def tick(amount, seq, seconds=10, mem=GIB, ts=None):
-    import json
-    detail = json.dumps({"seconds": seconds, "mem_limit": mem, "disk_space": 0,
-                         "cpu_period": 100000, "cpu_quota": 100000})
-    return Row(seq=seq, ts=ts if ts is not None else 100 + seq * 10, amount=amount,
-               balance_after=0, kind=ledger.MAINTENANCE, ref="",
-               detail=check._detail(detail))
-
-
-RATES = {"ram_mu_per_gib_second": 100, "cpu_mu_per_vcpu_second": 1000,
-         "scarcity_max_multiplier": 2}
-
-
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class ChildRuleTests(unittest.TestCase):
-
-    def start_rows(self, got=100, build=-30, commission=0):
-        rows = [Row(1, 100, got, got, ledger.START, "")]
-        if commission:
-            rows.append(Row(2, 100, commission, got + commission, ledger.COMMISSION, ""))
-        rows.append(Row(len(rows) + 1, 100, build, 0, ledger.BUILD, ""))
-        return rows
-
-    def test_a_start_within_its_quote_is_fine(self):
-        self.assertEqual(check.child_problems(
-            self.start_rows(), mark=Mark(0, "", 0), rates=RATES, sent_peer_mu=100,
-            start_bound_peer_mu=30,
-        ), [])
-
-    def test_a_start_that_got_less_than_was_sent_is_an_overcharge(self):
-        problems = check.child_problems(self.start_rows(got=90), mark=Mark(0, "", 0), rates=RATES,
-                                        sent_peer_mu=100, start_bound_peer_mu=30)
-        self.assertEqual(len(problems), 1)
-
-    def test_a_build_and_commission_above_the_quote_are_an_overcharge(self):
-        problems = check.child_problems(
-            self.start_rows(build=-25, commission=-10), mark=Mark(0, "", 0), rates=RATES,
-            sent_peer_mu=100, start_bound_peer_mu=30,
-        )
-        self.assertEqual(len(problems), 1)
-
-    def test_a_statement_with_no_start_is_an_overcharge(self):
-        self.assertTrue(check.child_problems(
-            [], mark=Mark(0, "", 0), rates=RATES, sent_peer_mu=100, start_bound_peer_mu=30,
-        ))
-
-    def test_a_build_at_a_tick_is_an_overcharge(self):
-        rows = [Row(4, 140, -30, 0, ledger.BUILD, "")]
-        self.assertTrue(check.child_problems(rows, mark=Mark(3, "", 30), rates=RATES))
-
-    def test_a_tick_is_bounded_by_its_resources_at_the_rates_of_the_peer(self):
-        # 1 GiB and 1 vCPU for 10 s: (101 + 1001) * 10 * 2 = 22040.
-        self.assertEqual(check.maintenance_bound(tick(0, 1).detail, RATES), 22040)
-        self.assertEqual(check.child_problems([tick(-22040, 4)], mark=Mark(3, "", 0), rates=RATES), [])
-        self.assertTrue(check.child_problems([tick(-22041, 4)], mark=Mark(3, "", 0), rates=RATES))
-
-    def test_a_tick_that_names_no_resources_is_not_bounded(self):
-        row = Row(4, 140, -10 ** 9, 0, ledger.MAINTENANCE, "", {"peer_mu": "1"})
-        self.assertEqual(check.child_problems([row], mark=Mark(3, "", 0), rates=RATES), [])
-
-    def test_ticks_cannot_charge_more_time_than_passed(self):
-        rows = [tick(-1, seq, ts=200) for seq in (4, 5, 6)]
-
-        self.assertEqual(check.child_problems(rows[:2], mark=Mark(3, "", 0, ts=190), rates=RATES), [])
-        self.assertTrue(check.child_problems(rows, mark=Mark(3, "", 0, ts=190), rates=RATES))
-
-    def test_what_the_child_does_with_its_own_balance_is_not_a_charge_of_the_peer(self):
-        rows = [Row(4, 140, -50, 0, kind, "") for kind in (
-            ledger.CHILD_START, ledger.TOP_UP, ledger.TUNNEL, ledger.RESOURCE_CHANGE,
-            ledger.STATEMENT_QUERY,
-        )]
-        self.assertEqual(check.child_problems(rows, mark=Mark(3, "", 0), rates=RATES), [])
-
-    def test_an_unknown_charge_is_an_overcharge(self):
-        rows = [Row(4, 140, -1, 0, "fee", ""), Row(5, 140, -1, 0, ledger.DEBIT, "")]
-        self.assertEqual(len(check.child_problems(rows, mark=Mark(3, "", 0), rates=RATES)), 2)
+class ConsumptionTests(unittest.TestCase):
+    """What a child consumed is what its movements say, less what its father moved."""
 
     def test_consumption_leaves_out_what_the_father_moved(self):
         rows = [Row(4, 0, -10, 0, ledger.MAINTENANCE, ""),
@@ -356,6 +283,25 @@ class ChildRuleTests(unittest.TestCase):
                 Row(6, 0, -200, 0, ledger.WITHDRAWAL, ""),
                 Row(7, 0, -20, 0, ledger.CHILD_START, "grandchild")]
         self.assertEqual(check.consumption(rows), 30)
+
+    def test_what_the_child_does_with_its_own_balance_is_consumption_too(self):
+        """Its tunnels, its resizes and its statements are spent from its balance."""
+        rows = [Row(4, 0, -50, 0, kind, "") for kind in (
+            ledger.TUNNEL, ledger.RESOURCE_CHANGE, ledger.STATEMENT_QUERY)]
+
+        self.assertEqual(check.consumption(rows), 150)
+
+    def test_consumption_is_never_below_zero(self):
+        self.assertEqual(check.consumption([Row(4, 0, 80, 0, ledger.REFUND, "")]), 0)
+
+    def test_the_net_of_the_father_is_signed_as_the_child_sees_it(self):
+        rows = [Row(4, 0, -10, 0, ledger.MAINTENANCE, ""),
+                Row(5, 0, 500, 0, ledger.TOP_UP, ""),
+                Row(6, 0, -200, 0, ledger.WITHDRAWAL, ""),
+                Row(7, 0, -20, 0, ledger.TOP_UP, "grandchild")]
+
+        # The top-up of a child to its own child is negative on the child: not its father's.
+        self.assertEqual(check.father_net(rows), 300)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

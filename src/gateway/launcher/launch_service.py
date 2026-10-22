@@ -266,7 +266,6 @@ def _force_delegate(
         father_ip=father_ip,
         commission_mu=commission_mu,
         build_mu=build_mu,
-        variance=estimated_cost.variance,
     )
     bind_child_token(start_charge, instance.token)
 
@@ -618,7 +617,6 @@ def launch_service(
                         father_ip=father_ip,
                         commission_mu=commission_mu,
                         build_mu=build_mu,
-                        variance=estimated_cost.variance,
                     )
 
                 else:

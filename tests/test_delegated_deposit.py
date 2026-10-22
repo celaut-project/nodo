@@ -71,7 +71,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
     )
 
     def _delegate(self, *, initial_mu, commission_mu=0, build_mu=0, child_balance=None,
-                  start_error=None, mark=None):
+                  start_error=None, mark=None, record_error=None, stop_error=None):
         """Run a delegation. ``child_balance`` is what the peer reports, in its MU, and
         ``mark`` the last movement of its statement."""
         config = celaut.Configuration()
@@ -101,7 +101,10 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
             delegate_mod, "_check_start", return_value=(child_balance, mark)
         ) as check_start, patch.object(
             delegate_mod, "peer_mu_in_local", side_effect=lambda peer, amount, **_: amount // 2
-        ), patch.object(delegate_mod, "SQLConnection") as sql_connection:
+        ), patch.object(delegate_mod, "SQLConnection") as sql_connection, patch.object(
+            delegate_mod.BeeClient, "stop_service", side_effect=stop_error
+        ) as stop_service:
+            sql_connection.return_value.add_delegated_instance.side_effect = record_error
             error = None
             try:
                 delegate_mod.delegate_execution(
@@ -119,7 +122,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
                 error = e
         return SimpleNamespace(
             error=error, refunds=refunds, sent=sent.get("config"), start=start,
-            check_start=check_start,
+            check_start=check_start, stop_service=stop_service,
             written=(
                 sql_connection.return_value.add_delegated_instance.call_args.kwargs
                 if sql_connection.return_value.add_delegated_instance.called else None
@@ -151,21 +154,18 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         A mark at the amount sent would charge the build to the client again at the first
         tick, as consumption.
         """
-        mark = {"seq": 2, "ts": 100, "read_at": 101.0}
+        mark = {"seq": 2, "ts": 100, "hash": "abc"}
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
                            child_balance=1_580_000, mark=mark)
 
         self.assertEqual(r.written["peer_balance_mu"], 1_580_000)
         self.assertEqual(r.written["mark"], mark)
 
-    def test_the_start_is_checked_against_what_was_sent_and_the_quote(self):
-        """The build of 200 000 of ours is 400 000 of the peer's, with no variance."""
+    def test_the_chain_of_the_new_child_is_read_for_its_mark(self):
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
                            child_balance=1_580_000)
 
-        r.check_start.assert_called_once_with(
-            PEER_ID, "client-on-peer", PEER_TOKEN, 1_980_000, 400_000
-        )
+        r.check_start.assert_called_once_with(PEER_ID, "client-on-peer", PEER_TOKEN)
 
     def test_the_account_opens_with_the_start_the_commission_and_the_build(self):
         r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
@@ -206,6 +206,32 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         self.assertEqual(r.refunds, [True])
         self.assertIsNone(r.written)
 
+    def test_a_start_that_fails_after_the_peer_answered_stops_the_child_there(self):
+        """The father got his MU back and an error: nobody holds the instance, and left
+        alone it would run on the MU that this node sent until they ran out."""
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=1_580_000, record_error=Exception("disk is full"))
+
+        self.assertIsNotNone(r.error)
+        self.assertEqual(r.refunds, [True])
+        r.stop_service.assert_called_once()
+        self.assertEqual(r.stop_service.call_args.kwargs["token"], PEER_TOKEN)
+
+    def test_a_cleanup_that_fails_does_not_hide_the_error_or_the_refund(self):
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           child_balance=1_580_000, record_error=Exception("disk is full"),
+                           stop_error=Exception("peer is gone"))
+
+        self.assertEqual(str(r.error), "disk is full")
+        self.assertEqual(r.refunds, [True])
+
+    def test_a_start_that_never_got_a_token_has_nothing_to_stop(self):
+        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+                           start_error=Exception("timed out"))
+
+        self.assertIsNotNone(r.error)
+        r.stop_service.assert_not_called()
+
     def test_a_child_that_already_spent_keeps_the_instance_and_is_charged(self):
         """The child reads less than the amount less the build: a tick, or its dependencies.
 
@@ -229,7 +255,7 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
     PAYMENT_SYSTEM = SimpleNamespace(
         local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
     )
-    MARK = {"peer_balance_mu": 1_400_000, "seq": 9, "ts": 190, "read_at": 191.0}
+    MARK = {"peer_balance_mu": 1_400_000, "seq": 9, "ts": 190, "hash": "abc"}
 
     def _row(self, **overrides):
         row = {
@@ -418,21 +444,25 @@ def _fetch_of(book, tamper=None):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ReadChildTests(unittest.TestCase):
-    """What the tick reads of a child: its statement when it adds up, else its balance."""
+    """What a child owes at a tick: what its statements show, and what its balance fell by
+    since the last of them once what its father moved is taken out."""
 
-    def setUp(self):
-        pass
-
-    def _row(self, book, seq=2, balance=70):
+    def _row(self, book, seq=2, balance=70, verified=0, verified_sent=0, sent=0, charged=0):
         mark = book.mark_at(seq)
         return {'token': PEER_TOKEN, 'id': OUR_ALIAS, 'peer_id': PEER_ID,
                 'peer_balance_mu': balance, 'peer_statement_seq': seq,
-                'peer_statement_hash': mark.hash, 'peer_statement_ts': mark.ts}
+                'peer_statement_hash': mark.hash, 'peer_statement_ts': mark.ts,
+                'verified_consumption_peer_mu': verified,
+                'verified_father_net_peer_mu': verified_sent,
+                'father_net_peer_mu': sent, 'charged_peer_mu': charged}
 
     def _read(self, book=None, fetch_error=None, balance=None, row=None, tamper=None,
-              held=10 ** 9, rates=None):
+              held=10 ** 9, rates=None, due=True, force=False):
         fetch = MagicMock(side_effect=fetch_error) if fetch_error else _fetch_of(book, tamper)
-        with patch.object(statement_check, "read", fetch), \
+        sc = MagicMock()
+        sc.child_statement_due.return_value = due
+        with patch.object(maintain, "sc", sc), \
+                patch.object(statement_check, "read", fetch), \
                 patch.object(maintain, "_balance_held_on", return_value=held), \
                 patch.object(statement_check, "stored_rates", return_value=rates or {}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client-on-peer"), \
@@ -443,74 +473,139 @@ class ReadChildTests(unittest.TestCase):
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement") as self.penalise_none:
             try:
-                result = maintain._read_child(dict(row))
+                result = maintain._read_child(dict(row), force_statement=force)
             except Exception as e:
                 result = e
+        self.sc = sc
         return result, penalise, fetch
 
-    def test_the_child_pays_what_its_statement_says_since_the_mark(self):
+    def test_the_child_owes_what_its_statement_says_since_the_mark(self):
         book = _book((100, "start"), (-30, "build"), (-5, "maintenance"), (50, "top_up"),
                      (-7, "child_start"))
 
-        (spent, mark), penalise, fetch = self._read(book, row=self._row(book))
+        (charge, state), penalise, fetch = self._read(book, row=self._row(book, sent=50))
 
         # The top-up is the father's, not consumption.
-        self.assertEqual(spent, 12)
-        self.assertEqual((mark["peer_balance_mu"], mark["seq"], mark["hash"]),
+        self.assertEqual(charge, 12)
+        self.assertEqual((state["peer_balance_mu"], state["seq"], state["hash"]),
                          (108, 5, book.rows[4]["hash"]))
+        self.assertEqual((state["verified_consumption"], state["verified_father_net"],
+                          state["charged_delta"]), (12, 50, 12))
         penalise.assert_not_called()
         self.assertEqual(fetch.call_args.kwargs["from_seq"], 3)
 
-    def test_a_statement_that_does_not_add_up_is_penalised_and_charged_by_the_balance(self):
+    def test_between_statements_the_balance_says_what_was_consumed(self):
+        book = _book((100, "start"), (-30, "build"))
+
+        (charge, state), penalise, fetch = self._read(
+            book, row=self._row(book), balance=60, due=False)
+
+        fetch.assert_not_called()
+        self.assertEqual(charge, 10)
+        # The mark does not move: no statement was read.
+        self.assertEqual((state["seq"], state["hash"], state["peer_balance_mu"]),
+                         (2, book.rows[1]["hash"], 70))
+        self.assertEqual(state["charged_delta"], 10)
+
+    def test_a_withdrawal_of_the_father_is_not_consumption(self):
+        """The balance fell by 100 because the father took them out: nothing was spent."""
+        book = _book((1000, "start"), (0, "build"))
+
+        (charge, _), _, _ = self._read(
+            book, row=self._row(book, balance=1000, sent=-100), balance=900, due=False)
+
+        self.assertEqual(charge, 0)
+
+    def test_a_top_up_of_the_father_hides_no_consumption(self):
+        """The balance rose by 150 with 200 sent: 50 were spent."""
+        book = _book((1000, "start"), (0, "build"))
+
+        (charge, _), _, _ = self._read(
+            book, row=self._row(book, balance=1000, sent=200), balance=1150, due=False)
+
+        self.assertEqual(charge, 50)
+
+    def test_a_statement_corrects_what_the_balance_overcharged(self):
+        book = _book((100, "start"), (-30, "build"), (-8, "maintenance"))
+
+        (charge, state), _, _ = self._read(
+            book, row=self._row(book, charged=10))
+
+        # The statement says 8 and 10 were charged: 2 go back.
+        self.assertEqual(charge, -2)
+        self.assertEqual(state["charged_delta"], -2)
+
+    def test_a_statement_corrects_what_the_balance_undercharged(self):
+        book = _book((100, "start"), (-30, "build"), (-15, "maintenance"))
+
+        (charge, _), _, _ = self._read(book, row=self._row(book, charged=10))
+
+        self.assertEqual(charge, 5)
+
+    def test_what_was_charged_already_is_not_charged_twice(self):
+        book = _book((100, "start"), (-30, "build"))
+
+        (charge, _), _, _ = self._read(
+            book, row=self._row(book, verified=10, charged=10), balance=70, due=False)
+
+        self.assertEqual(charge, 0)
+
+    def test_a_statement_that_does_not_add_up_is_scored_and_the_balance_takes_its_place(self):
         book = _book((100, "start"), (-30, "build"), (-5, "maintenance"))
 
         def tamper(statement):
             statement.balance.n = "60"
 
-        (spent, mark), penalise, _ = self._read(book, row=self._row(book), tamper=tamper)
+        (charge, state), penalise, _ = self._read(book, row=self._row(book), tamper=tamper)
 
         self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
-        self.assertEqual(spent, 10)
-        self.assertEqual((mark["peer_balance_mu"], mark["seq"]), (60, 3))
+        # 70 at the mark, 60 at the head: 10, and the mark goes to the head.
+        self.assertEqual(charge, 10)
+        self.assertEqual((state["peer_balance_mu"], state["seq"]), (60, 3))
 
-    def test_an_overcharge_is_penalised_and_still_charged(self):
-        book = _book((100, "start"), (-30, "build"), (-5, "build"))
+    def test_what_cannot_be_checked_never_gives_MU_back(self):
+        book = _book((100, "start"), (-30, "build"), (20, "refund"))
 
-        (spent, _), penalise, _ = self._read(book, row=self._row(book))
+        def tamper(statement):
+            statement.balance.n = "999"
 
-        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
-        self.assertEqual(spent, 5)
+        (charge, _), _, _ = self._read(book, row=self._row(book, charged=0), tamper=tamper)
 
-    def test_a_peer_that_knows_the_child_and_gives_no_statement_is_penalised(self):
+        self.assertEqual(charge, 0)
+
+    def test_a_gap_that_the_retention_explains_is_not_a_fault_and_goes_to_the_head(self):
+        book = _book((100, "start"), (-30, "build"), (-5, "maintenance"), (-5, "maintenance"))
+        row = self._row(book, seq=1, balance=100)
+        row["peer_statement_ts"] = 0
+        book.purge_before(3)
+
+        (charge, state), penalise, _ = self._read(book, row=row)
+
+        penalise.assert_not_called()
+        self.assertEqual((charge, state["seq"]), (40, 4))
+
+    def test_a_child_with_no_mark_takes_the_head_as_its_mark(self):
+        book = _book((100, "start"), (-30, "build"), (-5, "maintenance"))
+        row = dict(self._row(book), peer_statement_seq=None, peer_statement_hash=None,
+                   peer_statement_ts=None)
+
+        (charge, state), penalise, fetch = self._read(book, row=row)
+
+        self.assertEqual(charge, 5)
+        self.assertEqual((state["seq"], state["hash"]), (3, book.rows[2]["hash"]))
+        self.assertEqual(fetch.call_args.kwargs["from_seq"], 1)
+        penalise.assert_not_called()
+
+    def test_a_peer_that_knows_the_child_and_gives_no_statement_is_scored_and_the_balance_charges(self):
         book = _book((100, "start"), (-30, "build"))
 
-        (spent, mark), penalise, _ = self._read(
+        (charge, state), penalise, _ = self._read(
             fetch_error=RuntimeError("refused"), balance=50, row=self._row(book))
 
         self.penalise_none.assert_called_once()
         self.assertEqual(self.penalise_none.call_args.kwargs["seq"], 3)
-        self.assertEqual(spent, 20)
-        self.assertIsNone(mark["seq"])
-
-    def test_a_statement_that_our_balance_does_not_pay_for_is_not_asked_for_and_no_one_is_scored(self):
-        book = _book((100, "start"), (-30, "build"))
-        # With rates that charge, and a balance that does not cover the fixed part.
-        (spent, mark), penalise, fetch = self._read(
-            book, balance=50, row=self._row(book), held=5,
-            rates={"statement_query_mu": 100, "statement_row_mu": 10})
-
-        fetch.assert_not_called()
-        self.penalise_none.assert_not_called()
-        penalise.assert_not_called()
-        self.assertEqual(spent, 20)
-        self.assertIsNone(mark["seq"])
-
-    def test_the_read_asks_for_what_the_balance_pays_for(self):
-        book = _book((100, "start"), (-30, "build"))
-
-        _, _, fetch = self._read(book, row=self._row(book), held=10 ** 9)
-
-        self.assertEqual(fetch.call_args.kwargs["rows"], ledger.max_statement_rows())
+        self.assertEqual(charge, 20)
+        self.assertEqual(state["seq"], 2)
 
     def test_a_child_the_peer_does_not_know_raises_for_the_tick_to_stop_it(self):
         book = _book((100, "start"), (-30, "build"))
@@ -521,39 +616,151 @@ class ReadChildTests(unittest.TestCase):
         self.assertIsInstance(result, RuntimeError)
         penalise.assert_not_called()
 
-    def test_with_no_mark_the_balance_is_charged_and_the_statement_marks(self):
-        book = _book((100, "start"), (-30, "build"), (-5, "maintenance"))
-        row = dict(self._row(book), peer_statement_seq=None, peer_statement_hash=None,
-                   peer_statement_ts=None)
+    def test_a_statement_that_our_balance_does_not_pay_for_is_not_asked_for_and_no_one_is_scored(self):
+        book = _book((100, "start"), (-30, "build"))
 
-        (spent, mark), penalise, fetch = self._read(book, row=row)
+        (charge, _), penalise, fetch = self._read(
+            book, balance=50, row=self._row(book), held=5,
+            rates={"statement_query_mu": 100, "statement_row_mu": 10})
 
-        self.assertEqual(spent, 5)
-        self.assertEqual((mark["seq"], mark["hash"]), (3, book.rows[2]["hash"]))
-        self.assertEqual(fetch.call_args.kwargs["from_seq"], 1)
+        fetch.assert_not_called()
+        self.penalise_none.assert_not_called()
         penalise.assert_not_called()
+        self.assertEqual(charge, 20)
+
+    def test_the_read_asks_for_what_the_balance_pays_for(self):
+        book = _book((100, "start"), (-30, "build"))
+
+        _, _, fetch = self._read(book, row=self._row(book))
+
+        self.assertEqual(fetch.call_args.kwargs["rows"], ledger.max_statement_rows())
+
+    def test_the_statement_is_read_only_when_it_is_due_or_asked_for(self):
+        book = _book((100, "start"), (-30, "build"))
+
+        _, _, fetch = self._read(book, row=self._row(book), balance=70, due=False)
+        fetch.assert_not_called()
+        self.sc.child_statement_due.assert_called_once()
+
+        _, _, fetch = self._read(book, row=self._row(book), balance=70, due=False, force=True)
+        fetch.assert_called_once()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class SettleChildTests(unittest.TestCase):
+    """What the tick does with what a child owes: charge it, give back, or stop it."""
+
+    ROW = {'token': PEER_TOKEN, 'id': OUR_ALIAS, 'peer_id': PEER_ID, 'balance_mu': 1_000_000}
+    STATE = {"peer_balance_mu": 1, "seq": 2, "hash": "h", "ts": 3}
+
+    def _settle(self, charge, row=None, rates=True, **kwargs):
+        sc = MagicMock()
+        with patch.object(maintain, "sc", sc), \
+                patch.object(maintain, "peer_mu_in_local",
+                             side_effect=(DelegatedMaintenanceTickTests._convert if rates
+                                          else lambda *a, **k: None)), \
+                patch.object(maintain, "stop_instance") as stop, \
+                patch.object(maintain, "ALLOW_DEBT", False), \
+                patch.object(maintain, "format_mu", str), \
+                patch.object(delegation_commission, "commission_percent", return_value=10.0):
+            result = maintain.settle_child(row or dict(self.ROW), charge, dict(self.STATE), **kwargs)
+        return result, sc, stop
+
+    def test_a_charge_is_taken_with_its_commission_rounded_up(self):
+        ok, sc, _ = self._settle(401)
+
+        # 401 of the peer's are 201 of ours, rounded up, and 10 % of them is 21 more.
+        self.assertTrue(ok)
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 222)
+
+    def test_a_correction_gives_back_rounded_down_with_its_commission_rounded_down(self):
+        ok, sc, _ = self._settle(-401)
+
+        # 401 of the peer's are 200 of ours, rounded down, and 10 % of them is 20 more.
+        self.assertTrue(ok)
+        kwargs = sc.settle_delegated_tick.call_args.kwargs
+        self.assertEqual((kwargs["charge_mu"], kwargs["refund_mu"]), (0, 220))
+
+    def test_nothing_to_charge_only_moves_the_state(self):
+        ok, sc, _ = self._settle(0)
+
+        self.assertTrue(ok)
+        sc.settle_delegated_tick.assert_called_once_with(
+            token=PEER_TOKEN, charge_mu=0, mark=self.STATE)
+
+    def test_a_figure_that_nothing_can_convert_is_not_settled_this_time(self):
+        ok, sc, _ = self._settle(1000, rates=False)
+
+        self.assertFalse(ok)
+        sc.settle_delegated_tick.assert_not_called()
+
+    def test_a_deposit_that_does_not_cover_the_charge_is_emptied_and_the_instance_stopped(self):
+        ok, sc, stop = self._settle(10 ** 9)
+
+        self.assertTrue(ok)
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 1_000_000)
+        stop.assert_called_once_with(token=OUR_ALIAS, reason=dead_instances.OUT_OF_BALANCE)
+
+    def test_a_stop_that_is_under_way_charges_the_whole_figure_and_stops_nothing(self):
+        ok, sc, stop = self._settle(10 ** 9, stop_if_short=False)
+
+        self.assertGreater(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 1_000_000)
+        stop.assert_not_called()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CloseDelegatedChargeTests(unittest.TestCase):
+    """Right before a delegated child is stopped its statement is read one last time."""
+
+    ROW = {'token': PEER_TOKEN, 'id': OUR_ALIAS, 'peer_id': PEER_ID}
+
+    def test_the_charge_is_closed_from_a_statement_that_is_asked_for(self):
+        sc = MagicMock()
+        sc.get_delegated_instances.return_value = [dict(self.ROW)]
+        with patch.object(maintain, "sc", sc), \
+                patch.object(maintain, "_read_child", return_value=(7, {"peer_balance_mu": 1})) as read, \
+                patch.object(maintain, "settle_child") as settle:
+            maintain.close_delegated_charge(PEER_TOKEN)
+
+        self.assertTrue(read.call_args.kwargs["force_statement"])
+        self.assertEqual(settle.call_args.args[1], 7)
+        self.assertFalse(settle.call_args.kwargs["stop_if_short"])
+
+    def test_a_failure_to_close_never_stops_the_stop(self):
+        sc = MagicMock()
+        sc.get_delegated_instances.return_value = [dict(self.ROW)]
+        with patch.object(maintain, "sc", sc), \
+                patch.object(maintain, "_read_child", side_effect=RuntimeError("peer is gone")), \
+                patch.object(maintain, "settle_child") as settle:
+            maintain.close_delegated_charge(PEER_TOKEN)
+
+        settle.assert_not_called()
+
+    def test_an_instance_that_is_not_there_is_ignored(self):
+        sc = MagicMock()
+        sc.get_delegated_instances.return_value = []
+        with patch.object(maintain, "sc", sc), patch.object(maintain, "_read_child") as read:
+            maintain.close_delegated_charge(PEER_TOKEN)
+
+        read.assert_not_called()
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class CheckStartTests(unittest.TestCase):
     """The statement of a new child, read right after StartService (#570)."""
 
-    def setUp(self):
-        pass
-
-    def _check(self, book=None, fetch_error=None, bound=40, tamper=None):
+    def _check(self, book=None, fetch_error=None, tamper=None):
         fetch = MagicMock(side_effect=fetch_error) if fetch_error else _fetch_of(book, tamper)
         with patch.object(statement_check, "read", fetch), \
-                patch.object(delegate_mod.statement_check, "stored_rates", return_value={}), \
                 patch.object(delegate_mod, "_child_balance_on_peer", return_value=55), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement",
                              side_effect=lambda peer, account, error, seq=0: penalise(
                                  peer, account, "statement_inconsistent", str(error), seq)):
-            result = delegate_mod._check_start(PEER_ID, "client-on-peer", PEER_TOKEN, 100, bound)
+            result = delegate_mod._check_start(PEER_ID, "client-on-peer", PEER_TOKEN)
         return result, penalise
 
-    def test_a_start_within_its_rule_marks_its_last_movement(self):
+    def test_a_start_marks_its_last_movement(self):
         book = _book((100, "start"), (-30, "build"))
 
         (balance, mark), penalise = self._check(book)
@@ -562,11 +769,11 @@ class CheckStartTests(unittest.TestCase):
         self.assertEqual((mark["seq"], mark["hash"]), (2, book.rows[1]["hash"]))
         penalise.assert_not_called()
 
-    def test_a_build_above_the_quote_is_an_overcharge(self):
-        (balance, mark), penalise = self._check(_book((100, "start"), (-30, "build")), bound=20)
+    def test_what_the_peer_took_for_the_build_is_not_judged(self):
+        (balance, mark), penalise = self._check(_book((100, "start"), (-90, "build")))
 
-        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
-        self.assertEqual((balance, mark["seq"]), (70, 2))
+        self.assertEqual((balance, mark["seq"]), (10, 2))
+        penalise.assert_not_called()
 
     def test_a_statement_that_does_not_start_at_its_first_movement_does_not_add_up(self):
         def tamper(statement):
@@ -944,8 +1151,9 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         self.assertEqual(sc.move_balance.call_args_list[0].args,
                          (FATHER_CLIENT, -500_000, ledger.TOP_UP))
         self.assertEqual(sc.move_balance.call_args_list[0].kwargs["instance_token"], OUR_ALIAS)
-        self.assertEqual(sc.move_balance.call_args_list[1].args,
-                         (OUR_ALIAS, 500_000, ledger.TOP_UP))
+        # The rows here and the net sent to the peer (+1 000 000 of its MU) are one write.
+        sc.move_delegated_deposit.assert_called_once_with(
+            OUR_ALIAS, FATHER_CLIENT, 500_000, 1_000_000)
         self.assertEqual(int(sent[0].difference.n), 1_000_000)
 
     def test_a_top_up_does_not_move_the_mark_the_tick_measures_against(self):
@@ -959,8 +1167,8 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         ok, _, sc, sent = self._modify(-400_000)
 
         self.assertTrue(ok)
-        sc.transfer.assert_called_once_with(OUR_ALIAS, FATHER_CLIENT, 400_000,
-                                            ledger.WITHDRAWAL, child=OUR_ALIAS)
+        sc.move_delegated_deposit.assert_called_once_with(
+            OUR_ALIAS, FATHER_CLIENT, -400_000, -800_000)
         self.assertEqual(int(sent[0].difference.n), -800_000)
 
     def test_a_peer_that_refuses_leaves_the_local_row_alone(self):
@@ -973,6 +1181,7 @@ class DelegatedDepositModificationTests(unittest.TestCase):
 
         self.assertFalse(ok)
         self.assertNotIn(OUR_ALIAS, [c.args[0] for c in sc.move_balance.call_args_list])
+        sc.move_delegated_deposit.assert_not_called()
 
     def test_taking_out_more_than_is_there_is_refused(self):
         ok, message, sc, sent = self._modify(-2_000_000)
@@ -986,6 +1195,7 @@ class DelegatedDepositModificationTests(unittest.TestCase):
 
         sc.move_balance.assert_not_called()
         sc.transfer.assert_not_called()
+        sc.move_delegated_deposit.assert_not_called()
 
     def test_a_withdrawal_the_peer_refuses_credits_nobody(self):
         ok, _, sc, _ = self._modify(-400_000, peer_accepts=False)
@@ -993,6 +1203,7 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         self.assertFalse(ok)
         sc.move_balance.assert_not_called()
         sc.transfer.assert_not_called()
+        sc.move_delegated_deposit.assert_not_called()
 
     def test_a_top_up_the_peer_refuses_goes_back_to_the_father(self):
         _, _, sc, _ = self._modify(500_000, peer_accepts=False)

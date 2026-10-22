@@ -1349,7 +1349,13 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
             if not external_token:
                 log.LOGGER(f"No peer uri for the peer {peer_id}")
                 return None
-            
+
+            # The account of the child on the peer ends with this stop. Its statement is
+            # read one last time, and what the child consumed since the last reading is
+            # charged from it and not from the estimate.
+            from src.manager.maintain import close_delegated_charge
+            close_delegated_charge(external_token)
+
             peer_refund = utils.from_amount(
                 BeeClient.stop_service(
                     node_channel(peer_uri, expected_peer_id=peer_id), token=external_token
@@ -1546,16 +1552,17 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     # never bought, out of this node's own pocket; a father credited for a withdrawal
     # the peer refused would hold MU that exists nowhere.
     #
-    # The mark of the maintenance tick does not move. The peer writes this change in
-    # the statement of the child as a `top_up` or a `withdrawal`, and the tick does not
-    # count those as consumption (`statement_check.consumption`).
+    # The rows and the net that this node has sent to the peer are written together:
+    # the tick takes that net out of what the balance of the child fell by, so that a
+    # withdrawal is not charged as consumption and a top-up does not hide any. The peer
+    # writes the same change in the statement of the child as a `top_up` or a
+    # `withdrawal`, and the tick does not count those as consumption either
+    # (`statement_check.consumption`).
     try:
         if amount_mu < 0:
             log.LOGGER(f"Credit father {father_id}")
-            sc.transfer(service_token, father_id, -amount_mu, ledger.WITHDRAWAL,
-                        child=service_token)
-        else:
-            sc.move_balance(service_token, amount_mu, ledger.TOP_UP)
+        sc.move_delegated_deposit(
+            service_token, father_id, amount_mu, -peer_amount if amount_mu < 0 else peer_amount)
     except ledger.NoSuchAccount:
         return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
     return True, _output.message or "Deposit modified correctly"
