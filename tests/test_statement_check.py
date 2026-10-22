@@ -582,13 +582,33 @@ class PenaltyTests(_Database):
         check.penalise_no_statement("peer", "acct", Unavailable())
         self.update.assert_not_called()
 
-    def test_a_refusal_for_lack_of_balance_is_penalised_because_the_read_only_asks_for_what_it_can_pay(self):
-        class Exhausted(grpc.RpcError):
+    @staticmethod
+    def _error(code):
+        class Coded(grpc.RpcError):
             def code(self):
-                return grpc.StatusCode.RESOURCE_EXHAUSTED
+                return code
 
-        check.penalise_no_statement("peer", "acct", Exhausted(), seq=3)
+        return Coded()
 
+    def test_a_refusal_for_lack_of_balance_that_the_balance_still_pays_for_is_penalised(self):
+        check.penalise_no_statement("peer", "acct", self._error(grpc.StatusCode.RESOURCE_EXHAUSTED),
+                                    seq=3, pays=lambda: True)
+
+        self.update.assert_called_once()
+
+    def test_a_refusal_for_lack_of_balance_after_the_balance_fell_is_not_a_fault(self):
+        check.penalise_no_statement("peer", "acct", self._error(grpc.StatusCode.RESOURCE_EXHAUSTED),
+                                    seq=3, pays=lambda: False)
+
+        self.update.assert_not_called()
+
+    def test_a_child_that_the_peer_delegated_on_is_not_a_fault(self):
+        error = self._error(grpc.StatusCode.UNIMPLEMENTED)
+
+        check.penalise_no_statement("peer", "token", error, seq=3, child=True)
+        self.update.assert_not_called()
+
+        check.penalise_no_statement("peer", "acct", error, seq=3)
         self.update.assert_called_once()
 
     def test_no_statement_is_one_fault_for_the_movement_that_was_missing(self):

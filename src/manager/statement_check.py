@@ -532,16 +532,35 @@ def query_charge_problems(rows: Iterable[Row], counters: Mapping[str, int],
     return problems
 
 
-def penalise_no_statement(peer_id: str, account: str, error: Exception, seq: int = 0) -> None:
+def still_pays(peer_id: str, rows_asked: int) -> bool:
+    """Whether our balance on ``peer_id``, read again now, still pays for a read of
+    ``rows_asked`` movements. False when it cannot be read."""
+    from src.manager.metrics import refresh_balance_on_peer
+
+    try:
+        balance = refresh_balance_on_peer(peer_id)
+    except Exception:
+        return False
+    return page_rows(balance, stored_rates(peer_id)) >= rows_asked
+
+
+def penalise_no_statement(peer_id: str, account: str, error: Exception, seq: int = 0,
+                          child: bool = False, pays=None) -> None:
     """A peer that gives no valid statement is one whose statement does not add up.
 
-    Not when the peer cannot be reached: that says nothing about its statements.
-    ``RESOURCE_EXHAUSTED`` counts as a refusal like any other, because a read only asks
-    for what our balance there covers (``page_rows``): a peer that says we cannot pay for
-    it contradicts the balance that it reports. ``seq`` is the movement where the
-    statement was missing.
+    Not when the peer cannot be reached: that says nothing about its statements. Nor
+    when ``child`` and the peer answers ``UNIMPLEMENTED``: it may have delegated the
+    child on, and the proto lets a node say so (the child is then charged from its
+    balance, as with no statement). ``RESOURCE_EXHAUSTED`` is a refusal like any other
+    when ``pays()`` says that our balance, read again, still pays for what was asked
+    (``page_rows``): a peer that says we cannot pay for it contradicts the balance that
+    it reports. When the balance fell in between, it is not a fault. ``seq`` is the
+    movement where the statement was missing.
     """
-    if unreachable(error):
+    code = _code_of(error)
+    if unreachable(error) or (child and code == grpc.StatusCode.UNIMPLEMENTED):
+        return
+    if code == grpc.StatusCode.RESOURCE_EXHAUSTED and pays is not None and not pays():
         return
     penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT,
                   f"no valid statement: {error}", seq)

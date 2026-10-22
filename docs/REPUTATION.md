@@ -189,6 +189,11 @@ Some things are not faults, and score nothing:
 - A read that our balance on the peer does not pay for. It is not asked for. A peer that
   refuses one that the balance does pay for contradicts the balance that it reports, and
   that is a fault.
+- A peer that answers `UNIMPLEMENTED` for a child: it may have delegated the child on,
+  and the child is then charged from its balance, as with no statement. For our own
+  account it is a fault.
+- A refusal for lack of balance when our balance, read again, no longer pays for what
+  was asked: the balance fell between the two reads.
 - A first read, or a read after a long time, where the peer has already deleted the
   oldest movements. It announces its retention (`retention_days`, never less than
   `ledger.MIN_PEER_RETENTION_DAYS` for this purpose), and what it deleted after that

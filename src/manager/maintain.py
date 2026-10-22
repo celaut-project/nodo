@@ -549,7 +549,9 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
             statement = statement_check.read(
                 peer_id, client_id, from_seq=from_seq, rows=rows_asked)
         except Exception as e:
-            statement_check.penalise_no_statement(peer_id, client_id, e, seq=from_seq)
+            statement_check.penalise_no_statement(
+                peer_id, client_id, e, seq=from_seq,
+                pays=lambda: statement_check.still_pays(peer_id, rows_asked))
             if debug_mode:
                 log.LOGGER(f"No statement of our account on {peer_id}: {e}")
             return
@@ -687,7 +689,9 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             raise (error or metrics_error) from None
         # The peer knows the instance and does not give its statement.
         if asked:
-            statement_check.penalise_no_statement(peer_id, token, error, seq=from_seq)
+            statement_check.penalise_no_statement(
+                peer_id, token, error, seq=from_seq, child=True,
+                pays=lambda: statement_check.still_pays(peer_id, rows_asked))
         new = mark
         if debug_mode:
             log.LOGGER(f"Charging {row.get('id')} from the balance on {peer_id}, not from its statement.")

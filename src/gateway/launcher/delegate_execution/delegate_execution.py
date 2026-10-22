@@ -11,7 +11,7 @@ from src.manager import balance_statement, statement_check
 from src.manager.manager import get_client_id_on_other_peer
 from src.reputation_system.reasons import Reason
 from src.utils.utils import from_amount
-from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
+from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer, refresh_balance_on_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
@@ -107,14 +107,29 @@ def _check_start(peer: str, client_id: str, external_token: str
 
     A statement that does not start from the genesis of the account, or that does not
     come from a peer that just answered ``StartService``, costs the peer the penalty for
-    a statement that does not add up. What the start took is not judged: the child holds
+    a statement that does not add up. A peer that answers ``UNIMPLEMENTED`` (it
+    delegated the child on) or that refuses for lack of balance that our balance, read
+    again, does not pay for, costs it nothing. What the start took is not judged: the child holds
     what is left of what was sent, and whoever runs the child is who pays the build. The
     start goes on in both cases: the child runs.
     """
+    # The read asks for no more than our balance on the peer pays for: what the start left
+    # may be little, and a refusal for lack of balance is then not the peer's fault.
     try:
-        statement = statement_check.read(peer, client_id, token=external_token, from_seq=1)
+        rows_asked = statement_check.page_rows(
+            refresh_balance_on_peer(peer), statement_check.stored_rates(peer))
     except Exception as e:
-        statement_check.penalise_no_statement(peer, external_token, e, seq=1)
+        log.LOGGER(f'Cannot read our balance on {peer} to read the statement of the child: {e}')
+        rows_asked = 0
+    if rows_asked <= 0:
+        return _child_balance_on_peer(peer, external_token), None
+    try:
+        statement = statement_check.read(
+            peer, client_id, token=external_token, from_seq=1, rows=rows_asked)
+    except Exception as e:
+        statement_check.penalise_no_statement(
+            peer, external_token, e, seq=1, child=True,
+            pays=lambda: statement_check.still_pays(peer, rows_asked))
         return _child_balance_on_peer(peer, external_token), None
 
     # A new account: its movement 1 hangs from its genesis.

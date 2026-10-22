@@ -749,16 +749,34 @@ class CloseDelegatedChargeTests(unittest.TestCase):
 class CheckStartTests(unittest.TestCase):
     """The statement of a new child, read right after StartService (#570)."""
 
-    def _check(self, book=None, fetch_error=None, tamper=None):
+    def _check(self, book=None, fetch_error=None, tamper=None, held=10 ** 9):
         fetch = MagicMock(side_effect=fetch_error) if fetch_error else _fetch_of(book, tamper)
         with patch.object(statement_check, "read", fetch), \
                 patch.object(delegate_mod, "_child_balance_on_peer", return_value=55), \
+                patch.object(delegate_mod, "refresh_balance_on_peer", return_value=held), \
+                patch.object(statement_check, "stored_rates", return_value=self.RATES), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement",
-                             side_effect=lambda peer, account, error, seq=0: penalise(
+                             side_effect=lambda peer, account, error, seq=0, **kw: penalise(
                                  peer, account, "statement_inconsistent", str(error), seq)):
             result = delegate_mod._check_start(PEER_ID, "client-on-peer", PEER_TOKEN)
+        self.fetch = fetch
         return result, penalise
+
+    RATES = {"statement_query_mu": 100, "statement_row_mu": 10}
+
+    def test_the_read_asks_for_what_the_balance_pays_for(self):
+        self._check(_book((100, "start"), (-30, "build")), held=150)
+
+        # (150 - 100) // 10 - 1 rows.
+        self.assertEqual(self.fetch.call_args.kwargs["rows"], 4)
+
+    def test_a_balance_that_pays_for_nothing_reads_no_statement_and_scores_nothing(self):
+        (balance, mark), penalise = self._check(_book((100, "start")), held=99)
+
+        self.fetch.assert_not_called()
+        penalise.assert_not_called()
+        self.assertEqual((balance, mark), (55, None))
 
     def test_a_start_marks_its_last_movement(self):
         book = _book((100, "start"), (-30, "build"))
@@ -873,6 +891,16 @@ class CheckOurAccountTests(unittest.TestCase):
         self.assertEqual(penalise.call_args.args[4], 3)
         self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 3)
         self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["attempts_used"], [4])
+
+    def test_the_statements_queries_are_counted_once_and_the_mark_goes_past_them(self):
+        now = int(time.time())
+        book = _book((500, "credit", "", "", now - 5), (-100, "child_start", "", "", now),
+                     (-1, "statement_query", "", "", now), account="client-on-peer")
+
+        sc, _ = self._check(book, attempts=[(4, now - 3, 100)])
+
+        sc.add_statement_queries_verified.assert_called_once_with(PEER_ID, 1, 1)
+        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 3)
 
     def test_the_top_ups_taken_are_saved_with_the_mark(self):
         ref = ledger.instance_ref(PEER_TOKEN)
