@@ -444,6 +444,19 @@ class TopUpAllowanceTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class StaleMarkTests(unittest.TestCase):
 
+    def test_failed_reads_are_priced_only_when_the_movements_show_their_range(self):
+        pending = [(1, 4, 13, 100), (2, 4, 13, 100), (3, 20, 30, 100), (4, 4, 13, 100)]
+        rows = [Row(4, 99, -1, 0, "debit", ""), Row(5, 100, -1, 0, "debit", ""),
+                Row(6, 500, -1, 0, "debit", "")]
+
+        priced = check.priced_failed_reads(pending[:2] + pending[2:3], rows, head_seq=6)
+
+        # Reads 1 and 2: the movements reach the head, which is inside the range, and the
+        # one dated after the read did not exist. Read 3 starts beyond the head.
+        self.assertEqual(priced, {1: 2, 2: 2, 3: 0})
+        # A range that the movements do not reach stays unpriced.
+        self.assertEqual(check.priced_failed_reads([(4, 4, 13, 100)], rows[:2], head_seq=9), {})
+
     def test_a_mark_is_read_again_after_a_tenth_of_the_retention(self):
         tenth = ledger.min_peer_retention_days() * 86400 / 10
 
@@ -611,6 +624,16 @@ class PenaltyTests(_Database):
         check.penalise_no_statement("peer", "acct", error, seq=3)
         self.update.assert_called_once()
 
+    def test_a_peer_that_always_refuses_is_scored_once_a_day(self):
+        with patch.object(check.time, "time", return_value=10 * 86400 + 5):
+            for _ in range(3):
+                check.penalise_no_statement("peer", "acct", Exception("refused"), seq=3)
+        self.assertEqual(self.update.call_count, 1)
+
+        with patch.object(check.time, "time", return_value=11 * 86400 + 5):
+            check.penalise_no_statement("peer", "acct", Exception("refused"), seq=3)
+        self.assertEqual(self.update.call_count, 2)
+
     def test_no_statement_is_one_fault_for_the_movement_that_was_missing(self):
         check.penalise_no_statement("peer", "acct", Exception("refused"), seq=3)
         check.penalise_no_statement("peer", "acct", Exception("refused"), seq=3)
@@ -647,6 +670,43 @@ class CountedReadTests(_Database):
 
         counters = self.sc.get_statement_counters("peer")
         self.assertEqual((counters["reads"], counters["rows_priced"]), (1, 11))
+
+    def test_a_read_that_fails_is_written_down_with_its_range_and_counts_what_it_asked_for(self):
+        self.read(error=RuntimeError("timeout"), rows=10)
+
+        pending = self.sc.failed_statement_reads("peer", ledger.account_ref("client"))
+        self.assertEqual([(a, b) for _, a, b, _ in pending], [(4, 13)])
+
+    def test_a_failed_read_is_priced_with_the_rows_that_the_account_had_then(self):
+        for _ in range(9):
+            self.read(error=RuntimeError("timeout"), rows=1000)
+        pending = self.sc.failed_statement_reads("peer", ledger.account_ref("client"))
+        self.assertEqual(self.sc.get_statement_counters("peer")["rows_priced"], 9 * 1001)
+
+        # The account holds 6 movements, all older than the reads.
+        rows = [Row(seq, 0, -1, 0, "debit", "") for seq in range(4, 10)]
+        check.settle_failed_reads("peer", "client", rows, head_seq=9)
+
+        # The row of the charge of each read, and the 6 movements that existed for each.
+        self.assertEqual(self.sc.get_statement_counters("peer")["rows_priced"], 9 * 1 + 9 * 6)
+        self.assertEqual(self.sc.failed_statement_reads("peer", ledger.account_ref("client")), [])
+        self.assertEqual(len(pending), 9)
+
+    def test_reads_that_time_out_do_not_hide_charges_that_were_never_due(self):
+        """Nine reads of 1000 rows that time out, and one answered with none: the peer
+        cannot charge ten statements of 1001 MU for an account that has no movement."""
+        rates = {"statement_query_mu": 1, "statement_row_mu": 1}
+        for _ in range(9):
+            self.read(error=RuntimeError("timeout"), rows=1000)
+        self.read(answer=celaut_pb2.BalanceStatement(), rows=1000)
+        check.settle_failed_reads("peer", "client", [], head_seq=3)
+        self.sc.add_statement_queries_verified("peer", 10, 10 * 1001)
+
+        problems = check.query_charge_problems(
+            [Row(5, 0, -1001, 0, "statement_query", "")] * 10,
+            self.sc.get_statement_counters("peer"), rates)
+
+        self.assertTrue(problems)
 
     def test_a_page_is_asked_as_a_range(self):
         fetch = self.read(rows=10)

@@ -2538,6 +2538,7 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ?
         ''', (None if genesis is None else 0, genesis, None if genesis is None else '0', ts,
               peer_id))
+        cursor.execute('DELETE FROM statement_failed_reads WHERE peer_id = ?', (peer_id,))
 
     def peers_with_client(self) -> List[str]:
         """The peers where this node holds a client: each has an account to check."""
@@ -3433,25 +3434,78 @@ class SQLConnection(metaclass=Singleton):
 
     def get_statement_counters(self, peer_id: str) -> dict:
         """``reads``, ``rows_priced``, ``verified`` and ``verified_mu`` of ``peer_id``
-        (see the `peer` table). Zeros for a peer that is not known."""
+        (see the `peer` table). Zeros for a peer that is not known. ``rows_priced``
+        includes the reads that failed and are not settled yet, at the rows asked for."""
         row = self._execute(
             'SELECT statement_reads, statement_rows_priced, statement_queries_verified, '
             'statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
         ).fetchone()
         if row is None:
             return {"reads": 0, "rows_priced": 0, "verified": 0, "verified_mu": 0}
-        return {"reads": int(row['statement_reads']), "rows_priced": int(row['statement_rows_priced']),
+        pending = self._execute(
+            'SELECT COALESCE(SUM(rows_priced), 0) FROM statement_failed_reads WHERE peer_id = ?',
+            (peer_id,)).fetchone()[0]
+        return {"reads": int(row['statement_reads']),
+                "rows_priced": int(row['statement_rows_priced']) + int(pending),
                 "verified": int(row['statement_queries_verified']),
                 "verified_mu": _as_int(row['statement_queries_verified_mu'])}
 
+    def add_failed_statement_read(self, peer_id: str, account_ref: str, from_seq: int,
+                                  to_seq: int, rows_priced: int) -> None:
+        """Write down a statement that was asked for and did not come."""
+        self._execute(
+            'INSERT INTO statement_failed_reads '
+            '(peer_id, account_ref, from_seq, to_seq, ts, rows_priced) VALUES (?, ?, ?, ?, ?, ?)',
+            (peer_id, account_ref, int(from_seq), int(to_seq), int(time.time()), int(rows_priced)))
+
+    def failed_statement_reads(self, peer_id: str, account_ref: str) -> List[Tuple[int, int, int, int]]:
+        """``(id, from_seq, to_seq, ts)`` of the reads of ``account_ref`` that failed and
+        are not settled."""
+        return [(int(row['id']), int(row['from_seq']), int(row['to_seq']), int(row['ts']))
+                for row in self._execute(
+                    'SELECT id, from_seq, to_seq, ts FROM statement_failed_reads '
+                    'WHERE peer_id = ? AND account_ref = ? ORDER BY id',
+                    (peer_id, account_ref)).fetchall()]
+
+    def settle_failed_statement_reads(self, peer_id: str, rows: Mapping[int, int]) -> None:
+        """Settle failed reads at the rows that they may have been priced for (by id)."""
+        def work(cursor):
+            for read_id, priced in rows.items():
+                cursor.execute('DELETE FROM statement_failed_reads WHERE id = ? AND peer_id = ?',
+                               (int(read_id), peer_id))
+                if cursor.rowcount:
+                    cursor.execute(
+                        'UPDATE peer SET statement_rows_priced = statement_rows_priced + ? '
+                        'WHERE id = ?', (int(priced), peer_id))
+
+        self._transaction(work)
+
+    def sweep_failed_statement_reads(self, max_age_days: int) -> int:
+        """Settle at the rows asked for the failed reads older than ``max_age_days``:
+        nothing will show their range any more. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+
+        def work(cursor):
+            old = cursor.execute(
+                'SELECT id, peer_id, rows_priced FROM statement_failed_reads WHERE ts < ?',
+                (cutoff,)).fetchall()
+            for row in old:
+                cursor.execute('DELETE FROM statement_failed_reads WHERE id = ?', (row['id'],))
+                cursor.execute(
+                    'UPDATE peer SET statement_rows_priced = statement_rows_priced + ? '
+                    'WHERE id = ?', (int(row['rows_priced']), row['peer_id']))
+            return len(old)
+
+        return self._transaction(work)
+
     def record_statement_fault(self, peer_id: str, account_ref: str, reason: str,
-                               seq: int) -> bool:
+                               seq: int, period: int = 0) -> bool:
         """Write a fault of ``peer_id`` in a statement. True if it was not written yet:
         that is the one time that it is scored."""
         cursor = self._execute('''
-            INSERT OR IGNORE INTO statement_faults (peer_id, account_ref, reason, seq, ts)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (peer_id, account_ref, reason, int(seq), int(time.time())))
+            INSERT OR IGNORE INTO statement_faults (peer_id, account_ref, reason, seq, period, ts)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (peer_id, account_ref, reason, int(seq), int(period), int(time.time())))
         return cursor.rowcount > 0
 
     def prune_statement_faults(self, max_age_days: int) -> int:

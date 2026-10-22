@@ -153,7 +153,16 @@ Nothing may take MU from the account but:
   statement shows it);
 - a statement that we asked for. What the peer shows never exceeds what this node asked
   for, in number and in MU at the rates that the peer announces: each read is counted
-  when it is asked, before the peer can charge it.
+  when it is asked, before the peer can charge it. A read that fails (a timeout) may
+  have been charged all the same: it is counted at the rows that it asked for, and once
+  a later statement shows its range, at the rows that the account held when it was asked.
+  The rates are those of today, so a peer that raises its prices loosens the bound for
+  the reads that it priced lower before.
+
+When the balance that the peer reports in `Metrics` (free, and not signed) pays for no
+movement, the node reads the head of the account, which is signed and costs only the fixed
+part, and reads the movements with the balance that the head says. A peer cannot stop the
+check by reporting a low balance.
 
 ### A child
 
@@ -173,7 +182,8 @@ The same scale as a service that does not hash to its id (`get_service_wrong_has
 every case the peer signed or reported something false about money. A fault is scored
 once for each peer, account, reason and movement where it shows, and that is kept in the
 database (`statement_faults`): it is not scored again at the next tick or after a
-restart, and a different fault, at another movement, is. After a statement that does not
+restart, and a different fault, at another movement, is. A peer that keeps refusing to
+give a statement shows no movement, and is scored once a day for as long as it refuses. After a statement that does not
 continue the chain the mark goes to the head, and the movements up to there are not
 checked.
 

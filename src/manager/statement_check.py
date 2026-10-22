@@ -27,6 +27,7 @@ The functions here are pure unless they say otherwise; ``maintain`` and
 ``delegate_execution`` read the statements and act on what these return.
 """
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -490,22 +491,62 @@ def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
     account pays for every read, and the peer writes each charge in it, so each read is
     counted when it is asked, before the peer can charge it: a read that fails after the
     charge still has its row. The rows that it may be priced for are the one of its own
-    charge, and then those of the answer, or those asked for when there is none.
+    charge, and then those of the answer. A read that fails is written down with its
+    range and time, at the rows asked for, and ``settle_failed_reads`` prices it later
+    with the rows that the account had then. ``from_seq`` 0 asks for the head only: no
+    movement.
     """
     from src.database.sql_connection import SQLConnection
     from src.manager import balance_statement
 
     sc = SQLConnection()
     sc.add_statement_read(peer_id, rows_priced=1)
+    asked = rows or ledger.max_statement_rows()
     to_seq = from_seq + rows - 1 if rows else 0
     try:
         statement = balance_statement.fetch(
             peer_id, client_id, token=token, from_seq=from_seq, to_seq=to_seq)
     except Exception:
-        sc.add_statement_read(peer_id, rows_priced=rows or ledger.max_statement_rows(), count=0)
+        if from_seq > 0:
+            sc.add_failed_statement_read(
+                peer_id, ledger.account_ref(token or client_id), from_seq,
+                from_seq + asked - 1, asked)
         raise
     sc.add_statement_read(peer_id, rows_priced=len(statement.movements), count=0)
     return statement
+
+
+def priced_failed_reads(pending: Iterable[Tuple[int, int, int, int]], rows: Iterable[Row],
+                        head_seq: int) -> Dict[int, int]:
+    """The reads that failed (``(id, from_seq, to_seq, ts)``) that ``rows``, the movements
+    of the account that were just checked up to ``head_seq``, show the range of, with the
+    rows that they may be priced for: those that the range held when the read was asked.
+
+    A read whose range the movements do not cover is left out: it stays at the rows asked
+    for. Rows are as old as the peer says, and a peer that dates them earlier makes the
+    count lower, which can only cost it.
+    """
+    rows = list(rows)
+    priced = {}
+    for read_id, from_seq, to_seq, ts in pending:
+        last = min(to_seq, head_seq)
+        if from_seq > head_seq:
+            priced[read_id] = 0
+        elif rows and rows[0].seq <= from_seq and rows[-1].seq >= last:
+            priced[read_id] = sum(1 for row in rows if from_seq <= row.seq <= last
+                                  and row.ts <= ts + CLOCK_SKEW_SECONDS)
+    return priced
+
+
+def settle_failed_reads(peer_id: str, account: str, rows: Iterable[Row], head_seq: int) -> None:
+    """Price the failed reads of ``account`` that the checked movements show the range of."""
+    from src.database.sql_connection import SQLConnection
+
+    sc = SQLConnection()
+    pending = sc.failed_statement_reads(peer_id, ledger.account_ref(account))
+    priced = priced_failed_reads(pending, rows, head_seq) if pending else {}
+    if priced:
+        sc.settle_failed_statement_reads(peer_id, priced)
 
 
 def query_charge_problems(rows: Iterable[Row], counters: Mapping[str, int],
@@ -570,8 +611,10 @@ def penalise_no_statement(peer_id: str, account: str, error: Exception, seq: int
         return
     if code == grpc.StatusCode.RESOURCE_EXHAUSTED and pays is not None and not pays():
         return
+    # A refusal shows no movement, and it would be the same fault at every read for as
+    # long as the peer keeps refusing: it is scored once a day instead.
     penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT,
-                  f"no valid statement: {error}", seq)
+                  f"no valid statement: {error}", seq, period=int(time.time()) // 86400)
 
 
 def _invalid_statement():
@@ -579,11 +622,13 @@ def _invalid_statement():
     return StatementInvalid
 
 
-def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: int = 0) -> None:
+def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: int = 0,
+                  period: int = 0) -> None:
     """Score a fault of a peer, once: the same fault read again costs it nothing.
 
     A fault is the peer, the account (by ``account_ref``, never the credential), the
-    reason and the seq of the movement where it shows (``statement_faults``). A
+    reason and the seq of the movement where it shows, and the ``period`` for a fault
+    that shows no movement (``statement_faults``). A
     statement that does not add up stays wrong for every read until the mark goes past
     it, and also after a restart, so the record is in the database. A different fault,
     at another movement, is scored.
@@ -593,6 +638,6 @@ def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: in
 
     account_ref = ledger.account_ref(account)
     log.LOGGER(f"Statement of {account_ref[:8]} on {peer_id}: {problem}")
-    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq):
+    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq, period):
         return
     interface.update_peer_reputation(peer_id=peer_id, amount=STATEMENT_PENALTY, reason=reason)

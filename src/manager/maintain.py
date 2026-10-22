@@ -30,7 +30,7 @@ from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import from_amount, peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
-from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
+from src.utils.cost_functions.general_cost_functions import RATE_STATEMENT_QUERY, compute_maintenance_cost
 from src.utils.monetary import format_mu
 from src.utils.hashing import get_configured_hash_id, get_configured_hash_spec, hash_stream
 from src.utils.service_content import read_service_content
@@ -541,6 +541,14 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
     for _ in range(ledger.max_statement_pages_per_tick()):
         rows_asked = statement_check.page_rows(balance, rates)
         if rows_asked <= 0:
+            # The balance that the peer reports in ``Metrics`` is free and not signed: a
+            # peer could report one that pays for nothing, just before each read. The
+            # head of the account is signed, and costs a fixed part only.
+            signed = _signed_balance(peer_id, client_id, mark, balance, rates, debug_mode)
+            if signed is not None:
+                balance = signed
+                rows_asked = statement_check.page_rows(balance, rates)
+        if rows_asked <= 0:
             log.LOGGER(f"Our balance on {peer_id}, {balance} MU, does not pay for a statement.")
             return
         from_seq = 1 if mark.seq is None else mark.seq + 1
@@ -568,6 +576,7 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
         if queries:
             sc.add_statement_queries_verified(
                 peer_id, len(queries), -sum(row.amount for row in queries))
+        statement_check.settle_failed_reads(peer_id, client_id, chain.rows, statement.head_seq)
         check = statement_check.account_faults(
             chain.rows, sc.delegated_starts_on_peer(peer_id),
             [statement_check.StartAttempt(*a) for a in sc.open_start_attempts(peer_id)],
@@ -592,6 +601,37 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
         if not chain.more:
             return
         balance = from_amount(statement.balance)
+
+
+def _signed_balance(peer_id: str, client_id: str, mark: statement_check.Mark, balance: int,
+                    rates, debug_mode: bool = False) -> Optional[int]:
+    """The balance of our account in the signed head of its statement, when the balance
+    that ``Metrics`` gives does not pay for a read of movements. None when the head is
+    not paid for either, or cannot be had.
+
+    The head is checked against the mark like any statement is: a peer that shows another
+    head than before is scored. It reads no movement, so the mark does not move.
+    """
+    if balance < int(rates.get(RATE_STATEMENT_QUERY, 0)):
+        return None
+    read_at = time.time()
+    try:
+        statement = statement_check.read(peer_id, client_id, from_seq=0)
+    except Exception as e:
+        # The peer may refuse for lack of balance as it said; any other refusal is the
+        # fault of ``penalise_no_statement``.
+        statement_check.penalise_no_statement(
+            peer_id, client_id, e, seq=0, pays=lambda: False)
+        if debug_mode:
+            log.LOGGER(f"No head of our account on {peer_id}: {e}")
+        return None
+    chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=0)
+    if chain.rows is None:
+        statement_check.penalise_once(
+            peer_id, client_id, Reason.STATEMENT_INCONSISTENT, chain.problem,
+            chain.fault_seq if chain.fault_seq is not None else 0)
+        return None
+    return from_amount(statement.balance)
 
 
 def _balance_held_on(peer_id: str) -> int:
@@ -679,6 +719,7 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             new = statement_check.mark_after(chain, statement, start)
             balance_now = from_amount(statement.balance)
             checked = True
+            statement_check.settle_failed_reads(peer_id, token, chain.rows, statement.head_seq)
         else:
             if chain.problem:
                 statement_check.penalise_once(
@@ -1324,6 +1365,7 @@ def sweep_balance_movements(force: bool = False) -> int:
         deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
         sc.prune_statement_faults(max_age_days=ledger.retention_days())
         sc.prune_start_attempts(max_age_days=ledger.retention_days())
+        sc.sweep_failed_statement_reads(max_age_days=ledger.retention_days())
         if deleted:
             log.LOGGER(f"Retention sweep deleted {deleted} balance movement(s).")
         return deleted

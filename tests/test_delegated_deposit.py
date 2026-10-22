@@ -474,6 +474,7 @@ class ReadChildTests(unittest.TestCase):
                 patch.object(maintain, "instance_balance_on_peer",
                              side_effect=RuntimeError("gone") if balance is None else None,
                              return_value=balance), \
+                patch.object(statement_check, "settle_failed_reads"), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement") as self.penalise_none:
             try:
@@ -759,6 +760,7 @@ class CheckStartTests(unittest.TestCase):
                 patch.object(delegate_mod, "_child_balance_on_peer", return_value=55), \
                 patch.object(delegate_mod, "refresh_balance_on_peer", return_value=held), \
                 patch.object(statement_check, "stored_rates", return_value=self.RATES), \
+                patch.object(statement_check, "settle_failed_reads"), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement",
                              side_effect=lambda peer, account, error, seq=0, **kw: penalise(
@@ -841,6 +843,7 @@ class CheckOurAccountTests(unittest.TestCase):
                 patch.object(maintain, "_balance_held_on", return_value=held), \
                 patch.object(statement_check, "stored_rates", return_value=rates or {}), \
                 patch.object(maintain, "_peer_rates", return_value=rates or {}), \
+                patch.object(statement_check, "settle_failed_reads"), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement") as penalise_none:
             if max_pages:
@@ -956,6 +959,35 @@ class CheckOurAccountTests(unittest.TestCase):
         self.fetch.assert_not_called()
         penalise.assert_not_called()
         sc.set_peer_statement_mark.assert_not_called()
+
+    RATES_100 = {"statement_query_mu": 100, "statement_row_mu": 100}
+
+    def test_a_balance_that_metrics_gives_too_low_is_checked_against_the_signed_head(self):
+        """The free ``Metrics`` figure pays for no row; the head is signed, and says that
+        the account holds more: the statement is read with the balance of the head."""
+        book = _book((500, "credit"), (-1, "statement_query"), account="client-on-peer")
+
+        sc, penalise = self._check(book, held=150, rates=self.RATES_100)
+
+        self.assertEqual([c.kwargs["from_seq"] for c in self.fetch.call_args_list], [0, 1])
+        penalise.assert_not_called()
+        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 2)
+
+    def test_a_signed_head_that_cannot_pay_either_reads_no_movement(self):
+        book = _book((150, "credit"), account="client-on-peer")
+
+        sc, penalise = self._check(book, held=150, rates=self.RATES_100)
+
+        self.assertEqual([c.kwargs["from_seq"] for c in self.fetch.call_args_list], [0])
+        sc.set_peer_statement_mark.assert_not_called()
+
+    def test_a_head_that_is_not_the_one_of_the_mark_is_scored(self):
+        book = _book((500, "credit"), (-1, "statement_query"), account="client-on-peer")
+        stored = dict(self._stored(book.mark_at(2)), hash="another-hash")
+
+        _, penalise = self._check(book, stored=stored, held=150, rates=self.RATES_100)
+
+        self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
 
     def test_a_long_account_is_read_page_by_page_without_skipping_a_movement(self):
         book = _book((5, "credit"), *[(0, "deposit")] * 11, account="client-on-peer")

@@ -644,15 +644,35 @@ TABLES = {
     # A fault of a peer in a statement (#570) is scored once: one row for each peer,
     # account (by `account_ref`), reason and seq, the movement where it shows. The same
     # fault read again at the next tick, or after a restart, finds its row and costs
-    # nothing; a different fault, at another seq, is scored.
+    # nothing; a different fault, at another seq, is scored. A peer that refuses to give
+    # a statement shows no movement to anchor the fault to, so it is scored once for each
+    # `period` (a day) instead.
     "statement_faults": '''
         CREATE TABLE IF NOT EXISTS statement_faults (
             peer_id TEXT NOT NULL,
             account_ref TEXT NOT NULL,
             reason TEXT NOT NULL,
             seq INTEGER NOT NULL,
+            period INTEGER NOT NULL DEFAULT 0,
             ts INTEGER NOT NULL,
-            PRIMARY KEY (peer_id, account_ref, reason, seq)
+            PRIMARY KEY (peer_id, account_ref, reason, seq, period)
+        )
+    ''',
+    # A statement that was asked for and did not come (a timeout) may have been charged
+    # by the peer all the same. It is counted at the rows that it asked for, and once a
+    # later statement shows the movements of that range, at the rows that existed when it
+    # was asked: `rows_priced` is those that it asked for, and `from_seq` and `to_seq`
+    # the range, in the account `account_ref`. A read that is never settled is added to
+    # the counters of the peer as asked when it is swept.
+    "statement_failed_reads": '''
+        CREATE TABLE IF NOT EXISTS statement_failed_reads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            account_ref TEXT NOT NULL,
+            from_seq INTEGER NOT NULL,
+            to_seq INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            rows_priced INTEGER NOT NULL
         )
     ''',
     "balance_movements": '''
