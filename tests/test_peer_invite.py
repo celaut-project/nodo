@@ -34,7 +34,7 @@ class PeerInviteTests(unittest.TestCase):
         invite = pi.parse_invite(pi.build_invite(peer))
         self.assertEqual(invite.public_key, KEY)
         self.assertEqual(
-            [list(a.tags) for a in invite.addr], [["ip4"], ["ip6"], ["tor3"]]
+            [list(a.tags) for a in invite.addr], [["ip4"], ["ip6"], ["tor-onion-v3"]]
         )
         self.assertEqual(
             pi.invite_targets(invite),
@@ -49,7 +49,7 @@ class PeerInviteTests(unittest.TestCase):
         self.assertEqual(pi.data_to_address("ip4", bytes([1, 2, 3, 4, 1, 2])), "1.2.3.4:258")
         self.assertEqual(len(pi.address_to_data("ip6", "[::1]:1")), 18)
         self.assertEqual(
-            pi.address_to_data("tor3", f"{pi._onion_text(ONION_KEY)}:9"),
+            pi.address_to_data("tor-onion-v3", f"{pi._onion_text(ONION_KEY)}:9"),
             ONION_KEY + bytes([0, 9]),
         )
 
@@ -65,7 +65,7 @@ class PeerInviteTests(unittest.TestCase):
         self.assertEqual(pi.invite_targets(invite), ["1.2.3.4:5"])
 
     def test_malformed_data_for_a_known_tag_is_refused(self):
-        for tag, data in (("ip4", b"\x01\x02\x03\x04"), ("ip6", b"\x00" * 17), ("tor3", b"\x00" * 33)):
+        for tag, data in (("ip4", b"\x01\x02\x03\x04"), ("ip6", b"\x00" * 17), ("tor-onion-v3", b"\x00" * 33), ("dns", b"\x00\x01"), ("dns", b"a b.example\x00\x01")):
             raw = invite_pb2.PeerInvite(
                 public_key=KEY, addr=[invite_pb2.Addr(tags=[tag], data=data)]
             ).SerializeToString()
@@ -92,9 +92,20 @@ class PeerInviteTests(unittest.TestCase):
         size = len(pi.build_invite(peer))
         self.assertLess(size, 150, size)
 
-    def test_hostnames_are_left_out(self):
-        invite = pi.parse_invite(pi.build_invite(_peer(("node.example.org", 1), ("1.2.3.4", 2))))
-        self.assertEqual(pi.invite_targets(invite), ["1.2.3.4:2"])
+    def test_a_host_name_is_a_dns_address(self):
+        invite = pi.parse_invite(pi.build_invite(_peer(("node.example.org", 8090), ("1.2.3.4", 2))))
+        self.assertEqual([list(a.tags) for a in invite.addr], [["dns"], ["ip4"]])
+        self.assertEqual(pi.invite_targets(invite), ["node.example.org:8090", "1.2.3.4:2"])
+        self.assertEqual(
+            pi.address_to_data("dns", "a.example:258"), b"a.example" + bytes([1, 2])
+        )
+
+    def test_what_is_not_a_host_name_is_left_out(self):
+        for host in ("", "bad host", "-x.example", "a..b", "x" * 64 + ".example", "ñandú.example"):
+            invite = pi.parse_invite(pi.build_invite(_peer((host, 1), ("1.2.3.4", 2))))
+            self.assertEqual(pi.invite_targets(invite), ["1.2.3.4:2"], host)
+        with self.assertRaises(pi.InviteError):
+            pi.address_to_data("dns", "1.2.3.4:5")
 
     def test_field_numbers_are_pinned(self):
         fields = lambda m: {f.name: f.number for f in m.DESCRIPTOR.fields}

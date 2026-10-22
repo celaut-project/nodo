@@ -351,7 +351,7 @@ These are the most commonly used commands for daily tasks:
 - **invite `[--raw <file|->]`**  
   Prints this node's peer invitation as a QR code in the terminal, with its size in
   bytes and the QR version. The invitation holds the node's identity key and its
-  addresses (`ip4`, `ip6` and `tor3`; a host name is left out), in order of preference —
+  addresses (`ip4`, `ip6`, `tor-onion-v3` and `dns`; a host that is none of them is left out), in order of preference —
   no signature, resources or proofs. `--raw` writes the bytes to a file (`-` for stdout)
   instead. It is refused over 1000 bytes, saying which addresses to remove.
 

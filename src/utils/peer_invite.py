@@ -7,7 +7,8 @@ remote end holds ``public_key``, and then fetches the full signed ``Peer`` with
 
 Each ``Addr`` is described by tags, which are synonyms, and the tag defines the format of
 its ``data`` (the host and then the port). Adding a kind of address is one entry in
-``_CODECS``.
+``_CODECS``. The onion tag is the one the transport of ``Peer.Uri`` uses, so a kind of
+network has one name wherever it appears.
 """
 
 import base64
@@ -20,6 +21,7 @@ from google.protobuf.message import DecodeError
 
 from protos import invite_pb2
 from src.identity.node_identity import ComponentFormalError, parse_component_formal
+from src.identity.transport_stack import ONION_V3_TAG
 
 PUBLIC_KEY_LENGTH = 32
 # A QR code holds 2953 bytes at level L and 2331 at level M. This keeps it scannable.
@@ -27,6 +29,7 @@ MAX_QR_BYTES = 1000
 
 _PORT = struct.Struct(">H")
 _ONION_VERSION = b"\x03"
+_MAX_HOSTNAME = 253
 
 
 class InviteError(ValueError):
@@ -89,7 +92,7 @@ def _onion_text(key: bytes) -> str:
     return base64.b32encode(key + checksum + _ONION_VERSION).decode().lower() + ".onion"
 
 
-def _encode_tor3(text: str) -> bytes:
+def _encode_onion(text: str) -> bytes:
     host = _host_of(text)
     try:
         raw = base64.b32decode(host.removesuffix(".onion").upper())
@@ -101,15 +104,61 @@ def _encode_tor3(text: str) -> bytes:
     return key + _PORT.pack(_port_of(text))
 
 
-def _decode_tor3(data: bytes) -> str:
-    key = _split_port(data, PUBLIC_KEY_LENGTH, "tor3")
+def _decode_onion(data: bytes) -> str:
+    key = _split_port(data, PUBLIC_KEY_LENGTH, ONION_V3_TAG)
     return f"{_onion_text(key)}:{_PORT.unpack(data[PUBLIC_KEY_LENGTH:])[0]}"
+
+
+def _valid_hostname(host: str) -> bool:
+    """A DNS name: ASCII labels of letters, digits and hyphens, and not an address."""
+    labels = host.rstrip(".").split(".")
+    return (
+        0 < len(host) <= _MAX_HOSTNAME
+        and host.isascii()
+        and all(
+            0 < len(label) <= 63
+            and not label.startswith("-")
+            and not label.endswith("-")
+            and label.replace("-", "").isalnum()
+            for label in labels
+        )
+    )
+
+
+def _encode_dns(text: str) -> bytes:
+    host = _host_of(text)
+    if not _valid_hostname(host) or _tag_of_host_literal(host):
+        raise InviteError(f"Not a host name: {text!r}.")
+    return host.encode("ascii") + _PORT.pack(_port_of(text))
+
+
+def _decode_dns(data: bytes) -> str:
+    if len(data) <= _PORT.size:
+        raise InviteError(f"The data of a 'dns' address is {len(data)} bytes, too short.")
+    try:
+        host = data[:-_PORT.size].decode("ascii")
+    except UnicodeDecodeError:
+        raise InviteError("The host of a 'dns' address is not ASCII.") from None
+    if not _valid_hostname(host) or _tag_of_host_literal(host):
+        raise InviteError(f"Not a host name: {host!r}.")
+    return f"{host}:{_PORT.unpack(data[-_PORT.size:])[0]}"
+
+
+def _tag_of_host_literal(host: str) -> Optional[str]:
+    """``ip4``, ``ip6`` or the onion tag when ``host`` is such a literal, else None."""
+    if host.lower().endswith(".onion"):
+        return ONION_V3_TAG
+    try:
+        return "ip4" if ipaddress.ip_address(host).version == 4 else "ip6"
+    except ValueError:
+        return None
 
 
 _CODECS: Dict[str, _Codec] = {
     "ip4": _ip_codec(4, "ip4"),
     "ip6": _ip_codec(6, "ip6"),
-    "tor3": _Codec(_encode_tor3, _decode_tor3),
+    ONION_V3_TAG: _Codec(_encode_onion, _decode_onion),
+    "dns": _Codec(_encode_dns, _decode_dns),
 }
 
 
@@ -133,19 +182,15 @@ def known_tag(addr: invite_pb2.Addr) -> Optional[str]:
 
 
 def _tag_of_host(host: str) -> Optional[str]:
-    if host.lower().endswith(".onion"):
-        return "tor3"
-    try:
-        return "ip4" if ipaddress.ip_address(host).version == 4 else "ip6"
-    except ValueError:
-        return None
+    """The tag for ``host``, or None when it is nothing an invitation can carry."""
+    return _tag_of_host_literal(host) or ("dns" if _valid_hostname(host) else None)
 
 
 def build_invite(peer) -> bytes:
     """The invitation to ``peer``, a ``celaut.Peer``, taking its key and its addresses.
 
     The addresses keep the order of the Peer, which puts the reachable ones first. One
-    whose host has no tag (a host name) is left out: its ``data`` would need a format.
+    whose host is not an IP, an onion name or a valid DNS name is left out.
     """
     try:
         public_key = bytes.fromhex(peer.public_key)
