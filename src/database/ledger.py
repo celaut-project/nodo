@@ -105,9 +105,14 @@ def account_ref(account: str) -> str:
     return _digest(_ACCOUNT_PREFIX + account)
 
 
+def genesis_hash_of_ref(ref: str) -> str:
+    """The ``prev_hash`` of the first row of the account that ``account_ref`` names."""
+    return _digest(_GENESIS_PREFIX + ref)
+
+
 def genesis_hash(account: str) -> str:
     """The ``prev_hash`` of the first row of an account."""
-    return _digest(_GENESIS_PREFIX + account_ref(account))
+    return genesis_hash_of_ref(account_ref(account))
 
 
 def canonical_amount(value) -> str:

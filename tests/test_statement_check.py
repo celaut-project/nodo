@@ -15,72 +15,262 @@ try:
     from src.database import ledger
     from src.manager import statement_check as check
     from src.manager.statement_check import Mark, Row
+    from tests.statement_chain import FakeLedger
     from src.utils.monetary import GIB
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
 
-def statement(*movements, balance=None, truncated=False):
-    """A statement from (seq, amount, kind[, token, detail, ts]) tuples, adding up from 0
-    before the first one unless it is told otherwise with ``balance``."""
-    out = celaut_pb2.BalanceStatement(truncated=truncated)
-    running = 0
+def chained(*movements, account="acct"):
+    """A ledger from (amount, kind[, ref, detail, ts]) tuples, as a node builds it."""
+    out = FakeLedger(account)
     for movement in movements:
-        seq, amount, kind = movement[:3]
-        token = movement[3] if len(movement) > 3 else ""
-        detail = movement[4] if len(movement) > 4 else ""
-        ts = movement[5] if len(movement) > 5 else 100 + seq
-        running += amount
-        out.movements.add(seq=seq, ts=ts, kind=kind, instance_ref=token, detail=detail,
-                          amount=celaut_pb2.Amount(n=str(amount)),
-                          balance_after=celaut_pb2.Amount(n=str(running)))
-    out.balance.n = str(running if balance is None else balance)
+        amount, kind = movement[:2]
+        out.add(amount, kind, *movement[2:5])
     return out
 
 
+def verify(book, mark=None, *, from_seq=None, now=None, **statement_args):
+    """``verify_chain`` of what ``book`` shows from the row after ``mark``."""
+    mark = check.NO_MARK if mark is None else mark
+    from_seq = (1 if mark.seq is None else mark.seq + 1) if from_seq is None else from_seq
+    statement = book.statement(from_seq=from_seq, **statement_args)
+    return check.verify_chain(
+        statement, mark, now=statement.ts if now is None else now, from_seq=from_seq
+    ), statement
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class AddsUpTests(unittest.TestCase):
+class ChainTests(unittest.TestCase):
 
-    def test_a_new_account_adds_up_from_zero(self):
-        rows, problem = check.new_rows(statement((1, 100, "start"), (2, -30, "build")), Mark(0, 0))
+    def test_a_new_account_adds_up_from_its_genesis(self):
+        book = chained((100, "start"), (-30, "build"))
 
-        self.assertIsNone(problem)
-        self.assertEqual([r.seq for r in rows], [1, 2])
+        chain, _ = verify(book, Mark.new_account("acct", ts=0))
 
-    def test_a_gap_does_not_add_up(self):
-        s = statement((1, 100, "start"), (3, -30, "build"))
+        self.assertIsNone(chain.problem)
+        self.assertEqual([r.seq for r in chain.rows], [1, 2])
+        self.assertFalse(chain.more)
 
-        self.assertEqual(check.new_rows(s, Mark(0, 0))[0], None)
-        self.assertIn("missing", check.new_rows(s, Mark(0, 0))[1])
+    def test_a_first_read_takes_what_the_node_holds_as_its_start(self):
+        """The movements that the retention deleted before the first read are accepted."""
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"), (-5, "maintenance"))
+        book.purge_before(3)
 
-    def test_a_balance_that_is_not_the_last_movement_does_not_add_up(self):
-        s = statement((1, 100, "start"), balance=99)
+        chain, _ = verify(book)
 
-        self.assertIsNotNone(check.new_rows(s, Mark(0, 0))[1])
+        self.assertIsNone(chain.problem)
+        self.assertEqual([r.seq for r in chain.rows], [3, 4])
+        self.assertTrue(chain.gap)
 
-    def test_only_the_movements_after_the_mark_are_new(self):
-        s = statement((1, 100, "start"), (2, -30, "build"), (3, -5, "maintenance"))
+    def test_the_movements_after_the_mark_are_new(self):
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"))
 
-        rows, problem = check.new_rows(s, Mark(2, 70))
+        chain, _ = verify(book, book.mark_at(2))
 
-        self.assertIsNone(problem)
-        self.assertEqual([r.seq for r in rows], [3])
+        self.assertIsNone(chain.problem)
+        self.assertEqual([r.seq for r in chain.rows], [3])
+        self.assertFalse(chain.gap)
 
-    def test_a_mark_that_changed_does_not_add_up(self):
-        s = statement((1, 100, "start"), (2, -30, "build"))
+    def test_a_node_that_is_caught_up_shows_nothing_new(self):
+        book = chained((100, "start"), (-30, "build"))
 
-        self.assertIn("is not the movement", check.new_rows(s, Mark(2, 71))[1])
+        chain, _ = verify(book, book.mark_at(2))
 
-    def test_a_balance_that_moved_with_no_movement_does_not_add_up(self):
-        empty = celaut_pb2.BalanceStatement(balance=celaut_pb2.Amount(n="69"))
+        self.assertEqual(chain.rows, [])
+        self.assertFalse(chain.more)
 
-        self.assertIsNotNone(check.new_rows(empty, Mark(2, 70))[1])
+    def test_a_mark_that_changed_does_not_hang(self):
+        """The node rewrote a movement that it had shown: the hash of the mark differs."""
+        shown = chained((100, "start"), (-30, "build"))
+        mark = shown.mark_at(2)
+        rewritten = chained((100, "start"), (-31, "build"), (-5, "maintenance"))
 
-    def test_an_answer_cut_by_the_node_cannot_be_checked_and_is_no_fault(self):
-        s = statement((1, 0, "start"), (5, 70, "maintenance"), truncated=True, balance=70)
-        s.movements.pop(0)
+        chain, _ = verify(rewritten, mark)
 
-        self.assertEqual(check.new_rows(s, Mark(2, 70)), (None, None))
+        self.assertIsNone(chain.rows)
+        self.assertIn("is not the movement that it was", chain.problem)
+
+    def test_a_node_that_is_caught_up_must_show_the_head_it_showed(self):
+        shown = chained((100, "start"), (-30, "build"))
+        mark = shown.mark_at(2)
+        rewritten = chained((100, "start"), (-31, "build"))
+
+        chain, _ = verify(rewritten, mark)
+
+        self.assertIsNone(chain.rows)
+
+    def test_a_gap_that_the_retention_does_not_excuse_is_a_fault(self):
+        """The movements after a recent mark cannot have been deleted yet."""
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"), (-5, "maintenance"))
+        mark = book.mark_at(1)
+        book.purge_before(3)
+
+        chain, _ = verify(book, mark)
+
+        self.assertIsNone(chain.rows)
+        self.assertIn("were deleted before", chain.problem)
+
+    def test_a_gap_after_an_old_mark_is_the_retention(self):
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"), (-5, "maintenance"))
+        mark = book.mark_at(1)
+        book.purge_before(3)
+
+        # The same read, 40 days after the mark: the movement after it may be deleted.
+        later = book.statement(from_seq=2, ts=mark.ts + 40 * 86400)
+        chain = check.verify_chain(later, mark, now=later.ts, from_seq=2)
+
+        self.assertIsNone(chain.problem)
+        self.assertTrue(chain.gap)
+        self.assertEqual([r.seq for r in chain.rows], [3, 4])
+
+    def test_a_node_cannot_excuse_a_gap_with_a_retention_of_zero(self):
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"), (-5, "maintenance"))
+        mark = book.mark_at(1)
+        book.purge_before(3)
+
+        chain, _ = verify(book, mark, retention_days=0)
+
+        self.assertIsNone(chain.rows)
+
+    def test_a_node_that_holds_movements_and_does_not_show_them_is_a_fault(self):
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"))
+        statement = book.statement(from_seq=1)
+        statement.movements.pop(0)
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIsNone(chain.rows)
+        self.assertIn("are held and not shown", chain.problem)
+
+    def test_a_gap_inside_the_statement_is_a_fault(self):
+        book = chained((100, "start"), (-30, "build"), (-5, "maintenance"))
+        statement = book.statement(from_seq=1)
+        statement.movements.pop(1)
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIn("missing", chain.problem)
+
+    def test_a_movement_that_does_not_add_up_is_a_fault(self):
+        book = chained((100, "start"), (-30, "build"))
+        statement = book.statement(from_seq=1)
+        statement.movements[1].balance_after.n = "71"
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIsNone(chain.rows)
+
+    def test_a_movement_that_does_not_hang_from_the_one_before_is_a_fault(self):
+        book = chained((100, "start"), (-30, "build"))
+        statement = book.statement(from_seq=1)
+        statement.movements[1].prev_hash = "0" * 64
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIn("does not hang", chain.problem)
+
+    def test_the_first_movement_hangs_from_the_genesis_of_its_account(self):
+        book = chained((100, "start"))
+        statement = book.statement(from_seq=1)
+        statement.movements[0].prev_hash = ledger.genesis_hash("another-account")
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIn("genesis", chain.problem)
+
+    def test_a_head_that_is_not_the_last_movement_is_a_fault(self):
+        book = chained((100, "start"), (-30, "build"))
+        statement = book.statement(from_seq=1)
+        statement.head_hash = "f" * 64
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIsNone(chain.rows)
+
+    def test_a_balance_that_is_not_the_last_movement_is_a_fault(self):
+        book = chained((100, "start"))
+        statement = book.statement(from_seq=1)
+        statement.balance.n = "99"
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIsNotNone(chain.problem)
+
+    def test_a_head_that_went_back_is_a_fault(self):
+        book = chained((100, "start"), (-30, "build"))
+        mark = book.mark_at(2)
+        shorter = chained((100, "start"))
+
+        chain, _ = verify(shorter, mark)
+
+        self.assertIn("went back", chain.problem)
+
+    def test_a_statement_dated_far_from_our_clock_is_a_fault(self):
+        book = chained((100, "start"))
+
+        chain, statement = verify(book, ts=10 ** 9, now=1000)
+
+        self.assertIsNone(chain.rows)
+        self.assertIn("is dated", chain.problem)
+
+    def test_a_movement_dated_after_the_statement_is_a_fault(self):
+        book = chained((100, "start"))
+        statement = book.statement(from_seq=1)
+        statement.movements[0].ts = statement.ts + 5
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIn("after the statement", chain.problem)
+
+    def test_an_amount_that_is_not_canonical_is_a_fault(self):
+        book = chained((100, "start"))
+        statement = book.statement(from_seq=1)
+        statement.movements[0].amount.n = "0100"
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+
+        self.assertIn("canonical", chain.problem)
+
+    def test_an_account_with_no_movement_holds_nothing(self):
+        empty = chained()
+        statement = empty.statement(from_seq=1)
+
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+        self.assertEqual(chain.rows, [])
+
+        statement.balance.n = "5"
+        chain = check.verify_chain(statement, check.NO_MARK, now=statement.ts, from_seq=1)
+        self.assertIsNone(chain.rows)
+
+    def test_a_page_that_stops_short_says_there_is_more(self):
+        book = chained(*[(1, "deposit")] * 5)
+
+        chain, statement = verify(book, limit=2)
+
+        self.assertEqual([r.seq for r in chain.rows], [1, 2])
+        self.assertTrue(chain.more)
+        # The next page goes on from the mark that the first one left.
+        mark = check.mark_after(chain, statement, check.NO_MARK)
+        chain, statement = verify(book, mark, limit=2)
+        self.assertEqual([r.seq for r in chain.rows], [3, 4])
+        self.assertTrue(chain.more)
+
+    def test_the_mark_after_the_head_is_dated_by_the_statement(self):
+        book = chained((100, "start"), (-30, "build"))
+
+        chain, statement = verify(book)
+        mark = check.mark_after(chain, statement, check.NO_MARK)
+
+        self.assertEqual((mark.seq, mark.balance, mark.ts), (2, 70, statement.ts))
+
+    def test_a_mark_at_the_head_of_a_statement_is_where_to_go_on_from(self):
+        book = chained((100, "start"), (-30, "build"))
+        statement = book.statement(from_seq=1)
+
+        mark = check.anchor_at_head(statement)
+
+        self.assertEqual((mark.seq, mark.hash, mark.balance), (2, book.rows[-1]["hash"], 70))
 
 
 def tick(amount, seq, seconds=10, mem=GIB, ts=None):
@@ -108,57 +298,57 @@ class ChildRuleTests(unittest.TestCase):
 
     def test_a_start_within_its_quote_is_fine(self):
         self.assertEqual(check.child_problems(
-            self.start_rows(), mark=Mark(0, 0), rates=RATES, sent_peer_mu=100,
+            self.start_rows(), mark=Mark(0, "", 0), rates=RATES, sent_peer_mu=100,
             start_bound_peer_mu=30,
         ), [])
 
     def test_a_start_that_got_less_than_was_sent_is_an_overcharge(self):
-        problems = check.child_problems(self.start_rows(got=90), mark=Mark(0, 0), rates=RATES,
+        problems = check.child_problems(self.start_rows(got=90), mark=Mark(0, "", 0), rates=RATES,
                                         sent_peer_mu=100, start_bound_peer_mu=30)
         self.assertEqual(len(problems), 1)
 
     def test_a_build_and_commission_above_the_quote_are_an_overcharge(self):
         problems = check.child_problems(
-            self.start_rows(build=-25, commission=-10), mark=Mark(0, 0), rates=RATES,
+            self.start_rows(build=-25, commission=-10), mark=Mark(0, "", 0), rates=RATES,
             sent_peer_mu=100, start_bound_peer_mu=30,
         )
         self.assertEqual(len(problems), 1)
 
     def test_a_statement_with_no_start_is_an_overcharge(self):
         self.assertTrue(check.child_problems(
-            [], mark=Mark(0, 0), rates=RATES, sent_peer_mu=100, start_bound_peer_mu=30,
+            [], mark=Mark(0, "", 0), rates=RATES, sent_peer_mu=100, start_bound_peer_mu=30,
         ))
 
     def test_a_build_at_a_tick_is_an_overcharge(self):
         rows = [Row(4, 140, -30, 0, ledger.BUILD, "")]
-        self.assertTrue(check.child_problems(rows, mark=Mark(3, 30), rates=RATES))
+        self.assertTrue(check.child_problems(rows, mark=Mark(3, "", 30), rates=RATES))
 
     def test_a_tick_is_bounded_by_its_resources_at_the_rates_of_the_peer(self):
         # 1 GiB and 1 vCPU for 10 s: (101 + 1001) * 10 * 2 = 22040.
         self.assertEqual(check.maintenance_bound(tick(0, 1).detail, RATES), 22040)
-        self.assertEqual(check.child_problems([tick(-22040, 4)], mark=Mark(3, 0), rates=RATES), [])
-        self.assertTrue(check.child_problems([tick(-22041, 4)], mark=Mark(3, 0), rates=RATES))
+        self.assertEqual(check.child_problems([tick(-22040, 4)], mark=Mark(3, "", 0), rates=RATES), [])
+        self.assertTrue(check.child_problems([tick(-22041, 4)], mark=Mark(3, "", 0), rates=RATES))
 
     def test_a_tick_that_names_no_resources_is_not_bounded(self):
         row = Row(4, 140, -10 ** 9, 0, ledger.MAINTENANCE, "", {"peer_mu": "1"})
-        self.assertEqual(check.child_problems([row], mark=Mark(3, 0), rates=RATES), [])
+        self.assertEqual(check.child_problems([row], mark=Mark(3, "", 0), rates=RATES), [])
 
     def test_ticks_cannot_charge_more_time_than_passed(self):
         rows = [tick(-1, seq, ts=200) for seq in (4, 5, 6)]
 
-        self.assertEqual(check.child_problems(rows[:2], mark=Mark(3, 0, ts=190), rates=RATES), [])
-        self.assertTrue(check.child_problems(rows, mark=Mark(3, 0, ts=190), rates=RATES))
+        self.assertEqual(check.child_problems(rows[:2], mark=Mark(3, "", 0, ts=190), rates=RATES), [])
+        self.assertTrue(check.child_problems(rows, mark=Mark(3, "", 0, ts=190), rates=RATES))
 
     def test_what_the_child_does_with_its_own_balance_is_not_a_charge_of_the_peer(self):
         rows = [Row(4, 140, -50, 0, kind, "") for kind in (
             ledger.CHILD_START, ledger.TOP_UP, ledger.TUNNEL, ledger.RESOURCE_CHANGE,
             ledger.STATEMENT_QUERY,
         )]
-        self.assertEqual(check.child_problems(rows, mark=Mark(3, 0), rates=RATES), [])
+        self.assertEqual(check.child_problems(rows, mark=Mark(3, "", 0), rates=RATES), [])
 
     def test_an_unknown_charge_is_an_overcharge(self):
         rows = [Row(4, 140, -1, 0, "fee", ""), Row(5, 140, -1, 0, ledger.DEBIT, "")]
-        self.assertEqual(len(check.child_problems(rows, mark=Mark(3, 0), rates=RATES)), 2)
+        self.assertEqual(len(check.child_problems(rows, mark=Mark(3, "", 0), rates=RATES)), 2)
 
     def test_consumption_leaves_out_what_the_father_moved(self):
         rows = [Row(4, 0, -10, 0, ledger.MAINTENANCE, ""),

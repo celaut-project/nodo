@@ -450,12 +450,17 @@ def gateway_component() -> Layer:
                                     "~';'.join(sorted(key=value or key=))",
         "statement.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
         "statement.signature.payload": statement_payload(peer_id, "<statement_digest>"),
-        "statement.digest": "blake2b-256 hex of UTF-8 of "
-                            "hex(account)|since_seconds|last|ts|balance.n|truncated|movements",
-        "statement.digest.truncated": "1 or 0",
-        "statement.digest.movements": "'/'.join(movement in seq order)",
-        "statement.digest.movement": "seq~ts~hex(amount.n)~hex(balance_after.n)~hex(kind)"
-                                     "~instance_ref~hex(detail)~prev_hash",
+        "statement.digest": "blake2b-256 hex of UTF-8 of account_ref|from_seq|to_seq|ts|"
+                            "retention_days|oldest_seq|head_seq|head_hash|hex(balance.n)|"
+                            "movements",
+        "statement.digest.movements": "'/'.join(hash of each movement in seq order)",
+        "statement.movement.hash": "blake2b-256 hex of UTF-8 of "
+                                   "celaut-balance-movement:prev_hash|seq~ts~hex(amount.n)~"
+                                   "hex(balance_after.n)~hex(kind)~instance_ref~hex(detail)",
+        "statement.genesis": "blake2b-256 hex of UTF-8 of celaut-balance-genesis:account_ref",
+        "statement.account_ref": "blake2b-256 hex of UTF-8 of celaut-ledger-account:"
+                                 "client_id or instance token",
+        "statement.instance_ref": "blake2b-256 hex of UTF-8 of celaut-ledger-instance:token",
         "statement.digest.hex": "lowercase hex of UTF-8; empty for an empty text",
         "client_binding.payload": client_binding_payload(peer_id, client_id),
         "client_binding.signature": "Peer.signature_scheme, lowercase hex",
@@ -510,8 +515,12 @@ def gateway_component() -> Layer:
         "the scheme of its Peer. The signed text is \"" + statement_payload(
             "<public_key>", "<statement_digest>") + "\". The statement digest is a "
         "BLAKE2b-256 hash of a text that the formal field specifies. This text contains "
-        "all the fields of the statement except the signature. A statement with no "
-        "valid signature is not valid.\n"
+        "the account, the range, the head of the account and the hash of each movement "
+        "of the statement. The hash of a movement contains the hash of the movement "
+        "before it, so the head commits to all of them. A node that signed a statement "
+        "cannot show other movements for the same seq later. A statement names no "
+        "credential: the account and the instances are hashes of their tokens. A "
+        "statement with no valid signature is not valid.\n"
         "\n"
         "OTHER SIGNATURES. To bind a client_id to its identity, a peer signs the "
         "text \"" + client_binding_payload("<peer_id>", "<client_id>") + "\". The wallet "

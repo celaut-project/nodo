@@ -326,7 +326,11 @@ class GatewayServicer(object):
         the balance of the caller, or of a child of the caller, signed by the node. The
         caller pays for it: a fixed part and a part for each movement returned (the
         rates "statement_query_mu" and "statement_row_mu"). The node writes the charge
-        as a "statement_query" movement before it answers.
+        as a "statement_query" movement before it answers. The node refuses with a status
+        code: RESOURCE_EXHAUSTED when the caller cannot pay for the answer,
+        PERMISSION_DENIED when the account is not the caller's or a child of it,
+        NOT_FOUND when the account does not exist, and UNIMPLEMENTED for an instance that
+        this node delegated to another node.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

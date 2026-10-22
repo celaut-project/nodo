@@ -494,6 +494,18 @@ def _peer_rates(peer_id: str, refresh: bool = False) -> dict:
     return statement_check.stored_rates(peer_id)
 
 
+def _our_mark(stored: dict) -> statement_check.Mark:
+    """The mark that ``sc.get_peer_statement_mark`` returns, as a ``Mark``."""
+    if not stored:
+        return statement_check.NO_MARK
+    return statement_check.Mark(stored["seq"], stored.get("hash", ""),
+                                stored.get("balance_mu", 0), stored.get("ts"))
+
+
+def _save_our_mark(peer_id: str, mark: statement_check.Mark) -> None:
+    sc.set_peer_statement_mark(peer_id, mark.seq, mark.hash, mark.balance, mark.ts)
+
+
 def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
     """Read the statement of our account on ``peer_id`` and check it (#570).
 
@@ -505,102 +517,89 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
     client_id = sc.get_peer_client(peer_id=peer_id)
     if not client_id:
         return
-    stored = sc.get_peer_statement_mark(peer_id)
-    # An account starts at 0 before its movement 1, so a peer read for the first time
-    # is checked from there.
-    mark = statement_check.Mark(stored.get("seq", 0), stored.get("balance_mu", 0))
+    mark = _our_mark(sc.get_peer_statement_mark(peer_id))
+    from_seq = 1 if mark.seq is None else mark.seq + 1
     read_at = time.time()
     try:
-        statement = balance_statement.fetch(
-            peer_id, client_id,
-            since_seconds=statement_check.since_seconds(stored.get("read_at")),
-        )
+        statement = balance_statement.fetch(peer_id, client_id, from_seq=from_seq)
     except Exception as e:
         statement_check.penalise_no_statement(peer_id, client_id, e)
         if debug_mode:
             log.LOGGER(f"No statement of our account on {peer_id}: {e}")
         return
 
-    rows, problem = statement_check.new_rows(statement, mark)
-    if rows is None:
-        if problem:
-            statement_check.penalise_once(peer_id, client_id, Reason.STATEMENT_INCONSISTENT, problem)
+    chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=from_seq)
+    if chain.rows is None:
+        statement_check.penalise_once(peer_id, client_id, Reason.STATEMENT_INCONSISTENT, chain.problem)
         # Go on from what the peer says now: the movements up to here cannot be
         # checked, and asking for them again would only fail again.
-        last = statement.movements[-1].seq if statement.movements else None
-        sc.set_peer_statement_mark(peer_id, last, from_amount(statement.balance), read_at)
+        _save_our_mark(peer_id, statement_check.anchor_at_head(statement))
         return
 
     problems, stop_at = statement_check.account_problems(
-        rows, sc.delegated_starts_on_peer(peer_id), now_ts=statement.ts
+        chain.rows, sc.delegated_starts_on_peer(peer_id), now_ts=statement.ts
     )
     if problems:
         statement_check.penalise_once(
             peer_id, client_id, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
         )
     if stop_at is None:
-        sc.set_peer_statement_mark(
-            peer_id, rows[-1].seq if rows else mark.seq, from_amount(statement.balance), read_at
-        )
+        _save_our_mark(peer_id, statement_check.mark_after(chain, statement, mark))
         return
-    checked = [row for row in rows if row.seq < stop_at]
+    checked = [row for row in chain.rows if row.seq < stop_at]
     if checked:
-        # The read time stays: the next span must still reach the start that waits.
-        sc.set_peer_statement_mark(
-            peer_id, checked[-1].seq, checked[-1].balance_after, stored.get("read_at")
-        )
+        last = checked[-1]
+        _save_our_mark(peer_id, statement_check.Mark(
+            last.seq, last.hash, last.balance_after, last.ts))
 
 
 def _read_child(row: dict, debug_mode: bool = False):
     """What the child consumed on its peer since its mark, and the new mark.
 
     Returns ``(spent_peer_mu, mark)``, and raises when nothing could be read. From the
-    statement when it adds up from the mark (#570): the movements since the mark,
-    without those of the father. Otherwise from two readings of the balance: the
-    difference against the mark, and the next tick goes on from the end of this
-    statement.
+    statement when it continues the mark (#570): the movements since the mark, without
+    those of the father. Otherwise from two readings of the balance: the difference
+    against the mark, and the next tick goes on from the head of this statement.
     """
     peer_id, token = row.get('peer_id'), row['token']
-    mark = statement_check.Mark(row.get('peer_statement_seq'), int(row.get('peer_balance_mu') or 0),
-                                row.get('peer_statement_ts'))
+    # With no seq the mark is not a movement, and its balance is the last reading.
+    mark = statement_check.Mark(
+        row.get('peer_statement_seq'), row.get('peer_statement_hash') or "",
+        int(row.get('peer_balance_mu') or 0), row.get('peer_statement_ts'))
     read_at = time.time()
+    from_seq = 1 if mark.seq is None else mark.seq + 1
     statement, error = None, None
     try:
         statement = balance_statement.fetch(
             peer_id, get_client_id_on_other_peer(peer_id=peer_id), token=token,
-            since_seconds=statement_check.since_seconds(
-                row.get('peer_statement_read_at') if mark.seq is not None else None
-            ),
+            from_seq=from_seq,
         )
     except Exception as e:
         error = e
 
     if statement is not None:
-        rows, problem = statement_check.new_rows(statement, mark)
+        chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=from_seq)
         # With no mark, nothing says which movements are new.
-        if rows is not None and mark.seq is not None:
-            problems = statement_check.child_problems(rows, mark=mark, rates=_peer_rates(peer_id))
+        if chain.rows is not None and mark.seq is not None:
+            problems = statement_check.child_problems(
+                chain.rows, mark=mark, rates=_peer_rates(peer_id))
             if problems:
                 problems = statement_check.child_problems(
-                    rows, mark=mark, rates=_peer_rates(peer_id, refresh=True)
+                    chain.rows, mark=mark, rates=_peer_rates(peer_id, refresh=True)
                 )
             if problems:
                 statement_check.penalise_once(
                     peer_id, token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
                 )
-            last = rows[-1] if rows else None
-            return statement_check.consumption(rows), {
-                "peer_balance_mu": from_amount(statement.balance),
-                "seq": last.seq if last else mark.seq,
-                "ts": last.ts if last else mark.ts,
-                "read_at": read_at,
+            new = statement_check.mark_after(chain, statement, mark)
+            return statement_check.consumption(chain.rows), {
+                "peer_balance_mu": new.balance, "seq": new.seq, "hash": new.hash, "ts": new.ts,
             }
-        if problem:
-            statement_check.penalise_once(peer_id, token, Reason.STATEMENT_INCONSISTENT, problem)
-        balance = from_amount(statement.balance)
-        last = statement.movements[-1] if statement.movements else None
-        new_mark = {"peer_balance_mu": balance, "seq": last.seq if last else None,
-                    "ts": last.ts if last else None, "read_at": read_at}
+        if chain.problem:
+            statement_check.penalise_once(peer_id, token, Reason.STATEMENT_INCONSISTENT, chain.problem)
+        head = statement_check.anchor_at_head(statement)
+        balance = head.balance
+        new_mark = {"peer_balance_mu": balance, "seq": head.seq, "hash": head.hash, "ts": head.ts}
     else:
         try:
             balance = instance_balance_on_peer(peer_id=peer_id, token=token)
@@ -610,7 +609,7 @@ def _read_child(row: dict, debug_mode: bool = False):
             raise error from None
         # The peer knows the instance and does not give its statement.
         statement_check.penalise_no_statement(peer_id, token, error)
-        new_mark = {"peer_balance_mu": balance, "seq": None, "ts": None, "read_at": None}
+        new_mark = {"peer_balance_mu": balance, "seq": None, "hash": None, "ts": None}
     if debug_mode:
         log.LOGGER(f"Charging {row.get('id')} from the balance on {peer_id}, not from its statement.")
     return mark.balance - balance, new_mark

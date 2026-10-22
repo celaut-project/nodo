@@ -89,7 +89,7 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'peer_balance_mu': 1800,
                 'peer_statement_seq': None,
                 'peer_statement_ts': None,
-                'peer_statement_read_at': None,
+                'peer_statement_hash': None,
             },
         )
 
@@ -105,15 +105,15 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
 
         self.sc.settle_delegated_tick(
             token=self.PEER_TOKEN, charge_mu=200,
-            mark={"peer_balance_mu": 1400, "seq": 7, "ts": 70, "read_at": 71.5},
+            mark={"peer_balance_mu": 1400, "seq": 7, "ts": 70, "hash": "abc"},
         )
 
         self.assertEqual(self.sc.get_delegated_balance(token=self.PEER_TOKEN), 700)
         row = self.sc.get_delegated_instances()[0]
         self.assertEqual(
             (row['peer_balance_mu'], row['peer_statement_seq'], row['peer_statement_ts'],
-             row['peer_statement_read_at']),
-            (1400, 7, 70, 71.5),
+             row['peer_statement_hash']),
+            (1400, 7, 70, "abc"),
         )
 
     def test_a_tick_with_nothing_to_charge_only_moves_the_mark(self):

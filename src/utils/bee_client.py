@@ -341,15 +341,16 @@ class BeeClient:
 
     @staticmethod
     def get_balance_statement(channel, client_id: str, token: str = "",
-                              since_seconds: int = 0, last: int = 0,
+                              from_seq: int = 0, to_seq: int = 0,
                               timeout: Optional[float] = None) -> Optional[celaut_pb2.BalanceStatement]:
         """``Client & BalanceStatementRequest -> BalanceStatement`` (#570). ``token``
-        names a child of the client; empty reads the account of the client."""
+        names a child of the client; empty reads the account of the client. The range
+        is by seq: ``from_seq`` 0 asks only for the head, ``to_seq`` 0 for up to it."""
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetBalanceStatement,
             input=[
                 celaut_pb2.BalanceStatementRequest(
-                    token=token, since_seconds=int(since_seconds), last=int(last),
+                    token=token, from_seq=int(from_seq), to_seq=int(to_seq),
                 ),
                 celaut_pb2.Client(client_id=client_id),
             ],

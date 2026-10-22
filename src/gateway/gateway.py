@@ -373,17 +373,33 @@ class Gateway(celaut_pb2_grpc.Gateway):
         request, client_id = parse_with_client(request_iterator, method="GetBalanceStatement")
         caller = require_caller(context, client_id)
         request = request or celaut_pb2.BalanceStatementRequest()
+        # A refusal carries a status code of its own: the caller tells "you cannot pay
+        # for this" from "this is not yours" from a fault of this node, and only the
+        # last says anything about the node.
         try:
             statement = balance_statement.answer(
                 caller=caller,
                 token=request.token,
-                since_seconds=request.since_seconds,
-                last=request.last,
+                from_seq=request.from_seq,
+                to_seq=request.to_seq,
                 allow_debt=ALLOW_DEBT,
             )
-        except (balance_statement.StatementRefused, ledger.NoSuchAccount,
-                ledger.InsufficientBalance) as e:
-            raise Exception(f"No balance statement. {e}")
+        except ledger.InsufficientBalance as e:
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, f"No balance statement. {e}")
+            return
+        except balance_statement.StatementRefused as e:
+            context.abort(grpc.StatusCode.PERMISSION_DENIED, f"No balance statement. {e}")
+            return
+        except ledger.NoSuchAccount as e:
+            context.abort(grpc.StatusCode.NOT_FOUND, f"No balance statement. {e}")
+            return
+        except balance_statement.StatementUnavailable as e:
+            context.abort(grpc.StatusCode.UNIMPLEMENTED, f"No balance statement. {e}")
+            return
+        except Exception as e:
+            log.LOGGER(f"Error answering a balance statement: {e}")
+            context.abort(grpc.StatusCode.INTERNAL, "No balance statement.")
+            return
         yield from BeeClient.respond(statement)
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):

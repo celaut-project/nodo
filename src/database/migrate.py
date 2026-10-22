@@ -48,8 +48,10 @@ def connect_to_database(db_file):
 # same as `remote_client_id` stays unset for a peer this node has never needed to
 # call.
 #
-# `statement_seq`, `statement_balance_mu` and `statement_read_at` are the mark of the
-# statement of `remote_client_id` on that peer (#570), as on `delegated_instances`.
+# `statement_seq`, `statement_hash`, `statement_balance_mu` and `statement_ts` are the mark
+# of the statement of `remote_client_id` on that peer (#570): the last movement that was
+# checked, its hash, the balance after it, and a time on the clock of the peer before
+# which nothing after it was written. The same as on `delegated_instances`.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
@@ -65,8 +67,9 @@ TABLES = {
             last_ts INTEGER DEFAULT NULL,
             learned_via_gossip INTEGER NOT NULL DEFAULT 0,
             statement_seq INTEGER DEFAULT NULL,
+            statement_hash TEXT DEFAULT NULL,
             statement_balance_mu TEXT DEFAULT NULL,
-            statement_read_at REAL DEFAULT NULL
+            statement_ts INTEGER DEFAULT NULL
         )
     ''',
     "clients": '''
@@ -194,12 +197,11 @@ TABLES = {
     # either node moves its rate (same reason as `peer.balance_mu`).
     #
     # The mark is a movement of the child's statement on the peer (#570):
-    # `peer_statement_seq` is its seq, `peer_balance_mu` the balance after it and
-    # `peer_statement_ts` its time, on the clock of the peer. `peer_statement_read_at`
-    # is when this node read it, on its own clock: the next read asks for the span
-    # since then. `sent_peer_mu` is the `initial_mu` that this node sent the peer, in
-    # the MU of the peer: the most that the peer can take from our account for this
-    # start.
+    # `peer_statement_seq` is its seq, `peer_statement_hash` its hash, `peer_balance_mu`
+    # the balance after it and `peer_statement_ts` a time on the clock of the peer before
+    # which nothing after it was written. `sent_peer_mu` is the `initial_mu` that this
+    # node sent the peer, in the MU of the peer: the most that the peer can take from our
+    # account for this start.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -212,7 +214,7 @@ TABLES = {
             peer_balance_mu TEXT,
             peer_statement_seq INTEGER DEFAULT NULL,
             peer_statement_ts INTEGER DEFAULT NULL,
-            peer_statement_read_at REAL DEFAULT NULL,
+            peer_statement_hash TEXT DEFAULT NULL,
             sent_peer_mu TEXT DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,

@@ -608,65 +608,87 @@ class SQLConnection(metaclass=Singleton):
         with SQLConnection._consumption_lock:
             SQLConnection._consumption_windows.pop(id, None)
 
-    def balance_statement(self, account_id: str, payer_id: str, *, since_seconds: int = 0,
-                          last: int = 0, max_rows: int = 0,
+    def balance_statement(self, account_id: str, payer_id: str, *, from_seq: int = 0,
+                          to_seq: int = 0, max_rows: int = 0,
                           price: Callable[[int], int] = lambda rows: 0,
                           allow_debt: bool = True) -> dict:
         """Charge ``payer_id`` for a statement of ``account_id`` and read it, in one go.
 
-        The rows are the last ``last`` (0: no count) with a ``ts`` in the last
-        ``since_seconds`` (0: no span), and never more than ``max_rows``. ``price``
-        gives the cost for a number of rows returned. It is charged to ``payer_id`` as a
-        ``statement_query`` row, in the same transaction as the read: when the payer
-        reads its own account, that row is in the statement, and the statement adds up
-        to the balance at the moment of the answer.
+        The rows are those with a seq from ``from_seq`` (0: none, only the head of the
+        account) to ``to_seq`` (0: up to the head), in ascending order, and never more
+        than ``max_rows``: when there are more, they are the first ones, and the caller
+        asks again from the last seq it got. ``price`` gives the cost for a number of
+        rows returned. It is charged to ``payer_id`` as a ``statement_query`` row, in
+        the same transaction as the read.
 
-        Returns ``{"movements": [...], "balance_mu": int, "truncated": bool, "ts": int}``.
-        Raises ``ledger.NoSuchAccount`` and ``ledger.InsufficientBalance``.
+        When the payer reads its own account and the answer reaches the head, that
+        charge is the last row and the new head: the statement adds up to the balance at
+        the moment of the answer. The charge is not counted in ``max_rows``. When the
+        answer stops short of the head, the charge is only in the head, and the next
+        page has it.
+
+        Returns ``{"movements": [...], "balance_mu": int, "head_seq": int,
+        "head_hash": str, "oldest_seq": int, "ts": int}``. Raises
+        ``ledger.NoSuchAccount`` and ``ledger.InsufficientBalance``.
         """
         def work(cursor):
             now = int(time.time())
-            where, params = 'account_id = ?', [account_id]
-            if since_seconds > 0:
-                where += ' AND ts >= ?'
-                params.append(now - int(since_seconds))
+            if not self._account_exists(cursor, account_id):
+                raise ledger.NoSuchAccount(account_id)
+            columns = ('seq, ts, amount_mu, balance_after_mu, kind, instance_ref, detail, '
+                       'prev_hash, hash')
+            head = cursor.execute(
+                'SELECT MAX(seq) FROM balance_movements WHERE account_id = ?', (account_id,)
+            ).fetchone()[0] or 0
             own = account_id == payer_id
-            # The charge is the last row of the answer when it is part of it, so the
-            # cap leaves room for it.
-            cap = max(0, max_rows - (1 if own else 0)) if max_rows > 0 else None
-            limits = [n for n in (last if last > 0 else None, cap) if n is not None]
-            limit = min(limits) if limits else None
-            # One row more than the limit, to know if the cap cut the answer.
-            fetched = cursor.execute(
-                f'SELECT seq, ts, amount_mu, balance_after_mu, kind, instance_ref, detail, '
-                f'prev_hash, hash FROM balance_movements WHERE {where} ORDER BY seq DESC LIMIT ?',
-                (*params, -1 if limit is None else limit + 1),
-            ).fetchall()
-            truncated = limit is not None and len(fetched) > limit and (last <= 0 or limit < last)
-            rows = [dict(row) for row in reversed(fetched if limit is None else fetched[:limit])]
+            rows = []
+            if int(from_seq) > 0:
+                where, params = 'account_id = ? AND seq >= ?', [account_id, int(from_seq)]
+                if int(to_seq) > 0:
+                    where += ' AND seq <= ?'
+                    params.append(int(to_seq))
+                rows = [dict(row) for row in cursor.execute(
+                    f'SELECT {columns} FROM balance_movements WHERE {where} '
+                    f'ORDER BY seq ASC LIMIT ?', (*params, int(max_rows) if max_rows > 0 else -1),
+                ).fetchall()]
             seq = self._move(
                 cursor, payer_id, -int(price(len(rows) + (1 if own else 0))),
                 ledger.STATEMENT_QUERY, allow_debt=allow_debt,
                 instance_token=None if own else account_id,
                 detail={"rows": str(len(rows))},
             )
-            if own and seq is not None:
+            reaches_head = (rows[-1]["seq"] == head) if rows else int(from_seq) > head
+            if (own and seq is not None and int(from_seq) > 0 and int(from_seq) <= seq
+                    and reaches_head and (int(to_seq) == 0 or int(to_seq) >= seq)):
                 rows.append(dict(cursor.execute(
-                    'SELECT seq, ts, amount_mu, balance_after_mu, kind, instance_ref, detail, '
-                    'prev_hash, hash FROM balance_movements WHERE account_id = ? AND seq = ?', (account_id, seq),
+                    f'SELECT {columns} FROM balance_movements '
+                    f'WHERE account_id = ? AND seq = ?', (account_id, seq),
                 ).fetchone()))
+            last = cursor.execute(
+                'SELECT seq, hash FROM balance_movements WHERE account_id = ? '
+                'ORDER BY seq DESC LIMIT 1', (account_id,)
+            ).fetchone()
+            oldest = cursor.execute(
+                'SELECT MIN(seq) FROM balance_movements WHERE account_id = ?', (account_id,)
+            ).fetchone()[0] or 0
             for table, where_account in _ACCOUNT_TABLES:
                 balance_row = cursor.execute(
                     f'SELECT balance_mu FROM {table} WHERE {where_account}', (account_id,)
                 ).fetchone()
                 if balance_row is not None:
                     break
-            else:
-                raise ledger.NoSuchAccount(account_id)
             return {"movements": rows, "balance_mu": _balance_of(balance_row['balance_mu']),
-                    "truncated": truncated, "ts": now}
+                    "head_seq": int(last['seq']) if last else 0,
+                    "head_hash": last['hash'] if last else ledger.genesis_hash(account_id),
+                    "oldest_seq": int(oldest), "ts": now}
 
         return self._transaction(work)
+
+    def delegated_account_exists(self, account_id: str) -> bool:
+        """Whether ``account_id`` is a live instance that this node delegated to a peer."""
+        return self._execute(
+            'SELECT 1 FROM delegated_instances WHERE id = ? AND killed_at IS NULL', (account_id,)
+        ).fetchone() is not None
 
     def prune_balance_movements(self, max_age_days: int) -> int:
         """Delete the rows older than ``max_age_days``. Returns how many.
@@ -2638,7 +2660,7 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('''
             SELECT token_delegation, id, peer_id, father_id, serialized_instance,
                    balance_mu, peer_balance_mu, peer_statement_seq, peer_statement_ts,
-                   peer_statement_read_at
+                   peer_statement_hash
             FROM delegated_instances WHERE killed_at IS NULL
         ''')
         return [
@@ -2652,7 +2674,7 @@ class SQLConnection(metaclass=Singleton):
                 'peer_balance_mu': _as_int(row[6]),
                 'peer_statement_seq': row[7],
                 'peer_statement_ts': row[8],
-                'peer_statement_read_at': row[9],
+                'peer_statement_hash': row[9],
             }
             for row in result.fetchall()
         ]
@@ -3064,8 +3086,8 @@ class SQLConnection(metaclass=Singleton):
                 They must add up to ``balance_mu``. None is one ``start``.
             sent_peer_mu (int): The ``initial_mu`` sent to the peer, in its MU.
             mark (Optional[Mapping]): The movement of the child's statement on the
-                peer that ``peer_balance_mu`` is the balance after: ``seq``, ``ts``
-                and ``read_at`` (see `delegated_instances`). None when the statement
+                peer that ``peer_balance_mu`` is the balance after: ``seq``, ``hash``
+                and ``ts`` (see `delegated_instances`). None when the statement
                 could not be read.
         """
         movements = _opening_movements(balance_mu, movements)
@@ -3078,12 +3100,12 @@ class SQLConnection(metaclass=Singleton):
                 INSERT INTO delegated_instances (
                     token_delegation, id, peer_id, father_id, serialized_instance, service_id,
                     balance_mu, peer_balance_mu, peer_statement_seq, peer_statement_ts,
-                    peer_statement_read_at, sent_peer_mu, launched_at
+                    peer_statement_hash, sent_peer_mu, launched_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id,
                   str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
-                  mark.get("read_at"), str(int(sent_peer_mu))))
+                  mark.get("hash"), str(int(sent_peer_mu))))
             self._append_opening(cursor, encrypted_external_token, movements)
 
         self._transaction(work)
@@ -3112,7 +3134,7 @@ class SQLConnection(metaclass=Singleton):
         the peer metered since the mark, so a charge without its mark bills the same
         consumption again on the next tick, and a mark without the charge writes it
         off. ``mark`` holds ``peer_balance_mu`` and, when a statement was read,
-        ``seq``, ``ts`` and ``read_at`` (see `delegated_instances`); a key that is not
+        ``seq``, ``hash`` and ``ts`` (see `delegated_instances`); a key that is not
         there is written as NULL. The charge is taken whole, debt or not: the caller
         decided what the instance owes.
 
@@ -3136,33 +3158,36 @@ class SQLConnection(metaclass=Singleton):
             cursor.execute('''
                 UPDATE delegated_instances
                 SET peer_balance_mu = ?, peer_statement_seq = ?, peer_statement_ts = ?,
-                    peer_statement_read_at = ?
+                    peer_statement_hash = ?
                 WHERE token_delegation = ? AND killed_at IS NULL
             ''', (str(int(mark["peer_balance_mu"])), mark.get("seq"), mark.get("ts"),
-                  mark.get("read_at"), token))
+                  mark.get("hash"), token))
             return seq
 
         return self._transaction(work)
 
     def get_peer_statement_mark(self, peer_id: str) -> dict:
-        """The mark of the statement of our account on ``peer_id``; see the `peer` table."""
+        """The mark of the statement of our account on ``peer_id``; see the `peer` table.
+
+        ``{}`` when nothing was checked yet.
+        """
         row = self._execute(
-            'SELECT statement_seq, statement_balance_mu, statement_read_at FROM peer WHERE id = ?',
-            (peer_id,),
+            'SELECT statement_seq, statement_hash, statement_balance_mu, statement_ts '
+            'FROM peer WHERE id = ?', (peer_id,),
         ).fetchone()
         if row is None or row['statement_seq'] is None:
             return {}
-        return {"seq": int(row['statement_seq']),
-                "balance_mu": _as_int(row['statement_balance_mu']),
-                "read_at": row['statement_read_at']}
+        return {"seq": int(row['statement_seq']), "hash": row['statement_hash'] or "",
+                "balance_mu": _as_int(row['statement_balance_mu']), "ts": row['statement_ts']}
 
-    def set_peer_statement_mark(self, peer_id: str, seq: Optional[int],
-                                balance_mu: Optional[int], read_at: Optional[float]) -> None:
+    def set_peer_statement_mark(self, peer_id: str, seq: Optional[int], hash: Optional[str],
+                                balance_mu: Optional[int], ts: Optional[int]) -> None:
         """Write the mark of the statement of our account on ``peer_id``. None clears it."""
         self._execute('''
-            UPDATE peer SET statement_seq = ?, statement_balance_mu = ?, statement_read_at = ?
+            UPDATE peer SET statement_seq = ?, statement_hash = ?, statement_balance_mu = ?,
+                            statement_ts = ?
             WHERE id = ?
-        ''', (seq, None if balance_mu is None else str(int(balance_mu)), read_at, peer_id))
+        ''', (seq, hash, None if balance_mu is None else str(int(balance_mu)), ts, peer_id))
 
     def delegated_starts_on_peer(self, peer_id: str) -> Dict[str, int]:
         """The ``instance_ref`` of the token of the peer of each instance delegated to

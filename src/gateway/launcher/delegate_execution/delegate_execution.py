@@ -88,31 +88,32 @@ def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: i
     """Read the statement of the new child on ``peer`` and check its start (#570).
 
     Returns the balance of the child there, in the MU of the peer, and the mark that the
-    maintenance tick goes on from: ``seq``, ``ts`` and ``read_at``. The mark is None when
+    maintenance tick goes on from: ``seq``, ``hash`` and ``ts``. The mark is None when
     the statement could not be used, and the balance then comes from ``GetMetrics``.
 
-    A statement that does not add up, or that does not come from a peer that just
-    answered ``StartService``, costs the peer the penalty for a statement that does not
-    add up. One that takes more than this node sent, or a build above the quote, costs
-    it the penalty for an overcharge. The start goes on in both cases: the child runs.
+    A statement that does not continue from the start of the account, or that does not
+    come from a peer that just answered ``StartService``, costs the peer the penalty for
+    a statement that does not add up. One that takes more than this node sent, or a
+    build above the quote, costs it the penalty for an overcharge. The start goes on in
+    both cases: the child runs.
     """
-    read_at = time.time()
     try:
-        statement = balance_statement.fetch(peer, client_id, token=external_token)
+        statement = balance_statement.fetch(peer, client_id, token=external_token, from_seq=1)
     except Exception as e:
         statement_check.penalise_no_statement(peer, external_token, e)
         return _child_balance_on_peer(peer, external_token), None
 
-    # A new account: its movement 1 starts from 0.
-    start = statement_check.Mark(0, 0)
-    rows, problem = statement_check.new_rows(statement, start)
-    if rows is None:
-        if problem:
-            statement_check.penalise_once(peer, external_token, Reason.STATEMENT_INCONSISTENT, problem)
+    # A new account: its movement 1 hangs from its genesis.
+    now = time.time()
+    start = statement_check.Mark.new_account(external_token, ts=now)
+    chain = statement_check.verify_chain(statement, start, now=now, from_seq=1)
+    if chain.rows is None:
+        statement_check.penalise_once(
+            peer, external_token, Reason.STATEMENT_INCONSISTENT, chain.problem)
         return _child_balance_on_peer(peer, external_token), None
 
     problems = statement_check.child_problems(
-        rows, mark=start,
+        chain.rows, mark=statement_check.Mark(0, "", 0),
         rates=statement_check.stored_rates(peer),
         sent_peer_mu=sent_peer_mu, start_bound_peer_mu=start_bound_peer_mu,
     )
@@ -120,7 +121,8 @@ def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: i
         statement_check.penalise_once(
             peer, external_token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
         )
-    mark = {"seq": rows[-1].seq, "ts": rows[-1].ts, "read_at": read_at} if rows else None
+    new = statement_check.mark_after(chain, statement, start)
+    mark = {"seq": new.seq, "hash": new.hash, "ts": new.ts} if chain.rows else None
     return from_amount(statement.balance), mark
 
 

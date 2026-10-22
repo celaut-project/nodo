@@ -50,9 +50,9 @@ STATEMENT_PENALTY = -1000
 # Room for the clocks: a ts is whole seconds, and a tick may come a moment early.
 CLOCK_SLACK_SECONDS = 2
 
-# The span that a read asks for is the time since the last read, plus this. A movement
-# written just before the last read reached the peer is then still in the next answer.
-SINCE_MARGIN_SECONDS = 60
+# How far the clock of a peer may be from this node's: a statement dated further away is
+# not valid, so a peer cannot choose the time that its own movements are judged at.
+CLOCK_SKEW_SECONDS = 120
 
 # The factor k of EstimatedCost.variance: a build may cost (1 + variance * k) times its
 # quote.
@@ -68,14 +68,30 @@ class Row:
     kind: str
     ref: str
     detail: Mapping = field(default_factory=dict)
+    hash: str = ""
 
 
 @dataclass(frozen=True)
 class Mark:
-    """The last movement that this node checked. ``seq`` None: none yet."""
+    """Where this node has checked an account up to.
+
+    ``seq`` and ``hash`` are the last movement that was checked, and ``balance`` the
+    balance after it. ``ts`` is a time, on the clock of the peer, before which no
+    movement after ``seq`` was written: the ``ts`` of that movement, or the ``ts`` of
+    the statement that showed it to be the head. ``seq`` None: nothing checked yet.
+    """
     seq: Optional[int]
+    hash: str
     balance: int
     ts: Optional[int] = None
+
+    @staticmethod
+    def new_account(account: str, ts: int) -> "Mark":
+        """The mark of an account that was just created: before its movement 1."""
+        return Mark(0, ledger.genesis_hash(account), 0, int(ts))
+
+
+NO_MARK = Mark(None, "", 0)
 
 
 def tick_detail(sys_req, seconds: int) -> dict:
@@ -101,52 +117,162 @@ def rows_of(statement: celaut_pb2.BalanceStatement) -> List[Row]:
     return [
         Row(seq=int(m.seq), ts=int(m.ts), amount=from_amount(m.amount),
             balance_after=from_amount(m.balance_after), kind=m.kind,
-            ref=m.instance_ref, detail=_detail(m.detail))
+            ref=m.instance_ref, detail=_detail(m.detail), hash=_hash_of(m))
         for m in statement.movements
     ]
 
 
-def new_rows(statement: celaut_pb2.BalanceStatement, mark: Mark
-             ) -> Tuple[Optional[List[Row]], Optional[str]]:
-    """The movements after ``mark``, if the statement adds up.
+def _hash_of(movement: celaut_pb2.BalanceMovement) -> str:
+    return ledger.movement_hash(
+        movement.prev_hash, movement.seq, movement.ts, movement.amount.n,
+        movement.balance_after.n, movement.kind, movement.instance_ref, movement.detail,
+    )
 
-    Returns ``(rows, None)`` when it does, ``(None, problem)`` when it does not, and
-    ``(None, None)`` when it cannot be checked: the node cut the answer at its limit
-    before the movement after the mark. That is a span too long to ask for, not a fault
-    of the peer.
+
+@dataclass(frozen=True)
+class Chain:
+    """What ``verify_chain`` found in a statement.
+
+    ``rows`` are the movements after the mark that were checked, in order: None when the
+    statement is not valid, and ``problem`` says why and ``fault_seq`` where. ``more``:
+    the node holds movements after the last one, which the next read asks for. ``gap``:
+    the statement starts after movements that the node had deleted, which its
+    retention excuses (the movements between are not checkable).
+    """
+    rows: Optional[List[Row]]
+    problem: Optional[str] = None
+    fault_seq: Optional[int] = None
+    more: bool = False
+    gap: bool = False
+
+    @property
+    def reaches_head(self) -> bool:
+        return self.rows is not None and not self.more
+
+
+def _canonical(amount) -> bool:
+    return isinstance(amount.n, str) and amount.n == str(int(amount.n))
+
+
+def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: float,
+                 from_seq: int) -> Chain:
+    """The movements after ``mark``, if the statement is a valid continuation of it.
+
+    ``from_seq`` is what the read asked for (``mark.seq + 1``, or 1 with no mark). The
+    signature is checked elsewhere (``balance_statement.fetch``); this checks the
+    content, and a node that fails it signed something false:
+
+    1. The head is not behind the mark, is the mark when nothing came after it, and is
+       dated near the clock of this node.
+    2. The movements are consecutive, each one hangs from the hash of the one before and
+       adds to the balance, and none is dated after the statement.
+    3. The first movement of an account hangs from its genesis.
+    4. When the last movement is the head, it is the head: its hash and its balance.
+    5. The first movement joins the mark: the next seq, hanging from its hash. When it
+       does not, the movements between were deleted by the retention of the node, and
+       that is excused only when the mark is older than the retention. The node returns
+       from ``from_seq``, or from the first movement it holds if that is later, and
+       never skips some of what it holds.
     """
     rows = rows_of(statement)
     balance = from_amount(statement.balance)
+    first = from_seq
+
+    def invalid(problem, seq):
+        return Chain(None, problem, seq)
+
+    if abs(statement.ts - now) > CLOCK_SKEW_SECONDS:
+        return invalid(f"the statement is dated {statement.ts}, and it is {int(now)}", statement.head_seq)
+    if mark.seq is not None and statement.head_seq < mark.seq:
+        return invalid(f"the head went back from movement {mark.seq} to {statement.head_seq}",
+                       mark.seq)
+    if not all(_canonical(m.amount) and _canonical(m.balance_after) for m in statement.movements) \
+            or not _canonical(statement.balance):
+        return invalid("an amount is not a canonical integer", first)
+
     for previous, row in zip(rows, rows[1:]):
         if row.seq != previous.seq + 1:
-            return None, f"movements {previous.seq + 1} to {row.seq - 1} are missing"
-        if previous.balance_after + row.amount != row.balance_after:
-            return None, f"movement {row.seq} does not add up"
-    if rows and rows[0].seq == 1 and rows[0].amount != rows[0].balance_after:
-        return None, "the first movement does not start from 0"
-    if rows and rows[-1].balance_after != balance:
-        return None, "the balance is not the balance after the last movement"
-    if mark.seq is None:
-        return rows, None
-    if not rows:
-        if balance != mark.balance:
-            return None, f"the balance moved after movement {mark.seq} with no movement"
-        return [], None
-    if rows[0].seq <= mark.seq:
-        # The mark is in the answer, and it must be the movement that was checked.
-        index = mark.seq - rows[0].seq
-        if index >= len(rows):
-            return None, f"the statement ends before movement {mark.seq}, which it showed"
-        if rows[index].balance_after != mark.balance:
-            return None, f"movement {mark.seq} is not the movement that it was"
-        return rows[index + 1:], None
-    if rows[0].seq != mark.seq + 1:
-        if statement.truncated:
-            return None, None
-        return None, f"movements {mark.seq + 1} to {rows[0].seq - 1} are missing"
-    if mark.balance + rows[0].amount != rows[0].balance_after:
-        return None, f"movement {rows[0].seq} does not add up from movement {mark.seq}"
-    return rows, None
+            return invalid(f"movements {previous.seq + 1} to {row.seq - 1} are missing", row.seq)
+    previous_hash, previous_row = None, None
+    for movement, row in zip(statement.movements, rows):
+        if previous_row is not None:
+            if movement.prev_hash != previous_hash:
+                return invalid(f"movement {row.seq} does not hang from movement {previous_row.seq}", row.seq)
+            if previous_row.balance_after + row.amount != row.balance_after:
+                return invalid(f"movement {row.seq} does not add up", row.seq)
+        if row.ts > statement.ts:
+            return invalid(f"movement {row.seq} is dated after the statement", row.seq)
+        previous_hash, previous_row = row.hash, row
+
+    gap = False
+    if rows:
+        head = rows[0]
+        if head.seq == 1:
+            genesis = ledger.genesis_hash_of_ref(statement.account_ref)
+            if statement.movements[0].prev_hash != genesis:
+                return invalid("the first movement does not hang from the genesis of the account", 1)
+            if head.amount != head.balance_after:
+                return invalid("the first movement does not start from 0", 1)
+        expected_first = max(first, statement.oldest_seq)
+        if head.seq != expected_first:
+            return invalid(f"movements {expected_first} to {head.seq - 1} are held and not shown",
+                           head.seq)
+        if mark.seq is not None:
+            if head.seq <= mark.seq:
+                return invalid(f"movement {head.seq} was not asked for", head.seq)
+            if head.seq == mark.seq + 1:
+                if statement.movements[0].prev_hash != mark.hash:
+                    return invalid(
+                        f"movement {mark.seq} is not the movement that it was", head.seq)
+                if mark.balance + head.amount != head.balance_after:
+                    return invalid(
+                        f"movement {head.seq} does not add up from movement {mark.seq}", head.seq)
+            else:
+                retention = max(int(statement.retention_days), ledger.min_peer_retention_days())
+                if mark.ts is not None and mark.ts >= now - retention * 86400 - CLOCK_SKEW_SECONDS:
+                    return invalid(
+                        f"movements {mark.seq + 1} to {head.seq - 1} were deleted before "
+                        f"{retention} days", mark.seq + 1)
+                gap = True
+        elif head.seq > 1:
+            gap = True
+    if rows and rows[-1].seq == statement.head_seq:
+        if rows[-1].hash != statement.head_hash:
+            return invalid("the hash of the last movement is not the head", rows[-1].seq)
+        if rows[-1].balance_after != balance:
+            return invalid("the balance is not the balance after the last movement", rows[-1].seq)
+    elif not rows:
+        if statement.head_seq == 0:
+            if balance != 0 or statement.head_hash != ledger.genesis_hash_of_ref(statement.account_ref):
+                return invalid("an account with no movement holds a balance", 0)
+        elif mark.seq is not None and statement.head_seq == mark.seq:
+            if statement.head_hash != mark.hash or balance != mark.balance:
+                return invalid(f"movement {mark.seq} is not the movement that it was", mark.seq)
+    elif rows[-1].seq > statement.head_seq:
+        return invalid("a movement is after the head", rows[-1].seq)
+    more = statement.head_seq > (rows[-1].seq if rows else (mark.seq or 0))
+    return Chain(rows, None, None, more=more, gap=gap)
+
+
+def mark_after(chain: Chain, statement: celaut_pb2.BalanceStatement, mark: Mark) -> Mark:
+    """The mark once ``chain`` was accepted: at its last movement, or still at ``mark``."""
+    if chain.rows:
+        last = chain.rows[-1]
+        return Mark(last.seq, last.hash, last.balance_after,
+                    statement.ts if chain.reaches_head else last.ts)
+    if mark.seq is not None and not chain.more:
+        return Mark(mark.seq, mark.hash, mark.balance, statement.ts)
+    return mark
+
+
+def anchor_at_head(statement: celaut_pb2.BalanceStatement) -> Mark:
+    """A mark at the head of the account, from what the statement says of it.
+
+    For a statement that cannot be checked from the mark: the movements up to the head
+    cannot be, and asking for them again would only fail again.
+    """
+    return Mark(int(statement.head_seq), statement.head_hash, from_amount(statement.balance),
+                int(statement.ts))
 
 
 def advertised_rates(peer: Optional[celaut_pb2.Peer]) -> Dict[str, int]:
@@ -350,14 +476,6 @@ def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now_ts: int
         else:
             problems.append(f"movement {row.seq} is a {row.kind!r} charge that this node did not cause")
     return problems, None
-
-
-def since_seconds(read_at: Optional[float], now: Optional[float] = None) -> int:
-    """The span to ask for: since the last read, with a margin. 0 (no span) for none."""
-    if not read_at:
-        return 0
-    now = time.time() if now is None else now
-    return max(1, math.ceil(now - float(read_at))) + SINCE_MARGIN_SECONDS
 
 
 def unreachable(error: Exception) -> bool:

@@ -675,19 +675,21 @@ message Metrics {
     Amount balance = 1;
 }
 
-// The request of GetBalanceStatement. With since_seconds and last, both apply: the
-// answer has the last `last` movements that are also in the span. With neither, the
-// node applies its own limit.
+// The request of GetBalanceStatement. The caller asks for a range of movements by their
+// seq, and nothing about the range changes what the node has already signed: a movement
+// that a statement showed cannot change afterwards, because the hash of each one commits
+// to all the ones before it.
 message BalanceStatementRequest {
     // The instance token of a child of the caller, to read the account of that child.
     // Empty to read the account of the caller: its client_id, or the local instance
     // that calls, by its address.
     string token = 1;
-    // A time span back from now, in seconds. Only the movements in it. 0 for no span.
-    uint64 since_seconds = 2;
-    // Only the last movements, at most this number. 0 for no count. The charge of this
-    // request is not counted.
-    uint32 last = 3;
+    // The first movement asked for. 0 asks for no movement, only the head of the
+    // account: the last movement and its hash.
+    uint64 from_seq = 2;
+    // The last movement asked for, included. 0 asks up to the head. The node never
+    // returns more than its own limit in one answer.
+    uint64 to_seq = 3;
 }
 
 // One movement of a balance.
@@ -733,26 +735,39 @@ message BalanceMovement {
 
 // The answer of GetBalanceStatement.
 message BalanceStatement {
-    // The account: a client_id or an instance token.
-    string account = 1;
-    // The span of the request, in seconds. 0 for no span.
-    uint64 since_seconds = 2;
-    // The count of the request. 0 for no count.
-    uint32 last = 3;
-    // The movements, in seq order. When the caller reads its own account, the last
-    // movement is the charge for this answer.
+    // The account, as a hash: blake2b-256 hex of "celaut-ledger-account:" followed by
+    // the client_id or the instance token. Never the credential itself, so that a
+    // statement can be shown to others.
+    string account_ref = 1;
+    // The first movement that the request asked for. 0 means none given.
+    uint64 from_seq = 2;
+    // The last movement that the request asked for. 0 means none given.
+    uint64 to_seq = 3;
+    // The movements of the range, in ascending seq order and with no gap. When the
+    // caller reads its own account up to the head, the last movement is the charge for
+    // this answer. If the node holds fewer movements than the range, because of its
+    // retention or its limit, they are the first it holds from from_seq: the caller asks
+    // again from the last seq it received.
     repeated BalanceMovement movements = 4;
-    // The balance of the account at the answer, in MU.
+    // The balance of the account at the head, in MU.
     Amount balance = 5;
-    // True if the node returned fewer movements than the filters select, because of
-    // its limit. The caller can ask again with a smaller span.
-    bool truncated = 6;
+    // The last movement of the account when the node answered. The balance is the
+    // balance after that movement. 0 for an account with no movement.
+    uint64 head_seq = 6;
+    // The hash of the last movement. For an account with no movement, its genesis hash.
+    string head_hash = 7;
+    // The first movement that the node still holds. Older ones were deleted when they
+    // passed its retention, and the first movement it holds hangs from the hash of a
+    // movement that it no longer has.
+    uint64 oldest_seq = 8;
+    // How long the node keeps movements, in days.
+    uint32 retention_days = 9;
     // When the node answered, in unix seconds, on the clock of the node.
-    int64 ts = 7;
+    int64 ts = 10;
     // The signature of the node, with the key and the scheme of its Peer, in lowercase
     // hexadecimal. The celaut-gateway layer gives the text that it signs. A statement
     // without a valid signature is not valid.
-    string signature = 8;
+    string signature = 11;
 }
 
 // The answer of StartService.
@@ -1250,7 +1265,11 @@ service Gateway {
     // the balance of the caller, or of a child of the caller, signed by the node. The
     // caller pays for it: a fixed part and a part for each movement returned (the
     // rates "statement_query_mu" and "statement_row_mu"). The node writes the charge
-    // as a "statement_query" movement before it answers.
+    // as a "statement_query" movement before it answers. The node refuses with a status
+    // code: RESOURCE_EXHAUSTED when the caller cannot pay for the answer,
+    // PERMISSION_DENIED when the account is not the caller's or a child of it,
+    // NOT_FOUND when the account does not exist, and UNIMPLEMENTED for an instance that
+    // this node delegated to another node.
     rpc GetBalanceStatement(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Opens a byte stream to a declared slot of a local instance. First, the caller
     // sends a TokenMessage with the instance token and the internal port in slot. Then

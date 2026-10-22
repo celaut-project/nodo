@@ -449,42 +449,72 @@ class StatementReadTests(_Database):
         kwargs.setdefault("price", lambda rows: 1 + rows)
         return self.sc.balance_statement(account, payer, **kwargs)
 
-    def test_the_charge_is_the_last_movement_and_the_statement_adds_up(self):
-        read = self.read()
+    def test_the_charge_is_the_last_movement_when_the_answer_reaches_the_head(self):
+        read = self.read(from_seq=1)
 
+        self.assertEqual([m["seq"] for m in read["movements"]], list(range(1, 8)))
         last = read["movements"][-1]
         self.assertEqual(last["kind"], ledger.STATEMENT_QUERY)
         # Six rows before it and itself: 1 + 7.
         self.assertEqual(int(last["amount_mu"]), -8)
         self.assertEqual(int(last["balance_after_mu"]), read["balance_mu"])
+        self.assertEqual((read["head_seq"], read["head_hash"]), (7, last["hash"]))
         self.assert_adds_up("c1", read["balance_mu"])
+        self.assert_chained("c1")
 
-    def test_last_counts_the_movements_before_the_charge(self):
-        read = self.read(last=2)
+    def test_a_range_gives_those_movements_and_the_charge_is_in_the_head(self):
+        read = self.read(from_seq=2, to_seq=4)
 
-        self.assertEqual([m["seq"] for m in read["movements"]], [5, 6, 7])
-        self.assertFalse(read["truncated"])
+        self.assertEqual([m["seq"] for m in read["movements"]], [2, 3, 4])
+        self.assertEqual(read["head_seq"], 7)
+        self.assertEqual(self.rows("c1")[-1]["kind"], ledger.STATEMENT_QUERY)
 
-    def test_since_keeps_only_the_span(self):
-        SQLConnection._connection.execute(
-            "UPDATE balance_movements SET ts = ? WHERE seq < 4", (int(time.time()) - 3600,)
-        )
+    def test_from_zero_reads_only_the_head_and_pays_only_the_fixed_part(self):
+        read = self.read(from_seq=0)
+
+        self.assertEqual(read["movements"], [])
+        self.assertEqual(int(self.rows("c1")[-1]["amount_mu"]), -2)
+        self.assertEqual((read["head_seq"], read["head_hash"]),
+                         (7, self.rows("c1")[-1]["hash"]))
+        self.assertEqual(read["oldest_seq"], 1)
+
+    def test_the_node_cap_gives_the_first_rows_and_the_next_page_goes_on(self):
+        first = self.read(from_seq=1, max_rows=3)
+        self.assertEqual([m["seq"] for m in first["movements"]], [1, 2, 3])
+
+        second = self.read(from_seq=4, max_rows=3)
+        self.assertEqual([m["seq"] for m in second["movements"]], [4, 5, 6])
+
+        third = self.read(from_seq=7, max_rows=3)
+        # The charge of the first read, of the second, and of this one.
+        self.assertEqual([m["seq"] for m in third["movements"]], [7, 8, 9])
+
+    def test_a_read_past_the_head_gets_only_the_charge(self):
+        read = self.read(from_seq=100)
+
+        self.assertEqual(read["movements"], [])
+
+    def test_a_read_that_starts_at_the_next_movement_gets_the_charge(self):
+        read = self.read(from_seq=7)
+
+        self.assertEqual([m["seq"] for m in read["movements"]], [7])
+        self.assertEqual(read["movements"][0]["kind"], ledger.STATEMENT_QUERY)
+
+    def test_what_the_sweep_deleted_is_where_the_answer_starts(self):
+        SQLConnection._connection.execute("UPDATE balance_movements SET ts = 0")
         SQLConnection._connection.commit()
+        self.sc.prune_balance_movements(max_age_days=30)
 
-        read = self.read(since_seconds=60)
+        read = self.read(from_seq=1)
 
-        self.assertEqual([m["seq"] for m in read["movements"]], [4, 5, 6, 7])
-
-    def test_the_node_cap_cuts_the_answer_and_says_so(self):
-        read = self.read(max_rows=3)
-
-        self.assertEqual([m["seq"] for m in read["movements"]], [5, 6, 7])
-        self.assertTrue(read["truncated"])
+        self.assertEqual(read["oldest_seq"], 6)
+        self.assertEqual([m["seq"] for m in read["movements"]], [6, 7])
+        self.assertEqual(read["movements"][0]["prev_hash"], self.rows("c1")[0]["prev_hash"])
 
     def test_a_father_reads_its_child_and_pays_for_it(self):
-        self.add_instance("i1", "c1", 70)
+        self.add_instance("i1", "c1", 70, movements=(ledger.Movement(ledger.START, 70),))
 
-        read = self.read(account="i1", payer="c1")
+        read = self.read(account="i1", payer="c1", from_seq=1)
 
         self.assertEqual([m["kind"] for m in read["movements"]], [ledger.START])
         self.assertEqual(read["balance_mu"], 70)
@@ -493,9 +523,14 @@ class StatementReadTests(_Database):
                          (ledger.STATEMENT_QUERY, ledger.instance_ref("i1")))
         self.assertEqual(int(charge["amount_mu"]), -2)
 
+    def test_an_account_that_does_not_exist_is_not_charged(self):
+        with self.assertRaises(ledger.NoSuchAccount):
+            self.read(account="nobody", payer="c1", from_seq=1)
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 950)
+
     def test_a_payer_that_cannot_pay_gets_nothing(self):
         with self.assertRaises(ledger.InsufficientBalance):
-            self.read(price=lambda rows: 10 ** 9, allow_debt=False)
+            self.read(price=lambda rows: 10 ** 9, allow_debt=False, from_seq=1)
         self.assertEqual(self.sc.get_balance_by_client_id("c1"), 950)
 
 
@@ -510,35 +545,83 @@ class SignedStatementTests(_Database):
         self.addCleanup(patcher.stop)
         self.peer_id = node_identity.get_node_public_key_hex()
         self.sc.add_client("c1", 1000, None)
-        self.add_instance("i1", "c1", 1000)
-        self.add_instance("i2", "someone-else", 1000)
+        self.add_instance("i1", "c1", 1000, movements=(ledger.Movement(ledger.START, 1000),))
+        self.add_instance("i2", "someone-else", 1000,
+                          movements=(ledger.Movement(ledger.START, 1000),))
 
     def test_the_answer_verifies_against_the_key_of_the_node(self):
-        statement = balance_statement.answer(caller="c1")
+        statement = balance_statement.answer(caller="c1", from_seq=1)
 
-        self.assertEqual(statement.account, "c1")
+        self.assertEqual(statement.account_ref, ledger.account_ref("c1"))
         self.assertTrue(balance_statement.verify(statement, self.peer_id))
 
     def test_a_changed_movement_breaks_the_signature(self):
-        statement = balance_statement.answer(caller="c1")
+        statement = balance_statement.answer(caller="c1", from_seq=1)
         statement.movements[0].amount.n = "999999"
 
         self.assertFalse(balance_statement.verify(statement, self.peer_id))
 
-    def test_a_caller_reads_its_child_by_token(self):
-        statement = balance_statement.answer(caller="c1", token="i1")
+    def test_a_movement_that_is_dropped_breaks_the_signature(self):
+        self.sc.move_balance("c1", -1, ledger.TOP_UP)
+        statement = balance_statement.answer(caller="c1", from_seq=1)
+        statement.movements.pop(0)
 
-        self.assertEqual(statement.account, "i1")
+        self.assertFalse(balance_statement.verify(statement, self.peer_id))
+
+    def test_the_head_is_signed(self):
+        statement = balance_statement.answer(caller="c1", from_seq=0)
+        statement.head_hash = "0" * 64
+
+        self.assertFalse(balance_statement.verify(statement, self.peer_id))
+
+    def test_the_hash_of_a_statement_movement_is_the_one_of_its_row(self):
+        statement = balance_statement.answer(caller="c1", from_seq=1)
+
+        rows = self.rows("c1")
+        self.assertEqual([balance_statement.movement_hash(m) for m in statement.movements],
+                         [row["hash"] for row in rows])
+        self.assertEqual(statement.head_hash, rows[-1]["hash"])
+
+    def test_a_statement_holds_no_credential(self):
+        self.sc.add_client("a-client-id-that-is-a-secret", 500, None)
+        self.sc.move_balance("a-client-id-that-is-a-secret", -10, ledger.CHILD_START,
+                             instance_token="a-token-that-is-a-secret")
+        self.sc.bind_child("a-client-id-that-is-a-secret", 2, "a-token-that-is-a-secret")
+
+        statement = balance_statement.answer(caller="a-client-id-that-is-a-secret", from_seq=1)
+
+        wire = statement.SerializeToString()
+        self.assertNotIn(b"secret", wire)
+        self.assertEqual(statement.account_ref, ledger.account_ref("a-client-id-that-is-a-secret"))
+
+    def test_a_caller_reads_its_child_by_token(self):
+        statement = balance_statement.answer(caller="c1", token="i1", from_seq=1)
+
+        self.assertEqual(statement.account_ref, ledger.account_ref("i1"))
         self.assertTrue(balance_statement.verify(statement, self.peer_id))
 
     def test_a_caller_cannot_read_an_account_that_is_not_its_own_or_a_child(self):
         with self.assertRaises(balance_statement.StatementRefused):
-            balance_statement.answer(caller="c1", token="i2")
+            balance_statement.answer(caller="c1", token="i2", from_seq=1)
 
     def test_a_child_reads_its_own_account_and_not_its_father(self):
-        self.assertEqual(balance_statement.answer(caller="i1").account, "i1")
+        self.assertEqual(balance_statement.answer(caller="i1", from_seq=1).account_ref,
+                         ledger.account_ref("i1"))
         with self.assertRaises(balance_statement.StatementRefused):
-            balance_statement.answer(caller="i1", token="c1")
+            balance_statement.answer(caller="i1", token="c1", from_seq=1)
+
+    def test_an_instance_delegated_to_a_peer_has_no_statement(self):
+        self.sc.add_delegated_instance(
+            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
+            peer_balance_mu=6, movements=(ledger.Movement(ledger.START, 60),),
+            sent_peer_mu=9, mark={},
+        )
+        before = len(self.rows("c1"))
+
+        with self.assertRaises(balance_statement.StatementUnavailable):
+            balance_statement.answer(caller="c1", token="alias", from_seq=1)
+        self.assertEqual(len(self.rows("c1")), before, "nothing is charged for it")
 
 
 if __name__ == "__main__":
