@@ -2677,7 +2677,13 @@ class SQLConnection(metaclass=Singleton):
             (f"-{max(1, int(keep_days))} days",),
         )
 
-    def get_delegated_instances(self) -> List[dict]:
+    def get_delegated_row(self, token: str) -> Optional[dict]:
+        """A live delegated instance by the token that the peer knows, as
+        ``get_delegated_instances`` gives it; None when it is gone."""
+        rows = self.get_delegated_instances(token=token)
+        return rows[0] if rows else None
+
+    def get_delegated_instances(self, token: Optional[str] = None) -> List[dict]:
         """
         Fetches every delegated instance, for restoring state on startup.
 
@@ -2693,7 +2699,8 @@ class SQLConnection(metaclass=Singleton):
                    peer_statement_hash, verified_consumption_peer_mu,
                    verified_father_net_peer_mu, father_net_peer_mu, charged_peer_mu
             FROM delegated_instances WHERE killed_at IS NULL
-        ''')
+            ''' + ('AND token_delegation = ?' if token is not None else ''),
+            (token,) if token is not None else ())
         return [
             {
                 'token': row[0],

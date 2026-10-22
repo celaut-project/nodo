@@ -9,6 +9,7 @@ The peer is a ``FakeLedger`` of the child. Its MU are ours one for one, with no
 commission, so that a figure is a figure.
 """
 import sqlite3
+import threading
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,7 @@ try:
     from src.database.migrate import create_tables
     from src.database.sql_connection import SQLConnection
     from src.manager import maintain, statement_check
+    from src.manager.manager import delegation_lock
     from src.utils.cost_functions import delegation_commission
     from tests.statement_chain import FakeLedger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -123,6 +125,68 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         self.assertEqual(self.deposit, 900 - 20)
         row = self.sc.get_delegated_instances()[0]
         self.assertEqual((row["verified_consumption_peer_mu"], row["charged_peer_mu"]), (20, 20))
+
+    def test_a_withdrawal_that_lands_in_the_middle_of_a_tick_is_not_charged_as_consumption(self):
+        """``modify_deposit`` holds the lock of the deposit from the call to the peer until
+        the net is written: the peer has moved the balance and this node has not yet
+        written the net, and a tick that read the row in between would charge it."""
+        lock = delegation_lock(ALIAS)
+        lock.acquire()
+        self.peer.add(-100, "withdrawal", ts=self.now - 60)
+
+        def answer(peer, client, token="", from_seq=0, rows=None):
+            return self.peer.statement(
+                from_seq=from_seq, to_seq=from_seq + rows - 1 if rows else 0, ts=self.now)
+
+        with patch.object(maintain, "sc", self.sc), \
+                patch.object(maintain, "_check_our_account"), \
+                patch.object(statement_check, "read", MagicMock(side_effect=answer)), \
+                patch.object(maintain, "_balance_held_on", return_value=10 ** 9), \
+                patch.object(statement_check, "stored_rates", return_value={}), \
+                patch.object(maintain, "get_client_id_on_other_peer", return_value="client"), \
+                patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
+                patch.object(maintain, "peer_mu_in_local", side_effect=lambda p, a, **k: a), \
+                patch.object(maintain, "stop_instance"), \
+                patch.object(delegation_commission, "commission_percent", return_value=0.0), \
+                patch.object(self.sc, "child_statement_due", return_value=False):
+            tick = threading.Thread(target=maintain.maintain_delegated_instances)
+            tick.start()
+            tick.join(0.3)
+            self.assertTrue(tick.is_alive(), "the tick must wait for modify_deposit")
+            self.sc.move_delegated_deposit(ALIAS, FATHER, -100, -100)
+            lock.release()
+            tick.join(10)
+
+        self.assertFalse(tick.is_alive())
+        row = self.sc.get_delegated_instances()[0]
+        self.assertEqual(row["charged_peer_mu"], 0)
+        self.assertEqual(self.deposit, 900 - 100)
+
+    def test_the_first_reading_of_a_child_with_no_mark_does_not_charge_the_build_as_consumption(self):
+        """The build that the peer took was more than the quote that the balance was
+        measured from; what opened the account is not consumption."""
+        SQLConnection._connection.execute(
+            "UPDATE delegated_instances SET peer_statement_seq = NULL, "
+            "peer_statement_hash = NULL, peer_statement_ts = NULL, peer_balance_mu = '950'")
+        SQLConnection._connection.commit()
+
+        charge = self.tick(statement=False)
+
+        self.assertEqual(charge, 0)
+        self.assertEqual(self.deposit, 900)
+        row = self.sc.get_delegated_instances()[0]
+        self.assertEqual((row["verified_consumption_peer_mu"], row["peer_statement_seq"]), (0, 2))
+
+    def test_what_a_child_consumes_after_a_first_reading_with_no_mark_is_charged(self):
+        SQLConnection._connection.execute(
+            "UPDATE delegated_instances SET peer_statement_seq = NULL, "
+            "peer_statement_hash = NULL, peer_statement_ts = NULL, peer_balance_mu = '950'")
+        SQLConnection._connection.commit()
+        self.consume(5)
+
+        self.tick(statement=False)
+
+        self.assertEqual(self.deposit, 900 - 5)
 
     def test_a_withdrawal_of_the_father_is_not_charged_as_consumption(self):
         self.consume(5)

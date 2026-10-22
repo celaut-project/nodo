@@ -274,6 +274,8 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
               rates=True, rows=None, due=True):
         sc = MagicMock()
         sc.get_delegated_instances.return_value = rows or [row]
+        sc.get_delegated_row.side_effect = lambda token: next(
+            (r for r in (rows or [row]) if r['token'] == token), None)
         sc.statement_tick_due.return_value = due
         read = (
             MagicMock(side_effect=read_raises) if read_raises
@@ -400,6 +402,8 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
             self._row(id="wont-stop", balance_mu=0),
             self._row(token="second-token"),
         ]
+        sc.get_delegated_row.side_effect = lambda token: next(
+            r for r in sc.get_delegated_instances.return_value if r['token'] == token)
         with patch.object(maintain, "sc", sc), \
                 patch.object(maintain, "_check_our_account"), \
                 patch.object(maintain, "_read_child", return_value=(600_000, self.MARK)), \

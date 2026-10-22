@@ -3,6 +3,7 @@ from uuid import uuid4
 from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
 import secrets
+import threading
 
 from src.manager.resources import IOBigData
 from protos import celaut_pb2
@@ -1437,7 +1438,27 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
 
 
 # Modify an instance's deposit, in MU.
+_delegation_locks: Dict[str, threading.RLock] = {}
+_delegation_locks_guard = threading.Lock()
+
+
+def delegation_lock(alias: str) -> threading.RLock:
+    """The lock of one instance's deposit: ``modify_deposit`` holds it from the call to
+    the peer until the net that it sent is written, and the maintenance tick holds it
+    from reading that net until it has charged. The peer moves the balance of a child
+    first and this node writes the net after, so a tick that read both in between would
+    charge a withdrawal as consumption, or give back a top-up that the next tick charges
+    again."""
+    with _delegation_locks_guard:
+        return _delegation_locks.setdefault(alias, threading.RLock())
+
+
 def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
+    with delegation_lock(service_token):
+        return _modify_deposit(amount_mu, service_token)
+
+
+def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     """Move ``amount_mu`` between an instance and its father: a positive figure tops the
     instance up out of the father's balance, a negative one gives it back.
 

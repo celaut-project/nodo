@@ -302,10 +302,18 @@ def caused_by_father(row: Row) -> bool:
         (row.kind == ledger.WITHDRAWAL and row.amount < 0)
 
 
+def opens_account(row: Row) -> bool:
+    """What opened the child's account: the amount it was started with, and the build
+    that the peer took from it. Neither is consumption, and the build is what this node
+    already paid at the start (``delegate_execution``)."""
+    return row.kind in (ledger.START, ledger.BUILD)
+
+
 def consumption(rows: Iterable[Row]) -> int:
     """What the child spent in ``rows``, in the MU of the peer: every movement but
-    those of its father. Never below 0."""
-    return max(0, -sum(row.amount for row in rows if not caused_by_father(row)))
+    those of its father and those that opened its account. Never below 0."""
+    return max(0, -sum(row.amount for row in rows
+                       if not caused_by_father(row) and not opens_account(row)))
 
 
 def father_net(rows: Iterable[Row]) -> int:

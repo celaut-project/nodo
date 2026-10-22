@@ -13,7 +13,7 @@ from src.database import ledger
 from src.manager import balance_statement, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
+from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.utils.cost_functions.delegation_commission import commission_floor_on, commission_on
 from src.utils.bee_client import BeeClient, Dir
@@ -622,9 +622,13 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
     in between can only make the charge smaller for a moment, never wrongly stop an
     instance for a charge that the father caused.
 
-    When the statement does not continue the mark (a fault of the peer, a first reading,
-    or movements that the retention of the peer deleted) nothing can be checked up to its
-    head: what the balance says is taken for what was spent, and the mark goes to the
+    A child with no mark (the statement of its start could not be used) is read from its
+    first movement and checked from the genesis of its account, and what opened the
+    account (``start``, ``build``) is not consumption: the build that the peer took may
+    be more than the quote that the balance was measured from.
+
+    When the statement does not continue the mark (a fault of the peer, or movements that
+    the retention of the peer deleted) nothing can be checked up to its head: what the balance says is taken for what was spent, and the mark goes to the
     head. A fault is scored, and a gap that the retention explains is not. A charge that
     comes from a balance, and not from a statement that continues the mark, is never
     negative: only a checked statement gives MU back.
@@ -662,11 +666,17 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             error = e
 
     if statement is not None:
-        chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=from_seq)
-        if chain.rows is not None and mark.seq is not None and not chain.gap:
+        # No mark (the statement of the start could not be used) and the statement shows
+        # the account from its first movement: it is checked from its genesis, like the
+        # one that ``_check_start`` reads, and what opened the account is not consumption.
+        start = mark
+        if mark.seq is None and statement.movements and statement.movements[0].seq == 1:
+            start = statement_check.Mark.new_account(token, 0)
+        chain = statement_check.verify_chain(statement, start, now=read_at, from_seq=from_seq)
+        if chain.rows is not None and start.seq is not None and not chain.gap:
             verified += statement_check.consumption(chain.rows)
             verified_sent += statement_check.father_net(chain.rows)
-            new = statement_check.mark_after(chain, statement, mark)
+            new = statement_check.mark_after(chain, statement, start)
             balance_now = from_amount(statement.balance)
             checked = True
         else:
@@ -869,35 +879,41 @@ def maintain_delegated_instances(debug_mode: bool = False):
         except Exception as e:
             log.LOGGER(f"Error checking our account on {peer_id}: {e}")
 
-    for row in delegated:
-        peer_id, token, vmachine_id = row.get('peer_id'), row['token'], row.get('id')
+    for listed in delegated:
+        # Under the lock of the deposit, with the row read again: what ``modify_deposit``
+        # wrote since the tick began is part of it (``manager.delegation_lock``).
+        with delegation_lock(listed.get('id')):
+            row = sc.get_delegated_row(listed['token'])
+            if row is None:
+                continue
+            peer_id, token, vmachine_id = row.get('peer_id'), row['token'], row.get('id')
 
-        try:
-            read = _read_child(row, debug_mode=debug_mode)
-        except Exception as e:
-            if is_peer_available(peer_id=peer_id):
-                # The peer is up and does not know this instance: it is gone there,
-                # whatever ended it. Stopping it here settles the row the same way
-                # any other stop does -- the peer answers a StopService for an
-                # instance it does not have with a refund of zero, which is exactly
-                # what it owes.
-                log.LOGGER(
-                    f"Peer {peer_id} no longer holds the delegated instance "
-                    f"{vmachine_id} ({e}); stopping it here too."
-                )
-                try:
-                    stop_instance(token=vmachine_id, reason=dead_instances.PEER_STOPPED)
-                except Exception as stop_error:
-                    log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
-            elif debug_mode:
-                log.LOGGER(
-                    f"Peer {peer_id} is unreachable; not charging the delegated "
-                    f"instance {vmachine_id} this tick."
-                )
-            continue
+            try:
+                read = _read_child(row, debug_mode=debug_mode)
+            except Exception as e:
+                if is_peer_available(peer_id=peer_id):
+                    # The peer is up and does not know this instance: it is gone there,
+                    # whatever ended it. Stopping it here settles the row the same way
+                    # any other stop does -- the peer answers a StopService for an
+                    # instance it does not have with a refund of zero, which is exactly
+                    # what it owes.
+                    log.LOGGER(
+                        f"Peer {peer_id} no longer holds the delegated instance "
+                        f"{vmachine_id} ({e}); stopping it here too."
+                    )
+                    try:
+                        stop_instance(token=vmachine_id, reason=dead_instances.PEER_STOPPED)
+                    except Exception as stop_error:
+                        log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
+                elif debug_mode:
+                    log.LOGGER(
+                        f"Peer {peer_id} is unreachable; not charging the delegated "
+                        f"instance {vmachine_id} this tick."
+                    )
+                continue
 
-        charge_peer_mu, state = read
-        settle_child(row, charge_peer_mu, state, debug_mode=debug_mode)
+            charge_peer_mu, state = read
+            settle_child(row, charge_peer_mu, state, debug_mode=debug_mode)
 
 
 def enforce_activity_window(debug_mode: bool = False):
