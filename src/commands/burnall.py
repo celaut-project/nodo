@@ -45,6 +45,7 @@ import sys
 from typing import Dict, List, Sequence
 
 from src.database.sql_connection import SQLConnection
+from src.utils.privileges import sudo_rerun
 from src.manager.manager import credit_father, stop_instance
 from src.utils import dead_instances
 from src.utils.monetary import format_mu
@@ -150,7 +151,7 @@ def burnall(argv: List[str] = None) -> None:
     # rights `kill` needs, and finding that out after printing a plan is worse
     # than finding it out now.
     if not dry_run and os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
+        print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
         return
 
     try:

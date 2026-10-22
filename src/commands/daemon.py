@@ -4,6 +4,8 @@ import socket
 import subprocess
 from typing import Optional
 
+from src.utils.privileges import sudo_nodo, sudo_rerun
+
 
 def is_serving() -> bool:
     """Whether something answers on this node's gateway port.
@@ -72,7 +74,7 @@ def restart_after_config_write(before: Optional[str]) -> bool:
     print(
         "The change is on disk, but the running node is still on the configuration it "
         "booted with and will overwrite the change the next time it persists a value of "
-        "its own. Run `sudo nodo daemon restart`.",
+        f"its own. Run `{sudo_nodo('daemon restart')}`.",
         flush=True,
     )
     return False
@@ -89,7 +91,7 @@ def daemon_command(subcommand, main_dir) -> bool:
     """
     _ = main_dir
     if os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
+        print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
         return False
 
     service_name = "nodo.service"

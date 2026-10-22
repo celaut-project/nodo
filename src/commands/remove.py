@@ -2,6 +2,7 @@ import os
 import shutil
 
 from src.commands.__by_tag import get_id
+from src.utils.privileges import sudo_rerun
 from src.commands.inspect_service import format_size
 from src.utils.config import ConfigManager
 
@@ -46,7 +47,7 @@ def remove(service: str):
 
     # Check if script is run as root
     if os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
+        print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
         return
 
     # `get_id` answers "" for a name it cannot resolve, and every path built below

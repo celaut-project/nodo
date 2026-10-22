@@ -21,6 +21,7 @@ import shutil
 import subprocess
 from typing import NamedTuple, Optional, Sequence
 
+from src.utils.privileges import sudo_nodo
 from src.virtualizers.microvm.errors import MicroVMError
 
 CONFIG_KEY = "virtualizers.ch.VIRTIOFSD_BINARY"
@@ -49,7 +50,7 @@ INSTALL_HINT = (
     "Re-run the installer, which puts the Rust virtiofsd in <MAIN_DIR>/bin, or "
     "install it by hand ('cargo install virtiofsd --locked', needs libcap-ng-dev "
     "and libseccomp-dev) and give the node its absolute path: "
-    f"'sudo nodo config set {CONFIG_KEY}=/absolute/path/to/virtiofsd'. "
+    f"'{sudo_nodo('config set')} {CONFIG_KEY}=/absolute/path/to/virtiofsd'. "
     "See docs/SHARED_FILESYSTEMS.md."
 )
 
