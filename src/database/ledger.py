@@ -10,12 +10,20 @@ The account id is the id that the owner holds: the ``client_id``, or the instanc
 token that ``StartService`` returned. For a delegated instance that token is the
 alias this node hands out (``delegated_instances.id``), not the token of the peer.
 
-A row is never changed, with one exception: ``instance_token`` can go from empty to
-set, one time. A start charges the father before the child exists, so the
-``child_start`` row is written without the token of the child, and the token is set
-when the child is created. A reader treats an empty ``instance_token`` on a
-``child_start`` as a start in progress.
+A row is never changed. Each one carries the hash of the row before it (``prev_hash``)
+and its own (``hash``), so the rows of an account are a chain: the hash of the last
+one commits to all the history, and a node that rewrites a row it already showed
+cannot keep the chain. The first row hangs from a genesis hash that is tied to the
+account. A start charges the father before the child exists, so the ``child_start``
+row is written with no child, and the child is bound later with a new row,
+``child_bound``, that names the ``child_start`` it completes. A reader treats a
+``child_start`` with no ``child_bound`` and no ``refund`` as a start in progress.
+
+A row never carries a credential. An instance token and a client_id are bearer
+credentials, so a row names an instance by ``instance_ref`` (a hash of the token, with
+a prefix of its own), and a statement names its account by ``account_ref``.
 """
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
@@ -42,7 +50,8 @@ COMMISSION = "commission"
 MAINTENANCE = "maintenance"
 """One maintenance period of an instance."""
 CHILD_START = "child_start"
-"""The account paid the ``initial_mu`` of a child. ``instance_token`` is the child."""
+"""The account paid the ``initial_mu`` of a child. The child is named by the
+``child_bound`` that follows once it exists."""
 TOP_UP = "top_up"
 """``ModifyDeposit`` with a positive difference: negative on the father, positive on
 the child."""
@@ -58,13 +67,69 @@ RESOURCE_CHANGE = "resource_change"
 """``ModifyServiceSystemResources``."""
 STATEMENT_QUERY = "statement_query"
 """A ``GetBalanceStatement`` that the account asked for."""
+CHILD_BOUND = "child_bound"
+"""The child of a ``child_start`` exists. Moves nothing: ``instance_ref`` is the child
+and ``detail.starts_seq`` the seq of the ``child_start`` that it completes."""
 
 KINDS = (
     DEPOSIT, CREDIT, DEBIT, START, BUILD, COMMISSION, MAINTENANCE, CHILD_START,
-    TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY,
+    CHILD_BOUND, TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY,
 )
 
+_MOVEMENT_PREFIX = "celaut-balance-movement:"
+_GENESIS_PREFIX = "celaut-balance-genesis:"
+_INSTANCE_PREFIX = "celaut-ledger-instance:"
+_ACCOUNT_PREFIX = "celaut-ledger-account:"
+
+
+def _digest(text: str) -> str:
+    return hashlib.blake2b(text.encode("utf-8"), digest_size=32).hexdigest()
+
+
+def _hex(text: str) -> str:
+    return text.encode("utf-8").hex()
+
+
+def instance_ref(token: str) -> str:
+    """What a row says about an instance: a hash of its token, never the token.
+
+    The prefix keeps it from being any other credential. In particular it is not
+    ``sha256(token)``, which is the alias that this node hands out for a delegated
+    instance.
+    """
+    return _digest(_INSTANCE_PREFIX + token)
+
+
+def account_ref(account: str) -> str:
+    """What a statement says about its account: a hash of the client_id or token."""
+    return _digest(_ACCOUNT_PREFIX + account)
+
+
+def genesis_hash(account: str) -> str:
+    """The ``prev_hash`` of the first row of an account."""
+    return _digest(_GENESIS_PREFIX + account_ref(account))
+
+
+def canonical_amount(value) -> str:
+    """An amount as the text that is hashed: a decimal integer, no sign but ``-``."""
+    return str(int(value))
+
+
+def movement_hash(prev_hash: str, seq: int, ts: int, amount_mu, balance_after_mu,
+                  kind: str, instance_ref_: Optional[str], detail: Optional[str]) -> str:
+    """The hash of a row: its fields, and the hash of the row before it.
+
+    Every free text goes in as hexadecimal, so that no field can pass for a separator
+    and two different rows never give the same text.
+    """
+    return _digest(
+        f"{_MOVEMENT_PREFIX}{prev_hash}|{int(seq)}~{int(ts)}~"
+        f"{_hex(canonical_amount(amount_mu))}~{_hex(canonical_amount(balance_after_mu))}~"
+        f"{_hex(kind)}~{instance_ref_ or ''}~{_hex(detail or '')}"
+    )
+
 DEFAULT_RETENTION_DAYS = 30
+DEFAULT_MIN_PEER_RETENTION_DAYS = 7
 DEFAULT_MAX_STATEMENT_ROWS = 1000
 
 
@@ -107,6 +172,15 @@ def _positive_int(key: str, default: int) -> int:
 def retention_days() -> int:
     """``ledger.RETENTION_DAYS``: rows older than this are deleted."""
     return _positive_int("ledger.RETENTION_DAYS", DEFAULT_RETENTION_DAYS)
+
+
+def min_peer_retention_days() -> int:
+    """``ledger.MIN_PEER_RETENTION_DAYS``: the retention that a peer is held to.
+
+    A peer announces how long it keeps its rows. A gap in its statement is excused by
+    that retention, and a peer that announces none would excuse any gap.
+    """
+    return _positive_int("ledger.MIN_PEER_RETENTION_DAYS", DEFAULT_MIN_PEER_RETENTION_DAYS)
 
 
 def max_statement_rows() -> int:

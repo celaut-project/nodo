@@ -66,7 +66,7 @@ class Row:
     amount: int
     balance_after: int
     kind: str
-    token: str
+    ref: str
     detail: Mapping = field(default_factory=dict)
 
 
@@ -101,7 +101,7 @@ def rows_of(statement: celaut_pb2.BalanceStatement) -> List[Row]:
     return [
         Row(seq=int(m.seq), ts=int(m.ts), amount=from_amount(m.amount),
             balance_after=from_amount(m.balance_after), kind=m.kind,
-            token=m.instance_token, detail=_detail(m.detail))
+            ref=m.instance_ref, detail=_detail(m.detail))
         for m in statement.movements
     ]
 
@@ -216,7 +216,7 @@ def build_bound(build_peer_mu: int, variance: float) -> int:
 # tunnels, a resize, its statements; or get MU back from them. None of it is a charge
 # of the peer on this node.
 _CHILD_ACTIVITY = (
-    ledger.CHILD_START, ledger.TOP_UP, ledger.WITHDRAWAL, ledger.REFUND, ledger.TUNNEL,
+    ledger.CHILD_START, ledger.CHILD_BOUND, ledger.TOP_UP, ledger.WITHDRAWAL, ledger.REFUND, ledger.TUNNEL,
     ledger.RESOURCE_CHANGE, ledger.STATEMENT_QUERY, ledger.DEPOSIT, ledger.CREDIT,
 )
 
@@ -304,19 +304,27 @@ def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now_ts: int
                      ) -> Tuple[List[str], Optional[int]]:
     """What the peer took from our account that this node did not cause.
 
-    ``starts`` is each child that this node started on the peer, by the token of the
-    peer, with what it sent for it. Returns the problems, and the seq of the first
-    ``child_start`` that cannot be judged yet: one with no token, or with a token that
-    this node has not stored, younger than ``start_grace_seconds``. That start may be
-    in progress. The mark stops before it, and the next read looks at it again.
+    ``starts`` is each child that this node started on the peer, by the ``instance_ref``
+    of its token on the peer, with what it sent for it. The peer names the child of a
+    ``child_start`` in a later ``child_bound`` row. Returns the problems, and the seq of
+    the first ``child_start`` that cannot be judged yet: one with no ``child_bound``, or
+    with a child that this node has not stored, younger than ``start_grace_seconds``.
+    That start may be in progress. The mark stops before it, and the next read looks at
+    it again.
     """
     rows = list(rows)
     problems = []
     refunded = set()
+    bound = {}
     for row in rows:
         if row.kind == ledger.REFUND and row.amount > 0:
             try:
                 refunded.add(int(row.detail["refunds_seq"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+        elif row.kind == ledger.CHILD_BOUND:
+            try:
+                bound[int(row.detail["starts_seq"])] = row.ref
             except (KeyError, TypeError, ValueError):
                 pass
     for row in rows:
@@ -325,18 +333,19 @@ def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now_ts: int
         if row.kind == ledger.CHILD_START:
             if row.seq in refunded:
                 continue
-            if row.token in starts:
-                if -row.amount > starts[row.token]:
+            child = bound.get(row.seq, "")
+            if child in starts:
+                if -row.amount > starts[child]:
                     problems.append(
-                        f"the start of {row.token[:8]} took {-row.amount} MU, and "
-                        f"{starts[row.token]} were sent"
+                        f"the start of {child[:8]} took {-row.amount} MU, and "
+                        f"{starts[child]} were sent"
                     )
                 continue
             if now_ts - row.ts <= start_grace_seconds():
                 return problems, row.seq
             problems.append(f"movement {row.seq} pays the start of a child that this node did not start")
         elif row.kind == ledger.TOP_UP:
-            if row.token not in starts:
+            if row.ref not in starts:
                 problems.append(f"movement {row.seq} tops up an instance that is not ours")
         else:
             problems.append(f"movement {row.seq} is a {row.kind!r} charge that this node did not cause")

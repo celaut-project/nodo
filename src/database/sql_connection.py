@@ -284,7 +284,11 @@ class SQLConnection(metaclass=Singleton):
         if not os.path.exists(STORAGE):
             os.makedirs(STORAGE)
         if SQLConnection._connection is None:
-            SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
+            # `timeout`: the CLI writes to the same file from another process, and a
+            # writer waits for the lock instead of failing with `database is locked`.
+            SQLConnection._connection = sqlite3.connect(
+                DATABASE_FILE, check_same_thread=False, timeout=30
+            )
             SQLConnection._connection.row_factory = sqlite3.Row
             _ensure_traceability_tables(SQLConnection._connection)
 
@@ -361,10 +365,20 @@ class SQLConnection(metaclass=Singleton):
     # not at all, and the rows of an account add up to its balance.
 
     def _transaction(self, work: Callable[[sqlite3.Cursor], object]):
-        """Run ``work`` with a cursor, under the connection lock, as one transaction."""
+        """Run ``work`` with a cursor, under the connection lock, as one transaction.
+
+        The transaction takes the write lock of the database before the first read
+        (``BEGIN IMMEDIATE``). The lock of this class is the lock of one process, and
+        the CLI (``credit_client``, ``burnall``, ``pay``) writes from another: with the
+        default, a transaction begins at its first write, and a balance or a seq that
+        ``work`` read before it could be stale by then.
+        """
         with SQLConnection._lock:
             connection = SQLConnection._connection
             try:
+                if connection.in_transaction:
+                    connection.commit()
+                connection.execute('BEGIN IMMEDIATE')
                 result = work(connection.cursor())
                 connection.commit()
                 return result
@@ -376,19 +390,32 @@ class SQLConnection(metaclass=Singleton):
     def _append_movement(cursor, account_id: str, amount_mu: int, balance_after_mu: int,
                          kind: str, instance_token: Optional[str] = None,
                          detail: Optional[Mapping] = None) -> int:
-        """Write the next row of ``account_id`` and return its seq."""
+        """Write the next row of ``account_id`` and return its seq.
+
+        The row hangs from the one before it: ``prev_hash`` is its hash, or the genesis
+        hash of the account for the first row. ``instance_token`` is the token of the
+        instance that the row concerns; the row keeps only its ``instance_ref``.
+        """
         if kind not in ledger.KINDS:
             raise ValueError(f"Unknown kind of movement: {kind!r}")
-        row = cursor.execute(
-            'SELECT MAX(seq) FROM balance_movements WHERE account_id = ?', (account_id,)
+        last = cursor.execute(
+            'SELECT seq, hash FROM balance_movements WHERE account_id = ? '
+            'ORDER BY seq DESC LIMIT 1', (account_id,)
         ).fetchone()
-        seq = int(row[0] or 0) + 1
+        seq = int(last[0]) + 1 if last else 1
+        prev_hash = last[1] if last else ledger.genesis_hash(account_id)
+        ts = int(time.time())
+        ref = ledger.instance_ref(instance_token) if instance_token else None
+        text = ledger.canonical_detail(detail)
         cursor.execute('''
             INSERT INTO balance_movements
-                (account_id, seq, ts, amount_mu, balance_after_mu, kind, instance_token, detail)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (account_id, seq, int(time.time()), str(int(amount_mu)), str(int(balance_after_mu)),
-              kind, instance_token, ledger.canonical_detail(detail)))
+                (account_id, seq, ts, amount_mu, balance_after_mu, kind, instance_ref,
+                 detail, prev_hash, hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (account_id, seq, ts, str(int(amount_mu)), str(int(balance_after_mu)), kind,
+              ref, text, prev_hash,
+              ledger.movement_hash(prev_hash, seq, ts, amount_mu, balance_after_mu, kind,
+                                   ref, text)))
         return seq
 
     def _move(self, cursor, account_id: str, amount_mu: int, kind: str, *,
@@ -478,17 +505,108 @@ class SQLConnection(metaclass=Singleton):
             self._append_movement(cursor, account_id, int(movement.amount_mu), balance_mu,
                                   movement.kind, movement.instance_token, movement.detail)
 
-    def set_movement_token(self, account_id: str, seq: int, instance_token: str) -> bool:
-        """Set the token of a row that has none: a ``child_start`` whose child now exists.
+    def bind_child(self, account_id: str, starts_seq: int, instance_token: str) -> int:
+        """Say that the child of a ``child_start`` exists: write a ``child_bound`` row.
 
-        The one change a row allows (see src/database/ledger.py). Only from empty to
-        set, so it cannot rename a child that a statement already showed.
+        A start charges the father before the child exists, and a row is never
+        changed, so the child comes in a row of its own: it moves nothing, names the
+        child by ``instance_ref`` and the ``child_start`` by ``detail.starts_seq``.
+        Returns the seq of the new row.
         """
-        cursor = self._execute('''
-            UPDATE balance_movements SET instance_token = ?
-            WHERE account_id = ? AND seq = ? AND instance_token IS NULL
-        ''', (instance_token, account_id, int(seq)))
-        return cursor.rowcount > 0
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT balance_after_mu FROM balance_movements WHERE account_id = ? '
+                'ORDER BY seq DESC LIMIT 1', (account_id,)
+            ).fetchone()
+            if row is None:
+                raise ledger.NoSuchAccount(account_id)
+            return self._append_movement(
+                cursor, account_id, 0, _balance_of(row['balance_after_mu']), ledger.CHILD_BOUND,
+                instance_token=instance_token, detail={"starts_seq": str(int(starts_seq))},
+            )
+
+        return self._transaction(work)
+
+    def settle_stop(self, account_id: str, reason: str, *, delegated: bool = False,
+                    father_id: Optional[str] = None, credit: bool = True) -> Optional[int]:
+        """Settle a stopped instance in one transaction: refund, then mark it dead.
+
+        What the instance has left goes back to its father, and the instance dies, as
+        one fact. The balance is read inside the transaction, so a charge of a tick or a
+        tunnel that lands meanwhile is either before it (and the father gets less) or
+        after the death (and is refused): no MU are made out of a stale read.
+
+        Two rows when the father gets the leftover: a negative ``refund`` on the
+        instance, a positive one on the father, who names the instance. The instance
+        dies with nothing on it, unless it was in debt, which stays as it was. When
+        the father is gone the instance still dies, and its ``refund`` says
+        ``detail.lost = father_gone``; with ``credit`` off, ``detail.to = caller``, and
+        the figure is for the caller of ``stop_instance`` to settle.
+
+        ``account_id`` is the id of the account: the instance id of a local instance,
+        or the alias of a delegated one.
+
+        Returns the leftover (0 if there was none), or None when the instance was
+        dead already or does not exist.
+        """
+        table, where = (
+            ("delegated_instances", "id = ? AND killed_at IS NULL") if delegated
+            else ("local_instances", "id = ? AND killed_at IS NULL")
+        )
+
+        def work(cursor):
+            row = cursor.execute(
+                f'SELECT balance_mu FROM {table} WHERE {where}', (account_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            leftover = max(_balance_of(row['balance_mu']), 0)
+            if leftover > 0:
+                father_exists = bool(credit and father_id and self._account_exists(cursor, father_id))
+                detail = None
+                if not credit:
+                    detail = {"to": "caller"}
+                elif not father_exists:
+                    detail = {"lost": "father_gone"}
+                self._move(cursor, account_id, -leftover, ledger.REFUND, detail=detail)
+                if father_exists:
+                    self._move(cursor, father_id, leftover, ledger.REFUND,
+                               instance_token=account_id)
+            cursor.execute(
+                f'UPDATE {table} SET killed_at = CURRENT_TIMESTAMP, death_reason = ? WHERE {where}',
+                (reason, account_id),
+            )
+            return leftover
+
+        leftover = self._transaction(work)
+        if leftover is not None and not delegated:
+            self._forget_consumption(account_id)
+        return leftover
+
+    def account_exists(self, account_id: Optional[str]) -> bool:
+        """Whether a client, a live local instance or a live delegated one has this id."""
+        if not account_id:
+            return False
+        return self._transaction(lambda cursor: self._account_exists(cursor, account_id))
+
+    @staticmethod
+    def _account_exists(cursor, account_id: str) -> bool:
+        for table, where in _ACCOUNT_TABLES:
+            if cursor.execute(f'SELECT 1 FROM {table} WHERE {where}', (account_id,)).fetchone():
+                return True
+        return False
+
+    def _forget_consumption(self, id: str, killed: bool = True) -> None:
+        """What a local instance leaves when it dies: its burn-rate rows and window.
+
+        ``killed`` is whether this call killed it: only then the room it freed changes.
+        """
+        if killed:
+            _local_capacity_changed()
+        self._execute('DELETE FROM instance_consumption WHERE instance_id = ?', (id,))
+        self._execute('DELETE FROM instance_energy WHERE instance_id = ?', (id,))
+        with SQLConnection._consumption_lock:
+            SQLConnection._consumption_windows.pop(id, None)
 
     def balance_statement(self, account_id: str, payer_id: str, *, since_seconds: int = 0,
                           last: int = 0, max_rows: int = 0,
@@ -520,8 +638,8 @@ class SQLConnection(metaclass=Singleton):
             limit = min(limits) if limits else None
             # One row more than the limit, to know if the cap cut the answer.
             fetched = cursor.execute(
-                f'SELECT seq, ts, amount_mu, balance_after_mu, kind, instance_token, detail '
-                f'FROM balance_movements WHERE {where} ORDER BY seq DESC LIMIT ?',
+                f'SELECT seq, ts, amount_mu, balance_after_mu, kind, instance_ref, detail, '
+                f'prev_hash, hash FROM balance_movements WHERE {where} ORDER BY seq DESC LIMIT ?',
                 (*params, -1 if limit is None else limit + 1),
             ).fetchall()
             truncated = limit is not None and len(fetched) > limit and (last <= 0 or limit < last)
@@ -534,8 +652,8 @@ class SQLConnection(metaclass=Singleton):
             )
             if own and seq is not None:
                 rows.append(dict(cursor.execute(
-                    'SELECT seq, ts, amount_mu, balance_after_mu, kind, instance_token, detail '
-                    'FROM balance_movements WHERE account_id = ? AND seq = ?', (account_id, seq),
+                    'SELECT seq, ts, amount_mu, balance_after_mu, kind, instance_ref, detail, '
+                    'prev_hash, hash FROM balance_movements WHERE account_id = ? AND seq = ?', (account_id, seq),
                 ).fetchone()))
             for table, where_account in _ACCOUNT_TABLES:
                 balance_row = cursor.execute(
@@ -553,9 +671,9 @@ class SQLConnection(metaclass=Singleton):
     def prune_balance_movements(self, max_age_days: int) -> int:
         """Delete the rows older than ``max_age_days``. Returns how many.
 
-        The last row of a live account stays, whatever its age: it is what the next
-        row counts its seq from, and a seq that went back to 1 would read as a ledger
-        that lost its history.
+        The last row of a live account stays, whatever its age: the next row counts its
+        seq from it and hangs from its hash, and a seq that went back to 1 would read as
+        a ledger that lost its history.
         """
         cutoff = int(time.time()) - int(max_age_days) * 86400
         cursor = self._execute('''
@@ -1197,12 +1315,7 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ? AND killed_at IS NULL
         ''', (reason, id))
         killed = cursor.rowcount > 0
-        if killed:
-            _local_capacity_changed()
-        self._execute('DELETE FROM instance_consumption WHERE instance_id = ?', (id,))
-        self._execute('DELETE FROM instance_energy WHERE instance_id = ?', (id,))
-        with SQLConnection._consumption_lock:
-            SQLConnection._consumption_windows.pop(id, None)
+        self._forget_consumption(id, killed)
         return killed
 
     def get_dead_local_instances(self) -> List[dict]:
@@ -3052,13 +3165,15 @@ class SQLConnection(metaclass=Singleton):
         ''', (seq, None if balance_mu is None else str(int(balance_mu)), read_at, peer_id))
 
     def delegated_starts_on_peer(self, peer_id: str) -> Dict[str, int]:
-        """The token of the peer of each instance delegated to ``peer_id``, live or dead,
-        with what was sent for its start, in the MU of the peer."""
+        """The ``instance_ref`` of the token of the peer of each instance delegated to
+        ``peer_id``, live or dead, with what was sent for its start, in the MU of the
+        peer. That is how the peer names the child in the rows of our account there."""
         rows = self._execute(
             'SELECT token_delegation, sent_peer_mu FROM delegated_instances WHERE peer_id = ?',
             (peer_id,),
         ).fetchall()
-        return {row['token_delegation']: _as_int(row['sent_peer_mu']) for row in rows}
+        return {ledger.instance_ref(row['token_delegation']): _as_int(row['sent_peer_mu'])
+                for row in rows}
 
     def get_delegated_token_by_id(self, id: str) -> Optional[str]:
         """

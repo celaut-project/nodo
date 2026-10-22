@@ -39,9 +39,7 @@ class ManagerTransportCleanupTests(unittest.TestCase):
         ), patch.object(
             manager.sc, "get_internal_instance", return_value=serialized_instance
         ), patch.object(
-            manager.sc, "get_instance_balance", return_value=42
-        ), patch.object(
-            manager.sc, "mark_local_killed", return_value=True
+            manager.sc, "settle_stop", return_value=42
         ), patch.object(
             manager.dead_instances, "write_death_record"
         ), patch.object(

@@ -579,11 +579,14 @@ TABLES = {
     ''',
     # One row per movement of a balance (#570): see src/database/ledger.py. The rows of
     # an account add up to its balance, because each one is written in the same
-    # transaction as the balance. `seq` counts from 1 for each account, with no gaps.
-    # `ts` is unix seconds. `amount_mu` is signed; both MU columns are TEXT, as every
-    # balance is. `detail` is the cause, as canonical JSON. The retention sweep deletes
-    # rows older than `ledger.RETENTION_DAYS`, but keeps the last row of a live account,
-    # so that the next row still knows its seq.
+    # transaction as the balance, and they are a chain: `prev_hash` is the `hash` of
+    # the row before (the genesis hash for seq 1), so the hash of the last row commits
+    # to all of them. `seq` counts from 1 for each account, with no gaps. `ts` is unix
+    # seconds. `amount_mu` is signed; both MU columns are TEXT, as every balance is.
+    # `instance_ref` is a hash of the token of the instance that the row concerns,
+    # never the token. `detail` is the cause, as canonical JSON. A row is never
+    # changed. The retention sweep deletes rows older than `ledger.RETENTION_DAYS`, but
+    # keeps the last row of a live account, so that the next row still hangs from it.
     "balance_movements": '''
         CREATE TABLE IF NOT EXISTS balance_movements (
             account_id TEXT NOT NULL,
@@ -592,8 +595,10 @@ TABLES = {
             amount_mu TEXT NOT NULL,
             balance_after_mu TEXT NOT NULL,
             kind TEXT NOT NULL,
-            instance_token TEXT DEFAULT NULL,
+            instance_ref TEXT DEFAULT NULL,
             detail TEXT DEFAULT NULL,
+            prev_hash TEXT NOT NULL,
+            hash TEXT NOT NULL,
             PRIMARY KEY (account_id, seq)
         )
     '''

@@ -4,7 +4,12 @@ Every write of a balance goes with its row, in one transaction, so the rows of a
 account add up to its balance. A statement is charged to whoever asks, and is signed.
 """
 
+import hashlib
+import multiprocessing
+import os
 import sqlite3
+import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -55,6 +60,17 @@ class _Database(unittest.TestCase):
             self.assertEqual(int(row["balance_after_mu"]), running)
         self.assertEqual(running, balance)
 
+    def assert_chained(self, account):
+        """Each row hangs from the one before it, and its hash is the one of its fields."""
+        previous = ledger.genesis_hash(account)
+        for row in self.rows(account):
+            self.assertEqual(row["prev_hash"], previous)
+            self.assertEqual(row["hash"], ledger.movement_hash(
+                row["prev_hash"], row["seq"], row["ts"], row["amount_mu"],
+                row["balance_after_mu"], row["kind"], row["instance_ref"], row["detail"],
+            ))
+            previous = row["hash"]
+
     def add_instance(self, token, father, balance, movements=None):
         self.sc.add_local_instance(
             father_id=father, container_ip="10.0.0.2", container_id=token, name=token,
@@ -79,7 +95,8 @@ class LedgerWriteTests(_Database):
 
         self.assertEqual(self.sc.get_balance_by_client_id("c1"), 400)
         self.assert_adds_up("c1", 400)
-        self.assertEqual(self.rows("c1")[-1]["instance_token"], "child")
+        self.assertEqual(self.rows("c1")[-1]["instance_ref"], ledger.instance_ref("child"))
+        self.assert_chained("c1")
 
     def test_a_charge_beyond_the_balance_moves_nothing_without_debt(self):
         self.sc.add_client("c1", 100, None)
@@ -123,18 +140,28 @@ class LedgerWriteTests(_Database):
 
         self.assertEqual(self.sc.get_balance_by_client_id("c1"), 40)
         self.assertEqual(self.sc.get_instance_balance("i1"), 110)
-        self.assertEqual(self.rows("c1")[-1]["instance_token"], "i1")
-        self.assertIsNone(self.rows("i1")[-1]["instance_token"])
+        self.assertEqual(self.rows("c1")[-1]["instance_ref"], ledger.instance_ref("i1"))
+        self.assertIsNone(self.rows("i1")[-1]["instance_ref"])
         self.assert_adds_up("c1", 40)
         self.assert_adds_up("i1", 110)
 
-    def test_the_token_of_a_child_start_is_set_once(self):
+    def test_the_child_of_a_start_is_bound_by_a_row_of_its_own(self):
         self.sc.add_client("c1", 100, None)
         seq = self.sc.move_balance("c1", -10, ledger.CHILD_START)
+        start = self.rows("c1")[-1]
 
-        self.assertTrue(self.sc.set_movement_token("c1", seq, "child-1"))
-        self.assertFalse(self.sc.set_movement_token("c1", seq, "child-2"))
-        self.assertEqual(self.rows("c1")[-1]["instance_token"], "child-1")
+        bound_seq = self.sc.bind_child("c1", seq, "child-1")
+
+        self.assertEqual(self.rows("c1")[seq - 1], start, "the start row is never changed")
+        bound = self.rows("c1")[-1]
+        self.assertEqual(bound["seq"], bound_seq)
+        self.assertEqual(bound["kind"], ledger.CHILD_BOUND)
+        self.assertEqual(int(bound["amount_mu"]), 0)
+        self.assertEqual(int(bound["balance_after_mu"]), 90)
+        self.assertEqual(bound["instance_ref"], ledger.instance_ref("child-1"))
+        self.assertEqual(bound["detail"], '{"starts_seq":"%d"}' % seq)
+        self.assert_adds_up("c1", 90)
+        self.assert_chained("c1")
 
     def test_a_delegated_instance_is_an_account_under_the_alias_of_its_father(self):
         self.sc.add_client("c1", 100, None)
@@ -153,7 +180,9 @@ class LedgerWriteTests(_Database):
         self.assert_adds_up("alias", 45)
         row = self.sc.get_delegated_instances()[0]
         self.assertEqual((row["peer_balance_mu"], row["peer_statement_seq"]), (4, 3))
-        self.assertEqual(self.sc.delegated_starts_on_peer("p"), {"peer-token": 9})
+        self.assertEqual(
+            self.sc.delegated_starts_on_peer("p"), {ledger.instance_ref("peer-token"): 9}
+        )
 
     def test_the_sweep_keeps_the_last_row_of_a_live_account(self):
         self.sc.add_client("c1", 100, None)
@@ -165,6 +194,246 @@ class LedgerWriteTests(_Database):
         self.sc.move_balance("c1", 5, ledger.DEPOSIT)
 
         self.assertEqual([r["seq"] for r in self.rows("c1")], [2, 3])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class LedgerChainTests(_Database):
+
+    def test_the_first_row_hangs_from_the_genesis_of_its_account(self):
+        self.sc.add_client("c1", 500, None)
+        self.sc.add_client("c2", 500, None)
+
+        self.assertEqual(self.rows("c1")[0]["prev_hash"], ledger.genesis_hash("c1"))
+        self.assertNotEqual(ledger.genesis_hash("c1"), ledger.genesis_hash("c2"))
+        self.assert_chained("c1")
+
+    def test_every_row_hangs_from_the_one_before_it(self):
+        self.sc.add_client("c1", 500, None)
+        for amount in (-10, 25, -3):
+            self.sc.move_balance("c1", amount, ledger.TOP_UP if amount < 0 else ledger.DEPOSIT)
+
+        rows = self.rows("c1")
+        self.assertEqual(len(rows), 4)
+        for before, row in zip(rows, rows[1:]):
+            self.assertEqual(row["prev_hash"], before["hash"])
+        self.assert_chained("c1")
+
+    def test_the_chain_survives_the_sweep(self):
+        self.sc.add_client("c1", 100, None)
+        self.sc.move_balance("c1", 5, ledger.DEPOSIT)
+        SQLConnection._connection.execute("UPDATE balance_movements SET ts = 0")
+        SQLConnection._connection.commit()
+        kept = self.rows("c1")[1]["hash"]
+
+        self.sc.prune_balance_movements(max_age_days=30)
+        self.sc.move_balance("c1", 5, ledger.DEPOSIT)
+
+        rows = self.rows("c1")
+        self.assertEqual([r["seq"] for r in rows], [2, 3])
+        self.assertEqual(rows[1]["prev_hash"], kept)
+
+    def test_a_row_is_the_same_hash_for_any_implementation(self):
+        """A fixed vector: another implementation of the chain can check itself with it."""
+        genesis = ledger.genesis_hash("acct")
+        self.assertEqual(
+            genesis, "4d754ff1bc79afaa5f564f5f8afc57addbf565e6ea85946592a622db18df05c2")
+        self.assertEqual(
+            ledger.movement_hash(genesis, 1, 1700000000, 500, 500, "credit", None, None),
+            "38683a3a15dc9ae892fc745acd9a3592d7bb55ea2ed48c7519e25fc8fcc07430")
+        self.assertEqual(
+            ledger.movement_hash("ab" * 32, 2, 1700000001, -10, 490, "child_start",
+                                 ledger.instance_ref("tok"), '{"rows":"3"}'),
+            "fd0410b88cd86147c5837919fc46247fd5fcfca4a43bf2d4322e7b7c253fc34c")
+
+    def test_a_field_cannot_pass_for_a_separator(self):
+        """Two rows that differ in where a text ends never give the same hash."""
+        a = ledger.movement_hash("p", 1, 5, 1, 1, "x~y", None, None)
+        b = ledger.movement_hash("p", 1, 5, 1, 1, "x", "y", None)
+        self.assertNotEqual(a, b)
+
+    def test_a_reference_is_not_the_alias_of_a_delegated_instance(self):
+        self.assertNotEqual(ledger.instance_ref("tok"), hashlib.sha256(b"tok").hexdigest())
+        self.assertNotEqual(ledger.instance_ref("x"), ledger.account_ref("x"))
+
+    def test_no_row_holds_a_credential(self):
+        self.sc.add_client("secret-client", 500, None)
+        self.sc.move_balance("secret-client", -10, ledger.CHILD_START, instance_token="secret-token")
+        self.sc.bind_child("secret-client", 2, "secret-token")
+
+        for row in self.rows("secret-client"):
+            for value in row.values():
+                self.assertNotIn("secret-token", str(value))
+        self.assertEqual(self.rows("secret-client")[1]["instance_ref"],
+                         ledger.instance_ref("secret-token"))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class SettleStopTests(_Database):
+
+    def setUp(self):
+        super().setUp()
+        self.sc.add_client("c1", 1000, None)
+        self.add_instance("i1", "c1", 400, movements=(ledger.Movement(ledger.START, 400),))
+
+    def test_the_leftover_goes_to_the_father_in_one_step_and_the_child_dies_empty(self):
+        self.assertEqual(self.sc.settle_stop("i1", "manual_kill", father_id="c1"), 400)
+
+        child, father = self.rows("i1"), self.rows("c1")
+        self.assertEqual((child[-1]["kind"], int(child[-1]["amount_mu"])), (ledger.REFUND, -400))
+        self.assertEqual(int(child[-1]["balance_after_mu"]), 0)
+        self.assertEqual((father[-1]["kind"], int(father[-1]["amount_mu"])), (ledger.REFUND, 400))
+        self.assertEqual(father[-1]["instance_ref"], ledger.instance_ref("i1"))
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1400)
+        self.assertFalse(self.sc.internal_instance_exists("i1"))
+        self.assert_adds_up("i1", 0)
+        self.assert_chained("i1")
+        self.assert_chained("c1")
+
+    def test_a_stop_that_repeats_does_nothing(self):
+        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+
+        self.assertIsNone(self.sc.settle_stop("i1", "manual_kill", father_id="c1"))
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1400)
+
+    def test_a_dead_instance_cannot_be_charged(self):
+        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+
+        with self.assertRaises(ledger.NoSuchAccount):
+            self.sc.move_balance("i1", -1, ledger.MAINTENANCE)
+
+    def test_an_unknown_instance_is_not_settled(self):
+        self.assertIsNone(self.sc.settle_stop("nobody", "manual_kill", father_id="c1"))
+
+    def test_a_father_that_is_gone_loses_nothing_that_the_books_do_not_say(self):
+        self.assertEqual(self.sc.settle_stop("i1", "manual_kill", father_id="gone"), 400)
+
+        refund = self.rows("i1")[-1]
+        self.assertEqual(refund["detail"], '{"lost":"father_gone"}')
+        self.assertFalse(self.sc.internal_instance_exists("i1"))
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1000)
+
+    def test_a_caller_that_takes_the_leftover_gets_the_figure_and_the_father_nothing(self):
+        self.assertEqual(
+            self.sc.settle_stop("i1", "burnall", father_id="c1", credit=False), 400)
+
+        self.assertEqual(self.rows("i1")[-1]["detail"], '{"to":"caller"}')
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1000)
+        self.assertFalse(self.sc.internal_instance_exists("i1"))
+
+    def test_an_instance_in_debt_dies_with_its_debt_and_no_refund(self):
+        self.sc.move_balance("i1", -450, ledger.MAINTENANCE)
+
+        self.assertEqual(self.sc.settle_stop("i1", "out_of_balance", father_id="c1"), 0)
+
+        self.assertEqual([r["kind"] for r in self.rows("i1")][-1], ledger.MAINTENANCE)
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1000)
+        self.assertFalse(self.sc.internal_instance_exists("i1"))
+
+    def test_an_instance_father_is_credited_too(self):
+        self.add_instance("i2", "i1", 100, movements=(ledger.Movement(ledger.START, 100),))
+
+        self.sc.settle_stop("i2", "manual_kill", father_id="i1")
+
+        self.assertEqual(self.sc.get_instance_balance("i1"), 500)
+        self.assert_adds_up("i1", 500)
+
+    def test_a_delegated_instance_settles_under_its_alias(self):
+        self.sc.add_delegated_instance(
+            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
+            peer_balance_mu=6, movements=(
+                ledger.Movement(ledger.START, 100), ledger.Movement(ledger.COMMISSION, -10),
+                ledger.Movement(ledger.BUILD, -30),
+            ), sent_peer_mu=9, mark={},
+        )
+
+        self.assertEqual(
+            self.sc.settle_stop("alias", "manual_kill", delegated=True, father_id="c1"), 60)
+
+        self.assertEqual(self.rows("alias")[-1]["kind"], ledger.REFUND)
+        self.assert_adds_up("alias", 0)
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1060)
+
+    def test_a_charge_that_lands_during_the_stop_is_never_refunded_too(self):
+        """Whatever the interleaving, what the child had splits into what it was charged
+        and what its father got back: no MU appear."""
+        charged = []
+        lock = threading.Lock()
+
+        def charge():
+            for _ in range(40):
+                try:
+                    self.sc.move_balance("i1", -5, ledger.TUNNEL, allow_debt=False)
+                except ledger.NoSuchAccount:
+                    return
+                except ledger.InsufficientBalance:
+                    return
+                with lock:
+                    charged.append(5)
+
+        threads = [threading.Thread(target=charge) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        refund = self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(sum(charged) + refund, 400)
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1000 + refund)
+        self.assert_adds_up("i1", 0)
+        self.assert_chained("i1")
+
+
+def _write_from_another_process(path, account, count):
+    """What the CLI does: write to the same file, from a process of its own."""
+    connection = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    connection.row_factory = sqlite3.Row
+    SQLConnection._connection = connection
+    sc = SQLConnection()
+    for _ in range(count):
+        sc.move_balance(account, 1, ledger.DEPOSIT)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class WritersInOtherProcessesTests(unittest.TestCase):
+
+    def test_two_processes_and_this_one_keep_the_chain_and_the_sum(self):
+        original = SQLConnection._connection
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "nodo.db")
+            connection = sqlite3.connect(path, timeout=30, check_same_thread=False)
+            connection.row_factory = sqlite3.Row
+            create_tables(connection.cursor())
+            connection.commit()
+            SQLConnection._connection = connection
+            try:
+                sc = SQLConnection()
+                sc.add_client("c1", 0, None)
+                context = multiprocessing.get_context("spawn")
+                workers = [
+                    context.Process(target=_write_from_another_process, args=(path, "c1", 60))
+                    for _ in range(2)
+                ]
+                for worker in workers:
+                    worker.start()
+                for _ in range(60):
+                    sc.move_balance("c1", 1, ledger.DEPOSIT)
+                for worker in workers:
+                    worker.join(timeout=120)
+                    self.assertEqual(worker.exitcode, 0)
+
+                rows = [dict(r) for r in connection.execute(
+                    "SELECT * FROM balance_movements WHERE account_id = 'c1' ORDER BY seq")]
+                self.assertEqual([r["seq"] for r in rows], list(range(1, 181)))
+                previous = ledger.genesis_hash("c1")
+                for row in rows:
+                    self.assertEqual(row["prev_hash"], previous)
+                    previous = row["hash"]
+                self.assertEqual(sc.get_balance_by_client_id("c1"), 180)
+                self.assertEqual(int(rows[-1]["balance_after_mu"]), 180)
+            finally:
+                connection.close()
+                SQLConnection._connection = original
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -220,7 +489,8 @@ class StatementReadTests(_Database):
         self.assertEqual([m["kind"] for m in read["movements"]], [ledger.START])
         self.assertEqual(read["balance_mu"], 70)
         charge = self.rows("c1")[-1]
-        self.assertEqual((charge["kind"], charge["instance_token"]), (ledger.STATEMENT_QUERY, "i1"))
+        self.assertEqual((charge["kind"], charge["instance_ref"]),
+                         (ledger.STATEMENT_QUERY, ledger.instance_ref("i1")))
         self.assertEqual(int(charge["amount_mu"]), -2)
 
     def test_a_payer_that_cannot_pay_gets_nothing(self):

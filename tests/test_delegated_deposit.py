@@ -538,7 +538,7 @@ class CheckOurAccountTests(unittest.TestCase):
         sc = MagicMock()
         sc.get_peer_client.return_value = "client-on-peer"
         sc.get_peer_statement_mark.return_value = stored or {}
-        sc.delegated_starts_on_peer.return_value = starts or {PEER_TOKEN: 100}
+        sc.delegated_starts_on_peer.return_value = starts or {ledger.instance_ref(PEER_TOKEN): 100}
         with patch.object(maintain, "sc", sc), \
                 patch.object(maintain.balance_statement, "fetch", return_value=statement), \
                 patch.object(statement_check, "penalise_once") as penalise:
@@ -547,14 +547,15 @@ class CheckOurAccountTests(unittest.TestCase):
 
     def test_our_own_movements_move_the_mark_to_the_last_one(self):
         statement = _statement((1, 500, "credit"), (2, -100, "child_start"),
-                               (3, -1, "statement_query"))
-        statement.movements[1].instance_token = PEER_TOKEN
+                               (3, 0, "child_bound", '{"starts_seq":"2"}'),
+                               (4, -1, "statement_query"))
+        statement.movements[2].instance_ref = ledger.instance_ref(PEER_TOKEN)
 
         sc, penalise = self._check(statement)
 
         penalise.assert_not_called()
         peer, seq, balance, _ = sc.set_peer_statement_mark.call_args.args
-        self.assertEqual((peer, seq, balance), (PEER_ID, 3, 399))
+        self.assertEqual((peer, seq, balance), (PEER_ID, 4, 399))
 
     def test_a_charge_we_did_not_cause_is_an_overcharge(self):
         statement = _statement((1, 500, "credit"), (2, -100, "debit"))
@@ -599,25 +600,20 @@ class _StopHarness:
         )
         self.sc.get_delegated_token_by_id.return_value = PEER_TOKEN
         self.sc.get_peer_id_by_external_service.return_value = PEER_ID
-        self.sc.get_delegated_balance.return_value = leftover
         self.sc.get_external_father_id.return_value = father_id
         self.sc.get_delegated_instance.return_value = None
         self.sc.get_instance_balance.return_value = 0
-        self.sc.mark_delegated_killed.side_effect = self._record_purge
-        self.sc.move_balance.side_effect = self._record_credit
+        self.sc.settle_stop.side_effect = self._settle
+        self.leftover = leftover
         self.purge_raises = purge_raises
 
         self.peer_refund = celaut.Refund(amount=celaut.Amount(n=str(peer_refund)))
 
-    def _record_purge(self, token, reason=None):
-        self.calls.append(("purge", token))
+    def _settle(self, account_id, reason, delegated=False, father_id=None, credit=True):
+        self.calls.append(("settle", account_id, delegated, father_id, credit))
         if self.purge_raises:
             raise RuntimeError("database is locked")
-        return True
-
-    def _record_credit(self, account_id, amount_mu, kind, **kwargs):
-        self.calls.append(("credit", account_id, amount_mu, kind, kwargs.get("instance_token")))
-        return 1
+        return self.leftover
 
     def _stop_service(self, **kwargs):
         self.calls.append(("stop_service_on_peer", PEER_TOKEN))
@@ -646,10 +642,9 @@ class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
         refund = harness.run()
 
         self.assertEqual(refund, LEFTOVER)
-        self.assertIn(("credit", FATHER_CLIENT, LEFTOVER, ledger.REFUND, OUR_ALIAS),
-                      harness.calls)
+        self.assertIn(("settle", OUR_ALIAS, True, FATHER_CLIENT, True), harness.calls)
 
-    def test_the_peers_own_refund_is_not_credited_to_the_father(self):
+    def test_the_peers_own_refund_is_not_the_figure_the_father_is_settled_with(self):
         """It is a different account, in a different unit.
 
         The peer credits it to the client row this node holds there -- this node's
@@ -662,36 +657,27 @@ class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
         refund = harness.run()
 
         self.assertEqual(refund, LEFTOVER)
-        credits = [c for c in harness.calls if c[0].startswith("credit")]
-        self.assertEqual(credits, [("credit", FATHER_CLIENT, LEFTOVER, ledger.REFUND, OUR_ALIAS)])
+        settlements = [c for c in harness.calls if c[0] == "settle"]
+        self.assertEqual(settlements, [("settle", OUR_ALIAS, True, FATHER_CLIENT, True)])
 
-    def test_an_instance_father_is_credited_too(self):
+    def test_an_instance_father_is_settled_too(self):
         harness = _StopHarness(father_id="father-instance", father_is_instance=True)
         harness.run()
 
-        self.assertIn(("credit", "father-instance", LEFTOVER, ledger.REFUND, OUR_ALIAS),
-                      harness.calls)
+        self.assertIn(("settle", OUR_ALIAS, True, "father-instance", True), harness.calls)
 
-    def test_the_credit_happens_after_the_delegation_row_is_deleted(self):
-        """The ordering lesson from #297, on this branch too.
-
-        A stop that fails part-way is retried, and a credit issued before the row is
-        gone is issued again on every retry -- MU manufactured out of a deposit
-        nobody spent.
-        """
+    def test_the_settlement_waits_for_the_peer_to_confirm_the_stop(self):
+        """A stop the peer does not confirm settles nothing, and is retried."""
         harness = _StopHarness()
         harness.run()
 
         kinds = [call[0] for call in harness.calls]
-        self.assertLess(kinds.index("purge"), kinds.index("credit"))
+        self.assertLess(kinds.index("stop_service_on_peer"), kinds.index("settle"))
 
-    def test_a_purge_that_fails_credits_nothing_so_a_retry_cannot_pay_twice(self):
+    def test_a_settlement_that_fails_returns_nothing_so_a_retry_settles_once(self):
         harness = _StopHarness(purge_raises=True)
 
         self.assertIsNone(harness.run())
-        self.assertEqual(
-            [c for c in harness.calls if c[0].startswith("credit")], []
-        )
 
     def test_a_peer_that_will_not_confirm_the_stop_settles_nothing(self):
         """Neither the row nor the money moves while the instance may still be running.
@@ -702,8 +688,7 @@ class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
         harness = _StopHarness(peer_raises=True)
 
         self.assertIsNone(harness.run())
-        self.assertEqual([c for c in harness.calls if c[0] == "purge"], [])
-        self.assertEqual([c for c in harness.calls if c[0].startswith("credit")], [])
+        self.assertEqual([c for c in harness.calls if c[0] == "settle"], [])
         harness.close.assert_called_once_with(token=PEER_TOKEN)
 
     def test_a_caller_that_took_the_leftover_on_itself_is_not_second_guessed(self):
@@ -711,18 +696,12 @@ class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
         refund = harness.run(credit=False)
 
         self.assertEqual(refund, LEFTOVER)
-        self.assertEqual(
-            [c for c in harness.calls if c[0].startswith("credit")], []
-        )
+        self.assertIn(("settle", OUR_ALIAS, True, FATHER_CLIENT, False), harness.calls)
 
-    def test_an_exhausted_child_credits_nothing(self):
+    def test_an_exhausted_child_returns_zero(self):
         harness = _StopHarness(leftover=0)
-        refund = harness.run()
 
-        self.assertEqual(refund, 0)
-        self.assertEqual(
-            [c for c in harness.calls if c[0].startswith("credit")], []
-        )
+        self.assertEqual(harness.run(), 0)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

@@ -41,8 +41,9 @@ def _hex(text: str) -> str:
 
 def _movement_text(movement: celaut_pb2.BalanceMovement) -> str:
     return "~".join((
-        str(movement.seq), str(movement.ts), movement.amount.n, movement.balance_after.n,
-        movement.kind, _hex(movement.instance_token), _hex(movement.detail),
+        str(movement.seq), str(movement.ts), _hex(movement.amount.n),
+        _hex(movement.balance_after.n), _hex(movement.kind), movement.instance_ref,
+        _hex(movement.detail), movement.prev_hash,
     ))
 
 
@@ -98,8 +99,9 @@ def answer(caller: str, token: str = "", since_seconds: int = 0, last: int = 0,
                 amount=to_amount(row["amount_mu"]),
                 balance_after=to_amount(row["balance_after_mu"]),
                 kind=row["kind"],
-                instance_token=row["instance_token"] or "",
+                instance_ref=row["instance_ref"] or "",
                 detail=row["detail"] or "",
+                prev_hash=row["prev_hash"],
             )
             for row in read["movements"]
         ],

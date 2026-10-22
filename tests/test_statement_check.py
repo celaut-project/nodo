@@ -31,7 +31,7 @@ def statement(*movements, balance=None, truncated=False):
         detail = movement[4] if len(movement) > 4 else ""
         ts = movement[5] if len(movement) > 5 else 100 + seq
         running += amount
-        out.movements.add(seq=seq, ts=ts, kind=kind, instance_token=token, detail=detail,
+        out.movements.add(seq=seq, ts=ts, kind=kind, instance_ref=token, detail=detail,
                           amount=celaut_pb2.Amount(n=str(amount)),
                           balance_after=celaut_pb2.Amount(n=str(running)))
     out.balance.n = str(running if balance is None else balance)
@@ -88,7 +88,7 @@ def tick(amount, seq, seconds=10, mem=GIB, ts=None):
     detail = json.dumps({"seconds": seconds, "mem_limit": mem, "disk_space": 0,
                          "cpu_period": 100000, "cpu_quota": 100000})
     return Row(seq=seq, ts=ts if ts is not None else 100 + seq * 10, amount=amount,
-               balance_after=0, kind=ledger.MAINTENANCE, token="",
+               balance_after=0, kind=ledger.MAINTENANCE, ref="",
                detail=check._detail(detail))
 
 
@@ -172,17 +172,29 @@ class ChildRuleTests(unittest.TestCase):
 class AccountRuleTests(unittest.TestCase):
     STARTS = {"child": 100}
 
+    @staticmethod
+    def bound(seq, child="child", starts_seq=None):
+        return Row(seq, 0, 0, 0, ledger.CHILD_BOUND, child,
+                   {"starts_seq": str(seq - 1 if starts_seq is None else starts_seq)})
+
     def test_our_starts_top_ups_queries_and_credits_are_fine(self):
         rows = [Row(2, 0, 500, 0, ledger.DEPOSIT, ""),
-                Row(3, 0, -100, 0, ledger.CHILD_START, "child"),
-                Row(4, 0, -50, 0, ledger.TOP_UP, "child"),
-                Row(5, 0, -1, 0, ledger.STATEMENT_QUERY, "child"),
-                Row(6, 0, 20, 0, ledger.REFUND, "child")]
+                Row(3, 0, -100, 0, ledger.CHILD_START, ""),
+                self.bound(4),
+                Row(5, 0, -50, 0, ledger.TOP_UP, "child"),
+                Row(6, 0, -1, 0, ledger.STATEMENT_QUERY, "child"),
+                Row(7, 0, 20, 0, ledger.REFUND, "child")]
         self.assertEqual(check.account_problems(rows, self.STARTS, now_ts=10 ** 6), ([], None))
 
     def test_a_start_above_what_was_sent_is_an_overcharge(self):
-        rows = [Row(3, 0, -101, 0, ledger.CHILD_START, "child")]
+        rows = [Row(3, 0, -101, 0, ledger.CHILD_START, ""), self.bound(4)]
         self.assertEqual(len(check.account_problems(rows, self.STARTS, now_ts=0)[0]), 1)
+
+    def test_a_start_bound_to_a_child_that_is_not_ours_is_an_overcharge_once_it_is_old(self):
+        rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""), self.bound(4, child="stranger")]
+        problems, stop_at = check.account_problems(rows, self.STARTS, now_ts=10 ** 6)
+
+        self.assertEqual((len(problems), stop_at), (1, None))
 
     def test_a_start_in_progress_stops_the_check_until_it_is_known(self):
         rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),

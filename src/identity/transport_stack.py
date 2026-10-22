@@ -454,8 +454,8 @@ def gateway_component() -> Layer:
                             "hex(account)|since_seconds|last|ts|balance.n|truncated|movements",
         "statement.digest.truncated": "1 or 0",
         "statement.digest.movements": "'/'.join(movement in seq order)",
-        "statement.digest.movement": "seq~ts~amount.n~balance_after.n~kind"
-                                     "~hex(instance_token)~hex(detail)",
+        "statement.digest.movement": "seq~ts~hex(amount.n)~hex(balance_after.n)~hex(kind)"
+                                     "~instance_ref~hex(detail)~prev_hash",
         "statement.digest.hex": "lowercase hex of UTF-8; empty for an empty text",
         "client_binding.payload": client_binding_payload(peer_id, client_id),
         "client_binding.signature": "Peer.signature_scheme, lowercase hex",

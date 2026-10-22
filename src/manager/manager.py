@@ -763,7 +763,7 @@ def spend_mu(
 
     ``refund_function_container``, if given, gets a function that gives the charge
     back, as a ``refund`` row. ``movement``, if given, gets the ``(account, seq)`` of
-    the row, so the caller can set its ``instance_token`` later
+    the row, so the caller can name the child of a ``child_start`` once it exists
     (``bind_child_token``).
 
     Returns True if the MU were taken. False, with a log line, if the account does not
@@ -801,10 +801,12 @@ def spend_mu(
 
 
 def bind_child_token(movement: List[Tuple[str, int]], token: str) -> None:
-    """Set the token of the child on the ``child_start`` that paid for it."""
+    """Name the child on the ``child_start`` that paid for it, with a ``child_bound`` row."""
     for account_id, seq in movement:
-        if not sc.set_movement_token(account_id, seq, token):
-            log.LOGGER(f"Could not set the child {token} on row {seq} of {account_id}.")
+        try:
+            sc.bind_child(account_id, seq, token)
+        except Exception as e:
+            log.LOGGER(f"Could not bind the child to row {seq} of {account_id}: {e}")
 
 
 def generate_client(client_id: Optional[str] = None) -> celaut_pb2.Client:
@@ -1213,19 +1215,8 @@ def credit_father(father_id: str, amount_mu: int, kind: str = ledger.REFUND,
     return False
 
 
-def return_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, credit: bool) -> None:
-    """Hand a stopped instance's unspent deposit back to its father.
-
-    The same settlement for a local child and a delegated one: both are funded by a
-    father who paid the whole deposit up front, and both keep what is left of it on
-    a row of this node's own. Where they differ is what the peer does with its side
-    of a delegated instance, which is not this function's business.
-
-    Call this once the instance's row is gone -- see the ordering note in
-    ``stop_instance``. ``credit=False`` means the caller has taken the leftover onto
-    itself and will settle it; that is said out loud because the row the MU was
-    sitting in no longer exists, so a caller that drops the figure drops the money.
-    """
+def _log_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, credit: bool) -> None:
+    """Say where the unspent deposit of a stopped instance went (``sc.settle_stop``)."""
     leftover_mu = int(leftover_mu or 0)
     if leftover_mu <= 0:
         return
@@ -1234,15 +1225,12 @@ def return_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, c
             f"Handing {format_mu(leftover_mu)} unspent by {token} to the "
             f"caller of stop_instance rather than to its father {father_id}."
         )
-    elif not father_id:
-        # The MU has left the child's row by now, so this is a real loss rather
-        # than a no-op, and is worth the same log line an unknown father gets in
-        # `credit_father`.
+    elif not sc.account_exists(father_id):
         log.LOGGER(
             f"Cannot return {format_mu(leftover_mu)} unspent by {token}: "
-            f"it has no father on record."
+            f"its father {father_id!r} is gone."
         )
-    elif credit_father(father_id=father_id, amount_mu=leftover_mu, instance_token=token):
+    else:
         log.LOGGER(
             f"Returned {format_mu(leftover_mu)} unspent by {token} to its "
             f"father {father_id}."
@@ -1281,13 +1269,17 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
     RPC takes a token, never a name (a name is guessable). ``nodo kill`` resolves a
     name to the token before it calls this.
 
-    ``credit=False`` stops the instance and reads the leftover without crediting
-    anybody: the returned figure is then a debt the caller has taken on, and the
-    money exists nowhere else once the row is purged. Only a caller that stops a
-    whole subtree has any use for it -- see ``nodo burnall``, which stops fathers
-    before their children and so cannot let each child pay its own father, whose row
-    is already gone by then. Every other caller stops one instance whose father is
-    still there, and wants the default.
+    The leftover leaves the instance and reaches its father in one transaction
+    (``SQLConnection.settle_stop``): a ``refund`` row on each. The instance dies with
+    nothing on it.
+
+    ``credit=False`` stops the instance without crediting anybody: its ``refund`` row
+    says ``to: caller``, and the returned figure is a debt the caller has taken on.
+    Only a caller that stops a whole subtree has any use for it -- see ``nodo
+    burnall``, which stops fathers before their children and so cannot let each child
+    pay its own father, whose row is already gone by then. Every other caller stops one
+    instance whose father is still there, and wants the default. A father that is gone
+    anyway leaves ``lost: father_gone`` in the ``refund`` row.
 
     ``reason`` says why the instance dies. It is recorded in `death_reason`. The
     row stays in the database with `killed_at` set, and a dead instance never
@@ -1313,50 +1305,27 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
         serialized_instance = sc.get_internal_instance(id=token)
         
         try:
-            refund = sc.get_instance_balance(id=token)
             if reserved_mem_limit > 0:
                 #  IOBigData().unlock_ram(ram_amount=reserved_mem_limit)
                 IOBigData().log_snapshot(
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )
-            death_record = _death_record(token, father_id, reason, refund)
-            if not sc.mark_local_killed(id=token, reason=reason):
+            death_record = _death_record(token, father_id, reason, 0)
+            # What the child has left goes back to its father, and the child dies, in
+            # one transaction (`settle_stop`). Reading the balance first and settling
+            # after would credit the father with a figure that a charge of a tick or a
+            # tunnel has already lowered. A stop that fails before this moves nothing,
+            # and the next maintenance tick stops the instance again: the settlement
+            # happens once.
+            refund = sc.settle_stop(token, reason, father_id=father_id, credit=credit)
+            if refund is None:
                 # Another stop already killed it and settled the leftover.
                 log.LOGGER(f"Instance {token} is already dead.")
                 return None
+            death_record['leftover_mu'] = refund
             death_record['killed_at'] = datetime.now(timezone.utc).isoformat()
             dead_instances.write_death_record(token, death_record)
-
-            # The child's unspent deposit goes back to whoever paid it in, and it goes
-            # back *after* the row is gone.
-            #
-            # A father is charged the child's full `initial_mu` at StartService
-            # (`modify_deposit` -> `spend_mu`) and the child spends only the part it
-            # actually lives through, so whatever is left on the row is the father's
-            # money. Deleting the row without handing it back -- which is all it takes
-            # -- is what sends a parent's balance down without bound: one that starts
-            # and stops children in a loop, which is exactly what an orchestrator
-            # service does, pays the full deposit again on every iteration and never
-            # gets the change, so its balance falls at the rate it *provisions* rather
-            # than at the rate anything is *consumed*. Measured on a live node: 2.0e9
-            # MU charged for 20 children, 0.9e9 consumed by them, the orchestrator at
-            # -1.25e9 and still falling.
-            #
-            # Crediting first, before the DELETE, would look safer and is not: the
-            # amount is already in `refund`, a local read, so nothing about it depends
-            # on the row still existing. What does depend on the kill mark is whether this
-            # stop can happen twice. A `mark_local_killed` that raises leaves the row
-            # alive with its balance intact, and `maintain_vmachines` calls
-            # `stop_instance` again on the next tick -- so a credit issued before it
-            # would be issued again, and again, manufacturing MU out of a balance
-            # nobody ever spent. Crediting after means a failed purge credits nothing
-            # and the retry does the whole thing exactly once. The window that remains
-            # -- a crash between the DELETE and the credit -- loses the leftover, which
-            # is the direction to err in: the books may owe a father, they may never
-            # invent MU that no one paid in.
-            return_leftover(
-                token=token, father_id=father_id, leftover_mu=refund, credit=credit
-            )
+            _log_leftover(token=token, father_id=father_id, leftover_mu=refund, credit=credit)
 
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
@@ -1398,24 +1367,18 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
                 f"deposit there when {external_token} stopped."
             )
 
-            refund = sc.get_delegated_balance(token=external_token)
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_delegated_instance(token=external_token)
 
-            # Drop the delegation record only after the peer confirmed the stop:
-            # if StopService raised we must keep the row so the stop can be
-            # retried and the (remote-computed) refund reconciled, rather than
-            # orphaning an instance the peer may still be running.
-            if not sc.mark_delegated_killed(token=external_token, reason=reason):
+            # The row is settled only after the peer confirmed the stop: if StopService
+            # raised the row stays alive, so the stop can be retried and the refund
+            # reconciled, rather than orphaning an instance the peer may still run.
+            refund = sc.settle_stop(token, reason, delegated=True,
+                                    father_id=father_id, credit=credit)
+            if refund is None:
                 log.LOGGER(f"Delegated instance {token} is already dead.")
                 return None
-
-            # And credit after the DELETE, for the reason spelled out on the
-            # internal branch: this stop is retried while the row survives, and a
-            # credit issued before the row is gone is issued again on every retry.
-            return_leftover(
-                token=token, father_id=father_id, leftover_mu=refund, credit=credit
-            )
+            _log_leftover(token=token, father_id=father_id, leftover_mu=refund, credit=credit)
 
         except Exception as e:
             log.LOGGER('Error purging external instance with hashed token ' + token + ' ' + str(e))

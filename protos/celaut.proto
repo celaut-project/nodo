@@ -704,22 +704,31 @@ message BalanceMovement {
     // What the movement is: "deposit" (a payment), "credit" (MU that nobody paid in),
     // "debit" (the operator took MU), "start" (the initial_mu that the instance got),
     // "build", "commission" (of a node that delegated the instance), "maintenance" (one
-    // period), "child_start" (the account paid the start of a child), "top_up",
-    // "withdrawal", "refund" (MU that goes back to the parent), "tunnel",
-    // "resource_change" or "statement_query". A reader treats a kind that it does not
+    // period), "child_start" (the account paid the start of a child), "child_bound" (the
+    // child of a child_start exists; moves nothing), "top_up", "withdrawal", "refund"
+    // (MU that goes back to the parent), "tunnel", "resource_change" or
+    // "statement_query". A reader treats a kind that it does not
     // know as a charge that it did not cause.
     string kind = 5;
     // The instance that the movement concerns, when it is not the account: the child of
-    // a child_start, top_up, withdrawal or refund. In a statement_query, the account
-    // that was read. An empty instance_token in a child_start is a start that is not
-    // complete. The node sets it one time, when the child exists. It is the one part of
-    // a movement that can change.
-    string instance_token = 6;
+    // a child_start, child_bound, top_up, withdrawal or refund. In a statement_query,
+    // the account that was read. It is a hash of the token, never the token:
+    // blake2b-256 hex of "celaut-ledger-instance:" followed by the token. A token is a
+    // credential, and a statement can be shown to others.
+    string instance_ref = 6;
     // The cause of the movement, as JSON with sorted keys and no spaces. Empty if there
     // is none. For a maintenance period: "seconds", and the resources that the node
     // priced ("mem_limit", "disk_space", "cpu_period", "cpu_quota"). For a refund of a
-    // charge that was not used: "refunds_seq", the seq of that charge.
+    // charge that was not used: "refunds_seq", the seq of that charge. For a
+    // child_bound: "starts_seq", the seq of the child_start whose child it names.
     string detail = 7;
+    // The hash of the movement before this one. For the first movement, the genesis
+    // hash of the account: blake2b-256 hex of "celaut-balance-genesis:" followed by the
+    // account_ref. The hash of a movement is blake2b-256 hex of
+    // "celaut-balance-movement:" prev_hash "|" seq "~" ts "~" hex(amount) "~"
+    // hex(balance_after) "~" hex(kind) "~" instance_ref "~" hex(detail), with the
+    // amounts as decimal integers and hex() the lowercase hexadecimal of the UTF-8.
+    string prev_hash = 8;
 }
 
 // The answer of GetBalanceStatement.
