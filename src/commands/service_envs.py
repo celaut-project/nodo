@@ -1,7 +1,7 @@
 """``nodo service_envs <service> [--json]``: the env vars a service asks for.
 
 What ``nodo execute`` compares ``-e`` against (``src.utils.service_envs``), as a
-command of its own so ``nodo tui`` can ask for the missing ones in a form before it
+command of its own so ``nodo tui`` can ask for the missing ones, one by one, before it
 runs ``nodo execute``. A service not held locally is acquired first, the way
 ``execute`` would.
 """
@@ -38,8 +38,7 @@ def service_envs_command(service: str, as_json: bool = False) -> bool:
         print("The service declares no env vars.", flush=True)
         return True
     for spec in specs:
-        need = f"required by network {'; '.join(spec.networks)}" if spec.required else "optional"
-        print(f"{spec.name} ({need})", flush=True)
+        print(spec.name, flush=True)
         if spec.tags:
             print(f"  format: {', '.join(spec.tags)}", flush=True)
         if spec.prose:

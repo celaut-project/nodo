@@ -33,50 +33,34 @@ ERGO = (["pow:ergo"], b"pow.block_id=${BLOCK}\npow.chain=ergo")
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class EnvSpecsTests(unittest.TestCase):
-    def test_declared_vars_are_optional(self):
+    def test_declared_vars_are_listed_with_their_format(self):
         specs = service_envs.env_specs(_service(declared=[("LOG", ["text"], "log level")]))
         self.assertEqual([s.name for s in specs], ["LOG"])
-        self.assertFalse(specs[0].required)
         self.assertEqual(specs[0].tags, ("text",))
         self.assertEqual(specs[0].prose, "log level")
 
-    def test_network_placeholder_makes_a_declared_var_required(self):
+    def test_a_placeholder_does_not_repeat_a_declared_var(self):
         specs = service_envs.env_specs(_service(
             declared=[("LOG", [], ""), ("BLOCK", ["hex"], "chain tip")], networks=[ERGO],
         ))
-        by_name = {s.name: s for s in specs}
-        self.assertTrue(by_name["BLOCK"].required)
-        self.assertEqual(by_name["BLOCK"].networks, ("pow:ergo",))
-        self.assertEqual(by_name["BLOCK"].prose, "chain tip")
-        self.assertFalse(by_name["LOG"].required)
+        self.assertEqual([s.name for s in specs], ["BLOCK", "LOG"])
+        self.assertEqual(specs[0].prose, "chain tip")
 
-    def test_undeclared_placeholder_is_still_listed_as_required(self):
+    def test_undeclared_placeholder_is_still_listed(self):
         specs = service_envs.env_specs(_service(networks=[ERGO]))
-        self.assertEqual([(s.name, s.required) for s in specs], [("BLOCK", True)])
+        self.assertEqual([s.name for s in specs], ["BLOCK"])
 
-    def test_required_vars_come_first(self):
-        specs = service_envs.env_specs(_service(
-            declared=[("A", [], ""), ("BLOCK", [], ""), ("C", [], "")], networks=[ERGO],
-        ))
-        self.assertEqual([s.name for s in specs], ["BLOCK", "A", "C"])
+    def test_declared_vars_come_before_undeclared_placeholders(self):
+        specs = service_envs.env_specs(_service(declared=[("A", [], ""), ("C", [], "")], networks=[ERGO]))
+        self.assertEqual([s.name for s in specs], ["A", "C", "BLOCK"])
 
     def test_missing_envs(self):
         specs = service_envs.env_specs(_service(declared=[("A", [], ""), ("B", [], "")]))
         self.assertEqual([s.name for s in service_envs.missing_envs(specs, {"A": ""})], ["B"])
 
-    def test_required_var_needs_a_usable_value(self):
-        spec = service_envs.EnvSpec(name="BLOCK", networks=("pow:ergo",))
-        self.assertFalse(service_envs.is_answered(spec, {}))
-        self.assertFalse(service_envs.is_answered(spec, {"BLOCK": ""}))
-        self.assertFalse(service_envs.is_answered(spec, {"BLOCK": "a\nb"}))
-        self.assertTrue(service_envs.is_answered(spec, {"BLOCK": "abc"}))
-
     def test_json_shape(self):
-        spec = service_envs.EnvSpec(name="BLOCK", tags=("hex",), prose="p", networks=("pow:ergo",))
-        self.assertEqual(spec.to_json(), {
-            "name": "BLOCK", "tags": ["hex"], "prose": "p",
-            "required": True, "networks": ["pow:ergo"],
-        })
+        spec = service_envs.EnvSpec(name="BLOCK", tags=("hex",), prose="p")
+        self.assertEqual(spec.to_json(), {"name": "BLOCK", "tags": ["hex"], "prose": "p"})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -99,26 +83,28 @@ class CompleteEnvsTests(unittest.TestCase):
         self.assertEqual(out, "")
         ask.assert_not_called()
 
-    def test_non_interactive_aborts_on_a_missing_required_var(self):
+    def test_non_interactive_reports_the_missing_vars_and_goes_on(self):
         result, out, ask = self._complete({"LOG": "x"}, interactive=False)
-        self.assertIsNone(result)
-        self.assertIn("Missing required env var: BLOCK", out)
+        self.assertEqual(result, {"LOG": "x"})
+        self.assertIn("not set: BLOCK", out)
         ask.assert_not_called()
 
-    def test_non_interactive_only_warns_about_optional_vars(self):
-        result, out, _ = self._complete({"BLOCK": "b"}, interactive=False)
-        self.assertEqual(result, {"BLOCK": "b"})
-        self.assertIn("Optional env vars not given, so not set: LOG", out)
+    def test_interactive_asks_one_by_one_only_for_the_missing_vars(self):
+        result, out, ask = self._complete({"LOG": "x"}, interactive=True, answers=["tip"])
+        self.assertEqual(result, {"LOG": "x", "BLOCK": "tip"})
+        self.assertEqual(ask.call_count, 1)
+        self.assertIn("[1/1]", out)
 
-    def test_interactive_asks_again_until_a_required_var_has_a_value(self):
-        result, out, ask = self._complete({}, interactive=True, answers=["", "tip", ""])
-        self.assertEqual(result, {"BLOCK": "tip"})
-        self.assertEqual(ask.call_count, 3)
-        self.assertIn("BLOCK is required", out)
+    def test_interactive_numbers_each_question(self):
+        _, out, ask = self._complete({}, interactive=True, answers=["a", "b"])
+        self.assertEqual(ask.call_count, 2)
+        self.assertIn("[1/2]", out)
+        self.assertIn("[2/2]", out)
 
-    def test_interactive_keeps_an_optional_answer(self):
-        result, _, _ = self._complete({"BLOCK": "b"}, interactive=True, answers=["debug"])
-        self.assertEqual(result, {"BLOCK": "b", "LOG": "debug"})
+    def test_enter_leaves_a_var_unset_and_says_so(self):
+        result, out, _ = self._complete({}, interactive=True, answers=["", "debug"])
+        self.assertEqual(result, {"BLOCK": "debug"})
+        self.assertIn("Not set: LOG", out)
 
     def test_values_are_never_printed(self):
         _, out, _ = self._complete({}, interactive=True, answers=["s3cr3t", "t0k3n"])
@@ -135,12 +121,12 @@ class CompleteEnvsTests(unittest.TestCase):
             result = execute_cmd.complete_envs("svc", {"A": "1"}, interactive=False)
         self.assertEqual(result, {"A": "1"})
 
-    def test_execute_does_not_launch_when_a_required_var_is_missing(self):
+    def test_execute_launches_with_what_was_given(self):
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), \
-                patch.object(execute_cmd, "launch_via_gateway") as launch, \
+                patch.object(execute_cmd, "launch_via_gateway", return_value=None) as launch, \
                 redirect_stdout(io.StringIO()):
             execute_cmd.execute("svc", envs={}, check_envs=True, ask_envs=False)
-        launch.assert_not_called()
+        launch.assert_called_once()
 
     def test_execute_without_check_launches_as_before(self):
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), \
