@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package invite;
+
+// A compact invitation to a peer, small enough for a QR code. It only lets a scanning
+// node find and contact the peer: the scanning node then fetches the full signed Peer
+// with GetPeerInfo. It carries no signature, no resources and no proofs.
+//
+// It lives in its own file, apart from celaut.proto, so that it is not part of the
+// protocol schema the whole network has to agree on.
+message PeerInvite {
+  // The identity of the peer: its 32 raw ed25519 public key bytes.
+  bytes public_key = 1;
+  // Where to reach it, in order of preference.
+  repeated Addr addr = 2;
+}
+
+message Addr {
+  // Synonyms for the kind of address, for example ["ip4"] or ["tor3"]. A match on one
+  // of them is enough. There is no central list: a node that does not know any of the
+  // tags ignores the Addr.
+  repeated string tags = 1;
+  // Optional parameters of the address, as sorted key=value lines in UTF-8. Usually
+  // empty.
+  bytes formal = 2;
+  // Where to connect: the host and then the port. The tag defines the format.
+  bytes data = 3;
+}

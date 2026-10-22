@@ -32,6 +32,11 @@ if python3 -c "import grpc_tools.protoc" >/dev/null 2>&1; then
     --python_out="${PROTO_DIR}" \
     "${PROTO_DIR}/pack.proto" \
     --experimental_allow_proto3_optional
+
+  python3 -m grpc_tools.protoc \
+    -I"${PROTO_DIR}" \
+    --python_out="${PROTO_DIR}" \
+    "${PROTO_DIR}/invite.proto"
 else
   protoc \
     -I"${PROTO_DIR}" \
@@ -46,6 +51,11 @@ else
     --python_out="${PROTO_DIR}" \
     "${PROTO_DIR}/pack.proto" \
     --experimental_allow_proto3_optional
+
+  protoc \
+    -I"${PROTO_DIR}" \
+    --python_out="${PROTO_DIR}" \
+    "${PROTO_DIR}/invite.proto"
 fi
 
 # The node's protobuf runtime is pinned to 4.23.3 by bee-rpc, so the gencode has to

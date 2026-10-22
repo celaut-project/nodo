@@ -9,6 +9,9 @@ ecdsa==0.19.2
 # X.509 for the node's TLS identity (issue #257): generating the self-signed
 # certificate that carries the identity public key, and reading a peer's.
 cryptography==50.0.0
+# Terminal QR code of a peer invitation (issue #572). Pure Python, no dependencies, and
+# the only QR library here that lets the caller force byte mode and the error level.
+segno==1.6.6
 mnemonic==0.21
 bip32==4.0
 PyYAML==6.0.1

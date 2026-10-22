@@ -113,6 +113,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.chat_attach_area = Rect::ZERO;
     app.chat_send_area = Rect::ZERO;
     app.peers_refresh_area = Rect::ZERO;
+    app.peers_invite_area = Rect::ZERO;
     app.profile_button_area = Rect::ZERO;
 
     // Below the smallest size the pages are laid out for, say so instead of drawing
@@ -5371,7 +5372,7 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
             "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  p pack  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
         }
         Page::Peers => {
-            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  a choose  \u{2022}  r/\u{27f3} refresh all  \u{2022}  d forget  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  i invite QR  \u{2022}  a choose  \u{2022}  r/\u{27f3} refresh all  \u{2022}  d forget  \u{2022}  q quit"
         }
         Page::Clients => {
             "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  q quit"

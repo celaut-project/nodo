@@ -127,6 +127,7 @@ COMMANDS = sorted(
         "protocol",
         "instances",
         "connect",
+        "invite",
         "disconnect",
         "reputation",
         "donations",
