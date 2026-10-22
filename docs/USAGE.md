@@ -1193,6 +1193,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | PEERS: table | — | `nodo peers [--json]` (new `--json`) |
 | PEERS: payments + reputation events card | — | `nodo peers <peer> [--json]` (new) |
 | PEERS: connect | `c` | `nodo connect <host:port>` |
+| PEERS: show this node's invitation as a QR code (Details overlay) | `i`, or the `[ QR ]` button on the table's border | `nodo invite` |
 | PEERS: choose a peer learned over the network (y/N) | `a` | `nodo connect <host:port>` of its first endpoint |
 | PEERS: forget | `d` | `nodo disconnect <peer>` |
 | PEERS: adjust local reputation | `+` / `-` | `nodo peer_reputation <peer> +1` / `-1` (new) |

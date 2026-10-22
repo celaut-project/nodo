@@ -1199,6 +1199,8 @@ pub(crate) enum CommandKind {
     /// `nodo service_envs <id> --json` for a confirmed execution: opens the env var
     /// form, or runs `nodo execute` when the service asks for none.
     ServiceEnvs { id: String, label: String },
+    /// `nodo invite`: its stdout is the QR code, shown in the Details overlay.
+    Invite,
 }
 
 /// Result of a background `nodo` invocation.
@@ -3401,6 +3403,8 @@ pub struct App {
     pub chat_send_area: Rect,
     /// The ⟳ button on the PEERS table's border; `Rect::ZERO` when not drawn.
     pub peers_refresh_area: Rect,
+    /// The invitation QR button next to it; `Rect::ZERO` when not drawn.
+    pub peers_invite_area: Rect,
     /// The "change profile" button on the POLICIES page, where it was drawn last.
     pub profile_button_area: Rect,
     /// The open right-click menu, while `input_mode` is `ContextMenu`.
@@ -3581,6 +3585,7 @@ impl Default for App {
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
             peers_refresh_area: Rect::ZERO,
+            peers_invite_area: Rect::ZERO,
             profile_button_area: Rect::ZERO,
             context_menu: None,
             docs: crate::docs::DocsState::default(),
@@ -3984,6 +3989,10 @@ impl App {
         }
         if self.page() == Page::Peers && self.peers_refresh_area.contains(position) {
             self.open_refresh_peers_confirm();
+            return;
+        }
+        if self.page() == Page::Peers && self.peers_invite_area.contains(position) {
+            self.open_invite();
             return;
         }
         // The same thing the `p` key does: open the profile deck.
@@ -6464,6 +6473,9 @@ impl App {
                         .unwrap_or_else(|| first_line(&outcome.stderr)))
                 };
                 self.on_service_envs(id, label, envs);
+            }
+            CommandKind::Invite => {
+                self.on_invite_outcome(outcome.success, &outcome.stdout, &outcome.stderr);
             }
             CommandKind::Generic => {
                 self.status = if outcome.success {

@@ -545,6 +545,9 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()
         }
+        (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Peers => {
+            app.open_invite()
+        }
         (KeyModifiers::NONE, KeyCode::Char('a')) if app.page() == Page::Peers => {
             app.open_choose_peer_confirm()
         }
