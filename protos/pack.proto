@@ -26,6 +26,7 @@ message Service {
         optional celaut.Service.Container.Resources resources = 4;
         celaut.Service.Container.ConfigDeclaration config_declaration = 5;
         repeated celaut.Service.Api.Protocol node_protocol_stack = 6;
+        repeated celaut.DataFormatKeyValue environment_variables = 7;
     }
     string prose = 1;
     Container container = 2;
