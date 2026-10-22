@@ -161,7 +161,8 @@ def delegate_execution(
     returns is where the maintenance tick goes on from.
     """
     # The token of the child once the peer has started it. A start that times out has none
-    # to stop: TODO(#578).
+    # to stop: TODO(#578). Its attempt stays unbound, and the peer may still take its start
+    # from our account (``statement_check.account_faults``).
     external_token: Optional[str] = None
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
@@ -197,6 +198,10 @@ def delegate_execution(
 
         log.LOGGER('Go to launch the service on ' + str(peer))
         client_id = get_client_id_on_other_peer(peer_id=peer)
+        # Written down before the peer is asked: the peer takes MU from our account for
+        # this start, and the movement may show before this node knows the child, or when
+        # it never does (a timeout). See `statement_check.account_faults`.
+        attempt_id = SQLConnection().add_start_attempt(peer, sent_peer_mu)
         service_instance = BeeClient.start_service(
             peer_channel(peer),
             utils.service_extended(
@@ -210,6 +215,7 @@ def delegate_execution(
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
         )
         external_token = service_instance.token
+        SQLConnection().bind_start_attempt(attempt_id, external_token)
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 
         build_peer_mu = convert_mu(

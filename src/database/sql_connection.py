@@ -2505,14 +2505,44 @@ class SQLConnection(metaclass=Singleton):
             return False
 
         try:
-            self._execute('''
-                UPDATE peer SET remote_client_id = ? WHERE id = ?
-            ''', (client_id, peer_id))
+            # A new client is a new account on the peer, which starts from its genesis:
+            # the mark goes with it, so that it is never older than the account
+            # (#570). The same client again changes nothing.
+            def work(cursor):
+                row = cursor.execute(
+                    'SELECT remote_client_id FROM peer WHERE id = ?', (peer_id,)).fetchone()
+                if row is not None and row['remote_client_id'] == client_id:
+                    return
+                cursor.execute('UPDATE peer SET remote_client_id = ? WHERE id = ?',
+                               (client_id, peer_id))
+                self._reset_statement_state(
+                    cursor, peer_id, ledger.genesis_hash(client_id), int(time.time()))
+
+            self._transaction(work)
             logger.LOGGER(f'Associated external client {client_id} with peer {peer_id}')
             return True
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
+
+    @staticmethod
+    def _reset_statement_state(cursor, peer_id: str, genesis: Optional[str], ts: Optional[int]) -> None:
+        """The mark and the counters of the statement of our account on ``peer_id``, for
+        an account that has no movements yet (``genesis`` is the hash of its genesis), or
+        for none (``genesis`` None)."""
+        cursor.execute('''
+            UPDATE peer SET statement_seq = ?, statement_hash = ?, statement_balance_mu = ?,
+                            statement_ts = ?, statement_ticks = 0, statement_reads = 0,
+                            statement_rows_priced = 0, statement_queries_verified = 0,
+                            statement_queries_verified_mu = '0'
+            WHERE id = ?
+        ''', (None if genesis is None else 0, genesis, None if genesis is None else '0', ts,
+              peer_id))
+
+    def peers_with_client(self) -> List[str]:
+        """The peers where this node holds a client: each has an account to check."""
+        return [row['id'] for row in self._execute(
+            'SELECT id FROM peer WHERE remote_client_id IS NOT NULL').fetchall()]
 
     # The delegated_instances key column is `token_delegation` (the token as the
     # remote peer knows it); `id` holds our hashed alias of it. There is no
@@ -2812,9 +2842,11 @@ class SQLConnection(metaclass=Singleton):
             peer_id (str): The ID of the peer.
         """
         try:
-            self._execute('''
-                UPDATE peer SET remote_client_id = NULL WHERE id = ?
-            ''', (peer_id,))
+            def work(cursor):
+                cursor.execute('UPDATE peer SET remote_client_id = NULL WHERE id = ?', (peer_id,))
+                self._reset_statement_state(cursor, peer_id, None, None)
+
+            self._transaction(work)
             logger.LOGGER(f'Successfully deleted external client associated with peer {peer_id}')
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
@@ -3262,13 +3294,89 @@ class SQLConnection(metaclass=Singleton):
                 "balance_mu": _as_int(row['statement_balance_mu']), "ts": row['statement_ts']}
 
     def set_peer_statement_mark(self, peer_id: str, seq: Optional[int], hash: Optional[str],
-                                balance_mu: Optional[int], ts: Optional[int]) -> None:
-        """Write the mark of the statement of our account on ``peer_id``. None clears it."""
-        self._execute('''
-            UPDATE peer SET statement_seq = ?, statement_hash = ?, statement_balance_mu = ?,
-                            statement_ts = ?
-            WHERE id = ?
-        ''', (seq, hash, None if balance_mu is None else str(int(balance_mu)), ts, peer_id))
+                                balance_mu: Optional[int], ts: Optional[int],
+                                attempts_used: Iterable[int] = (),
+                                top_ups_taken: Optional[Mapping[str, int]] = None) -> None:
+        """Write the mark of the statement of our account on ``peer_id``. None clears it.
+
+        In the same transaction, the movements that the mark goes past are accounted
+        for: ``attempts_used`` are the start attempts that a ``child_start`` was matched
+        with, and ``top_ups_taken`` is what the peer took for the top-ups of each child
+        (by ``instance_ref``), which leaves the allowance of the child.
+        """
+        taken = {ref: int(mu) for ref, mu in (top_ups_taken or {}).items() if int(mu) > 0}
+
+        def work(cursor):
+            cursor.execute('''
+                UPDATE peer SET statement_seq = ?, statement_hash = ?, statement_balance_mu = ?,
+                                statement_ts = ?
+                WHERE id = ?
+            ''', (seq, hash, None if balance_mu is None else str(int(balance_mu)), ts, peer_id))
+            for attempt_id in attempts_used:
+                cursor.execute('UPDATE start_attempts SET consumed = 1 WHERE id = ?',
+                               (int(attempt_id),))
+            if taken:
+                for row in cursor.execute(
+                        'SELECT token_delegation, top_up_allowance_peer_mu '
+                        'FROM delegated_instances WHERE peer_id = ?', (peer_id,)).fetchall():
+                    spent = taken.get(ledger.instance_ref(row['token_delegation']))
+                    if spent:
+                        cursor.execute(
+                            'UPDATE delegated_instances SET top_up_allowance_peer_mu = ? '
+                            'WHERE token_delegation = ?',
+                            (str(max(0, _as_int(row['top_up_allowance_peer_mu']) - spent)),
+                             row['token_delegation']))
+
+        self._transaction(work)
+
+    def add_start_attempt(self, peer_id: str, sent_peer_mu: int) -> int:
+        """Write down a start that is about to be asked of ``peer_id``, and return its id."""
+        return self._execute(
+            'INSERT INTO start_attempts (peer_id, ts, sent_peer_mu) VALUES (?, ?, ?)',
+            (peer_id, int(time.time()), str(int(sent_peer_mu))),
+        ).lastrowid
+
+    def bind_start_attempt(self, attempt_id: int, instance_token: str) -> None:
+        """The peer answered the start: the attempt now has its child."""
+        self._execute('UPDATE start_attempts SET ref = ? WHERE id = ?',
+                      (ledger.instance_ref(instance_token), int(attempt_id)))
+
+    def open_start_attempts(self, peer_id: str) -> List[Tuple[int, int, int]]:
+        """``(id, ts, sent_peer_mu)`` of the starts on ``peer_id`` with no child and not
+        yet matched with a movement, oldest first."""
+        return [(int(row['id']), int(row['ts']), _as_int(row['sent_peer_mu']))
+                for row in self._execute(
+                    'SELECT id, ts, sent_peer_mu FROM start_attempts '
+                    'WHERE peer_id = ? AND ref IS NULL AND consumed = 0 ORDER BY ts, id',
+                    (peer_id,)).fetchall()]
+
+    def prune_start_attempts(self, max_age_days: int) -> int:
+        """Delete the attempts older than ``max_age_days``. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        return self._execute('DELETE FROM start_attempts WHERE ts < ?', (cutoff,)).rowcount
+
+    def reserve_top_up(self, alias: str, peer_mu: int) -> None:
+        """Raise the allowance for the top-ups of a delegated child by ``peer_mu`` (may be
+        negative, to undo a reservation), before the peer is asked: its movement may
+        show in our account before the call returns."""
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT top_up_allowance_peer_mu FROM delegated_instances WHERE id = ?',
+                (alias,)).fetchone()
+            if row is not None:
+                cursor.execute(
+                    'UPDATE delegated_instances SET top_up_allowance_peer_mu = ? WHERE id = ?',
+                    (str(max(0, _as_int(row['top_up_allowance_peer_mu']) + int(peer_mu))), alias))
+
+        self._transaction(work)
+
+    def top_up_allowances(self, peer_id: str) -> Dict[str, int]:
+        """The allowance for top-ups of each instance delegated to ``peer_id``, by
+        ``instance_ref``, in the MU of the peer."""
+        return {ledger.instance_ref(row['token_delegation']): _as_int(row['top_up_allowance_peer_mu'])
+                for row in self._execute(
+                    'SELECT token_delegation, top_up_allowance_peer_mu FROM delegated_instances '
+                    'WHERE peer_id = ?', (peer_id,)).fetchall()}
 
     def statement_tick_due(self, peer_id: str, every: int) -> bool:
         """Count one tick for our account on ``peer_id``; True once ``every`` have passed.
@@ -3354,8 +3462,15 @@ class SQLConnection(metaclass=Singleton):
             'SELECT token_delegation, sent_peer_mu FROM delegated_instances WHERE peer_id = ?',
             (peer_id,),
         ).fetchall()
-        return {ledger.instance_ref(row['token_delegation']): _as_int(row['sent_peer_mu'])
-                for row in rows}
+        starts = {ledger.instance_ref(row['token_delegation']): _as_int(row['sent_peer_mu'])
+                  for row in rows}
+        # A child that the peer answered for and that is not stored yet (its start is
+        # still being checked) is named by its attempt.
+        for row in self._execute(
+                'SELECT ref, sent_peer_mu FROM start_attempts WHERE peer_id = ? AND ref IS NOT NULL',
+                (peer_id,)).fetchall():
+            starts.setdefault(row['ref'], _as_int(row['sent_peer_mu']))
+        return starts
 
     def get_delegated_token_by_id(self, id: str) -> Optional[str]:
         """

@@ -11,8 +11,9 @@ Of its own account it checks two things:
    checked, and each new movement hangs from the hash of the one before it, adds to the
    balance, and ends in the head that the peer signed. A peer that shows other movements
    than it showed before cannot keep the chain.
-2. Nothing takes MU from it that this node did not cause: the start of its own children,
-   their top-ups, and the statements that it asked for.
+2. Nothing takes MU from it that this node did not cause: the start of its own children
+   (each one is written down before the peer is asked), their top-ups up to what was sent,
+   and the statements that it asked for.
 
 Of a child it checks the chain, and nothing else. What the peer charges a child is the
 business of whoever runs the child, and this node only charges its father what the child
@@ -314,38 +315,62 @@ def father_net(rows: Iterable[Row]) -> int:
 
 
 def start_grace_seconds() -> int:
-    """How long a ``child_start`` may wait for its token, or for its refund."""
+    """How long a start may take on the peer: the movement that pays for it is dated
+    up to this long after this node asked for it."""
     timeout = int(env_manager.get("START_SERVICE_ON_PEER_TIMEOUT", 0) or 0)
     iteration = int(env_manager.get("MANAGER_ITERATION_TIME", 10) or 10)
     return (timeout if timeout > 0 else 600) + 2 * iteration
 
 
-def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now: float
-                     ) -> Tuple[List[str], Optional[int]]:
-    """``account_faults`` without the seq of each fault: only what it says."""
-    faults, stop_at = account_faults(rows, starts, now)
-    return [text for _, text in faults], stop_at
+@dataclass(frozen=True)
+class StartAttempt:
+    """A start that this node asked the peer for and that has no child of ours: the peer
+    may have finished it after this node gave up. ``sent_mu`` is the most that it may
+    take for it, in the MU of the peer."""
+    id: int
+    ts: int
+    sent_mu: int
 
 
-def account_faults(rows: Iterable[Row], starts: Mapping[str, int], now: float
-                   ) -> Tuple[List[Tuple[int, str]], Optional[int]]:
+@dataclass(frozen=True)
+class AccountCheck:
+    """What ``account_faults`` found in the movements of our account.
+
+    ``faults`` are the problems, each with the seq where it shows. ``attempts_used`` are
+    the start attempts that a ``child_start`` was matched with, and ``top_ups_taken`` is
+    what the peer took for the top-ups of each child, by ``instance_ref``: both are
+    saved with the mark, so that a movement is accounted for once.
+    """
+    faults: List[Tuple[int, str]]
+    attempts_used: List[int] = field(default_factory=list)
+    top_ups_taken: Dict[str, int] = field(default_factory=dict)
+
+
+def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
+                   attempts: Iterable[StartAttempt], top_up_allowances: Mapping[str, int],
+                   now: float) -> AccountCheck:
     """What the peer took from our account that this node did not cause.
 
-    ``starts`` is each child that this node started on the peer, by the ``instance_ref``
-    of its token on the peer, with what it sent for it. The peer names the child of a
-    ``child_start`` in a later ``child_bound`` row. Returns the problems, and the seq of
-    the first ``child_start`` that cannot be judged yet: one with no ``child_bound``, or
-    with a child that this node has not stored, younger than ``start_grace_seconds``.
-    That start may be in progress. The mark stops before it, and the next read looks at
-    it again. Each problem comes with the seq of the movement where it shows.
+    A start is written down before the peer is asked (``attempts``), so every
+    ``child_start`` that the peer writes can be told from one that nobody asked for the
+    moment it shows, and nothing waits:
 
-    ``now`` is the clock of this node, never the date of the statement: a peer chooses
-    that, and a start that it dated at the moment of every read would wait for ever. The
-    date of a movement is at most the date of its statement, which is near our clock
-    (``verify_chain``), so a start is judged at the latest ``CLOCK_SKEW_SECONDS`` late.
+    * a child of ours (``starts``, by the ``instance_ref`` of its token on the peer, with
+      what was sent for it) is named by the ``child_bound`` row that follows its start,
+      and may take up to what was sent;
+    * a start with no child of ours (the peer finished one that timed out, or has not
+      named it) is matched with an attempt that has no child and was not matched yet: it
+      was written at most ``start_grace_seconds`` before the movement, and it took no more
+      than what that attempt sent. One attempt pays for one movement;
+    * a top-up is for a child of ours, and takes no more than this node sent for it
+      (``top_up_allowances``, which the caller raises before the peer is asked).
+
+    A peer cannot take MU from our account under a name that matches none of these.
+    The attempt window is on the clock of this node, never the date of the statement:
+    a peer chooses that.
     """
     rows = list(rows)
-    problems = []
+    faults: List[Tuple[int, str]] = []
     refunded = set()
     bound = {}
     for row in rows:
@@ -359,6 +384,11 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int], now: float
                 bound[int(row.detail["starts_seq"])] = row.ref
             except (KeyError, TypeError, ValueError):
                 pass
+    open_attempts = list(attempts)
+    used: List[int] = []
+    allowance = dict(top_up_allowances)
+    taken: Dict[str, int] = {}
+    window = start_grace_seconds() + CLOCK_SKEW_SECONDS
     for row in rows:
         if row.amount >= 0 or row.kind == ledger.STATEMENT_QUERY:
             continue
@@ -368,27 +398,48 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int], now: float
             child = bound.get(row.seq, "")
             if child in starts:
                 if -row.amount > starts[child]:
-                    problems.append((
+                    faults.append((
                         row.seq,
                         f"the start of {child[:8]} took {-row.amount} MU, and "
                         f"{starts[child]} were sent",
                     ))
                 continue
-            if now - row.ts <= start_grace_seconds() + CLOCK_SKEW_SECONDS:
-                return problems, row.seq
-            # TODO(#578): the peer may have finished a start that this node gave up on
-            # at its timeout, and a request reference would tell it from a start that
-            # nobody asked for. Until then it is logged, and not scored.
-            log.LOGGER(f"Movement {row.seq} pays the start of a child that this node does "
-                       f"not know ({child[:8] or 'no child'}).")
+            match = next((a for a in open_attempts
+                          if a.ts - CLOCK_SKEW_SECONDS <= row.ts <= a.ts + window
+                          and -row.amount <= a.sent_mu), None)
+            if match is None:
+                faults.append((
+                    row.seq,
+                    f"movement {row.seq} pays the start of a child that this node did not "
+                    f"ask for ({child[:8] or 'no child'}), {-row.amount} MU"))
+                continue
+            open_attempts.remove(match)
+            used.append(match.id)
         elif row.kind == ledger.TOP_UP:
-            if row.ref not in starts:
-                problems.append((row.seq, f"movement {row.seq} tops up an instance that is not ours"))
+            if row.ref not in allowance:
+                faults.append((row.seq, f"movement {row.seq} tops up an instance that is not ours"))
+                continue
+            allowed = allowance[row.ref]
+            if -row.amount > allowed:
+                faults.append((
+                    row.seq,
+                    f"movement {row.seq} tops up {row.ref[:8]} by {-row.amount} MU, and "
+                    f"{allowed} were sent"))
+            paid = min(-row.amount, allowed)
+            allowance[row.ref] = allowed - paid
+            taken[row.ref] = taken.get(row.ref, 0) + paid
         else:
-            problems.append((
+            faults.append((
                 row.seq, f"movement {row.seq} is a {row.kind!r} charge that this node did not cause"
             ))
-    return problems, None
+    return AccountCheck(faults, used, taken)
+
+
+def stale_mark(mark_ts: Optional[int], now: float) -> bool:
+    """Whether the mark of an account is old enough to read it again, when there is no
+    child to read it for: a tenth of the retention that a peer is held to, so that the
+    mark is never old enough to excuse movements that a peer hides (``verify_chain``)."""
+    return mark_ts is None or now - mark_ts >= ledger.min_peer_retention_days() * 86400 / 10
 
 
 def unreachable(error: Exception) -> bool:

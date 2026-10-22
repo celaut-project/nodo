@@ -503,6 +503,89 @@ class DelegatedDepositRowsTests(_Database):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class OurAccountOnAPeerTests(_Database):
+    """What guards the account that this node holds on a peer (#570)."""
+
+    def setUp(self):
+        super().setUp()
+        self.sc.add_peer("p", b"")
+        self.sc.add_client("c1", 100, None)
+        self.sc.add_delegated_instance(
+            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
+            peer_balance_mu=6, movements=(ledger.Movement(ledger.START, 60),), sent_peer_mu=9)
+        self.ref = ledger.instance_ref("peer-token")
+
+    def test_a_new_client_is_a_mark_at_the_genesis_of_its_account(self):
+        self.sc.add_external_client("p", "client-1")
+
+        mark = self.sc.get_peer_statement_mark("p")
+
+        self.assertEqual((mark["seq"], mark["hash"], mark["balance_mu"]),
+                         (0, ledger.genesis_hash("client-1"), 0))
+        self.assertAlmostEqual(mark["ts"], time.time(), delta=5)
+
+    def test_the_same_client_again_keeps_its_mark(self):
+        self.sc.add_external_client("p", "client-1")
+        self.sc.set_peer_statement_mark("p", 7, "h", 3, 5)
+
+        self.sc.add_external_client("p", "client-1")
+
+        self.assertEqual(self.sc.get_peer_statement_mark("p")["seq"], 7)
+
+    def test_another_client_starts_again_from_its_genesis_and_its_counters(self):
+        self.sc.add_external_client("p", "client-1")
+        self.sc.set_peer_statement_mark("p", 7, "h", 3, 5)
+        self.sc.add_statement_read("p", rows_priced=4)
+
+        self.sc.add_external_client("p", "client-2")
+
+        self.assertEqual(self.sc.get_peer_statement_mark("p")["hash"], ledger.genesis_hash("client-2"))
+        self.assertEqual(self.sc.get_statement_counters("p")["reads"], 0)
+
+    def test_deleting_the_client_clears_the_mark(self):
+        self.sc.add_external_client("p", "client-1")
+
+        self.sc.delete_external_client("p")
+
+        self.assertEqual(self.sc.get_peer_statement_mark("p"), {})
+        self.assertEqual(self.sc.peers_with_client(), [])
+
+    def test_the_peers_with_a_client(self):
+        self.sc.add_external_client("p", "client-1")
+
+        self.assertEqual(self.sc.peers_with_client(), ["p"])
+
+    def test_a_top_up_is_reserved_before_the_peer_is_asked_and_taken_with_the_mark(self):
+        self.sc.reserve_top_up("alias", 50)
+        self.assertEqual(self.sc.top_up_allowances("p"), {self.ref: 50})
+
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, top_ups_taken={self.ref: 30})
+        self.assertEqual(self.sc.top_up_allowances("p"), {self.ref: 20})
+
+        self.sc.reserve_top_up("alias", -50)
+        self.assertEqual(self.sc.top_up_allowances("p"), {self.ref: 0})
+
+    def test_an_attempt_is_open_until_it_has_a_child_or_a_movement(self):
+        first = self.sc.add_start_attempt("p", 100)
+        second = self.sc.add_start_attempt("p", 200)
+        third = self.sc.add_start_attempt("p", 300)
+
+        self.sc.bind_start_attempt(first, "token-1")
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts_used=[second])
+
+        self.assertEqual([a[0] for a in self.sc.open_start_attempts("p")], [third])
+        self.assertEqual(self.sc.delegated_starts_on_peer("p")[ledger.instance_ref("token-1")], 100)
+
+    def test_old_attempts_are_swept(self):
+        self.sc.add_start_attempt("p", 100)
+        SQLConnection._connection.execute("UPDATE start_attempts SET ts = 0")
+        SQLConnection._connection.commit()
+
+        self.assertEqual(self.sc.prune_start_attempts(max_age_days=30), 1)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class StatementBooksTests(_Database):
     """What a node keeps about the statements of a peer: ticks, counters, mark."""
 

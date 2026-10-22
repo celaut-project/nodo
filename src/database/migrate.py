@@ -60,6 +60,9 @@ def connect_to_database(db_file):
 # movements that the peer showed in our account, and what they took. Verified never
 # exceeds what we asked for, so a peer cannot add queries that we did not make.
 # `statement_ticks` counts the ticks since our account on that peer was last read.
+#
+# A new `remote_client_id` is a new account, which starts from its genesis: the mark and
+# the counters are set again with it, so the mark is never older than the account.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
@@ -224,6 +227,10 @@ TABLES = {
     # the `ModifyDeposit` that this node has sent, written with the rows that they leave
     # here; `charged_peer_mu` what the tick has taken from the deposit for it.
     # `statement_ticks` counts the ticks since the statement of the child was last read.
+    # `top_up_allowance_peer_mu` is what this node has sent the peer in top-ups of the
+    # child (it is raised before the peer is asked) less what our own statement has shown
+    # the peer to take for them: the most that the next movements of our account may take
+    # for the child, in the MU of the peer.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -243,9 +250,27 @@ TABLES = {
             father_net_peer_mu TEXT NOT NULL DEFAULT '0',
             charged_peer_mu TEXT NOT NULL DEFAULT '0',
             sent_peer_mu TEXT DEFAULT NULL,
+            top_up_allowance_peer_mu TEXT NOT NULL DEFAULT '0',
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL
+        )
+    ''',
+    # Every start that this node asked a peer for, written before the peer is asked
+    # (#570). The peer takes MU from our account for it, and the movement may show before
+    # this node knows the child, or when it never does: a start that timed out and that
+    # the peer finished. A `child_start` that no child of ours explains is judged against
+    # these. `ref` is the `instance_ref` of the token once the peer answered, and
+    # `consumed` is 1 once a movement was matched with the attempt: one attempt pays for
+    # one movement. `sent_peer_mu` is the most that the peer may take for it.
+    "start_attempts": '''
+        CREATE TABLE IF NOT EXISTS start_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            sent_peer_mu TEXT NOT NULL,
+            ref TEXT DEFAULT NULL,
+            consumed INTEGER NOT NULL DEFAULT 0
         )
     ''',
     "deposit_tokens": '''

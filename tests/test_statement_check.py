@@ -111,6 +111,19 @@ class ChainTests(unittest.TestCase):
         self.assertIsNone(chain.rows)
         self.assertIn("were deleted before", chain.problem)
 
+    def test_a_new_account_excuses_nothing_that_a_node_hides(self):
+        """The mark of an account that was just created is as young as the account, so a
+        first read cannot excuse a movement that the node does not show."""
+        book = chained((100, "start"), (-900000, "debit"), (-5, "maintenance"))
+        statement_ts = book.statement(from_seq=1).ts
+        mark = Mark.new_account("acct", ts=statement_ts - 60)
+        book.purge_before(3)
+
+        chain, _ = verify(book, mark)
+
+        self.assertIsNone(chain.rows)
+        self.assertIn("were deleted before", chain.problem)
+
     def test_a_gap_after_an_old_mark_is_the_retention(self):
         book = chained((100, "start"), (-30, "build"), (-5, "maintenance"), (-5, "maintenance"))
         mark = book.mark_at(1)
@@ -304,9 +317,14 @@ class ConsumptionTests(unittest.TestCase):
         self.assertEqual(check.father_net(rows), 300)
 
 
+def _check_account(rows, starts=None, attempts=(), allowances=None, now=10 ** 6):
+    return check.account_faults(
+        rows, {"child": 100} if starts is None else starts, attempts,
+        {"child": 1000} if allowances is None else allowances, now=now)
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class AccountRuleTests(unittest.TestCase):
-    STARTS = {"child": 100}
 
     @staticmethod
     def bound(seq, child="child", starts_seq=None):
@@ -320,74 +338,118 @@ class AccountRuleTests(unittest.TestCase):
                 Row(5, 0, -50, 0, ledger.TOP_UP, "child"),
                 Row(6, 0, -1, 0, ledger.STATEMENT_QUERY, "child"),
                 Row(7, 0, 20, 0, ledger.REFUND, "child")]
-        self.assertEqual(check.account_problems(rows, self.STARTS, now=10 ** 6), ([], None))
+
+        result = _check_account(rows)
+
+        self.assertEqual(result.faults, [])
+        self.assertEqual(result.top_ups_taken, {"child": 50})
 
     def test_a_start_above_what_was_sent_is_an_overcharge(self):
         rows = [Row(3, 0, -101, 0, ledger.CHILD_START, ""), self.bound(4)]
-        self.assertEqual(len(check.account_problems(rows, self.STARTS, now=0)[0]), 1)
-
-    def test_a_start_bound_to_a_child_that_is_not_ours_is_not_scored_once_it_is_old(self):
-        # TODO(#578): a start that this node gave up on may be the peer's.
-        rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""), self.bound(4, child="stranger")]
-        problems, stop_at = check.account_problems(rows, self.STARTS, now=10 ** 6)
-
-        self.assertEqual((problems, stop_at), ([], None))
-
-    def test_a_start_in_progress_stops_the_check_until_it_is_known(self):
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),
-                Row(4, 1000, -999, 0, ledger.DEBIT, "")]
-
-        self.assertEqual(check.account_problems(rows, self.STARTS, now=1001), ([], 3))
-
-    def test_a_start_that_nobody_asked_for_is_not_scored_once_it_is_old(self):
-        # TODO(#578): until a request reference tells it from a start nobody asked for.
-        rows = [Row(3, 0, -100, 0, ledger.CHILD_START, "")]
-        problems, stop_at = check.account_problems(rows, self.STARTS, now=10 ** 6)
-
-        self.assertEqual((problems, stop_at), ([], None))
+        self.assertEqual(len(_check_account(rows).faults), 1)
 
     def test_a_start_that_was_given_back_is_fine(self):
         rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""),
                 Row(4, 0, 100, 0, ledger.REFUND, "", {"refunds_seq": "3"})]
-        self.assertEqual(check.account_problems(rows, self.STARTS, now=10 ** 6), ([], None))
+        self.assertEqual(_check_account(rows).faults, [])
 
     def test_a_charge_this_node_did_not_cause_is_an_overcharge(self):
         rows = [Row(3, 0, -5, 0, ledger.DEBIT, ""),
                 Row(4, 0, -5, 0, ledger.TOP_UP, "not-ours"),
                 Row(5, 0, -5, 0, ledger.MAINTENANCE, "")]
-        self.assertEqual(len(check.account_problems(rows, self.STARTS, now=0)[0]), 3)
-
-
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class AccountClockTests(unittest.TestCase):
-    """A start waits on the clock of this node, never on the date of the statement."""
-
-    STARTS = {"child": 100}
-
-    def test_a_start_inside_the_wait_stops_the_check(self):
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""), Row(4, 1000, -999, 0, ledger.DEBIT, "")]
-
-        self.assertEqual(check.account_problems(rows, self.STARTS, now=1001), ([], 3))
-
-    def test_a_start_is_judged_once_the_wait_has_passed_on_our_clock(self):
-        row = Row(3, 1000, -100, 0, ledger.CHILD_START, "")
-        wait = check.start_grace_seconds() + check.CLOCK_SKEW_SECONDS
-
-        self.assertEqual(check.account_problems([row], self.STARTS, now=1000 + wait)[1], 3)
-        self.assertIsNone(check.account_problems([row], self.STARTS, now=1000 + wait + 1)[1])
-
-    def test_a_start_that_nobody_knows_is_not_scored_for_now(self):
-        # TODO(#578)
-        row = Row(3, 0, -100, 0, ledger.CHILD_START, "")
-
-        self.assertEqual(check.account_problems([row], self.STARTS, now=10 ** 6), ([], None))
+        self.assertEqual(len(_check_account(rows).faults), 3)
 
     def test_each_problem_comes_with_the_seq_where_it_shows(self):
         rows = [Row(3, 0, -5, 0, ledger.DEBIT, ""), Row(4, 0, -5, 0, ledger.MAINTENANCE, "")]
 
-        faults, _ = check.account_faults(rows, self.STARTS, now=0)
+        self.assertEqual([seq for seq, _ in _check_account(rows).faults], [3, 4])
 
-        self.assertEqual([seq for seq, _ in faults], [3, 4])
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class StartAttemptTests(unittest.TestCase):
+    """A ``child_start`` that no child of ours explains is judged against what this node
+    asked for, and nothing else: nothing waits, and nothing is excused for its age."""
+
+    def test_a_start_that_nobody_asked_for_is_a_fault(self):
+        for child_row in ([], [Row(4, 0, 0, 0, ledger.CHILD_BOUND, "stranger", {"starts_seq": "3"})]):
+            rows = [Row(3, 1000, -900000, 0, ledger.CHILD_START, "")] + child_row
+
+            faults = _check_account(rows, now=1000).faults
+
+            self.assertEqual([seq for seq, _ in faults], [3])
+
+    def test_a_start_that_this_node_asked_for_and_gave_up_on_is_matched_with_its_attempt(self):
+        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, "")]
+
+        result = _check_account(rows, attempts=[check.StartAttempt(7, 990, 100)])
+
+        self.assertEqual((result.faults, result.attempts_used), ([], [7]))
+
+    def test_an_attempt_pays_for_one_movement(self):
+        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),
+                Row(4, 1001, -100, 0, ledger.CHILD_START, "")]
+
+        result = _check_account(rows, attempts=[check.StartAttempt(7, 990, 100)])
+
+        self.assertEqual([seq for seq, _ in result.faults], [4])
+
+    def test_a_start_takes_no_more_than_its_attempt_sent(self):
+        rows = [Row(3, 1000, -101, 0, ledger.CHILD_START, "")]
+
+        self.assertEqual(len(_check_account(rows, attempts=[check.StartAttempt(7, 990, 100)]).faults), 1)
+
+    def test_a_start_is_dated_within_the_window_of_its_attempt(self):
+        attempt = check.StartAttempt(7, 1000, 100)
+        window = check.start_grace_seconds() + check.CLOCK_SKEW_SECONDS
+
+        def faults(ts):
+            return _check_account([Row(3, ts, -100, 0, ledger.CHILD_START, "")], attempts=[attempt]).faults
+
+        self.assertEqual(faults(1000 + window), [])
+        self.assertEqual(len(faults(1000 + window + 1)), 1)
+        self.assertEqual(faults(1000 - check.CLOCK_SKEW_SECONDS), [])
+        self.assertEqual(len(faults(1000 - check.CLOCK_SKEW_SECONDS - 1)), 1)
+
+    def test_a_start_with_a_child_of_ours_does_not_use_an_attempt(self):
+        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),
+                Row(4, 1000, 0, 0, ledger.CHILD_BOUND, "child", {"starts_seq": "3"})]
+
+        result = _check_account(rows, attempts=[check.StartAttempt(7, 990, 100)])
+
+        self.assertEqual((result.faults, result.attempts_used), ([], []))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class TopUpAllowanceTests(unittest.TestCase):
+
+    def test_a_top_up_of_a_child_of_ours_takes_no_more_than_was_sent(self):
+        rows = [Row(3, 0, -900000, 0, ledger.TOP_UP, "child")]
+
+        result = _check_account(rows, allowances={"child": 1000})
+
+        self.assertEqual([seq for seq, _ in result.faults], [3])
+        self.assertEqual(result.top_ups_taken, {"child": 1000})
+
+    def test_the_top_ups_of_one_read_add_up_against_the_allowance(self):
+        rows = [Row(3, 0, -600, 0, ledger.TOP_UP, "child"), Row(4, 0, -600, 0, ledger.TOP_UP, "child")]
+
+        self.assertEqual([seq for seq, _ in _check_account(rows, allowances={"child": 1000}).faults], [4])
+
+    def test_a_top_up_with_nothing_sent_is_a_fault(self):
+        rows = [Row(3, 0, -1, 0, ledger.TOP_UP, "child")]
+
+        self.assertEqual(len(_check_account(rows, allowances={"child": 0}).faults), 1)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class StaleMarkTests(unittest.TestCase):
+
+    def test_a_mark_is_read_again_after_a_tenth_of_the_retention(self):
+        tenth = ledger.min_peer_retention_days() * 86400 / 10
+
+        self.assertTrue(check.stale_mark(None, 10 ** 9))
+        self.assertFalse(check.stale_mark(10 ** 9 - tenth + 1, 10 ** 9))
+        self.assertTrue(check.stale_mark(10 ** 9 - tenth, 10 ** 9))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

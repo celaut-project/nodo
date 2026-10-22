@@ -4,6 +4,7 @@ import shutil
 import threading
 import time
 import traceback
+from typing import Optional
 
 import grpc
 
@@ -502,8 +503,12 @@ def _our_mark(stored: dict) -> statement_check.Mark:
                                 stored.get("balance_mu", 0), stored.get("ts"))
 
 
-def _save_our_mark(peer_id: str, mark: statement_check.Mark) -> None:
-    sc.set_peer_statement_mark(peer_id, mark.seq, mark.hash, mark.balance, mark.ts)
+def _save_our_mark(peer_id: str, mark: statement_check.Mark,
+                   check: Optional[statement_check.AccountCheck] = None) -> None:
+    sc.set_peer_statement_mark(
+        peer_id, mark.seq, mark.hash, mark.balance, mark.ts,
+        attempts_used=check.attempts_used if check else (),
+        top_ups_taken=check.top_ups_taken if check else None)
 
 
 def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
@@ -517,9 +522,9 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
     account or ``ledger.MAX_STATEMENT_PAGES_PER_TICK`` pages. A page asks for no more
     movements than our balance there pays for, so a refusal for lack of balance is the
     peer contradicting the balance that it reports. The mark moves to the last movement
-    that was checked. It stops before a start that may still be in progress, and the next
-    read asks again from there. A statement that does not continue the mark is scored,
-    and the mark goes to the head: the movements up to there cannot be checked.
+    that was checked, and what those movements took is accounted for with it, so a
+    movement is judged once. A statement that does not continue the mark is scored, and
+    the mark goes to the head: the movements up to there cannot be checked.
     """
     client_id = sc.get_peer_client(peer_id=peer_id)
     if not client_id:
@@ -561,8 +566,11 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
         if queries:
             sc.add_statement_queries_verified(
                 peer_id, len(queries), -sum(row.amount for row in queries))
-        faults, stop_at = statement_check.account_faults(chain.rows, sc.delegated_starts_on_peer(peer_id),
-                                                         now=read_at)
+        check = statement_check.account_faults(
+            chain.rows, sc.delegated_starts_on_peer(peer_id),
+            [statement_check.StartAttempt(*a) for a in sc.open_start_attempts(peer_id)],
+            sc.top_up_allowances(peer_id), now=read_at)
+        faults = check.faults
         charge_problems = statement_check.query_charge_problems(
             chain.rows, sc.get_statement_counters(peer_id), rates)
         if charge_problems:
@@ -577,15 +585,8 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
                 peer_id, client_id, Reason.STATEMENT_OVERCHARGED,
                 "; ".join(text for _, text in faults), min(seq for seq, _ in faults))
 
-        if stop_at is not None:
-            checked = [row for row in chain.rows if row.seq < stop_at]
-            if checked:
-                last = checked[-1]
-                _save_our_mark(peer_id, statement_check.Mark(
-                    last.seq, last.hash, last.balance_after, last.ts))
-            return
         mark = statement_check.mark_after(chain, statement, mark)
-        _save_our_mark(peer_id, mark)
+        _save_our_mark(peer_id, mark, check)
         if not chain.more:
             return
         balance = from_amount(statement.balance)
@@ -847,9 +848,19 @@ def maintain_delegated_instances(debug_mode: bool = False):
     """
     delegated = sc.get_delegated_instances()
     every = ledger.statement_read_every_ticks(MANAGER_ITERATION_TIME)
-    for peer_id in sorted({row.get('peer_id') for row in delegated if row.get('peer_id')}):
+    with_children = {row.get('peer_id') for row in delegated if row.get('peer_id')}
+    for peer_id in sorted(with_children):
         try:
             if sc.statement_tick_due(peer_id, every):
+                _check_our_account(peer_id, debug_mode=debug_mode)
+        except Exception as e:
+            log.LOGGER(f"Error checking our account on {peer_id}: {e}")
+    # Our account is also read where there is no child, now and then: a mark that grows
+    # old would excuse movements that the peer hides (``statement_check.verify_chain``).
+    for peer_id in sorted(set(sc.peers_with_client()) - with_children):
+        try:
+            if statement_check.stale_mark(sc.get_peer_statement_mark(peer_id).get("ts"),
+                                          time.time()):
                 _check_our_account(peer_id, debug_mode=debug_mode)
         except Exception as e:
             log.LOGGER(f"Error checking our account on {peer_id}: {e}")
@@ -1292,6 +1303,7 @@ def sweep_balance_movements(force: bool = False) -> int:
     try:
         deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
         sc.prune_statement_faults(max_age_days=ledger.retention_days())
+        sc.prune_start_attempts(max_age_days=ledger.retention_days())
         if deleted:
             log.LOGGER(f"Retention sweep deleted {deleted} balance movement(s).")
         return deleted

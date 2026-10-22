@@ -141,11 +141,16 @@ child, every `ledger.STATEMENT_READ_EVERY_TICKS` ticks. It reads from the last m
 that it checked (the *mark*), in pages that its balance on the peer pays for, up to
 `ledger.MAX_STATEMENT_PAGES_PER_TICK` pages. Each page continues the chain: the next seq,
 hanging from the hash of the mark, adding to its balance, and ending in the head that the
-peer signed. Nothing may take MU from the account but:
+peer signed. A new client is a new account: its mark starts at the genesis. Where there
+is no child, the account is read when its mark is older than a tenth of
+`ledger.MIN_PEER_RETENTION_DAYS`, so a peer cannot hide recent movements as retention.
+Nothing may take MU from the account but:
 
 - the start of a child of ours, no more than what was sent for it (`child_start`, and the
   `child_bound` row that names the child once it exists);
-- a top-up of a child of ours;
+- a top-up of a child of ours, no more than what this node sent for it with
+  `ModifyDeposit` (it is written down before the peer is asked, and taken off as the
+  statement shows it);
 - a statement that we asked for. What the peer shows never exceeds what this node asked
   for, in number and in MU at the rates that the peer announces: each read is counted
   when it is asked, before the peer can charge it.
@@ -189,11 +194,12 @@ Some things are not faults, and score nothing:
   `ledger.MIN_PEER_RETENTION_DAYS` for this purpose), and what it deleted after that
   time is not checkable. A reader that stays up to date, and keeps what it reads, can
   check all of it.
-- A `child_start` with no `child_bound`, or with a child that this node has not stored
-  yet. The start may be in progress, so the check stops there and looks again at the next
-  read. The wait is measured on the clock of this node, never on the date of the peer's
-  statement. After `START_SERVICE_ON_PEER_TIMEOUT` and two ticks it is logged and not
-  scored: the peer may have finished a start that this node gave up on (#578).
+- A `child_start` that this node asked for and gave up on (#578): the peer may have
+  finished it after `START_SERVICE_ON_PEER_TIMEOUT`. Every start is written down before
+  the peer is asked, and a `child_start` that no child of ours explains is matched with
+  one of those: it must be dated within the wait of the attempt, on the clock of this
+  node, take no more than the attempt sent, and one attempt pays for one movement.
+  Anything else is a fault at once; nothing waits.
 - A peer that rejects a start because the amount is too small. The amount was the choice
   of this node.
 

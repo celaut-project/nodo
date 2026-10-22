@@ -1495,6 +1495,7 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         return True, "Deposit modified correctly"
 
     top_up_refunds = []
+    reserved = 0
     if amount_mu > 0:
         log.LOGGER(f"Charge father {father_id}")
         if not spend_mu(
@@ -1508,6 +1509,8 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
 
     def give_back_top_up() -> None:
         # The father paid for a top-up the peer never received.
+        if reserved:
+            sc.reserve_top_up(service_token, -reserved)
         if top_up_refunds and not top_up_refunds.pop()():
             log.LOGGER(f"Could not give {format_mu(amount_mu)} back to {father_id}.")
 
@@ -1531,6 +1534,11 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
             to_mu_per_unit=payment_system.peer_mu_per_unit,
             round_up=amount_mu < 0,
         )
+        if amount_mu > 0:
+            # Before the peer is asked: its row may show in our account, and be checked,
+            # before the call returns (``statement_check.account_faults``).
+            sc.reserve_top_up(service_token, peer_amount)
+            reserved = peer_amount
         _output = BeeClient.modify_deposit(
             peer_channel(peer_id),
             difference=utils.to_amount(

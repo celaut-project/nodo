@@ -805,11 +805,13 @@ class CheckOurAccountTests(unittest.TestCase):
     COUNTERS = {"reads": 10, "rows_priced": 100, "verified": 0, "verified_mu": 0}
 
     def _check(self, book, stored=None, starts=None, held=10 ** 9, rates=None, counters=None,
-               fetch=None, max_pages=None):
+               fetch=None, max_pages=None, attempts=None):
         sc = MagicMock()
         sc.get_peer_client.return_value = "client-on-peer"
         sc.get_peer_statement_mark.return_value = stored or {}
         sc.delegated_starts_on_peer.return_value = starts or {ledger.instance_ref(PEER_TOKEN): 100}
+        sc.open_start_attempts.return_value = attempts or []
+        sc.top_up_allowances.return_value = {ledger.instance_ref(PEER_TOKEN): 1000}
         sc.get_statement_counters.return_value = counters or dict(self.COUNTERS)
         fetch = fetch or _fetch_of(book)
         with patch.object(maintain, "sc", sc), \
@@ -851,36 +853,35 @@ class CheckOurAccountTests(unittest.TestCase):
         self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
         self.assertEqual(penalise.call_args.args[4], 2)
 
-    def test_a_start_in_progress_holds_the_mark_before_it(self):
+    def test_a_start_that_nobody_asked_for_is_scored_when_it_shows(self):
         now = int(time.time())
         book = _book((500, "credit", "", "", now - 5), (-100, "child_start", "", "", now),
                      account="client-on-peer")
 
         sc, penalise = self._check(book)
 
-        penalise.assert_not_called()
-        sc.set_peer_statement_mark.assert_called_once_with(
-            PEER_ID, 1, book.rows[0]["hash"], 500, book.rows[0]["ts"])
+        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
+        self.assertEqual(penalise.call_args.args[4], 2)
 
-    def test_a_start_that_a_peer_dates_at_every_read_does_not_wait_for_ever(self):
-        """The wait is measured on our clock: the date of the statement is the peer's."""
+    def test_a_start_in_progress_is_matched_with_its_attempt_and_the_mark_goes_past_it(self):
         now = int(time.time())
-        old = now - statement_check.start_grace_seconds() - 600
-        book = _book((500, "credit", "", "", old - 5), (-100, "child_start", "", "", old),
-                     (-1, "statement_query", "", "", now - 1), account="client-on-peer")
+        book = _book((500, "credit", "", "", now - 5), (-100, "child_start", "", "", now),
+                     (-999, "debit", "", "", now), account="client-on-peer")
 
-        sc, penalise = self._check(book)
+        sc, penalise = self._check(book, attempts=[(4, now - 3, 100)])
 
+        self.assertEqual(penalise.call_args.args[4], 3)
         self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 3)
+        self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["attempts_used"], [4])
 
-    def test_a_start_that_nobody_knows_is_logged_and_not_scored_until_it_has_a_reference(self):
-        # TODO(#578)
-        book = _book((500, "credit"), (-100, "child_start"), account="client-on-peer")
+    def test_the_top_ups_taken_are_saved_with_the_mark(self):
+        ref = ledger.instance_ref(PEER_TOKEN)
+        book = _book((500, "credit"), (-50, "top_up", ref), account="client-on-peer")
 
         sc, penalise = self._check(book)
 
         penalise.assert_not_called()
-        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 2)
+        self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["top_ups_taken"], {ref: 50})
 
     def test_a_statement_that_does_not_add_up_from_the_mark_is_penalised_and_the_mark_goes_to_the_head(self):
         book = _book((500, "credit"), (-100, "statement_query"), account="client-on-peer")
