@@ -52,6 +52,14 @@ def connect_to_database(db_file):
 # of the statement of `remote_client_id` on that peer (#570): the last movement that was
 # checked, its hash, the balance after it, and a time on the clock of the peer before
 # which nothing after it was written. The same as on `delegated_instances`.
+#
+# What a peer may charge our account for the statements that we read from it (#570) is
+# kept in four counters that never go back: `statement_reads` is how many we asked for,
+# `statement_rows_priced` the rows that they may have been priced for, and
+# `statement_queries_verified` and `statement_queries_verified_mu` the `statement_query`
+# movements that the peer showed in our account, and what they took. Verified never
+# exceeds what we asked for, so a peer cannot add queries that we did not make.
+# `statement_ticks` counts the ticks since our account on that peer was last read.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
@@ -69,7 +77,12 @@ TABLES = {
             statement_seq INTEGER DEFAULT NULL,
             statement_hash TEXT DEFAULT NULL,
             statement_balance_mu TEXT DEFAULT NULL,
-            statement_ts INTEGER DEFAULT NULL
+            statement_ts INTEGER DEFAULT NULL,
+            statement_ticks INTEGER NOT NULL DEFAULT 0,
+            statement_reads INTEGER NOT NULL DEFAULT 0,
+            statement_rows_priced INTEGER NOT NULL DEFAULT 0,
+            statement_queries_verified INTEGER NOT NULL DEFAULT 0,
+            statement_queries_verified_mu TEXT NOT NULL DEFAULT '0'
         )
     ''',
     "clients": '''
@@ -589,6 +602,20 @@ TABLES = {
     # never the token. `detail` is the cause, as canonical JSON. A row is never
     # changed. The retention sweep deletes rows older than `ledger.RETENTION_DAYS`, but
     # keeps the last row of a live account, so that the next row still hangs from it.
+    # A fault of a peer in a statement (#570) is scored once: one row for each peer,
+    # account (by `account_ref`), reason and seq, the movement where it shows. The same
+    # fault read again at the next tick, or after a restart, finds its row and costs
+    # nothing; a different fault, at another seq, is scored.
+    "statement_faults": '''
+        CREATE TABLE IF NOT EXISTS statement_faults (
+            peer_id TEXT NOT NULL,
+            account_ref TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            PRIMARY KEY (peer_id, account_ref, reason, seq)
+        )
+    ''',
     "balance_movements": '''
         CREATE TABLE IF NOT EXISTS balance_movements (
             account_id TEXT NOT NULL,

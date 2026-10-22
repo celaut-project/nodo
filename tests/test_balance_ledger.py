@@ -437,6 +437,49 @@ class WritersInOtherProcessesTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class StatementBooksTests(_Database):
+    """What a node keeps about the statements of a peer: ticks, counters, mark."""
+
+    def setUp(self):
+        super().setUp()
+        SQLConnection._connection.execute("INSERT INTO peer (id) VALUES ('p')")
+        SQLConnection._connection.commit()
+
+    def test_a_read_is_due_every_so_many_ticks(self):
+        due = [self.sc.statement_tick_due("p", 3) for _ in range(7)]
+
+        self.assertEqual(due, [False, False, True, False, False, True, False])
+
+    def test_a_peer_that_is_not_known_is_never_due(self):
+        self.assertFalse(self.sc.statement_tick_due("nobody", 1))
+
+    def test_the_counters_only_go_up(self):
+        self.sc.add_statement_read("p", rows_priced=1)
+        self.sc.add_statement_read("p", rows_priced=4, count=0)
+        self.sc.add_statement_queries_verified("p", 1, 14)
+        self.sc.add_statement_queries_verified("p", 2, 30)
+
+        self.assertEqual(self.sc.get_statement_counters("p"),
+                         {"reads": 1, "rows_priced": 5, "verified": 3, "verified_mu": 44})
+
+    def test_the_mark_of_a_peer_is_kept_whole(self):
+        self.assertEqual(self.sc.get_peer_statement_mark("p"), {})
+
+        self.sc.set_peer_statement_mark("p", 7, "abc", 1234, 99)
+
+        self.assertEqual(self.sc.get_peer_statement_mark("p"),
+                         {"seq": 7, "hash": "abc", "balance_mu": 1234, "ts": 99})
+
+    def test_the_interval_of_reads_is_held_to_a_tenth_of_the_shortest_retention(self):
+        with patch.object(ledger, "min_peer_retention_days", return_value=1):
+            # A tenth of a day is 8640 s: 864 ticks of 10 s.
+            with patch.object(ledger, "_positive_int", return_value=10 ** 9):
+                self.assertEqual(ledger.statement_read_every_ticks(10), 864)
+            with patch.object(ledger, "_positive_int", return_value=30):
+                self.assertEqual(ledger.statement_read_every_ticks(10), 30)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class StatementReadTests(_Database):
 
     def setUp(self):

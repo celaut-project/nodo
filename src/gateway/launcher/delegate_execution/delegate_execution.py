@@ -98,9 +98,9 @@ def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: i
     both cases: the child runs.
     """
     try:
-        statement = balance_statement.fetch(peer, client_id, token=external_token, from_seq=1)
+        statement = statement_check.read(peer, client_id, token=external_token, from_seq=1)
     except Exception as e:
-        statement_check.penalise_no_statement(peer, external_token, e)
+        statement_check.penalise_no_statement(peer, external_token, e, seq=1)
         return _child_balance_on_peer(peer, external_token), None
 
     # A new account: its movement 1 hangs from its genesis.
@@ -109,7 +109,8 @@ def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: i
     chain = statement_check.verify_chain(statement, start, now=now, from_seq=1)
     if chain.rows is None:
         statement_check.penalise_once(
-            peer, external_token, Reason.STATEMENT_INCONSISTENT, chain.problem)
+            peer, external_token, Reason.STATEMENT_INCONSISTENT, chain.problem,
+            chain.fault_seq if chain.fault_seq is not None else 1)
         return _child_balance_on_peer(peer, external_token), None
 
     problems = statement_check.child_problems(
@@ -119,7 +120,7 @@ def _check_start(peer: str, client_id: str, external_token: str, sent_peer_mu: i
     )
     if problems:
         statement_check.penalise_once(
-            peer, external_token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
+            peer, external_token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems), 1
         )
     new = statement_check.mark_after(chain, statement, start)
     mark = {"seq": new.seq, "hash": new.hash, "ts": new.ts} if chain.rows else None

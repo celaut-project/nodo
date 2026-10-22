@@ -510,47 +510,91 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
     """Read the statement of our account on ``peer_id`` and check it (#570).
 
     Our account there pays the start of each child that this node delegates, and its
-    top-ups; it gets our payments and the refunds. Nothing else may take MU from it.
-    The mark moves to the last movement that was checked. It stops before a start that
-    may still be in progress, and the next read asks again from there.
+    top-ups; it gets our payments and the refunds. Nothing else may take MU from it, and
+    the peer may only charge it for the statements that this node asked for.
+
+    The read goes on from the mark, a page at a time, until it reaches the head of the
+    account or ``ledger.MAX_STATEMENT_PAGES_PER_TICK`` pages. A page asks for no more
+    movements than our balance there pays for, so a refusal for lack of balance is the
+    peer contradicting the balance that it reports. The mark moves to the last movement
+    that was checked. It stops before a start that may still be in progress, and the next
+    read asks again from there. A statement that does not continue the mark is scored,
+    and the mark goes to the head: the movements up to there cannot be checked.
     """
     client_id = sc.get_peer_client(peer_id=peer_id)
     if not client_id:
         return
-    mark = _our_mark(sc.get_peer_statement_mark(peer_id))
-    from_seq = 1 if mark.seq is None else mark.seq + 1
-    read_at = time.time()
     try:
-        statement = balance_statement.fetch(peer_id, client_id, from_seq=from_seq)
+        balance = _balance_held_on(peer_id)
     except Exception as e:
-        statement_check.penalise_no_statement(peer_id, client_id, e)
         if debug_mode:
-            log.LOGGER(f"No statement of our account on {peer_id}: {e}")
+            log.LOGGER(f"Cannot read our balance on {peer_id} to read our statement: {e}")
         return
+    rates = statement_check.stored_rates(peer_id)
+    mark = _our_mark(sc.get_peer_statement_mark(peer_id))
 
-    chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=from_seq)
-    if chain.rows is None:
-        statement_check.penalise_once(peer_id, client_id, Reason.STATEMENT_INCONSISTENT, chain.problem)
-        # Go on from what the peer says now: the movements up to here cannot be
-        # checked, and asking for them again would only fail again.
-        _save_our_mark(peer_id, statement_check.anchor_at_head(statement))
-        return
+    for _ in range(ledger.max_statement_pages_per_tick()):
+        rows_asked = statement_check.page_rows(balance, rates)
+        if rows_asked <= 0:
+            log.LOGGER(f"Our balance on {peer_id}, {balance} MU, does not pay for a statement.")
+            return
+        from_seq = 1 if mark.seq is None else mark.seq + 1
+        read_at = time.time()
+        try:
+            statement = statement_check.read(
+                peer_id, client_id, from_seq=from_seq, rows=rows_asked)
+        except Exception as e:
+            statement_check.penalise_no_statement(peer_id, client_id, e, seq=from_seq)
+            if debug_mode:
+                log.LOGGER(f"No statement of our account on {peer_id}: {e}")
+            return
 
-    problems, stop_at = statement_check.account_problems(
-        chain.rows, sc.delegated_starts_on_peer(peer_id), now_ts=statement.ts
-    )
-    if problems:
-        statement_check.penalise_once(
-            peer_id, client_id, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
-        )
-    if stop_at is None:
-        _save_our_mark(peer_id, statement_check.mark_after(chain, statement, mark))
-        return
-    checked = [row for row in chain.rows if row.seq < stop_at]
-    if checked:
-        last = checked[-1]
-        _save_our_mark(peer_id, statement_check.Mark(
-            last.seq, last.hash, last.balance_after, last.ts))
+        chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=from_seq)
+        if chain.rows is None:
+            statement_check.penalise_once(
+                peer_id, client_id, Reason.STATEMENT_INCONSISTENT, chain.problem,
+                chain.fault_seq if chain.fault_seq is not None else from_seq)
+            _save_our_mark(peer_id, statement_check.anchor_at_head(statement))
+            return
+
+        queries = [row for row in chain.rows if row.kind == ledger.STATEMENT_QUERY and row.amount < 0]
+        if queries:
+            sc.add_statement_queries_verified(
+                peer_id, len(queries), -sum(row.amount for row in queries))
+        faults, stop_at = statement_check.account_faults(chain.rows, sc.delegated_starts_on_peer(peer_id),
+                                                         now=read_at)
+        charge_problems = statement_check.query_charge_problems(
+            chain.rows, sc.get_statement_counters(peer_id), rates)
+        if charge_problems:
+            # The peer may have a price that this node did not read yet.
+            rates = _peer_rates(peer_id, refresh=True)
+            charge_problems = statement_check.query_charge_problems(
+                chain.rows, sc.get_statement_counters(peer_id), rates)
+        if charge_problems:
+            faults.append((queries[-1].seq, "; ".join(charge_problems)))
+        if faults:
+            statement_check.penalise_once(
+                peer_id, client_id, Reason.STATEMENT_OVERCHARGED,
+                "; ".join(text for _, text in faults), min(seq for seq, _ in faults))
+
+        if stop_at is not None:
+            checked = [row for row in chain.rows if row.seq < stop_at]
+            if checked:
+                last = checked[-1]
+                _save_our_mark(peer_id, statement_check.Mark(
+                    last.seq, last.hash, last.balance_after, last.ts))
+            return
+        mark = statement_check.mark_after(chain, statement, mark)
+        _save_our_mark(peer_id, mark)
+        if not chain.more:
+            return
+        balance = from_amount(statement.balance)
+
+
+def _balance_held_on(peer_id: str) -> int:
+    """What we hold on ``peer_id`` now, in its MU: read for free from its ``Metrics``."""
+    from src.manager.metrics import refresh_balance_on_peer
+    return refresh_balance_on_peer(peer_id)
 
 
 def _read_child(row: dict, debug_mode: bool = False):
@@ -560,6 +604,10 @@ def _read_child(row: dict, debug_mode: bool = False):
     statement when it continues the mark (#570): the movements since the mark, without
     those of the father. Otherwise from two readings of the balance: the difference
     against the mark, and the next tick goes on from the head of this statement.
+
+    The statement is only asked for when our balance on the peer pays for it: a refusal
+    for lack of balance is then the peer contradicting the balance that it reports, and
+    when it does not, the tick charges from the balance and no one is scored.
     """
     peer_id, token = row.get('peer_id'), row['token']
     # With no seq the mark is not a movement, and its balance is the last reading.
@@ -568,11 +616,16 @@ def _read_child(row: dict, debug_mode: bool = False):
         int(row.get('peer_balance_mu') or 0), row.get('peer_statement_ts'))
     read_at = time.time()
     from_seq = 1 if mark.seq is None else mark.seq + 1
-    statement, error = None, None
+    statement, error, asked = None, None, False
     try:
-        statement = balance_statement.fetch(
+        rows_asked = statement_check.page_rows(
+            _balance_held_on(peer_id), statement_check.stored_rates(peer_id))
+        if rows_asked <= 0:
+            raise RuntimeError(f"our balance on {peer_id} does not pay for a statement")
+        asked = True
+        statement = statement_check.read(
             peer_id, get_client_id_on_other_peer(peer_id=peer_id), token=token,
-            from_seq=from_seq,
+            from_seq=from_seq, rows=rows_asked,
         )
     except Exception as e:
         error = e
@@ -589,14 +642,16 @@ def _read_child(row: dict, debug_mode: bool = False):
                 )
             if problems:
                 statement_check.penalise_once(
-                    peer_id, token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems)
-                )
+                    peer_id, token, Reason.STATEMENT_OVERCHARGED, "; ".join(problems),
+                    from_seq)
             new = statement_check.mark_after(chain, statement, mark)
             return statement_check.consumption(chain.rows), {
                 "peer_balance_mu": new.balance, "seq": new.seq, "hash": new.hash, "ts": new.ts,
             }
         if chain.problem:
-            statement_check.penalise_once(peer_id, token, Reason.STATEMENT_INCONSISTENT, chain.problem)
+            statement_check.penalise_once(
+                peer_id, token, Reason.STATEMENT_INCONSISTENT, chain.problem,
+                chain.fault_seq if chain.fault_seq is not None else from_seq)
         head = statement_check.anchor_at_head(statement)
         balance = head.balance
         new_mark = {"peer_balance_mu": balance, "seq": head.seq, "hash": head.hash, "ts": head.ts}
@@ -608,7 +663,8 @@ def _read_child(row: dict, debug_mode: bool = False):
             # caller tells the two apart.
             raise error from None
         # The peer knows the instance and does not give its statement.
-        statement_check.penalise_no_statement(peer_id, token, error)
+        if asked:
+            statement_check.penalise_no_statement(peer_id, token, error, seq=from_seq)
         new_mark = {"peer_balance_mu": balance, "seq": None, "hash": None, "ts": None}
     if debug_mode:
         log.LOGGER(f"Charging {row.get('id')} from the balance on {peer_id}, not from its statement.")
@@ -653,9 +709,11 @@ def maintain_delegated_instances(debug_mode: bool = False):
     `stop_instance` hands its father whatever is left.
     """
     delegated = sc.get_delegated_instances()
+    every = ledger.statement_read_every_ticks(MANAGER_ITERATION_TIME)
     for peer_id in sorted({row.get('peer_id') for row in delegated if row.get('peer_id')}):
         try:
-            _check_our_account(peer_id, debug_mode=debug_mode)
+            if sc.statement_tick_due(peer_id, every):
+                _check_our_account(peer_id, debug_mode=debug_mode)
         except Exception as e:
             log.LOGGER(f"Error checking our account on {peer_id}: {e}")
 
@@ -1149,6 +1207,7 @@ def sweep_balance_movements(force: bool = False) -> int:
     _last_ledger_sweep = now
     try:
         deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
+        sc.prune_statement_faults(max_age_days=ledger.retention_days())
         if deleted:
             log.LOGGER(f"Retention sweep deleted {deleted} balance movement(s).")
         return deleted

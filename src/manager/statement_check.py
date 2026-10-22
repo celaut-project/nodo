@@ -426,8 +426,15 @@ def start_grace_seconds() -> int:
     return (timeout if timeout > 0 else 600) + 2 * iteration
 
 
-def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now_ts: int
+def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now: float
                      ) -> Tuple[List[str], Optional[int]]:
+    """``account_faults`` without the seq of each fault: only what it says."""
+    faults, stop_at = account_faults(rows, starts, now)
+    return [text for _, text in faults], stop_at
+
+
+def account_faults(rows: Iterable[Row], starts: Mapping[str, int], now: float
+                   ) -> Tuple[List[Tuple[int, str]], Optional[int]]:
     """What the peer took from our account that this node did not cause.
 
     ``starts`` is each child that this node started on the peer, by the ``instance_ref``
@@ -436,7 +443,12 @@ def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now_ts: int
     the first ``child_start`` that cannot be judged yet: one with no ``child_bound``, or
     with a child that this node has not stored, younger than ``start_grace_seconds``.
     That start may be in progress. The mark stops before it, and the next read looks at
-    it again.
+    it again. Each problem comes with the seq of the movement where it shows.
+
+    ``now`` is the clock of this node, never the date of the statement: a peer chooses
+    that, and a start that it dated at the moment of every read would wait for ever. The
+    date of a movement is at most the date of its statement, which is near our clock
+    (``verify_chain``), so a start is judged at the latest ``CLOCK_SKEW_SECONDS`` late.
     """
     rows = list(rows)
     problems = []
@@ -462,63 +474,132 @@ def account_problems(rows: Iterable[Row], starts: Mapping[str, int], now_ts: int
             child = bound.get(row.seq, "")
             if child in starts:
                 if -row.amount > starts[child]:
-                    problems.append(
+                    problems.append((
+                        row.seq,
                         f"the start of {child[:8]} took {-row.amount} MU, and "
-                        f"{starts[child]} were sent"
-                    )
+                        f"{starts[child]} were sent",
+                    ))
                 continue
-            if now_ts - row.ts <= start_grace_seconds():
+            if now - row.ts <= start_grace_seconds() + CLOCK_SKEW_SECONDS:
                 return problems, row.seq
-            problems.append(f"movement {row.seq} pays the start of a child that this node did not start")
+            # TODO(#578): the peer may have finished a start that this node gave up on
+            # at its timeout, and a request reference would tell it from a start that
+            # nobody asked for. Until then it is logged, and not scored.
+            log.LOGGER(f"Movement {row.seq} pays the start of a child that this node does "
+                       f"not know ({child[:8] or 'no child'}).")
         elif row.kind == ledger.TOP_UP:
             if row.ref not in starts:
-                problems.append(f"movement {row.seq} tops up an instance that is not ours")
+                problems.append((row.seq, f"movement {row.seq} tops up an instance that is not ours"))
         else:
-            problems.append(f"movement {row.seq} is a {row.kind!r} charge that this node did not cause")
+            problems.append((
+                row.seq, f"movement {row.seq} is a {row.kind!r} charge that this node did not cause"
+            ))
     return problems, None
 
 
 def unreachable(error: Exception) -> bool:
     """A transport failure, which says nothing about the statement of the peer."""
-    return isinstance(error, grpc.RpcError) and error.code() in (
-        grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED,
-    )
+    return _code_of(error) in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED)
 
 
-def _short_of_statement_price(peer_id: str) -> bool:
-    """Whether our account on ``peer_id`` may not pay for a statement now.
+def _code_of(error: Exception):
+    return error.code() if isinstance(error, grpc.RpcError) and callable(getattr(error, "code", None)) \
+        else None
 
-    A peer refuses a statement that the account cannot pay, and that is not its fault.
-    The price is read from its rates, for a few rows; a balance that cannot be read
-    counts as short, so that a doubt never costs the peer the penalty.
+
+def page_rows(balance_mu: int, rates: Mapping[str, int]) -> int:
+    """How many movements a read may ask for with ``balance_mu`` on the peer, at its
+    rates. 0 when it could not pay for even the head of the account.
+
+    The peer charges its fixed part and a part for each movement, and for one more: the
+    charge of the read, which our own account shows. A peer that refuses a statement
+    that this much covers is at fault, so the read asks for no more than it can pay.
     """
-    from src.manager.metrics import refresh_balance_on_peer
     from src.utils.cost_functions.general_cost_functions import (
         RATE_STATEMENT_QUERY,
         RATE_STATEMENT_ROW,
     )
 
-    rates = stored_rates(peer_id)
-    price = rates.get(RATE_STATEMENT_QUERY, 0) + 10 * rates.get(RATE_STATEMENT_ROW, 0)
+    query = int(rates.get(RATE_STATEMENT_QUERY, 0))
+    row = int(rates.get(RATE_STATEMENT_ROW, 0))
+    cap = ledger.max_statement_rows()
+    if row <= 0:
+        return cap if balance_mu >= query else 0
+    affordable = (int(balance_mu) - query) // row - 1
+    return max(0, min(cap, affordable))
+
+
+def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
+         rows: Optional[int] = None) -> celaut_pb2.BalanceStatement:
+    """``balance_statement.fetch``, with the books of what the peer may charge for it.
+
+    ``rows`` is how many movements the read asks for (None: the node decides). Our
+    account pays for every read, and the peer writes each charge in it, so each read is
+    counted when it is asked, before the peer can charge it: a read that fails after the
+    charge still has its row. The rows that it may be priced for are the one of its own
+    charge, and then those of the answer, or those asked for when there is none.
+    """
+    from src.database.sql_connection import SQLConnection
+    from src.manager import balance_statement
+
+    sc = SQLConnection()
+    sc.add_statement_read(peer_id, rows_priced=1)
+    to_seq = from_seq + rows - 1 if rows else 0
     try:
-        return refresh_balance_on_peer(peer_id) < price
+        statement = balance_statement.fetch(
+            peer_id, client_id, token=token, from_seq=from_seq, to_seq=to_seq)
     except Exception:
-        return True
+        sc.add_statement_read(peer_id, rows_priced=rows or ledger.max_statement_rows(), count=0)
+        raise
+    sc.add_statement_read(peer_id, rows_priced=len(statement.movements), count=0)
+    return statement
 
 
-def penalise_no_statement(peer_id: str, account: str, error: Exception) -> None:
+def query_charge_problems(rows: Iterable[Row], counters: Mapping[str, int],
+                          rates: Mapping[str, int]) -> List[str]:
+    """Whether the peer charged our account for more statements than we asked for.
+
+    ``counters`` are the totals that ``SQLConnection.get_statement_counters`` gives,
+    with ``rows`` already added to the verified ones. What the peer showed never exceeds
+    what we asked for, in number and in MU: asked for, at the fixed part of the rates
+    and a part for each movement that the reads may be priced for.
+    """
+    from src.utils.cost_functions.general_cost_functions import (
+        RATE_STATEMENT_QUERY,
+        RATE_STATEMENT_ROW,
+    )
+
+    rows = [row for row in rows if row.kind == ledger.STATEMENT_QUERY and row.amount < 0]
+    if not rows:
+        return []
+    allowed_mu = (counters["reads"] * int(rates.get(RATE_STATEMENT_QUERY, 0))
+                  + counters["rows_priced"] * int(rates.get(RATE_STATEMENT_ROW, 0)))
+    problems = []
+    if counters["verified"] > counters["reads"]:
+        problems.append(
+            f"{counters['verified']} statement charges, and {counters['reads']} statements were asked for"
+        )
+    if counters["verified_mu"] > allowed_mu:
+        problems.append(
+            f"statement charges of {counters['verified_mu']} MU, and what was asked for "
+            f"costs {allowed_mu} MU at its rates"
+        )
+    return problems
+
+
+def penalise_no_statement(peer_id: str, account: str, error: Exception, seq: int = 0) -> None:
     """A peer that gives no valid statement is one whose statement does not add up.
 
-    Not when the peer cannot be reached (that says nothing about its statements), nor
-    when our account there cannot pay for one.
+    Not when the peer cannot be reached: that says nothing about its statements.
+    ``RESOURCE_EXHAUSTED`` counts as a refusal like any other, because a read only asks
+    for what our balance there covers (``page_rows``): a peer that says we cannot pay for
+    it contradicts the balance that it reports. ``seq`` is the movement where the
+    statement was missing.
     """
     if unreachable(error):
         return
-    if not isinstance(error, _invalid_statement()) and _short_of_statement_price(peer_id):
-        log.LOGGER(f"No statement of {account[:8]} from {peer_id}, and our account there "
-                   f"may not pay for one: {error}")
-        return
-    penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT, f"no valid statement: {error}")
+    penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT,
+                  f"no valid statement: {error}", seq)
 
 
 def _invalid_statement():
@@ -526,17 +607,20 @@ def _invalid_statement():
     return StatementInvalid
 
 
-# (peer, account, reason) already scored. A statement that does not add up stays wrong
-# for every later read until the mark moves past it, and one fault must cost the peer
-# one penalty, not one each tick. In memory: a restart costs at most one more.
-_penalised = set()
+def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: int = 0) -> None:
+    """Score a fault of a peer, once: the same fault read again costs it nothing.
 
-
-def penalise_once(peer_id: str, account: str, reason: str, problem: str) -> None:
+    A fault is the peer, the account (by ``account_ref``, never the credential), the
+    reason and the seq of the movement where it shows (``statement_faults``). A
+    statement that does not add up stays wrong for every read until the mark goes past
+    it, and also after a restart, so the record is in the database. A different fault,
+    at another movement, is scored.
+    """
+    from src.database.sql_connection import SQLConnection
     from src.reputation_system import interface
 
-    log.LOGGER(f"Statement of {account[:8]} on {peer_id}: {problem}")
-    if (peer_id, account, reason) in _penalised:
+    account_ref = ledger.account_ref(account)
+    log.LOGGER(f"Statement of {account_ref[:8]} on {peer_id}: {problem}")
+    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq):
         return
-    _penalised.add((peer_id, account, reason))
     interface.update_peer_reputation(peer_id=peer_id, amount=STATEMENT_PENALTY, reason=reason)

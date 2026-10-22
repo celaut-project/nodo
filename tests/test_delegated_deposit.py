@@ -245,9 +245,10 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         return row
 
     def _tick(self, row, *, spent=600_000, read_raises=None, peer_reachable=True,
-              rates=True, rows=None):
+              rates=True, rows=None, due=True):
         sc = MagicMock()
         sc.get_delegated_instances.return_value = rows or [row]
+        sc.statement_tick_due.return_value = due
         read = (
             MagicMock(side_effect=read_raises) if read_raises
             else MagicMock(return_value=(spent, self.MARK))
@@ -280,6 +281,11 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         if round_up:
             return -(-numerator // 2_000_000_000)
         return numerator // 2_000_000_000
+
+    def test_our_account_is_read_only_when_its_ticks_are_due(self):
+        self._tick(self._row(), due=False)
+
+        self.check_account.assert_not_called()
 
     def test_our_account_on_each_peer_is_checked_once(self):
         self._tick(None, rows=[self._row(), self._row(token="second-token")])
@@ -399,8 +405,14 @@ def _answer(book, from_seq, tamper=None):
     return statement
 
 
+def _answer_page(book, from_seq, rows):
+    """What a node answers for ``rows`` movements from ``from_seq``, dated now."""
+    return book.statement(from_seq=from_seq, to_seq=from_seq + rows - 1 if rows else 0,
+                          ts=int(time.time()))
+
+
 def _fetch_of(book, tamper=None):
-    return MagicMock(side_effect=lambda peer, client, token="", from_seq=0, to_seq=0:
+    return MagicMock(side_effect=lambda peer, client, token="", from_seq=0, rows=None:
                      _answer(book, from_seq, tamper))
 
 
@@ -409,7 +421,7 @@ class ReadChildTests(unittest.TestCase):
     """What the tick reads of a child: its statement when it adds up, else its balance."""
 
     def setUp(self):
-        statement_check._penalised.clear()
+        pass
 
     def _row(self, book, seq=2, balance=70):
         mark = book.mark_at(seq)
@@ -417,16 +429,19 @@ class ReadChildTests(unittest.TestCase):
                 'peer_balance_mu': balance, 'peer_statement_seq': seq,
                 'peer_statement_hash': mark.hash, 'peer_statement_ts': mark.ts}
 
-    def _read(self, book=None, fetch_error=None, balance=None, row=None, tamper=None):
+    def _read(self, book=None, fetch_error=None, balance=None, row=None, tamper=None,
+              held=10 ** 9, rates=None):
         fetch = MagicMock(side_effect=fetch_error) if fetch_error else _fetch_of(book, tamper)
-        with patch.object(maintain.balance_statement, "fetch", fetch), \
+        with patch.object(statement_check, "read", fetch), \
+                patch.object(maintain, "_balance_held_on", return_value=held), \
+                patch.object(statement_check, "stored_rates", return_value=rates or {}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client-on-peer"), \
                 patch.object(maintain, "_peer_rates", return_value={}), \
                 patch.object(maintain, "instance_balance_on_peer",
                              side_effect=RuntimeError("gone") if balance is None else None,
                              return_value=balance), \
                 patch.object(statement_check, "penalise_once") as penalise, \
-                patch.object(statement_check, "_short_of_statement_price", return_value=False):
+                patch.object(statement_check, "penalise_no_statement") as self.penalise_none:
             try:
                 result = maintain._read_child(dict(row))
             except Exception as e:
@@ -472,9 +487,30 @@ class ReadChildTests(unittest.TestCase):
         (spent, mark), penalise, _ = self._read(
             fetch_error=RuntimeError("refused"), balance=50, row=self._row(book))
 
-        self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
+        self.penalise_none.assert_called_once()
+        self.assertEqual(self.penalise_none.call_args.kwargs["seq"], 3)
         self.assertEqual(spent, 20)
         self.assertIsNone(mark["seq"])
+
+    def test_a_statement_that_our_balance_does_not_pay_for_is_not_asked_for_and_no_one_is_scored(self):
+        book = _book((100, "start"), (-30, "build"))
+        # With rates that charge, and a balance that does not cover the fixed part.
+        (spent, mark), penalise, fetch = self._read(
+            book, balance=50, row=self._row(book), held=5,
+            rates={"statement_query_mu": 100, "statement_row_mu": 10})
+
+        fetch.assert_not_called()
+        self.penalise_none.assert_not_called()
+        penalise.assert_not_called()
+        self.assertEqual(spent, 20)
+        self.assertIsNone(mark["seq"])
+
+    def test_the_read_asks_for_what_the_balance_pays_for(self):
+        book = _book((100, "start"), (-30, "build"))
+
+        _, _, fetch = self._read(book, row=self._row(book), held=10 ** 9)
+
+        self.assertEqual(fetch.call_args.kwargs["rows"], ledger.max_statement_rows())
 
     def test_a_child_the_peer_does_not_know_raises_for_the_tick_to_stop_it(self):
         book = _book((100, "start"), (-30, "build"))
@@ -503,15 +539,17 @@ class CheckStartTests(unittest.TestCase):
     """The statement of a new child, read right after StartService (#570)."""
 
     def setUp(self):
-        statement_check._penalised.clear()
+        pass
 
     def _check(self, book=None, fetch_error=None, bound=40, tamper=None):
         fetch = MagicMock(side_effect=fetch_error) if fetch_error else _fetch_of(book, tamper)
-        with patch.object(delegate_mod.balance_statement, "fetch", fetch), \
+        with patch.object(statement_check, "read", fetch), \
                 patch.object(delegate_mod.statement_check, "stored_rates", return_value={}), \
                 patch.object(delegate_mod, "_child_balance_on_peer", return_value=55), \
-                patch.object(statement_check, "_short_of_statement_price", return_value=False), \
-                patch.object(statement_check, "penalise_once") as penalise:
+                patch.object(statement_check, "penalise_once") as penalise, \
+                patch.object(statement_check, "penalise_no_statement",
+                             side_effect=lambda peer, account, error, seq=0: penalise(
+                                 peer, account, "statement_inconsistent", str(error), seq)):
             result = delegate_mod._check_start(PEER_ID, "client-on-peer", PEER_TOKEN, 100, bound)
         return result, penalise
 
@@ -557,18 +595,30 @@ class CheckStartTests(unittest.TestCase):
 class CheckOurAccountTests(unittest.TestCase):
     """The statement of our own account on a peer, read at each tick (#570)."""
 
-    def setUp(self):
-        statement_check._penalised.clear()
+    COUNTERS = {"reads": 10, "rows_priced": 100, "verified": 0, "verified_mu": 0}
 
-    def _check(self, book, stored=None, starts=None):
+    def _check(self, book, stored=None, starts=None, held=10 ** 9, rates=None, counters=None,
+               fetch=None, max_pages=None):
         sc = MagicMock()
         sc.get_peer_client.return_value = "client-on-peer"
         sc.get_peer_statement_mark.return_value = stored or {}
         sc.delegated_starts_on_peer.return_value = starts or {ledger.instance_ref(PEER_TOKEN): 100}
+        sc.get_statement_counters.return_value = counters or dict(self.COUNTERS)
+        fetch = fetch or _fetch_of(book)
         with patch.object(maintain, "sc", sc), \
-                patch.object(maintain.balance_statement, "fetch", _fetch_of(book)), \
-                patch.object(statement_check, "penalise_once") as penalise:
-            maintain._check_our_account(PEER_ID)
+                patch.object(statement_check, "read", fetch), \
+                patch.object(maintain, "_balance_held_on", return_value=held), \
+                patch.object(statement_check, "stored_rates", return_value=rates or {}), \
+                patch.object(maintain, "_peer_rates", return_value=rates or {}), \
+                patch.object(statement_check, "penalise_once") as penalise, \
+                patch.object(statement_check, "penalise_no_statement") as penalise_none:
+            if max_pages:
+                with patch.object(ledger, "max_statement_pages_per_tick", return_value=max_pages):
+                    maintain._check_our_account(PEER_ID)
+            else:
+                maintain._check_our_account(PEER_ID)
+        self.penalise_none = penalise_none
+        self.fetch = fetch
         return sc, penalise
 
     @staticmethod
@@ -586,12 +636,13 @@ class CheckOurAccountTests(unittest.TestCase):
         peer, seq, hash_, balance, _ = sc.set_peer_statement_mark.call_args.args
         self.assertEqual((peer, seq, hash_, balance), (PEER_ID, 4, book.rows[3]["hash"], 399))
 
-    def test_a_charge_we_did_not_cause_is_an_overcharge(self):
+    def test_a_charge_we_did_not_cause_is_an_overcharge_at_its_seq(self):
         book = _book((500, "credit"), (-100, "debit"), account="client-on-peer")
 
         _, penalise = self._check(book)
 
         self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
+        self.assertEqual(penalise.call_args.args[4], 2)
 
     def test_a_start_in_progress_holds_the_mark_before_it(self):
         now = int(time.time())
@@ -604,7 +655,27 @@ class CheckOurAccountTests(unittest.TestCase):
         sc.set_peer_statement_mark.assert_called_once_with(
             PEER_ID, 1, book.rows[0]["hash"], 500, book.rows[0]["ts"])
 
-    def test_a_statement_that_does_not_add_up_from_the_mark_is_penalised(self):
+    def test_a_start_that_a_peer_dates_at_every_read_does_not_wait_for_ever(self):
+        """The wait is measured on our clock: the date of the statement is the peer's."""
+        now = int(time.time())
+        old = now - statement_check.start_grace_seconds() - 600
+        book = _book((500, "credit", "", "", old - 5), (-100, "child_start", "", "", old),
+                     (-1, "statement_query", "", "", now - 1), account="client-on-peer")
+
+        sc, penalise = self._check(book)
+
+        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 3)
+
+    def test_a_start_that_nobody_knows_is_logged_and_not_scored_until_it_has_a_reference(self):
+        # TODO(#578)
+        book = _book((500, "credit"), (-100, "child_start"), account="client-on-peer")
+
+        sc, penalise = self._check(book)
+
+        penalise.assert_not_called()
+        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 2)
+
+    def test_a_statement_that_does_not_add_up_from_the_mark_is_penalised_and_the_mark_goes_to_the_head(self):
         book = _book((500, "credit"), (-100, "statement_query"), account="client-on-peer")
         mark = book.mark_at(1)
         stored = dict(self._stored(mark), balance_mu=499)
@@ -612,7 +683,95 @@ class CheckOurAccountTests(unittest.TestCase):
         sc, penalise = self._check(book, stored=stored)
 
         self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
+        self.assertEqual(penalise.call_args.args[4], 2)
         sc.set_peer_statement_mark.assert_called_once()
+        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 2)
+
+    def test_a_statement_that_is_not_given_is_scored_at_the_movement_that_was_missing(self):
+        book = _book((500, "credit"), (-1, "statement_query"), account="client-on-peer")
+        mark = book.mark_at(1)
+
+        sc, _ = self._check(book, stored=self._stored(mark),
+                            fetch=MagicMock(side_effect=RuntimeError("refused")))
+
+        self.penalise_none.assert_called_once()
+        self.assertEqual(self.penalise_none.call_args.kwargs["seq"], 2)
+        sc.set_peer_statement_mark.assert_not_called()
+
+    def test_a_read_asks_for_what_the_balance_pays_for(self):
+        book = _book(*[(1, "deposit")] * 30, account="client-on-peer")
+
+        self._check(book, held=100 + 2 * 10, rates={"statement_query_mu": 100,
+                                                    "statement_row_mu": 10}, max_pages=1)
+
+        # 20 MU after the fixed part pay for two rows, and one of them is the charge.
+        self.assertEqual(self.fetch.call_args.kwargs["rows"], 1)
+
+    def test_a_balance_that_pays_for_nothing_asks_for_nothing(self):
+        book = _book((500, "credit"), account="client-on-peer")
+
+        sc, penalise = self._check(book, held=50, rates={"statement_query_mu": 100,
+                                                         "statement_row_mu": 10})
+
+        self.fetch.assert_not_called()
+        penalise.assert_not_called()
+        sc.set_peer_statement_mark.assert_not_called()
+
+    def test_a_long_account_is_read_page_by_page_without_skipping_a_movement(self):
+        book = _book((5, "credit"), *[(0, "deposit")] * 11, account="client-on-peer")
+        fetched = []
+
+        def fetch(peer, client, token="", from_seq=0, rows=None):
+            fetched.append(from_seq)
+            return _answer_page(book, from_seq, rows)
+
+        sc, penalise = self._check(book, fetch=MagicMock(side_effect=fetch), max_pages=10,
+                                   rates={"statement_query_mu": 0, "statement_row_mu": 1},
+                                   held=5)
+
+        # Four movements fit in 5 MU of rows, with one more for the charge: 4, 4, 4.
+        self.assertEqual(fetched, [1, 5, 9])
+        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 12)
+        penalise.assert_not_called()
+
+    def test_a_tick_reads_no_more_than_its_pages(self):
+        book = _book((5, "credit"), *[(0, "deposit")] * 11, account="client-on-peer")
+
+        def fetch(peer, client, token="", from_seq=0, rows=None):
+            return _answer_page(book, from_seq, rows)
+
+        sc, _ = self._check(book, fetch=MagicMock(side_effect=fetch), max_pages=2,
+                            rates={"statement_query_mu": 0, "statement_row_mu": 1}, held=5)
+
+        self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 8)
+
+    def test_the_peer_cannot_charge_more_statements_than_we_asked_for(self):
+        book = _book((500, "credit"), (-1, "statement_query"), (-1, "statement_query"),
+                     account="client-on-peer")
+
+        _, penalise = self._check(
+            book, counters={"reads": 1, "rows_priced": 10, "verified": 2, "verified_mu": 2})
+
+        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
+        self.assertIn("statements were asked for", penalise.call_args.args[3])
+
+    def test_the_peer_cannot_charge_more_for_them_than_their_price(self):
+        book = _book((500, "credit"), (-90, "statement_query"), account="client-on-peer")
+
+        _, penalise = self._check(
+            book, rates={"statement_query_mu": 10, "statement_row_mu": 1},
+            counters={"reads": 1, "rows_priced": 5, "verified": 1, "verified_mu": 90})
+
+        self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
+
+    def test_charges_within_what_we_asked_for_are_fine(self):
+        book = _book((500, "credit"), (-14, "statement_query"), account="client-on-peer")
+
+        _, penalise = self._check(
+            book, rates={"statement_query_mu": 10, "statement_row_mu": 1},
+            counters={"reads": 1, "rows_priced": 5, "verified": 1, "verified_mu": 14})
+
+        penalise.assert_not_called()
 
 
 class _StopHarness:

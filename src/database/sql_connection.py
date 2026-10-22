@@ -3189,6 +3189,82 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ?
         ''', (seq, hash, None if balance_mu is None else str(int(balance_mu)), ts, peer_id))
 
+    def statement_tick_due(self, peer_id: str, every: int) -> bool:
+        """Count one tick for our account on ``peer_id``; True once ``every`` have passed.
+
+        The count goes back to 0 when it says True, so the caller reads at that tick.
+        """
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT statement_ticks FROM peer WHERE id = ?', (peer_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            ticks = int(row['statement_ticks']) + 1
+            due = ticks >= int(every)
+            cursor.execute('UPDATE peer SET statement_ticks = ? WHERE id = ?',
+                           (0 if due else ticks, peer_id))
+            return due
+
+        return self._transaction(work)
+
+    def add_statement_read(self, peer_id: str, rows_priced: int, count: int = 1) -> None:
+        """Count statements that this node asked ``peer_id`` for, and the rows they may be
+        priced for: what the peer may charge our account for them (see the `peer` table)."""
+        self._execute('''
+            UPDATE peer SET statement_reads = statement_reads + ?,
+                            statement_rows_priced = statement_rows_priced + ?
+            WHERE id = ?
+        ''', (int(count), int(rows_priced), peer_id))
+
+    def add_statement_queries_verified(self, peer_id: str, count: int, mu: int) -> None:
+        """Count ``statement_query`` movements that ``peer_id`` showed in our account, and
+        what they took, in the MU of the peer."""
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
+            ).fetchone()
+            if row is None:
+                return
+            cursor.execute('''
+                UPDATE peer SET statement_queries_verified = statement_queries_verified + ?,
+                                statement_queries_verified_mu = ?
+                WHERE id = ?
+            ''', (int(count), str(_as_int(row['statement_queries_verified_mu']) + int(mu)),
+                  peer_id))
+
+        self._transaction(work)
+
+    def get_statement_counters(self, peer_id: str) -> dict:
+        """``reads``, ``rows_priced``, ``verified`` and ``verified_mu`` of ``peer_id``
+        (see the `peer` table). Zeros for a peer that is not known."""
+        row = self._execute(
+            'SELECT statement_reads, statement_rows_priced, statement_queries_verified, '
+            'statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
+        ).fetchone()
+        if row is None:
+            return {"reads": 0, "rows_priced": 0, "verified": 0, "verified_mu": 0}
+        return {"reads": int(row['statement_reads']), "rows_priced": int(row['statement_rows_priced']),
+                "verified": int(row['statement_queries_verified']),
+                "verified_mu": _as_int(row['statement_queries_verified_mu'])}
+
+    def record_statement_fault(self, peer_id: str, account_ref: str, reason: str,
+                               seq: int) -> bool:
+        """Write a fault of ``peer_id`` in a statement. True if it was not written yet:
+        that is the one time that it is scored."""
+        cursor = self._execute('''
+            INSERT OR IGNORE INTO statement_faults (peer_id, account_ref, reason, seq, ts)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (peer_id, account_ref, reason, int(seq), int(time.time())))
+        return cursor.rowcount > 0
+
+    def prune_statement_faults(self, max_age_days: int) -> int:
+        """Delete the faults older than ``max_age_days``. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        return self._execute(
+            'DELETE FROM statement_faults WHERE ts < ?', (cutoff,)
+        ).rowcount
+
     def delegated_starts_on_peer(self, peer_id: str) -> Dict[str, int]:
         """The ``instance_ref`` of the token of the peer of each instance delegated to
         ``peer_id``, live or dead, with what was sent for its start, in the MU of the

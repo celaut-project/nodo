@@ -135,6 +135,8 @@ def movement_hash(prev_hash: str, seq: int, ts: int, amount_mu, balance_after_mu
 
 DEFAULT_RETENTION_DAYS = 30
 DEFAULT_MIN_PEER_RETENTION_DAYS = 7
+DEFAULT_MAX_STATEMENT_PAGES_PER_TICK = 4
+DEFAULT_STATEMENT_READ_EVERY_TICKS = 30
 DEFAULT_MAX_STATEMENT_ROWS = 1000
 
 
@@ -186,6 +188,25 @@ def min_peer_retention_days() -> int:
     that retention, and a peer that announces none would excuse any gap.
     """
     return _positive_int("ledger.MIN_PEER_RETENTION_DAYS", DEFAULT_MIN_PEER_RETENTION_DAYS)
+
+
+def max_statement_pages_per_tick() -> int:
+    """``ledger.MAX_STATEMENT_PAGES_PER_TICK``: the pages that one tick reads of an account."""
+    return _positive_int("ledger.MAX_STATEMENT_PAGES_PER_TICK", DEFAULT_MAX_STATEMENT_PAGES_PER_TICK)
+
+
+def statement_read_every_ticks(tick_seconds: float) -> int:
+    """``ledger.STATEMENT_READ_EVERY_TICKS``: the ticks between two reads of our account on
+    a peer.
+
+    A read is a purchase, so it is not made at every tick. The rows are kept for the
+    retention of the peer, and reading less often only delays a detection. The interval
+    is held to a tenth of the shortest retention that a peer is held to: a node that read
+    too rarely would meet gaps that its own slowness caused.
+    """
+    every = _positive_int("ledger.STATEMENT_READ_EVERY_TICKS", DEFAULT_STATEMENT_READ_EVERY_TICKS)
+    longest = (min_peer_retention_days() * 86400) / 10
+    return max(1, min(every, int(longest // max(float(tick_seconds), 1.0))))
 
 
 def max_statement_rows() -> int:

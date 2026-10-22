@@ -374,58 +374,197 @@ class AccountRuleTests(unittest.TestCase):
                 Row(5, 0, -50, 0, ledger.TOP_UP, "child"),
                 Row(6, 0, -1, 0, ledger.STATEMENT_QUERY, "child"),
                 Row(7, 0, 20, 0, ledger.REFUND, "child")]
-        self.assertEqual(check.account_problems(rows, self.STARTS, now_ts=10 ** 6), ([], None))
+        self.assertEqual(check.account_problems(rows, self.STARTS, now=10 ** 6), ([], None))
 
     def test_a_start_above_what_was_sent_is_an_overcharge(self):
         rows = [Row(3, 0, -101, 0, ledger.CHILD_START, ""), self.bound(4)]
-        self.assertEqual(len(check.account_problems(rows, self.STARTS, now_ts=0)[0]), 1)
+        self.assertEqual(len(check.account_problems(rows, self.STARTS, now=0)[0]), 1)
 
-    def test_a_start_bound_to_a_child_that_is_not_ours_is_an_overcharge_once_it_is_old(self):
+    def test_a_start_bound_to_a_child_that_is_not_ours_is_not_scored_once_it_is_old(self):
+        # TODO(#578): a start that this node gave up on may be the peer's.
         rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""), self.bound(4, child="stranger")]
-        problems, stop_at = check.account_problems(rows, self.STARTS, now_ts=10 ** 6)
+        problems, stop_at = check.account_problems(rows, self.STARTS, now=10 ** 6)
 
-        self.assertEqual((len(problems), stop_at), (1, None))
+        self.assertEqual((problems, stop_at), ([], None))
 
     def test_a_start_in_progress_stops_the_check_until_it_is_known(self):
         rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),
                 Row(4, 1000, -999, 0, ledger.DEBIT, "")]
 
-        self.assertEqual(check.account_problems(rows, self.STARTS, now_ts=1001), ([], 3))
+        self.assertEqual(check.account_problems(rows, self.STARTS, now=1001), ([], 3))
 
-    def test_a_start_that_nobody_asked_for_is_an_overcharge_once_it_is_old(self):
+    def test_a_start_that_nobody_asked_for_is_not_scored_once_it_is_old(self):
+        # TODO(#578): until a request reference tells it from a start nobody asked for.
         rows = [Row(3, 0, -100, 0, ledger.CHILD_START, "")]
-        problems, stop_at = check.account_problems(rows, self.STARTS, now_ts=10 ** 6)
+        problems, stop_at = check.account_problems(rows, self.STARTS, now=10 ** 6)
 
-        self.assertEqual((len(problems), stop_at), (1, None))
+        self.assertEqual((problems, stop_at), ([], None))
 
     def test_a_start_that_was_given_back_is_fine(self):
         rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""),
                 Row(4, 0, 100, 0, ledger.REFUND, "", {"refunds_seq": "3"})]
-        self.assertEqual(check.account_problems(rows, self.STARTS, now_ts=10 ** 6), ([], None))
+        self.assertEqual(check.account_problems(rows, self.STARTS, now=10 ** 6), ([], None))
 
     def test_a_charge_this_node_did_not_cause_is_an_overcharge(self):
         rows = [Row(3, 0, -5, 0, ledger.DEBIT, ""),
                 Row(4, 0, -5, 0, ledger.TOP_UP, "not-ours"),
                 Row(5, 0, -5, 0, ledger.MAINTENANCE, "")]
-        self.assertEqual(len(check.account_problems(rows, self.STARTS, now_ts=0)[0]), 3)
+        self.assertEqual(len(check.account_problems(rows, self.STARTS, now=0)[0]), 3)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class PenaltyTests(unittest.TestCase):
+class AccountClockTests(unittest.TestCase):
+    """A start waits on the clock of this node, never on the date of the statement."""
+
+    STARTS = {"child": 100}
+
+    def test_a_start_inside_the_wait_stops_the_check(self):
+        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""), Row(4, 1000, -999, 0, ledger.DEBIT, "")]
+
+        self.assertEqual(check.account_problems(rows, self.STARTS, now=1001), ([], 3))
+
+    def test_a_start_is_judged_once_the_wait_has_passed_on_our_clock(self):
+        row = Row(3, 1000, -100, 0, ledger.CHILD_START, "")
+        wait = check.start_grace_seconds() + check.CLOCK_SKEW_SECONDS
+
+        self.assertEqual(check.account_problems([row], self.STARTS, now=1000 + wait)[1], 3)
+        self.assertIsNone(check.account_problems([row], self.STARTS, now=1000 + wait + 1)[1])
+
+    def test_a_start_that_nobody_knows_is_not_scored_for_now(self):
+        # TODO(#578)
+        row = Row(3, 0, -100, 0, ledger.CHILD_START, "")
+
+        self.assertEqual(check.account_problems([row], self.STARTS, now=10 ** 6), ([], None))
+
+    def test_each_problem_comes_with_the_seq_where_it_shows(self):
+        rows = [Row(3, 0, -5, 0, ledger.DEBIT, ""), Row(4, 0, -5, 0, ledger.MAINTENANCE, "")]
+
+        faults, _ = check.account_faults(rows, self.STARTS, now=0)
+
+        self.assertEqual([seq for seq, _ in faults], [3, 4])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class PageRowsTests(unittest.TestCase):
+    RATES = {"statement_query_mu": 100, "statement_row_mu": 10}
+
+    def test_a_read_asks_for_what_it_can_pay_with_a_row_for_its_own_charge(self):
+        # 100 for the call, 10 for each movement and one more for the charge.
+        self.assertEqual(check.page_rows(100 + 5 * 10, self.RATES), 4)
+
+    def test_a_balance_that_does_not_pay_for_the_head_asks_for_nothing(self):
+        self.assertEqual(check.page_rows(100 + 10 - 1, self.RATES), 0)
+        self.assertEqual(check.page_rows(99, self.RATES), 0)
+
+    def test_a_node_that_charges_nothing_is_asked_for_a_full_page(self):
+        self.assertEqual(check.page_rows(0, {}), ledger.max_statement_rows())
+
+    def test_a_page_is_never_more_than_the_limit(self):
+        self.assertEqual(check.page_rows(10 ** 12, self.RATES), ledger.max_statement_rows())
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class QueryChargeTests(unittest.TestCase):
+    RATES = {"statement_query_mu": 10, "statement_row_mu": 1}
+    ROWS = [Row(2, 0, -14, 0, ledger.STATEMENT_QUERY, "")]
+
+    def counters(self, **kwargs):
+        return dict({"reads": 1, "rows_priced": 5, "verified": 1, "verified_mu": 14}, **kwargs)
+
+    def test_what_was_asked_for_covers_what_was_charged(self):
+        self.assertEqual(check.query_charge_problems(self.ROWS, self.counters(), self.RATES), [])
+
+    def test_more_charges_than_reads_is_a_problem(self):
+        problems = check.query_charge_problems(self.ROWS, self.counters(verified=2), self.RATES)
+
+        self.assertEqual(len(problems), 1)
+
+    def test_more_mu_than_the_price_of_what_was_asked_for_is_a_problem(self):
+        problems = check.query_charge_problems(self.ROWS, self.counters(verified_mu=16), self.RATES)
+
+        self.assertEqual(len(problems), 1)
+
+    def test_nothing_to_check_without_a_charge_in_the_rows(self):
+        self.assertEqual(check.query_charge_problems(
+            [Row(2, 0, 5, 0, ledger.DEPOSIT, "")], self.counters(verified=99), self.RATES), [])
+
+
+class _Database(unittest.TestCase):
+    """An in-memory database with the real schema, for what is kept in it."""
 
     def setUp(self):
-        check._penalised.clear()
+        import sqlite3
+
+        from src.database.migrate import create_tables
+        from src.database.sql_connection import SQLConnection
+
+        self.sc = SQLConnection()
+        self._original = SQLConnection._connection
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        connection.row_factory = sqlite3.Row
+        create_tables(connection.cursor())
+        connection.execute("INSERT INTO peer (id) VALUES ('peer')")
+        connection.commit()
+        SQLConnection._connection = connection
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        from src.database.sql_connection import SQLConnection
+        SQLConnection._connection.close()
+        SQLConnection._connection = self._original
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class PenaltyTests(_Database):
+
+    def setUp(self):
+        super().setUp()
         patcher = patch("src.reputation_system.interface.update_peer_reputation")
         self.update = patcher.start()
         self.addCleanup(patcher.stop)
 
     def test_one_fault_costs_one_penalty(self):
         for _ in range(3):
-            check.penalise_once("peer", "acct", "statement_overcharged", "x")
+            check.penalise_once("peer", "acct", "statement_overcharged", "x", 5)
 
         self.update.assert_called_once_with(
             peer_id="peer", amount=check.STATEMENT_PENALTY, reason="statement_overcharged"
         )
+
+    def test_the_same_fault_costs_nothing_after_a_restart(self):
+        """What was scored is in the database, not in the memory of the process."""
+        check.penalise_once("peer", "acct", "statement_overcharged", "x", 5)
+        self.update.reset_mock()
+
+        check.penalise_once("peer", "acct", "statement_overcharged", "x", 5)
+
+        self.update.assert_not_called()
+
+    def test_a_second_fault_of_the_same_reason_at_another_movement_is_scored(self):
+        check.penalise_once("peer", "acct", "statement_overcharged", "x", 5)
+        check.penalise_once("peer", "acct", "statement_overcharged", "y", 9)
+
+        self.assertEqual(self.update.call_count, 2)
+
+    def test_the_same_movement_for_another_reason_is_scored(self):
+        check.penalise_once("peer", "acct", "statement_overcharged", "x", 5)
+        check.penalise_once("peer", "acct", "statement_inconsistent", "x", 5)
+
+        self.assertEqual(self.update.call_count, 2)
+
+    def test_the_fault_is_kept_by_the_hash_of_the_account_and_not_the_account(self):
+        check.penalise_once("peer", "a-client-id-that-is-a-secret", "statement_overcharged", "x", 5)
+
+        rows = self.sc._execute("SELECT * FROM statement_faults").fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["account_ref"], ledger.account_ref("a-client-id-that-is-a-secret"))
+        self.assertNotIn("secret", " ".join(str(v) for v in dict(rows[0]).values()))
+
+    def test_the_faults_are_forgotten_with_the_retention(self):
+        check.penalise_once("peer", "acct", "statement_overcharged", "x", 5)
+        self.sc._execute("UPDATE statement_faults SET ts = 0")
+
+        self.assertEqual(self.sc.prune_statement_faults(max_age_days=30), 1)
 
     def test_an_unreachable_peer_is_not_penalised(self):
         class Unavailable(grpc.RpcError):
@@ -435,15 +574,62 @@ class PenaltyTests(unittest.TestCase):
         check.penalise_no_statement("peer", "acct", Unavailable())
         self.update.assert_not_called()
 
-    def test_a_refusal_while_our_account_cannot_pay_is_not_penalised(self):
-        with patch.object(check, "_short_of_statement_price", return_value=True):
-            check.penalise_no_statement("peer", "acct", Exception("No balance statement."))
-        self.update.assert_not_called()
+    def test_a_refusal_for_lack_of_balance_is_penalised_because_the_read_only_asks_for_what_it_can_pay(self):
+        class Exhausted(grpc.RpcError):
+            def code(self):
+                return grpc.StatusCode.RESOURCE_EXHAUSTED
 
-    def test_a_refusal_while_our_account_can_pay_is_penalised(self):
-        with patch.object(check, "_short_of_statement_price", return_value=False):
-            check.penalise_no_statement("peer", "acct", Exception("No balance statement."))
+        check.penalise_no_statement("peer", "acct", Exhausted(), seq=3)
+
         self.update.assert_called_once()
+
+    def test_no_statement_is_one_fault_for_the_movement_that_was_missing(self):
+        check.penalise_no_statement("peer", "acct", Exception("refused"), seq=3)
+        check.penalise_no_statement("peer", "acct", Exception("refused"), seq=3)
+        check.penalise_no_statement("peer", "acct", Exception("refused"), seq=4)
+
+        self.assertEqual(self.update.call_count, 2)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CountedReadTests(_Database):
+    """Each read is counted when it is asked, before the peer can charge it."""
+
+    def read(self, answer=None, error=None, **kwargs):
+        statement = celaut_pb2.BalanceStatement()
+        for _ in range(3):
+            statement.movements.add()
+        with patch("src.manager.balance_statement.fetch",
+                   side_effect=error, return_value=answer if answer is not None else statement) as fetch:
+            try:
+                check.read("peer", "client", from_seq=4, **kwargs)
+            except Exception:
+                pass
+        return fetch
+
+    def test_a_read_that_is_answered_counts_the_rows_of_its_answer(self):
+        self.read(rows=10)
+
+        self.assertEqual(self.sc.get_statement_counters("peer")["reads"], 1)
+        # The row of the charge, and the three movements.
+        self.assertEqual(self.sc.get_statement_counters("peer")["rows_priced"], 4)
+
+    def test_a_read_that_fails_counts_all_that_it_asked_for(self):
+        self.read(error=RuntimeError("timeout"), rows=10)
+
+        counters = self.sc.get_statement_counters("peer")
+        self.assertEqual((counters["reads"], counters["rows_priced"]), (1, 11))
+
+    def test_a_page_is_asked_as_a_range(self):
+        fetch = self.read(rows=10)
+
+        self.assertEqual((fetch.call_args.kwargs["from_seq"], fetch.call_args.kwargs["to_seq"]),
+                         (4, 13))
+
+    def test_the_node_decides_when_no_size_is_asked(self):
+        fetch = self.read()
+
+        self.assertEqual(fetch.call_args.kwargs["to_seq"], 0)
 
 
 if __name__ == "__main__":
