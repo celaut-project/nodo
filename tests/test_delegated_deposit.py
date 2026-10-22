@@ -831,7 +831,10 @@ class CheckStartTests(unittest.TestCase):
 class CheckOurAccountTests(unittest.TestCase):
     """The statement of our own account on a peer, read at each tick (#570)."""
 
+    # What the books hold before the page is read: the charges of the page are added to
+    # them with the mark.
     COUNTERS = {"reads": 10, "rows_priced": 100, "verified": 0, "verified_mu": 0}
+    RATES = {"statement_query_mu": 0, "statement_row_mu": 1}
 
     def _check(self, book, stored=None, starts=None, held=10 ** 9, rates=None, counters=None,
                fetch=None, max_pages=None, attempts=None):
@@ -840,14 +843,14 @@ class CheckOurAccountTests(unittest.TestCase):
         sc.get_peer_statement_mark.return_value = stored or {}
         sc.delegated_starts_on_peer.return_value = starts or {ledger.instance_ref(PEER_TOKEN): 100}
         sc.open_start_attempts.return_value = attempts or []
-        sc.top_up_allowances.return_value = {ledger.instance_ref(PEER_TOKEN): 1000}
+        sc.top_up_reservations.return_value = [(1, ledger.instance_ref(PEER_TOKEN), 1000, 1000)]
         sc.get_statement_counters.return_value = counters or dict(self.COUNTERS)
         fetch = fetch or _fetch_of(book)
         with patch.object(maintain, "sc", sc), \
                 patch.object(statement_check, "read", fetch), \
                 patch.object(maintain, "_balance_held_on", return_value=held), \
-                patch.object(statement_check, "stored_rates", return_value=rates or {}), \
-                patch.object(maintain, "_peer_rates", return_value=rates or {}), \
+                patch.object(statement_check, "stored_rates", return_value=rates or self.RATES), \
+                patch.object(maintain, "_peer_rates", return_value=rates or self.RATES), \
                 patch.object(statement_check, "settle_failed_reads"), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement") as penalise_none:
@@ -902,7 +905,8 @@ class CheckOurAccountTests(unittest.TestCase):
 
         self.assertEqual(penalise.call_args.args[4], 3)
         self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 3)
-        self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["attempts_used"], [4])
+        self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["attempts"],
+                         {4: (2, 100, now, False)})
 
     def test_the_statements_queries_are_counted_once_and_the_mark_goes_past_them(self):
         now = int(time.time())
@@ -911,7 +915,8 @@ class CheckOurAccountTests(unittest.TestCase):
 
         sc, _ = self._check(book, attempts=[(4, now - 3, 100)])
 
-        sc.add_statement_queries_verified.assert_called_once_with(PEER_ID, 1, 1)
+        # With the mark, in the same transaction.
+        self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["queries_verified"], (1, 1))
         self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 3)
 
     def test_the_top_ups_taken_are_saved_with_the_mark(self):
@@ -921,7 +926,7 @@ class CheckOurAccountTests(unittest.TestCase):
         sc, penalise = self._check(book)
 
         penalise.assert_not_called()
-        self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["top_ups_taken"], {ref: 50})
+        self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["top_ups_taken"], {1: 50})
 
     def test_a_statement_that_does_not_add_up_from_the_mark_is_penalised_and_the_mark_goes_to_the_head(self):
         book = _book((500, "credit"), (-100, "statement_query"), account="client-on-peer")
@@ -1027,7 +1032,7 @@ class CheckOurAccountTests(unittest.TestCase):
                      account="client-on-peer")
 
         _, penalise = self._check(
-            book, counters={"reads": 1, "rows_priced": 10, "verified": 2, "verified_mu": 2})
+            book, counters={"reads": 1, "rows_priced": 10, "verified": 0, "verified_mu": 0})
 
         self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
         self.assertIn("statements were asked for", penalise.call_args.args[3])
@@ -1037,7 +1042,7 @@ class CheckOurAccountTests(unittest.TestCase):
 
         _, penalise = self._check(
             book, rates={"statement_query_mu": 10, "statement_row_mu": 1},
-            counters={"reads": 1, "rows_priced": 5, "verified": 1, "verified_mu": 90})
+            counters={"reads": 1, "rows_priced": 5, "verified": 0, "verified_mu": 0})
 
         self.assertEqual(penalise.call_args.args[2], "statement_overcharged")
 
@@ -1046,7 +1051,7 @@ class CheckOurAccountTests(unittest.TestCase):
 
         _, penalise = self._check(
             book, rates={"statement_query_mu": 10, "statement_row_mu": 1},
-            counters={"reads": 1, "rows_priced": 5, "verified": 1, "verified_mu": 14})
+            counters={"reads": 1, "rows_priced": 5, "verified": 0, "verified_mu": 0})
 
         penalise.assert_not_called()
 

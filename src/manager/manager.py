@@ -1448,14 +1448,27 @@ def delegation_lock(alias: str) -> threading.RLock:
     from reading that net until it has charged. The peer moves the balance of a child
     first and this node writes the net after, so a tick that read both in between would
     charge a withdrawal as consumption, or give back a top-up that the next tick charges
-    again."""
+    again.
+
+    Each call to a peer under the lock has a time limit (``peer_call_timeout``), so the
+    lock is never held for longer than that. The tick does not wait for the lock: when
+    ``modify_deposit`` holds it, the tick charges that child at the next tick."""
     with _delegation_locks_guard:
         return _delegation_locks.setdefault(alias, threading.RLock())
 
 
 def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
-    with delegation_lock(service_token):
+    from src.manager.statement_check import peer_call_timeout
+
+    lock = delegation_lock(service_token)
+    # The tick holds the lock while it reads the child on the peer, and each of those
+    # reads has a time limit. A longer wait means that something is wrong.
+    if not lock.acquire(timeout=4 * peer_call_timeout()):
+        return False, "The deposit of this instance is being charged. Try again."
+    try:
         return _modify_deposit(amount_mu, service_token)
+    finally:
+        lock.release()
 
 
 def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
@@ -1516,7 +1529,7 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         return True, "Deposit modified correctly"
 
     top_up_refunds = []
-    reserved = 0
+    reservation = None
     if amount_mu > 0:
         log.LOGGER(f"Charge father {father_id}")
         if not spend_mu(
@@ -1528,13 +1541,18 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         ):
             return False, 'Error charging the father'
 
-    def give_back_top_up() -> None:
-        # The father paid for a top-up the peer never received.
-        if reserved:
-            sc.reserve_top_up(service_token, -reserved)
+    def give_back_top_up(keep_reservation: bool = False) -> None:
+        # The father paid for a top-up the peer never received. When the answer was
+        # lost, the peer may have received it all the same: the reservation stays, and
+        # its window (``statement_check.top_up_grace_seconds``) ends it.
+        if not keep_reservation:
+            sc.drop_top_up_reservation(reservation)
         if top_up_refunds and not top_up_refunds.pop()():
             log.LOGGER(f"Could not give {format_mu(amount_mu)} back to {father_id}.")
 
+    from src.manager.statement_check import peer_call_timeout, unreachable
+
+    asked = False
     try:
         peer_id = sc.get_peer_id_by_external_service(token=external_token)
         if not peer_id:
@@ -1558,18 +1576,23 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         if amount_mu > 0:
             # Before the peer is asked: its row may show in our account, and be checked,
             # before the call returns (``statement_check.account_faults``).
-            sc.reserve_top_up(service_token, peer_amount)
-            reserved = peer_amount
+            reservation = sc.reserve_top_up(service_token, peer_amount)
+        asked = True
         _output = BeeClient.modify_deposit(
             peer_channel(peer_id),
             difference=utils.to_amount(
                 -peer_amount if amount_mu < 0 else peer_amount
             ),
             service_token=external_token,
+            timeout=peer_call_timeout(),
         )
+        if _output is None:
+            # The peer closed the call with no answer: like a lost answer.
+            raise ConnectionError(f"{peer_id} gave no answer to ModifyDeposit.")
     except Exception as e:
         log.LOGGER(f"Exception on modify_deposit for external service: {e}")
-        give_back_top_up()
+        give_back_top_up(keep_reservation=asked and (
+            unreachable(e) or isinstance(e, ConnectionError)))
         return False, "Node error."
 
     if not _output.success:

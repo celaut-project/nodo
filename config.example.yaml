@@ -1171,6 +1171,8 @@ communication:
   # peer that opens the stream and sends less than it declared; a generous timeout is
   # also what lets them accept their messages (a client_id, a hash, ...) in whichever
   # order the caller sent them. See src/gateway/client_gate.py.
+  # This node also waits this long at most for a peer to answer ModifyDeposit,
+  # GetBalanceStatement or GetMetrics (#570).
   SIMPLE_RPC_TIMEOUT_SECONDS: 60
 
 client:

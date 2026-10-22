@@ -655,7 +655,10 @@ class SQLConnection(metaclass=Singleton):
                 cursor, payer_id, -int(price(len(rows) + (1 if own else 0))),
                 ledger.STATEMENT_QUERY, allow_debt=allow_debt,
                 instance_token=None if own else account_id,
-                detail={"rows": str(len(rows))},
+                # The range names the read: a reader whose answer was lost finds the
+                # charge of that read by it, and prices it by the rows before it.
+                detail={"rows": str(len(rows)), "from_seq": str(int(from_seq)),
+                        "to_seq": str(int(to_seq))},
             )
             reaches_head = (rows[-1]["seq"] == head) if rows else int(from_seq) > head
             if (own and seq is not None and int(from_seq) > 0 and int(from_seq) <= seq
@@ -3303,43 +3306,55 @@ class SQLConnection(metaclass=Singleton):
 
     def set_peer_statement_mark(self, peer_id: str, seq: Optional[int], hash: Optional[str],
                                 balance_mu: Optional[int], ts: Optional[int],
-                                attempts_used: Iterable[int] = (),
-                                top_ups_taken: Optional[Mapping[str, int]] = None,
-                                children_started: Iterable[str] = ()) -> None:
+                                attempts: Optional[Mapping[int, tuple]] = None,
+                                top_ups_taken: Optional[Mapping[int, int]] = None,
+                                queries_verified: Optional[Tuple[int, int]] = None) -> None:
         """Write the mark of the statement of our account on ``peer_id``. None clears it.
 
         In the same transaction, the movements that the mark goes past are accounted
-        for: ``attempts_used`` are the start attempts that a ``child_start`` was matched
-        with, and ``top_ups_taken`` is what the peer took for the top-ups of each child
-        (by ``instance_ref``), which leaves the allowance of the child, and
-        ``children_started`` are the children whose start the movements showed: a start
-        is paid once.
+        for. ``attempts`` gives the new state of each start attempt that changed, by id:
+        ``(start_seq, start_mu, start_ts, closed)``. ``top_ups_taken`` is what the peer
+        took from each top-up reservation, by id. ``queries_verified`` is the count and
+        the MU of the ``statement_query`` movements that the mark goes past. All of it
+        moves with the mark, so a movement is accounted for once.
         """
-        taken = {ref: int(mu) for ref, mu in (top_ups_taken or {}).items() if int(mu) > 0}
-
         def work(cursor):
             cursor.execute('''
                 UPDATE peer SET statement_seq = ?, statement_hash = ?, statement_balance_mu = ?,
                                 statement_ts = ?
                 WHERE id = ?
             ''', (seq, hash, None if balance_mu is None else str(int(balance_mu)), ts, peer_id))
-            for attempt_id in attempts_used:
-                cursor.execute('UPDATE start_attempts SET consumed = 1 WHERE id = ?',
-                               (int(attempt_id),))
-            for ref in children_started:
-                cursor.execute('UPDATE start_attempts SET consumed = 1 '
-                               'WHERE peer_id = ? AND ref = ?', (peer_id, ref))
-            if taken:
-                for row in cursor.execute(
-                        'SELECT token_delegation, top_up_allowance_peer_mu '
-                        'FROM delegated_instances WHERE peer_id = ?', (peer_id,)).fetchall():
-                    spent = taken.get(ledger.instance_ref(row['token_delegation']))
-                    if spent:
-                        cursor.execute(
-                            'UPDATE delegated_instances SET top_up_allowance_peer_mu = ? '
-                            'WHERE token_delegation = ?',
-                            (str(max(0, _as_int(row['top_up_allowance_peer_mu']) - spent)),
-                             row['token_delegation']))
+            for attempt_id, (start_seq, start_mu, start_ts, closed) in (attempts or {}).items():
+                cursor.execute(
+                    'UPDATE start_attempts SET start_seq = ?, start_mu = ?, start_ts = ?, '
+                    'consumed = ? WHERE id = ? AND peer_id = ?',
+                    (start_seq, None if start_seq is None else str(int(start_mu)),
+                     start_ts, 1 if closed else 0, int(attempt_id), peer_id))
+            for reservation_id, mu in (top_ups_taken or {}).items():
+                row = cursor.execute(
+                    'SELECT peer_mu FROM top_up_reservations WHERE id = ? AND peer_id = ?',
+                    (int(reservation_id), peer_id)).fetchone()
+                if row is None:
+                    continue
+                left = _as_int(row['peer_mu']) - int(mu)
+                if left > 0:
+                    cursor.execute('UPDATE top_up_reservations SET peer_mu = ? WHERE id = ?',
+                                   (str(left), int(reservation_id)))
+                else:
+                    cursor.execute('DELETE FROM top_up_reservations WHERE id = ?',
+                                   (int(reservation_id),))
+            if queries_verified and int(queries_verified[0]):
+                row = cursor.execute(
+                    'SELECT statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
+                ).fetchone()
+                if row is not None:
+                    cursor.execute('''
+                        UPDATE peer SET statement_queries_verified = statement_queries_verified + ?,
+                                        statement_queries_verified_mu = ?
+                        WHERE id = ?
+                    ''', (int(queries_verified[0]),
+                          str(_as_int(row['statement_queries_verified_mu']) + int(queries_verified[1])),
+                          peer_id))
 
         self._transaction(work)
 
@@ -3355,13 +3370,23 @@ class SQLConnection(metaclass=Singleton):
         self._execute('UPDATE start_attempts SET ref = ? WHERE id = ?',
                       (ledger.instance_ref(instance_token), int(attempt_id)))
 
-    def open_start_attempts(self, peer_id: str) -> List[Tuple[int, int, int]]:
-        """``(id, ts, sent_peer_mu)`` of the starts on ``peer_id`` with no child and not
-        yet matched with a movement, oldest first."""
-        return [(int(row['id']), int(row['ts']), _as_int(row['sent_peer_mu']))
+    def refuse_start_attempt(self, attempt_id: int) -> None:
+        """The peer refused the start: the attempt holds no new movement."""
+        self._execute('UPDATE start_attempts SET refused_at = ? WHERE id = ?',
+                      (int(time.time()), int(attempt_id)))
+
+    def open_start_attempts(self, peer_id: str) -> List[tuple]:
+        """The start attempts on ``peer_id`` that are not closed, oldest first:
+        ``(id, ts, sent_peer_mu, ref, start_seq, start_mu, start_ts, refused_at)``.
+        ``ref`` is "" before the peer answered."""
+        return [(int(row['id']), int(row['ts']), _as_int(row['sent_peer_mu']), row['ref'] or "",
+                 None if row['start_seq'] is None else int(row['start_seq']),
+                 _as_int(row['start_mu']) if row['start_mu'] is not None else 0,
+                 int(row['start_ts'] or 0),
+                 None if row['refused_at'] is None else int(row['refused_at']))
                 for row in self._execute(
-                    'SELECT id, ts, sent_peer_mu FROM start_attempts '
-                    'WHERE peer_id = ? AND ref IS NULL AND consumed = 0 ORDER BY ts, id',
+                    'SELECT id, ts, sent_peer_mu, ref, start_seq, start_mu, start_ts, refused_at '
+                    'FROM start_attempts WHERE peer_id = ? AND consumed = 0 ORDER BY ts, id',
                     (peer_id,)).fetchall()]
 
     def started_children_on_peer(self, peer_id: str) -> List[str]:
@@ -3376,28 +3401,43 @@ class SQLConnection(metaclass=Singleton):
         cutoff = int(time.time()) - int(max_age_days) * 86400
         return self._execute('DELETE FROM start_attempts WHERE ts < ?', (cutoff,)).rowcount
 
-    def reserve_top_up(self, alias: str, peer_mu: int) -> None:
-        """Raise the allowance for the top-ups of a delegated child by ``peer_mu`` (may be
-        negative, to undo a reservation), before the peer is asked: its movement may
-        show in our account before the call returns."""
+    def reserve_top_up(self, alias: str, peer_mu: int) -> Optional[int]:
+        """Write down a top-up of ``peer_mu`` for the delegated child ``alias``. This is
+        done before the peer is asked, because its movement can show in our account
+        before the call returns. Returns the id of the reservation, or None for a child
+        that is not known."""
         def work(cursor):
             row = cursor.execute(
-                'SELECT top_up_allowance_peer_mu FROM delegated_instances WHERE id = ?',
+                'SELECT token_delegation, peer_id FROM delegated_instances WHERE id = ?',
                 (alias,)).fetchone()
-            if row is not None:
-                cursor.execute(
-                    'UPDATE delegated_instances SET top_up_allowance_peer_mu = ? WHERE id = ?',
-                    (str(max(0, _as_int(row['top_up_allowance_peer_mu']) + int(peer_mu))), alias))
+            if row is None:
+                return None
+            return cursor.execute(
+                'INSERT INTO top_up_reservations (peer_id, ref, ts, peer_mu) VALUES (?, ?, ?, ?)',
+                (row['peer_id'], ledger.instance_ref(row['token_delegation']), int(time.time()),
+                 str(int(peer_mu)))).lastrowid
 
-        self._transaction(work)
+        return self._transaction(work)
 
-    def top_up_allowances(self, peer_id: str) -> Dict[str, int]:
-        """The allowance for top-ups of each instance delegated to ``peer_id``, by
-        ``instance_ref``, in the MU of the peer."""
-        return {ledger.instance_ref(row['token_delegation']): _as_int(row['top_up_allowance_peer_mu'])
+    def drop_top_up_reservation(self, reservation_id: Optional[int]) -> None:
+        """The peer refused the top-up: it may take nothing for it."""
+        if reservation_id is not None:
+            self._execute('DELETE FROM top_up_reservations WHERE id = ?', (int(reservation_id),))
+
+    def top_up_reservations(self, peer_id: str) -> List[Tuple[int, str, int, int]]:
+        """``(id, ref, ts, peer_mu)`` of the top-ups that this node sent to children on
+        ``peer_id``, oldest first. Each one is a top-up that our statement has not shown
+        in full yet."""
+        return [(int(row['id']), row['ref'], int(row['ts']), _as_int(row['peer_mu']))
                 for row in self._execute(
-                    'SELECT token_delegation, top_up_allowance_peer_mu FROM delegated_instances '
-                    'WHERE peer_id = ?', (peer_id,)).fetchall()}
+                    'SELECT id, ref, ts, peer_mu FROM top_up_reservations WHERE peer_id = ? '
+                    'ORDER BY ts, id', (peer_id,)).fetchall()]
+
+    def prune_top_up_reservations(self, max_age_seconds: int) -> int:
+        """Delete the reservations older than ``max_age_seconds``: no movement may take
+        from them any more. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_seconds)
+        return self._execute('DELETE FROM top_up_reservations WHERE ts < ?', (cutoff,)).rowcount
 
     def statement_tick_due(self, peer_id: str, every: int) -> bool:
         """Count one tick for our account on ``peer_id``; True once ``every`` have passed.
@@ -3448,7 +3488,8 @@ class SQLConnection(metaclass=Singleton):
     def get_statement_counters(self, peer_id: str) -> dict:
         """``reads``, ``rows_priced``, ``verified`` and ``verified_mu`` of ``peer_id``
         (see the `peer` table). Zeros for a peer that is not known. ``rows_priced``
-        includes the reads that failed and are not settled yet, at the rows asked for."""
+        includes the reads that failed and are not settled yet, at the rows that they
+        count for until then (``add_failed_statement_read``)."""
         row = self._execute(
             'SELECT statement_reads, statement_rows_priced, statement_queries_verified, '
             'statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
@@ -3464,24 +3505,44 @@ class SQLConnection(metaclass=Singleton):
                 "verified_mu": _as_int(row['statement_queries_verified_mu'])}
 
     def add_failed_statement_read(self, peer_id: str, account_ref: str, from_seq: int,
-                                  to_seq: int, rows_priced: int) -> None:
-        """Write down a statement that was asked for and did not come."""
-        self._execute(
-            'INSERT INTO statement_failed_reads '
-            '(peer_id, account_ref, from_seq, to_seq, ts, rows_priced) VALUES (?, ?, ?, ?, ?, ?)',
-            (peer_id, account_ref, int(from_seq), int(to_seq), int(time.time()), int(rows_priced)))
+                                  to_seq: int, rows_priced: int, own: bool = False) -> None:
+        """Write down a statement that was asked for and did not come.
 
-    def failed_statement_reads(self, peer_id: str, account_ref: str) -> List[Tuple[int, int, int, int]]:
-        """``(id, from_seq, to_seq, ts)`` of the reads of ``account_ref`` that failed and
-        are not settled."""
-        return [(int(row['id']), int(row['from_seq']), int(row['to_seq']), int(row['ts']))
+        A read of our own account (``own``) counts for 0 rows until its charge shows. A
+        read of a child counts for ``rows_priced``. A second read of the same range that
+        is not settled yet counts for 0, because it asks for the same rows."""
+        def work(cursor):
+            priced = 0 if own else int(rows_priced)
+            if priced and cursor.execute(
+                    'SELECT 1 FROM statement_failed_reads WHERE peer_id = ? AND account_ref = ? '
+                    'AND from_seq = ? AND own = 0', (peer_id, account_ref, int(from_seq))).fetchone():
+                priced = 0
+            cursor.execute(
+                'INSERT INTO statement_failed_reads '
+                '(peer_id, account_ref, from_seq, to_seq, ts, rows_priced, own) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (peer_id, account_ref, int(from_seq), int(to_seq), int(time.time()), priced,
+                 1 if own else 0))
+
+        self._transaction(work)
+
+    def failed_statement_reads(self, peer_id: str, account_ref: str) -> List[tuple]:
+        """``(id, from_seq, to_seq, ts, seen_to, rows_seen)`` of the reads of
+        ``account_ref`` that failed and are not settled, oldest first. ``seen_to`` is
+        None when no statement showed the range yet."""
+        return [(int(row['id']), int(row['from_seq']), int(row['to_seq']), int(row['ts']),
+                 None if row['seen_to'] is None else int(row['seen_to']), int(row['rows_seen']))
                 for row in self._execute(
-                    'SELECT id, from_seq, to_seq, ts FROM statement_failed_reads '
+                    'SELECT id, from_seq, to_seq, ts, seen_to, rows_seen FROM statement_failed_reads '
                     'WHERE peer_id = ? AND account_ref = ? ORDER BY id',
                     (peer_id, account_ref)).fetchall()]
 
-    def settle_failed_statement_reads(self, peer_id: str, rows: Mapping[int, int]) -> None:
-        """Settle failed reads at the rows that they may have been priced for (by id)."""
+    def settle_failed_statement_reads(self, peer_id: str, rows: Mapping[int, int],
+                                      progress: Optional[Mapping[int, Tuple[int, int]]] = None) -> None:
+        """Settle failed reads at the rows that they may have been priced for (by id).
+        ``progress`` is for the reads that are not settled yet: ``(seen_to, rows_seen)``.
+        ``seen_to`` is the last seq of the range that a statement showed, and
+        ``rows_seen`` is how many rows of it count."""
         def work(cursor):
             for read_id, priced in rows.items():
                 cursor.execute('DELETE FROM statement_failed_reads WHERE id = ? AND peer_id = ?',
@@ -3490,6 +3551,10 @@ class SQLConnection(metaclass=Singleton):
                     cursor.execute(
                         'UPDATE peer SET statement_rows_priced = statement_rows_priced + ? '
                         'WHERE id = ?', (int(priced), peer_id))
+            for read_id, (seen_to, rows_seen) in (progress or {}).items():
+                cursor.execute(
+                    'UPDATE statement_failed_reads SET seen_to = ?, rows_seen = ? '
+                    'WHERE id = ? AND peer_id = ?', (int(seen_to), int(rows_seen), int(read_id), peer_id))
 
         self._transaction(work)
 
@@ -3512,14 +3577,30 @@ class SQLConnection(metaclass=Singleton):
         return self._transaction(work)
 
     def record_statement_fault(self, peer_id: str, account_ref: str, reason: str,
-                               seq: int, period: int = 0) -> bool:
+                               seq: int, window: int = 0) -> bool:
         """Write a fault of ``peer_id`` in a statement. True if it was not written yet:
-        that is the one time that it is scored."""
-        cursor = self._execute('''
-            INSERT OR IGNORE INTO statement_faults (peer_id, account_ref, reason, seq, period, ts)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (peer_id, account_ref, reason, int(seq), int(period), int(time.time())))
-        return cursor.rowcount > 0
+        that is the one time that it is scored.
+
+        With ``window`` (seconds), the fault shows no movement. It is written and scored
+        again only when the last one is older than ``window``. The last one is the one of
+        the same peer, account, reason and seq."""
+        now = int(time.time())
+
+        def work(cursor):
+            if window > 0:
+                last = cursor.execute(
+                    'SELECT MAX(ts) FROM statement_faults WHERE peer_id = ? AND account_ref = ? '
+                    'AND reason = ? AND seq = ? AND period > 0',
+                    (peer_id, account_ref, reason, int(seq))).fetchone()[0]
+                if last is not None and now - int(last) < int(window):
+                    return False
+            cursor.execute('''
+                INSERT OR IGNORE INTO statement_faults (peer_id, account_ref, reason, seq, period, ts)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (peer_id, account_ref, reason, int(seq), now if window > 0 else 0, now))
+            return cursor.rowcount > 0
+
+        return self._transaction(work)
 
     def prune_statement_faults(self, max_age_days: int) -> int:
         """Delete the faults older than ``max_age_days``. Returns how many."""

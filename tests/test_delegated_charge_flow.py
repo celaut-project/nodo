@@ -129,7 +129,8 @@ class DelegatedChargeFlowTests(unittest.TestCase):
     def test_a_withdrawal_that_lands_in_the_middle_of_a_tick_is_not_charged_as_consumption(self):
         """``modify_deposit`` holds the lock of the deposit from the call to the peer until
         the net is written: the peer has moved the balance and this node has not yet
-        written the net, and a tick that read the row in between would charge it."""
+        written the net, and a tick that read the row in between would charge it. The
+        tick does not wait for the lock: it leaves the child to the next tick."""
         lock = delegation_lock(ALIAS)
         lock.acquire()
         self.peer.add(-100, "withdrawal", ts=self.now - 60)
@@ -151,13 +152,13 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(self.sc, "child_statement_due", return_value=False):
             tick = threading.Thread(target=maintain.maintain_delegated_instances)
             tick.start()
-            tick.join(0.3)
-            self.assertTrue(tick.is_alive(), "the tick must wait for modify_deposit")
+            tick.join(10)
+            self.assertFalse(tick.is_alive(), "the tick must not wait for modify_deposit")
+            self.assertEqual(self.sc.get_delegated_instances()[0]["charged_peer_mu"], 0)
             self.sc.move_delegated_deposit(ALIAS, FATHER, -100, -100)
             lock.release()
-            tick.join(10)
+            maintain.maintain_delegated_instances()
 
-        self.assertFalse(tick.is_alive())
         row = self.sc.get_delegated_instances()[0]
         self.assertEqual(row["charged_peer_mu"], 0)
         self.assertEqual(self.deposit, 900 - 100)

@@ -557,35 +557,62 @@ class OurAccountOnAPeerTests(_Database):
         self.assertEqual(self.sc.peers_with_client(), ["p"])
 
     def test_a_top_up_is_reserved_before_the_peer_is_asked_and_taken_with_the_mark(self):
+        first = self.sc.reserve_top_up("alias", 50)
+        second = self.sc.reserve_top_up("alias", 20)
+        self.assertEqual([(r[0], r[1], r[3]) for r in self.sc.top_up_reservations("p")],
+                         [(first, self.ref, 50), (second, self.ref, 20)])
+
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, top_ups_taken={first: 30, second: 20})
+        self.assertEqual([(r[0], r[3]) for r in self.sc.top_up_reservations("p")], [(first, 20)])
+
+        self.sc.drop_top_up_reservation(first)
+        self.assertEqual(self.sc.top_up_reservations("p"), [])
+
+    def test_a_reservation_of_a_child_that_is_not_known_is_none(self):
+        self.assertIsNone(self.sc.reserve_top_up("nobody", 50))
+
+    def test_old_reservations_are_swept(self):
         self.sc.reserve_top_up("alias", 50)
-        self.assertEqual(self.sc.top_up_allowances("p"), {self.ref: 50})
+        SQLConnection._connection.execute("UPDATE top_up_reservations SET ts = 0")
+        SQLConnection._connection.commit()
 
-        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, top_ups_taken={self.ref: 30})
-        self.assertEqual(self.sc.top_up_allowances("p"), {self.ref: 20})
+        self.assertEqual(self.sc.prune_top_up_reservations(max_age_seconds=3600), 1)
 
-        self.sc.reserve_top_up("alias", -50)
-        self.assertEqual(self.sc.top_up_allowances("p"), {self.ref: 0})
-
-    def test_an_attempt_is_open_until_it_has_a_child_or_a_movement(self):
+    def test_an_attempt_is_open_until_a_child_bound_closes_it(self):
         first = self.sc.add_start_attempt("p", 100)
         second = self.sc.add_start_attempt("p", 200)
         third = self.sc.add_start_attempt("p", 300)
 
         self.sc.bind_start_attempt(first, "token-1")
-        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts_used=[second])
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={
+            second: (4, 200, 1000, True), third: (5, 300, 1001, False)})
 
-        self.assertEqual([a[0] for a in self.sc.open_start_attempts("p")], [third])
+        open_ = self.sc.open_start_attempts("p")
+        self.assertEqual([(a[0], a[3], a[4], a[5]) for a in open_],
+                         [(first, ledger.instance_ref("token-1"), None, 0), (third, "", 5, 300)])
         self.assertEqual(self.sc.delegated_starts_on_peer("p")[ledger.instance_ref("token-1")], 100)
+
+    def test_a_refused_attempt_says_when(self):
+        attempt = self.sc.add_start_attempt("p", 100)
+
+        self.sc.refuse_start_attempt(attempt)
+
+        self.assertAlmostEqual(self.sc.open_start_attempts("p")[0][7], time.time(), delta=5)
 
     def test_the_children_whose_start_was_shown_are_remembered_with_the_mark(self):
         attempt = self.sc.add_start_attempt("p", 100)
         self.sc.bind_start_attempt(attempt, "token-1")
         self.assertEqual(self.sc.started_children_on_peer("p"), [])
 
-        self.sc.set_peer_statement_mark(
-            "p", 1, "h", 0, 5, children_started=[ledger.instance_ref("token-1")])
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={attempt: (3, 100, 1000, True)})
 
         self.assertEqual(self.sc.started_children_on_peer("p"), [ledger.instance_ref("token-1")])
+
+    def test_the_statement_charges_move_with_the_mark(self):
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, queries_verified=(2, 30))
+
+        counters = self.sc.get_statement_counters("p")
+        self.assertEqual((counters["verified"], counters["verified_mu"]), (2, 30))
 
     def test_old_attempts_are_swept(self):
         self.sc.add_start_attempt("p", 100)

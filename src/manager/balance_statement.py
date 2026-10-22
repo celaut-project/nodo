@@ -17,6 +17,7 @@ layer announces the same encoding (``statement.digest`` in transport_stack), so 
 reader can check a statement without this code.
 """
 import hashlib
+from typing import Optional
 
 from protos import celaut_pb2
 from src.database import ledger
@@ -139,20 +140,20 @@ def answer(caller: str, token: str = "", from_seq: int = 0, to_seq: int = 0,
 
 
 def fetch(peer_id: str, client_id: str, token: str = "", from_seq: int = 0,
-          to_seq: int = 0) -> celaut_pb2.BalanceStatement:
+          to_seq: int = 0, timeout: Optional[float] = None) -> celaut_pb2.BalanceStatement:
     """Read a statement from ``peer_id`` as ``client_id``, and check its signature.
 
     ``token`` is a child that this node delegated there, by the token of the peer.
     Raises ``StatementInvalid`` for no answer, an answer about another account or
     range, or a signature that does not verify. A transport error is raised as it is,
-    with its status code.
+    with its status code. ``timeout`` is how long the call may take, in seconds.
     """
     from src.identity.grpc_transport import peer_channel
     from src.utils.bee_client import BeeClient
 
     statement = BeeClient.get_balance_statement(
         peer_channel(peer_id=peer_id), client_id=client_id, token=token,
-        from_seq=from_seq, to_seq=to_seq,
+        from_seq=from_seq, to_seq=to_seq, timeout=timeout,
     )
     if statement is None:
         raise StatementInvalid(f"{peer_id} answered no statement.")

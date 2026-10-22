@@ -9,7 +9,6 @@ from protos import celaut_pb2
 from src.database import ledger
 from src.manager import balance_statement, statement_check
 from src.manager.manager import get_client_id_on_other_peer
-from src.reputation_system.reasons import Reason
 from src.utils.utils import from_amount
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer, refresh_balance_on_peer
 from src.database.sql_connection import SQLConnection
@@ -117,10 +116,13 @@ def _check_start(peer: str, client_id: str, external_token: str,
     start goes on in both cases: the child runs.
     """
     # The read asks for no more than our balance on the peer pays for: what the start left
-    # may be little, and a refusal for lack of balance is then not the peer's fault.
+    # may be little, and a refusal for lack of balance is then not the peer's fault. The
+    # balance is never less than the one that the peer signed, less what this node caused
+    # since (``statement_check.signed_floor``).
     try:
         rows_asked = statement_check.page_rows(
-            refresh_balance_on_peer(peer), statement_check.stored_rates(peer))
+            max(refresh_balance_on_peer(peer), statement_check.floor_on(peer, SQLConnection())),
+            statement_check.stored_rates(peer))
     except Exception as e:
         log.LOGGER(f'Cannot read our balance on {peer} to read the statement of the child: {e}')
         rows_asked = 0
@@ -132,7 +134,8 @@ def _check_start(peer: str, client_id: str, external_token: str,
     except Exception as e:
         statement_check.penalise_no_statement(
             peer, external_token, e, seq=1, child=True,
-            pays=lambda: statement_check.still_pays(peer, rows_asked))
+            pays=lambda: statement_check.still_pays(
+                peer, rows_asked, statement_check.floor_on(peer, SQLConnection())))
         return _child_balance_on_peer(peer, external_token), None
 
     # A new account: its movement 1 hangs from its genesis.
@@ -141,9 +144,7 @@ def _check_start(peer: str, client_id: str, external_token: str,
         external_token, ts=now if started_at is None else started_at)
     chain = statement_check.verify_chain(statement, start, now=now, from_seq=1)
     if chain.rows is None:
-        statement_check.penalise_once(
-            peer, external_token, Reason.STATEMENT_INCONSISTENT, chain.problem,
-            chain.fault_seq if chain.fault_seq is not None else 1)
+        statement_check.penalise_chain(peer, external_token, chain, 1)
         return _child_balance_on_peer(peer, external_token), None
 
     new = statement_check.mark_after(chain, statement, start)
@@ -183,6 +184,7 @@ def delegate_execution(
     # to stop: TODO(#578). Its attempt stays unbound, and the peer may still take its start
     # from our account (``statement_check.account_faults``).
     external_token: Optional[str] = None
+    attempt_id: Optional[int] = None
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
@@ -234,6 +236,8 @@ def delegate_execution(
             ),
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
         )
+        if service_instance is None:
+            raise RuntimeError(f'{peer} closed the start with no answer.')
         external_token = service_instance.token
         SQLConnection().bind_start_attempt(attempt_id, external_token)
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
@@ -309,6 +313,13 @@ def delegate_execution(
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
         if external_token:
             _stop_on_peer(peer, external_token)
+        elif attempt_id is not None and not statement_check.unreachable(e):
+            # The peer refused the start. It gives back the start of each candidate that
+            # it tried before it answers, so the attempt holds no new movement.
+            try:
+                SQLConnection().refuse_start_attempt(attempt_id)
+            except Exception as refuse_error:
+                log.LOGGER(f'Could not close the start attempt on {peer}: {refuse_error}')
         try:
             refund_container.pop()()
         except IndexError:

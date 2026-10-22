@@ -227,10 +227,6 @@ TABLES = {
     # the `ModifyDeposit` that this node has sent, written with the rows that they leave
     # here; `charged_peer_mu` what the tick has taken from the deposit for it.
     # `statement_ticks` counts the ticks since the statement of the child was last read.
-    # `top_up_allowance_peer_mu` is what this node has sent the peer in top-ups of the
-    # child (it is raised before the peer is asked) less what our own statement has shown
-    # the peer to take for them: the most that the next movements of our account may take
-    # for the child, in the MU of the peer.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -250,7 +246,6 @@ TABLES = {
             father_net_peer_mu TEXT NOT NULL DEFAULT '0',
             charged_peer_mu TEXT NOT NULL DEFAULT '0',
             sent_peer_mu TEXT DEFAULT NULL,
-            top_up_allowance_peer_mu TEXT NOT NULL DEFAULT '0',
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL
@@ -260,9 +255,14 @@ TABLES = {
     # (#570). The peer takes MU from our account for it, and the movement may show before
     # this node knows the child, or when it never does: a start that timed out and that
     # the peer finished. A `child_start` that no child of ours explains is judged against
-    # these. `ref` is the `instance_ref` of the token once the peer answered, and
-    # `consumed` is 1 once a movement was matched with the attempt: one attempt pays for
-    # one movement. `sent_peer_mu` is the most that the peer may take for it.
+    # these. `ref` is the `instance_ref` of the token once the peer answered.
+    # `sent_peer_mu` is the most that the peer may take for it.
+    # One attempt holds one movement. `start_seq` is the `child_start` that the attempt
+    # holds, and `start_mu` and `start_ts` are its amount and its date. A `refund` of
+    # that movement sets the attempt free again. `consumed` is 1 when the attempt is
+    # closed: a `child_bound` names the child of its movement. `refused_at` is when the
+    # peer refused the start. The attempt then holds no new movement, and the peer must
+    # give back the movement that it holds.
     "start_attempts": '''
         CREATE TABLE IF NOT EXISTS start_attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -270,7 +270,27 @@ TABLES = {
             ts INTEGER NOT NULL,
             sent_peer_mu TEXT NOT NULL,
             ref TEXT DEFAULT NULL,
-            consumed INTEGER NOT NULL DEFAULT 0
+            consumed INTEGER NOT NULL DEFAULT 0,
+            start_seq INTEGER DEFAULT NULL,
+            start_mu TEXT DEFAULT NULL,
+            start_ts INTEGER DEFAULT NULL,
+            refused_at INTEGER DEFAULT NULL
+        )
+    ''',
+    # Each top-up that this node sends to a delegated child, written before the peer is
+    # asked (#570). The peer takes MU from our account for it, and the movement may show
+    # before the call returns. `ref` is the `instance_ref` of the token of the child on
+    # the peer. `ts` is when the top-up was asked. `peer_mu` is what is left of it, in the
+    # MU of the peer. A `top_up` movement takes from the reservations of its child that
+    # are dated near it. A reservation is deleted when it is used up, or when the peer
+    # refuses the top-up.
+    "top_up_reservations": '''
+        CREATE TABLE IF NOT EXISTS top_up_reservations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            ref TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            peer_mu TEXT NOT NULL
         )
     ''',
     "deposit_tokens": '''
@@ -645,8 +665,9 @@ TABLES = {
     # account (by `account_ref`), reason and seq, the movement where it shows. The same
     # fault read again at the next tick, or after a restart, finds its row and costs
     # nothing; a different fault, at another seq, is scored. A peer that refuses to give
-    # a statement shows no movement to anchor the fault to, so it is scored once for each
-    # `period` (a day) instead.
+    # a statement shows no movement to anchor the fault to. Such a fault is scored at
+    # most once in a window of 24 hours, and `period` is the time when it was scored.
+    # A fault with a movement has `period` 0.
     "statement_faults": '''
         CREATE TABLE IF NOT EXISTS statement_faults (
             peer_id TEXT NOT NULL,
@@ -659,11 +680,17 @@ TABLES = {
         )
     ''',
     # A statement that was asked for and did not come (a timeout) may have been charged
-    # by the peer all the same. It is counted at the rows that it asked for, and once a
-    # later statement shows the movements of that range, at the rows that existed when it
-    # was asked: `rows_priced` is those that it asked for, and `from_seq` and `to_seq`
-    # the range, in the account `account_ref`. A read that is never settled is added to
-    # the counters of the peer as asked when it is swept.
+    # by the peer all the same. `from_seq` and `to_seq` are its range in the account
+    # `account_ref`, and `rows_priced` is what it counts for until it is settled.
+    # `own` is 1 for a read of our own account. Its charge is a `statement_query`
+    # movement in that same account, and the rows that existed for the read are those
+    # before that movement. Until the charge shows, the read counts for 0 rows.
+    # A read of a child counts for the rows asked for. A second read of the same range
+    # that is not settled yet counts for 0. Once the statements of the child show the
+    # range, the read counts for the rows dated before it: `seen_to` is the last seq of
+    # the range that a statement showed, and `rows_seen` how many of those rows count.
+    # A read that is never settled is added to the counters of the peer as asked when it
+    # is swept.
     "statement_failed_reads": '''
         CREATE TABLE IF NOT EXISTS statement_failed_reads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -672,7 +699,10 @@ TABLES = {
             from_seq INTEGER NOT NULL,
             to_seq INTEGER NOT NULL,
             ts INTEGER NOT NULL,
-            rows_priced INTEGER NOT NULL
+            rows_priced INTEGER NOT NULL,
+            own INTEGER NOT NULL DEFAULT 0,
+            seen_to INTEGER DEFAULT NULL,
+            rows_seen INTEGER NOT NULL DEFAULT 0
         )
     ''',
     "balance_movements": '''

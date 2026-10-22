@@ -331,12 +331,13 @@ class BeeClient:
         )
 
     @staticmethod
-    def get_metrics(channel, token: str) -> celaut_pb2.Metrics:
+    def get_metrics(channel, token: str, timeout: Optional[float] = None) -> celaut_pb2.Metrics:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetMetrics,
             input=celaut_pb2.TokenMessage(token=token),
             indices_serializer=rpc_input("GetMetrics"),
             indices_parser=rpc_output("GetMetrics"),
+            timeout=timeout,
         )
 
     @staticmethod
@@ -439,13 +440,15 @@ class BeeClient:
 
     @staticmethod
     def modify_deposit(
-            channel, difference: celaut_pb2.Amount, service_token: str
+            channel, difference: celaut_pb2.Amount, service_token: str,
+            timeout: Optional[float] = None,
     ) -> Optional[celaut_pb2.ModifyDepositOutput]:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).ModifyDeposit,
             input=celaut_pb2.ModifyDepositInput(difference=difference, service_token=service_token),
             indices_serializer=rpc_input("ModifyDeposit"),
             indices_parser=rpc_output("ModifyDeposit"),
+            timeout=timeout,
         )
 
     @staticmethod

@@ -28,7 +28,7 @@ The functions here are pure unless they say otherwise; ``maintain`` and
 """
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
 import grpc
@@ -50,6 +50,13 @@ CLOCK_SLACK_SECONDS = 2
 # How far the clock of a peer may be from this node's: a statement dated further away is
 # not valid, so a peer cannot choose the time that its own movements are judged at.
 CLOCK_SKEW_SECONDS = 120
+
+# A fault that shows no movement is scored at most once in this window (seconds). The
+# window starts when the fault is scored, so it does not depend on the date in UTC.
+FAULT_WINDOW_SECONDS = 86400
+
+# The seq that a statement dated far from our clock is scored at: it shows no movement.
+CLOCK_FAULT_SEQ = -1
 
 @dataclass(frozen=True)
 class Row:
@@ -129,13 +136,16 @@ class Chain:
     statement is not valid, and ``problem`` says why and ``fault_seq`` where. ``more``:
     the node holds movements after the last one, which the next read asks for. ``gap``:
     the statement starts after movements that the node had deleted, which its
-    retention excuses (the movements between are not checkable).
+    retention excuses (the movements between are not checkable). ``clock``: the
+    statement is refused because it is dated far from our clock. That shows no
+    movement, and the clock that is wrong can be ours.
     """
     rows: Optional[List[Row]]
     problem: Optional[str] = None
     fault_seq: Optional[int] = None
     more: bool = False
     gap: bool = False
+    clock: bool = False
 
     @property
     def reaches_head(self) -> bool:
@@ -155,10 +165,12 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
     content, and a node that fails it signed something false:
 
     1. The head is not behind the mark, is the mark when nothing came after it, and is
-       dated near the clock of this node.
+       dated near the clock of this node (else ``clock`` is True).
     2. The movements are consecutive, each one hangs from the hash of the one before and
-       adds to the balance, none is dated after the statement, and the dates do not go
-       back (more than the clocks may differ), not even before the mark.
+       adds to the balance, and none is dated after the statement. A movement can be
+       dated before the one before it, or before the mark. That is not a fault, because
+       the clock of an honest peer can step back. Its date in ``rows`` is the date before
+       it, so a window or a price never uses a date that goes back.
     3. The first movement of an account hangs from its genesis.
     4. When the last movement is the head, it is the head: its hash and its balance.
     5. The first movement joins the mark: the next seq, hanging from its hash. When it
@@ -175,7 +187,8 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
         return Chain(None, problem, seq)
 
     if abs(statement.ts - now) > CLOCK_SKEW_SECONDS:
-        return invalid(f"the statement is dated {statement.ts}, and it is {int(now)}", statement.head_seq)
+        return Chain(None, f"the statement is dated {statement.ts}, and it is {int(now)}",
+                     CLOCK_FAULT_SEQ, clock=True)
     if mark.seq is not None and statement.head_seq < mark.seq:
         return invalid(f"the head went back from movement {mark.seq} to {statement.head_seq}",
                        mark.seq)
@@ -193,9 +206,6 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
                 return invalid(f"movement {row.seq} does not hang from movement {previous_row.seq}", row.seq)
             if previous_row.balance_after + row.amount != row.balance_after:
                 return invalid(f"movement {row.seq} does not add up", row.seq)
-            if row.ts < previous_row.ts - CLOCK_SKEW_SECONDS:
-                return invalid(f"movement {row.seq} is dated before movement {previous_row.seq}",
-                               row.seq)
         if row.ts > statement.ts:
             return invalid(f"movement {row.seq} is dated after the statement", row.seq)
         previous_hash, previous_row = row.hash, row
@@ -216,8 +226,6 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
         if mark.seq is not None:
             if head.seq <= mark.seq:
                 return invalid(f"movement {head.seq} was not asked for", head.seq)
-            if mark.ts is not None and head.ts < mark.ts - CLOCK_SKEW_SECONDS:
-                return invalid(f"movement {head.seq} is dated before the mark", head.seq)
             if head.seq == mark.seq + 1:
                 if statement.movements[0].prev_hash != mark.hash:
                     return invalid(
@@ -249,17 +257,30 @@ def verify_chain(statement: celaut_pb2.BalanceStatement, mark: Mark, *, now: flo
     elif rows[-1].seq > statement.head_seq:
         return invalid("a movement is after the head", rows[-1].seq)
     more = statement.head_seq > (rows[-1].seq if rows else (mark.seq or 0))
-    return Chain(rows, None, None, more=more, gap=gap)
+    return Chain(_dates_forward(rows, mark), None, None, more=more, gap=gap)
+
+
+def _dates_forward(rows: List[Row], mark: Mark) -> List[Row]:
+    """``rows`` with each date at least the date before it, and the date of the mark."""
+    out, last = [], mark.ts if mark.seq is not None else None
+    for row in rows:
+        if last is not None and row.ts < last:
+            row = replace(row, ts=last)
+        out.append(row)
+        last = row.ts
+    return out
 
 
 def mark_after(chain: Chain, statement: celaut_pb2.BalanceStatement, mark: Mark) -> Mark:
-    """The mark once ``chain`` was accepted: at its last movement, or still at ``mark``."""
+    """The mark once ``chain`` was accepted: at its last movement, or still at ``mark``.
+    Its date does not go back."""
     if chain.rows:
         last = chain.rows[-1]
         return Mark(last.seq, last.hash, last.balance_after,
-                    statement.ts if chain.reaches_head else last.ts)
+                    max(statement.ts, last.ts) if chain.reaches_head else last.ts)
     if mark.seq is not None and not chain.more:
-        return Mark(mark.seq, mark.hash, mark.balance, statement.ts)
+        return Mark(mark.seq, mark.hash, mark.balance,
+                    statement.ts if mark.ts is None else max(statement.ts, mark.ts))
     return mark
 
 
@@ -337,59 +358,113 @@ def start_grace_seconds() -> int:
     return (timeout if timeout > 0 else 600) + 2 * iteration
 
 
+def peer_call_timeout() -> float:
+    """How long this node waits for a peer to answer ``ModifyDeposit``,
+    ``GetBalanceStatement`` or ``GetMetrics``. Without a limit, a peer that does not
+    answer stops the thread that asked."""
+    try:
+        return float(env_manager.get("communication.SIMPLE_RPC_TIMEOUT_SECONDS", 60) or 60)
+    except (TypeError, ValueError):
+        return 60.0
+
+
+def top_up_grace_seconds() -> int:
+    """How long after this node asked for a top-up its movement may be dated."""
+    iteration = int(env_manager.get("MANAGER_ITERATION_TIME", 10) or 10)
+    return int(peer_call_timeout()) + 2 * iteration
+
+
 @dataclass(frozen=True)
 class StartAttempt:
-    """A start that this node asked the peer for and that has no child of ours: the peer
-    may have finished it after this node gave up. ``sent_mu`` is the most that it may
-    take for it, in the MU of the peer."""
+    """A start that this node asked the peer for, and that is not closed: no
+    ``child_bound`` named the child of its movement yet. ``sent_mu`` is the most that it
+    may take, in the MU of the peer. ``ref`` is the child once the peer answered, else "".
+    ``start_seq`` is the ``child_start`` that the attempt holds (None: none yet), with
+    its amount ``start_mu`` and its date ``start_ts``. ``refused_at`` is when the peer
+    refused the start."""
     id: int
     ts: int
     sent_mu: int
+    ref: str = ""
+    start_seq: Optional[int] = None
+    start_mu: int = 0
+    start_ts: int = 0
+    refused_at: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class TopUpReservation:
+    """A top-up that this node sent to the child ``ref``, at ``ts`` on our clock.
+    ``mu`` is the part of it that no movement took yet, in the MU of the peer."""
+    id: int
+    ref: str
+    ts: int
+    mu: int
 
 
 @dataclass(frozen=True)
 class AccountCheck:
     """What ``account_faults`` found in the movements of our account.
 
-    ``faults`` are the problems, each with the seq where it shows. ``attempts_used`` are
-    the start attempts that a ``child_start`` was matched with, and ``top_ups_taken`` is
-    what the peer took for the top-ups of each child, by ``instance_ref``: both are
-    saved with the mark, so that a movement is accounted for once.
+    ``faults`` are the problems, each with the seq where it shows. ``attempts`` is the
+    new state of each start attempt that changed, by id: ``(start_seq, start_mu,
+    start_ts, closed)``. ``top_ups_taken`` is what the peer took from each top-up
+    reservation, by id. Both are saved with the mark, so that a movement is accounted
+    for once.
     """
     faults: List[Tuple[int, str]]
-    attempts_used: List[int] = field(default_factory=list)
-    top_ups_taken: Dict[str, int] = field(default_factory=dict)
-    children_started: List[str] = field(default_factory=list)
+    attempts: Dict[int, tuple] = field(default_factory=dict)
+    top_ups_taken: Dict[int, int] = field(default_factory=dict)
+
+
+class _Held:
+    """The state of a start attempt while ``account_faults`` reads the movements."""
+
+    def __init__(self, attempt: StartAttempt):
+        self.attempt = attempt
+        self.seq, self.mu, self.ts = attempt.start_seq, attempt.start_mu, attempt.start_ts
+        self.closed = False
+        self.changed = False
+
+    @property
+    def state(self) -> tuple:
+        return self.seq, self.mu, self.ts, self.closed
 
 
 def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
-                   attempts: Iterable[StartAttempt], top_up_allowances: Mapping[str, int],
-                   now: float, started: Iterable[str] = ()) -> AccountCheck:
+                   attempts: Iterable[StartAttempt],
+                   reservations: Iterable[TopUpReservation],
+                   now: float, started: Iterable[str] = (),
+                   reaches_head: bool = False) -> AccountCheck:
     """What the peer took from our account that this node did not cause.
 
-    A start is written down before the peer is asked (``attempts``), so every
-    ``child_start`` that the peer writes can be told from one that nobody asked for the
-    moment it shows, and nothing waits:
+    A start is written down before the peer is asked (``attempts``), and a top-up too
+    (``reservations``). Every movement that takes MU from our account must match one
+    of them, or be the charge of a statement:
 
-    * a child of ours (``starts``, by the ``instance_ref`` of its token on the peer, with
-      what was sent for it) is named by the ``child_bound`` row that follows its start,
-      and may take up to what was sent, once: ``started`` are the children whose start
-      an earlier read already showed;
-    * a start with no child of ours (the peer finished one that timed out, or has not
-      named it) is matched with an attempt that has no child and was not matched yet: it
-      was written at most ``start_grace_seconds`` before the movement, and it took no more
-      than what that attempt sent. One attempt pays for one movement;
-    * a top-up is for a child of ours, and takes no more than this node sent for it
-      (``top_up_allowances``, which the caller raises before the peer is asked).
+    * Each ``child_start`` that is not given back holds one attempt. It is dated at
+      most ``start_grace_seconds`` after the attempt, and it takes no more than the
+      attempt sent. When no ``child_bound`` names its child yet, it holds the free
+      attempt that sent the least of those that pay for it.
+    * A ``refund`` of a ``child_start`` sets its attempt free again. The peer charges a
+      start for each candidate that it tries, and gives back the start of each one that
+      fails.
+    * A ``child_bound`` closes the attempt. When it names a child of ours (``starts``),
+      the movement goes to the attempt of that child. The movement that held that
+      attempt goes to the attempt that the first one held. A child is paid once:
+      ``started`` are the children whose start an earlier read showed. When it names a
+      child that this node does not know, the attempt is one that never had an answer.
+    * An attempt that the peer refused holds no new movement. When the movement that it
+      held is not given back by the head of a read after the refusal, that is a fault.
+    * A ``top_up`` takes from the reservations of its child that are dated near it.
 
-    A peer cannot take MU from our account under a name that matches none of these.
-    The attempt window is on the clock of this node, never the date of the statement:
-    a peer chooses that.
+    The windows are on the clock of this node, never the date of the statement: a peer
+    sets that. ``reaches_head``: these movements go up to the head of the account.
     """
     rows = list(rows)
     faults: List[Tuple[int, str]] = []
-    refunded = set()
-    bound = {}
+    refunded, bound = set(), {}
+    starts_here = {row.seq for row in rows if row.kind == ledger.CHILD_START and row.amount < 0}
     for row in rows:
         if row.kind == ledger.REFUND and row.amount > 0:
             try:
@@ -401,62 +476,159 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
                 bound[int(row.detail["starts_seq"])] = row.ref
             except (KeyError, TypeError, ValueError):
                 pass
-    open_attempts = list(attempts)
+
+    held = {a.id: _Held(a) for a in attempts}
+    holder = {h.seq: h for h in held.values() if h.seq is not None}
+    of_child = {h.attempt.ref: h for h in held.values() if h.attempt.ref}
     seen = set(started)
-    children: List[str] = []
-    used: List[int] = []
-    allowance = dict(top_up_allowances)
-    taken: Dict[str, int] = {}
     window = start_grace_seconds() + CLOCK_SKEW_SECONDS
+
+    def free(h: _Held, mu: int, ts: int, ref_less: bool) -> bool:
+        a = h.attempt
+        return (not h.closed and h.seq is None and a.refused_at is None
+                and (not ref_less or not a.ref)
+                and a.ts - CLOCK_SKEW_SECONDS <= ts <= a.ts + window and mu <= a.sent_mu)
+
+    def hold(h: _Held, seq: int, mu: int, ts: int) -> None:
+        h.seq, h.mu, h.ts, h.changed = seq, mu, ts, True
+        holder[seq] = h
+
+    def release(h: _Held) -> None:
+        holder.pop(h.seq, None)
+        h.seq, h.mu, h.ts, h.changed = None, 0, 0, True
+
+    def place(seq: int, mu: int, ts: int, ref_less: bool = False) -> Optional[_Held]:
+        fits = [h for h in held.values() if free(h, mu, ts, ref_less)]
+        if not fits:
+            return None
+        best = min(fits, key=lambda h: (h.attempt.sent_mu, h.attempt.ts, h.attempt.id))
+        hold(best, seq, mu, ts)
+        return best
+
+    def not_asked(seq: int, mu: int, child: str) -> None:
+        faults.append((seq, f"movement {seq} pays the start of a child that this node did "
+                            f"not ask for ({child[:8] or 'no child'}), {mu} MU"))
+
+    def close(h: _Held) -> None:
+        h.closed, h.changed = True, True
+
+    def bind(seq: int, mu: int, ts: int, child: str, at: int) -> None:
+        """The movement ``seq`` pays the start of ``child``, as the row ``at`` says."""
+        previous = holder.get(seq)
+        if child not in starts:
+            # A child that this node does not know: the start timed out here, and this
+            # node never had its token. Only an attempt with no answer may hold it.
+            if previous is not None and not previous.attempt.ref:
+                close(previous)
+                return
+            if previous is not None:
+                release(previous)
+            placed = place(seq, mu, ts, ref_less=True)
+            if placed is None:
+                not_asked(at, mu, child)
+            else:
+                close(placed)
+            return
+        target = of_child.get(child)
+        if target is None or target.closed:
+            if child in seen or target is not None:
+                if previous is not None:
+                    release(previous)
+                faults.append((at, f"the start of {child[:8]} was paid more than once"))
+                return
+            # A child of ours with no attempt here (it was swept): what was sent for it
+            # is the bound.
+            if previous is not None:
+                release(previous)
+            seen.add(child)
+            if mu > starts[child]:
+                faults.append((at, f"the start of {child[:8]} took {mu} MU, and "
+                                   f"{starts[child]} were sent"))
+            return
+        if previous is not target:
+            displaced = (target.seq, target.mu, target.ts) if target.seq is not None else None
+            if displaced:
+                release(target)
+            if previous is not None:
+                release(previous)
+            hold(target, seq, mu, ts)
+            if displaced:
+                # Two starts at the same time: each movement goes to its own attempt.
+                if previous is not None and free(previous, displaced[1], displaced[2], False):
+                    hold(previous, *displaced)
+                elif place(*displaced) is None:
+                    not_asked(displaced[0], displaced[1], "")
+        close(target)
+        seen.add(child)
+        if mu > target.attempt.sent_mu:
+            faults.append((at, f"the start of {child[:8]} took {mu} MU, and "
+                               f"{target.attempt.sent_mu} were sent"))
+
+    left = {r.id: r.mu for r in reservations}
+    reservations = list(reservations)
+    top_up_window = top_up_grace_seconds() + CLOCK_SKEW_SECONDS
+    taken: Dict[int, int] = {}
     for row in rows:
+        if row.kind == ledger.REFUND and row.amount > 0:
+            try:
+                given_back = holder.get(int(row.detail["refunds_seq"]))
+            except (KeyError, TypeError, ValueError):
+                given_back = None
+            if given_back is not None:
+                release(given_back)
+            continue
+        if row.kind == ledger.CHILD_BOUND:
+            try:
+                starts_seq = int(row.detail["starts_seq"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if starts_seq not in starts_here and starts_seq in holder:
+                h = holder[starts_seq]
+                bind(starts_seq, h.mu, h.ts, row.ref, row.seq)
+            continue
         if row.amount >= 0 or row.kind == ledger.STATEMENT_QUERY:
             continue
         if row.kind == ledger.CHILD_START:
             if row.seq in refunded:
                 continue
-            child = bound.get(row.seq, "")
-            if child in starts:
-                if child in seen:
-                    faults.append((row.seq, f"the start of {child[:8]} was paid more than once"))
-                    continue
-                seen.add(child)
-                children.append(child)
-                if -row.amount > starts[child]:
-                    faults.append((
-                        row.seq,
-                        f"the start of {child[:8]} took {-row.amount} MU, and "
-                        f"{starts[child]} were sent",
-                    ))
-                continue
-            match = next((a for a in open_attempts
-                          if a.ts - CLOCK_SKEW_SECONDS <= row.ts <= a.ts + window
-                          and -row.amount <= a.sent_mu), None)
-            if match is None:
-                faults.append((
-                    row.seq,
-                    f"movement {row.seq} pays the start of a child that this node did not "
-                    f"ask for ({child[:8] or 'no child'}), {-row.amount} MU"))
-                continue
-            open_attempts.remove(match)
-            used.append(match.id)
+            if row.seq in bound:
+                bind(row.seq, -row.amount, row.ts, bound[row.seq], row.seq)
+            elif place(row.seq, -row.amount, row.ts) is None:
+                not_asked(row.seq, -row.amount, "")
         elif row.kind == ledger.TOP_UP:
-            if row.ref not in allowance:
+            if row.ref not in starts:
                 faults.append((row.seq, f"movement {row.seq} tops up an instance that is not ours"))
                 continue
-            allowed = allowance[row.ref]
-            if -row.amount > allowed:
+            need = -row.amount
+            for r in reservations:
+                if need <= 0:
+                    break
+                if r.ref != row.ref or left[r.id] <= 0 or \
+                        not r.ts - CLOCK_SKEW_SECONDS <= row.ts <= r.ts + top_up_window:
+                    continue
+                part = min(need, left[r.id])
+                left[r.id] -= part
+                taken[r.id] = taken.get(r.id, 0) + part
+                need -= part
+            if need > 0:
                 faults.append((
                     row.seq,
                     f"movement {row.seq} tops up {row.ref[:8]} by {-row.amount} MU, and "
-                    f"{allowed} were sent"))
-            paid = min(-row.amount, allowed)
-            allowance[row.ref] = allowed - paid
-            taken[row.ref] = taken.get(row.ref, 0) + paid
+                    f"{-row.amount - need} were sent near its date"))
         else:
             faults.append((
                 row.seq, f"movement {row.seq} is a {row.kind!r} charge that this node did not cause"
             ))
-    return AccountCheck(faults, used, taken, children)
+
+    if reaches_head:
+        for h in held.values():
+            refused_at = h.attempt.refused_at
+            if refused_at is not None and h.seq is not None and not h.closed and now >= refused_at:
+                faults.append((h.seq, f"the start of movement {h.seq} was refused and not "
+                                      f"given back"))
+                close(h)
+    return AccountCheck(faults, {h.attempt.id: h.state for h in held.values() if h.changed},
+                        taken)
 
 
 def stale_mark(mark_ts: Optional[int], now: float) -> bool:
@@ -464,6 +636,13 @@ def stale_mark(mark_ts: Optional[int], now: float) -> bool:
     child to read it for: a tenth of the retention that a peer is held to, so that the
     mark is never old enough to excuse movements that a peer hides (``verify_chain``)."""
     return mark_ts is None or now - mark_ts >= ledger.min_peer_retention_days() * 86400 / 10
+
+
+def refusal_age_seconds() -> float:
+    """The age of a mark at which a transport failure can be a refusal: half of the
+    retention that a peer is held to. This applies to a peer that answers other calls.
+    A gap is excused only after a mark older than that retention (``verify_chain``)."""
+    return ledger.min_peer_retention_days() * 86400 / 2
 
 
 def unreachable(error: Exception) -> bool:
@@ -498,6 +677,58 @@ def page_rows(balance_mu: int, rates: Mapping[str, int]) -> int:
     return max(0, min(cap, affordable))
 
 
+def signed_floor(mark_balance: int, free_attempts_mu: int, reserved_mu: int,
+                 counters: Mapping[str, int], rates: Mapping[str, int]) -> int:
+    """The least that our account on a peer holds now, from what the peer signed.
+
+    The balance of the mark is signed by the peer. After the mark, only what this node
+    caused may take MU from the account. That is three things:
+
+    * the starts that it asked for and that hold no movement yet (``free_attempts_mu``);
+    * the top-ups that it reserved (``reserved_mu``);
+    * the statements that it asked for and whose charge did not show yet.
+
+    A statement costs at most what it was counted for, and at most a full page.
+    """
+    from src.utils.cost_functions.general_cost_functions import (
+        RATE_STATEMENT_QUERY,
+        RATE_STATEMENT_ROW,
+    )
+
+    query = int(rates.get(RATE_STATEMENT_QUERY, 0))
+    row = int(rates.get(RATE_STATEMENT_ROW, 0))
+    allowed = counters["reads"] * query + counters["rows_priced"] * row
+    most_per_read = query + row * (ledger.max_statement_rows() + 1)
+    unshown = min(allowed - counters["verified_mu"],
+                  (counters["reads"] - counters["verified"]) * most_per_read)
+    return int(mark_balance) - int(free_attempts_mu) - int(reserved_mu) - max(0, unshown)
+
+
+def floor_on(peer_id: str, books) -> int:
+    """``signed_floor`` of our account on ``peer_id``, from ``books`` (a
+    ``SQLConnection``). It is 0 with no mark, or when the books cannot be read. The
+    check then has only the balance that ``Metrics`` gives."""
+    try:
+        stored = books.get_peer_statement_mark(peer_id)
+        if not stored:
+            return 0
+        # A movement after the mark is dated at the mark or later (``verify_chain``), so
+        # an attempt or a reservation whose window ended before the mark takes nothing.
+        since = int(stored.get("ts") or 0) - CLOCK_SKEW_SECONDS
+        start_window = start_grace_seconds() + CLOCK_SKEW_SECONDS
+        top_up_window = top_up_grace_seconds() + CLOCK_SKEW_SECONDS
+        attempts = [StartAttempt(*a) for a in books.open_start_attempts(peer_id)]
+        free_mu = sum(a.sent_mu for a in attempts if a.start_seq is None and a.refused_at is None
+                      and a.ts + start_window >= since)
+        reserved = sum(int(r[3]) for r in books.top_up_reservations(peer_id)
+                       if int(r[2]) + top_up_window >= since)
+        return max(0, signed_floor(int(stored.get("balance_mu") or 0), free_mu, reserved,
+                                   books.get_statement_counters(peer_id), stored_rates(peer_id)))
+    except Exception as e:
+        log.LOGGER(f"Cannot read the signed balance of our account on {peer_id}: {e}")
+        return 0
+
+
 def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
          rows: Optional[int] = None) -> celaut_pb2.BalanceStatement:
     """``balance_statement.fetch``, with the books of what the peer may charge for it.
@@ -507,9 +738,8 @@ def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
     counted when it is asked, before the peer can charge it: a read that fails after the
     charge still has its row. The rows that it may be priced for are the one of its own
     charge, and then those of the answer. A read that fails is written down with its
-    range and time, at the rows asked for, and ``settle_failed_reads`` prices it later
-    with the rows that the account had then. ``from_seq`` 0 asks for the head only: no
-    movement.
+    range and time, and ``settle_failed_reads`` prices it later. ``from_seq`` 0 asks for
+    the head only: no movement. The read waits ``peer_call_timeout`` at most.
     """
     from src.database.sql_connection import SQLConnection
     from src.manager import balance_statement
@@ -520,48 +750,99 @@ def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
     to_seq = from_seq + rows - 1 if rows else 0
     try:
         statement = balance_statement.fetch(
-            peer_id, client_id, token=token, from_seq=from_seq, to_seq=to_seq)
+            peer_id, client_id, token=token, from_seq=from_seq, to_seq=to_seq,
+            timeout=peer_call_timeout())
     except Exception:
         if from_seq > 0:
             sc.add_failed_statement_read(
                 peer_id, ledger.account_ref(token or client_id), from_seq,
-                from_seq + asked - 1, asked)
+                from_seq + asked - 1, asked, own=not token)
         raise
     sc.add_statement_read(peer_id, rows_priced=len(statement.movements), count=0)
     return statement
 
 
-def priced_failed_reads(pending: Iterable[Tuple[int, int, int, int]], rows: Iterable[Row],
-                        head_seq: int) -> Dict[int, int]:
-    """The reads that failed (``(id, from_seq, to_seq, ts)``) that ``rows``, the movements
-    of the account that were just checked up to ``head_seq``, show the range of, with the
-    rows that they may be priced for: those that the range held when the read was asked.
+def _detail_int(detail: Mapping, key: str) -> Optional[int]:
+    try:
+        return int(detail[key])
+    except (KeyError, TypeError, ValueError):
+        return None
 
-    A read whose range the movements do not cover is left out: it stays at the rows asked
-    for. Rows are as old as the peer says, and a peer that dates them earlier makes the
-    count lower, which can only cost it.
+
+def priced_own_reads(pending: Iterable[tuple], rows: Iterable[Row], now: float,
+                     reaches_head: bool) -> Dict[int, int]:
+    """The failed reads of our own account (``(id, from_seq, to_seq, ts, ...)``) that
+    ``rows`` settle, with the rows that each one may be priced for.
+
+    The peer writes the charge of a read in the same transaction as the read. The
+    charge is a ``statement_query`` movement that names the range of the read. So the
+    rows that existed for the read are those of its range before its charge. That is by seq, and
+    a date that the peer writes changes nothing. A read whose charge does not show by
+    the head of the account, long after it was asked, was not charged: it counts for 0.
     """
     rows = list(rows)
-    priced = {}
-    for read_id, from_seq, to_seq, ts in pending:
-        last = min(to_seq, head_seq)
-        if from_seq > head_seq:
+    charges = [row for row in rows
+               if row.kind == ledger.STATEMENT_QUERY and row.amount < 0 and not row.ref]
+    used, priced = set(), {}
+    for read_id, from_seq, to_seq, ts, *_ in pending:
+        charge = next((row for row in charges if row.seq not in used and row.seq >= from_seq
+                       and _detail_int(row.detail, "from_seq") == from_seq), None)
+        if charge is not None:
+            used.add(charge.seq)
+            priced[read_id] = max(0, min(to_seq, charge.seq - 1) - from_seq + 1)
+        elif reaches_head and now > ts + peer_call_timeout() + CLOCK_SKEW_SECONDS:
             priced[read_id] = 0
-        elif rows and rows[0].seq <= from_seq and rows[-1].seq >= last:
-            priced[read_id] = sum(1 for row in rows if from_seq <= row.seq <= last
-                                  and row.ts <= ts + CLOCK_SKEW_SECONDS)
     return priced
 
 
-def settle_failed_reads(peer_id: str, account: str, rows: Iterable[Row], head_seq: int) -> None:
-    """Price the failed reads of ``account`` that the checked movements show the range of."""
+def priced_child_reads(pending: Iterable[tuple], rows: Iterable[Row], head_seq: int
+                       ) -> Tuple[Dict[int, int], Dict[int, Tuple[int, int]]]:
+    """The failed reads of a child (``(id, from_seq, to_seq, ts, seen_to, rows_seen)``)
+    whose range ``rows`` show. ``rows`` are the movements of the child that were just
+    checked up to ``head_seq``.
+
+    A read counts for the rows of its range that are dated before it. The statements
+    can show the range over several pages. Each page adds the rows that it shows. The
+    read is settled when a page gets to the end of the range or to the head. Returns
+    the settled reads with their rows, and the progress of the others.
+    """
+    rows = list(rows)
+    priced, progress = {}, {}
+    for read_id, from_seq, to_seq, ts, seen_to, rows_seen in pending:
+        if from_seq > head_seq:
+            priced[read_id] = 0
+            continue
+        first = from_seq if seen_to is None else seen_to + 1
+        last = min(to_seq, head_seq)
+        shown = [row for row in rows if first <= row.seq <= last]
+        if not shown or shown[0].seq != first:
+            continue
+        count = rows_seen + sum(1 for row in shown if row.ts <= ts + CLOCK_SKEW_SECONDS)
+        if shown[-1].seq >= last:
+            priced[read_id] = count
+        else:
+            progress[read_id] = (shown[-1].seq, count)
+    return priced, progress
+
+
+def settle_failed_reads(peer_id: str, account: str, rows: Iterable[Row], head_seq: int, *,
+                        own: bool = False, now: Optional[float] = None,
+                        reaches_head: bool = False) -> None:
+    """Price the failed reads of ``account`` that the checked movements settle:
+    ``priced_own_reads`` for our own account (``own``), else ``priced_child_reads``."""
     from src.database.sql_connection import SQLConnection
 
     sc = SQLConnection()
     pending = sc.failed_statement_reads(peer_id, ledger.account_ref(account))
-    priced = priced_failed_reads(pending, rows, head_seq) if pending else {}
-    if priced:
-        sc.settle_failed_statement_reads(peer_id, priced)
+    if not pending:
+        return
+    if own:
+        priced, progress = priced_own_reads(
+            pending, rows, time.time() if now is None else now, reaches_head), {}
+    else:
+        priced, progress = priced_child_reads(pending, rows, head_seq)
+    if priced or progress:
+        sc.settle_failed_statement_reads(peer_id, priced, progress)
 
 
 def query_charge_problems(rows: Iterable[Row], counters: Mapping[str, int],
@@ -596,40 +877,63 @@ def query_charge_problems(rows: Iterable[Row], counters: Mapping[str, int],
     return problems
 
 
-def still_pays(peer_id: str, rows_asked: int) -> bool:
-    """Whether our balance on ``peer_id``, read again now, still pays for a read of
-    ``rows_asked`` movements. False when it cannot be read."""
+def still_pays(peer_id: str, rows_asked: int, floor: int = 0) -> bool:
+    """Whether our balance on ``peer_id`` still pays for a read of ``rows_asked``
+    movements. The balance is the one that ``Metrics`` gives now, but never less than
+    ``floor`` (``signed_floor``): a peer cannot say a lower balance than it signed."""
     from src.manager.metrics import refresh_balance_on_peer
 
     try:
         balance = refresh_balance_on_peer(peer_id)
     except Exception:
-        return False
-    return page_rows(balance, stored_rates(peer_id)) >= rows_asked
+        balance = 0
+    return page_rows(max(balance, floor), stored_rates(peer_id)) >= rows_asked
 
 
 def penalise_no_statement(peer_id: str, account: str, error: Exception, seq: int = 0,
-                          child: bool = False, pays=None) -> None:
+                          child: bool = False, pays=None, answered: bool = False,
+                          mark_ts: Optional[int] = None) -> None:
     """A peer that gives no valid statement is one whose statement does not add up.
 
-    Not when the peer cannot be reached: that says nothing about its statements. Nor
-    when ``child`` and the peer answers ``UNIMPLEMENTED``: it may have delegated the
+    Not when ``child`` and the peer answers ``UNIMPLEMENTED``: it may have delegated the
     child on, and the proto lets a node say so (the child is then charged from its
     balance, as with no statement). ``RESOURCE_EXHAUSTED`` is a refusal like any other
-    when ``pays()`` says that our balance, read again, still pays for what was asked
-    (``page_rows``): a peer that says we cannot pay for it contradicts the balance that
-    it reports. When the balance fell in between, it is not a fault. ``seq`` is the
+    when ``pays()`` says that our balance still pays for what was asked (``page_rows``):
+    a peer that says we cannot pay for it contradicts the balance that it reports or
+    signed. When the balance fell in between, it is not a fault. ``seq`` is the
     movement where the statement was missing.
+
+    A transport failure (``unreachable``) says nothing about the statement, as a rule.
+    But the peer selects the code that it answers with. The failure is a refusal when
+    two conditions are true. The peer ``answered`` another call in the same tick. The
+    mark (dated ``mark_ts``) is older than ``refusal_age_seconds``. If not, the mark
+    grows old enough to excuse movements that the peer hides. With no date, the failure
+    is not a refusal.
     """
     code = _code_of(error)
-    if unreachable(error) or (child and code == grpc.StatusCode.UNIMPLEMENTED):
+    if child and code == grpc.StatusCode.UNIMPLEMENTED:
         return
-    if code == grpc.StatusCode.RESOURCE_EXHAUSTED and pays is not None and not pays():
+    if unreachable(error):
+        if not answered or mark_ts is None or time.time() - int(mark_ts) < refusal_age_seconds():
+            return
+    elif code == grpc.StatusCode.RESOURCE_EXHAUSTED and pays is not None and not pays():
         return
     # A refusal shows no movement, and it would be the same fault at every read for as
-    # long as the peer keeps refusing: it is scored once a day instead.
+    # long as the peer keeps refusing: it is scored once in a window instead.
     penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT,
-                  f"no valid statement: {error}", seq, period=int(time.time()) // 86400)
+                  f"no valid statement: {error}", seq, window=FAULT_WINDOW_SECONDS)
+
+
+def penalise_chain(peer_id: str, account: str, chain: Chain, seq: int) -> None:
+    """Score a statement that ``verify_chain`` did not accept, at its ``fault_seq``, or
+    at ``seq``. A statement dated far from our clock shows no movement, and the clock
+    that is wrong can be ours. It is scored once in a window, not at each read."""
+    if chain.clock:
+        penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT, chain.problem,
+                      CLOCK_FAULT_SEQ, window=FAULT_WINDOW_SECONDS)
+    else:
+        penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT, chain.problem,
+                      chain.fault_seq if chain.fault_seq is not None else seq)
 
 
 def _invalid_statement():
@@ -638,21 +942,21 @@ def _invalid_statement():
 
 
 def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: int = 0,
-                  period: int = 0) -> None:
+                  window: int = 0) -> None:
     """Score a fault of a peer, once: the same fault read again costs it nothing.
 
     A fault is the peer, the account (by ``account_ref``, never the credential), the
-    reason and the seq of the movement where it shows, and the ``period`` for a fault
-    that shows no movement (``statement_faults``). A
-    statement that does not add up stays wrong for every read until the mark goes past
-    it, and also after a restart, so the record is in the database. A different fault,
-    at another movement, is scored.
+    reason and the seq of the movement where it shows. A statement that does not add up
+    stays wrong for every read until the mark goes past it, and also after a restart,
+    so the record is in the database. A different fault, at another movement, is
+    scored. A fault that shows no movement has a ``window`` (seconds): it is scored
+    again only when the last one is older than that (``statement_faults``).
     """
     from src.database.sql_connection import SQLConnection
     from src.reputation_system import interface
 
     account_ref = ledger.account_ref(account)
     log.LOGGER(f"Statement of {account_ref[:8]} on {peer_id}: {problem}")
-    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq, period):
+    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq, window):
         return
     interface.update_peer_reputation(peer_id=peer_id, amount=STATEMENT_PENALTY, reason=reason)
