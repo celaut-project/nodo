@@ -7,6 +7,7 @@ from src.utils import logger as log
 import src.manager.resources as iobd
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing
+from src.utils.privileges import sudo_nodo, sudo_rerun
 from src.utils.network import get_local_ip, resolve_public_host, resolve_public_port
 
 env_manager = ConfigManager(log=log.LOGGER)
@@ -292,7 +293,7 @@ if __name__ == '__main__':
         else:
             print(
                 "Nodo address: unavailable -- network.GATEWAY_PORT is not "
-                "assigned yet. Start the node once as root ('sudo nodo serve') "
+                f"assigned yet. Start the node once as root ('{sudo_nodo('serve')}') "
                 "so it can pick a port and open it, then run 'nodo doctor'.",
                 flush=True
             )
@@ -325,7 +326,7 @@ if __name__ == '__main__':
                 for alert in alerts:
                     print(alert.as_line(), flush=True)
                 print(
-                    "\nRun `sudo nodo daemon restart` to restart it in the background.",
+                    f"\nRun `{sudo_nodo('daemon restart')}` to restart it in the background.",
                     flush=True
                 )
         except Exception as e:
@@ -628,7 +629,7 @@ if __name__ == '__main__':
                     print(f"Error: {e}")
                     sys.exit(1)
                 if os.geteuid() != 0 and service_user != getpass.getuser():
-                    print("This script requires superuser privileges. Please run with sudo.")
+                    print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
                 else:
                     main_dir = shlex.quote(INSTALL_DIR)
                     os.system(f"/bin/bash {main_dir}/bash/restore_source.sh {main_dir}")
@@ -1063,7 +1064,7 @@ if __name__ == '__main__':
             case "prune_containers":
                 # Check if script is run as root
                 if os.geteuid() != 0:
-                    print("This script requires superuser privileges. Please run with sudo.")
+                    print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
                     exit()
                 
                 from src.manager.maintain import maintain_vmachines

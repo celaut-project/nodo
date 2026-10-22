@@ -15,7 +15,7 @@ import yaml
 from mnemonic import Mnemonic
 
 from src.utils.network import get_free_port
-from src.utils.privileges import can_admin_network
+from src.utils.privileges import can_admin_network, sudo_nodo
 from src.utils.singleton import Singleton
 
 
@@ -663,7 +663,7 @@ class ConfigManager(metaclass=Singleton):
                 "gateway port not assigned",
                 "network.GATEWAY_PORT is unassigned and this process is not root and has no\n"
                 "CAP_NET_ADMIN, so it cannot open the port in the host firewall. Leaving it\n"
-                "unassigned rather than storing a port nothing can reach: run 'sudo nodo serve'\n"
+                f"unassigned rather than storing a port nothing can reach: run '{sudo_nodo('serve')}'\n"
                 "once, or set network.GATEWAY_PORT to a port you have opened yourself.",
             )
             return

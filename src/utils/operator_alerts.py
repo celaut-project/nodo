@@ -41,6 +41,8 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional
 
+from src.utils.privileges import sudo_nodo
+
 
 #: Prefix for a line the operator has to act on. Uppercase and bracketed so it
 #: survives being read at a glance in a wall of ordinary ``key: value`` output --
@@ -167,7 +169,7 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
             key="gateway_port_unassigned",
             summary=(
                 "NOT SERVING - no gateway port is assigned, so no peer can reach "
-                "this node and it earns nothing. Assign and open one: sudo nodo serve"
+                f"this node and it earns nothing. Assign and open one: {sudo_nodo('serve')}"
             ),
             detail=pending or "",
         )
@@ -191,13 +193,13 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
             summary=(
                 f"NOT SERVING - nothing is listening on TCP {port}, so no peer can "
                 f"reach this node and it earns nothing while it is down. Start it: "
-                f"sudo nodo serve"
+                f"{sudo_nodo('serve')}"
             ),
             detail=(
                 "The port is assigned and the host firewall has no open question "
                 "about it, so nothing in the configuration is wrong -- there is "
                 "simply no node process answering on it.\n"
-                "Start it with:\n  sudo nodo serve\n"
+                f"Start it with:\n  {sudo_nodo('serve')}\n"
                 "If it was started and stopped on its own, storage/app.log holds "
                 "why."
             ),

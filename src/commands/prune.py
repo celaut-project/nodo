@@ -30,6 +30,7 @@ import sys
 from typing import List, Optional, Sequence, Tuple
 
 from src.commands.inspect_service import format_size
+from src.utils.privileges import sudo_rerun
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -141,7 +142,7 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
     # root, and a partial removal by an unprivileged user would leave a half-freed
     # directory and report a number that was never true.
     if not dry_run and os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
+        print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
         return
 
     # Read from the microVM family rather than through `virtualizers.interface`,

@@ -684,6 +684,11 @@ These are intended for development or advanced maintenance environments:
   `sudo nodo daemon stop`  
   `sudo nodo daemon restart`
 
+  After an install without sudo, `nodo` lives in `~/.local/bin`, which sudo does not
+  search, so `sudo nodo …` answers `command not found`. Give sudo the path instead:
+  `sudo ~/.local/bin/nodo daemon restart`. The commands nodo prints for you already
+  do this. Every `sudo nodo …` in these docs reads the same way.
+
 - **doctor**  
   Checks and fixes the Nodo systemd service configuration, and performs comprehensive virtualization and Cloud Hypervisor compatibility checks (requires superuser privileges).  
   Checks performed:
