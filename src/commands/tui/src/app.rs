@@ -135,8 +135,14 @@ pub enum Page {
 pub enum PageGroup {
     /// Where this node stands right now.
     Status,
-    /// What is running here and who it is running for.
+    /// What is running here: instances, their tunnels, and the ones that died.
     Activity,
+    /// What this node can run: the services in its registry, and the packs that
+    /// put them there.
+    Catalog,
+    /// Who the node deals with: the peers it talks to, the clients that talk to it,
+    /// and the conversations with their operators.
+    Network,
     /// What being up has been worth.
     Money,
     /// What the node did, in its own words.
@@ -154,9 +160,11 @@ impl PageGroup {
     /// a test — but written out, because the top row's order is a fact about the top
     /// row and a reader should be able to see it without folding twelve pages down
     /// into five.
-    pub const ALL: [PageGroup; 6] = [
+    pub const ALL: [PageGroup; 8] = [
         PageGroup::Status,
         PageGroup::Activity,
+        PageGroup::Catalog,
+        PageGroup::Network,
         PageGroup::Money,
         PageGroup::Record,
         PageGroup::Settings,
@@ -173,6 +181,8 @@ impl PageGroup {
         match self {
             PageGroup::Status => "OVERVIEW",
             PageGroup::Activity => "WORKLOAD",
+            PageGroup::Catalog => "CATALOG",
+            PageGroup::Network => "NETWORK",
             PageGroup::Money => "EARNINGS",
             PageGroup::Record => "LOGS",
             PageGroup::Settings => "SETTINGS",
@@ -186,6 +196,8 @@ impl PageGroup {
         match self {
             PageGroup::Status => "OVER",
             PageGroup::Activity => "WORK",
+            PageGroup::Catalog => "CAT",
+            PageGroup::Network => "NET",
             PageGroup::Money => "EARN",
             PageGroup::Record => "LOGS",
             PageGroup::Settings => "SET",
@@ -235,10 +247,12 @@ impl Page {
         Page::Tunnels,
         // Beside Instances too: it is where an instance goes when it stops.
         Page::Dead,
-        Page::Peers,
         Page::Services,
         // Beside Services: a pack is how a service gets into the registry.
         Page::Packs,
+        // Who this node deals with, apart from what it runs: peers first because
+        // they are the network it belongs to, then the clients it serves.
+        Page::Peers,
         Page::Clients,
         // Beside Clients: both are "who is on the other end", and Chat is often
         // reached from noticing something worth telling that operator about.
@@ -316,12 +330,9 @@ impl Page {
             Page::Overview => PageGroup::Status,
             Page::Instances
             | Page::Tunnels
-            | Page::Dead
-            | Page::Peers
-            | Page::Services
-            | Page::Packs
-            | Page::Clients
-            | Page::Chat => PageGroup::Activity,
+            | Page::Dead => PageGroup::Activity,
+            Page::Services | Page::Packs => PageGroup::Catalog,
+            Page::Peers | Page::Clients | Page::Chat => PageGroup::Network,
             Page::Earnings => PageGroup::Money,
             Page::Logs => PageGroup::Record,
             Page::Cell | Page::Pricing | Page::Schedule | Page::Energy | Page::Config => {
@@ -3819,7 +3830,7 @@ impl App {
         self.tabs.cycle_group(-1);
     }
 
-    /// `1`..`6`: jump straight to a group.
+    /// `1`..`8`: jump straight to a group.
     ///
     /// One-based, matching the labels as counted on screen rather than as indexed in
     /// an array — nobody reading a row of five looks for a zeroth.
@@ -9072,9 +9083,9 @@ mod tests {
                     Page::Instances,
                     Page::Tunnels,
                     Page::Dead,
-                    Page::Peers,
                     Page::Services,
                     Page::Packs,
+                    Page::Peers,
                     Page::Clients,
                     Page::Chat,
                     Page::Earnings,
@@ -14278,7 +14289,7 @@ mod tab_groups {
         assert_eq!(tabs.page(), PageGroup::Activity.pages()[0]);
 
         tabs.cycle_group(1);
-        assert_eq!(tabs.page(), PageGroup::Money.pages()[0]);
+        assert_eq!(tabs.page(), PageGroup::Catalog.pages()[0]);
     }
 
     #[test]
@@ -14316,7 +14327,7 @@ mod tab_groups {
     fn reopening_the_current_group_keeps_the_current_page() {
         let mut tabs = tabs_on(Page::Clients);
 
-        tabs.select_group(PageGroup::Activity);
+        tabs.select_group(PageGroup::Network);
 
         assert_eq!(tabs.page(), Page::Clients);
     }

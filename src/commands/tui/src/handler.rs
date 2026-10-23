@@ -474,10 +474,10 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('[')) if app.page() != Page::Schedule => {
             app.previous_group()
         }
-        // 1..5 jump straight to a group, one-based as they are counted on screen.
+        // 1..8 jump straight to a group, one-based as they are counted on screen.
         // Nothing else in this interface binds a digit, so there is no page that has
         // to be excepted the way SCHEDULE is above.
-        (KeyModifiers::NONE, KeyCode::Char(digit @ '1'..='6')) => {
+        (KeyModifiers::NONE, KeyCode::Char(digit @ '1'..='8')) => {
             app.select_group_by_number(digit as usize - '0' as usize)
         }
         (_, KeyCode::Up) => app.on_up(),

@@ -865,10 +865,10 @@ mod tests {
         }
 
         #[test]
-        fn packs_is_a_workload_page_beside_services() {
+        fn packs_is_a_catalog_page_beside_services() {
             let services = Page::ALL.iter().position(|page| *page == Page::Services).unwrap();
             assert_eq!(Page::ALL[services + 1], Page::Packs);
-            assert_eq!(Page::Packs.group(), crate::app::PageGroup::Activity);
+            assert_eq!(Page::Packs.group(), crate::app::PageGroup::Catalog);
             assert_eq!(Page::Packs.title(), "PACKS");
         }
 

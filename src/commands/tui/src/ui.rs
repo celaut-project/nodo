@@ -5426,9 +5426,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     // where it applies: a footer advertising `[/] group` on the one page where those
     // keys do something else would be advertising the wrong thing.
     let navigation = if app.page() == Page::Schedule {
-        "1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "1-8 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     } else {
-        "[/] or 1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "[/] or 1-8 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     };
     let lines = vec![
         Line::from(Span::styled(
@@ -10234,7 +10234,9 @@ mod overview_summaries {
         app.node_info.version = "1.4.2".to_string();
         for (width, height) in [(80, 24), (120, 30), (200, 60), (60, 40)] {
             let screen = overview_at(&mut app, width, height);
-            let (header, page) = screen.split_once('\n').unwrap();
+            let (header, below) = screen.split_once('\n').unwrap();
+            // The group row is not a card: it names the NETWORK group.
+            let page = below.split_once('\n').unwrap().1;
             assert!(header.contains("● RUNNING"), "{width}x{height}:\n{screen}");
             assert!(header.contains("0 peers"), "{width}x{height}:\n{screen}");
             for word in ["RUNNING", "running", "Status", "0 peers", "0 clients", "0 instances", "NETWORK"] {
