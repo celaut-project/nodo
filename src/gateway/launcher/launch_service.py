@@ -293,7 +293,14 @@ def launch_service(
         configuration: Optional[celaut_pb2.Configuration] = None,
         recursion_guard_token: str = None,
         recursion_guard_hops: Optional[int] = None,
+        start_ref: Optional[str] = None,
 ) -> celaut_pb2.ServiceInstance:
+    """Start the service here or on a peer, for ``father_id``.
+
+    ``start_ref`` is the StartReference of the request, in hex (#578). The
+    ``child_start`` of each candidate carries it, so that the father can tell which of
+    its requests each start comes from.
+    """
 
     with RecursionGuard(
             token=recursion_guard_token,
@@ -590,6 +597,7 @@ def launch_service(
                         amount_mu=initial_mu,
                         refund_function_container=refund_container,
                         kind=ledger.CHILD_START,
+                        detail={"start_ref": start_ref} if start_ref else None,
                         movement=start_charge,
                 ):
                     raise Exception('Launch service error charging ' + father_id)

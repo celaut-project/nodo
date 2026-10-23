@@ -149,7 +149,13 @@ ticks, as with a child. A read that fails does not make the next tick read again
 Nothing may take MU from the account but:
 
 - the start of a child of ours, no more than what was sent for it, and once (`child_start`,
-  and the `child_bound` row that names the child once it exists);
+  and the `child_bound` row that names the child once it exists). Each start that this
+  node asks for goes with a `StartReference` of its own (#578): a nonce and a MAC of
+  the nonce with a key of this node. The peer writes the reference in
+  `detail.start_ref` of the `child_start`, so this node knows which of its requests
+  caused each start, with no matching by amount or time, and also after a restart. A
+  `child_start` with no reference, or with a reference that has no valid MAC, is a
+  start that this node did not ask for: a fault at once;
 - a top-up of a child of ours, no more than what this node sent for it with
   `ModifyDeposit`. Each top-up is written down before the peer is asked
   (`top_up_reservations`), and the statement takes from it as it shows the movement.
@@ -235,18 +241,20 @@ Some things are not faults, and score nothing:
   time is not checkable. A reader that stays up to date, and keeps what it reads, can
   check all of it.
 - A `child_start` that this node asked for and gave up on (#578): the peer may have
-  finished it after `START_SERVICE_ON_PEER_TIMEOUT`. Every start is written down before
-  the peer is asked, and a `child_start` that no child of ours explains is matched with
-  one of those: it must be dated within the wait of the attempt, on the clock of this
-  node, take no more than the attempt sent, and one attempt holds one movement. The
-  peer charges a start for each candidate that it tries. It gives back the start of each
-  one that fails, and a `refund` of a movement sets its attempt free again. A
-  `child_bound` closes the attempt. When it names a child of ours, the movement goes to
-  the attempt of that child. So a read during a build, or two starts at the same
-  time, is not a fault. Anything else is a fault at once; nothing waits.
-- A start that the peer refused. The attempt then holds no new movement, and the peer
-  must give back the start of each candidate that it tried before it answers. A movement
-  of a refused attempt that is not given back by the head of a later read is a fault.
+  finished it after `START_SERVICE_ON_PEER_TIMEOUT`. The peer charges a start for each
+  candidate that it tries, with the same reference, and it gives back the start of each
+  one that fails: a `refund` of a movement sets its reference free again. One reference
+  holds one movement that is not given back. A `child_bound` that names a child of ours
+  closes the reference, and a later `child_start` with it is a fault. A start that this
+  node gave up on has a child that nobody holds: the father got an error and its MU
+  back. After the timeout, the node asks the peer again with the same reference and a
+  short deadline, and stops the child that it gets. If that fails too, the next check of
+  the account that shows the `child_start` asks again, at each check, until it gets the
+  child and stops it. The peer then gives back what the child did not use, as a `refund`
+  of the `child_start`. While the node asks, the movement is not a fault.
+- A start that the peer refused. The peer must give back the start of each candidate
+  that it tried before it answers. A movement of a refused start that is not given back
+  by the head of a later read is a fault.
 - A peer that rejects a start because the amount is too small. The amount was the choice
   of this node.
 

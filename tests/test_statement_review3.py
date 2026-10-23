@@ -29,6 +29,7 @@ try:
     from src.manager import metrics as metrics_mod
     from src.manager.manager import delegation_lock
     from src.manager.statement_check import Row
+    from src.utils import start_ref
     from tests.statement_chain import FakeLedger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -152,13 +153,23 @@ class _Node(unittest.TestCase):
     def reasons(self):
         return [c.kwargs["reason"] for c in self.scores.call_args_list]
 
-    def start_child(self, attempt, amount, token, ts=None):
+    def charge_start(self, reference, amount, ts=None):
+        """The peer charges a start of the request ``reference``."""
+        return self.peer.add(-amount, ledger.CHILD_START, text=detail(start_ref=reference), ts=ts)
+
+    def start_child(self, reference, amount, token, ts=None):
         """The peer charges a start and names its child."""
-        start = self.peer.add(-amount, ledger.CHILD_START, ts=ts)
+        start = self.charge_start(reference, amount, ts=ts)
         self.peer.add(0, ledger.CHILD_BOUND, ledger.instance_ref(token),
                       detail(starts_seq=start["seq"]), ts=ts)
-        self.sc.bind_start_attempt(attempt, token)
+        self.sc.bind_start_attempt(PEER, reference, token)
         return start
+
+    def attempt(self, sent):
+        """A start that this node asks the peer for, by a new reference."""
+        reference = start_ref.new().hex()
+        self.sc.add_start_attempt(PEER, reference, sent)
+        return reference
 
     def add_child(self):
         """A delegated child on the peer, of a father with a balance here."""
@@ -178,8 +189,8 @@ class RetryOfAnotherCandidateTests(_Node):
     def setUp(self):
         super().setUp()
         self.peer.add(100_000, ledger.CREDIT)
-        self.attempt = self.sc.add_start_attempt(PEER, 1000)
-        self.first = self.peer.add(-1000, ledger.CHILD_START)
+        self.reference = self.attempt(1000)
+        self.first = self.charge_start(self.reference, 1000)
         self.check()  # during the build of the first candidate
 
     def fail_first_candidate(self):
@@ -187,7 +198,7 @@ class RetryOfAnotherCandidateTests(_Node):
 
     def test_a_read_during_the_first_candidate_and_one_after_the_bind_score_nothing(self):
         self.fail_first_candidate()
-        self.start_child(self.attempt, 1000, TOKEN)
+        self.start_child(self.reference, 1000, TOKEN)
 
         self.check()
 
@@ -195,21 +206,28 @@ class RetryOfAnotherCandidateTests(_Node):
 
     def test_a_read_during_each_candidate_scores_nothing(self):
         self.fail_first_candidate()
-        second = self.peer.add(-1000, ledger.CHILD_START)
+        second = self.charge_start(self.reference, 1000)
         self.check()  # during the build of the second candidate
 
         self.peer.add(0, ledger.CHILD_BOUND, ledger.instance_ref(TOKEN),
                       detail(starts_seq=second["seq"]))
-        self.sc.bind_start_attempt(self.attempt, TOKEN)
+        self.sc.bind_start_attempt(PEER, self.reference, TOKEN)
         self.check()
 
         self.assertEqual(self.score_count, 0, self.reasons())
 
     def test_a_start_paid_twice_is_still_a_fault(self):
         self.fail_first_candidate()
-        self.start_child(self.attempt, 1000, TOKEN)
+        self.start_child(self.reference, 1000, TOKEN)
         self.check()
-        self.start_child(self.attempt, 1000, TOKEN)
+        self.start_child(self.reference, 1000, TOKEN)
+
+        self.check()
+
+        self.assertEqual(self.reasons(), ["statement_overcharged"])
+
+    def test_a_second_candidate_charged_before_the_first_is_given_back_is_a_fault(self):
+        self.charge_start(self.reference, 1000)
 
         self.check()
 
@@ -225,18 +243,17 @@ class ConcurrentStartsTests(_Node):
         self.peer.add(100_000, ledger.CREDIT)
 
     def _two_starts(self, sent_a, sent_b):
-        a = self.sc.add_start_attempt(PEER, sent_a)
-        b = self.sc.add_start_attempt(PEER, sent_b)
+        a, b = self.attempt(sent_a), self.attempt(sent_b)
         # The peer charges B first, and our read lands before either child is named.
-        start_b = self.peer.add(-sent_b, ledger.CHILD_START)
+        start_b = self.charge_start(b, sent_b)
         self.check()
-        start_a = self.peer.add(-sent_a, ledger.CHILD_START)
+        start_a = self.charge_start(a, sent_a)
         self.peer.add(0, ledger.CHILD_BOUND, ledger.instance_ref("token-b"),
                       detail(starts_seq=start_b["seq"]))
         self.peer.add(0, ledger.CHILD_BOUND, ledger.instance_ref("token-a"),
                       detail(starts_seq=start_a["seq"]))
-        self.sc.bind_start_attempt(a, "token-a")
-        self.sc.bind_start_attempt(b, "token-b")
+        self.sc.bind_start_attempt(PEER, a, "token-a")
+        self.sc.bind_start_attempt(PEER, b, "token-b")
         self.check()
 
     def test_a_smaller_start_charged_first_is_not_paid_twice(self):
@@ -248,6 +265,124 @@ class ConcurrentStartsTests(_Node):
         self._two_starts(1000, 1000)
 
         self.assertEqual(self.score_count, 0, self.reasons())
+
+    def test_a_start_that_names_the_child_of_another_request_is_a_fault(self):
+        a, b = self.attempt(1000), self.attempt(1000)
+        self.sc.bind_start_attempt(PEER, a, "token-a")
+        self.sc.bind_start_attempt(PEER, b, "token-b")
+        start_a = self.charge_start(a, 1000)
+        self.peer.add(0, ledger.CHILD_BOUND, ledger.instance_ref("token-b"),
+                      detail(starts_seq=start_a["seq"]))
+
+        self.check()
+
+        self.assertEqual(self.reasons(), ["statement_overcharged"])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class StartReferenceTests(_Node):
+    """#578: a ``child_start`` is ours when its reference has the MAC of this node."""
+
+    def setUp(self):
+        super().setUp()
+        self.peer.add(100_000, ledger.CREDIT)
+
+    def test_a_start_with_no_reference_is_a_fault(self):
+        self.peer.add(-1000, ledger.CHILD_START)
+
+        self.check()
+
+        self.assertEqual(self.reasons(), ["statement_overcharged"])
+
+    def test_a_start_with_a_reference_that_is_not_ours_is_a_fault(self):
+        forged = start_ref.new()
+        forged = forged[:start_ref.NONCE_BYTES] + bytes(start_ref.MAC_BYTES)
+        self.charge_start(forged.hex(), 1000)
+
+        self.check()
+
+        self.assertEqual(self.reasons(), ["statement_overcharged"])
+
+    def test_a_start_with_a_reference_of_ours_and_no_attempt_here_is_fine(self):
+        reference = start_ref.new().hex()
+        self.charge_start(reference, 1000)
+
+        with patch.object(maintain.orphan_starts, "stop_orphan", return_value=False):
+            self.check()
+
+        self.assertEqual(self.score_count, 0, self.reasons())
+        self.assertEqual(self.sc.orphan_starts(PEER), [reference])
+
+    def test_a_start_takes_no_more_than_was_sent(self):
+        self.charge_start(self.attempt(1000), 1001)
+
+        self.check()
+
+        self.assertEqual(self.reasons(), ["statement_overcharged"])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class OrphanStartTests(_Node):
+    """#578: the child of a start that timed out here is stopped, and is no fault."""
+
+    def setUp(self):
+        super().setUp()
+        self.peer.add(100_000, ledger.CREDIT)
+        self.reference = self.attempt(1000)
+        # The peer finished the start after this node gave up on it.
+        start = self.charge_start(self.reference, 1000)
+        self.peer.add(0, ledger.CHILD_BOUND, ledger.instance_ref(TOKEN),
+                      detail(starts_seq=start["seq"]))
+        self.start_seq = start["seq"]
+        self.asked = []
+        self.stopped = []
+
+    def check_with_the_peer(self, answer):
+        def ask_again(peer_id, client_id, reference, timeout):
+            self.asked.append((peer_id, client_id, reference))
+            return answer()
+
+        with patch.object(maintain.orphan_starts, "ask_again", side_effect=ask_again), \
+                patch.object(maintain.orphan_starts, "peer_channel"), \
+                patch.object(maintain.orphan_starts.BeeClient, "stop_service",
+                             side_effect=lambda channel, token: self.stopped.append(token)):
+            self.check()
+
+    def test_the_orphan_is_asked_for_by_its_reference_and_stopped(self):
+        self.check_with_the_peer(lambda: celaut_pb2.ServiceInstance(token=TOKEN))
+
+        self.assertEqual(self.score_count, 0, self.reasons())
+        self.assertEqual(self.asked, [(PEER, CLIENT, self.reference)])
+        self.assertEqual(self.stopped, [TOKEN])
+        self.assertEqual(self.sc.orphan_starts(PEER), [])
+
+    def test_an_orphan_that_is_not_had_is_asked_for_again_at_the_next_check(self):
+        def in_progress():
+            raise coded(grpc.StatusCode.ABORTED)
+
+        self.check_with_the_peer(in_progress)
+        self.check_with_the_peer(lambda: celaut_pb2.ServiceInstance(token=TOKEN))
+
+        self.assertEqual(self.score_count, 0, self.reasons())
+        self.assertEqual(len(self.asked), 2)
+        self.assertEqual(self.stopped, [TOKEN])
+
+    def test_a_stopped_orphan_is_given_back_and_may_not_be_charged_again(self):
+        self.check_with_the_peer(lambda: celaut_pb2.ServiceInstance(token=TOKEN))
+        self.peer.add(400, ledger.REFUND, text=detail(refunds_seq=self.start_seq))
+        self.charge_start(self.reference, 1000)
+
+        self.check_with_the_peer(lambda: None)
+
+        self.assertEqual(self.reasons(), ["statement_overcharged"])
+
+    def test_a_start_that_delegate_execution_still_waits_for_is_not_an_orphan(self):
+        start_ref.begin(self.reference)
+        self.addCleanup(start_ref.end, self.reference)
+
+        self.check_with_the_peer(lambda: celaut_pb2.ServiceInstance(token=TOKEN))
+
+        self.assertEqual(self.asked, [])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -262,23 +397,28 @@ class RefusedStartTests(_Node):
         self.peer.add(100_000, ledger.CREDIT)
         self.check()
 
-    def delegate(self, during=None):
-        """Ask the peer for a start of 50 000 MU, which it refuses. ``during`` runs while
-        the peer works on it."""
+    def delegate(self, during=None, error=grpc.StatusCode.FAILED_PRECONDITION):
+        """Ask the peer for a start of 50 000 MU, which it refuses with ``error``.
+        ``during`` runs while the peer works on it. ``self.reference`` is the reference
+        of the start."""
         config = celaut_pb2.Configuration()
         config.initial_mu.n = "50000"
+
+        def service_extended(**kwargs):
+            self.reference = kwargs["start_ref"].hex()
+            return MagicMock()
 
         def start_service(*args, **kwargs):
             if during:
                 during()
-            raise coded(grpc.StatusCode.FAILED_PRECONDITION)
+            raise coded(error)
 
         with patch.object(delegate_mod, "matching_payment_system",
                           return_value=self.PAYMENT_SYSTEM), \
                 patch.object(delegate_mod, "balance_on_other_peer", return_value=10 ** 12), \
                 patch.object(delegate_mod, "get_client_id_on_other_peer", return_value=CLIENT), \
                 patch.object(delegate_mod, "peer_channel"), \
-                patch.object(delegate_mod.utils, "service_extended", return_value=MagicMock()), \
+                patch.object(delegate_mod.utils, "service_extended", side_effect=service_extended), \
                 patch.object(delegate_mod.BeeClient, "start_service", side_effect=start_service):
             with self.assertRaises(Exception):
                 delegate_mod.delegate_execution(
@@ -288,7 +428,7 @@ class RefusedStartTests(_Node):
 
     def test_a_start_that_the_peer_charges_after_it_refused_is_a_fault(self):
         self.delegate()
-        self.peer.add(-50_000, ledger.CHILD_START)
+        self.charge_start(self.reference, 50_000)
 
         self.check()
 
@@ -296,7 +436,7 @@ class RefusedStartTests(_Node):
 
     def test_a_candidate_that_the_peer_gave_back_before_it_refused_is_fine(self):
         def candidate():
-            start = self.peer.add(-50_000, ledger.CHILD_START)
+            start = self.charge_start(self.reference, 50_000)
             self.check()  # our read lands during the build
             self.peer.add(50_000, ledger.REFUND, text=detail(refunds_seq=start["seq"]))
 
@@ -306,11 +446,20 @@ class RefusedStartTests(_Node):
         self.assertEqual(self.score_count, 0, self.reasons())
 
     def test_a_candidate_that_the_peer_keeps_after_it_refused_is_a_fault(self):
-        self.delegate(during=lambda: (self.peer.add(-50_000, ledger.CHILD_START), self.check()))
+        self.delegate(during=lambda: (self.charge_start(self.reference, 50_000), self.check()))
 
         self.check()
 
         self.assertEqual(self.reasons(), ["statement_overcharged"])
+
+    def test_a_start_that_times_out_is_asked_for_again_by_its_reference(self):
+        with patch.object(delegate_mod.orphan_starts, "stop_orphan") as stop_orphan:
+            self.delegate(error=grpc.StatusCode.DEADLINE_EXCEEDED)
+
+        self.assertEqual(stop_orphan.call_args.args[:3], (PEER, CLIENT, self.reference))
+        self.assertFalse(start_ref.in_flight(self.reference))
+        # Not refused: the peer may have the start still.
+        self.assertIsNone(self.sc.start_attempts(PEER)[0][7])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

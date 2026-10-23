@@ -991,6 +991,35 @@ message RecursionGuard {
     optional uint32 remaining_hops = 2;
 }
 
+// The reference of a StartService request, chosen by the caller (#578). With it, the
+// request is idempotent: a caller that lost the answer asks again with the same
+// reference and learns what the node did.
+//
+// The node keys the reference by the caller: its client_id, or the local instance that
+// asks. The same reference from another caller is another start. A second request with
+// the same reference and caller does not start anything and charges nothing:
+//   * after the first start succeeded, the node returns the same ServiceInstance;
+//   * while the first start runs, the node refuses with ABORTED, and the caller asks
+//     again later;
+//   * after the first start failed, the node refuses with FAILED_PRECONDITION and the
+//     error of that start.
+// A request that the node answers from its reference needs no service: a Client and a
+// StartReference are enough. The StartReference must come before the hashes of the
+// service: the node can begin the start at the first one, and a reference that comes
+// after that is ignored.
+//
+// A start with a reference whose call ends before the answer keeps its instance: the
+// caller can ask for it again. With no reference, the node stops that instance.
+//
+// The node keeps a reference while its instance lives, and at least
+// ledger.RETENTION_DAYS after the start ended. The child_start movement that pays the
+// start carries the reference, in hex, in detail.start_ref. A caller can then tell
+// which request caused each start that it paid for.
+message StartReference {
+    // From 1 to 64 bytes. The node refuses a longer reference.
+    bytes ref = 1;
+}
+
 // The answer of AssociateClient.
 message AssociateClientOutput {
     // True if the node bound the client to the peer.
@@ -1180,10 +1209,11 @@ message ObserveEvent {
 service Gateway {
     // Starts a service. The caller sends a Client and the service as content hashes, as
     // Metadata or as the full Service. It can also send a Configuration and a
-    // RecursionGuard. The node returns a ServiceInstance with the addresses of the
-    // instance and its token. The node can start the service on a peer and give the
-    // addresses of that instance. If the node does not have the service and the caller
-    // does not send it, the node refuses with an error.
+    // RecursionGuard, and a StartReference that makes the request idempotent. The node
+    // returns a ServiceInstance with the addresses of the instance and its token. The
+    // node can start the service on a peer and give the addresses of that instance. If
+    // the node does not have the service and the caller does not send it, the node
+    // refuses with an error.
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Stops an instance. The TokenMessage gives the instance token. The node gives the
     // balance that the instance did not use back to its parent, and returns a Refund

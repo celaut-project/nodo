@@ -12,7 +12,7 @@ Of its own account it checks two things:
    balance, and ends in the head that the peer signed. A peer that shows other movements
    than it showed before cannot keep the chain.
 2. Nothing takes MU from it that this node did not cause: the start of its own children
-   (each one is written down before the peer is asked), their top-ups up to what was sent,
+   (each one carries a reference of this node, #578), their top-ups up to what was sent,
    and the statements that it asked for.
 
 Of a child it checks the chain, and nothing else. What the peer charges a child is the
@@ -29,14 +29,14 @@ The functions here are pure unless they say otherwise; ``maintain`` and
 import json
 import time
 from dataclasses import dataclass, field, replace
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import grpc
 
 from protos import celaut_pb2
 from src.database import ledger
 from src.reputation_system.reasons import Reason
-from src.utils import logger as log
+from src.utils import logger as log, start_ref as start_refs
 from src.utils.config import ConfigManager
 from src.utils.utils import from_amount
 
@@ -376,20 +376,21 @@ def top_up_grace_seconds() -> int:
 
 @dataclass(frozen=True)
 class StartAttempt:
-    """A start that this node asked the peer for, and that is not closed: no
-    ``child_bound`` named the child of its movement yet. ``sent_mu`` is the most that it
-    may take, in the MU of the peer. ``ref`` is the child once the peer answered, else "".
-    ``start_seq`` is the ``child_start`` that the attempt holds (None: none yet), with
-    its amount ``start_mu`` and its date ``start_ts``. ``refused_at`` is when the peer
-    refused the start."""
-    id: int
+    """A start that this node asked the peer for, by its reference ``start_ref`` (#578).
+    ``sent_mu`` is the most that it may take, in the MU of the peer (None: not known).
+    ``ref`` is the child once this node has its token, else "". ``start_seq`` is the
+    ``child_start`` that the attempt holds (None: none yet), with its amount
+    ``start_mu``. ``refused_at`` is when the peer refused the start. ``closed``: a
+    ``child_bound`` named a child of ours for its movement."""
+    id: Optional[int]
+    start_ref: str
     ts: int
-    sent_mu: int
+    sent_mu: Optional[int]
     ref: str = ""
     start_seq: Optional[int] = None
     start_mu: int = 0
-    start_ts: int = 0
     refused_at: Optional[int] = None
+    closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -407,13 +408,13 @@ class AccountCheck:
     """What ``account_faults`` found in the movements of our account.
 
     ``faults`` are the problems, each with the seq where it shows. ``attempts`` is the
-    new state of each start attempt that changed, by id: ``(start_seq, start_mu,
-    start_ts, closed)``. ``top_ups_taken`` is what the peer took from each top-up
+    new state of each start attempt that changed, by its reference: ``(start_seq,
+    start_mu, closed, ref)``. ``top_ups_taken`` is what the peer took from each top-up
     reservation, by id. Both are saved with the mark, so that a movement is accounted
     for once.
     """
     faults: List[Tuple[int, str]]
-    attempts: Dict[int, tuple] = field(default_factory=dict)
+    attempts: Dict[str, tuple] = field(default_factory=dict)
     top_ups_taken: Dict[int, int] = field(default_factory=dict)
 
 
@@ -422,147 +423,115 @@ class _Held:
 
     def __init__(self, attempt: StartAttempt):
         self.attempt = attempt
-        self.seq, self.mu, self.ts = attempt.start_seq, attempt.start_mu, attempt.start_ts
-        self.closed = False
+        self.seq, self.mu = attempt.start_seq, attempt.start_mu
+        self.closed = attempt.closed
+        self.child = attempt.ref
         self.changed = False
 
     @property
     def state(self) -> tuple:
-        return self.seq, self.mu, self.ts, self.closed
+        return self.seq, self.mu, self.closed, self.child
 
 
 def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
                    attempts: Iterable[StartAttempt],
                    reservations: Iterable[TopUpReservation],
-                   now: float, started: Iterable[str] = (),
-                   reaches_head: bool = False) -> AccountCheck:
+                   now: float, reaches_head: bool = False,
+                   ours: Optional[Callable[[str], bool]] = None) -> AccountCheck:
     """What the peer took from our account that this node did not cause.
 
-    A start is written down before the peer is asked (``attempts``), and a top-up too
-    (``reservations``). Every movement that takes MU from our account must match one
-    of them, or be the charge of a statement:
+    Each start goes with a reference of this node (#578), and the peer writes it in the
+    ``child_start`` that pays the start (``detail.start_ref``). A top-up is written down
+    before the peer is asked (``reservations``). Every movement that takes MU from our
+    account must match one of them, or be the charge of a statement:
 
-    * Each ``child_start`` that is not given back holds one attempt. It is dated at
-      most ``start_grace_seconds`` after the attempt, and it takes no more than the
-      attempt sent. When no ``child_bound`` names its child yet, it holds the free
-      attempt that sent the least of those that pay for it.
-    * A ``refund`` of a ``child_start`` sets its attempt free again. The peer charges a
-      start for each candidate that it tries, and gives back the start of each one that
-      fails.
-    * A ``child_bound`` closes the attempt. When it names a child of ours (``starts``),
-      the movement goes to the attempt of that child. The movement that held that
-      attempt goes to the attempt that the first one held. A child is paid once:
-      ``started`` are the children whose start an earlier read showed. When it names a
-      child that this node does not know, the attempt is one that never had an answer.
-    * An attempt that the peer refused holds no new movement. When the movement that it
-      held is not given back by the head of a read after the refusal, that is a fault.
+    * A ``child_start`` that is not given back has a reference that ``ours`` accepts.
+      It takes no more than the attempt of the reference sent. One attempt holds one
+      movement: the peer charges a start for each candidate that it tries, and gives
+      back the start of each one that fails. A reference of ours with no attempt here
+      gets one.
+    * A ``refund`` of a ``child_start`` sets its attempt free again.
+    * A ``child_bound`` that names a child of ours (``starts``) closes the attempt of
+      its movement: the start of that child is paid, once. When it names a child that this
+      node does not know, the attempt stays open: the start timed out here, and the
+      child is an orphan that this node stops when it gets its token.
+    * An attempt that the peer refused must have what it holds given back by the head
+      of a read after the refusal.
     * A ``top_up`` takes from the reservations of its child that are dated near it.
 
-    The windows are on the clock of this node, never the date of the statement: a peer
-    sets that. ``reaches_head``: these movements go up to the head of the account.
+    ``reaches_head``: these movements go up to the head of the account. ``ours`` tells
+    a reference of this node, ``start_ref.ours`` by default.
     """
+    ours = ours or start_refs.ours
     rows = list(rows)
     faults: List[Tuple[int, str]] = []
-    refunded, bound = set(), {}
-    starts_here = {row.seq for row in rows if row.kind == ledger.CHILD_START and row.amount < 0}
+    refunded = set()
     for row in rows:
         if row.kind == ledger.REFUND and row.amount > 0:
             try:
                 refunded.add(int(row.detail["refunds_seq"]))
             except (KeyError, TypeError, ValueError):
                 pass
-        elif row.kind == ledger.CHILD_BOUND:
-            try:
-                bound[int(row.detail["starts_seq"])] = row.ref
-            except (KeyError, TypeError, ValueError):
-                pass
 
-    held = {a.id: _Held(a) for a in attempts}
-    holder = {h.seq: h for h in held.values() if h.seq is not None}
-    of_child = {h.attempt.ref: h for h in held.values() if h.attempt.ref}
-    seen = set(started)
-    window = start_grace_seconds() + CLOCK_SKEW_SECONDS
-
-    def free(h: _Held, mu: int, ts: int, ref_less: bool) -> bool:
-        a = h.attempt
-        return (not h.closed and h.seq is None and a.refused_at is None
-                and (not ref_less or not a.ref)
-                and a.ts - CLOCK_SKEW_SECONDS <= ts <= a.ts + window and mu <= a.sent_mu)
-
-    def hold(h: _Held, seq: int, mu: int, ts: int) -> None:
-        h.seq, h.mu, h.ts, h.changed = seq, mu, ts, True
-        holder[seq] = h
+    by_ref = {a.start_ref: _Held(a) for a in attempts}
+    holder = {h.seq: h for h in by_ref.values() if h.seq is not None}
+    paid = {h.child for h in by_ref.values() if h.closed and h.child}
 
     def release(h: _Held) -> None:
         holder.pop(h.seq, None)
-        h.seq, h.mu, h.ts, h.changed = None, 0, 0, True
+        h.seq, h.mu, h.changed = None, 0, True
 
-    def place(seq: int, mu: int, ts: int, ref_less: bool = False) -> Optional[_Held]:
-        fits = [h for h in held.values() if free(h, mu, ts, ref_less)]
-        if not fits:
-            return None
-        best = min(fits, key=lambda h: (h.attempt.sent_mu, h.attempt.ts, h.attempt.id))
-        hold(best, seq, mu, ts)
-        return best
+    def started(row: Row) -> None:
+        # A movement that this page gives back takes nothing, and is no fault. It still
+        # holds its attempt until the refund, so that a ``child_bound`` closes it.
+        given_back = row.seq in refunded
+        mu = -row.amount
+        reference = str(row.detail.get("start_ref") or "")
+        if not ours(reference):
+            if not given_back:
+                faults.append((row.seq, f"movement {row.seq} pays a start that this node did "
+                                        f"not ask for ({reference[:16] or 'no reference'}), "
+                                        f"{mu} MU"))
+            return
+        h = by_ref.get(reference)
+        if h is None:
+            h = by_ref[reference] = _Held(StartAttempt(None, reference, int(now), None))
+        if h.closed or h.seq is not None:
+            if not given_back:
+                faults.append((row.seq, f"the start {reference[:16]} was paid more than once"))
+            return
+        sent = h.attempt.sent_mu
+        if sent is not None and mu > sent and not given_back:
+            faults.append((row.seq, f"the start {reference[:16]} took {mu} MU, and {sent} "
+                                    f"were sent"))
+        h.seq, h.mu, h.changed = row.seq, mu, True
+        holder[row.seq] = h
 
-    def not_asked(seq: int, mu: int, child: str) -> None:
-        faults.append((seq, f"movement {seq} pays the start of a child that this node did "
-                            f"not ask for ({child[:8] or 'no child'}), {mu} MU"))
-
-    def close(h: _Held) -> None:
-        h.closed, h.changed = True, True
-
-    def bind(seq: int, mu: int, ts: int, child: str, at: int) -> None:
-        """The movement ``seq`` pays the start of ``child``, as the row ``at`` says."""
-        previous = holder.get(seq)
+    def bound(row: Row) -> None:
+        try:
+            h = holder.get(int(row.detail["starts_seq"]))
+        except (KeyError, TypeError, ValueError):
+            return
+        if h is None or h.closed:
+            # The movement was given back, or has no reference of ours: it is judged
+            # where it shows.
+            return
+        child = row.ref
+        if h.child and h.child != child:
+            faults.append((row.seq, f"the start {h.attempt.start_ref[:16]} of "
+                                    f"{h.child[:8]} names the child {child[:8]}"))
+            return
         if child not in starts:
-            # A child that this node does not know: the start timed out here, and this
-            # node never had its token. Only an attempt with no answer may hold it.
-            if previous is not None and not previous.attempt.ref:
-                close(previous)
-                return
-            if previous is not None:
-                release(previous)
-            placed = place(seq, mu, ts, ref_less=True)
-            if placed is None:
-                not_asked(at, mu, child)
-            else:
-                close(placed)
+            # A child that this node does not hold: an orphan, for ``orphan_starts``.
             return
-        target = of_child.get(child)
-        if target is None or target.closed:
-            if child in seen or target is not None:
-                if previous is not None:
-                    release(previous)
-                faults.append((at, f"the start of {child[:8]} was paid more than once"))
-                return
-            # A child of ours with no attempt here (it was swept): what was sent for it
-            # is the bound.
-            if previous is not None:
-                release(previous)
-            seen.add(child)
-            if mu > starts[child]:
-                faults.append((at, f"the start of {child[:8]} took {mu} MU, and "
-                                   f"{starts[child]} were sent"))
+        if child in paid:
+            faults.append((row.seq, f"the start of {child[:8]} was paid more than once"))
             return
-        if previous is not target:
-            displaced = (target.seq, target.mu, target.ts) if target.seq is not None else None
-            if displaced:
-                release(target)
-            if previous is not None:
-                release(previous)
-            hold(target, seq, mu, ts)
-            if displaced:
-                # Two starts at the same time: each movement goes to its own attempt.
-                if previous is not None and free(previous, displaced[1], displaced[2], False):
-                    hold(previous, *displaced)
-                elif place(*displaced) is None:
-                    not_asked(displaced[0], displaced[1], "")
-        close(target)
-        seen.add(child)
-        if mu > target.attempt.sent_mu:
-            faults.append((at, f"the start of {child[:8]} took {mu} MU, and "
-                               f"{target.attempt.sent_mu} were sent"))
+        paid.add(child)
+        h.closed, h.child, h.changed = True, child, True
+        if h.attempt.sent_mu is None and starts[child] is not None and h.mu > starts[child]:
+            faults.append((row.seq, f"the start of {child[:8]} took {h.mu} MU, and "
+                                    f"{starts[child]} were sent"))
 
     left = {r.id: r.mu for r in reservations}
     reservations = list(reservations)
@@ -578,23 +547,12 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
                 release(given_back)
             continue
         if row.kind == ledger.CHILD_BOUND:
-            try:
-                starts_seq = int(row.detail["starts_seq"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if starts_seq not in starts_here and starts_seq in holder:
-                h = holder[starts_seq]
-                bind(starts_seq, h.mu, h.ts, row.ref, row.seq)
+            bound(row)
             continue
         if row.amount >= 0 or row.kind == ledger.STATEMENT_QUERY:
             continue
         if row.kind == ledger.CHILD_START:
-            if row.seq in refunded:
-                continue
-            if row.seq in bound:
-                bind(row.seq, -row.amount, row.ts, bound[row.seq], row.seq)
-            elif place(row.seq, -row.amount, row.ts) is None:
-                not_asked(row.seq, -row.amount, "")
+            started(row)
         elif row.kind == ledger.TOP_UP:
             if row.ref not in starts:
                 faults.append((row.seq, f"movement {row.seq} tops up an instance that is not ours"))
@@ -621,13 +579,13 @@ def account_faults(rows: Iterable[Row], starts: Mapping[str, int],
             ))
 
     if reaches_head:
-        for h in held.values():
+        for h in by_ref.values():
             refused_at = h.attempt.refused_at
             if refused_at is not None and h.seq is not None and not h.closed and now >= refused_at:
                 faults.append((h.seq, f"the start of movement {h.seq} was refused and not "
                                       f"given back"))
-                close(h)
-    return AccountCheck(faults, {h.attempt.id: h.state for h in held.values() if h.changed},
+                h.closed, h.changed = True, True
+    return AccountCheck(faults, {ref: h.state for ref, h in by_ref.items() if h.changed},
                         taken)
 
 
@@ -717,8 +675,9 @@ def floor_on(peer_id: str, books) -> int:
         since = int(stored.get("ts") or 0) - CLOCK_SKEW_SECONDS
         start_window = start_grace_seconds() + CLOCK_SKEW_SECONDS
         top_up_window = top_up_grace_seconds() + CLOCK_SKEW_SECONDS
-        attempts = [StartAttempt(*a) for a in books.open_start_attempts(peer_id)]
-        free_mu = sum(a.sent_mu for a in attempts if a.start_seq is None and a.refused_at is None
+        attempts = [StartAttempt(*a) for a in books.start_attempts(peer_id)]
+        free_mu = sum(a.sent_mu or 0 for a in attempts
+                      if not a.closed and a.start_seq is None and a.refused_at is None
                       and a.ts + start_window >= since)
         reserved = sum(int(r[3]) for r in books.top_up_reservations(peer_id)
                        if int(r[2]) + top_up_window >= since)

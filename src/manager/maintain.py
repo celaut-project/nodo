@@ -10,7 +10,7 @@ import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database import ledger
-from src.manager import balance_statement, statement_check
+from src.manager import balance_statement, orphan_starts, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
@@ -51,6 +51,10 @@ SHORT_INTERVAL_COUNT = env_manager.get("SHORT_INTERVAL_COUNT")
 SUBMIT_REPUTATION_AT_INIT = env_manager.get("SUBMIT_REPUTATION_AT_INIT")
 MIN_SLOTS_OPEN_PER_PEER = int(env_manager.get("MIN_SLOTS_OPEN_PER_PEER"))
 MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
+# How long after a start that timed out here our account on the peer is read for it, when
+# no read showed its movement yet (#578). The peer writes the movement when it takes the
+# request, so one read after the timeout shows it.
+UNSETTLED_START_READ_SECONDS = 86400
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
@@ -609,10 +613,9 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
             reaches_head=chain.reaches_head)
         check = statement_check.account_faults(
             chain.rows, sc.delegated_starts_on_peer(peer_id),
-            [statement_check.StartAttempt(*a) for a in sc.open_start_attempts(peer_id)],
+            [statement_check.StartAttempt(*a) for a in sc.start_attempts(peer_id)],
             [statement_check.TopUpReservation(*r) for r in sc.top_up_reservations(peer_id)],
-            now=read_at, started=sc.started_children_on_peer(peer_id),
-            reaches_head=chain.reaches_head)
+            now=read_at, reaches_head=chain.reaches_head)
         faults = check.faults
 
         def counters():
@@ -637,6 +640,7 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
         mark = statement_check.mark_after(chain, statement, mark)
         _save_our_mark(peer_id, mark, check, (len(queries), queries_mu) if queries else None)
         if not chain.more:
+            orphan_starts.stop_orphans(peer_id, client_id, statement_check.peer_call_timeout(), sc)
             return
         balance = _payable_balance(peer_id, from_amount(statement.balance))
 
@@ -955,7 +959,10 @@ def maintain_delegated_instances(debug_mode: bool = False):
     delegated = sc.get_delegated_instances()
     every = ledger.statement_read_every_ticks(MANAGER_ITERATION_TIME)
     with_children = {row.get('peer_id') for row in delegated if row.get('peer_id')}
-    for peer_id in sorted(with_children):
+    # A start that timed out here is read for as a child is (#578): the peer may have
+    # charged it, and its child is then stopped (``orphan_starts``).
+    unsettled = set(sc.peers_with_unsettled_starts(time.time() - UNSETTLED_START_READ_SECONDS))
+    for peer_id in sorted(with_children | unsettled):
         try:
             if sc.statement_tick_due(peer_id, every):
                 _check_our_account(peer_id, debug_mode=debug_mode)
@@ -965,7 +972,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
     # old would excuse movements that the peer hides (``statement_check.verify_chain``).
     # While the mark is old, a read is due every ``every`` ticks, as with a child: a read
     # that fails does not make the next tick read again.
-    for peer_id in sorted(set(sc.peers_with_client()) - with_children):
+    for peer_id in sorted(set(sc.peers_with_client()) - with_children - unsettled):
         try:
             if statement_check.stale_mark(sc.get_peer_statement_mark(peer_id).get("ts"),
                                           time.time()) and sc.statement_tick_due(peer_id, every):
@@ -1429,6 +1436,7 @@ def sweep_balance_movements(force: bool = False) -> int:
         deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
         sc.prune_statement_faults(max_age_days=ledger.retention_days())
         sc.prune_start_attempts(max_age_days=ledger.retention_days())
+        sc.prune_start_refs(max_age_days=ledger.retention_days())
         sc.prune_top_up_reservations(max_age_seconds=ledger.retention_days() * 86400)
         sc.sweep_failed_statement_reads(max_age_days=ledger.retention_days())
         if deleted:

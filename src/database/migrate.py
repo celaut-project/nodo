@@ -254,27 +254,46 @@ TABLES = {
     # Every start that this node asked a peer for, written before the peer is asked
     # (#570). The peer takes MU from our account for it, and the movement may show before
     # this node knows the child, or when it never does: a start that timed out and that
-    # the peer finished. A `child_start` that no child of ours explains is judged against
-    # these. `ref` is the `instance_ref` of the token once the peer answered.
-    # `sent_peer_mu` is the most that the peer may take for it.
+    # the peer finished. `start_ref` is the reference that this node sent with the start
+    # (#578), in hex, and the peer writes it in the `child_start` that pays the start.
+    # `ref` is the `instance_ref` of the token once this node has the token.
+    # `sent_peer_mu` is the most that the peer may take for it. NULL when the attempt
+    # comes from a `child_start` with a reference of ours and no attempt here.
     # One attempt holds one movement. `start_seq` is the `child_start` that the attempt
-    # holds, and `start_mu` and `start_ts` are its amount and its date. A `refund` of
-    # that movement sets the attempt free again. `consumed` is 1 when the attempt is
-    # closed: a `child_bound` names the child of its movement. `refused_at` is when the
-    # peer refused the start. The attempt then holds no new movement, and the peer must
-    # give back the movement that it holds.
+    # holds, and `start_mu` its amount. A `refund` of that movement sets the attempt free
+    # again. `consumed` is 1 when the attempt is closed: a `child_bound` names a child of
+    # ours for its movement. `refused_at` is when the peer refused the start. The peer
+    # must then give back the movement that the attempt holds.
     "start_attempts": '''
         CREATE TABLE IF NOT EXISTS start_attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             peer_id TEXT NOT NULL,
+            start_ref TEXT NOT NULL,
             ts INTEGER NOT NULL,
-            sent_peer_mu TEXT NOT NULL,
+            sent_peer_mu TEXT DEFAULT NULL,
             ref TEXT DEFAULT NULL,
             consumed INTEGER NOT NULL DEFAULT 0,
             start_seq INTEGER DEFAULT NULL,
             start_mu TEXT DEFAULT NULL,
-            start_ts INTEGER DEFAULT NULL,
-            refused_at INTEGER DEFAULT NULL
+            refused_at INTEGER DEFAULT NULL,
+            UNIQUE (peer_id, start_ref)
+        )
+    ''',
+    # The references of the StartService requests that this node answers (#578), keyed by
+    # the caller: its client_id, or the local instance that asks. `state` is `running`,
+    # `started` or `failed`. `instance` is the serialized ServiceInstance that the caller
+    # got, and `token` its token. `error` is why a failed start failed. A row of an
+    # instance that lives is kept. Any other row is deleted after ledger.RETENTION_DAYS.
+    "start_refs": '''
+        CREATE TABLE IF NOT EXISTS start_refs (
+            caller_id TEXT NOT NULL,
+            start_ref TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            instance BLOB DEFAULT NULL,
+            token TEXT DEFAULT NULL,
+            error TEXT DEFAULT NULL,
+            PRIMARY KEY (caller_id, start_ref)
         )
     ''',
     # Each top-up that this node sends to a delegated child, written before the peer is

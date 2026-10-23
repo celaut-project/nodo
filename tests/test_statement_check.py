@@ -377,20 +377,21 @@ class AccountRuleTests(unittest.TestCase):
 
     def test_our_starts_top_ups_queries_and_credits_are_fine(self):
         rows = [Row(2, 0, 500, 0, ledger.DEPOSIT, ""),
-                Row(3, 0, -100, 0, ledger.CHILD_START, ""),
+                Row(3, 0, -100, 0, ledger.CHILD_START, "", {"start_ref": "ab" * 32}),
                 self.bound(4),
                 Row(5, 0, -50, 0, ledger.TOP_UP, "child"),
                 Row(6, 0, -1, 0, ledger.STATEMENT_QUERY, "child"),
                 Row(7, 0, 20, 0, ledger.REFUND, "child")]
 
-        result = _check_account(rows)
+        result = _check_account(rows, ours=lambda reference: reference == "ab" * 32)
 
         self.assertEqual(result.faults, [])
         self.assertEqual(result.top_ups_taken, {1: 50})
 
     def test_a_start_above_what_was_sent_is_an_overcharge(self):
-        rows = [Row(3, 0, -101, 0, ledger.CHILD_START, ""), self.bound(4)]
-        self.assertEqual(len(_check_account(rows).faults), 1)
+        rows = [Row(3, 0, -101, 0, ledger.CHILD_START, "", {"start_ref": "ab" * 32}),
+                self.bound(4)]
+        self.assertEqual(len(_check_account(rows, ours=lambda _: True).faults), 1)
 
     def test_a_start_that_was_given_back_is_fine(self):
         rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""),
@@ -409,135 +410,137 @@ class AccountRuleTests(unittest.TestCase):
         self.assertEqual([seq for seq, _ in _check_account(rows).faults], [3, 4])
 
 
-def attempt(id, ts=990, sent=100, ref="", **kwargs):
-    return check.StartAttempt(id, ts, sent, ref, **kwargs)
+OURS = "ab" * 32
+OTHER = "cd" * 32
+
+
+def ours(reference):
+    return reference in (OURS, OTHER)
+
+
+def start(seq, mu, reference=OURS, ts=1000):
+    return Row(seq, ts, -mu, 0, ledger.CHILD_START, "",
+               {"start_ref": reference} if reference else {})
+
+
+def attempt(start_ref=OURS, sent=100, ref="", **kwargs):
+    return check.StartAttempt(1, start_ref, 990, sent, ref, **kwargs)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class StartAttemptTests(unittest.TestCase):
-    """A ``child_start`` is judged against what this node asked for, and nothing else:
-    nothing waits, and nothing is excused for its age."""
+    """A ``child_start`` is judged by its reference (#578), and nothing else: nothing
+    waits, and nothing is excused for its date."""
 
-    def test_a_start_that_nobody_asked_for_is_a_fault(self):
-        for child_row in ([], [Row(4, 0, 0, 0, ledger.CHILD_BOUND, "stranger", {"starts_seq": "3"})]):
-            rows = [Row(3, 1000, -900000, 0, ledger.CHILD_START, "")] + child_row
+    def test_a_start_without_a_reference_of_ours_is_a_fault(self):
+        for reference in ("", "ef" * 32):
+            for child_row in ([], [Row(4, 1000, 0, 0, ledger.CHILD_BOUND, "stranger",
+                                       {"starts_seq": "3"})]):
+                rows = [start(3, 900000, reference)] + child_row
 
-            faults = _check_account(rows, now=1000).faults
+                faults = _check_account(rows, attempts=[attempt()], ours=ours).faults
 
-            self.assertEqual([seq for seq, _ in faults], [3])
+                self.assertEqual([seq for seq, _ in faults], [3])
 
-    def test_a_start_that_this_node_asked_for_holds_its_attempt_until_its_child_is_named(self):
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, "")]
+    def test_a_start_holds_its_attempt_until_its_child_is_named(self):
+        result = _check_account([start(3, 100)], attempts=[attempt()], ours=ours)
 
-        result = _check_account(rows, attempts=[attempt(7)])
+        self.assertEqual((result.faults, result.attempts), ([], {OURS: (3, 100, False, "")}))
 
-        self.assertEqual((result.faults, result.attempts), ([], {7: (3, 100, 1000, False)}))
+    def test_a_start_is_not_judged_by_its_date(self):
+        for ts in (0, 10 ** 9):
+            self.assertEqual(
+                _check_account([start(3, 100, ts=ts)], attempts=[attempt()], ours=ours).faults,
+                [])
 
-    def test_a_start_whose_child_this_node_never_learnt_closes_an_attempt_with_no_answer(self):
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),
-                Row(4, 1000, 0, 0, ledger.CHILD_BOUND, "stranger", {"starts_seq": "3"})]
+    def test_a_reference_of_ours_with_no_attempt_here_gets_one(self):
+        result = _check_account([start(3, 100)], ours=ours)
 
-        result = _check_account(rows, attempts=[attempt(7), attempt(8, ref="child")])
+        self.assertEqual((result.faults, result.attempts), ([], {OURS: (3, 100, False, "")}))
 
-        self.assertEqual((result.faults, result.attempts), ([], {7: (3, 100, 1000, True)}))
+    def test_a_start_whose_child_this_node_does_not_hold_leaves_the_attempt_open(self):
+        rows = [start(3, 100), Row(4, 1000, 0, 0, ledger.CHILD_BOUND, "stranger",
+                                   {"starts_seq": "3"})]
 
-    def test_an_attempt_holds_one_movement(self):
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),
-                Row(4, 1001, -100, 0, ledger.CHILD_START, "")]
+        result = _check_account(rows, attempts=[attempt()], ours=ours)
 
-        result = _check_account(rows, attempts=[attempt(7)])
+        self.assertEqual((result.faults, result.attempts), ([], {OURS: (3, 100, False, "")}))
+
+    def test_a_start_of_a_child_of_ours_closes_its_attempt(self):
+        rows = [start(3, 100), self_bound(4)]
+
+        result = _check_account(rows, attempts=[attempt()], ours=ours)
+
+        self.assertEqual((result.faults, result.attempts), ([], {OURS: (3, 100, True, "child")}))
+
+    def test_a_reference_holds_one_movement(self):
+        rows = [start(3, 100), start(4, 100)]
+
+        result = _check_account(rows, attempts=[attempt()], ours=ours)
 
         self.assertEqual([seq for seq, _ in result.faults], [4])
 
+    def test_a_closed_reference_takes_no_new_movement(self):
+        rows = [start(3, 100), self_bound(4),
+                Row(5, 0, 100, 0, ledger.REFUND, "", {"refunds_seq": "3"}), start(6, 100)]
+
+        result = _check_account(rows, attempts=[attempt()], ours=ours)
+
+        self.assertEqual([seq for seq, _ in result.faults], [6])
+
     def test_a_start_takes_no_more_than_its_attempt_sent(self):
-        rows = [Row(3, 1000, -101, 0, ledger.CHILD_START, "")]
+        faults = _check_account([start(3, 101)], attempts=[attempt()], ours=ours).faults
 
-        self.assertEqual(len(_check_account(rows, attempts=[attempt(7)]).faults), 1)
+        self.assertEqual(len(faults), 1)
 
-    def test_a_start_is_dated_within_the_window_of_its_attempt(self):
-        window = check.start_grace_seconds() + check.CLOCK_SKEW_SECONDS
+    def test_a_start_with_no_attempt_takes_no_more_than_its_child_was_sent(self):
+        rows = [start(3, 101), self_bound(4)]
 
-        def faults(ts):
-            return _check_account([Row(3, ts, -100, 0, ledger.CHILD_START, "")],
-                                  attempts=[attempt(7, ts=1000)]).faults
-
-        self.assertEqual(faults(1000 + window), [])
-        self.assertEqual(len(faults(1000 + window + 1)), 1)
-        self.assertEqual(faults(1000 - check.CLOCK_SKEW_SECONDS), [])
-        self.assertEqual(len(faults(1000 - check.CLOCK_SKEW_SECONDS - 1)), 1)
+        self.assertEqual(len(_check_account(rows, ours=ours).faults), 1)
 
     def test_the_start_of_a_child_of_ours_is_paid_once(self):
-        rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""), self_bound(4),
-                Row(5, 0, -100, 0, ledger.CHILD_START, ""), self_bound(6, starts_seq=5)]
+        rows = [start(3, 100), self_bound(4), start(5, 100, OTHER), self_bound(6, starts_seq=5)]
 
-        result = _check_account(rows)
+        result = _check_account(rows, attempts=[attempt(), attempt(OTHER)], ours=ours)
 
-        self.assertEqual([seq for seq, _ in result.faults], [5])
+        self.assertEqual([seq for seq, _ in result.faults], [6])
 
-    def test_a_start_that_an_earlier_read_showed_is_not_paid_again(self):
-        rows = [Row(3, 0, -100, 0, ledger.CHILD_START, ""), self_bound(4)]
+    def test_a_start_names_the_child_of_its_own_request(self):
+        rows = [start(3, 100), self_bound(4)]
 
-        result = check.account_faults(rows, {"child": 100}, [], [], now=10 ** 6, started=["child"])
+        faults = _check_account(rows, starts={"child": 100, "other": 100},
+                                attempts=[attempt(ref="other")], ours=ours).faults
 
-        self.assertEqual([seq for seq, _ in result.faults], [3])
-
-    def test_a_start_of_a_child_of_ours_closes_the_attempt_of_that_child(self):
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, ""),
-                Row(4, 1000, 0, 0, ledger.CHILD_BOUND, "child", {"starts_seq": "3"})]
-
-        result = _check_account(rows, attempts=[attempt(7), attempt(8, ref="child")])
-
-        self.assertEqual((result.faults, result.attempts), ([], {8: (3, 100, 1000, True)}))
+        self.assertEqual([seq for seq, _ in faults], [4])
 
     def test_a_refund_sets_the_attempt_free_for_the_next_candidate(self):
-        """New problem 1: one start, two candidates, a read during each."""
-        held = attempt(7, ref="child", start_seq=3, start_mu=100, start_ts=1000)
-        rows = [Row(4, 1001, 100, 0, ledger.REFUND, "", {"refunds_seq": "3"}),
-                Row(5, 1002, -100, 0, ledger.CHILD_START, "")]
+        held = attempt(start_seq=3, start_mu=100)
+        rows = [Row(4, 1001, 100, 0, ledger.REFUND, "", {"refunds_seq": "3"}), start(5, 100)]
 
-        result = _check_account(rows, attempts=[held])
+        result = _check_account(rows, attempts=[held], ours=ours)
 
-        self.assertEqual((result.faults, result.attempts), ([], {7: (5, 100, 1002, False)}))
-
-    def test_two_starts_at_once_change_attempts_when_their_children_are_named(self):
-        """New problem 5: the movement of B held A; the movement of A goes to A, and the
-        one of B to B."""
-        a = attempt(7, sent=1000, ref="child-a", start_seq=3, start_mu=1000, start_ts=1000)
-        b = attempt(8, sent=1000, ref="child-b")
-        rows = [Row(4, 1001, -1000, 0, ledger.CHILD_START, ""),
-                Row(5, 1002, 0, 0, ledger.CHILD_BOUND, "child-b", {"starts_seq": "3"}),
-                Row(6, 1003, 0, 0, ledger.CHILD_BOUND, "child-a", {"starts_seq": "4"})]
-
-        result = _check_account(rows, starts={"child-a": 1000, "child-b": 1000}, attempts=[a, b])
-
-        self.assertEqual(result.faults, [])
-        self.assertEqual(result.attempts, {7: (4, 1000, 1001, True), 8: (3, 1000, 1000, True)})
-
-    def test_an_attempt_holds_the_movement_that_fits_it_best(self):
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, "")]
-
-        result = _check_account(rows, attempts=[attempt(7, sent=1000), attempt(8, sent=100)])
-
-        self.assertEqual(list(result.attempts), [8])
-
-    def test_a_refused_attempt_holds_no_movement(self):
-        """New problem 6."""
-        rows = [Row(3, 1000, -100, 0, ledger.CHILD_START, "")]
-
-        faults = _check_account(rows, attempts=[attempt(7, refused_at=995)]).faults
-
-        self.assertEqual([seq for seq, _ in faults], [3])
+        self.assertEqual((result.faults, result.attempts), ([], {OURS: (5, 100, False, "")}))
 
     def test_a_movement_of_a_refused_attempt_must_be_given_back_by_the_head(self):
-        held = attempt(7, start_seq=3, start_mu=100, start_ts=1000, refused_at=1005)
+        held = attempt(start_seq=3, start_mu=100, refused_at=1005)
         rows = [Row(4, 1010, 5, 0, ledger.CREDIT, "")]
 
-        self.assertEqual(_check_account(rows, attempts=[held], now=1006).faults, [])
-        result = _check_account(rows, attempts=[held], now=1006, reaches_head=True)
+        self.assertEqual(_check_account(rows, attempts=[held], now=1006, ours=ours).faults, [])
+        result = _check_account(rows, attempts=[held], now=1006, reaches_head=True, ours=ours)
         self.assertEqual([seq for seq, _ in result.faults], [3])
         given_back = rows + [Row(5, 1011, 100, 0, ledger.REFUND, "", {"refunds_seq": "3"})]
-        self.assertEqual(
-            _check_account(given_back, attempts=[held], now=1006, reaches_head=True).faults, [])
+        self.assertEqual(_check_account(given_back, attempts=[held], now=1006,
+                                        reaches_head=True, ours=ours).faults, [])
+
+    def test_the_references_of_this_node_are_its_own(self):
+        from src.utils import start_ref
+
+        reference = start_ref.new()
+        self.assertTrue(start_ref.ours(reference.hex()))
+        self.assertFalse(start_ref.ours(reference[:-1].hex() + "00"))
+        self.assertFalse(start_ref.ours(reference.hex()[:-2]))
+        self.assertFalse(start_ref.ours("not hex"))
+        self.assertNotEqual(start_ref.new(), reference)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -690,11 +693,13 @@ class SignedFloorTests(unittest.TestCase):
         books.get_peer_statement_mark.return_value = {"seq": 5, "hash": "h", "balance_mu": 5000,
                                                       "ts": now}
         old = now - check.start_grace_seconds() - 3 * check.CLOCK_SKEW_SECONDS
-        books.open_start_attempts.return_value = [
-            (1, now, 100, "", None, 0, 0, None),     # free: it may still take 100
-            (2, old, 700, "", None, 0, 0, None),     # its window ended before the mark
-            (3, now, 200, "", 4, 200, now, None),    # its movement is before the mark
-            (4, now, 300, "", None, 0, 0, now)]      # refused
+        books.start_attempts.return_value = [
+            (1, "a", now, 100, "", None, 0, None, False),    # free: it may still take 100
+            (2, "b", old, 700, "", None, 0, None, False),    # its window ended before the mark
+            (3, "c", now, 200, "", 4, 200, None, False),     # its movement is before the mark
+            (4, "d", now, 300, "", None, 0, now, False),     # refused
+            (5, "e", now, 400, "", None, 0, None, True),     # closed
+            (6, "f", now, None, "", None, 0, None, False)]   # nothing known was sent
         books.top_up_reservations.return_value = [(1, "child", now, 50), (2, "child", 0, 900)]
         books.get_statement_counters.return_value = {"reads": 0, "rows_priced": 0,
                                                      "verified": 0, "verified_mu": 0}

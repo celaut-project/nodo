@@ -135,13 +135,18 @@ def service_extended(
         config: typing.Optional[celaut_pb2.Configuration] = None,
         send_only_hashes: typing.Optional[bool] = False,
         client_id: typing.Optional[str] = None,
-        recursion_guard_token: typing.Optional[str] = None
+        recursion_guard_token: typing.Optional[str] = None,
+        start_ref: typing.Optional[bytes] = None,
 ) -> Generator[object, None, None]:
     # 1
     if client_id:
         yield celaut_pb2.Client(
             client_id=client_id
         )
+
+    # 7 -- before the hashes: the receiver may begin the start at the first one (#578).
+    if start_ref:
+        yield celaut_pb2.StartReference(ref=start_ref)
 
     # 2 -- the token unchanged, with one hop less than this node was given (#456).
     recursion_guard = recursion_guard_message(recursion_guard_token)

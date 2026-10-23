@@ -3312,8 +3312,9 @@ class SQLConnection(metaclass=Singleton):
         """Write the mark of the statement of our account on ``peer_id``. None clears it.
 
         In the same transaction, the movements that the mark goes past are accounted
-        for. ``attempts`` gives the new state of each start attempt that changed, by id:
-        ``(start_seq, start_mu, start_ts, closed)``. ``top_ups_taken`` is what the peer
+        for. ``attempts`` gives the new state of each start attempt that changed, by its
+        reference: ``(start_seq, start_mu, closed, ref)``. An attempt that is not here
+        is written. ``top_ups_taken`` is what the peer
         took from each top-up reservation, by id. ``queries_verified`` is the count and
         the MU of the ``statement_query`` movements that the mark goes past. All of it
         moves with the mark, so a movement is accounted for once.
@@ -3324,12 +3325,19 @@ class SQLConnection(metaclass=Singleton):
                                 statement_ts = ?
                 WHERE id = ?
             ''', (seq, hash, None if balance_mu is None else str(int(balance_mu)), ts, peer_id))
-            for attempt_id, (start_seq, start_mu, start_ts, closed) in (attempts or {}).items():
-                cursor.execute(
-                    'UPDATE start_attempts SET start_seq = ?, start_mu = ?, start_ts = ?, '
-                    'consumed = ? WHERE id = ? AND peer_id = ?',
-                    (start_seq, None if start_seq is None else str(int(start_mu)),
-                     start_ts, 1 if closed else 0, int(attempt_id), peer_id))
+            for start_ref, (start_seq, start_mu, closed, ref) in (attempts or {}).items():
+                values = (start_seq, None if start_seq is None else str(int(start_mu)),
+                          1 if closed else 0, ref or None)
+                if not cursor.execute(
+                        'UPDATE start_attempts SET start_seq = ?, start_mu = ?, consumed = ?, '
+                        'ref = COALESCE(?, ref) WHERE peer_id = ? AND start_ref = ?',
+                        values + (peer_id, start_ref)).rowcount:
+                    # A reference of ours with no attempt here: the attempt was deleted,
+                    # or this node lost it.
+                    cursor.execute(
+                        'INSERT INTO start_attempts (peer_id, start_ref, ts, start_seq, '
+                        'start_mu, consumed, ref) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        (peer_id, start_ref, int(time.time())) + values)
             for reservation_id, mu in (top_ups_taken or {}).items():
                 row = cursor.execute(
                     'SELECT peer_mu FROM top_up_reservations WHERE id = ? AND peer_id = ?',
@@ -3358,48 +3366,117 @@ class SQLConnection(metaclass=Singleton):
 
         self._transaction(work)
 
-    def add_start_attempt(self, peer_id: str, sent_peer_mu: int) -> int:
-        """Write down a start that is about to be asked of ``peer_id``, and return its id."""
-        return self._execute(
-            'INSERT INTO start_attempts (peer_id, ts, sent_peer_mu) VALUES (?, ?, ?)',
-            (peer_id, int(time.time()), str(int(sent_peer_mu))),
-        ).lastrowid
+    def add_start_attempt(self, peer_id: str, start_ref: str, sent_peer_mu: int) -> None:
+        """Write down a start that is about to be asked of ``peer_id``, with its
+        reference in hex."""
+        self._execute(
+            'INSERT INTO start_attempts (peer_id, start_ref, ts, sent_peer_mu) VALUES (?, ?, ?, ?)',
+            (peer_id, start_ref, int(time.time()), str(int(sent_peer_mu))),
+        )
 
-    def bind_start_attempt(self, attempt_id: int, instance_token: str) -> None:
-        """The peer answered the start: the attempt now has its child."""
-        self._execute('UPDATE start_attempts SET ref = ? WHERE id = ?',
-                      (ledger.instance_ref(instance_token), int(attempt_id)))
+    def bind_start_attempt(self, peer_id: str, start_ref: str, instance_token: str) -> None:
+        """This node has the token of the child of the attempt."""
+        self._execute('UPDATE start_attempts SET ref = ? WHERE peer_id = ? AND start_ref = ?',
+                      (ledger.instance_ref(instance_token), peer_id, start_ref))
 
-    def refuse_start_attempt(self, attempt_id: int) -> None:
-        """The peer refused the start: the attempt holds no new movement."""
-        self._execute('UPDATE start_attempts SET refused_at = ? WHERE id = ?',
-                      (int(time.time()), int(attempt_id)))
+    def refuse_start_attempt(self, peer_id: str, start_ref: str) -> None:
+        """The peer refused the start: it must give back what the attempt holds."""
+        self._execute('UPDATE start_attempts SET refused_at = ? WHERE peer_id = ? AND start_ref = ?',
+                      (int(time.time()), peer_id, start_ref))
 
-    def open_start_attempts(self, peer_id: str) -> List[tuple]:
-        """The start attempts on ``peer_id`` that are not closed, oldest first:
-        ``(id, ts, sent_peer_mu, ref, start_seq, start_mu, start_ts, refused_at)``.
-        ``ref`` is "" before the peer answered."""
-        return [(int(row['id']), int(row['ts']), _as_int(row['sent_peer_mu']), row['ref'] or "",
+    def start_attempts(self, peer_id: str) -> List[tuple]:
+        """The start attempts on ``peer_id``, oldest first: ``(id, start_ref, ts,
+        sent_peer_mu, ref, start_seq, start_mu, refused_at, closed)``. ``ref`` is ""
+        before this node has the token of the child, and ``sent_peer_mu`` is None when
+        it is not known."""
+        return [(int(row['id']), row['start_ref'], int(row['ts']),
+                 None if row['sent_peer_mu'] is None else _as_int(row['sent_peer_mu']),
+                 row['ref'] or "",
                  None if row['start_seq'] is None else int(row['start_seq']),
-                 _as_int(row['start_mu']) if row['start_mu'] is not None else 0,
-                 int(row['start_ts'] or 0),
-                 None if row['refused_at'] is None else int(row['refused_at']))
+                 _as_int(row['start_mu']),
+                 None if row['refused_at'] is None else int(row['refused_at']),
+                 bool(row['consumed']))
                 for row in self._execute(
-                    'SELECT id, ts, sent_peer_mu, ref, start_seq, start_mu, start_ts, refused_at '
-                    'FROM start_attempts WHERE peer_id = ? AND consumed = 0 ORDER BY ts, id',
+                    'SELECT id, start_ref, ts, sent_peer_mu, ref, start_seq, start_mu, '
+                    'refused_at, consumed FROM start_attempts WHERE peer_id = ? ORDER BY ts, id',
                     (peer_id,)).fetchall()]
 
-    def started_children_on_peer(self, peer_id: str) -> List[str]:
-        """The ``instance_ref`` of the children of ``peer_id`` whose start was already
-        shown in our account there."""
-        return [row['ref'] for row in self._execute(
-            'SELECT ref FROM start_attempts WHERE peer_id = ? AND ref IS NOT NULL AND consumed = 1',
+    def orphan_starts(self, peer_id: str) -> List[str]:
+        """The references of the starts on ``peer_id`` that the peer charged, and whose
+        child this node never got: the start timed out here. The peer did not refuse
+        them, and did not give back what they took."""
+        return [row['start_ref'] for row in self._execute(
+            'SELECT start_ref FROM start_attempts WHERE peer_id = ? AND start_seq IS NOT NULL '
+            'AND ref IS NULL AND consumed = 0 AND refused_at IS NULL ORDER BY ts, id',
             (peer_id,)).fetchall()]
+
+    def settle_orphan_start(self, peer_id: str, start_ref: str, instance_token: str) -> None:
+        """This node stopped the child of a start that timed out here. The attempt is
+        closed: the peer may not charge it again."""
+        self._execute(
+            'UPDATE start_attempts SET ref = ?, consumed = 1 WHERE peer_id = ? AND start_ref = ?',
+            (ledger.instance_ref(instance_token), peer_id, start_ref))
+
+    def peers_with_unsettled_starts(self, since_ts: int) -> List[str]:
+        """The peers with a start that timed out here: an orphan (``orphan_starts``), or
+        an attempt of ``since_ts`` or later whose movement no read showed yet."""
+        return [row['peer_id'] for row in self._execute(
+            'SELECT DISTINCT peer_id FROM start_attempts WHERE ref IS NULL AND consumed = 0 '
+            'AND refused_at IS NULL AND (start_seq IS NOT NULL OR ts >= ?)',
+            (int(since_ts),)).fetchall()]
 
     def prune_start_attempts(self, max_age_days: int) -> int:
         """Delete the attempts older than ``max_age_days``. Returns how many."""
         cutoff = int(time.time()) - int(max_age_days) * 86400
         return self._execute('DELETE FROM start_attempts WHERE ts < ?', (cutoff,)).rowcount
+
+    def claim_start_ref(self, caller_id: str, start_ref: str) -> bool:
+        """Write down that the start of ``start_ref`` from ``caller_id`` runs. False when
+        the reference is known already."""
+        return self._execute(
+            'INSERT OR IGNORE INTO start_refs (caller_id, start_ref, ts, state) '
+            'VALUES (?, ?, ?, ?)',
+            (caller_id, start_ref, int(time.time()), 'running'),
+        ).rowcount > 0
+
+    def get_start_ref(self, caller_id: str, start_ref: str) -> Optional[tuple]:
+        """``(state, instance, error)`` of the start of ``start_ref`` from ``caller_id``,
+        or None when the reference is not known."""
+        row = self._execute(
+            'SELECT state, instance, error FROM start_refs WHERE caller_id = ? AND start_ref = ?',
+            (caller_id, start_ref)).fetchone()
+        return None if row is None else (row['state'], row['instance'], row['error'])
+
+    def finish_start_ref(self, caller_id: str, start_ref: str, instance: bytes, token: str) -> None:
+        """The start of ``start_ref`` gave ``instance``, a serialized ServiceInstance."""
+        self._execute(
+            'UPDATE start_refs SET state = ?, instance = ?, token = ?, ts = ? '
+            'WHERE caller_id = ? AND start_ref = ?',
+            ('started', instance, token, int(time.time()), caller_id, start_ref))
+
+    def fail_start_ref(self, caller_id: str, start_ref: str, error: str) -> None:
+        """The start of ``start_ref`` failed with ``error``."""
+        self._execute(
+            'UPDATE start_refs SET state = ?, error = ?, ts = ? WHERE caller_id = ? AND start_ref = ?',
+            ('failed', error, int(time.time()), caller_id, start_ref))
+
+    def fail_running_start_refs(self) -> int:
+        """At boot: a start that ran when the node stopped did not finish. Returns how
+        many."""
+        return self._execute(
+            'UPDATE start_refs SET state = ?, error = ? WHERE state = ?',
+            ('failed', 'The node restarted during the start.', 'running')).rowcount
+
+    def prune_start_refs(self, max_age_days: int) -> int:
+        """Delete the references older than ``max_age_days`` that no instance that lives
+        needs. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        return self._execute(
+            "DELETE FROM start_refs WHERE ts < ? AND state != 'running' AND ("
+            "token IS NULL OR ("
+            "token NOT IN (SELECT id FROM local_instances WHERE killed_at IS NULL) AND "
+            "token NOT IN (SELECT id FROM delegated_instances WHERE killed_at IS NULL)))",
+            (cutoff,)).rowcount
 
     def reserve_top_up(self, alias: str, peer_mu: int) -> Optional[int]:
         """Write down a top-up of ``peer_mu`` for the delegated child ``alias``. This is
@@ -3621,10 +3698,14 @@ class SQLConnection(metaclass=Singleton):
                   for row in rows}
         # A child that the peer answered for and that is not stored yet (its start is
         # still being checked) is named by its attempt.
+        # A child whose start timed out and that this node stopped (#578) is named by
+        # its attempt too. When nothing is known of what was sent, what its movement took
+        # is the bound.
         for row in self._execute(
-                'SELECT ref, sent_peer_mu FROM start_attempts WHERE peer_id = ? AND ref IS NOT NULL',
-                (peer_id,)).fetchall():
-            starts.setdefault(row['ref'], _as_int(row['sent_peer_mu']))
+                'SELECT ref, sent_peer_mu, start_mu FROM start_attempts '
+                'WHERE peer_id = ? AND ref IS NOT NULL', (peer_id,)).fetchall():
+            starts.setdefault(row['ref'], _as_int(
+                row['start_mu'] if row['sent_peer_mu'] is None else row['sent_peer_mu']))
         return starts
 
     def get_delegated_token_by_id(self, id: str) -> Optional[str]:

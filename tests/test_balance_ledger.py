@@ -583,35 +583,67 @@ class OurAccountOnAPeerTests(_Database):
 
         self.assertEqual(self.sc.prune_top_up_reservations(max_age_seconds=3600), 1)
 
-    def test_an_attempt_is_open_until_a_child_bound_closes_it(self):
-        first = self.sc.add_start_attempt("p", 100)
-        second = self.sc.add_start_attempt("p", 200)
-        third = self.sc.add_start_attempt("p", 300)
+    def test_an_attempt_keeps_what_the_mark_says_of_it_by_its_reference(self):
+        self.sc.add_start_attempt("p", "r1", 100)
+        self.sc.add_start_attempt("p", "r2", 200)
+        self.sc.add_start_attempt("p", "r3", 300)
 
-        self.sc.bind_start_attempt(first, "token-1")
+        self.sc.bind_start_attempt("p", "r1", "token-1")
         self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={
-            second: (4, 200, 1000, True), third: (5, 300, 1001, False)})
+            "r2": (4, 200, True, ledger.instance_ref("token-2")), "r3": (5, 300, False, "")})
 
-        open_ = self.sc.open_start_attempts("p")
-        self.assertEqual([(a[0], a[3], a[4], a[5]) for a in open_],
-                         [(first, ledger.instance_ref("token-1"), None, 0), (third, "", 5, 300)])
+        attempts = self.sc.start_attempts("p")
+        self.assertEqual([(a[1], a[3], a[4], a[5], a[6], a[8]) for a in attempts], [
+            ("r1", 100, ledger.instance_ref("token-1"), None, 0, False),
+            ("r2", 200, ledger.instance_ref("token-2"), 4, 200, True),
+            ("r3", 300, "", 5, 300, False)])
         self.assertEqual(self.sc.delegated_starts_on_peer("p")[ledger.instance_ref("token-1")], 100)
+        self.assertEqual(self.sc.orphan_starts("p"), ["r3"])
 
-    def test_a_refused_attempt_says_when(self):
-        attempt = self.sc.add_start_attempt("p", 100)
+    def test_a_reference_of_ours_with_no_attempt_gets_one_with_the_mark(self):
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={"r1": (4, 70, False, "")})
 
-        self.sc.refuse_start_attempt(attempt)
+        self.assertEqual([(a[1], a[3], a[5], a[6]) for a in self.sc.start_attempts("p")],
+                         [("r1", None, 4, 70)])
+        self.assertEqual(self.sc.orphan_starts("p"), ["r1"])
 
-        self.assertAlmostEqual(self.sc.open_start_attempts("p")[0][7], time.time(), delta=5)
+    def test_the_mark_does_not_forget_a_token_that_came_meanwhile(self):
+        self.sc.add_start_attempt("p", "r1", 100)
+        self.sc.bind_start_attempt("p", "r1", "token-1")
 
-    def test_the_children_whose_start_was_shown_are_remembered_with_the_mark(self):
-        attempt = self.sc.add_start_attempt("p", 100)
-        self.sc.bind_start_attempt(attempt, "token-1")
-        self.assertEqual(self.sc.started_children_on_peer("p"), [])
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={"r1": (4, 100, False, "")})
 
-        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={attempt: (3, 100, 1000, True)})
+        self.assertEqual(self.sc.start_attempts("p")[0][4], ledger.instance_ref("token-1"))
 
-        self.assertEqual(self.sc.started_children_on_peer("p"), [ledger.instance_ref("token-1")])
+    def test_a_stopped_orphan_is_closed_and_named(self):
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={"r1": (4, 70, False, "")})
+
+        self.sc.settle_orphan_start("p", "r1", "token-1")
+
+        self.assertEqual(self.sc.orphan_starts("p"), [])
+        self.assertEqual(self.sc.delegated_starts_on_peer("p")[ledger.instance_ref("token-1")], 70)
+        self.assertTrue(self.sc.start_attempts("p")[0][8])
+
+    def test_a_refused_attempt_says_when_and_is_no_orphan(self):
+        self.sc.add_start_attempt("p", "r1", 100)
+        self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, attempts={"r1": (4, 100, False, "")})
+
+        self.sc.refuse_start_attempt("p", "r1")
+
+        self.assertAlmostEqual(self.sc.start_attempts("p")[0][7], time.time(), delta=5)
+        self.assertEqual(self.sc.orphan_starts("p"), [])
+
+    def test_the_peers_with_a_start_that_timed_out_are_read(self):
+        self.sc.add_start_attempt("new", "r1", 100)
+        self.sc.add_start_attempt("old", "r2", 100)
+        self.sc.add_start_attempt("bound", "r3", 100)
+        self.sc.bind_start_attempt("bound", "r3", "token")
+        SQLConnection._connection.execute("UPDATE start_attempts SET ts = 0 WHERE peer_id = 'old'")
+        SQLConnection._connection.commit()
+
+        self.assertEqual(self.sc.peers_with_unsettled_starts(since_ts=10), ["new"])
+        self.sc.set_peer_statement_mark("old", 1, "h", 0, 5, attempts={"r2": (4, 100, False, "")})
+        self.assertEqual(sorted(self.sc.peers_with_unsettled_starts(since_ts=10)), ["new", "old"])
 
     def test_the_statement_charges_move_with_the_mark(self):
         self.sc.set_peer_statement_mark("p", 1, "h", 0, 5, queries_verified=(2, 30))
@@ -620,11 +652,59 @@ class OurAccountOnAPeerTests(_Database):
         self.assertEqual((counters["verified"], counters["verified_mu"]), (2, 30))
 
     def test_old_attempts_are_swept(self):
-        self.sc.add_start_attempt("p", 100)
+        self.sc.add_start_attempt("p", "r1", 100)
         SQLConnection._connection.execute("UPDATE start_attempts SET ts = 0")
         SQLConnection._connection.commit()
 
         self.assertEqual(self.sc.prune_start_attempts(max_age_days=30), 1)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class StartReferenceBooksTests(_Database):
+    """#578: what a node keeps of the StartReference of each request that it answers."""
+
+    def test_a_reference_is_claimed_once_for_each_caller(self):
+        self.assertTrue(self.sc.claim_start_ref("client", "r1"))
+        self.assertFalse(self.sc.claim_start_ref("client", "r1"))
+        self.assertTrue(self.sc.claim_start_ref("another-client", "r1"))
+        self.assertEqual(self.sc.get_start_ref("client", "r1"), ("running", None, None))
+        self.assertIsNone(self.sc.get_start_ref("client", "r2"))
+
+    def test_a_start_keeps_its_instance_or_its_error(self):
+        self.sc.claim_start_ref("client", "r1")
+        self.sc.claim_start_ref("client", "r2")
+
+        self.sc.finish_start_ref("client", "r1", b"instance", "token")
+        self.sc.fail_start_ref("client", "r2", "no room")
+
+        self.assertEqual(self.sc.get_start_ref("client", "r1"), ("started", b"instance", None))
+        self.assertEqual(self.sc.get_start_ref("client", "r2"), ("failed", None, "no room"))
+
+    def test_a_start_that_ran_when_the_node_stopped_failed(self):
+        self.sc.claim_start_ref("client", "r1")
+
+        self.assertEqual(self.sc.fail_running_start_refs(), 1)
+
+        self.assertEqual(self.sc.get_start_ref("client", "r1")[0], "failed")
+
+    def test_a_reference_is_kept_while_its_instance_lives(self):
+        for reference in ("lives", "dead", "failed", "running"):
+            self.sc.claim_start_ref("client", reference)
+        self.sc.finish_start_ref("client", "lives", b"", "instance-that-lives")
+        self.sc.finish_start_ref("client", "dead", b"", "instance-that-died")
+        self.sc.fail_start_ref("client", "failed", "no room")
+        connection = SQLConnection._connection
+        connection.execute("INSERT INTO local_instances (id, name) VALUES ('instance-that-lives', 'a')")
+        connection.execute("INSERT INTO local_instances (id, name, killed_at) "
+                           "VALUES ('instance-that-died', 'b', CURRENT_TIMESTAMP)")
+        connection.execute("UPDATE start_refs SET ts = 0")
+        connection.commit()
+
+        self.assertEqual(self.sc.prune_start_refs(max_age_days=30), 2)
+
+        self.assertEqual([self.sc.get_start_ref("client", r) is not None
+                          for r in ("lives", "dead", "failed", "running")],
+                         [True, False, False, True])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
