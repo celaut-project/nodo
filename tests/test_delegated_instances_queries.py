@@ -25,7 +25,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DelegatedInstanceQueryTests(unittest.TestCase):
     PEER_TOKEN = "token-as-the-peer-knows-it"
-    HASHED = "our-hashed-alias"
+    HASHED = "our-hashed-alias"  # any value: the alias is only a key here
 
     def setUp(self):
         self.sc = SQLConnection()
@@ -40,7 +40,7 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
 
         self.sc.add_delegated_instance(
             father_id="father-instance",
-            encrypted_external_token=self.HASHED,
+            alias=self.HASHED,
             external_token=self.PEER_TOKEN,
             peer_id="peer-1",
             serialized_instance=b"original-instance",

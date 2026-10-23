@@ -135,7 +135,7 @@ class DeadInstanceTests(unittest.TestCase):
 
     def test_delegated_instance_kill_keeps_the_row(self):
         self.sc.add_delegated_instance(
-            external_token="token", encrypted_external_token="hashed", peer_id="peer",
+            external_token="token", alias="hashed", peer_id="peer",
             father_id="father", serialized_instance=b"", service_id="svc",
             balance_mu=10, peer_balance_mu=10,
         )

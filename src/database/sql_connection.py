@@ -3138,7 +3138,7 @@ class SQLConnection(metaclass=Singleton):
             for row in result.fetchall()
         ]
 
-    def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str,
+    def add_delegated_instance(self, father_id: str, alias: str, external_token: str,
                                peer_id: str, serialized_instance: str, service_id: str,
                                balance_mu: int = 0, peer_balance_mu: int = 0,
                                movements: Optional[Sequence[ledger.Movement]] = None,
@@ -3149,8 +3149,8 @@ class SQLConnection(metaclass=Singleton):
 
         Args:
             father_id (str): The father ID.
-            encrypted_external_token (str): The encrypted external token: the token
-                the father holds, and the id of the account.
+            alias (str): The token the father holds, and the id of the account. A random
+                value of this node, not derived from ``external_token``.
             external_token (str): The external token.
             peer_id (str): The peer ID.
             serialized_instance (str): Serialized celaut instance.
@@ -3193,7 +3193,7 @@ class SQLConnection(metaclass=Singleton):
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id,
+            ''', (external_token, alias, peer_id, father_id, serialized_instance, service_id,
                   str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
                   mark.get("hash"), str(int(sent_peer_mu)),
                   shape.get("mem_limit"), shape.get("disk_space"), shape.get("cpu_period"),
@@ -3203,7 +3203,7 @@ class SQLConnection(metaclass=Singleton):
                   shape.get("base_disk_space"), shape.get("base_cpu_period"),
                   shape.get("base_cpu_quota"), shape.get("arch"), launch_bp.get("cpu"),
                   launch_bp.get("mem"), launch_bp.get("disk"), time.time()))
-            self._append_opening(cursor, encrypted_external_token, movements)
+            self._append_opening(cursor, alias, movements)
 
         self._transaction(work)
 

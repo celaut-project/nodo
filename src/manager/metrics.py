@@ -200,7 +200,7 @@ def get_metrics(token: str) -> celaut_pb2.Metrics:
 
     else:
         # A delegated instance is known by the alias `delegate_execution` handed out
-        # -- the sha256 hex of the peer's token -- which never contains '##'. Gating
+        # -- a random hex value -- which never contains '##'. Gating
         # this lookup on that old token format rejected every one of them, so a node
         # that re-delegated a child answered its father's metrics read with "Invalid
         # token", and the father took that for the child being gone (#442).

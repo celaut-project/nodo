@@ -175,7 +175,7 @@ class _Node(unittest.TestCase):
         """A delegated child on the peer, of a father with a balance here."""
         self.sc.add_client(FATHER, 100_000, None)
         self.sc.add_delegated_instance(
-            father_id=FATHER, encrypted_external_token=ALIAS, external_token=TOKEN,
+            father_id=FATHER, alias=ALIAS, external_token=TOKEN,
             peer_id=PEER, serialized_instance=b"", service_id="s", balance_mu=900,
             peer_balance_mu=900, movements=(ledger.Movement(ledger.START, 900),),
             sent_peer_mu=1000, mark=None,

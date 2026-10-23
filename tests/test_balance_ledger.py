@@ -166,7 +166,7 @@ class LedgerWriteTests(_Database):
     def test_a_delegated_instance_is_an_account_under_the_alias_of_its_father(self):
         self.sc.add_client("c1", 100, None)
         self.sc.add_delegated_instance(
-            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            father_id="c1", alias="alias", external_token="peer-token",
             peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
             peer_balance_mu=6, movements=(
                 ledger.Movement(ledger.START, 100), ledger.Movement(ledger.BUILD, -40),
@@ -338,7 +338,7 @@ class SettleStopTests(_Database):
 
     def test_a_delegated_instance_settles_under_its_alias(self):
         self.sc.add_delegated_instance(
-            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            father_id="c1", alias="alias", external_token="peer-token",
             peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
             peer_balance_mu=6, movements=(
                 ledger.Movement(ledger.START, 100), ledger.Movement(ledger.BUILD, -40),
@@ -447,7 +447,7 @@ class DelegatedDepositRowsTests(_Database):
         super().setUp()
         self.sc.add_client("c1", 1000, None)
         self.sc.add_delegated_instance(
-            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            father_id="c1", alias="alias", external_token="peer-token",
             peer_id="p", serialized_instance=b"", service_id="s", balance_mu=500,
             peer_balance_mu=1000, movements=(ledger.Movement(ledger.START, 500),),
             sent_peer_mu=1000, mark={},
@@ -516,7 +516,7 @@ class OurAccountOnAPeerTests(_Database):
         self.sc.add_peer("p", b"")
         self.sc.add_client("c1", 100, None)
         self.sc.add_delegated_instance(
-            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            father_id="c1", alias="alias", external_token="peer-token",
             peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
             peer_balance_mu=6, movements=(ledger.Movement(ledger.START, 60),), sent_peer_mu=9)
         self.ref = ledger.instance_ref("peer-token")
@@ -926,7 +926,7 @@ class SignedStatementTests(_Database):
 
     def test_an_instance_delegated_to_a_peer_has_no_statement(self):
         self.sc.add_delegated_instance(
-            father_id="c1", encrypted_external_token="alias", external_token="peer-token",
+            father_id="c1", alias="alias", external_token="peer-token",
             peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
             peer_balance_mu=6, movements=(ledger.Movement(ledger.START, 60),),
             sent_peer_mu=9, mark={},

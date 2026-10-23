@@ -26,6 +26,7 @@ money is moved to the right account, in the right amount, at the right point in 
 sequence.
 """
 
+import hashlib
 import time
 import unittest
 from types import SimpleNamespace
@@ -125,6 +126,20 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
                 if sql_connection.return_value.add_delegated_instance.called else None
             ),
         )
+
+    def test_the_alias_is_not_derived_from_the_token_of_the_peer(self):
+        # The alias is a bearer credential here (#576): sha256(token) would make the
+        # credential on this node computable from the one on the peer.
+        r = self._delegate(initial_mu=1_000_000, child_balance=1_000_000)
+        alias = r.written["alias"]
+        self.assertNotEqual(alias, hashlib.sha256(PEER_TOKEN.encode("utf-8")).hexdigest())
+        self.assertNotIn(PEER_TOKEN, alias)
+        self.assertEqual(len(alias), 64)
+
+    def test_two_delegations_of_the_same_token_get_different_aliases(self):
+        first = self._delegate(initial_mu=1_000_000, child_balance=1_000_000)
+        second = self._delegate(initial_mu=1_000_000, child_balance=1_000_000)
+        self.assertNotEqual(first.written["alias"], second.written["alias"])
 
     def test_the_peer_is_sent_what_the_father_paid_less_the_build_of_this_node(self):
         r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,

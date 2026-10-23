@@ -93,8 +93,7 @@ def instance_ref(token: str) -> str:
     """What a row says about an instance: a hash of its token, never the token.
 
     The prefix keeps it from being any other credential. In particular it is not
-    ``sha256(token)``, which is the alias that this node hands out for a delegated
-    instance.
+    ``sha256(token)``, which the alias of a delegated instance used to be.
     """
     return _digest(_INSTANCE_PREFIX + token)
 
