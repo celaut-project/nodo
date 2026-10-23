@@ -2596,7 +2596,7 @@ impl Identifiable for PriceEntry {
     }
 }
 
-const PRICE_CATALOGUE: [(&str, &str, &str, bool); 7] = [
+const PRICE_CATALOGUE: [(&str, &str, &str, bool); 9] = [
     ("RAM_MU_PER_GIB_HOUR", "RAM", "per GiB-hour", true),
     ("CPU_MU_PER_VCPU_HOUR", "CPU", "per vCPU-hour", true),
     ("DISK_MU_PER_GIB_HOUR", "DISK", "per GiB-hour", true),
@@ -2604,6 +2604,8 @@ const PRICE_CATALOGUE: [(&str, &str, &str, bool); 7] = [
     ("BUILD_MU", "BUILD", "per container build", false),
     ("TUNNEL_OPEN_MU", "TUNNEL", "per tunnel opened", false),
     ("MODIFY_RESOURCES_MU", "RESIZE", "per resource change", false),
+    ("STATEMENT_QUERY_MU", "STATEMENT", "per balance statement", false),
+    ("STATEMENT_ROW_MU", "ROW", "per statement row", false),
 ];
 
 /// The block under `pricing:` holding per-architecture overrides. Mirrors
@@ -10833,6 +10835,8 @@ mod tests {
                 "BUILD_MU",
                 "TUNNEL_OPEN_MU",
                 "MODIFY_RESOURCES_MU",
+                "STATEMENT_QUERY_MU",
+                "STATEMENT_ROW_MU",
             ]
         );
     }

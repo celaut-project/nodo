@@ -115,29 +115,140 @@ first ERG burned is worth more than the first ERG donated — comparing `W_o / H
 index has never been filled, that term is zero for *every* candidate — never for some of
 them, which would rank peers on the shape of a failure.
 
-## What the start of a delegated instance does not score
+## What a peer charges, from its statements
 
 This node pays `initial_mu` for a start and sends the peer that amount less its own
 commission (#563). The peer takes its build from the amount that it got, and must take
-nothing else from the account of this node.
+nothing else from the account of this node. While the child runs, the peer charges its
+maintenance to the balance of the child.
 
-This node does **not** check that rule, and a start lowers no `r` for what the peer
-charged. A balance on the peer is the sum of every movement on it, and two readings of it
-cannot tell the build apart from the rest:
+A balance cannot check any of this. It is the sum of every movement on it, and two
+readings of it cannot tell a wrong charge from the rest: our account on the peer also
+moves for a top-up of another child or a tunnel. A check on readings like these
+penalizes honest peers (#565, #569).
 
-- the account of this node on the peer also moves for a top-up of another child, or for a
-  tunnel, while a build runs for minutes;
-- the balance of the child also moves for a maintenance tick, and for what the child
-  spends on its own dependencies as soon as it boots.
+What holds is the **statement** of the account (#570): every movement, with its kind and
+its cause, signed by the peer (`GetBalanceStatement`). The movements of an account are a
+chain: each one carries the hash of the one before it, and the signed head commits to all
+of them. A peer that signed a statement cannot show other movements for the same seqs
+later, and a reader that goes on from the last movement that it checked never has to
+trust a summary of the ones that came before.
 
-A check on readings like these penalizes honest peers. The check that holds is a statement
-of the movements of an account, from the peer: each charge with its cause, so that this
-node can add them up against the balance and see which ones were applied to it. See
-[`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md) for signed statements of a node about its
-own executions.
+### Our account on a peer
 
-A peer that rejects a start because the amount is too small is not at fault either. The
-amount was the choice of this node.
+This node reads the statement of its own account on each peer where it has a delegated
+child, every `ledger.STATEMENT_READ_EVERY_TICKS` ticks. It reads from the last movement
+that it checked (the *mark*), in pages that its balance on the peer pays for, up to
+`ledger.MAX_STATEMENT_PAGES_PER_TICK` pages. Each page continues the chain: the next seq,
+hanging from the hash of the mark, adding to its balance, and ending in the head that the
+peer signed. A new client is a new account: its mark starts at the genesis. Where there
+is no child, the account is read when its mark is older than a tenth of
+`ledger.MIN_PEER_RETENTION_DAYS`, so a peer cannot hide recent movements as retention.
+While the mark is that old, a read is due every `ledger.STATEMENT_READ_EVERY_TICKS`
+ticks, as with a child. A read that fails does not make the next tick read again.
+Nothing may take MU from the account but:
+
+- the start of a child of ours, no more than what was sent for it, and once (`child_start`,
+  and the `child_bound` row that names the child once it exists);
+- a top-up of a child of ours, no more than what this node sent for it with
+  `ModifyDeposit`. Each top-up is written down before the peer is asked
+  (`top_up_reservations`), and the statement takes from it as it shows the movement.
+  The movement must be dated near the time of the top-up: no later than
+  `communication.SIMPLE_RPC_TIMEOUT_SECONDS` and two ticks after it. When the peer
+  refuses the top-up, the reservation is deleted. When the answer is lost, the
+  reservation stays until its time ends, because the peer can have done the top-up;
+- a statement that we asked for. What the peer shows never exceeds what this node asked
+  for, in number and in MU at the rates that the peer announces: each read is counted
+  when it is asked, before the peer can charge it. A read that fails (a timeout) may
+  have been charged all the same. For our own account, the peer writes the charge of a
+  read in the same transaction as the read. The charge names the range of the read. So a
+  failed read counts for the rows of its range before its charge, by seq. Until
+  its charge shows, it counts for 0, and when the head shows no charge long after the
+  read, it stays at 0. For a child, a failed read counts for the rows that it asked
+  for, and a second read of the same range counts for 0. When the statements of the
+  child show the range, over one page or more, it counts for the rows dated before it.
+  The rates are those of today, so a peer that raises its prices loosens the bound for
+  the reads that it priced lower before.
+
+The balance that the peer reports in `Metrics` is free, and not signed. So a read uses
+the larger of that balance and the *signed floor*. The signed floor is the balance of the
+mark, which the peer signed, less all that this node caused since. That is the starts
+that hold no movement yet, the top-ups that are reserved, and the statements whose charge
+did not show yet. A peer cannot stop the check by reporting a low balance. A refusal for
+lack of balance is a fault when the signed floor pays for the read. When neither balance
+pays for a movement, the node reads the head of the account. The head is signed and costs
+only the fixed part. The node then reads the movements with the balance that the head
+says.
+
+### A child
+
+For a child, this node checks the chain and nothing else. What the peer charges a child
+is the business of whoever runs it: the father is charged what the child consumed, and
+the peer's build, ticks and tunnels are not judged. See [`PRICING.md`](PRICING.md) for
+how that charge is found.
+
+### What costs a peer reputation
+
+| What the peer did | Reason | Change of `r` |
+|---|---|---|
+| A statement that does not continue the chain, is not signed by it, or does not come at all from a peer that answers | `statement_inconsistent` | -1000 |
+| A charge to our account that this node did not cause | `statement_overcharged` | -1000 |
+
+The same scale as a service that does not hash to its id (`get_service_wrong_hash`): in
+every case the peer signed or reported something false about money. A fault is scored
+once for each peer, account, reason and movement where it shows, and that is kept in the
+database (`statement_faults`): it is not scored again at the next tick or after a
+restart, and a different fault, at another movement, is. A peer that keeps refusing to
+give a statement shows no movement. It is scored at most once in 24 hours for as long
+as it refuses. The 24 hours start when it is scored, not at midnight UTC. After a
+statement that does not continue the chain the mark goes to the head, and the movements
+up to there are not checked. A statement dated far from the clock of this node is
+different: the clock that is wrong can be ours. It is scored at most once in 24 hours,
+and the mark stays where it is.
+
+A statement that does not continue the chain is any of these: the head is behind the
+mark, or is dated far from the clock of this node; a movement does not hang from the one
+before it, does not add up, or is dated after the statement; the first movement after the
+mark does not hang from its hash; the peer holds movements and does not show them; or the
+peer deleted movements after the mark before its retention allows it. A movement dated
+before the one before it, or before the mark, is not a fault: the clock of an honest
+peer can step back. The node uses the date before it for that movement.
+
+Some things are not faults, and score nothing:
+
+- A peer that cannot be reached. That costs `peer_refresh_failed` instead. But a peer
+  selects the code that it answers with. A timeout or `UNAVAILABLE` of the statement is
+  a refusal, and a fault, when two conditions are true. The peer answers `GetMetrics` in
+  the same tick. The mark is older than half of `ledger.MIN_PEER_RETENTION_DAYS`.
+- A read that our balance on the peer does not pay for. It is not asked for. A peer that
+  refuses one that the balance does pay for contradicts the balance that it reports, and
+  that is a fault.
+- A peer that answers `UNIMPLEMENTED` for a child: it may have delegated the child on,
+  and the child is then charged from its balance, as with no statement. For our own
+  account it is a fault.
+- A refusal for lack of balance when our balance, read again, no longer pays for what
+  was asked, and the signed floor does not pay for it either: the balance fell between
+  the two reads.
+- A first read, or a read after a long time, where the peer has already deleted the
+  oldest movements. It announces its retention (`retention_days`, never less than
+  `ledger.MIN_PEER_RETENTION_DAYS` for this purpose), and what it deleted after that
+  time is not checkable. A reader that stays up to date, and keeps what it reads, can
+  check all of it.
+- A `child_start` that this node asked for and gave up on (#578): the peer may have
+  finished it after `START_SERVICE_ON_PEER_TIMEOUT`. Every start is written down before
+  the peer is asked, and a `child_start` that no child of ours explains is matched with
+  one of those: it must be dated within the wait of the attempt, on the clock of this
+  node, take no more than the attempt sent, and one attempt holds one movement. The
+  peer charges a start for each candidate that it tries. It gives back the start of each
+  one that fails, and a `refund` of a movement sets its attempt free again. A
+  `child_bound` closes the attempt. When it names a child of ours, the movement goes to
+  the attempt of that child. So a read during a build, or two starts at the same
+  time, is not a fault. Anything else is a fault at once; nothing waits.
+- A start that the peer refused. The attempt then holds no new movement, and the peer
+  must give back the start of each candidate that it tried before it answers. A movement
+  of a refused attempt that is not given back by the head of a later read is a fault.
+- A peer that rejects a start because the amount is too small. The amount was the choice
+  of this node.
 
 ## Why an instance died, and what it costs the service
 

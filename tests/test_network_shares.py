@@ -7,6 +7,7 @@ the share has no owner, and a member runs on the node that already holds it.
 import importlib.util
 import tempfile
 import unittest
+from types import SimpleNamespace
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -390,10 +391,12 @@ class LaunchPlacementTests(unittest.TestCase):
                 stack.enter_context(patch.object(target, name, return_value=value))
             balancer = stack.enter_context(patch.object(launch, "execution_balancer"))
             local = stack.enter_context(
-                patch.object(launch, "local_execution", return_value="local-instance")
+                patch.object(launch, "local_execution",
+                             return_value=SimpleNamespace(token="local-instance", instance=None))
             )
             delegate = stack.enter_context(
-                patch.object(launch, "delegate_execution", return_value="peer-instance")
+                patch.object(launch, "delegate_execution",
+                             return_value=SimpleNamespace(token="peer-instance", instance=None))
             )
             balancer.return_value = iter([(peer, cost) for peer in candidates])
             try:
@@ -408,23 +411,23 @@ class LaunchPlacementTests(unittest.TestCase):
 
     def test_a_member_runs_on_the_peer_that_holds_the_share(self):
         result, local, delegate = self._launch(["p2"], ["local", "p1", "p2"])
-        self.assertEqual(result, "peer-instance")
+        self.assertEqual(getattr(result, "token", result), "peer-instance")
         local.assert_not_called()
         self.assertEqual(delegate.call_args.kwargs["peer"], "p2")
 
     def test_a_member_runs_here_when_this_node_holds_it(self):
         result, local, delegate = self._launch([sl.LOCAL], ["p1", "local"])
-        self.assertEqual(result, "local-instance")
+        self.assertEqual(getattr(result, "token", result), "local-instance")
         delegate.assert_not_called()
 
     def test_a_share_nobody_holds_takes_the_cheapest_candidate(self):
         result, _local, delegate = self._launch([], ["p1", "local"])
-        self.assertEqual(result, "peer-instance")
+        self.assertEqual(getattr(result, "token", result), "peer-instance")
         self.assertEqual(delegate.call_args.kwargs["peer"], "p1")
 
     def test_a_split_share_lets_the_balancer_choose_between_its_holders(self):
         result, local, delegate = self._launch(["p1", "p2"], ["local", "p2", "p1"])
-        self.assertEqual(result, "peer-instance")
+        self.assertEqual(getattr(result, "token", result), "peer-instance")
         local.assert_not_called()
         self.assertEqual(delegate.call_args.kwargs["peer"], "p2")
 

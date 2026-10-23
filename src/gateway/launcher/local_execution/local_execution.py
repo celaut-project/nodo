@@ -3,6 +3,7 @@ import traceback
 from typing import Optional, Callable, List, Dict
 
 from protos import celaut_pb2 as celaut, celaut_pb2
+from src.database import ledger
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.architecture import get_arch_tag
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
@@ -393,6 +394,11 @@ def local_execution(
             cpu_quota=int(resolved_resources.cpu_quota),
             arch=service_arch,
             launch_bp=launch_bp,
+            # What the father paid, and the build taken from it (#570).
+            movements=(
+                ledger.Movement(ledger.START, initial_mu),
+                ledger.Movement(ledger.BUILD, -build_mu),
+            ),
         )
         registered_id = vmachine_id
 

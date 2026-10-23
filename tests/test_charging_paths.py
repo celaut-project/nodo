@@ -159,28 +159,35 @@ class InstanceDeductionTests(unittest.TestCase):
     """
 
     def test_spend_mu_reaches_the_database_accessor(self):
-        """`spend_mu` -> `spend_instance_balance` was passing an argument the
-        accessor did not have, so charging any instance raised TypeError."""
+        """`spend_mu` -> `move_balance` was passing an argument the accessor did not
+        have once, so charging any instance raised TypeError."""
+        from src.database import ledger
         from src.manager import manager
 
         with _config(), \
              patch.object(manager.sc, "client_exists", return_value=False), \
              patch.object(manager.sc, "internal_instance_exists", return_value=True), \
-             patch.object(manager.sc, "spend_instance_balance", autospec=True, return_value=True) as spend:
-            self.assertTrue(manager.spend_mu(id="vm-1", amount_mu=4_242, debug_mode=False))
+             patch.object(manager.sc, "move_balance", autospec=True, return_value=7) as move:
+            self.assertTrue(manager.spend_mu(id="vm-1", amount_mu=4_242, debug_mode=False,
+                                             kind=ledger.MAINTENANCE))
 
-        spend.assert_called_once_with(id="vm-1", amount_mu=4_242, allow_debt=manager.ALLOW_DEBT)
+        move.assert_called_once_with("vm-1", -4_242, ledger.MAINTENANCE,
+                                     allow_debt=manager.ALLOW_DEBT,
+                                     instance_token=None, detail=None)
 
     def test_a_client_is_charged_through_the_same_call(self):
+        from src.database import ledger
         from src.manager import manager
 
         with _config(), \
              patch.object(manager.sc, "client_exists", return_value=True), \
-             patch.object(manager.sc, "get_client_balance", return_value=(10_000, None, "")), \
-             patch.object(manager.sc, "reduce_balance", autospec=True) as reduce_balance:
-            self.assertTrue(manager.spend_mu(id="client-1", amount_mu=4_242, debug_mode=False))
+             patch.object(manager.sc, "move_balance", autospec=True, return_value=7) as move:
+            self.assertTrue(manager.spend_mu(id="client-1", amount_mu=4_242, debug_mode=False,
+                                             kind=ledger.CHILD_START))
 
-        reduce_balance.assert_called_once_with(client_id="client-1", balance_mu=4_242)
+        move.assert_called_once_with("client-1", -4_242, ledger.CHILD_START,
+                                     allow_debt=manager.ALLOW_DEBT,
+                                     instance_token=None, detail=None)
 
 
 class PaymentCreditTests(unittest.TestCase):
@@ -213,7 +220,8 @@ class PaymentCreditTests(unittest.TestCase):
             )
 
         manager_module.increase_local_balance_for_client.assert_called_once_with(
-            client_id="client-1", amount_mu=5_000
+            client_id="client-1", amount_mu=5_000,
+            detail={"deposit_token": "deposit-token", "ledger": ""},
         )
         self.assertTrue(credited)
         update_token.assert_called_once_with(token_id="deposit-token", status="payed")

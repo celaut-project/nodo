@@ -31,7 +31,7 @@ class ManagerDevClientPoolTests(unittest.TestCase):
         # Regression for #472: the pool sits at 1 MU, so `nodo estimate` (10**16) found nothing.
         balances = {"dev-a": 1, "dev-b": 1}
 
-        def add_balance(client_id, balance_mu):
+        def move_balance(client_id, balance_mu, kind, **kwargs):
             balances[client_id] += balance_mu
 
         with patch.object(
@@ -39,7 +39,7 @@ class ManagerDevClientPoolTests(unittest.TestCase):
         ), patch.object(
             manager.sc, "get_client_balance",
             side_effect=lambda client_id: (balances[client_id], None, None),
-        ), patch.object(manager.sc, "add_balance", side_effect=add_balance):
+        ), patch.object(manager.sc, "move_balance", side_effect=move_balance):
             client_id = next(manager.get_dev_clients(amount_mu=10**16))
 
         self.assertEqual(client_id, "dev-a")
@@ -51,10 +51,10 @@ class ManagerDevClientPoolTests(unittest.TestCase):
             manager, "_ensure_dev_client_pool", return_value=["dev-a"]
         ), patch.object(
             manager.sc, "get_client_balance", return_value=(10**18, None, None)
-        ), patch.object(manager.sc, "add_balance") as add_balance:
+        ), patch.object(manager.sc, "move_balance") as move_balance:
             self.assertEqual(next(manager.get_dev_clients(amount_mu=10**16)), "dev-a")
 
-        add_balance.assert_not_called()
+        move_balance.assert_not_called()
 
     def test_get_dev_clients_skips_unreadable_clients(self):
         with patch.object(

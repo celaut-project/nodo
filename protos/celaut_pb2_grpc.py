@@ -114,6 +114,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.GetBalanceStatement = channel.stream_stream(
+                '/celaut.Gateway/GetBalanceStatement',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
         self.ServiceTunnel = channel.stream_stream(
                 '/celaut.Gateway/ServiceTunnel',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -316,6 +321,21 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetBalanceStatement(self, request_iterator, context):
+        """Takes a BalanceStatementRequest and returns a BalanceStatement: the movements of
+        the balance of the caller, or of a child of the caller, signed by the node. The
+        caller pays for it: a fixed part and a part for each movement returned (the
+        rates "statement_query_mu" and "statement_row_mu"). The node writes the charge
+        as a "statement_query" movement before it answers. The node refuses with a status
+        code: RESOURCE_EXHAUSTED when the caller cannot pay for the answer,
+        PERMISSION_DENIED when the account is not the caller's or a child of it,
+        NOT_FOUND when the account does not exist, and UNIMPLEMENTED for an instance that
+        this node delegated to another node.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ServiceTunnel(self, request_iterator, context):
         """Opens a byte stream to a declared slot of a local instance. First, the caller
         sends a TokenMessage with the instance token and the internal port in slot. Then
@@ -429,6 +449,11 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'GetMetrics': grpc.stream_stream_rpc_method_handler(
                     servicer.GetMetrics,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'GetBalanceStatement': grpc.stream_stream_rpc_method_handler(
+                    servicer.GetBalanceStatement,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -756,6 +781,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetMetrics',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetBalanceStatement(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetBalanceStatement',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

@@ -184,15 +184,17 @@ class TrafficMeter:
     def enabled(self) -> bool:
         return prices().net_mu_per_gib > 0
 
-    def _spend(self, amount_mu: int) -> bool:
+    def _spend(self, amount_mu: int, detail: dict) -> bool:
         if amount_mu <= 0:
             return True
 
         # Imported here rather than at module scope: the manager pulls in the
         # virtualizer stack, and the relay must stay importable without it.
+        from src.database import ledger
         from src.manager.manager import spend_mu
 
-        if spend_mu(id=self.token, amount_mu=amount_mu, debug_mode=False):
+        if spend_mu(id=self.token, amount_mu=amount_mu, debug_mode=False,
+                    kind=ledger.TUNNEL, detail=detail):
             # _spend() itself runs unlocked (spend_mu can be slow, and add()
             # already serializes the accounting that decides the amount), but the
             # writer thread and this generator's thread can both land here, so
@@ -214,7 +216,7 @@ class TrafficMeter:
         Independent of the traffic rate: a ``pricing.TUNNEL_OPEN_MU`` of 0 spends
         nothing and always returns True, even when traffic metering is disabled.
         """
-        return self._spend(prices().tunnel_open_mu)
+        return self._spend(prices().tunnel_open_mu, {"open": True})
 
     def add(self, byte_count: int) -> bool:
         """Account ``byte_count`` of relayed traffic, billing whole blocks.
@@ -246,9 +248,10 @@ class TrafficMeter:
             blocks, self._unbilled_bytes = divmod(self._unbilled_bytes, self._interval_bytes)
             if not blocks:
                 return not self.exhausted.is_set()
-            amount_mu = traffic_charge_mu(blocks * self._interval_bytes)
+            billed_bytes = blocks * self._interval_bytes
+            amount_mu = traffic_charge_mu(billed_bytes)
 
-        return self._spend(amount_mu)
+        return self._spend(amount_mu, {"bytes": billed_bytes})
 
     def settle(self) -> None:
         """Bill the partial block left over when the tunnel closes."""
@@ -265,7 +268,7 @@ class TrafficMeter:
             pending, self._unbilled_bytes = self._unbilled_bytes, 0
 
         if pending:
-            self._spend(traffic_charge_mu(pending))
+            self._spend(traffic_charge_mu(pending), {"bytes": pending})
 
         logger(
             f"{LOG_PREFIX} {self.target}: billed {format_mu(self._billed_mu)} for "

@@ -155,6 +155,11 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         output={1: celaut_pb2.Metrics},
         auth="token",
     ),
+    "GetBalanceStatement": GatewayRpc(
+        input={1: celaut_pb2.BalanceStatementRequest, 2: celaut_pb2.Client},
+        output={1: celaut_pb2.BalanceStatement},
+        auth="client",
+    ),
     "ServiceTunnel": GatewayRpc(
         input={1: celaut_pb2.TokenMessage, 0: bytes},
         output={0: bytes},

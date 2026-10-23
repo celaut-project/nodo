@@ -94,9 +94,7 @@ class StopInstanceMemoryAccountingTests(unittest.TestCase):
         ), patch.object(
             manager_module.sc, "get_internal_instance", return_value=None
         ), patch.object(
-            manager_module.sc, "get_instance_balance", return_value=123
-        ), patch.object(
-            manager_module.sc, "mark_local_killed", return_value=True
+            manager_module.sc, "settle_stop", return_value=123
         ), patch.object(
             manager_module.dead_instances, "write_death_record"
         ), patch.object(

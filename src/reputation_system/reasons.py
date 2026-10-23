@@ -33,6 +33,17 @@ class Reason:
     """The peer answered `GetService` with a service that does not hash to the id we
     asked for. Dropped, never stored; scored far below a timeout."""
 
+    STATEMENT_INCONSISTENT = "statement_inconsistent"
+    """A balance statement of the peer does not continue its chain: a gap in the
+    movements, a movement that does not hang from the one before it or does not take the
+    balance where it says, movements that it showed before and changed, a signature that
+    does not verify, or no statement at all from a peer that answers (#570)."""
+
+    STATEMENT_OVERCHARGED = "statement_overcharged"
+    """A balance statement of the peer shows a charge on our account that this node did
+    not cause: a start that is not one of ours, a top-up of an instance that is not ours,
+    or more statements than this node asked for (#570)."""
+
     # Services.
     INSTANCE_LOST = "instance_lost"
     """The instance's virtual machine no longer exists and had to be pruned."""

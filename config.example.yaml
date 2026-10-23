@@ -329,6 +329,29 @@ instances:
   # Keep at most this many bytes (the last ones) of each guest log at death.
   DEAD_LOG_MAX_BYTES: 1048576
 
+# The ledger of balance movements (issue #570): one row for each change of the balance
+# of a client or an instance, which its owner reads with GetBalanceStatement.
+ledger:
+  # Rows older than this are deleted. A peer reads the statements of its account, and of
+  # the work it delegated here, every STATEMENT_READ_EVERY_TICKS ticks; the rest is margin
+  # to dispute a charge or to show a signed statement as evidence.
+  RETENTION_DAYS: 30
+  # The most movements that one statement returns. The statement holds the first ones
+  # of the range, and the caller asks again from the last seq that it got.
+  MAX_STATEMENT_ROWS: 1000
+  # The shortest retention that a peer is held to. A gap in its statement after the last
+  # movement that this node checked is excused by the retention that the peer announces,
+  # and never by less than this. Where there is no child, our account is read again when
+  # its mark is older than a tenth of this.
+  MIN_PEER_RETENTION_DAYS: 7
+  # The most pages that one read of our account on a peer takes. A reader that is behind
+  # goes on at the next read.
+  MAX_STATEMENT_PAGES_PER_TICK: 4
+  # The ticks between two reads of our account on a peer, and between two reads of the
+  # statement of a delegated child. A read costs MU, so reading less often only delays a
+  # detection.
+  STATEMENT_READ_EVERY_TICKS: 30
+
 builder:
   WAIT_FOR_CONTAINER: 60
   WAIT_FOR_UNLOCK_MEMORY: 60
@@ -745,6 +768,11 @@ pricing:
   BUILD_MU: 10000000
   TUNNEL_OPEN_MU: 10000
   MODIFY_RESOURCES_MU: 10000
+  # A balance statement (GetBalanceStatement, issue #570): a fixed part for each call,
+  # and a part for each movement that it returns. The account that asks pays it. A peer
+  # that delegated work here reads its statements at each maintenance tick.
+  STATEMENT_QUERY_MU: 100
+  STATEMENT_ROW_MU: 1
   # Scarcity surcharge, applied to each resource independently from that resource's own
   # availability: 1x while it is plentiful, up to SCARCITY_MAX_MULTIPLIER once it is
   # exhausted. Set the maximum to 1 to price purely by consumption and ignore load.
@@ -1143,6 +1171,8 @@ communication:
   # peer that opens the stream and sends less than it declared; a generous timeout is
   # also what lets them accept their messages (a client_id, a hash, ...) in whichever
   # order the caller sent them. See src/gateway/client_gate.py.
+  # This node also waits this long at most for a peer to answer ModifyDeposit,
+  # GetBalanceStatement or GetMetrics (#570).
   SIMPLE_RPC_TIMEOUT_SECONDS: 60
 
 client:

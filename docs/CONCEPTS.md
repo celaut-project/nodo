@@ -147,6 +147,47 @@ the least `initial_mu` that starts the service. See [`PRICING.md`](PRICING.md).
   `initial_mu` to X plus the minimum runtime. No new field is necessary.
 - If the request has no `initial_mu`, the node uses the build plus its default balance.
 
+### Read where a balance went
+
+Every change of a balance is one movement in the ledger of the node, written with the
+balance itself: a payment, the start of an instance and its build, each maintenance
+period, a top-up, a refund, a tunnel. Each movement says what it was (`kind`), what it
+concerns (the child, for a start that the account paid), and its cause (for a period,
+the resources and the seconds that the node priced). The movements of an account add up
+to its balance, and they are a chain: each one carries the hash of the one before it, the
+first one hangs from a hash that is tied to the account, and a movement is never changed.
+The hash of the last movement commits to all the history.
+
+`GetBalanceStatement` returns the movements of an account, signed by the node:
+
+- A client reads its own account with its client_id, and a local instance reads its own
+  by its address.
+- With `token`, the caller reads the account of a child of its own instead: an instance
+  that it started. One statement is one account. The movements of a child are not in the
+  account of its father: the father has the `child_start` that paid for the child, then a
+  `child_bound` row that names it, and reads the child for the rest.
+- The caller asks for a range of movements by their seq (`from_seq` to `to_seq`), or for
+  nothing but the head of the account. The node answers the first movements of the range,
+  up to its own limit, and the caller goes on from the last seq that it received, so none
+  is skipped. The answer has the head (the last seq and its hash), the first movement that
+  the node still holds, and how long it keeps them.
+- A statement holds no credential. The account and the instances in it are named by a
+  hash of their tokens, because a token is a key that can stop an instance or move its
+  deposit. A statement can be shown to others.
+- An instance that this node delegated to another node has no statement here: to the
+  service nothing is delegated, and its movements would say otherwise.
+
+The caller pays for it, a fixed part and a part for each movement
+([`PRICING.md`](PRICING.md)). A node that delegates work reads the statements of its own
+account on its peers, and a peer whose statement does not continue the chain, or that
+charges the account what the node did not cause, loses reputation
+([`REPUTATION.md`](REPUTATION.md#what-a-peer-charges-from-its-statements)).
+
+The node deletes movements older than `ledger.RETENTION_DAYS`. What it deleted before a
+caller read it cannot be checked, so a caller that wants to check everything stays up to
+date, and keeps what it reads: a signed statement is evidence that it can show, as a
+receipt is ([`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md)).
+
 ## Address and token provisioning
 
 To talk to a running instance you need its **communication address** (`ip:port`, from

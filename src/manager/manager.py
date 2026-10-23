@@ -1,12 +1,14 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Generator, Tuple
+from typing import Dict, Generator, Iterable, List, Optional, Tuple
 import secrets
+import threading
 
 from src.manager.resources import IOBigData
 from protos import celaut_pb2
 
+from src.database import ledger
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.tunneling import delegated_endpoints
 
@@ -120,6 +122,10 @@ def _target_dev_client_balance(amount_mu: int) -> int:
     return int(amount_mu) + 1
 
 
+# The `detail.reason` of the credit that funds a dev client.
+DEV_CLIENT_CREDIT = "dev_client"
+
+
 def _create_dev_client(prefix: str, amount_mu: Optional[int] = None) -> str:
     client_id = f"{prefix}{uuid4()}"
     sc.add_client(
@@ -127,8 +133,13 @@ def _create_dev_client(prefix: str, amount_mu: Optional[int] = None) -> str:
         balance_mu=_target_dev_client_balance(amount_mu or 0),
         last_usage=None,
         unmetered=True,
+        reason=DEV_CLIENT_CREDIT,
     )
     return client_id
+
+
+def _fund_dev_client(client_id: str, amount_mu: int) -> None:
+    sc.move_balance(client_id, amount_mu, ledger.CREDIT, detail={"reason": DEV_CLIENT_CREDIT})
 
 
 def _create_verified_dev_client(prefix: str, amount_mu: int) -> str:
@@ -150,7 +161,7 @@ def _ensure_dev_client_pool(prefix: str, pool_size: int) -> List[str]:
             continue
         target_balance = _target_dev_client_balance(0)
         if client_balance < target_balance:
-            sc.add_balance(client_id=client_id, balance_mu=target_balance - client_balance)
+            _fund_dev_client(client_id, target_balance - client_balance)
         readable_clients.append(client_id)
     missing_clients = max(0, pool_size - len(readable_clients))
     for _ in range(missing_clients):
@@ -181,7 +192,7 @@ def _acquire_dev_client(prefix: str, pool_size: int, amount_mu: int) -> str:
 
     target_balance = _target_dev_client_balance(amount_mu)
     if current_balance < target_balance:
-        sc.add_balance(client_id=client_id, balance_mu=target_balance - current_balance)
+        _fund_dev_client(client_id, target_balance - current_balance)
     return client_id
 
 
@@ -197,7 +208,7 @@ def get_dev_clients(amount_mu: int) -> Generator[str, None, None]:
         # clients actually consumed are topped up.
         target_balance = _target_dev_client_balance(amount_mu)
         if client_balance < target_balance:
-            sc.add_balance(client_id=client_id, balance_mu=target_balance - client_balance)
+            _fund_dev_client(client_id, target_balance - client_balance)
         yield client_id
 
 
@@ -707,42 +718,30 @@ def accept_peer_refresh(peer: celaut_pb2.Peer, peer_id: str) -> bool:
 def get_internal_service_id_by_uri(uri: str) -> str:
     return sc.get_local_instance_id_by_uri(uri=uri)
 
-def __refund(
-        amount_mu: int = None,
-        token: str = None,
-        add_function=None,  # Lambda if the cache is not a dict of token:balance
-) -> bool:
-    try:
-        add_function(amount_mu)
-    except Exception as e:
-        log.LOGGER('Manager error: ' + str(e))
-        return False
-    return True
-
-
-# Only can be executed once.
-def __refund_function_factory(
-        amount_mu: int = None,
-        token: str = None,
-        container: list = None,
-        add_function=None
-) -> lambda: None:
-    if container is not None:
-        container.append(
-            lambda: __refund(amount_mu=amount_mu, token=token, add_function=add_function)
-        )
-
-
-def increase_local_balance_for_client(client_id: str, amount_mu: int) -> bool:
+def increase_local_balance_for_client(client_id: str, amount_mu: int,
+                                      detail: Optional[dict] = None) -> bool:
+    """Credit a payment to a client: a ``deposit`` row, with ``detail`` as its cause."""
     log.LOGGER(f"Credit client {client_id} with {format_mu(amount_mu)}")
     if not sc.client_exists(client_id=client_id):
         raise Exception('Client ' + client_id + ' does not exists.')
-    if not __refund(
-            amount_mu=amount_mu,
-            add_function=lambda amount: sc.add_balance(client_id=client_id, balance_mu=amount),
-            token=client_id
-    ):
-        raise Exception(f"Manager error: cannot credit client {client_id} with {format_mu(amount_mu)}")
+    try:
+        sc.move_balance(client_id, amount_mu, ledger.DEPOSIT, detail=detail)
+    except Exception as e:
+        raise Exception(
+            f"Manager error: cannot credit client {client_id} with {format_mu(amount_mu)}: {e}"
+        )
+    return True
+
+
+def _give_back(account_id: str, amount_mu: int, seq: Optional[int],
+               instance_token: Optional[str]) -> bool:
+    """Undo a charge of ``spend_mu``: a ``refund`` row that names the row it undoes."""
+    try:
+        sc.move_balance(account_id, amount_mu, ledger.REFUND, instance_token=instance_token,
+                        detail=None if seq is None else {"refunds_seq": str(seq)})
+    except Exception as e:
+        log.LOGGER(f"Manager error giving {format_mu(amount_mu)} back to {account_id}: {e}")
+        return False
     return True
 
 
@@ -750,85 +749,65 @@ def spend_mu(
         id: str,
         amount_mu: int,
         refund_function_container: list = None,
-        debug_mode: bool=True
+        debug_mode: bool = True,
+        *,
+        kind: str,
+        instance_token: Optional[str] = None,
+        detail: Optional[dict] = None,
+        movement: Optional[list] = None,
 ) -> bool:
-    """
-    Attempts to deduct MU from a client or instance.
-    Returns True if successful, False otherwise (with logging on failures).
+    """Take ``amount_mu`` from a client or a local instance (by token or address).
+
+    ``kind``, ``instance_token`` and ``detail`` are the row of the ledger that says why
+    (#570). The balance and the row are written in one transaction, so two threads that
+    bill the same instance (the two directions of a tunnel) cannot lose a charge.
+
+    ``refund_function_container``, if given, gets a function that gives the charge
+    back, as a ``refund`` row. ``movement``, if given, gets the ``(account, seq)`` of
+    the row, so the caller can name the child of a ``child_start`` once it exists
+    (``bind_child_token``).
+
+    Returns True if the MU were taken. False, with a log line, if the account does not
+    exist or does not hold them and the node does not allow debt.
     """
     amount_mu = int(amount_mu)
     try:
-        is_client = sc.client_exists(client_id=id)
-        # If the identifier corresponds to a client
-        if is_client:
-            client_data = sc.get_client_balance(client_id=id)
-            if not client_data:
-                log.LOGGER(f"No balance record found for client '{id}'.")
+        if not sc.client_exists(client_id=id) and not sc.internal_instance_exists(id=id):
+            resolved_id = resolve_instance_token(id, allow_uri_fallback=True)
+            if not resolved_id:
                 return False
+            id = resolved_id
 
-            balance, last_usage, _ = client_data
-            balance = int(balance)
-
-            if balance < amount_mu and not ALLOW_DEBT:
-                log.LOGGER(
-                    f"Insufficient balance for client '{id}': {format_mu(balance)} available, "
-                    f"needed {format_mu(amount_mu)}."
-                )
-                return False
-
-            if debug_mode:
-                log.LOGGER(f"Charging client {id} {format_mu(amount_mu)}")
-            sc.reduce_balance(client_id=id, balance_mu=amount_mu)
-
-            __refund_function_factory(
-                amount_mu=amount_mu,
-                token=id,
-                add_function=lambda amount: sc.add_balance(client_id=id, balance_mu=amount),
-                container=refund_function_container
+        seq = sc.move_balance(id, -amount_mu, kind, allow_debt=ALLOW_DEBT,
+                              instance_token=instance_token, detail=detail)
+        if debug_mode:
+            log.LOGGER(f"Charged {id} {format_mu(amount_mu)} ({kind}).")
+        if movement is not None and seq is not None:
+            movement.append((id, seq))
+        if refund_function_container is not None:
+            refund_function_container.append(
+                lambda: _give_back(id, amount_mu, seq, instance_token)
             )
-            return True
+        return True
 
-        # If the identifier corresponds to a container (by ID or URI)
-        else:
-            is_id = sc.internal_instance_exists(id=id)
-            if not is_id:
-                resolved_id = resolve_instance_token(id, allow_uri_fallback=True)
-                if not resolved_id:
-                    return False
-                id = resolved_id
-                is_id = sc.internal_instance_exists(id=id)
-                if not is_id:
-                    log.LOGGER(f"Resolved container ID '{id}' does not exist.")
-                    return False
-
-            # Atomic read-check-write: a service tunnel bills the same container
-            # from both relay directions at once, and a separate get/update would
-            # let two threads read the same balance and lose one deduction.
-            spent = sc.spend_instance_balance(
-                id=id, amount_mu=amount_mu, allow_debt=ALLOW_DEBT
-            )
-            if spent is None:
-                log.LOGGER(f"Container '{id}' does not exist; cannot charge it.")
-                return False
-            if spent is False:
-                log.LOGGER(
-                    f"Insufficient balance for container '{id}': needed {format_mu(amount_mu)}."
-                )
-                return False
-            if debug_mode:
-                log.LOGGER(f"Container {id} charged {format_mu(amount_mu)}.")
-
-            __refund_function_factory(
-                amount_mu=amount_mu,
-                add_function=lambda amount: sc.update_instance_balance(id=id, balance_mu=amount),
-                token=id,
-                container=refund_function_container
-            )
-            return True
-
+    except ledger.NoSuchAccount:
+        log.LOGGER(f"'{id}' is neither a client nor a local instance; cannot charge it.")
+        return False
+    except ledger.InsufficientBalance as e:
+        log.LOGGER(f"Insufficient balance: {e}")
+        return False
     except Exception as e:
         log.LOGGER(f"Manager error charging '{id}': {e}")
         return False
+
+
+def bind_child_token(movement: List[Tuple[str, int]], token: str) -> None:
+    """Name the child on the ``child_start`` that paid for it, with a ``child_bound`` row."""
+    for account_id, seq in movement:
+        try:
+            sc.bind_child(account_id, seq, token)
+        except Exception as e:
+            log.LOGGER(f"Could not bind the child to row {seq} of {account_id}: {e}")
 
 
 def generate_client(client_id: Optional[str] = None) -> celaut_pb2.Client:
@@ -1206,7 +1185,8 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     )
 
 
-def credit_father(father_id: str, amount_mu: int) -> bool:
+def credit_father(father_id: str, amount_mu: int, kind: str = ledger.REFUND,
+                  instance_token: Optional[str] = None) -> bool:
     """Give ``amount_mu`` back to whoever funded an instance, client or instance alike.
 
     The exact reverse of :func:`spend_mu`, and the one operation a stop needs: the
@@ -1215,21 +1195,20 @@ def credit_father(father_id: str, amount_mu: int) -> bool:
     other. ``modify_deposit`` already branches this way for a negative difference;
     this is that branch, named, so a stop can reuse it instead of re-deriving it.
 
+    ``kind`` is the row of the father: a ``refund`` (what a stopped child left, or a
+    top-up that did not happen) or a ``withdrawal``. ``instance_token`` is the child.
+
     Returns False (and says so) when the father is neither, which is a bookkeeping
     fault worth a log line: the MU has left the child's row by then.
     """
     amount_mu = int(amount_mu)
     if amount_mu <= 0:
         return True
-    if sc.internal_instance_exists(id=father_id):
-        sc.update_instance_balance(
-            id=father_id,
-            balance_mu=sc.get_instance_balance(id=father_id) + amount_mu,
-        )
+    try:
+        sc.move_balance(father_id, amount_mu, kind, instance_token=instance_token)
         return True
-    if sc.client_exists(client_id=father_id):
-        sc.add_balance(client_id=father_id, balance_mu=amount_mu)
-        return True
+    except ledger.NoSuchAccount:
+        pass
     log.LOGGER(
         f"Cannot return {format_mu(amount_mu)} left by a stopped instance: its father "
         f"{father_id!r} is neither a client nor a local instance."
@@ -1237,19 +1216,8 @@ def credit_father(father_id: str, amount_mu: int) -> bool:
     return False
 
 
-def return_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, credit: bool) -> None:
-    """Hand a stopped instance's unspent deposit back to its father.
-
-    The same settlement for a local child and a delegated one: both are funded by a
-    father who paid the whole deposit up front, and both keep what is left of it on
-    a row of this node's own. Where they differ is what the peer does with its side
-    of a delegated instance, which is not this function's business.
-
-    Call this once the instance's row is gone -- see the ordering note in
-    ``stop_instance``. ``credit=False`` means the caller has taken the leftover onto
-    itself and will settle it; that is said out loud because the row the MU was
-    sitting in no longer exists, so a caller that drops the figure drops the money.
-    """
+def _log_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, credit: bool) -> None:
+    """Say where the unspent deposit of a stopped instance went (``sc.settle_stop``)."""
     leftover_mu = int(leftover_mu or 0)
     if leftover_mu <= 0:
         return
@@ -1258,15 +1226,12 @@ def return_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, c
             f"Handing {format_mu(leftover_mu)} unspent by {token} to the "
             f"caller of stop_instance rather than to its father {father_id}."
         )
-    elif not father_id:
-        # The MU has left the child's row by now, so this is a real loss rather
-        # than a no-op, and is worth the same log line an unknown father gets in
-        # `credit_father`.
+    elif not sc.account_exists(father_id):
         log.LOGGER(
             f"Cannot return {format_mu(leftover_mu)} unspent by {token}: "
-            f"it has no father on record."
+            f"its father {father_id!r} is gone."
         )
-    elif credit_father(father_id=father_id, amount_mu=leftover_mu):
+    else:
         log.LOGGER(
             f"Returned {format_mu(leftover_mu)} unspent by {token} to its "
             f"father {father_id}."
@@ -1305,13 +1270,17 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
     RPC takes a token, never a name (a name is guessable). ``nodo kill`` resolves a
     name to the token before it calls this.
 
-    ``credit=False`` stops the instance and reads the leftover without crediting
-    anybody: the returned figure is then a debt the caller has taken on, and the
-    money exists nowhere else once the row is purged. Only a caller that stops a
-    whole subtree has any use for it -- see ``nodo burnall``, which stops fathers
-    before their children and so cannot let each child pay its own father, whose row
-    is already gone by then. Every other caller stops one instance whose father is
-    still there, and wants the default.
+    The leftover leaves the instance and reaches its father in one transaction
+    (``SQLConnection.settle_stop``): a ``refund`` row on each. The instance dies with
+    nothing on it.
+
+    ``credit=False`` stops the instance without crediting anybody: its ``refund`` row
+    says ``to: caller``, and the returned figure is a debt the caller has taken on.
+    Only a caller that stops a whole subtree has any use for it -- see ``nodo
+    burnall``, which stops fathers before their children and so cannot let each child
+    pay its own father, whose row is already gone by then. Every other caller stops one
+    instance whose father is still there, and wants the default. A father that is gone
+    anyway leaves ``lost: father_gone`` in the ``refund`` row.
 
     ``reason`` says why the instance dies. It is recorded in `death_reason`. The
     row stays in the database with `killed_at` set, and a dead instance never
@@ -1337,50 +1306,27 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
         serialized_instance = sc.get_internal_instance(id=token)
         
         try:
-            refund = sc.get_instance_balance(id=token)
             if reserved_mem_limit > 0:
                 #  IOBigData().unlock_ram(ram_amount=reserved_mem_limit)
                 IOBigData().log_snapshot(
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )
-            death_record = _death_record(token, father_id, reason, refund)
-            if not sc.mark_local_killed(id=token, reason=reason):
+            death_record = _death_record(token, father_id, reason, 0)
+            # What the child has left goes back to its father, and the child dies, in
+            # one transaction (`settle_stop`). Reading the balance first and settling
+            # after would credit the father with a figure that a charge of a tick or a
+            # tunnel has already lowered. A stop that fails before this moves nothing,
+            # and the next maintenance tick stops the instance again: the settlement
+            # happens once.
+            refund = sc.settle_stop(token, reason, father_id=father_id, credit=credit)
+            if refund is None:
                 # Another stop already killed it and settled the leftover.
                 log.LOGGER(f"Instance {token} is already dead.")
                 return None
+            death_record['leftover_mu'] = refund
             death_record['killed_at'] = datetime.now(timezone.utc).isoformat()
             dead_instances.write_death_record(token, death_record)
-
-            # The child's unspent deposit goes back to whoever paid it in, and it goes
-            # back *after* the row is gone.
-            #
-            # A father is charged the child's full `initial_mu` at StartService
-            # (`modify_deposit` -> `spend_mu`) and the child spends only the part it
-            # actually lives through, so whatever is left on the row is the father's
-            # money. Deleting the row without handing it back -- which is all it takes
-            # -- is what sends a parent's balance down without bound: one that starts
-            # and stops children in a loop, which is exactly what an orchestrator
-            # service does, pays the full deposit again on every iteration and never
-            # gets the change, so its balance falls at the rate it *provisions* rather
-            # than at the rate anything is *consumed*. Measured on a live node: 2.0e9
-            # MU charged for 20 children, 0.9e9 consumed by them, the orchestrator at
-            # -1.25e9 and still falling.
-            #
-            # Crediting first, before the DELETE, would look safer and is not: the
-            # amount is already in `refund`, a local read, so nothing about it depends
-            # on the row still existing. What does depend on the kill mark is whether this
-            # stop can happen twice. A `mark_local_killed` that raises leaves the row
-            # alive with its balance intact, and `maintain_vmachines` calls
-            # `stop_instance` again on the next tick -- so a credit issued before it
-            # would be issued again, and again, manufacturing MU out of a balance
-            # nobody ever spent. Crediting after means a failed purge credits nothing
-            # and the retry does the whole thing exactly once. The window that remains
-            # -- a crash between the DELETE and the credit -- loses the leftover, which
-            # is the direction to err in: the books may owe a father, they may never
-            # invent MU that no one paid in.
-            return_leftover(
-                token=token, father_id=father_id, leftover_mu=refund, credit=credit
-            )
+            _log_leftover(token=token, father_id=father_id, leftover_mu=refund, credit=credit)
 
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
@@ -1404,7 +1350,13 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
             if not external_token:
                 log.LOGGER(f"No peer uri for the peer {peer_id}")
                 return None
-            
+
+            # The account of the child on the peer ends with this stop. Its statement is
+            # read one last time, and what the child consumed since the last reading is
+            # charged from it and not from the estimate.
+            from src.manager.maintain import close_delegated_charge
+            close_delegated_charge(external_token)
+
             peer_refund = utils.from_amount(
                 BeeClient.stop_service(
                     node_channel(peer_uri, expected_peer_id=peer_id), token=external_token
@@ -1422,24 +1374,18 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
                 f"deposit there when {external_token} stopped."
             )
 
-            refund = sc.get_delegated_balance(token=external_token)
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_delegated_instance(token=external_token)
 
-            # Drop the delegation record only after the peer confirmed the stop:
-            # if StopService raised we must keep the row so the stop can be
-            # retried and the (remote-computed) refund reconciled, rather than
-            # orphaning an instance the peer may still be running.
-            if not sc.mark_delegated_killed(token=external_token, reason=reason):
+            # The row is settled only after the peer confirmed the stop: if StopService
+            # raised the row stays alive, so the stop can be retried and the refund
+            # reconciled, rather than orphaning an instance the peer may still run.
+            refund = sc.settle_stop(token, reason, delegated=True,
+                                    father_id=father_id, credit=credit)
+            if refund is None:
                 log.LOGGER(f"Delegated instance {token} is already dead.")
                 return None
-
-            # And credit after the DELETE, for the reason spelled out on the
-            # internal branch: this stop is retried while the row survives, and a
-            # credit issued before the row is gone is issued again on every retry.
-            return_leftover(
-                token=token, father_id=father_id, leftover_mu=refund, credit=credit
-            )
+            _log_leftover(token=token, father_id=father_id, leftover_mu=refund, credit=credit)
 
         except Exception as e:
             log.LOGGER('Error purging external instance with hashed token ' + token + ' ' + str(e))
@@ -1492,7 +1438,61 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
 
 
 # Modify an instance's deposit, in MU.
+_delegation_locks: Dict[str, threading.RLock] = {}
+_delegation_locks_guard = threading.Lock()
+
+
+def delegation_lock(alias: str) -> threading.RLock:
+    """The lock of one instance's deposit: ``modify_deposit`` holds it from the call to
+    the peer until the net that it sent is written, and the maintenance tick holds it
+    from reading that net until it has charged. The peer moves the balance of a child
+    first and this node writes the net after, so a tick that read both in between would
+    charge a withdrawal as consumption, or give back a top-up that the next tick charges
+    again.
+
+    Each call to a peer under the lock has a time limit (``peer_call_timeout``), so the
+    lock is never held for longer than that. The tick does not wait for the lock: when
+    ``modify_deposit`` holds it, the tick charges that child at the next tick."""
+    with _delegation_locks_guard:
+        return _delegation_locks.setdefault(alias, threading.RLock())
+
+
+def forget_delegation_locks(alive: Iterable[str]) -> int:
+    """Drop the locks of the instances that are not in ``alive``, and return how many.
+
+    Without this, ``_delegation_locks`` keeps one entry for each alias for ever. A lock
+    that a thread holds stays. A thread that took a lock just before it was dropped can
+    run at the same time as another thread that makes a new one, but only for an
+    instance that is dead: ``modify_deposit`` gives an error for it."""
+    alive = set(alive)
+    dropped = 0
+    with _delegation_locks_guard:
+        for alias in [alias for alias in _delegation_locks if alias not in alive]:
+            lock = _delegation_locks[alias]
+            if lock.acquire(blocking=False):
+                try:
+                    del _delegation_locks[alias]
+                    dropped += 1
+                finally:
+                    lock.release()
+    return dropped
+
+
 def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
+    from src.manager.statement_check import peer_call_timeout
+
+    lock = delegation_lock(service_token)
+    # The tick holds the lock while it reads the child on the peer, and each of those
+    # reads has a time limit. A longer wait means that something is wrong.
+    if not lock.acquire(timeout=4 * peer_call_timeout()):
+        return False, "The deposit of this instance is being charged. Try again."
+    try:
+        return _modify_deposit(amount_mu, service_token)
+    finally:
+        lock.release()
+
+
+def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     """Move ``amount_mu`` between an instance and its father: a positive figure tops the
     instance up out of the father's balance, a negative one gives it back.
 
@@ -1534,29 +1534,46 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     if desired_amount < 0:
         return False, "The instance does not have that balance"
 
+    if is_internal:
+        # Both sides in one transaction: the father and the child each get a row.
+        try:
+            if amount_mu > 0:
+                sc.transfer(father_id, service_token, amount_mu, ledger.TOP_UP,
+                            child=service_token, allow_debt=ALLOW_DEBT)
+            else:
+                sc.transfer(service_token, father_id, -amount_mu, ledger.WITHDRAWAL,
+                            child=service_token)
+        except ledger.InsufficientBalance:
+            return False, 'Error charging the father'
+        except ledger.NoSuchAccount:
+            return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
+        return True, "Deposit modified correctly"
+
+    top_up_refunds = []
+    reservation = None
     if amount_mu > 0:
         log.LOGGER(f"Charge father {father_id}")
         if not spend_mu(
                 id=father_id,
                 amount_mu=amount_mu,
-                refund_function_container=[]
+                refund_function_container=top_up_refunds,
+                kind=ledger.TOP_UP,
+                instance_token=service_token,
         ):
             return False, 'Error charging the father'
 
-    if is_internal:
-        if amount_mu < 0:
-            # The reverse of spend_mu(): what the instance gives back goes to its father.
-            log.LOGGER(f"Credit father {father_id}")
-            if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
-                return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
-        sc.update_instance_balance(id=service_token, balance_mu=desired_amount)
-        return True, "Deposit modified correctly"
-
-    def give_back_top_up() -> None:
-        # The father paid for a top-up the peer never received.
-        if amount_mu > 0 and not credit_father(father_id=father_id, amount_mu=amount_mu):
+    def give_back_top_up(keep_reservation: bool = False) -> None:
+        # The father paid for a top-up the peer never received. When the answer was
+        # lost, the peer may have received it all the same: the reservation stays, and
+        # its window (``statement_check.top_up_grace_seconds``) ends it.
+        if not keep_reservation:
+            sc.drop_top_up_reservation(reservation)
+        if top_up_refunds and not top_up_refunds.pop()():
             log.LOGGER(f"Could not give {format_mu(amount_mu)} back to {father_id}.")
 
+    from src.manager.statement_check import peer_call_timeout, unreachable
+
+    asked = False
     try:
         peer_id = sc.get_peer_id_by_external_service(token=external_token)
         if not peer_id:
@@ -1577,16 +1594,26 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
             to_mu_per_unit=payment_system.peer_mu_per_unit,
             round_up=amount_mu < 0,
         )
+        if amount_mu > 0:
+            # Before the peer is asked: its row may show in our account, and be checked,
+            # before the call returns (``statement_check.account_faults``).
+            reservation = sc.reserve_top_up(service_token, peer_amount)
+        asked = True
         _output = BeeClient.modify_deposit(
             peer_channel(peer_id),
             difference=utils.to_amount(
                 -peer_amount if amount_mu < 0 else peer_amount
             ),
             service_token=external_token,
+            timeout=peer_call_timeout(),
         )
+        if _output is None:
+            # The peer closed the call with no answer: like a lost answer.
+            raise ConnectionError(f"{peer_id} gave no answer to ModifyDeposit.")
     except Exception as e:
         log.LOGGER(f"Exception on modify_deposit for external service: {e}")
-        give_back_top_up()
+        give_back_top_up(keep_reservation=asked and (
+            unreachable(e) or isinstance(e, ConnectionError)))
         return False, "Node error."
 
     if not _output.success:
@@ -1597,21 +1624,18 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     # the peer never received would refund the father at the stop for runtime that was
     # never bought, out of this node's own pocket; a father credited for a withdrawal
     # the peer refused would hold MU that exists nowhere.
-    if amount_mu < 0:
-        log.LOGGER(f"Credit father {father_id}")
-        if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
-            return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
-    # Both sides together. The maintenance tick charges the fall in the peer's own
-    # figure for this instance, so a deposit change has to move the mark it measures
-    # against by the same amount: left behind, a top-up reads as an instance that
-    # consumed nothing and hides a whole interval's usage.
-    sc.update_delegated_deposit(
-        token=external_token,
-        balance_mu=desired_amount,
-        peer_balance_mu=max(
-            0,
-            sc.get_delegated_peer_balance(token=external_token)
-            + (-peer_amount if amount_mu < 0 else peer_amount),
-        ),
-    )
+    #
+    # The rows and the net that this node has sent to the peer are written together:
+    # the tick takes that net out of what the balance of the child fell by, so that a
+    # withdrawal is not charged as consumption and a top-up does not hide any. The peer
+    # writes the same change in the statement of the child as a `top_up` or a
+    # `withdrawal`, and the tick does not count those as consumption either
+    # (`statement_check.consumption`).
+    try:
+        if amount_mu < 0:
+            log.LOGGER(f"Credit father {father_id}")
+        sc.move_delegated_deposit(
+            service_token, father_id, amount_mu, -peer_amount if amount_mu < 0 else peer_amount)
+    except ledger.NoSuchAccount:
+        return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
     return True, _output.message or "Deposit modified correctly"

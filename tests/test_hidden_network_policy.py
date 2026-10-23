@@ -203,8 +203,8 @@ class LaunchTests(unittest.TestCase):
             patched(mod, "authorize_shares", return_value=[])
             spend = patched(mod, "spend_mu", return_value=True)
             balancer = patched(mod, "execution_balancer")
-            local = patched(mod, "local_execution", return_value=SimpleNamespace(instance=None))
-            delegate = patched(mod, "delegate_execution", return_value=SimpleNamespace(instance=None))
+            local = patched(mod, "local_execution", return_value=SimpleNamespace(token="child", instance=None))
+            delegate = patched(mod, "delegate_execution", return_value=SimpleNamespace(token="child", instance=None))
             patched(mod, "from_amount", return_value=1)
             # Pricing is not tested here: what funds a start has its own tests (#563).
             patched(mod, "_funding_failure", return_value=None)

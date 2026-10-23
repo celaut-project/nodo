@@ -87,45 +87,46 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'serialized_instance': b'original-instance',
                 'balance_mu': 900,
                 'peer_balance_mu': 1800,
+                'peer_statement_seq': None,
+                'peer_statement_ts': None,
+                'peer_statement_hash': None,
+                'verified_consumption_peer_mu': 0,
+                'verified_father_net_peer_mu': 0,
+                'father_net_peer_mu': 0,
+                'charged_peer_mu': 0,
             },
         )
 
-    def test_the_deposit_is_read_back_and_spent_down(self):
-        """The father's deposit lives on this row, in our MU.
+    def test_a_charge_writes_the_deposit_and_its_mark_together(self):
+        """One transaction, so no failure can leave one of them behind.
 
-        The maintenance tick spends it and `stop_instance` hands back what is left,
-        so both have to see the same figure the delegation wrote.
+        The tick charges what the peer metered since the mark, so a deposit written
+        without its mark bills the same consumption again next tick. The peer's
+        figure stays on its own scale: the tick sums before converting, so a rate
+        that moved between two readings must not read as consumption.
         """
         self.assertEqual(self.sc.get_delegated_balance(token=self.PEER_TOKEN), 900)
 
-        self.sc.update_delegated_balance(token=self.PEER_TOKEN, balance_mu=870)
-
-        self.assertEqual(self.sc.get_delegated_balance(token=self.PEER_TOKEN), 870)
-
-    def test_the_peers_own_figure_is_kept_unconverted_and_re_marked(self):
-        """The mark the maintenance tick measures consumption against.
-
-        On the peer's scale, because the tick subtracts two readings before
-        converting: a rate that moved between them must not read as consumption.
-        """
-        self.assertEqual(self.sc.get_delegated_peer_balance(token=self.PEER_TOKEN), 1800)
-
-        self.sc.update_delegated_peer_balance(token=self.PEER_TOKEN, peer_balance_mu=1500)
-
-        self.assertEqual(self.sc.get_delegated_peer_balance(token=self.PEER_TOKEN), 1500)
-
-    def test_a_charge_writes_the_deposit_and_its_mark_together(self):
-        """One statement, so no failure can leave one of them behind.
-
-        The tick charges the fall in the peer's figure since the mark, so a deposit
-        written without its mark bills the same consumption again next tick.
-        """
-        self.sc.update_delegated_deposit(
-            token=self.PEER_TOKEN, balance_mu=700, peer_balance_mu=1400
+        self.sc.settle_delegated_tick(
+            token=self.PEER_TOKEN, charge_mu=200,
+            mark={"peer_balance_mu": 1400, "seq": 7, "ts": 70, "hash": "abc"},
         )
 
         self.assertEqual(self.sc.get_delegated_balance(token=self.PEER_TOKEN), 700)
-        self.assertEqual(self.sc.get_delegated_peer_balance(token=self.PEER_TOKEN), 1400)
+        row = self.sc.get_delegated_instances()[0]
+        self.assertEqual(
+            (row['peer_balance_mu'], row['peer_statement_seq'], row['peer_statement_ts'],
+             row['peer_statement_hash']),
+            (1400, 7, 70, "abc"),
+        )
+
+    def test_a_tick_with_nothing_to_charge_only_moves_the_mark(self):
+        self.sc.settle_delegated_tick(
+            token=self.PEER_TOKEN, charge_mu=0, mark={"peer_balance_mu": 1500},
+        )
+
+        self.assertEqual(self.sc.get_delegated_balance(token=self.PEER_TOKEN), 900)
+        self.assertEqual(self.sc.get_delegated_instances()[0]['peer_balance_mu'], 1500)
 
     def test_a_row_with_no_figures_reads_as_zero(self):
         """A NULL column and a token that is simply gone.
@@ -141,8 +142,7 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
 
         self.assertEqual(self.sc.get_delegated_balance(token=self.PEER_TOKEN), 0)
         self.assertEqual(self.sc.get_delegated_balance(token="nope"), 0)
-        self.assertEqual(self.sc.get_delegated_peer_balance(token=self.PEER_TOKEN), 0)
-        self.assertEqual(self.sc.get_delegated_peer_balance(token="nope"), 0)
+        self.assertEqual(self.sc.get_delegated_instances()[0]['peer_balance_mu'], 0)
 
     def test_purging_removes_the_row(self):
         self.sc.purgue_delegated(token=self.PEER_TOKEN)

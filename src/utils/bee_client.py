@@ -332,12 +332,33 @@ class BeeClient:
         )
 
     @staticmethod
-    def get_metrics(channel, token: str) -> celaut_pb2.Metrics:
+    def get_metrics(channel, token: str, timeout: Optional[float] = None) -> celaut_pb2.Metrics:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetMetrics,
             input=celaut_pb2.TokenMessage(token=token),
             indices_serializer=rpc_input("GetMetrics"),
             indices_parser=rpc_output("GetMetrics"),
+            timeout=timeout,
+        )
+
+    @staticmethod
+    def get_balance_statement(channel, client_id: str, token: str = "",
+                              from_seq: int = 0, to_seq: int = 0,
+                              timeout: Optional[float] = None) -> Optional[celaut_pb2.BalanceStatement]:
+        """``Client & BalanceStatementRequest -> BalanceStatement`` (#570). ``token``
+        names a child of the client; empty reads the account of the client. The range
+        is by seq: ``from_seq`` 0 asks only for the head, ``to_seq`` 0 for up to it."""
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetBalanceStatement,
+            input=[
+                celaut_pb2.BalanceStatementRequest(
+                    token=token, from_seq=int(from_seq), to_seq=int(to_seq),
+                ),
+                celaut_pb2.Client(client_id=client_id),
+            ],
+            indices_serializer=rpc_input("GetBalanceStatement"),
+            indices_parser=rpc_output("GetBalanceStatement"),
+            timeout=timeout,
         )
 
     @staticmethod
@@ -425,13 +446,15 @@ class BeeClient:
 
     @staticmethod
     def modify_deposit(
-            channel, difference: celaut_pb2.Amount, service_token: str
+            channel, difference: celaut_pb2.Amount, service_token: str,
+            timeout: Optional[float] = None,
     ) -> Optional[celaut_pb2.ModifyDepositOutput]:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).ModifyDeposit,
             input=celaut_pb2.ModifyDepositInput(difference=difference, service_token=service_token),
             indices_serializer=rpc_input("ModifyDeposit"),
             indices_parser=rpc_output("ModifyDeposit"),
+            timeout=timeout,
         )
 
     @staticmethod

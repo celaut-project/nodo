@@ -65,7 +65,11 @@ def __get_metrics_external(peer_id: str, token: str) -> celaut_pb2.Metrics:
     :return: A protobuf object containing the external metrics retrieved.
     :rtype: celaut_pb2.Metrics
     """
-    return BeeClient.get_metrics(peer_channel(peer_id=peer_id), token=token)
+    # With a limit: the maintenance tick asks for it, and a peer that does not answer
+    # must not stop the tick (#570).
+    from src.manager.statement_check import peer_call_timeout
+    return BeeClient.get_metrics(peer_channel(peer_id=peer_id), token=token,
+                                 timeout=peer_call_timeout())
 
 
 def _in_local_mu(peer_id: str, peer_balance_mu: int) -> int:
@@ -153,9 +157,11 @@ def _fetch_balance_on_peer(peer_id: str, raise_on_error: bool = False) -> int:
                         peer_id=peer_id,
                         token=client_id
                     )
-    except:
+    except Exception as e:
         logger('Error getting our balance from ' + peer_id + '.')
-        if is_peer_available(peer_id=peer_id):
+        # A call that timed out says nothing about the client (#570).
+        from src.manager.statement_check import unreachable
+        if not unreachable(e) and is_peer_available(peer_id=peer_id):
             logger('It is assumed that the client was invalid on peer ' + peer_id)
             sc.delete_external_client(peer_id=peer_id)
         if raise_on_error:

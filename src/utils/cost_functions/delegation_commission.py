@@ -55,6 +55,17 @@ def commission_min_mu() -> int:
     return value if value >= 0 else DEFAULT_MIN_MU
 
 
+def commission_floor_on(amount_mu: int) -> int:
+    """The commission on ``amount_mu``, rounded down.
+
+    For a correction that gives MU back: rounding it up would hand the client more than
+    the commission that was charged on what is being given back.
+    """
+    amount = max(int(amount_mu), 0)
+    numerator, denominator = Decimal(str(commission_percent())).as_integer_ratio()
+    return amount * numerator // (denominator * 100)
+
+
 def commission_on(amount_mu: int, with_minimum: bool = False) -> int:
     """The commission on ``amount_mu`` of consumption, rounded up.
 

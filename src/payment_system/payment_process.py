@@ -910,7 +910,10 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         _r = bool(client_id) and __check_payment_process(
             amount=amount, ledger=ledger_tag, token=token,
             contract=contract, script=script, asset=asset,
-        ) and _manager_module().increase_local_balance_for_client(client_id=client_id, amount_mu=amount)  # TODO allow for containers too.
+        ) and _manager_module().increase_local_balance_for_client(
+            client_id=client_id, amount_mu=amount,
+            detail={"deposit_token": token, "ledger": ledger_tag},
+        )  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
     contract_hash = sha3_256(contract).hexdigest() if contract else None

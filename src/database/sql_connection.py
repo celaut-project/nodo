@@ -12,6 +12,7 @@ from typing import Callable, Dict, Generator, Iterable, List, Mapping, Sequence,
 from src.utils.keyvalue import message_to_json
 
 from protos import celaut_pb2
+from src.database import ledger
 from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
@@ -136,6 +137,36 @@ def _as_int(value) -> int:
         return 0
 
 
+def _balance_of(value) -> int:
+    """A stored balance as a whole number of MU. Through Decimal, because a client row
+    can hold a figure in scientific notation (see ``get_client_balance``)."""
+    try:
+        return int(Decimal(str(value)))
+    except (InvalidOperation, ValueError, TypeError):
+        return 0
+
+
+def _opening_movements(balance_mu: int, movements) -> Tuple[ledger.Movement, ...]:
+    """The first rows of a new instance, checked to add up to the balance it opens with."""
+    movements = tuple(movements) if movements is not None \
+        else (ledger.Movement(ledger.START, int(balance_mu)),)
+    if sum(int(m.amount_mu) for m in movements) != int(balance_mu):
+        raise ValueError(
+            f"The movements of a new instance add up to "
+            f"{sum(int(m.amount_mu) for m in movements)} MU, not to its balance of {balance_mu}."
+        )
+    return movements
+
+
+# Where the balance of an account is, in the order an id is looked up: a client, a
+# live local instance, a live delegated instance (by the alias its father holds).
+_ACCOUNT_TABLES = (
+    ("clients", "id = ?"),
+    ("local_instances", "id = ? AND killed_at IS NULL"),
+    ("delegated_instances", "id = ? AND killed_at IS NULL"),
+)
+
+
 # What a payment row was *for*. NULL means an ordinary payment: a deposit a client
 # paid us, or one we paid a peer. `status` is orthogonal and still says how far it got.
 PAYMENT_PURPOSE_DONATION = "donation"
@@ -253,7 +284,11 @@ class SQLConnection(metaclass=Singleton):
         if not os.path.exists(STORAGE):
             os.makedirs(STORAGE)
         if SQLConnection._connection is None:
-            SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
+            # `timeout`: the CLI writes to the same file from another process, and a
+            # writer waits for the lock instead of failing with `database is locked`.
+            SQLConnection._connection = sqlite3.connect(
+                DATABASE_FILE, check_same_thread=False, timeout=30
+            )
             SQLConnection._connection.row_factory = sqlite3.Row
             _ensure_traceability_tables(SQLConnection._connection)
 
@@ -323,25 +358,392 @@ class SQLConnection(metaclass=Singleton):
                 SQLConnection._connection.rollback()
                 raise e
 
+    # Balances (#570)
+    #
+    # Every write of a balance goes through `_move`, inside `_transaction`: the balance
+    # and its row of `balance_movements` are one fact, so they are written together or
+    # not at all, and the rows of an account add up to its balance.
+
+    def _transaction(self, work: Callable[[sqlite3.Cursor], object]):
+        """Run ``work`` with a cursor, under the connection lock, as one transaction.
+
+        The transaction takes the write lock of the database before the first read
+        (``BEGIN IMMEDIATE``). The lock of this class is the lock of one process, and
+        the CLI (``credit_client``, ``burnall``, ``pay``) writes from another: with the
+        default, a transaction begins at its first write, and a balance or a seq that
+        ``work`` read before it could be stale by then.
+        """
+        with SQLConnection._lock:
+            connection = SQLConnection._connection
+            try:
+                if connection.in_transaction:
+                    connection.commit()
+                connection.execute('BEGIN IMMEDIATE')
+                result = work(connection.cursor())
+                connection.commit()
+                return result
+            except Exception:
+                connection.rollback()
+                raise
+
+    @staticmethod
+    def _append_movement(cursor, account_id: str, amount_mu: int, balance_after_mu: int,
+                         kind: str, instance_token: Optional[str] = None,
+                         detail: Optional[Mapping] = None) -> int:
+        """Write the next row of ``account_id`` and return its seq.
+
+        The row hangs from the one before it: ``prev_hash`` is its hash, or the genesis
+        hash of the account for the first row. ``instance_token`` is the token of the
+        instance that the row concerns; the row keeps only its ``instance_ref``.
+        """
+        if kind not in ledger.KINDS:
+            raise ValueError(f"Unknown kind of movement: {kind!r}")
+        last = cursor.execute(
+            'SELECT seq, hash FROM balance_movements WHERE account_id = ? '
+            'ORDER BY seq DESC LIMIT 1', (account_id,)
+        ).fetchone()
+        seq = int(last[0]) + 1 if last else 1
+        prev_hash = last[1] if last else ledger.genesis_hash(account_id)
+        ts = int(time.time())
+        ref = ledger.instance_ref(instance_token) if instance_token else None
+        text = ledger.canonical_detail(detail)
+        cursor.execute('''
+            INSERT INTO balance_movements
+                (account_id, seq, ts, amount_mu, balance_after_mu, kind, instance_ref,
+                 detail, prev_hash, hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (account_id, seq, ts, str(int(amount_mu)), str(int(balance_after_mu)), kind,
+              ref, text, prev_hash,
+              ledger.movement_hash(prev_hash, seq, ts, amount_mu, balance_after_mu, kind,
+                                   ref, text)))
+        return seq
+
+    def _move(self, cursor, account_id: str, amount_mu: int, kind: str, *,
+              allow_debt: bool = True, instance_token: Optional[str] = None,
+              detail: Optional[Mapping] = None) -> Optional[int]:
+        """Add ``amount_mu`` (signed) to the balance of ``account_id``, with its row.
+
+        Returns the seq of the row, or None for an amount of 0: nothing moved, so
+        nothing is written. Raises ``NoSuchAccount``, or ``InsufficientBalance`` for a
+        charge that leaves the balance below 0 when ``allow_debt`` is off.
+        """
+        amount_mu = int(amount_mu)
+        for table, where in _ACCOUNT_TABLES:
+            columns = "balance_mu, last_usage" if table == "clients" else "balance_mu"
+            row = cursor.execute(
+                f'SELECT {columns} FROM {table} WHERE {where}', (account_id,)
+            ).fetchone()
+            if row is not None:
+                break
+        else:
+            raise ledger.NoSuchAccount(account_id)
+        if amount_mu == 0:
+            return None
+        balance_mu = _balance_of(row['balance_mu']) + amount_mu
+        if amount_mu < 0 and balance_mu < 0 and not allow_debt:
+            raise ledger.InsufficientBalance(
+                f"{account_id} holds {format_mu(balance_mu - amount_mu)}, "
+                f"needed {format_mu(-amount_mu)}."
+            )
+        if table == "clients":
+            last_usage = row['last_usage']
+            # A funded client is an active one: topping up past the threshold clears
+            # the expiry clock, and spending down to zero starts it.
+            if amount_mu > 0 and last_usage and balance_mu >= CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION:
+                last_usage = None
+            elif amount_mu < 0 and balance_mu == 0 and last_usage is None:
+                last_usage = time.time()
+            cursor.execute(
+                'UPDATE clients SET balance_mu = ?, last_usage = ? WHERE id = ?',
+                (str(balance_mu), last_usage, account_id),
+            )
+        else:
+            cursor.execute(
+                f'UPDATE {table} SET balance_mu = ? WHERE {where}', (str(balance_mu), account_id)
+            )
+        return self._append_movement(
+            cursor, account_id, amount_mu, balance_mu, kind, instance_token, detail
+        )
+
+    def move_balance(self, account_id: str, amount_mu: int, kind: str, *,
+                     allow_debt: bool = True, instance_token: Optional[str] = None,
+                     detail: Optional[Mapping] = None) -> Optional[int]:
+        """Add ``amount_mu`` (signed) to the balance of a client or an instance.
+
+        ``kind``, ``instance_token`` and ``detail`` are the row of the ledger that says
+        why. Returns the seq of the row (None for 0). Raises ``ledger.NoSuchAccount``
+        and ``ledger.InsufficientBalance``; see ``_move``.
+        """
+        return self._transaction(lambda cursor: self._move(
+            cursor, account_id, amount_mu, kind, allow_debt=allow_debt,
+            instance_token=instance_token, detail=detail,
+        ))
+
+    def transfer(self, source_id: str, target_id: str, amount_mu: int, kind: str, *,
+                 child: str, allow_debt: bool = False) -> None:
+        """Move ``amount_mu`` from one account to another: two rows, one transaction.
+
+        For ``ModifyDeposit`` between an instance and its father. ``child`` is the
+        instance: the row of the father names it, as every row of a father about a
+        child does. Raises as ``_move`` does, and then neither balance moved.
+        """
+        def work(cursor):
+            self._move(cursor, source_id, -int(amount_mu), kind, allow_debt=allow_debt,
+                       instance_token=None if source_id == child else child)
+            self._move(cursor, target_id, int(amount_mu), kind,
+                       instance_token=None if target_id == child else child)
+
+        self._transaction(work)
+
+    def _append_opening(self, cursor, account_id: str, movements) -> None:
+        """Write the first rows of a new account, with the balance after each."""
+        balance_mu = 0
+        for movement in movements:
+            if int(movement.amount_mu) == 0:
+                continue
+            balance_mu += int(movement.amount_mu)
+            self._append_movement(cursor, account_id, int(movement.amount_mu), balance_mu,
+                                  movement.kind, movement.instance_token, movement.detail)
+
+    def bind_child(self, account_id: str, starts_seq: int, instance_token: str) -> int:
+        """Say that the child of a ``child_start`` exists: write a ``child_bound`` row.
+
+        A start charges the father before the child exists, and a row is never
+        changed, so the child comes in a row of its own: it moves nothing, names the
+        child by ``instance_ref`` and the ``child_start`` by ``detail.starts_seq``.
+        Returns the seq of the new row.
+        """
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT balance_after_mu FROM balance_movements WHERE account_id = ? '
+                'ORDER BY seq DESC LIMIT 1', (account_id,)
+            ).fetchone()
+            if row is None:
+                raise ledger.NoSuchAccount(account_id)
+            return self._append_movement(
+                cursor, account_id, 0, _balance_of(row['balance_after_mu']), ledger.CHILD_BOUND,
+                instance_token=instance_token, detail={"starts_seq": str(int(starts_seq))},
+            )
+
+        return self._transaction(work)
+
+    def settle_stop(self, account_id: str, reason: str, *, delegated: bool = False,
+                    father_id: Optional[str] = None, credit: bool = True) -> Optional[int]:
+        """Settle a stopped instance in one transaction: refund, then mark it dead.
+
+        What the instance has left goes back to its father, and the instance dies, as
+        one fact. The balance is read inside the transaction, so a charge of a tick or a
+        tunnel that lands meanwhile is either before it (and the father gets less) or
+        after the death (and is refused): no MU are made out of a stale read.
+
+        Two rows when the father gets the leftover: a negative ``refund`` on the
+        instance, a positive one on the father, who names the instance. The instance
+        dies with nothing on it, unless it was in debt, which stays as it was. When
+        the father is gone the instance still dies, and its ``refund`` says
+        ``detail.lost = father_gone``; with ``credit`` off, ``detail.to = caller``, and
+        the figure is for the caller of ``stop_instance`` to settle.
+
+        ``account_id`` is the id of the account: the instance id of a local instance,
+        or the alias of a delegated one.
+
+        Returns the leftover (0 if there was none), or None when the instance was
+        dead already or does not exist.
+        """
+        table, where = (
+            ("delegated_instances", "id = ? AND killed_at IS NULL") if delegated
+            else ("local_instances", "id = ? AND killed_at IS NULL")
+        )
+
+        def work(cursor):
+            row = cursor.execute(
+                f'SELECT balance_mu FROM {table} WHERE {where}', (account_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            leftover = max(_balance_of(row['balance_mu']), 0)
+            if leftover > 0:
+                father_exists = bool(credit and father_id and self._account_exists(cursor, father_id))
+                detail = None
+                if not credit:
+                    detail = {"to": "caller"}
+                elif not father_exists:
+                    detail = {"lost": "father_gone"}
+                self._move(cursor, account_id, -leftover, ledger.REFUND, detail=detail)
+                if father_exists:
+                    self._move(cursor, father_id, leftover, ledger.REFUND,
+                               instance_token=account_id)
+            cursor.execute(
+                f'UPDATE {table} SET killed_at = CURRENT_TIMESTAMP, death_reason = ? WHERE {where}',
+                (reason, account_id),
+            )
+            return leftover
+
+        leftover = self._transaction(work)
+        if leftover is not None and not delegated:
+            self._forget_consumption(account_id)
+        return leftover
+
+    def account_exists(self, account_id: Optional[str]) -> bool:
+        """Whether a client, a live local instance or a live delegated one has this id."""
+        if not account_id:
+            return False
+        return self._transaction(lambda cursor: self._account_exists(cursor, account_id))
+
+    @staticmethod
+    def _account_exists(cursor, account_id: str) -> bool:
+        for table, where in _ACCOUNT_TABLES:
+            if cursor.execute(f'SELECT 1 FROM {table} WHERE {where}', (account_id,)).fetchone():
+                return True
+        return False
+
+    def _forget_consumption(self, id: str, killed: bool = True) -> None:
+        """What a local instance leaves when it dies: its burn-rate rows and window.
+
+        ``killed`` is whether this call killed it: only then the room it freed changes.
+        """
+        if killed:
+            _local_capacity_changed()
+        self._execute('DELETE FROM instance_consumption WHERE instance_id = ?', (id,))
+        self._execute('DELETE FROM instance_energy WHERE instance_id = ?', (id,))
+        with SQLConnection._consumption_lock:
+            SQLConnection._consumption_windows.pop(id, None)
+
+    def balance_statement(self, account_id: str, payer_id: str, *, from_seq: int = 0,
+                          to_seq: int = 0, max_rows: int = 0,
+                          price: Callable[[int], int] = lambda rows: 0,
+                          allow_debt: bool = True) -> dict:
+        """Charge ``payer_id`` for a statement of ``account_id`` and read it, in one go.
+
+        The rows are those with a seq from ``from_seq`` (0: none, only the head of the
+        account) to ``to_seq`` (0: up to the head), in ascending order, and never more
+        than ``max_rows``: when there are more, they are the first ones, and the caller
+        asks again from the last seq it got. ``price`` gives the cost for a number of
+        rows returned. It is charged to ``payer_id`` as a ``statement_query`` row, in
+        the same transaction as the read.
+
+        When the payer reads its own account and the answer reaches the head, that
+        charge is the last row and the new head: the statement adds up to the balance at
+        the moment of the answer. The charge is not counted in ``max_rows``. When the
+        answer stops short of the head, the charge is only in the head, and the next
+        page has it.
+
+        Returns ``{"movements": [...], "balance_mu": int, "head_seq": int,
+        "head_hash": str, "oldest_seq": int, "ts": int}``. Raises
+        ``ledger.NoSuchAccount`` and ``ledger.InsufficientBalance``.
+        """
+        def work(cursor):
+            now = int(time.time())
+            if not self._account_exists(cursor, account_id):
+                raise ledger.NoSuchAccount(account_id)
+            columns = ('seq, ts, amount_mu, balance_after_mu, kind, instance_ref, detail, '
+                       'prev_hash, hash')
+            head = cursor.execute(
+                'SELECT MAX(seq) FROM balance_movements WHERE account_id = ?', (account_id,)
+            ).fetchone()[0] or 0
+            own = account_id == payer_id
+            rows = []
+            if int(from_seq) > 0:
+                where, params = 'account_id = ? AND seq >= ?', [account_id, int(from_seq)]
+                if int(to_seq) > 0:
+                    where += ' AND seq <= ?'
+                    params.append(int(to_seq))
+                rows = [dict(row) for row in cursor.execute(
+                    f'SELECT {columns} FROM balance_movements WHERE {where} '
+                    f'ORDER BY seq ASC LIMIT ?', (*params, int(max_rows) if max_rows > 0 else -1),
+                ).fetchall()]
+            seq = self._move(
+                cursor, payer_id, -int(price(len(rows) + (1 if own else 0))),
+                ledger.STATEMENT_QUERY, allow_debt=allow_debt,
+                instance_token=None if own else account_id,
+                # The range names the read: a reader whose answer was lost finds the
+                # charge of that read by it, and prices it by the rows before it.
+                detail={"rows": str(len(rows)), "from_seq": str(int(from_seq)),
+                        "to_seq": str(int(to_seq))},
+            )
+            reaches_head = (rows[-1]["seq"] == head) if rows else int(from_seq) > head
+            if (own and seq is not None and int(from_seq) > 0 and int(from_seq) <= seq
+                    and reaches_head and (int(to_seq) == 0 or int(to_seq) >= seq)):
+                rows.append(dict(cursor.execute(
+                    f'SELECT {columns} FROM balance_movements '
+                    f'WHERE account_id = ? AND seq = ?', (account_id, seq),
+                ).fetchone()))
+            last = cursor.execute(
+                'SELECT seq, hash FROM balance_movements WHERE account_id = ? '
+                'ORDER BY seq DESC LIMIT 1', (account_id,)
+            ).fetchone()
+            oldest = cursor.execute(
+                'SELECT MIN(seq) FROM balance_movements WHERE account_id = ?', (account_id,)
+            ).fetchone()[0] or 0
+            for table, where_account in _ACCOUNT_TABLES:
+                balance_row = cursor.execute(
+                    f'SELECT balance_mu FROM {table} WHERE {where_account}', (account_id,)
+                ).fetchone()
+                if balance_row is not None:
+                    break
+            return {"movements": rows, "balance_mu": _balance_of(balance_row['balance_mu']),
+                    "head_seq": int(last['seq']) if last else 0,
+                    "head_hash": last['hash'] if last else ledger.genesis_hash(account_id),
+                    "oldest_seq": int(oldest), "ts": now}
+
+        return self._transaction(work)
+
+    def delegated_account_exists(self, account_id: str) -> bool:
+        """Whether ``account_id`` is a live instance that this node delegated to a peer."""
+        return self._execute(
+            'SELECT 1 FROM delegated_instances WHERE id = ? AND killed_at IS NULL', (account_id,)
+        ).fetchone() is not None
+
+    def prune_balance_movements(self, max_age_days: int) -> int:
+        """Delete the rows older than ``max_age_days``. Returns how many.
+
+        The last row of a live account stays, whatever its age: the next row counts its
+        seq from it and hangs from its hash, and a seq that went back to 1 would read as
+        a ledger that lost its history.
+        """
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        cursor = self._execute('''
+            DELETE FROM balance_movements
+            WHERE ts < ?
+              AND NOT (
+                seq = (SELECT MAX(m.seq) FROM balance_movements m
+                       WHERE m.account_id = balance_movements.account_id)
+                AND (
+                  account_id IN (SELECT id FROM clients)
+                  OR account_id IN (SELECT id FROM local_instances WHERE killed_at IS NULL)
+                  OR account_id IN (SELECT id FROM delegated_instances WHERE killed_at IS NULL)
+                )
+              )
+        ''', (cutoff,))
+        return cursor.rowcount
+
     # Client Methods
 
     def add_client(self, client_id: str, balance_mu: int, last_usage: Optional[float],
-                   unmetered: bool = False):
+                   unmetered: bool = False, reason: str = "free_tier"):
         """
-        Adds a client to the database, updating if a conflict occurs.
+        Adds a client to the database. A client id that exists already raises.
 
         Args:
             client_id (str): The ID of the client.
-            balance_mu (int): Its starting balance, in MU.
+            balance_mu (int): Its starting balance, in MU. Written in the ledger as a
+                ``credit``, because nobody paid it in.
             last_usage (Optional[float]): The last usage time.
             unmetered (bool): Never charge this client. Set for the node's own dev
                 clients, which used to express the same thing by holding a balance of
                 1e256 -- a flag written as a number.
+            reason (str): Why the client gets ``balance_mu``: the ``detail`` of the
+                credit.
         """
-        self._execute('''
-            INSERT INTO clients (id, balance_mu, last_usage, unmetered)
-            VALUES (?, ?, ?, ?)
-        ''', (client_id, str(balance_mu), last_usage, int(bool(unmetered))))
+        def work(cursor):
+            cursor.execute('''
+                INSERT INTO clients (id, balance_mu, last_usage, unmetered)
+                VALUES (?, ?, ?, ?)
+            ''', (client_id, str(balance_mu), last_usage, int(bool(unmetered))))
+            if int(balance_mu):
+                self._append_movement(cursor, client_id, int(balance_mu), int(balance_mu),
+                                      ledger.CREDIT, detail={"reason": reason})
+
+        self._transaction(work)
 
     def client_is_unmetered(self, client_id: str) -> bool:
         """True for a client the node never charges (its own dev clients)."""
@@ -450,36 +852,6 @@ class SQLConnection(metaclass=Singleton):
             DELETE FROM clients WHERE id = ?
         ''', (client_id,))
 
-    def add_balance(self, client_id: str, balance_mu: int = 0):
-        """
-        Adds balance_mu to a client's balance.
-
-        Args:
-            client_id (str): The ID of the client.
-            balance_mu (int): The amount of balance_mu to add.
-        """
-        current, _last_usage, _ = self.get_client_balance(client_id)
-        total = current + balance_mu
-        # A funded client is an active one: topping up past the threshold clears the
-        # expiry clock.
-        if _last_usage and total >= CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION:
-            _last_usage = None
-        self.__update_client(client_id, total, _last_usage)
-
-    def reduce_balance(self, client_id: str, balance_mu: int):
-        """
-        Reduces balance_mu from a client's balance.
-
-        Args:
-            client_id (str): The ID of the client.
-            balance_mu (int): The amount of balance_mu to reduce.
-        """
-        _gas, _last_usage, _ = self.get_client_balance(client_id)
-        total_gas = _gas - balance_mu
-        if total_gas == 0 and _last_usage is None:
-            _last_usage = time.time()
-        self.__update_client(client_id, total_gas, _last_usage)
-
     def client_expired(self, client_id: str) -> bool:
         """
         Checks if a client has expired.
@@ -492,13 +864,6 @@ class SQLConnection(metaclass=Singleton):
         """
         _gas, _last_usage, _ = self.get_client_balance(client_id)
         return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
-
-    def __update_client(self, client_id: str, balance_mu: int, last_usage: float):
-        """Updates the balance_mu and last usage time for a client."""
-        balance_mu = str(balance_mu)
-        self._execute('''
-            UPDATE clients SET balance_mu = ?, last_usage = ? WHERE id = ?
-        ''', (balance_mu, last_usage, client_id))
 
     def get_balance_by_client_id(self, id: str) -> int:
         """
@@ -537,9 +902,10 @@ class SQLConnection(metaclass=Singleton):
         cpu_quota: int = 0,
         arch: Optional[str] = None,
         launch_bp: Optional[Mapping[str, int]] = None,
+        movements: Optional[Sequence[ledger.Movement]] = None,
     ):
         """
-        Adds an internal container to the database.
+        Adds an internal container to the database, with the first rows of its account.
 
         The four resource columns are what the maintenance tick prices this instance by
         (``src/manager/maintain.py`` reads them back through :meth:`get_sys_req`), so
@@ -575,19 +941,28 @@ class SQLConnection(metaclass=Singleton):
                 (``execution_cost.launch_price_bp``). The tick bounds its charge
                 against it when ``pricing.MAX_PRICE_VOLATILITY`` is on. A free launch
                 is 0 for each. None stores NULL, which means no bound.
+            movements (Optional[Sequence[ledger.Movement]]): How the instance came to
+                hold ``balance_mu``, in order: the ``start`` and the ``build``. They
+                must add up to ``balance_mu``. None is one ``start`` of ``balance_mu``.
         """
         launch_bp = launch_bp or {}
-        # `launched_at` is written here rather than left to a column default: SQLite
-        # refuses a non-constant default on `ALTER TABLE ADD COLUMN`, so a migrated
-        # database's column defaults to NULL however the fresh schema is declared.
-        # Writing it at the one insert is what makes the two agree.
-        self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
-              disk_space, int(cpu_period or 0), int(cpu_quota or 0),
-              serialized_instance, service_id, virtualizer, envs, arch,
-              launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk")))
+        movements = _opening_movements(balance_mu, movements)
+
+        def work(cursor):
+            # `launched_at` is written here rather than left to a column default: SQLite
+            # refuses a non-constant default on `ALTER TABLE ADD COLUMN`, so a migrated
+            # database's column defaults to NULL however the fresh schema is declared.
+            # Writing it at the one insert is what makes the two agree.
+            cursor.execute('''
+                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
+                  disk_space, int(cpu_period or 0), int(cpu_quota or 0),
+                  serialized_instance, service_id, virtualizer, envs, arch,
+                  launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk")))
+            self._append_opening(cursor, container_id, movements)
+
+        self._transaction(work)
         _local_capacity_changed()
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
@@ -917,55 +1292,6 @@ class SQLConnection(metaclass=Singleton):
                 last_refresh = excluded.last_refresh
         ''', (id, average, sample_count))
 
-    def update_instance_balance(self, id: str, balance_mu: int):
-        """
-        Updates the balance_mu amount for a container.
-
-        Args:
-            id (str): The id of the container.
-            balance_mu (int): The new balance_mu amount.
-        """
-        
-        balance_mu = str(balance_mu)
-        self._execute('''
-            UPDATE local_instances SET balance_mu = ? WHERE id = ? AND killed_at IS NULL
-        ''', (balance_mu, id))
-
-    def spend_instance_balance(self, id: str, amount_mu: int, allow_debt: bool) -> Optional[bool]:
-        """Atomically deduct ``amount_mu`` from a container's balance.
-
-        The read, the sufficiency check and the write happen under a single hold
-        of the connection lock, so two threads billing the same instance (e.g.
-        the two directions of a service tunnel) can never both read the same
-        balance and clobber each other's deduction — the lost-update race that a
-        separate ``get_instance_balance`` + ``update_instance_balance`` allows.
-
-        Returns True when the balance_mu was spent, False when the balance is
-        insufficient and debt is not allowed, and None when the container does
-        not exist. ``balance_mu`` is stored as TEXT, so the arithmetic is done in
-        Python (``int``) rather than in SQL to avoid affinity surprises.
-        """
-        amount_mu = int(amount_mu)
-        with SQLConnection._lock:
-            try:
-                cursor = SQLConnection._connection.cursor()
-                cursor.execute('SELECT balance_mu FROM local_instances WHERE id = ? AND killed_at IS NULL', (id,))
-                row = cursor.fetchone()
-                if row is None:
-                    return None
-                current = int(row['balance_mu'])
-                if current < amount_mu and not allow_debt:
-                    return False
-                cursor.execute(
-                    'UPDATE local_instances SET balance_mu = ? WHERE id = ? AND killed_at IS NULL',
-                    (str(current - amount_mu), id),
-                )
-                SQLConnection._connection.commit()
-                return True
-            except sqlite3.Error as e:
-                SQLConnection._connection.rollback()
-                raise e
-
     def internal_instance_exists(self, id: str) -> bool:
         """
         Checks if a internal instance exists in the database.
@@ -1014,12 +1340,7 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ? AND killed_at IS NULL
         ''', (reason, id))
         killed = cursor.rowcount > 0
-        if killed:
-            _local_capacity_changed()
-        self._execute('DELETE FROM instance_consumption WHERE instance_id = ?', (id,))
-        self._execute('DELETE FROM instance_energy WHERE instance_id = ?', (id,))
-        with SQLConnection._consumption_lock:
-            SQLConnection._consumption_windows.pop(id, None)
+        self._forget_consumption(id, killed)
         return killed
 
     def get_dead_local_instances(self) -> List[dict]:
@@ -2187,18 +2508,61 @@ class SQLConnection(metaclass=Singleton):
             return False
 
         try:
-            self._execute('''
-                UPDATE peer SET remote_client_id = ? WHERE id = ?
-            ''', (client_id, peer_id))
+            # A new client is a new account on the peer, which starts from its genesis:
+            # the mark goes with it, so that it is never older than the account
+            # (#570). The same client again changes nothing.
+            def work(cursor):
+                row = cursor.execute(
+                    'SELECT remote_client_id FROM peer WHERE id = ?', (peer_id,)).fetchone()
+                if row is not None and row['remote_client_id'] == client_id:
+                    return
+                cursor.execute('UPDATE peer SET remote_client_id = ? WHERE id = ?',
+                               (client_id, peer_id))
+                self._reset_statement_state(
+                    cursor, peer_id, ledger.genesis_hash(client_id), int(time.time()))
+
+            self._transaction(work)
             logger.LOGGER(f'Associated external client {client_id} with peer {peer_id}')
             return True
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
 
+    @staticmethod
+    def _reset_statement_state(cursor, peer_id: str, genesis: Optional[str], ts: Optional[int]) -> None:
+        """The mark and the counters of the statement of our account on ``peer_id``, for
+        an account that has no movements yet (``genesis`` is the hash of its genesis), or
+        for none (``genesis`` None)."""
+        cursor.execute('''
+            UPDATE peer SET statement_seq = ?, statement_hash = ?, statement_balance_mu = ?,
+                            statement_ts = ?, statement_ticks = 0, statement_reads = 0,
+                            statement_rows_priced = 0, statement_queries_verified = 0,
+                            statement_queries_verified_mu = '0'
+            WHERE id = ?
+        ''', (None if genesis is None else 0, genesis, None if genesis is None else '0', ts,
+              peer_id))
+        cursor.execute('DELETE FROM statement_failed_reads WHERE peer_id = ?', (peer_id,))
+
+    def peers_with_client(self) -> List[str]:
+        """The peers where this node holds a client: each has an account to check."""
+        return [row['id'] for row in self._execute(
+            'SELECT id FROM peer WHERE remote_client_id IS NOT NULL').fetchall()]
+
     # The delegated_instances key column is `token_delegation` (the token as the
     # remote peer knows it); `id` holds our hashed alias of it. There is no
     # `token` column, and the payload column is `serialized_instance`.
+
+    def father_of(self, account_id: str) -> Optional[str]:
+        """The father of a live instance of this node, by the token its father holds:
+        a local instance, or the alias of a delegated one. None for any other id."""
+        for table in ("local_instances", "delegated_instances"):
+            row = self._execute(
+                f'SELECT father_id FROM {table} WHERE id = ? AND killed_at IS NULL',
+                (account_id,),
+            ).fetchone()
+            if row is not None:
+                return row['father_id']
+        return None
 
     def get_external_father_id(self, token: str) -> str:
         """
@@ -2317,20 +2681,30 @@ class SQLConnection(metaclass=Singleton):
             (f"-{max(1, int(keep_days))} days",),
         )
 
-    def get_delegated_instances(self) -> List[dict]:
+    def get_delegated_row(self, token: str) -> Optional[dict]:
+        """A live delegated instance by the token that the peer knows, as
+        ``get_delegated_instances`` gives it; None when it is gone."""
+        rows = self.get_delegated_instances(token=token)
+        return rows[0] if rows else None
+
+    def get_delegated_instances(self, token: Optional[str] = None) -> List[dict]:
         """
         Fetches every delegated instance, for restoring state on startup.
 
         Returns:
             List[dict]: token (as the peer knows it), id (our hashed alias),
                 peer_id, father_id, the serialized instance, the deposit left on
-                the row (our MU) and the peer's own last-read figure (its MU).
+                the row (our MU), the peer's own last-read figure (its MU) and the
+                mark of the statement of the child on the peer (#570).
         """
         result = self._execute('''
             SELECT token_delegation, id, peer_id, father_id, serialized_instance,
-                   balance_mu, peer_balance_mu
+                   balance_mu, peer_balance_mu, peer_statement_seq, peer_statement_ts,
+                   peer_statement_hash, verified_consumption_peer_mu,
+                   verified_father_net_peer_mu, father_net_peer_mu, charged_peer_mu
             FROM delegated_instances WHERE killed_at IS NULL
-        ''')
+            ''' + ('AND token_delegation = ?' if token is not None else ''),
+            (token,) if token is not None else ())
         return [
             {
                 'token': row[0],
@@ -2340,6 +2714,13 @@ class SQLConnection(metaclass=Singleton):
                 'serialized_instance': row[4],
                 'balance_mu': _as_int(row[5]),
                 'peer_balance_mu': _as_int(row[6]),
+                'peer_statement_seq': row[7],
+                'peer_statement_ts': row[8],
+                'peer_statement_hash': row[9],
+                'verified_consumption_peer_mu': _as_int(row[10]),
+                'verified_father_net_peer_mu': _as_int(row[11]),
+                'father_net_peer_mu': _as_int(row[12]),
+                'charged_peer_mu': _as_int(row[13]),
             }
             for row in result.fetchall()
         ]
@@ -2472,9 +2853,11 @@ class SQLConnection(metaclass=Singleton):
             peer_id (str): The ID of the peer.
         """
         try:
-            self._execute('''
-                UPDATE peer SET remote_client_id = NULL WHERE id = ?
-            ''', (peer_id,))
+            def work(cursor):
+                cursor.execute('UPDATE peer SET remote_client_id = NULL WHERE id = ?', (peer_id,))
+                self._reset_statement_state(cursor, peer_id, None, None)
+
+            self._transaction(work)
             logger.LOGGER(f'Successfully deleted external client associated with peer {peer_id}')
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
@@ -2729,13 +3112,16 @@ class SQLConnection(metaclass=Singleton):
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str,
                                peer_id: str, serialized_instance: str, service_id: str,
-                               balance_mu: int = 0, peer_balance_mu: int = 0):
+                               balance_mu: int = 0, peer_balance_mu: int = 0,
+                               movements: Optional[Sequence[ledger.Movement]] = None,
+                               sent_peer_mu: int = 0, mark: Optional[Mapping] = None):
         """
-        Adds an external container to the database.
+        Adds an external container to the database, with the first rows of its account.
 
         Args:
             father_id (str): The father ID.
-            encrypted_external_token (str): The encrypted external token.
+            encrypted_external_token (str): The encrypted external token: the token
+                the father holds, and the id of the account.
             external_token (str): The external token.
             peer_id (str): The peer ID.
             serialized_instance (str): Serialized celaut instance.
@@ -2743,17 +3129,34 @@ class SQLConnection(metaclass=Singleton):
             balance_mu (int): The deposit the father paid for this instance, in our MU.
             peer_balance_mu (int): What the peer's own books say the instance holds,
                 in the peer's MU -- the mark the maintenance tick measures against.
+            movements (Optional[Sequence[ledger.Movement]]): How the instance came to
+                hold ``balance_mu``: the ``start``, the ``commission``, the ``build``.
+                They must add up to ``balance_mu``. None is one ``start``.
+            sent_peer_mu (int): The ``initial_mu`` sent to the peer, in its MU.
+            mark (Optional[Mapping]): The movement of the child's statement on the
+                peer that ``peer_balance_mu`` is the balance after: ``seq``, ``hash``
+                and ``ts`` (see `delegated_instances`). None when the statement
+                could not be read.
         """
-        # `launched_at` written explicitly, for the same reason as the local insert:
-        # a column added by migration cannot carry CURRENT_TIMESTAMP as its default.
-        self._execute('''
-            INSERT INTO delegated_instances (
-                token_delegation, id, peer_id, father_id, serialized_instance, service_id,
-                balance_mu, peer_balance_mu, launched_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id,
-              str(int(balance_mu)), str(int(peer_balance_mu))))
+        movements = _opening_movements(balance_mu, movements)
+        mark = mark or {}
+
+        def work(cursor):
+            # `launched_at` written explicitly, for the same reason as the local insert:
+            # a column added by migration cannot carry CURRENT_TIMESTAMP as its default.
+            cursor.execute('''
+                INSERT INTO delegated_instances (
+                    token_delegation, id, peer_id, father_id, serialized_instance, service_id,
+                    balance_mu, peer_balance_mu, peer_statement_seq, peer_statement_ts,
+                    peer_statement_hash, sent_peer_mu, launched_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id,
+                  str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
+                  mark.get("hash"), str(int(sent_peer_mu))))
+            self._append_opening(cursor, encrypted_external_token, movements)
+
+        self._transaction(work)
 
     def get_delegated_balance(self, token: str) -> int:
         """What is left of a delegated instance's deposit, in our MU.
@@ -2771,63 +3174,458 @@ class SQLConnection(metaclass=Singleton):
         row = result.fetchone()
         return _as_int(row['balance_mu']) if row else 0
 
-    def update_delegated_balance(self, token: str, balance_mu: int):
-        """Set what is left of a delegated instance's deposit, in our MU.
+    def settle_delegated_tick(self, token: str, charge_mu: int, mark: Mapping,
+                              detail: Optional[Mapping] = None, refund_mu: int = 0
+                              ) -> Optional[int]:
+        """Charge (or give back to) a delegated instance and move its mark, in one
+        transaction.
+
+        The charge and the mark are one fact. What the maintenance tick charges is what
+        the peer metered since the mark, so a charge without its mark bills the same
+        consumption again on the next tick, and a mark without the charge writes it
+        off. ``mark`` holds ``peer_balance_mu`` and, when a statement was read,
+        ``seq``, ``hash`` and ``ts`` (see `delegated_instances`); a key that is not
+        there is written as NULL. The charge is taken whole, debt or not: the caller
+        decided what the instance owes.
+
+        ``mark`` may also hold the totals of `delegated_instances`:
+        ``verified_consumption`` and ``verified_father_net`` (what they become) and
+        ``charged_delta`` (what is added to ``charged_peer_mu``, in the MU of the peer,
+        and is negative for a correction that gives back). A total that is not there is
+        left as it is.
+
+        ``refund_mu`` is MU that goes back to the instance, as a ``maintenance`` row with
+        ``adjustment`` in its detail: a charge that a later reading showed to be too
+        much. It is never given together with a charge.
+
+        Returns the seq of the row that was written, or None when nothing was.
 
         Args:
             token (str): The token of the external container.
-            balance_mu (int): The new balance.
+            charge_mu (int): What the instance consumed, in our MU, with the commission.
+            mark (Mapping): The new mark.
+            detail (Optional[Mapping]): The cause of the charge.
+            refund_mu (int): What goes back to it, in our MU.
         """
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT id, charged_peer_mu FROM delegated_instances '
+                'WHERE token_delegation = ? AND killed_at IS NULL', (token,),
+            ).fetchone()
+            if row is None:
+                raise ledger.NoSuchAccount(token)
+            seq = None
+            if int(charge_mu) > 0:
+                seq = self._move(cursor, row['id'], -int(charge_mu), ledger.MAINTENANCE,
+                                 detail=detail)
+            elif int(refund_mu) > 0:
+                seq = self._move(cursor, row['id'], int(refund_mu), ledger.MAINTENANCE,
+                                 detail=dict(detail or {}, adjustment="1"))
+            totals, params = '', []
+            if "verified_consumption" in mark:
+                totals += ', verified_consumption_peer_mu = ?'
+                params.append(str(int(mark["verified_consumption"])))
+            if "verified_father_net" in mark:
+                totals += ', verified_father_net_peer_mu = ?'
+                params.append(str(int(mark["verified_father_net"])))
+            if "charged_delta" in mark:
+                totals += ', charged_peer_mu = ?'
+                params.append(str(_as_int(row['charged_peer_mu']) + int(mark["charged_delta"])))
+            cursor.execute(f'''
+                UPDATE delegated_instances
+                SET peer_balance_mu = ?, peer_statement_seq = ?, peer_statement_ts = ?,
+                    peer_statement_hash = ?{totals}
+                WHERE token_delegation = ? AND killed_at IS NULL
+            ''', (str(int(mark["peer_balance_mu"])), mark.get("seq"), mark.get("ts"),
+                  mark.get("hash"), *params, token))
+            return seq
+
+        return self._transaction(work)
+
+    def move_delegated_deposit(self, alias: str, father_id: str, amount_mu: int,
+                               peer_mu: int) -> None:
+        """A ``ModifyDeposit`` of a delegated instance, once the peer has moved its side:
+        the rows here and the net that this node has sent, in one transaction.
+
+        ``amount_mu`` is the change of the deposit in our MU: a top-up (positive) is a row
+        on the instance, a withdrawal (negative) is one on the instance and one on the
+        father, who names the instance. ``peer_mu`` is what travelled to the peer, in its
+        MU and signed the same way, added to ``father_net_peer_mu``. The tick takes that
+        net out of what the balance of the child fell by, so it is written with the rows
+        and never apart from them.
+        """
+        def work(cursor):
+            if int(amount_mu) < 0:
+                self._move(cursor, alias, int(amount_mu), ledger.WITHDRAWAL)
+                self._move(cursor, father_id, -int(amount_mu), ledger.WITHDRAWAL,
+                           instance_token=alias)
+            else:
+                self._move(cursor, alias, int(amount_mu), ledger.TOP_UP)
+            row = cursor.execute(
+                'SELECT father_net_peer_mu FROM delegated_instances '
+                'WHERE id = ? AND killed_at IS NULL', (alias,)
+            ).fetchone()
+            cursor.execute(
+                'UPDATE delegated_instances SET father_net_peer_mu = ? '
+                'WHERE id = ? AND killed_at IS NULL',
+                (str(_as_int(row['father_net_peer_mu']) + int(peer_mu)), alias))
+
+        self._transaction(work)
+
+    def child_statement_due(self, token: str, every: int) -> bool:
+        """Count one tick for the statement of a delegated child; True once ``every``
+        have passed. The count goes back to 0 when it says True."""
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT statement_ticks FROM delegated_instances '
+                'WHERE token_delegation = ? AND killed_at IS NULL', (token,)
+            ).fetchone()
+            if row is None:
+                return False
+            ticks = int(row['statement_ticks']) + 1
+            due = ticks >= int(every)
+            cursor.execute('UPDATE delegated_instances SET statement_ticks = ? '
+                           'WHERE token_delegation = ?', (0 if due else ticks, token))
+            return due
+
+        return self._transaction(work)
+
+    def get_peer_statement_mark(self, peer_id: str) -> dict:
+        """The mark of the statement of our account on ``peer_id``; see the `peer` table.
+
+        ``{}`` when nothing was checked yet.
+        """
+        row = self._execute(
+            'SELECT statement_seq, statement_hash, statement_balance_mu, statement_ts '
+            'FROM peer WHERE id = ?', (peer_id,),
+        ).fetchone()
+        if row is None or row['statement_seq'] is None:
+            return {}
+        return {"seq": int(row['statement_seq']), "hash": row['statement_hash'] or "",
+                "balance_mu": _as_int(row['statement_balance_mu']), "ts": row['statement_ts']}
+
+    def set_peer_statement_mark(self, peer_id: str, seq: Optional[int], hash: Optional[str],
+                                balance_mu: Optional[int], ts: Optional[int],
+                                attempts: Optional[Mapping[int, tuple]] = None,
+                                top_ups_taken: Optional[Mapping[int, int]] = None,
+                                queries_verified: Optional[Tuple[int, int]] = None) -> None:
+        """Write the mark of the statement of our account on ``peer_id``. None clears it.
+
+        In the same transaction, the movements that the mark goes past are accounted
+        for. ``attempts`` gives the new state of each start attempt that changed, by id:
+        ``(start_seq, start_mu, start_ts, closed)``. ``top_ups_taken`` is what the peer
+        took from each top-up reservation, by id. ``queries_verified`` is the count and
+        the MU of the ``statement_query`` movements that the mark goes past. All of it
+        moves with the mark, so a movement is accounted for once.
+        """
+        def work(cursor):
+            cursor.execute('''
+                UPDATE peer SET statement_seq = ?, statement_hash = ?, statement_balance_mu = ?,
+                                statement_ts = ?
+                WHERE id = ?
+            ''', (seq, hash, None if balance_mu is None else str(int(balance_mu)), ts, peer_id))
+            for attempt_id, (start_seq, start_mu, start_ts, closed) in (attempts or {}).items():
+                cursor.execute(
+                    'UPDATE start_attempts SET start_seq = ?, start_mu = ?, start_ts = ?, '
+                    'consumed = ? WHERE id = ? AND peer_id = ?',
+                    (start_seq, None if start_seq is None else str(int(start_mu)),
+                     start_ts, 1 if closed else 0, int(attempt_id), peer_id))
+            for reservation_id, mu in (top_ups_taken or {}).items():
+                row = cursor.execute(
+                    'SELECT peer_mu FROM top_up_reservations WHERE id = ? AND peer_id = ?',
+                    (int(reservation_id), peer_id)).fetchone()
+                if row is None:
+                    continue
+                left = _as_int(row['peer_mu']) - int(mu)
+                if left > 0:
+                    cursor.execute('UPDATE top_up_reservations SET peer_mu = ? WHERE id = ?',
+                                   (str(left), int(reservation_id)))
+                else:
+                    cursor.execute('DELETE FROM top_up_reservations WHERE id = ?',
+                                   (int(reservation_id),))
+            if queries_verified and int(queries_verified[0]):
+                row = cursor.execute(
+                    'SELECT statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
+                ).fetchone()
+                if row is not None:
+                    cursor.execute('''
+                        UPDATE peer SET statement_queries_verified = statement_queries_verified + ?,
+                                        statement_queries_verified_mu = ?
+                        WHERE id = ?
+                    ''', (int(queries_verified[0]),
+                          str(_as_int(row['statement_queries_verified_mu']) + int(queries_verified[1])),
+                          peer_id))
+
+        self._transaction(work)
+
+    def add_start_attempt(self, peer_id: str, sent_peer_mu: int) -> int:
+        """Write down a start that is about to be asked of ``peer_id``, and return its id."""
+        return self._execute(
+            'INSERT INTO start_attempts (peer_id, ts, sent_peer_mu) VALUES (?, ?, ?)',
+            (peer_id, int(time.time()), str(int(sent_peer_mu))),
+        ).lastrowid
+
+    def bind_start_attempt(self, attempt_id: int, instance_token: str) -> None:
+        """The peer answered the start: the attempt now has its child."""
+        self._execute('UPDATE start_attempts SET ref = ? WHERE id = ?',
+                      (ledger.instance_ref(instance_token), int(attempt_id)))
+
+    def refuse_start_attempt(self, attempt_id: int) -> None:
+        """The peer refused the start: the attempt holds no new movement."""
+        self._execute('UPDATE start_attempts SET refused_at = ? WHERE id = ?',
+                      (int(time.time()), int(attempt_id)))
+
+    def open_start_attempts(self, peer_id: str) -> List[tuple]:
+        """The start attempts on ``peer_id`` that are not closed, oldest first:
+        ``(id, ts, sent_peer_mu, ref, start_seq, start_mu, start_ts, refused_at)``.
+        ``ref`` is "" before the peer answered."""
+        return [(int(row['id']), int(row['ts']), _as_int(row['sent_peer_mu']), row['ref'] or "",
+                 None if row['start_seq'] is None else int(row['start_seq']),
+                 _as_int(row['start_mu']) if row['start_mu'] is not None else 0,
+                 int(row['start_ts'] or 0),
+                 None if row['refused_at'] is None else int(row['refused_at']))
+                for row in self._execute(
+                    'SELECT id, ts, sent_peer_mu, ref, start_seq, start_mu, start_ts, refused_at '
+                    'FROM start_attempts WHERE peer_id = ? AND consumed = 0 ORDER BY ts, id',
+                    (peer_id,)).fetchall()]
+
+    def started_children_on_peer(self, peer_id: str) -> List[str]:
+        """The ``instance_ref`` of the children of ``peer_id`` whose start was already
+        shown in our account there."""
+        return [row['ref'] for row in self._execute(
+            'SELECT ref FROM start_attempts WHERE peer_id = ? AND ref IS NOT NULL AND consumed = 1',
+            (peer_id,)).fetchall()]
+
+    def prune_start_attempts(self, max_age_days: int) -> int:
+        """Delete the attempts older than ``max_age_days``. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        return self._execute('DELETE FROM start_attempts WHERE ts < ?', (cutoff,)).rowcount
+
+    def reserve_top_up(self, alias: str, peer_mu: int) -> Optional[int]:
+        """Write down a top-up of ``peer_mu`` for the delegated child ``alias``. This is
+        done before the peer is asked, because its movement can show in our account
+        before the call returns. Returns the id of the reservation, or None for a child
+        that is not known."""
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT token_delegation, peer_id FROM delegated_instances WHERE id = ?',
+                (alias,)).fetchone()
+            if row is None:
+                return None
+            return cursor.execute(
+                'INSERT INTO top_up_reservations (peer_id, ref, ts, peer_mu) VALUES (?, ?, ?, ?)',
+                (row['peer_id'], ledger.instance_ref(row['token_delegation']), int(time.time()),
+                 str(int(peer_mu)))).lastrowid
+
+        return self._transaction(work)
+
+    def drop_top_up_reservation(self, reservation_id: Optional[int]) -> None:
+        """The peer refused the top-up: it may take nothing for it."""
+        if reservation_id is not None:
+            self._execute('DELETE FROM top_up_reservations WHERE id = ?', (int(reservation_id),))
+
+    def top_up_reservations(self, peer_id: str) -> List[Tuple[int, str, int, int]]:
+        """``(id, ref, ts, peer_mu)`` of the top-ups that this node sent to children on
+        ``peer_id``, oldest first. Each one is a top-up that our statement has not shown
+        in full yet."""
+        return [(int(row['id']), row['ref'], int(row['ts']), _as_int(row['peer_mu']))
+                for row in self._execute(
+                    'SELECT id, ref, ts, peer_mu FROM top_up_reservations WHERE peer_id = ? '
+                    'ORDER BY ts, id', (peer_id,)).fetchall()]
+
+    def prune_top_up_reservations(self, max_age_seconds: int) -> int:
+        """Delete the reservations older than ``max_age_seconds``: no movement may take
+        from them any more. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_seconds)
+        return self._execute('DELETE FROM top_up_reservations WHERE ts < ?', (cutoff,)).rowcount
+
+    def statement_tick_due(self, peer_id: str, every: int) -> bool:
+        """Count one tick for our account on ``peer_id``; True once ``every`` have passed.
+
+        The count goes back to 0 when it says True, so the caller reads at that tick.
+        """
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT statement_ticks FROM peer WHERE id = ?', (peer_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            ticks = int(row['statement_ticks']) + 1
+            due = ticks >= int(every)
+            cursor.execute('UPDATE peer SET statement_ticks = ? WHERE id = ?',
+                           (0 if due else ticks, peer_id))
+            return due
+
+        return self._transaction(work)
+
+    def add_statement_read(self, peer_id: str, rows_priced: int, count: int = 1) -> None:
+        """Count statements that this node asked ``peer_id`` for, and the rows they may be
+        priced for: what the peer may charge our account for them (see the `peer` table)."""
         self._execute('''
-            UPDATE delegated_instances SET balance_mu = ? WHERE token_delegation = ? AND killed_at IS NULL
-        ''', (str(int(balance_mu)), token))
+            UPDATE peer SET statement_reads = statement_reads + ?,
+                            statement_rows_priced = statement_rows_priced + ?
+            WHERE id = ?
+        ''', (int(count), int(rows_priced), peer_id))
 
-    def update_delegated_deposit(self, token: str, balance_mu: int, peer_balance_mu: int):
-        """Write both sides of a delegated instance's deposit at once.
+    def add_statement_queries_verified(self, peer_id: str, count: int, mu: int) -> None:
+        """Count ``statement_query`` movements that ``peer_id`` showed in our account, and
+        what they took, in the MU of the peer."""
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
+            ).fetchone()
+            if row is None:
+                return
+            cursor.execute('''
+                UPDATE peer SET statement_queries_verified = statement_queries_verified + ?,
+                                statement_queries_verified_mu = ?
+                WHERE id = ?
+            ''', (int(count), str(_as_int(row['statement_queries_verified_mu']) + int(mu)),
+                  peer_id))
 
-        One statement, because the two are one fact. What the maintenance tick charges
-        is the fall in `peer_balance_mu` since it last looked, so a deposit moved
-        without its mark bills the same consumption again on the next tick, and a mark
-        moved without the deposit writes that consumption off. Every `_execute` commits
-        on its own, so two calls here are two transactions and a failure between them
-        leaves exactly one of those states behind.
+        self._transaction(work)
 
-        Args:
-            token (str): The token of the external container.
-            balance_mu (int): What is left of the deposit, in our MU.
-            peer_balance_mu (int): The peer's own figure it was measured against.
-        """
-        self._execute('''
-            UPDATE delegated_instances SET balance_mu = ?, peer_balance_mu = ?
-            WHERE token_delegation = ? AND killed_at IS NULL
-        ''', (str(int(balance_mu)), str(int(peer_balance_mu)), token))
+    def get_statement_counters(self, peer_id: str) -> dict:
+        """``reads``, ``rows_priced``, ``verified`` and ``verified_mu`` of ``peer_id``
+        (see the `peer` table). Zeros for a peer that is not known. ``rows_priced``
+        includes the reads that failed and are not settled yet, at the rows that they
+        count for until then (``add_failed_statement_read``)."""
+        row = self._execute(
+            'SELECT statement_reads, statement_rows_priced, statement_queries_verified, '
+            'statement_queries_verified_mu FROM peer WHERE id = ?', (peer_id,)
+        ).fetchone()
+        if row is None:
+            return {"reads": 0, "rows_priced": 0, "verified": 0, "verified_mu": 0}
+        pending = self._execute(
+            'SELECT COALESCE(SUM(rows_priced), 0) FROM statement_failed_reads WHERE peer_id = ?',
+            (peer_id,)).fetchone()[0]
+        return {"reads": int(row['statement_reads']),
+                "rows_priced": int(row['statement_rows_priced']) + int(pending),
+                "verified": int(row['statement_queries_verified']),
+                "verified_mu": _as_int(row['statement_queries_verified_mu'])}
 
-    def get_delegated_peer_balance(self, token: str) -> int:
-        """The peer's own last-read figure for a delegated instance, in the peer's MU.
+    def add_failed_statement_read(self, peer_id: str, account_ref: str, from_seq: int,
+                                  to_seq: int, rows_priced: int, own: bool = False) -> None:
+        """Write down a statement that was asked for and did not come.
 
-        Args:
-            token (str): The token of the external container.
-        """
-        result = self._execute('''
-            SELECT peer_balance_mu FROM delegated_instances WHERE token_delegation = ? AND killed_at IS NULL
-        ''', (token,))
-        row = result.fetchone()
-        return _as_int(row['peer_balance_mu']) if row else 0
+        A read of our own account (``own``) counts for 0 rows until its charge shows. A
+        read of a child counts for ``rows_priced``. A second read of the same range that
+        is not settled yet counts for 0, because it asks for the same rows."""
+        def work(cursor):
+            priced = 0 if own else int(rows_priced)
+            if priced and cursor.execute(
+                    'SELECT 1 FROM statement_failed_reads WHERE peer_id = ? AND account_ref = ? '
+                    'AND from_seq = ? AND own = 0', (peer_id, account_ref, int(from_seq))).fetchone():
+                priced = 0
+            cursor.execute(
+                'INSERT INTO statement_failed_reads '
+                '(peer_id, account_ref, from_seq, to_seq, ts, rows_priced, own) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (peer_id, account_ref, int(from_seq), int(to_seq), int(time.time()), priced,
+                 1 if own else 0))
 
-    def update_delegated_peer_balance(self, token: str, peer_balance_mu: int):
-        """Record what the peer's books say the instance holds, in the peer's MU.
+        self._transaction(work)
 
-        The mark the next tick measures against: what the peer has metered since is
-        the difference between this and the peer's next answer. Stored unconverted,
-        for the reason `refresh_balance_for_peer` stores the deposit unconverted.
+    def failed_statement_reads(self, peer_id: str, account_ref: str) -> List[tuple]:
+        """``(id, from_seq, to_seq, ts, seen_to, rows_seen)`` of the reads of
+        ``account_ref`` that failed and are not settled, oldest first. ``seen_to`` is
+        None when no statement showed the range yet."""
+        return [(int(row['id']), int(row['from_seq']), int(row['to_seq']), int(row['ts']),
+                 None if row['seen_to'] is None else int(row['seen_to']), int(row['rows_seen']))
+                for row in self._execute(
+                    'SELECT id, from_seq, to_seq, ts, seen_to, rows_seen FROM statement_failed_reads '
+                    'WHERE peer_id = ? AND account_ref = ? ORDER BY id',
+                    (peer_id, account_ref)).fetchall()]
 
-        Args:
-            token (str): The token of the external container.
-            peer_balance_mu (int): The peer's own figure, just read.
-        """
-        self._execute('''
-            UPDATE delegated_instances SET peer_balance_mu = ? WHERE token_delegation = ? AND killed_at IS NULL
-        ''', (str(int(peer_balance_mu)), token))
+    def settle_failed_statement_reads(self, peer_id: str, rows: Mapping[int, int],
+                                      progress: Optional[Mapping[int, Tuple[int, int]]] = None) -> None:
+        """Settle failed reads at the rows that they may have been priced for (by id).
+        ``progress`` is for the reads that are not settled yet: ``(seen_to, rows_seen)``.
+        ``seen_to`` is the last seq of the range that a statement showed, and
+        ``rows_seen`` is how many rows of it count."""
+        def work(cursor):
+            for read_id, priced in rows.items():
+                cursor.execute('DELETE FROM statement_failed_reads WHERE id = ? AND peer_id = ?',
+                               (int(read_id), peer_id))
+                if cursor.rowcount:
+                    cursor.execute(
+                        'UPDATE peer SET statement_rows_priced = statement_rows_priced + ? '
+                        'WHERE id = ?', (int(priced), peer_id))
+            for read_id, (seen_to, rows_seen) in (progress or {}).items():
+                cursor.execute(
+                    'UPDATE statement_failed_reads SET seen_to = ?, rows_seen = ? '
+                    'WHERE id = ? AND peer_id = ?', (int(seen_to), int(rows_seen), int(read_id), peer_id))
+
+        self._transaction(work)
+
+    def sweep_failed_statement_reads(self, max_age_days: int) -> int:
+        """Settle at the rows asked for the failed reads older than ``max_age_days``:
+        nothing will show their range any more. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+
+        def work(cursor):
+            old = cursor.execute(
+                'SELECT id, peer_id, rows_priced FROM statement_failed_reads WHERE ts < ?',
+                (cutoff,)).fetchall()
+            for row in old:
+                cursor.execute('DELETE FROM statement_failed_reads WHERE id = ?', (row['id'],))
+                cursor.execute(
+                    'UPDATE peer SET statement_rows_priced = statement_rows_priced + ? '
+                    'WHERE id = ?', (int(row['rows_priced']), row['peer_id']))
+            return len(old)
+
+        return self._transaction(work)
+
+    def record_statement_fault(self, peer_id: str, account_ref: str, reason: str,
+                               seq: int, window: int = 0) -> bool:
+        """Write a fault of ``peer_id`` in a statement. True if it was not written yet:
+        that is the one time that it is scored.
+
+        With ``window`` (seconds), the fault shows no movement. It is written and scored
+        again only when the last one is older than ``window``. The last one is the one of
+        the same peer, account, reason and seq."""
+        now = int(time.time())
+
+        def work(cursor):
+            if window > 0:
+                last = cursor.execute(
+                    'SELECT MAX(ts) FROM statement_faults WHERE peer_id = ? AND account_ref = ? '
+                    'AND reason = ? AND seq = ? AND period > 0',
+                    (peer_id, account_ref, reason, int(seq))).fetchone()[0]
+                if last is not None and now - int(last) < int(window):
+                    return False
+            cursor.execute('''
+                INSERT OR IGNORE INTO statement_faults (peer_id, account_ref, reason, seq, period, ts)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (peer_id, account_ref, reason, int(seq), now if window > 0 else 0, now))
+            return cursor.rowcount > 0
+
+        return self._transaction(work)
+
+    def prune_statement_faults(self, max_age_days: int) -> int:
+        """Delete the faults older than ``max_age_days``. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        return self._execute(
+            'DELETE FROM statement_faults WHERE ts < ?', (cutoff,)
+        ).rowcount
+
+    def delegated_starts_on_peer(self, peer_id: str) -> Dict[str, int]:
+        """The ``instance_ref`` of the token of the peer of each instance delegated to
+        ``peer_id``, live or dead, with what was sent for its start, in the MU of the
+        peer. That is how the peer names the child in the rows of our account there."""
+        rows = self._execute(
+            'SELECT token_delegation, sent_peer_mu FROM delegated_instances WHERE peer_id = ?',
+            (peer_id,),
+        ).fetchall()
+        starts = {ledger.instance_ref(row['token_delegation']): _as_int(row['sent_peer_mu'])
+                  for row in rows}
+        # A child that the peer answered for and that is not stored yet (its start is
+        # still being checked) is named by its attempt.
+        for row in self._execute(
+                'SELECT ref, sent_peer_mu FROM start_attempts WHERE peer_id = ? AND ref IS NOT NULL',
+                (peer_id,)).fetchall():
+            starts.setdefault(row['ref'], _as_int(row['sent_peer_mu']))
+        return starts
 
     def get_delegated_token_by_id(self, id: str) -> Optional[str]:
         """

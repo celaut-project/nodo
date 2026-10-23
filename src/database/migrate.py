@@ -47,6 +47,22 @@ def connect_to_database(db_file):
 # do; see docs/CONCEPTS.md's "Peers and clients" -- simply stays unassociated,
 # same as `remote_client_id` stays unset for a peer this node has never needed to
 # call.
+#
+# `statement_seq`, `statement_hash`, `statement_balance_mu` and `statement_ts` are the mark
+# of the statement of `remote_client_id` on that peer (#570): the last movement that was
+# checked, its hash, the balance after it, and a time on the clock of the peer before
+# which nothing after it was written. The same as on `delegated_instances`.
+#
+# What a peer may charge our account for the statements that we read from it (#570) is
+# kept in four counters that never go back: `statement_reads` is how many we asked for,
+# `statement_rows_priced` the rows that they may have been priced for, and
+# `statement_queries_verified` and `statement_queries_verified_mu` the `statement_query`
+# movements that the peer showed in our account, and what they took. Verified never
+# exceeds what we asked for, so a peer cannot add queries that we did not make.
+# `statement_ticks` counts the ticks since our account on that peer was last read.
+#
+# A new `remote_client_id` is a new account, which starts from its genesis: the mark and
+# the counters are set again with it, so the mark is never older than the account.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
@@ -60,7 +76,16 @@ TABLES = {
             reputation_index INTEGER,
             last_index_on_ledger INTEGER,
             last_ts INTEGER DEFAULT NULL,
-            learned_via_gossip INTEGER NOT NULL DEFAULT 0
+            learned_via_gossip INTEGER NOT NULL DEFAULT 0,
+            statement_seq INTEGER DEFAULT NULL,
+            statement_hash TEXT DEFAULT NULL,
+            statement_balance_mu TEXT DEFAULT NULL,
+            statement_ts INTEGER DEFAULT NULL,
+            statement_ticks INTEGER NOT NULL DEFAULT 0,
+            statement_reads INTEGER NOT NULL DEFAULT 0,
+            statement_rows_priced INTEGER NOT NULL DEFAULT 0,
+            statement_queries_verified INTEGER NOT NULL DEFAULT 0,
+            statement_queries_verified_mu TEXT NOT NULL DEFAULT '0'
         )
     ''',
     "clients": '''
@@ -186,6 +211,22 @@ TABLES = {
     # child bigger than the shape it was quoted at. Storing it unconverted is what
     # makes that possible; a figure converted at write time goes stale the moment
     # either node moves its rate (same reason as `peer.balance_mu`).
+    #
+    # The mark is a movement of the child's statement on the peer (#570):
+    # `peer_statement_seq` is its seq, `peer_statement_hash` its hash, `peer_balance_mu`
+    # the balance after it and `peer_statement_ts` a time on the clock of the peer before
+    # which nothing after it was written. `sent_peer_mu` is the `initial_mu` that this
+    # node sent the peer, in the MU of the peer: the most that the peer can take from our
+    # account for this start.
+    #
+    # What the child has consumed is kept in four totals, in the MU of the peer, so that a charge is the difference between what is owed and what was
+    # charged, and a reading that comes late corrects the ones before it:
+    # `verified_consumption_peer_mu` is what the statements checked so far show it spent
+    # (every movement but those of its father); `verified_father_net_peer_mu` the top-ups
+    # less the withdrawals of its father among them; `father_net_peer_mu` the same for all
+    # the `ModifyDeposit` that this node has sent, written with the rows that they leave
+    # here; `charged_peer_mu` what the tick has taken from the deposit for it.
+    # `statement_ticks` counts the ticks since the statement of the child was last read.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -196,9 +237,60 @@ TABLES = {
             service_id TEXT,
             balance_mu TEXT,
             peer_balance_mu TEXT,
+            peer_statement_seq INTEGER DEFAULT NULL,
+            peer_statement_ts INTEGER DEFAULT NULL,
+            peer_statement_hash TEXT DEFAULT NULL,
+            statement_ticks INTEGER NOT NULL DEFAULT 0,
+            verified_consumption_peer_mu TEXT NOT NULL DEFAULT '0',
+            verified_father_net_peer_mu TEXT NOT NULL DEFAULT '0',
+            father_net_peer_mu TEXT NOT NULL DEFAULT '0',
+            charged_peer_mu TEXT NOT NULL DEFAULT '0',
+            sent_peer_mu TEXT DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL
+        )
+    ''',
+    # Every start that this node asked a peer for, written before the peer is asked
+    # (#570). The peer takes MU from our account for it, and the movement may show before
+    # this node knows the child, or when it never does: a start that timed out and that
+    # the peer finished. A `child_start` that no child of ours explains is judged against
+    # these. `ref` is the `instance_ref` of the token once the peer answered.
+    # `sent_peer_mu` is the most that the peer may take for it.
+    # One attempt holds one movement. `start_seq` is the `child_start` that the attempt
+    # holds, and `start_mu` and `start_ts` are its amount and its date. A `refund` of
+    # that movement sets the attempt free again. `consumed` is 1 when the attempt is
+    # closed: a `child_bound` names the child of its movement. `refused_at` is when the
+    # peer refused the start. The attempt then holds no new movement, and the peer must
+    # give back the movement that it holds.
+    "start_attempts": '''
+        CREATE TABLE IF NOT EXISTS start_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            sent_peer_mu TEXT NOT NULL,
+            ref TEXT DEFAULT NULL,
+            consumed INTEGER NOT NULL DEFAULT 0,
+            start_seq INTEGER DEFAULT NULL,
+            start_mu TEXT DEFAULT NULL,
+            start_ts INTEGER DEFAULT NULL,
+            refused_at INTEGER DEFAULT NULL
+        )
+    ''',
+    # Each top-up that this node sends to a delegated child, written before the peer is
+    # asked (#570). The peer takes MU from our account for it, and the movement may show
+    # before the call returns. `ref` is the `instance_ref` of the token of the child on
+    # the peer. `ts` is when the top-up was asked. `peer_mu` is what is left of it, in the
+    # MU of the peer. A `top_up` movement takes from the reservations of its child that
+    # are dated near it. A reservation is deleted when it is used up, or when the peer
+    # refuses the top-up.
+    "top_up_reservations": '''
+        CREATE TABLE IF NOT EXISTS top_up_reservations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            ref TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            peer_mu TEXT NOT NULL
         )
     ''',
     "deposit_tokens": '''
@@ -558,6 +650,75 @@ TABLES = {
             closed_at DATETIME DEFAULT NULL,
             FOREIGN KEY (peer_id) REFERENCES peer (id)
         )
+    ''',
+    # One row per movement of a balance (#570): see src/database/ledger.py. The rows of
+    # an account add up to its balance, because each one is written in the same
+    # transaction as the balance, and they are a chain: `prev_hash` is the `hash` of
+    # the row before (the genesis hash for seq 1), so the hash of the last row commits
+    # to all of them. `seq` counts from 1 for each account, with no gaps. `ts` is unix
+    # seconds. `amount_mu` is signed; both MU columns are TEXT, as every balance is.
+    # `instance_ref` is a hash of the token of the instance that the row concerns,
+    # never the token. `detail` is the cause, as canonical JSON. A row is never
+    # changed. The retention sweep deletes rows older than `ledger.RETENTION_DAYS`, but
+    # keeps the last row of a live account, so that the next row still hangs from it.
+    # A fault of a peer in a statement (#570) is scored once: one row for each peer,
+    # account (by `account_ref`), reason and seq, the movement where it shows. The same
+    # fault read again at the next tick, or after a restart, finds its row and costs
+    # nothing; a different fault, at another seq, is scored. A peer that refuses to give
+    # a statement shows no movement to anchor the fault to. Such a fault is scored at
+    # most once in a window of 24 hours, and `period` is the time when it was scored.
+    # A fault with a movement has `period` 0.
+    "statement_faults": '''
+        CREATE TABLE IF NOT EXISTS statement_faults (
+            peer_id TEXT NOT NULL,
+            account_ref TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            period INTEGER NOT NULL DEFAULT 0,
+            ts INTEGER NOT NULL,
+            PRIMARY KEY (peer_id, account_ref, reason, seq, period)
+        )
+    ''',
+    # A statement that was asked for and did not come (a timeout) may have been charged
+    # by the peer all the same. `from_seq` and `to_seq` are its range in the account
+    # `account_ref`, and `rows_priced` is what it counts for until it is settled.
+    # `own` is 1 for a read of our own account. Its charge is a `statement_query`
+    # movement in that same account, and the rows that existed for the read are those
+    # before that movement. Until the charge shows, the read counts for 0 rows.
+    # A read of a child counts for the rows asked for. A second read of the same range
+    # that is not settled yet counts for 0. Once the statements of the child show the
+    # range, the read counts for the rows dated before it: `seen_to` is the last seq of
+    # the range that a statement showed, and `rows_seen` how many of those rows count.
+    # A read that is never settled is added to the counters of the peer as asked when it
+    # is swept.
+    "statement_failed_reads": '''
+        CREATE TABLE IF NOT EXISTS statement_failed_reads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            account_ref TEXT NOT NULL,
+            from_seq INTEGER NOT NULL,
+            to_seq INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            rows_priced INTEGER NOT NULL,
+            own INTEGER NOT NULL DEFAULT 0,
+            seen_to INTEGER DEFAULT NULL,
+            rows_seen INTEGER NOT NULL DEFAULT 0
+        )
+    ''',
+    "balance_movements": '''
+        CREATE TABLE IF NOT EXISTS balance_movements (
+            account_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            ts INTEGER NOT NULL,
+            amount_mu TEXT NOT NULL,
+            balance_after_mu TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            instance_ref TEXT DEFAULT NULL,
+            detail TEXT DEFAULT NULL,
+            prev_hash TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            PRIMARY KEY (account_id, seq)
+        )
     '''
 }
 
@@ -603,6 +764,12 @@ INDEXES = (
     # (the two TUI pages: ours, and our clients').
     "CREATE INDEX IF NOT EXISTS idx_peer_chat_conversations_peer "
     "ON peer_chat_conversations (peer_id, opened_by_us, opened_at)",
+    # A statement reads one account from a time on, and finding where it starts
+    # costs the same whatever the size of the account (#570).
+    "CREATE INDEX IF NOT EXISTS idx_balance_movements_account_ts "
+    "ON balance_movements (account_id, ts)",
+    # The retention sweep deletes by age, across every account.
+    "CREATE INDEX IF NOT EXISTS idx_balance_movements_ts ON balance_movements (ts)",
 )
 
 

@@ -13,6 +13,7 @@ from unittest import mock
 
 IMPORT_ERROR = None
 try:
+    from src.database import ledger
     from src.database.migrate import create_tables
     from src.database.sql_connection import SQLConnection
     from src.utils import dead_instances
@@ -69,7 +70,8 @@ class DeadInstanceTests(unittest.TestCase):
     def test_balance_of_dead_instance_is_not_spent(self):
         self._add_local("a")
         self.sc.mark_local_killed("a", "manual_kill")
-        self.assertIsNone(self.sc.spend_instance_balance("a", 1, allow_debt=False))
+        with self.assertRaises(ledger.NoSuchAccount):
+            self.sc.move_balance("a", -1, ledger.MAINTENANCE, allow_debt=False)
 
     def test_name_of_dead_instance_can_be_used_again(self):
         self._add_local("a")

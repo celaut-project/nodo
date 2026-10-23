@@ -1,12 +1,16 @@
+import time
 from hashlib import sha256
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 
 from protos import celaut_pb2
+from src.database import ledger
+from src.manager import balance_statement, statement_check
 from src.manager.manager import get_client_id_on_other_peer
-from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
+from src.utils.utils import from_amount
+from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer, refresh_balance_on_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
@@ -69,6 +73,20 @@ def _mu(amount) -> int:
     return int(amount.n or 0)
 
 
+def _stop_on_peer(peer: str, external_token: str) -> None:
+    """Stop a child that ``peer`` started and that this node will not keep.
+
+    The father got his MU back and an error, so nobody holds this instance. Left alone it
+    would run on the MU that this node sent until they ran out. The peer writes what it
+    leaves in our account as a ``refund`` of the ``child_start``. Never raises: the
+    start has failed already, and this is only the cleanup of it.
+    """
+    try:
+        BeeClient.stop_service(peer_channel(peer), token=external_token)
+    except Exception as e:
+        log.LOGGER(f"Could not stop the child {external_token[:8]} that {peer} started: {e}")
+
+
 def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
     """The balance that ``peer`` reports for the child after the start, in its own MU."""
     try:
@@ -76,6 +94,62 @@ def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
     except Exception as e:
         log.LOGGER(f'Cannot read the balance of the child {external_token[:8]} on {peer}: {e}')
         return None
+
+
+def _check_start(peer: str, client_id: str, external_token: str,
+                 started_at: Optional[float] = None) -> Tuple[Optional[int], Optional[dict]]:
+    """Read the statement of the new child on ``peer`` and check its chain (#570).
+
+    ``started_at`` is when this node asked the peer to start the child: the account was
+    written after that, and a build may take minutes before ``StartService`` answers.
+
+    Returns the balance of the child there, in the MU of the peer, and the mark that the
+    maintenance tick goes on from: ``seq``, ``hash`` and ``ts``. The mark is None when
+    the statement could not be used, and the balance then comes from ``GetMetrics``.
+
+    A statement that does not start from the genesis of the account, or that does not
+    come from a peer that just answered ``StartService``, costs the peer the penalty for
+    a statement that does not add up. A peer that answers ``UNIMPLEMENTED`` (it
+    delegated the child on) or that refuses for lack of balance that our balance, read
+    again, does not pay for, costs it nothing. What the start took is not judged: the child holds
+    what is left of what was sent, and whoever runs the child is who pays the build. The
+    start goes on in both cases: the child runs.
+    """
+    # The read asks for no more than our balance on the peer pays for: what the start left
+    # may be little, and a refusal for lack of balance is then not the peer's fault. The
+    # balance is never less than the one that the peer signed, less what this node caused
+    # since (``statement_check.signed_floor``).
+    try:
+        rows_asked = statement_check.page_rows(
+            max(refresh_balance_on_peer(peer), statement_check.floor_on(peer, SQLConnection())),
+            statement_check.stored_rates(peer))
+    except Exception as e:
+        log.LOGGER(f'Cannot read our balance on {peer} to read the statement of the child: {e}')
+        rows_asked = 0
+    if rows_asked <= 0:
+        return _child_balance_on_peer(peer, external_token), None
+    try:
+        statement = statement_check.read(
+            peer, client_id, token=external_token, from_seq=1, rows=rows_asked)
+    except Exception as e:
+        statement_check.penalise_no_statement(
+            peer, external_token, e, seq=1, child=True,
+            pays=lambda: statement_check.still_pays(
+                peer, rows_asked, statement_check.floor_on(peer, SQLConnection())))
+        return _child_balance_on_peer(peer, external_token), None
+
+    # A new account: its movement 1 hangs from its genesis.
+    now = time.time()
+    start = statement_check.Mark.new_account(
+        external_token, ts=now if started_at is None else started_at)
+    chain = statement_check.verify_chain(statement, start, now=now, from_seq=1)
+    if chain.rows is None:
+        statement_check.penalise_chain(peer, external_token, chain, 1)
+        return _child_balance_on_peer(peer, external_token), None
+
+    new = statement_check.mark_after(chain, statement, start)
+    mark = {"seq": new.seq, "hash": new.hash, "ts": new.ts} if chain.rows else None
+    return from_amount(statement.balance), mark
 
 
 def delegate_execution(
@@ -94,22 +168,23 @@ def delegate_execution(
     ``config.initial_mu`` is what the father paid, in local MU (#563). This node keeps
     ``commission_mu`` of it and sends the peer the rest, in the MU of the peer. The peer
     takes its own build from that amount, and what is left is the balance of the child
-    there. ``build_mu`` is the build that the peer quoted, in local MU. It is only the
-    fallback for a balance of the child that cannot be read: the peer sets the real build.
+    there. ``build_mu`` is the build that the peer quoted, in local MU.
 
     A delegated child keeps its deposit on this node, exactly as a local one does, so
     the father is refunded from this node's own books when the child stops. That deposit
     is what the father can get back: the amount that was sent, less the build of the
-    peer, in local MU. The peer reports the balance of the child, and that figure is
-    read, because the maintenance tick charges the client by re-reading it and taking
-    the difference. What the peer holds against our client there is the node's own
-    wholesale position and is not mirrored per instance.
+    peer, in local MU. Its account here opens with the ``start``, the ``commission`` of
+    this node and that ``build``.
 
-    This node does not check what the peer charged for the start. Two readings of a
-    balance cannot tell the build from the other movements on the same account: a
-    top-up of another child, a tunnel, a tick, or what the child spends on its own
-    dependencies. Only a statement of the movements, from the peer, can.
+    The balance of the child on the peer comes from its statement (#570), which also
+    shows what the peer took for the start: ``_check_start`` checks it, and the mark it
+    returns is where the maintenance tick goes on from.
     """
+    # The token of the child once the peer has started it. A start that times out has none
+    # to stop: TODO(#578). Its attempt stays unbound, and the peer may still take its start
+    # from our account (``statement_check.account_faults``).
+    external_token: Optional[str] = None
+    attempt_id: Optional[int] = None
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
@@ -143,6 +218,12 @@ def delegate_execution(
             )
 
         log.LOGGER('Go to launch the service on ' + str(peer))
+        client_id = get_client_id_on_other_peer(peer_id=peer)
+        # Written down before the peer is asked: the peer takes MU from our account for
+        # this start, and the movement may show before this node knows the child, or when
+        # it never does (a timeout). See `statement_check.account_faults`.
+        started_at = time.time()
+        attempt_id = SQLConnection().add_start_attempt(peer, sent_peer_mu)
         service_instance = BeeClient.start_service(
             peer_channel(peer),
             utils.service_extended(
@@ -150,24 +231,27 @@ def delegate_execution(
                 config=peer_config,
                 # TODO: Could pass only the previously selected configuration with the estimate cost
                 #  request, now is allowing to select another (that could be reasonable).
-                client_id=get_client_id_on_other_peer(peer_id=peer),
+                client_id=client_id,
                 recursion_guard_token=recursion_guard_token
             ),
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
         )
-        external_token: str = service_instance.token
+        if service_instance is None:
+            raise RuntimeError(f'{peer} closed the start with no answer.')
+        external_token = service_instance.token
+        SQLConnection().bind_start_attempt(attempt_id, external_token)
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 
-        # What the peer says the child holds now: the amount that we sent, less the build
-        # that it took. Read, not computed: the peer sets its own build, and the tick
-        # below measures the consumption from this very figure.
-        child_balance_peer = _child_balance_on_peer(peer, external_token)
         build_peer_mu = convert_mu(
             int(build_mu),
             from_mu_per_unit=payment_system.local_mu_per_unit,
             to_mu_per_unit=payment_system.peer_mu_per_unit,
             round_up=True,
         )
+        # What the peer says the child holds now: the amount that we sent, less the build
+        # that it took. Read, not computed: the peer sets its own build, and the tick
+        # below measures the consumption from this very figure.
+        child_balance_peer, mark = _check_start(peer, client_id, external_token, started_at)
         if child_balance_peer is None:
             # The peer could not be read: use what its quote says. The tick corrects the
             # mark at the next reading, and the instance is not lost over a failed read.
@@ -213,12 +297,29 @@ def delegate_execution(
             # still the client's to pay, and the build is not, because the build was
             # taken from the amount before the child had a balance.
             peer_balance_mu=peer_balance_mu,
+            movements=(
+                ledger.Movement(ledger.START, initial_mu),
+                ledger.Movement(ledger.COMMISSION, -int(commission_mu)),
+                ledger.Movement(ledger.BUILD, balance_mu - sent_mu,
+                                detail={"peer_id": peer}),
+            ),
+            sent_peer_mu=sent_peer_mu,
+            mark=mark,
         )
         service_instance.token = encrypted_external_token
         service_instance.instance.CopyFrom(published_instance)
         return service_instance
     except Exception as e:
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
+        if external_token:
+            _stop_on_peer(peer, external_token)
+        elif attempt_id is not None and not statement_check.unreachable(e):
+            # The peer refused the start. It gives back the start of each candidate that
+            # it tried before it answers, so the attempt holds no new movement.
+            try:
+                SQLConnection().refuse_start_attempt(attempt_id)
+            except Exception as refuse_error:
+                log.LOGGER(f'Could not close the start attempt on {peer}: {refuse_error}')
         try:
             refund_container.pop()()
         except IndexError:
