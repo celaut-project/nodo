@@ -16,6 +16,7 @@ import psutil
 from protos import celaut_pb2 as celaut
 from src.manager.resources import IOBigData, could_ve_this_sysreq
 from src.utils import host_limits, keyvalue, logger as log, benchmark
+from src.utils.privileges import sudo_nodo
 from src.utils.arch_guard import arch_from_tags, host_arch_tag
 
 
@@ -87,7 +88,7 @@ def _sysreq_shortfalls(
             f"Requested: {int(at_most.mem_limit)} bytes, "
             f"available in service memory pool: {pool_available} bytes, "
             f"total service memory pool: {pool_total} bytes."
-            "\n Try `sudo nodo daemon restart` to free up memory or increase the memory pool size if possible."
+            f"\n Try `{sudo_nodo('daemon restart')}` to free up memory or increase the memory pool size if possible."
         )
 
     if at_most.disk_space and int(at_most.disk_space) > disk_free:

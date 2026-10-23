@@ -28,6 +28,11 @@ much work it would take to run without `sudo`. For the diagnostic command see
 > (and nothing else) create a user namespace. The profile never follows
 > `virtualizers.ch.VIRTIOFSD_BINARY`: config.yaml is writable by the daemon's user.
 >
+> **`sudo nodo` needs the path.** The install without sudo puts the `nodo` wrapper
+> in `~/.local/bin`, which is not in sudo's `secure_path`, so `sudo nodo doctor`
+> fails with `command not found`. Use `sudo ~/.local/bin/nodo doctor`; the messages
+> nodo prints name the command that works for the install they run in (#573).
+>
 > **A restart stops the VMs.** With a service user, and in the install without
 > sudo, the unit has `Delegate=yes` and the VMs run inside its cgroup
 > (`nodo.service/nodo-ch/<vm>`). So `systemctl restart nodo.service`, and with it

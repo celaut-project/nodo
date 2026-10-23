@@ -45,7 +45,7 @@ def _burn(stop):
     Returns the order the instances were stopped in and the credits that came out
     of it, keyed by the account each total was paid to.
     """
-    with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+    with patch.object(burnall_cmd, "can_admin_network", return_value=True), \
          patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
                       return_value=list(TREE)), \
          patch.object(burnall_cmd.sc, "get_delegated_instances", return_value=[]), \
@@ -64,7 +64,7 @@ class BurnallOrderingTests(unittest.TestCase):
     def _run(self, argv=None, euid=0, stop_result=1, ids=None, typed=burnall_cmd.CONFIRMATION,
              tty=True, delegated=None):
         ids = list(TREE) if ids is None else ids
-        with patch.object(burnall_cmd.os, "geteuid", return_value=euid), \
+        with patch.object(burnall_cmd, "can_admin_network", return_value=(euid == 0)), \
              patch.object(burnall_cmd.sc, "get_all_internal_containers_ids", return_value=ids), \
              patch.object(burnall_cmd.sc, "get_delegated_instances",
                           return_value=list(delegated or [])), \
@@ -163,7 +163,7 @@ class DelegatedInstancesTests(unittest.TestCase):
     ROW = {"token": "remote-token", "id": "alias", "peer_id": "peer-1", "father_id": "parent"}
 
     def _run(self, delegated, stop_result=1):
-        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+        with patch.object(burnall_cmd, "can_admin_network", return_value=True), \
              patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
                           return_value=list(TREE)), \
              patch.object(burnall_cmd.sc, "get_delegated_instances", return_value=delegated), \
@@ -193,7 +193,7 @@ class DelegatedInstancesTests(unittest.TestCase):
 
     def test_an_unreadable_delegated_list_still_burns_the_local_ones(self):
         # Reported, not fatal: the local instances are still worth stopping.
-        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+        with patch.object(burnall_cmd, "can_admin_network", return_value=True), \
              patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
                           return_value=list(TREE)), \
              patch.object(burnall_cmd.sc, "get_delegated_instances",
@@ -214,7 +214,7 @@ class DelegatedInstancesTests(unittest.TestCase):
         )
 
     def test_the_prompt_counts_the_remote_ones(self):
-        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+        with patch.object(burnall_cmd, "can_admin_network", return_value=True), \
              patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
                           return_value=list(TREE)), \
              patch.object(burnall_cmd.sc, "get_delegated_instances", return_value=[self.ROW]), \
@@ -268,7 +268,7 @@ class RefundRollupTests(unittest.TestCase):
     def test_the_leftovers_are_read_without_being_credited_twice(self):
         # `credit=False` is what makes the roll-up the only payment: leave it out
         # and `stop_instance` pays the father as well.
-        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+        with patch.object(burnall_cmd, "can_admin_network", return_value=True), \
              patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
                           return_value=list(TREE)), \
              patch.object(burnall_cmd.sc, "get_internal_father_id",

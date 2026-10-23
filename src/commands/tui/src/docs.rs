@@ -2548,9 +2548,9 @@ mod tests {
     }
 
     #[test]
-    fn the_sixth_group_key_and_a_click_on_its_label_open_the_page() {
+    fn the_eighth_group_key_and_a_click_on_its_label_open_the_page() {
         let mut app = App::default();
-        key(&mut app, KeyCode::Char('6'));
+        key(&mut app, KeyCode::Char('8'));
         assert_eq!(app.page(), Page::Docs);
         // Found from the compiled-in root, which in a test is this checkout.
         assert_eq!(app.docs.docs_dir(), Some(repo_docs().as_path()));

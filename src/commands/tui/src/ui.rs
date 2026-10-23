@@ -113,6 +113,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.chat_attach_area = Rect::ZERO;
     app.chat_send_area = Rect::ZERO;
     app.peers_refresh_area = Rect::ZERO;
+    app.peers_invite_area = Rect::ZERO;
     app.profile_button_area = Rect::ZERO;
 
     // Below the smallest size the pages are laid out for, say so instead of drawing
@@ -5371,7 +5372,7 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
             "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  p pack  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
         }
         Page::Peers => {
-            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  a choose  \u{2022}  r/\u{27f3} refresh all  \u{2022}  d forget  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  i invite QR  \u{2022}  a choose  \u{2022}  r/\u{27f3} refresh all  \u{2022}  d forget  \u{2022}  q quit"
         }
         Page::Clients => {
             "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  q quit"
@@ -5425,9 +5426,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     // where it applies: a footer advertising `[/] group` on the one page where those
     // keys do something else would be advertising the wrong thing.
     let navigation = if app.page() == Page::Schedule {
-        "1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "1-8 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     } else {
-        "[/] or 1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "[/] or 1-8 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     };
     let lines = vec![
         Line::from(Span::styled(
@@ -10233,7 +10234,9 @@ mod overview_summaries {
         app.node_info.version = "1.4.2".to_string();
         for (width, height) in [(80, 24), (120, 30), (200, 60), (60, 40)] {
             let screen = overview_at(&mut app, width, height);
-            let (header, page) = screen.split_once('\n').unwrap();
+            let (header, below) = screen.split_once('\n').unwrap();
+            // The group row is not a card: it names the NETWORK group.
+            let page = below.split_once('\n').unwrap().1;
             assert!(header.contains("● RUNNING"), "{width}x{height}:\n{screen}");
             assert!(header.contains("0 peers"), "{width}x{height}:\n{screen}");
             for word in ["RUNNING", "running", "Status", "0 peers", "0 clients", "0 instances", "NETWORK"] {

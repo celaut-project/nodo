@@ -44,9 +44,9 @@ These are the most commonly used commands for daily tasks:
 
 - **execute `[--name <instance-name>] [-e key value] [--no-input] <service id | service tag | '.celaut.bee' file path>`**  
   Launches a service instance. The address it prints is reachable from this host only; use `nodo tunnel` to reach the instance from elsewhere. Use `--name` to assign a human-readable instance name. Use `-e` to add service environment variables.  
-  `execute` compares the `-e` values with the env vars that the service declares (see `nodo service_envs`). A var that a network of the service uses as `${VAR}` is required. All other declared vars are optional.  
-  - In a terminal, `execute` asks for each missing var. It asks for a required var again until the var has a value. Press Enter to skip an optional var.  
-  - Without a terminal, or with `--no-input`, `execute` does not ask. A missing required var stops the launch. A missing optional var is reported, and the instance starts without it.  
+  `execute` compares the `-e` values with the env vars that the service declares (see `nodo service_envs`). The node does not say which vars the service needs, and the service may not work without all of them, so none is forced.  
+  - In a terminal, `execute` asks one by one for each var that was not given with `-e`. Press Enter to leave a var unset.  
+  - Without a terminal, or with `--no-input`, `execute` does not ask. It reports the missing vars and starts the instance without them.  
   `execute` never prints the values, only the names.  
   **Example:**  
   `nodo execute 1234567890abcdef`
@@ -54,7 +54,7 @@ These are the most commonly used commands for daily tasks:
   `nodo execute --no-input -e BLOCK_ID 9a3f… my_service_tag`
 
 - **service_envs `<service id | service tag>` `[--json]`**  
-  Lists the env vars that the service asks for: name, format tags, prose, and whether the var is required (and by which network). If the service is not on this node, it is acquired first, as `execute` does.  
+  Lists the env vars that the service asks for: name, format tags and prose. If the service is not on this node, it is acquired first, as `execute` does.  
   **Example:**  
   `nodo service_envs my_service_tag --json`
 
@@ -348,6 +348,19 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
+- **invite `[--raw <file|->]`**  
+  Prints this node's peer invitation as a QR code in the terminal, with its size in
+  bytes and the QR version. The invitation holds the node's identity key and its
+  addresses (`ip4`, `ip6`, `tor-onion-v3` and `dns`; a host that is none of them is left out), in order of preference —
+  no signature, resources or proofs. `--raw` writes the bytes to a file (`-` for stdout)
+  instead. It is refused over 1000 bytes, saying which addresses to remove.
+
+- **connect `--invite <file|->`**  
+  Reads an invitation (the bytes `nodo invite --raw` writes; `-` reads stdin) and tries
+  its addresses in order, skipping kinds this node does not know. An address is only
+  accepted if the node that answers there holds the invited identity key; then the full
+  signed peer is fetched and registered, as with `nodo connect <ip:port>`.
+
 - **pack `<project directory | https git URL[#subdir]> [--local] [--detach] [--json]`**  
   Packages a project into a service. The source is a local directory (relative
   paths are read from the shell you typed in) or an **https** git URL, optionally
@@ -570,7 +583,7 @@ hashing:
 These commands offer extended management and exploration features:
 
 - **inspect `<service id | tag>`**  
-  Inspects details of a specific service.  
+  Inspects details of a specific service, including the env vars it asks for (give each with `nodo execute -e <key> <value>`).  
   **Example:**  
   `nodo inspect 1234567890abcdef`
 
@@ -671,6 +684,11 @@ These are intended for development or advanced maintenance environments:
   `sudo nodo daemon stop`  
   `sudo nodo daemon restart`
 
+  After an install without sudo, `nodo` lives in `~/.local/bin`, which sudo does not
+  search, so `sudo nodo …` answers `command not found`. Give sudo the path instead:
+  `sudo ~/.local/bin/nodo daemon restart`. The commands nodo prints for you already
+  do this. Every `sudo nodo …` in these docs reads the same way.
+
 - **doctor**  
   Checks and fixes the Nodo systemd service configuration, and performs comprehensive virtualization and Cloud Hypervisor compatibility checks (requires superuser privileges).  
   Checks performed:
@@ -705,7 +723,7 @@ These are intended for development or advanced maintenance environments:
   `nodo migrate`
 
 - **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]` `[--no-input]`**  
-  Asks for missing env vars, or refuses them, the same way as `execute`.  
+  Asks for missing env vars, one by one, the same way as `execute`.  
   Testing/dev only. `execute` always picks the peer through `execution_balancer`
   (cheapest local-or-connected-peer candidate, tried in cost order). This command
   skips that entirely and delegates straight to `peer_id` — no comparison against
@@ -1170,7 +1188,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | SERVICES: list | — | `nodo services [--json]` (new `--json`) |
 | SERVICES: reputation card | — | `nodo services <service> [--json]` (new) |
 | SERVICES: details | `i` | `nodo inspect <service>` |
-| SERVICES: execute (y/N, then a form for the env vars; values masked, Ctrl+R or 👁 shows one) | `e` | `nodo service_envs <service> --json`, then `nodo execute --no-input [-e key value]… <service>` (new `service_envs`, `--no-input`) |
+| SERVICES: execute (y/N, then each env var one at a time; values masked, Ctrl+R or 👁 shows it) | `e` | `nodo service_envs <service> --json`, then `nodo execute --no-input [-e key value]… <service>` (new `service_envs`, `--no-input`) |
 | SERVICES: delete | `d` | `nodo remove <service>` |
 | SERVICES: get from peers | — | `nodo get <service>` |
 | SERVICES / PACKS: pack a folder or an https git URL | `p` / `n` | `nodo pack <dir \| https URL[#subdir]> --detach [--json]` (new `--detach`, `--json`) |
@@ -1180,6 +1198,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | PEERS: table | — | `nodo peers [--json]` (new `--json`) |
 | PEERS: payments + reputation events card | — | `nodo peers <peer> [--json]` (new) |
 | PEERS: connect | `c` | `nodo connect <host:port>` |
+| PEERS: show this node's invitation as a QR code (Details overlay) | `i`, or the `[ QR ]` button on the table's border | `nodo invite` |
 | PEERS: choose a peer learned over the network (y/N) | `a` | `nodo connect <host:port>` of its first endpoint |
 | PEERS: forget | `d` | `nodo disconnect <peer>` |
 | PEERS: adjust local reputation | `+` / `-` | `nodo peer_reputation <peer> +1` / `-1` (new) |

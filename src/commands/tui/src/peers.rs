@@ -361,6 +361,38 @@ impl App {
         self.edit_kind = crate::app::EditKind::Text;
     }
 
+    /// Show this node's peer invitation as a QR code: `nodo invite`, whose output goes
+    /// to the Details overlay once it finishes.
+    pub fn open_invite(&mut self) {
+        if self.page() != crate::app::Page::Peers {
+            return;
+        }
+        self.spawn_command(
+            CommandKind::Invite,
+            "Invitation".to_string(),
+            vec!["invite".to_string()],
+        );
+    }
+
+    /// The QR is what `nodo invite` printed; a failure (no address to invite with, too
+    /// large for a QR) is its own message and goes to the status line.
+    pub(crate) fn on_invite_outcome(&mut self, success: bool, stdout: &str, stderr: &str) {
+        let text = if success { stdout } else if stderr.trim().is_empty() { stdout } else { stderr };
+        if !success {
+            let reason = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("no output");
+            self.status = format!("nodo invite failed: {reason}");
+            return;
+        }
+        let lines: Vec<String> = stdout.trim_matches('\n').lines().map(ToString::to_string).collect();
+        self.details = Some(crate::app::DetailsView {
+            title: "Peer invitation".to_string(),
+            lines,
+            scroll: 0,
+        });
+        self.input_mode = crate::app::InputMode::Details;
+        self.status = "Scan with `nodo connect --invite` • ↑/↓ scroll • Esc close".to_string();
+    }
+
     pub(crate) fn connect(&mut self) {
         let target = self.input.trim().to_string();
         let valid_shape = regex::Regex::new(r"^(\[[0-9a-fA-F:]+\]|[^:\s]+):\d{1,5}$")
@@ -465,6 +497,7 @@ fn connect_target(uris: &str) -> Option<String> {
 
 /// The refresh button: a clockwise open-circle arrow.
 const REFRESH_BUTTON: &str = "[ \u{27f3} ]";
+const INVITE_BUTTON: &str = "[ QR ]";
 
 /// The PEERS table's columns (issue #453): the id, then what this node holds there
 /// and the peer's standing, outlast where it is reached and what it announced --
@@ -565,6 +598,24 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
             )),
             area,
         );
+        // The QR button sits just left of it and asks nothing: it only shows the code.
+        let invite_width = INVITE_BUTTON.chars().count() as u16;
+        if split[0].width > button_width + invite_width + 6 {
+            let area = Rect::new(
+                split[0].right() - button_width - invite_width - 3,
+                split[0].y,
+                invite_width,
+                1,
+            );
+            app.peers_invite_area = area;
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    INVITE_BUTTON,
+                    Style::default().fg(accent()).add_modifier(Modifier::BOLD),
+                )),
+                area,
+            );
+        }
     }
 
     // A query that failed takes the card, not a corner of it. `0 connected` is the
@@ -1240,6 +1291,31 @@ mod tests {
                 app.pending_action,
                 Some(PendingAction::ChoosePeer { ref target, .. }) if target == "8.8.8.8:40001"
             ));
+        }
+
+        #[test]
+        fn a_finished_invite_opens_the_qr_in_the_details_overlay() {
+            let mut app = app_with(peer("peer-abc"));
+            app.on_invite_outcome(true, "\n██ QR ██\n▀▀▀▀\nInvitation: 49 bytes\n", "");
+            assert_eq!(app.input_mode, InputMode::Details);
+            let details = app.details.as_ref().expect("the QR is shown");
+            assert_eq!(details.title, "Peer invitation");
+            assert_eq!(details.lines, vec!["██ QR ██", "▀▀▀▀", "Invitation: 49 bytes"]);
+        }
+
+        #[test]
+        fn a_failed_invite_says_why_and_opens_nothing() {
+            let mut app = app_with(peer("peer-abc"));
+            app.on_invite_outcome(false, "The invitation is 1200 bytes and a QR code takes at most 1000.\n", "");
+            assert!(app.details.is_none());
+            assert!(app.status.contains("1200 bytes"), "{}", app.status);
+        }
+
+        #[test]
+        fn the_invite_button_and_key_are_offered_on_peers() {
+            assert!(crate::context_menu::page_actions(crate::app::Page::Peers)
+                .iter()
+                .any(|item| item.label == "Show invitation QR"));
         }
 
         #[test]

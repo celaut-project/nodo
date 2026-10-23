@@ -90,14 +90,14 @@ The design and the plan are in
 
 ## Pages
 
-The tab bar is **two rows**. The top row is the six groups — where the node stands,
-what is running and who with, what it earned, what it logged, everything that
+The tab bar is **two rows**. The top row is the eight groups — where the node stands,
+what is running here, what it can run, who it deals with, what it earned, what it logged, everything that
 *writes*, and the node's own documentation. The second row is the pages of whichever
 group is open, and only those:
 
 ```
 ┌ NODO   operations console  running ────────────────────────────────┐
-│ OVERVIEW │ WORKLOAD │ EARNINGS │ LOGS │ SETTINGS │ DOCS                │
+│ OVERVIEW │ WORKLOAD │ CATALOG │ NETWORK │ EARNINGS │ LOGS │ SETTINGS │ DOCS │
 └────────────────────────────────────────────────────────┘
  POLICIES │ PRICING │ SCHEDULE │ ENERGY │ ALL
 ```
@@ -110,7 +110,7 @@ never longer than five titles, is the same information at a third of the width.
 
 A group is labelled by what it *is*, not by its first page. `INSTANCES` is not what
 `WORKLOAD` means, and a group named after its first member would send somebody looking
-for CLIENTS past a label that appears to be about instances. A group holding one page
+for PACKS past a label that appears to be about instances. A group holding one page
 (OVERVIEW, EARNINGS, LOGS, DOCS) draws no second row at all — a row containing a single
 already-selected title says nothing and costs the page below it a line.
 
@@ -332,8 +332,8 @@ again on every resize — there is nothing to restart.
   two-line footer (2), at the width the short tab titles need. Below it the console
   shows a *Terminal too small* notice with the current and the needed size instead
   of a page; the keys keep working (`q` quits) and the mouse is ignored.
-- **Tab rows** switch to short titles (`OVER WORK EARN LOGS SET DOCS`, `INST PEERS
-  SERV CLNT CHAT`, …) when the full ones do not fit; a click lands on whichever form
+- **Tab rows** switch to short titles (`OVER WORK CAT NET EARN LOGS SET DOCS`, `PEERS
+  CLNT CHAT`, …) when the full ones do not fit; a click lands on whichever form
   was drawn.
 - **Tables** drop columns by importance when they are short of width, and cut what
   is left with `…` instead of mid-word (CJK and emoji measured at their real

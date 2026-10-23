@@ -18,7 +18,9 @@ imports this module, and ``ConfigManager`` imports the firewall package.
 import errno
 import os
 import re
+import shlex
 import shutil
+import sys
 from typing import List, Optional, Sequence, Tuple
 
 CAP_NET_ADMIN = 12
@@ -120,6 +122,62 @@ def installed_service_user(
     if name and not valid_user_name(name):
         raise ValueError(f"The User= of {unit_file} is not a valid user name: {name!r}.")
     return name
+
+
+# The directories sudo searches by default (secure_path). An install without
+# sudo puts its wrapper in ~/.local/bin, which is not one of them.
+SUDO_SECURE_PATH = (
+    "/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin", "/snap/bin",
+)
+
+
+def sudo_nodo(arguments: str = "") -> str:
+    """The command that runs ``nodo <arguments>`` as root, as an operator types it.
+
+    ``sudo nodo`` when sudo finds the wrapper on its own path. When the wrapper
+    is somewhere sudo does not search (``~/.local/bin`` after an install without
+    sudo), its absolute path, so the command the message prints is the one that
+    works.
+    """
+    wrapper = shutil.which("nodo")
+    if wrapper is None:
+        candidate = os.path.join(os.path.expanduser("~"), ".local", "bin", "nodo")
+        wrapper = candidate if os.access(candidate, os.X_OK) else None
+    command = "nodo"
+    if wrapper is not None and os.path.dirname(wrapper) not in SUDO_SECURE_PATH:
+        command = shlex.quote(wrapper)
+    return f"sudo {command} {arguments}".rstrip()
+
+
+def sudo_rerun() -> str:
+    """``sudo nodo`` followed by the arguments this process was started with."""
+    return sudo_nodo(" ".join(shlex.quote(a) for a in sys.argv[1:]))
+
+
+def unwritable_dirs(directories: Sequence[str]) -> List[str]:
+    """The existing ``directories`` this process cannot delete entries from.
+
+    Removing a file needs write and search access on its directory, not root: a
+    node installed without sudo owns its storage as the service user, and an
+    operator in that user's group can clean it. A directory that does not exist
+    has nothing to remove and is not listed.
+    """
+    return [
+        d for d in directories
+        if os.path.isdir(d) and not os.access(d, os.W_OK | os.X_OK)
+    ]
+
+
+def refuse_unwritable(directories: Sequence[str]) -> bool:
+    """Print why and return True when some of ``directories`` cannot be written."""
+    blocked = unwritable_dirs(directories)
+    if not blocked:
+        return False
+    print(
+        "This user cannot write to: " + ", ".join(blocked) + ".\n"
+        "Run it as the user that owns them, or with: " + sudo_rerun()
+    )
+    return True
 
 
 # setpriv (util-linux): clears the inheritable and ambient sets, then execs.

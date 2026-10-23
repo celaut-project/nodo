@@ -40,11 +40,11 @@ part a node's reputation is built out of. The prompt therefore reports how many
 of the instances were asked for by a client, not just how many exist.
 """
 
-import os
 import sys
 from typing import Dict, List, Sequence
 
 from src.database.sql_connection import SQLConnection
+from src.utils.privileges import can_admin_network, sudo_rerun
 from src.manager.manager import credit_father, stop_instance
 from src.utils import dead_instances
 from src.utils.monetary import format_mu
@@ -147,10 +147,10 @@ def burnall(argv: List[str] = None) -> None:
         return
 
     # Only the dry run is readable without privileges; stopping needs the same
-    # rights `kill` needs, and finding that out after printing a plan is worse
-    # than finding it out now.
-    if not dry_run and os.geteuid() != 0:
-        print("This script requires superuser privileges. Please run with sudo.")
+    # rights `kill` needs (root or CAP_NET_ADMIN, as the service user has), and
+    # finding that out after printing a plan is worse than finding it out now.
+    if not dry_run and not can_admin_network():
+        print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
         return
 
     try:
