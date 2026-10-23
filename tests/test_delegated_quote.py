@@ -1,15 +1,16 @@
-"""A node that delegates says so in its quote (#551).
+"""A node that delegates says so in its quote (#551), at its own price (#577).
 
 What the tests protect:
 
-* the commission applies to what the client consumes (the start charge of the peer,
-  each tick), never to the deposit, and the minimum applies once, at the start;
-* the quote is the best of the local price and a peer's price plus commission;
+* the quote is always the price of this node: the local price when it has room, and its
+  own price when only a peer that it covers can run the service. It is never the price of
+  a peer;
+* a peer is a candidate only if the price of this node covers what the peer quoted;
 * each hop gives its peers less time than it has, and a node with too little time,
   or one already asking about the same service, answers with its local price only;
 * the lists of the operator still end the quote: they refuse the domain everywhere;
-* the launch charges the commission to the client, deposits only the peer's price on
-  the peer, and does not delegate for more than it offered.
+* the launch charges the client the price of this node, keeps the build of this node
+  out of what it sends the peer, and deposits only that on the peer.
 """
 import threading
 import time
@@ -26,7 +27,7 @@ try:
     from src.balancers.execution_balancer import execution_balancer as balancer_mod
     from src.gateway.iterables import estimated_cost_iterable as cost_mod
     from src.gateway.launcher import launch_service as launch_mod
-    from src.utils.cost_functions import delegated_quote, delegation_commission
+    from src.utils.cost_functions import delegated_quote
     from src.utils.network_policy import HiddenModeRejection, NetworkPolicyRejection, Rejection
     from src.utils.singleton import Singleton
     from src.utils.tools.query_cache import QueryCache
@@ -62,69 +63,6 @@ class _FreshCache:
                 Singleton._instances[QueryCache] = previous
 
         self.addCleanup(restore)
-
-
-def commission(percent=5.0, minimum=0):
-    stack = ExitStack()
-    stack.enter_context(mock.patch.object(delegation_commission, "commission_percent", return_value=percent))
-    stack.enter_context(mock.patch.object(delegation_commission, "commission_min_mu", return_value=minimum))
-    return stack
-
-
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class CommissionTests(unittest.TestCase):
-    def test_only_the_start_charge_pays_it_not_the_deposit(self):
-        # 1 000 deposit + 200 start charge: 5 % of 200 is 10.
-        with commission(5.0):
-            offer = delegation_commission.with_commission(price(1_200), initial_mu=1_000)
-        self.assertEqual(offer.cost.n, "1210")
-
-    def test_the_maintenance_pays_it_too(self):
-        with commission(5.0):
-            offer = delegation_commission.with_commission(price(1_000, 100, 400), initial_mu=1_000)
-        self.assertEqual((offer.cost.n, offer.init_maintenance_cost.n, offer.max_maintenance_cost.n),
-                         ("1000", "105", "420"))
-
-    def test_the_minimum_applies_to_the_start_only(self):
-        with commission(5.0, minimum=50):
-            offer = delegation_commission.with_commission(price(1_200, 100), initial_mu=1_000)
-            self.assertEqual(delegation_commission.commission_on(100), 5)
-        self.assertEqual(offer.cost.n, "1250")
-        self.assertEqual(offer.init_maintenance_cost.n, "105")
-
-    def test_it_rounds_up_and_stays_exact_on_large_amounts(self):
-        with commission(5.0):
-            self.assertEqual(delegation_commission.commission_on(1), 1)
-            self.assertEqual(delegation_commission.commission_on(10**30 + 1), 5 * 10**28 + 1)
-
-    def test_zero_percent_is_the_old_price(self):
-        with commission(0.0):
-            offer = delegation_commission.with_commission(price(1_200, 100), initial_mu=1_000)
-        self.assertEqual((offer.cost.n, offer.init_maintenance_cost.n), ("1200", "100"))
-
-    def test_a_bad_setting_reads_as_the_default(self):
-        with mock.patch.object(delegation_commission.env_manager, "get", return_value="many"):
-            self.assertEqual(delegation_commission.commission_percent(), delegation_commission.DEFAULT_PERCENT)
-            self.assertEqual(delegation_commission.commission_min_mu(), delegation_commission.DEFAULT_MIN_MU)
-        with mock.patch.object(delegation_commission.env_manager, "get", return_value=-3):
-            self.assertEqual(delegation_commission.commission_percent(), delegation_commission.DEFAULT_PERCENT)
-
-
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class CommissionConfigTests(unittest.TestCase):
-    def test_a_bad_commission_stops_the_node(self):
-        from src.utils.config_validation import ConfigValidationError, validate_pricing_config
-
-        for good in ({}, {"COMMISSION_PERCENT": 0}, {"COMMISSION_PERCENT": 2.5, "COMMISSION_MIN_MU": 10}):
-            with self.subTest(value=good):
-                validate_pricing_config({"network": {"delegation": good}})
-        for bad in ({"COMMISSION_PERCENT": -1}, {"COMMISSION_PERCENT": "5%"}, {"COMMISSION_PERCENT": True},
-                    {"COMMISSION_PERCENT": 5000}, {"COMMISSION_MIN_MU": 1.5}, {"COMMISSION_MIN_MU": -1}):
-            with self.subTest(value=bad):
-                with self.assertRaises(ConfigValidationError):
-                    validate_pricing_config({"network": {"delegation": bad}})
-        with self.assertRaises(ConfigValidationError):
-            validate_pricing_config({"network": {"delegation": [5]}})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -205,12 +143,6 @@ class OneRoundPerServiceTests(_FreshCache, unittest.TestCase):
         env.environment_variables.add(key="MODE", value=b"fast")
         self.assertNotEqual(delegated_quote.loop_key("svc", env), base)
         self.assertNotEqual(delegated_quote.loop_key("other", celaut.Configuration()), base)
-
-    def test_the_offer_is_kept_for_the_launch(self):
-        self.assertIsNone(delegated_quote.recall_offer("client-1", "svc"))
-        delegated_quote.remember_offer("client-1", "svc", 1_210)
-        self.assertEqual(delegated_quote.recall_offer("client-1", "svc"), 1_210)
-        self.assertIsNone(delegated_quote.recall_offer("client-2", "svc"))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -304,23 +236,35 @@ class RealGrpcDeadlineTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class BalancerSortTests(unittest.TestCase):
-    def test_a_peer_is_compared_with_its_commission_and_yielded_without_it(self):
-        # The peer is cheaper alone (1 150 < 1 160), not with 5 % of its start charge.
-        configuration = celaut.Configuration(initial_mu=amount(1_000))
-        with commission(10.0), \
-                mock.patch.object(balancer_mod, "estimated_cost_sorter", side_effect=cheapest_first):
-            ordered = balancer_mod._sorted_with_commission(
-                {"local": price(1_160), "peer-a": price(1_150)}, configuration)
-        self.assertEqual([peer for peer, _ in ordered], ["local", "peer-a"])
-        # 1 150 + 10 % of 150 = 1 165 is what decided, but the launcher gets 1 150.
+    def _sorted(self, costs, own):
+        with mock.patch.object(balancer_mod, "estimated_cost_sorter", side_effect=cheapest_first):
+            return balancer_mod._sorted_at_a_profit(costs, own)
+
+    def test_a_peer_that_costs_more_than_this_node_charges_is_not_a_candidate(self):
+        own = price(1_300, 100)
+        ordered = self._sorted({
+            "local": price(1_300, 100),
+            "covered": price(1_200, 100),
+            "dearer-start": price(1_301, 100),
+            "dearer-period": price(1_200, 101),
+        }, own)
+        self.assertEqual([peer for peer, _ in ordered], ["covered", "local"])
+
+    def test_the_quote_of_the_peer_is_yielded_as_it_is(self):
+        # The launcher needs it for what the peer takes, not for what the client pays.
+        ordered = self._sorted({"peer-a": price(1_150)}, price(1_300))
         self.assertEqual(dict(ordered)["peer-a"].cost.n, "1150")
+
+    def test_with_no_price_of_this_node_only_the_local_node_is_a_candidate(self):
+        ordered = self._sorted({"local": price(1_300), "peer-a": price(1)}, None)
+        self.assertEqual([peer for peer, _ in ordered], ["local"])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class QuoteTests(_FreshCache, unittest.TestCase):
     def _quote(self, peers, *, executes=True, local=None, budget=8.0, delegates=True,
                hidden_rejection=False, policy_rejection=False, client_id="client-1",
-               deposit=1_000, metadata=None):
+               deposit=1_000, metadata=None, own=None):
         it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
         it.configuration = celaut.Configuration(initial_mu=amount(deposit))
         it.service_hash = "svc"
@@ -334,7 +278,6 @@ class QuoteTests(_FreshCache, unittest.TestCase):
             def patched(target, name, **kwargs):
                 return stack.enter_context(mock.patch.object(target, name, **kwargs))
 
-            stack.enter_context(commission(5.0))
             settings = {"network.DELEGATE_EXECUTION": delegates}
             patched(cost_mod.env_manager, "get", side_effect=lambda k, d=None: settings.get(k, d))
             patched(cost_mod, "executes_locally", return_value=executes)
@@ -351,27 +294,33 @@ class QuoteTests(_FreshCache, unittest.TestCase):
             patched(cost_mod.BeeClient, "respond",
                     side_effect=lambda message_iterator, indices: iter([message_iterator]))
             patched(cost_mod, "delegation_time_budget", return_value=budget)
-            patched(cost_mod, "estimated_cost_sorter", side_effect=cheapest_first)
-            asked = patched(cost_mod, "quotes_from_peers", return_value=peers)
+            patched(cost_mod, "own_price", return_value=own or price(1_300))
+            asked = self.asked = patched(cost_mod, "quotes_from_peers", return_value=peers)
             out = list(it.generate())
         return out[0], asked
 
-    def test_a_node_that_does_not_execute_offers_a_peer_with_its_commission(self):
+    def test_a_node_that_does_not_execute_offers_its_own_price_for_a_peer(self):
         offer, asked = self._quote({"peer-a": price(1_200)}, executes=False)
-        self.assertEqual(offer.cost.n, "1210")
+        self.assertEqual(offer.cost.n, "1300")
         asked.assert_called_once()
         self.assertEqual(asked.call_args.kwargs["timeout"], 8.0)
-        # The deposit travels to the peer: the commission is not taken on it.
+        # The deposit travels to the peer as it is.
         self.assertEqual(asked.call_args.kwargs["configuration"].initial_mu.n, "1000")
 
-    def test_a_peer_with_its_commission_is_offered_when_it_is_cheaper(self):
-        offer, _ = self._quote({"peer-a": price(1_200)}, local=price(1_300))
-        self.assertEqual(offer.cost.n, "1210")
+    def test_a_peer_that_costs_more_than_this_node_charges_is_not_offered(self):
+        with self.assertRaises(Exception) as caught:
+            self._quote({"peer-a": price(1_400)}, executes=False)
+        self.assertNotIsInstance(caught.exception, HiddenModeRejection)
 
-    def test_the_local_price_is_offered_when_it_is_cheaper(self):
-        # The peer alone (1 200) is cheaper, but not with its commission (1 210).
-        offer, _ = self._quote({"peer-a": price(1_200)}, local=price(1_205))
-        self.assertEqual(offer.cost.n, "1205")
+    def test_the_local_price_is_offered_even_when_a_peer_is_cheaper(self):
+        # The client pays what this node advertises, whoever runs the service.
+        offer, _ = self._quote({"peer-a": price(1_200)}, local=price(1_305))
+        self.assertEqual(offer.cost.n, "1305")
+
+    def test_with_room_here_the_peers_are_not_asked(self):
+        offer, asked = self._quote({"peer-a": price(1)}, local=price(1_300))
+        self.assertEqual(offer.cost.n, "1300")
+        asked.assert_not_called()
 
     def test_with_no_peer_answer_the_local_price_is_offered_as_before(self):
         offer, _ = self._quote({}, local=price(1_300))
@@ -379,7 +328,7 @@ class QuoteTests(_FreshCache, unittest.TestCase):
 
     def test_a_hidden_node_offers_what_a_peer_runs(self):
         offer, _ = self._quote({"peer-a": price(1_200)}, hidden_rejection=True)
-        self.assertEqual(offer.cost.n, "1210")
+        self.assertEqual(offer.cost.n, "1300")
 
     def test_with_no_peer_the_reason_of_this_node_is_given(self):
         with self.assertRaises(HiddenModeRejection):
@@ -399,7 +348,7 @@ class QuoteTests(_FreshCache, unittest.TestCase):
         self.assertEqual(offer.cost.n, "1300")
         asked.assert_not_called()
 
-    def test_a_question_that_comes_back_through_a_loop_gets_the_local_price(self):
+    def test_a_question_that_comes_back_through_a_loop_starts_no_second_round(self):
         # The round that is open had the deposit in other MU: 999, not 1 000.
         # The client sent its own metadata, and the question that comes back has the
         # metadata of the registry: the round stops on this node all the same.
@@ -408,59 +357,56 @@ class QuoteTests(_FreshCache, unittest.TestCase):
         client_metadata = celaut.Metadata()
         client_metadata.hashtag.hash.add(type=b"\x01", value=b"from-the-client")
         with delegated_quote.asking_peers_for(open_round):
-            offer, asked = self._quote({"peer-a": price(1)}, metadata=client_metadata)
-        self.assertEqual(offer.cost.n, "1300")
-        asked.assert_not_called()
+            with self.assertRaises(Exception):
+                self._quote(executes=False, peers={"peer-a": price(1)}, metadata=client_metadata)
+        self.asked.assert_not_called()
 
     def test_the_round_is_remembered_without_the_metadata(self):
         # The peers get the hashes only, and read the metadata from their registry.
-        self._quote({"peer-a": price(1_200)})
+        self._quote(executes=False, peers={"peer-a": price(1_200)})
         other = celaut.Metadata()
         other.hashtag.hash.add(type=b"\x01", value=b"from-the-client")
-        _, asked = self._quote({"peer-a": price(1)}, metadata=other)
+        _, asked = self._quote(executes=False, peers={"peer-a": price(1)}, metadata=other)
         asked.assert_not_called()
 
     def test_a_round_on_another_question_does_not_stop_this_one(self):
         env = celaut.Configuration()
         env.environment_variables.add(key="MODE", value=b"fast")
         with delegated_quote.asking_peers_for(delegated_quote.loop_key("svc", env)):
-            offer, asked = self._quote({"peer-a": price(1_200)})
-        self.assertEqual(offer.cost.n, "1210")
+            offer, asked = self._quote(executes=False, peers={"peer-a": price(1_200)})
+        self.assertEqual(offer.cost.n, "1300")
         asked.assert_called_once()
 
     def test_the_same_question_again_does_not_ask_the_peers_again(self):
-        first, asked_first = self._quote({"peer-a": price(1_200)})
-        second, asked_second = self._quote({"peer-a": price(1)})
+        first, asked_first = self._quote(executes=False, peers={"peer-a": price(1_200)})
+        second, asked_second = self._quote(executes=False, peers={"peer-a": price(1)})
         asked_first.assert_called_once()
         asked_second.assert_not_called()
-        self.assertEqual((first.cost.n, second.cost.n), ("1210", "1210"))
+        self.assertEqual((first.cost.n, second.cost.n), ("1300", "1300"))
 
     def test_the_round_is_remembered_by_the_full_question(self):
         # Another deposit is another price on the peer: the round is not reused.
-        self._quote({"peer-a": price(1_200)})
-        _, asked = self._quote({"peer-a": price(1_300)}, deposit=1_100)
+        self._quote(executes=False, peers={"peer-a": price(1_200)})
+        _, asked = self._quote(executes=False, peers={"peer-a": price(1_300)}, deposit=1_100)
         asked.assert_called_once()
 
     def test_an_empty_round_is_not_remembered(self):
-        self._quote({})
-        offer, asked = self._quote({"peer-a": price(1_200)})
+        with self.assertRaises(Exception):
+            self._quote(executes=False, peers={})
+        offer, asked = self._quote(executes=False, peers={"peer-a": price(1_200)})
         asked.assert_called_once()
-        self.assertEqual(offer.cost.n, "1210")
+        self.assertEqual(offer.cost.n, "1300")
 
     def test_with_no_peer_ttl_the_round_is_not_remembered(self):
         with mock.patch.object(delegated_quote, "peer_quote_ttl", return_value=0.0):
-            self._quote({"peer-a": price(1_200)})
-            _, asked = self._quote({"peer-a": price(1_200)})
+            self._quote(executes=False, peers={"peer-a": price(1_200)})
+            _, asked = self._quote(executes=False, peers={"peer-a": price(1_200)})
         asked.assert_called_once()
-
-    def test_the_offer_is_kept_for_the_launch(self):
-        self._quote({"peer-a": price(1_200)}, executes=False)
-        self.assertEqual(delegated_quote.recall_offer("client-1", "svc"), 1_210)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchTests(_FreshCache, unittest.TestCase):
-    def _launch(self, candidates, offered=None, initial_mu=None, build_mu=0, minimum_mu=0):
+    def _launch(self, candidates, initial_mu=None, build_mu=0, minimum_mu=0, own=None):
         """Launch with ``candidates``. ``initial_mu`` None is a request with no amount.
 
         The default balance that the quotes ask for is 1 000 MU. ``build_mu`` and
@@ -468,8 +414,6 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         maintenance period.
         """
         mod = launch_mod
-        if offered is not None:
-            delegated_quote.remember_offer("client-1", "svc", offered)
         configuration = celaut.Configuration()
         if initial_mu is not None:
             configuration.initial_mu.CopyFrom(amount(initial_mu))
@@ -477,8 +421,8 @@ class LaunchTests(_FreshCache, unittest.TestCase):
             def patched(target, name, **kwargs):
                 return stack.enter_context(mock.patch.object(target, name, **kwargs))
 
-            stack.enter_context(commission(5.0))
             patched(mod, "declarations_for_service", return_value=[])
+            patched(mod, "_own_price", return_value=own or price(1_300))
             patched(mod, "service_requires_parent_colocation", return_value=False)
             patched(mod, "authorize_shares", return_value=[])
             spend = patched(mod, "spend_mu", return_value=True)
@@ -511,48 +455,34 @@ class LaunchTests(_FreshCache, unittest.TestCase):
                 error = e
             return SimpleNamespace(error=error, spend=spend, delegate=delegate, local=local)
 
-    def test_the_client_pays_its_initial_mu_and_the_commission_comes_out_of_it(self):
+    def test_the_client_pays_its_initial_mu_and_the_build_of_this_node_comes_out_of_it(self):
         # The quotes ask for a balance of 1 500, and the peer quotes it with a build of
-        # 200: 1 700. The commission of this node on the build is 10.
-        r = self._launch([("peer-a", price(1_700))], initial_mu=1_500)
+        # 200: 1 700. This node quotes it with a build of 40: 1 540.
+        r = self._launch([("peer-a", price(1_700))], initial_mu=1_500, own=price(1_540))
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_500)
         kwargs = r.delegate.call_args.kwargs
         self.assertEqual(int(kwargs["config"].initial_mu.n), 1_500)
-        self.assertEqual(kwargs["commission_mu"], 10)
-        self.assertEqual(kwargs["build_mu"], 200)
+        self.assertEqual(kwargs["own_build_mu"], 40)
+        self.assertEqual(kwargs["peer_build_mu"], 200)
 
-    def test_with_no_amount_the_client_pays_the_quote_of_the_peer_and_its_commission(self):
+    def test_with_no_amount_the_client_pays_the_price_of_this_node_and_not_the_peer(self):
+        # The peer quotes 1 200, and this node advertises 1 300 for the same service.
         r = self._launch([("peer-a", price(1_200))])
         self.assertIsNone(r.error)
-        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_210)
+        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_300)
         kwargs = r.delegate.call_args.kwargs
-        self.assertEqual(int(kwargs["config"].initial_mu.n), 1_210)
-        # The peer gets 1 210 - 10 = 1 200: its build and the default balance.
-        self.assertEqual(kwargs["commission_mu"], 10)
-        self.assertEqual(kwargs["build_mu"], 200)
-
-    def test_a_peer_that_costs_more_than_the_offer_is_not_used(self):
-        r = self._launch([("peer-a", price(1_300)), ("peer-b", price(1_200))], offered=1_210)
-        self.assertIsNone(r.error)
-        self.assertEqual(r.delegate.call_args.kwargs["peer"], "peer-b")
-        self.assertEqual(r.spend.call_count, 1)
-
-    def test_with_no_peer_inside_the_offer_the_launch_fails_and_charges_nothing(self):
-        r = self._launch([("peer-a", price(1_300))], offered=1_210)
-        self.assertIsNotNone(r.error)
-        self.assertIn("more than the 1210 MU this node offered", str(r.error))
-        r.spend.assert_not_called()
+        self.assertEqual(int(kwargs["config"].initial_mu.n), 1_300)
+        # The build of the peer is what its quote has above the default balance, 1 000.
+        self.assertEqual(kwargs["peer_build_mu"], 200)
 
     def test_a_client_that_sets_its_amount_is_never_charged_more_than_it_set(self):
-        # The offer was 1 210, and the peer now costs more: a build of 300 on 1 500. The
-        # client set 1 500: it is charged 1 500 and no more, and the start fits.
-        r = self._launch([("peer-a", price(1_800))], offered=1_210, initial_mu=1_500)
+        r = self._launch([("peer-a", price(1_800))], initial_mu=1_500)
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_500)
 
     def test_the_local_node_is_charged_its_quote_when_there_is_no_amount(self):
-        r = self._launch([("local", price(1_300))], offered=1_210)
+        r = self._launch([("local", price(1_300))])
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_300)
 
@@ -576,11 +506,11 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         r.spend.assert_not_called()
 
     def test_a_peer_that_the_amount_does_not_fund_is_skipped_and_the_next_one_runs_it(self):
-        # After the commission of 10 and the build of 200 of peer-a, 20 MU is left. One
-        # period costs 50. The quote of peer-b has no build: 500 MU are left.
+        # After the build of 200 of peer-a, 30 MU is left. One period costs 50. The quote
+        # of peer-b has no build: 230 MU are left.
         cheap = price(430, init=50)
         free = price(230, init=50)
-        r = self._launch([("peer-a", cheap), ("peer-b", free)], initial_mu=230)
+        r = self._launch([("peer-a", cheap), ("peer-b", free)], initial_mu=230, own=price(230))
         self.assertIsNone(r.error)
         self.assertEqual(r.delegate.call_args.kwargs["peer"], "peer-b")
         self.assertEqual(r.spend.call_count, 1)

@@ -37,6 +37,8 @@ class ExecuteLocallyFlagTests(unittest.TestCase):
                                    settings.get(key, default)), \
                 mock.patch.object(balancer_module, "generate_estimated_cost",
                                   return_value=celaut_pb2.EstimatedCost()) as local_cost, \
+                mock.patch.object(balancer_module, "own_price",
+                                  return_value=celaut_pb2.EstimatedCost()), \
                 mock.patch.object(balancer_module, "peers_id_iterator", return_value=iter(["peer-1"])), \
                 mock.patch.object(balancer_module, "estimated_cost_sorter",
                                   side_effect=lambda estimated_costs: iter(estimated_costs.items())), \

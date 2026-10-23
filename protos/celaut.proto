@@ -705,8 +705,7 @@ message BalanceMovement {
     Amount balance_after = 4;
     // What the movement is: "deposit" (a payment), "credit" (MU that nobody paid in),
     // "debit" (the operator took MU), "start" (the initial_mu that the instance got),
-    // "build", "commission" (of a node that delegated the instance), "maintenance" (one
-    // period), "child_start" (the account paid the start of a child), "child_bound" (the
+    // "build", "maintenance" (one period), "child_start" (the account paid the start of a child), "child_bound" (the
     // child of a child_start exists; moves nothing), "top_up", "withdrawal", "refund"
     // (MU that goes back to the parent), "tunnel", "resource_change" or
     // "statement_query". A reader treats a kind that it does not

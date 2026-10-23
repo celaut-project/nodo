@@ -77,6 +77,8 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
         rows = self.sc.get_delegated_instances()
 
         self.assertEqual(len(rows), 1)
+        # The time that the child is charged up to starts at the start (#577).
+        self.assertIsInstance(rows[0].pop('charged_until'), float)
         self.assertEqual(
             rows[0],
             {
@@ -94,6 +96,27 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'verified_father_net_peer_mu': 0,
                 'father_net_peer_mu': 0,
                 'charged_peer_mu': 0,
+                # No shape was given: the child is charged nothing (#577).
+                'mem_limit': None,
+                'disk_space': None,
+                'cpu_period': None,
+                'cpu_quota': None,
+                'arch': None,
+                'launch_cpu_bp': None,
+                'launch_mem_bp': None,
+                'launch_disk_bp': None,
+                'max_mem_limit': None,
+                'max_disk_space': None,
+                'max_cpu_period': None,
+                'max_cpu_quota': None,
+                'base_mem_limit': None,
+                'base_disk_space': None,
+                'base_cpu_period': None,
+                'base_cpu_quota': None,
+                'peer_base_mem_limit': None,
+                'peer_base_disk_space': None,
+                'peer_base_cpu_period': None,
+                'peer_base_cpu_quota': None,
             },
         )
 

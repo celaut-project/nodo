@@ -638,6 +638,7 @@ class LaunchTests(unittest.TestCase):
             # Pricing is not tested here: what funds a start has its own tests (#563).
             patched(mod, "_funding_failure", return_value=None)
             patched(mod, "_delegation_terms", return_value=(0, 0))
+            patched(mod, "_own_price", return_value=None)
             patched(mod, "enforce_network_policy")
             patched(mod, "evaluate_possible_environment_workloads", return_value=None)
             patched(mod, "_detect_local_preflight_failure", return_value=None)
@@ -650,7 +651,7 @@ class LaunchTests(unittest.TestCase):
             patched(mod.utils, "get_network_name", return_value="lan")
             patched(mod, "get_arch_tag", return_value="amd64")
             patched(mod, "default_initial_balance", return_value=1)
-            patched(mod, "_client_charge_mu", return_value=1)  # the commission is not tested here
+            patched(mod, "_client_charge_mu", return_value=1)  # the price is not tested here
             balancer.return_value = iter([(peer, cost) for peer in candidates])
             error = None
             try:

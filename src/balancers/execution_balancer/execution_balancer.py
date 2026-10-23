@@ -12,6 +12,7 @@ from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.arch_guard import arch_from_tags
 from src.utils.cost_functions.architecture_resources import ask_of, should_skip_peer
+from src.utils.cost_functions.delegated_price import covers, own_price
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
 from src.utils.tools.query_cache import HIT, QueryCache, canonical_key, peer_quote_ttl, with_sorted_hashes
@@ -164,7 +165,7 @@ def quotes_from_peers(
         ignore_network: str = None,
         timeout: Optional[float] = None,
 ) -> Dict[str, celaut_pb2.EstimatedCost]:
-    """The price of each peer that answers, in local MU, without commission.
+    """The price of each peer that answers, in local MU.
 
     The peers are asked at the same time, not one after the other. With ``timeout``
     (seconds), only the answers that arrive in that time count: this node has its own
@@ -209,28 +210,26 @@ def quotes_from_peers(
         executor.shutdown(wait=False)
 
 
-def _sorted_with_commission(
+def _sorted_at_a_profit(
         costs: Dict[str, celaut_pb2.EstimatedCost],
-        configuration: celaut_pb2.Configuration,
+        own: Optional[celaut_pb2.EstimatedCost],
 ) -> List[tuple[str, celaut_pb2.EstimatedCost]]:
-    """``costs`` sorted as the client pays them, each with the price of the peer.
+    """``costs`` cheapest first, without the peers that this node would delegate at a loss.
 
-    A peer is compared with its commission (#551): that is the least ``initial_mu`` that
-    starts the service when this node delegates to it (``with_commission``). The cost
-    yielded is still the quote of the peer, without commission. The client pays
-    ``initial_mu`` and nothing else (#563). The launcher keeps the commission out of it,
-    sends the peer the rest, and the peer takes its build from what it gets. The quote of
-    the peer says what the peer needs, and the commission is added to it only to compare
-    and to offer.
+    The client pays what this node advertises, whoever runs the service (#577), so a
+    peer is a cost to cover: it is a candidate only if ``own``, the price of this node,
+    covers its quote, also at the most that the service may grow to
+    (``delegated_price.covers``). The cost yielded is still the quote
+    of the peer: the launcher needs it for what the peer takes. Without ``own`` no
+    price can be covered, and only the local node is a candidate.
     """
-    from src.utils.cost_functions.delegation_commission import with_commission
-
-    initial_mu = int(configuration.initial_mu.n or 0) if configuration.HasField("initial_mu") else 0
-    offered = {
-        peer: cost if peer == 'local' else with_commission(cost, initial_mu)
-        for peer, cost in costs.items()
-    }
-    return [(peer, costs[peer]) for peer, _ in estimated_cost_sorter(estimated_costs=offered)]
+    kept = {}
+    for peer, cost in costs.items():
+        if peer == 'local' or (own is not None and covers(own, cost)):
+            kept[peer] = cost
+        else:
+            log.LOGGER(f"Peer {peer} costs this node more than it charges; not a candidate.")
+    return list(estimated_cost_sorter(estimated_costs=kept))
 
 
 def execution_balancer(
@@ -242,6 +241,7 @@ def execution_balancer(
         recursion_guard_token: str = None,
         arch: Optional[str] = None,
         service: Optional[celaut.Service] = None,
+        own: Optional[celaut_pb2.EstimatedCost] = None,
 ) -> Generator[tuple[str, celaut_pb2.EstimatedCost], None, None]:
     """Every candidate's price for this service, cheapest first.
 
@@ -254,6 +254,11 @@ def execution_balancer(
     ``service`` is the manifest, and is local-only for the same reason: it is read
     to notice a ``read_mode=ro`` declaration, which changes what this node's disk
     floors mean for the quote it offers. A peer applies its own.
+
+    ``own`` is the price of this node for the service when a peer runs it
+    (``delegated_price.own_price``): a peer is a candidate only if it covers its quote.
+    The launcher gives the price that it then charges, so that both are the same figure.
+    Not given, it is priced here.
     """
 
     # sorted by cost, tuple of celaut.Instances or 'local' and cost
@@ -322,9 +327,18 @@ def execution_balancer(
     else:
         log.LOGGER('network.DELEGATE_EXECUTION is off; only the local node is considered.')
 
+    if own is None and any(peer != 'local' for peer in peers):
+        try:
+            own = own_price(
+                metadata=metadata, configuration=configuration,
+                resources=resources, arch=arch, service=service,
+            )
+        except Exception as e:
+            log.LOGGER(f'Error pricing the service for this node, so no peer is covered: {e}')
+
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")
-        return _sorted_with_commission(peers, configuration)
+        return _sorted_at_a_profit(peers, own)
     except Exception as e:
         log.LOGGER('Error during estimated cost sorter on execution balancer:' + str(e))
         raise StopIteration

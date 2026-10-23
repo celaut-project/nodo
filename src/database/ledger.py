@@ -45,8 +45,6 @@ START = "start"
 """The ``initial_mu`` that a new instance received from its father."""
 BUILD = "build"
 """The build of the service, taken from the ``initial_mu`` of a new instance."""
-COMMISSION = "commission"
-"""The commission of this node on a delegated start or tick (#551)."""
 MAINTENANCE = "maintenance"
 """One maintenance period of an instance."""
 CHILD_START = "child_start"
@@ -73,7 +71,7 @@ CHILD_BOUND = "child_bound"
 and ``detail.starts_seq`` the seq of the ``child_start`` that it completes."""
 
 KINDS = (
-    DEPOSIT, CREDIT, DEBIT, START, BUILD, COMMISSION, MAINTENANCE, CHILD_START,
+    DEPOSIT, CREDIT, DEBIT, START, BUILD, MAINTENANCE, CHILD_START,
     CHILD_BOUND, TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY,
 )
 

@@ -169,8 +169,7 @@ class LedgerWriteTests(_Database):
             father_id="c1", encrypted_external_token="alias", external_token="peer-token",
             peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
             peer_balance_mu=6, movements=(
-                ledger.Movement(ledger.START, 100), ledger.Movement(ledger.COMMISSION, -10),
-                ledger.Movement(ledger.BUILD, -30),
+                ledger.Movement(ledger.START, 100), ledger.Movement(ledger.BUILD, -40),
             ), sent_peer_mu=9, mark={"seq": 2, "ts": 5, "read_at": 7.0},
         )
 
@@ -342,8 +341,7 @@ class SettleStopTests(_Database):
             father_id="c1", encrypted_external_token="alias", external_token="peer-token",
             peer_id="p", serialized_instance=b"", service_id="s", balance_mu=60,
             peer_balance_mu=6, movements=(
-                ledger.Movement(ledger.START, 100), ledger.Movement(ledger.COMMISSION, -10),
-                ledger.Movement(ledger.BUILD, -30),
+                ledger.Movement(ledger.START, 100), ledger.Movement(ledger.BUILD, -40),
             ), sent_peer_mu=9, mark={},
         )
 
@@ -490,21 +488,23 @@ class DelegatedDepositRowsTests(_Database):
         self.assertEqual(self.sc.get_delegated_balance("peer-token"), 500)
         self.assertEqual(self.net(), 0)
 
-    def test_a_correction_is_a_row_with_its_detail_and_updates_the_totals(self):
+    def test_a_correction_of_what_the_peer_charged_updates_the_totals_and_not_the_deposit(self):
+        # What the peer charged this node is measured, and the instance is charged by
+        # the price of this node (#577): a correction moves the totals only.
         self.sc.settle_delegated_tick(
             "peer-token", 30, {"peer_balance_mu": 970, "verified_consumption": 30,
-                               "verified_father_net": 0, "charged_delta": 30})
+                               "verified_father_net": 0, "charged_delta": 30,
+                               "charged_until": 1000.0})
         self.sc.settle_delegated_tick(
             "peer-token", 0, {"peer_balance_mu": 975, "verified_consumption": 25,
-                              "charged_delta": -5}, refund_mu=5, detail={"peer_id": "p"})
+                              "charged_delta": -5, "charged_until": 2000.0})
 
         row = self.sc.get_delegated_instances()[0]
         self.assertEqual((row["verified_consumption_peer_mu"], row["charged_peer_mu"]), (25, 25))
-        self.assertEqual(self.sc.get_delegated_balance("peer-token"), 475)
-        last = self.rows("alias")[-1]
-        self.assertEqual((last["kind"], int(last["amount_mu"])), (ledger.MAINTENANCE, 5))
-        self.assertIn('"adjustment":"1"', last["detail"])
-        self.assert_adds_up("alias", 475)
+        self.assertEqual(row["charged_until"], 2000.0)
+        self.assertEqual(self.sc.get_delegated_balance("peer-token"), 470)
+        self.assertEqual(int(self.rows("alias")[-1]["amount_mu"]), -30)
+        self.assert_adds_up("alias", 470)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

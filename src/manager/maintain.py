@@ -1,3 +1,4 @@
+from fractions import Fraction
 from time import sleep
 import os
 import shutil
@@ -15,23 +16,22 @@ from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
-from src.utils.cost_functions.delegation_commission import commission_floor_on, commission_on
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
 from src.reputation_system.onchain_indexer import tick as onchain_reputation_tick
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.payment_system.mu_conversion import matching_payment_system
-from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
 from src.tunneling import delegated_endpoints
 from src.utils import activity_window, dead_instances, demand_history
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import from_amount, peers_id_iterator
-from src.utils.cost_functions.execution_cost import system_scarcity
+from src.utils.cost_functions.execution_cost import RESOURCES, SCARCITY_SCALE, charge_at_launch_price, system_scarcity
+from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_US
 from src.utils.cost_functions.general_cost_functions import RATE_STATEMENT_QUERY, RATE_STATEMENT_ROW, compute_maintenance_cost
-from src.utils.monetary import format_mu
+from src.utils.monetary import format_mu, prices
 from src.utils.hashing import get_configured_hash_id, get_configured_hash_spec, hash_stream
 from src.utils.service_content import read_service_content
 from src.utils.config import ConfigManager
@@ -689,7 +689,9 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
 
     Returns ``(charge_peer_mu, state)`` in the MU of the peer, and raises when nothing
     could be read. ``charge_peer_mu`` is signed: a reading that shows a past charge to
-    have been too much gives MU back. ``state`` is what ``settle_delegated_tick`` writes.
+    have been too much gives MU back. ``state`` is what ``settle_delegated_tick`` writes, and
+    ``rows``: the movements of the statement that were checked, which ``settle_child``
+    reads the resources of the child from.
 
     What is owed is the sum of two things (the totals are in `delegated_instances`):
 
@@ -734,6 +736,7 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
     from_seq = 1 if mark.seq is None else mark.seq + 1
 
     statement, error, asked, checked = None, None, False, False
+    rows = ()
     if force_statement or mark.seq is None or sc.child_statement_due(
             token, ledger.statement_read_every_ticks(MANAGER_ITERATION_TIME)):
         try:
@@ -771,6 +774,7 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             new = statement_check.mark_after(chain, statement, start)
             balance_now = from_amount(statement.balance)
             checked = True
+            rows = tuple(chain.rows)
             statement_check.settle_failed_reads(peer_id, token, chain.rows, statement.head_seq)
         else:
             if chain.problem:
@@ -812,72 +816,200 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
     return charge, {
         "peer_balance_mu": new.balance, "seq": new.seq, "hash": new.hash or None, "ts": new.ts,
         "verified_consumption": verified, "verified_father_net": verified_sent,
-        "charged_delta": charge,
+        "charged_delta": charge, "rows": rows,
     }
+
+
+SHAPE_KEYS = ("mem_limit", "disk_space", "cpu_period", "cpu_quota")
+# The multipliers of a launch while the node is free: the base price.
+BASE_LAUNCH_BP = {resource: SCARCITY_SCALE for resource in RESOURCES}
+
+
+def _sysresources(shape) -> celaut.Sysresources:
+    return celaut.Sysresources(**{key: int(shape.get(key) or 0) for key in SHAPE_KEYS})
+
+
+def _delegated_price(row: dict, shape, seconds: float) -> int:
+    """Our price for ``shape`` held ``seconds``, at the multipliers of the launch of ``row``.
+
+    A delegated instance is not free, and the scarcity of this node says nothing about
+    it (``delegated_price``).
+    """
+    return charge_at_launch_price(system_resources=_sysresources(shape), seconds=seconds,
+                                  launch_bp=_row_launch_bp(row) or BASE_LAUNCH_BP,
+                                  arch=_row_arch(row))
+
+
+def _shape(row: dict, prefix: str = "") -> Optional[dict]:
+    """The shape in the columns of ``row`` that start with ``prefix``, or None if unset."""
+    values = [row.get(f"{prefix}{key}") for key in SHAPE_KEYS]
+    if any(value is None for value in values):
+        return None
+    return {key: int(value) for key, value in zip(SHAPE_KEYS, values)}
+
+
+def _vcpus(shape) -> Fraction:
+    # A period of 0 is the default period of the kernel, as ``requested_units`` reads it.
+    return Fraction(int(shape["cpu_quota"]), int(shape["cpu_period"]) or _DEFAULT_CPU_PERIOD_US)
+
+
+def _changed_by(start: dict, peer_start: dict, peer_now: dict) -> dict:
+    """Our shape at the start, changed as much as the resources on the peer changed.
+
+    The floors of the two nodes are not the same (the disk of an image that one of them
+    has built, ``MIN_MEM_MIB``, the vCPU of a service that declares none), so the figures
+    of the peer are not compared with ours: only their changes are taken.
+    """
+    shape = dict(start)
+    for key in ("mem_limit", "disk_space"):
+        shape[key] = max(0, start[key] + peer_now[key] - peer_start[key])
+    vcpus = max(Fraction(0), _vcpus(start) + _vcpus(peer_now) - _vcpus(peer_start))
+    shape["cpu_quota"] = int(vcpus * (start["cpu_period"] or _DEFAULT_CPU_PERIOD_US))
+    return shape
+
+
+def _capped(shape: dict, row: dict) -> dict:
+    """``shape`` held down to the most that the child is charged for (``max_*`` on its row).
+
+    The changes come from the peer: a peer that wrote more than the service can hold
+    would raise what this node charges its own client.
+    """
+    capped = dict(shape)
+    for key in ("mem_limit", "disk_space"):
+        if row.get(f"max_{key}") is not None:
+            capped[key] = min(capped[key], int(row[f"max_{key}"]))
+    if row.get("max_cpu_quota") is not None and row.get("max_cpu_period") is not None:
+        most = {"cpu_quota": int(row["max_cpu_quota"]), "cpu_period": int(row["max_cpu_period"])}
+        if _vcpus(capped) > _vcpus(most):
+            capped["cpu_period"], capped["cpu_quota"] = most["cpu_period"], most["cpu_quota"]
+    return capped
+
+
+def _period_of(movement) -> Optional[tuple]:
+    """``(shape, seconds)`` of a ``maintenance`` movement of the peer, from its detail
+    (``statement_check.tick_detail``), or None if it does not say them."""
+    if movement.kind != ledger.MAINTENANCE or movement.detail.get("adjustment"):
+        return None
+    try:
+        shape = {key: int(movement.detail[key]) for key in SHAPE_KEYS}
+        return shape, int(movement.detail["seconds"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def measured_shape(row: dict, rows) -> tuple:
+    """What the resources that the child held on the peer change in its charge (#577).
+
+    The service changes its resources on the peer (``ModifyServiceSystemResources`` goes
+    to the node that runs it), so this node only knows them from the statement of the
+    child: each ``maintenance`` movement says the resources and the seconds that it
+    priced. The first that a statement shows is the start on the peer (``peer_base_*``),
+    and the shape of the child is our shape at the start (``base_*``) changed as those
+    resources changed since then (``_changed_by``), held down to its most (``_capped``).
+    A change of the resources before the first maintenance of the peer is not seen.
+
+    The ticks between two statements charge the last shape that was known, the one on the
+    row. For each period in ``rows`` the correction is our price for the shape of the
+    child less our price for the shape that was charged: positive if it grew, negative if
+    it shrank.
+
+    Returns ``(correction_mu, last_shape, resource_changes, peer_base)``: the correction,
+    the last shape that ``rows`` show (None if they show none), the number of
+    ``resource_change`` movements that the peer did not give back (each is charged at our
+    rate), and the start on the peer when ``rows`` are the first to show it (else None).
+    """
+    known = _shape(row) or {key: 0 for key in SHAPE_KEYS}
+    start = _shape(row, "base_") or known
+    peer_start = _shape(row, "peer_base_")
+    new_peer_start = None
+    correction, last = 0, None
+    changes, given_back = set(), set()
+    for movement in rows:
+        if movement.kind == ledger.RESOURCE_CHANGE:
+            changes.add(movement.seq)
+            continue
+        if movement.kind == ledger.REFUND:
+            try:
+                given_back.add(int(movement.detail.get("refunds_seq")))
+            except (TypeError, ValueError):
+                pass
+            continue
+        period = _period_of(movement)
+        if period is None:
+            continue
+        peer_now, seconds = period
+        if peer_start is None:
+            peer_start = new_peer_start = peer_now
+        shape = _capped(_changed_by(start, peer_start, peer_now), row)
+        if shape != known:
+            correction += _delegated_price(row, shape, seconds) - _delegated_price(row, known, seconds)
+        last = shape
+    return correction, last, len(changes - given_back), new_peer_start
+
+
+def _unmoved_state(row: dict) -> dict:
+    """The mark of ``row`` as it is: for a charge with no reading of the peer."""
+    return {"peer_balance_mu": int(row.get('peer_balance_mu') or 0),
+            "seq": row.get('peer_statement_seq'), "hash": row.get('peer_statement_hash'),
+            "ts": row.get('peer_statement_ts')}
 
 
 def settle_child(row: dict, charge_peer_mu: int, state: dict, *, stop_if_short: bool = True,
                  debug_mode: bool = False) -> bool:
-    """Take what the child owes from its deposit, or give back what it was charged too much.
+    """Charge the child what this node advertises for the time since the last charge, and
+    write what the peer charged this node.
+
+    A delegated child is charged like a local one (#577): our cost function and our
+    rates, for the seconds since ``charged_until`` and for the last shape that is known of
+    it (the one on its row), at the multipliers of its launch (``_delegated_price``).
+    When a statement was read, ``rows`` in ``state`` correct the periods that it covers by
+    the shape that the child really held, and the changes of its resources are charged at
+    our rate (``measured_shape``). The last shape goes on the row for the next ticks.
+
+    What the peer charged this node (``charge_peer_mu``, in the MU of the peer) is kept
+    in the totals of ``state``, and is no part of the charge: the difference is the
+    margin of this node, and a peer that charges more is a loss that this node takes.
+    With no reading of the peer, ``state`` is the mark as it is (``_unmoved_state``).
 
     Writes the rows, the totals and the mark in one transaction (``settle_delegated_tick``).
-    Returns False when it could not be settled this time: no common payment system says
-    what the figure is worth here. With ``stop_if_short`` an instance whose deposit does
-    not cover the charge is stopped, as a local one is.
+    With ``stop_if_short`` an instance whose deposit does not cover the charge is stopped,
+    as a local one is. Returns True.
     """
     peer_id, token, vmachine_id = row.get('peer_id'), row['token'], row.get('id')
-    if charge_peer_mu == 0:
-        # Nothing metered, or the child got more than it spent. Either way there is
-        # nothing to charge; re-mark and measure from here.
-        sc.settle_delegated_tick(token=token, charge_mu=0, mark=state)
-        return True
+    state = dict(state)
+    rows = state.pop("rows", ())
+    now = time.time()
+    since = row.get('charged_until')
+    seconds = max(0.0, now - float(since)) if since else 0.0
+    state["charged_until"] = now
+    charge_mu = _delegated_price(row, _shape(row) or {}, seconds)
+    detail = statement_check.tick_detail(row, seconds)
 
-    if charge_peer_mu < 0:
-        # A correction. It rounds down, and the commission with it: giving back more
-        # than was taken would be an error that nothing revises.
-        refund = peer_mu_in_local(peer_id, -charge_peer_mu, round_up=False)
-        if refund is None:
-            log.LOGGER(
-                f"No common payment system with {peer_id} says what the {-charge_peer_mu} MU "
-                f"that it metered less for {vmachine_id} are worth here; not correcting this tick."
-            )
-            return False
-        refund += commission_floor_on(refund)
-        sc.settle_delegated_tick(
-            token=token, charge_mu=0, mark=state, refund_mu=refund,
-            detail={"peer_id": peer_id, "peer_mu": str(charge_peer_mu)})
-        return True
-
-    # Rounds up, and the client pays the remainder: this is a cost already
-    # incurred with the peer, and the floor of it leaves this node paying the
-    # difference on every tick for the life of the instance.
-    charge_mu = peer_mu_in_local(peer_id, charge_peer_mu, round_up=True)
-    if charge_mu is None:
-        log.LOGGER(
-            f"No common payment system with {peer_id} says what the "
-            f"{charge_peer_mu} MU it metered for {vmachine_id} are worth here; "
-            f"not charging this tick."
-        )
-        return False
-    # What the peer metered, and this node's commission on it (#551). No minimum
-    # here: the minimum is for the start, and a tick can be very small.
-    commission_mu = commission_on(charge_mu)
-    charge_mu += commission_mu
-    detail = {"peer_id": peer_id, "peer_mu": str(charge_peer_mu),
-              "commission_mu": str(commission_mu)}
+    movements = []
+    correction, last, changes, peer_start = measured_shape(row, rows)
+    if correction:
+        movements.append(ledger.Movement(ledger.MAINTENANCE, -correction,
+                                         detail={"adjustment": "1"}))
+    for _ in range(changes):
+        movements.append(ledger.Movement(ledger.RESOURCE_CHANGE, -int(prices().modify_resources_mu)))
+    if last is not None:
+        state["shape"] = last
+    if peer_start is not None:
+        state["peer_base"] = peer_start
+    total_mu = charge_mu - sum(m.amount_mu for m in movements)
 
     balance_mu = int(row.get('balance_mu') or 0)
-    if stop_if_short and balance_mu < charge_mu and not ALLOW_DEBT:
+    if stop_if_short and balance_mu < total_mu and not ALLOW_DEBT:
         log.LOGGER(
             f"Stopping delegated instance {vmachine_id} on peer {peer_id}: "
             f"{format_mu(balance_mu)} left will not cover the "
-            f"{format_mu(charge_mu)} it just consumed there."
+            f"{format_mu(total_mu)} it just consumed."
         )
         # Emptied before the stop, not left for `stop_instance` to refund: the
         # instance consumed more than it held, so every MU on the row is already
-        # owed to the peer. Refunding it to the father would hand him back
-        # runtime this node has paid for, and the shortfall the node absorbs is
-        # then only the part the deposit could not reach.
+        # owed. Refunding it to the father would hand him back runtime this node
+        # has paid for, and the shortfall the node absorbs is then only the part the
+        # deposit could not reach.
         sc.settle_delegated_tick(token=token, charge_mu=balance_mu, mark=state, detail=detail)
         # No reputation penalty, the same as in the local tick: the father holds the
         # balance, so this death is not a fault of the service.
@@ -888,70 +1020,76 @@ def settle_child(row: dict, charge_peer_mu: int, state: dict, *, stop_if_short: 
         return True
 
     # Charge and mark in one transaction, because they are one fact. Charging first
-    # and marking second bills this same consumption again on the next tick if the
-    # second never lands, and marking first writes the consumption off instead.
-    sc.settle_delegated_tick(token=token, charge_mu=charge_mu, mark=state, detail=detail)
+    # and marking second bills this same time again on the next tick if the second
+    # never lands, and marking first writes the time off instead.
+    sc.settle_delegated_tick(token=token, charge_mu=charge_mu, mark=state,
+                             detail=detail if charge_mu else None, movements=movements)
     if debug_mode:
-        log.LOGGER(
-            f"Charged delegated instance {vmachine_id} {format_mu(charge_mu)} for "
-            f"what peer {peer_id} metered since the last tick."
-        )
+        log.LOGGER(f"Charged delegated instance {vmachine_id} {format_mu(total_mu)} for {seconds:.0f}s.")
     return True
 
 
 def close_delegated_charge(external_token: str) -> None:
-    """Settle what a delegated child owes right before it is stopped, from its statement.
+    """Settle what a delegated child owes right before it is stopped.
 
-    The account of the child on the peer ends with the stop, and what it consumed since
-    the last reading would stay at the estimate of the balance. This reads its statement
-    one last time and corrects the charge with it. Never raises, and never stops the
-    instance for a charge: the stop is under way.
+    The account of the child on the peer ends with the stop, and its resources since the
+    last reading would stay at the estimate. This reads its statement one last time and
+    charges with it. A peer that cannot be read does not stop the charge of the time,
+    which does not need it. Never raises, and never stops the instance for a charge: the
+    stop is under way.
     """
     try:
         row = next((r for r in sc.get_delegated_instances() if r['token'] == external_token), None)
         if row is None:
             return
-        charge_peer_mu, state = _read_child(row, force_statement=True)
+        try:
+            charge_peer_mu, state = _read_child(row, force_statement=True)
+        except Exception as e:
+            log.LOGGER(f"Could not read the delegated instance before its stop; "
+                       f"charging its time without it: {e}")
+            charge_peer_mu, state = 0, _unmoved_state(row)
         settle_child(row, charge_peer_mu, state, stop_if_short=False)
     except Exception as e:
         log.LOGGER(f"Could not close the charge of the delegated instance before its stop: {e}")
 
 
 def maintain_delegated_instances(debug_mode: bool = False):
-    """Charge a delegated instance for what the peer actually metered.
+    """Charge a delegated instance what this node advertises, and measure what the peer charges.
 
     A delegated child is funded like a local one -- its father is charged `initial_mu`
-    at StartService, and the build comes out of it (#563) -- and what the father can get
-    back sits on the delegation row, in this node's MU: `initial_mu` less the commission
-    of this node and less the build of the peer. Nothing else charges it: the sweep above prices `local_instances`,
-    and a delegated instance has no row there. Left unbilled, the deposit would still
-    be whole when the instance stopped and the father would be handed back runtime he
-    really used.
+    at StartService, and the build of this node comes out of it (#563) -- and what the
+    father can get back sits on the delegation row, in this node's MU. Nothing else
+    charges it: the sweep above prices `local_instances`, and a delegated instance has no
+    row there. Left unbilled, the deposit would still be whole when the instance stopped
+    and the father would be handed back runtime he really used.
 
-    What it costs is *measured*, not predicted: the balance of the child on the peer
-    falls by what it consumed, and its statement (#570) says exactly what that was. A
-    quote frozen at delegation would drift three ways at once -- the peer repricing its
-    resources, the two nodes' MU rates moving against each other, and a hotplug making
-    the child bigger than the shape it was quoted at -- and every one of those drifts is
-    invisible from here. The sum happens on the peer's scale, before any conversion, so a
-    rate that moved between two readings cannot read as consumption.
+    The charge is this node's price (#577): the cost function of a local instance, the
+    shape on the row, our rates and our scarcity, for the time since the last charge
+    (``settle_child``). A peer that reprices does not reach the child. The service changes
+    its resources on the peer, and the statement of the child shows them: each statement
+    that is read corrects the shape that the ticks charged (``measured_shape``).
+
+    What the peer charges this node is *measured* all the same: it is the cost of the
+    delegation, and the margin is the difference. The balance of the child on the peer
+    falls by what it consumed, and its statement (#570) says exactly what that was. The
+    sum happens on the peer's scale, before any conversion, so a rate that moved between
+    two readings cannot read as consumption.
 
     Every tick estimates from the balance, which the peer gives for free, and every
     ``ledger.STATEMENT_READ_EVERY_TICKS`` ticks the statement replaces the estimate with
     what the movements say. What a statement shows is never judged: the chain of the child
-    is checked, and what the peer charges it is the business of whoever runs it. The next
-    charge corrects the estimate, up or down (``_read_child``).
-
-    TODO(#577): a delegated instance will be charged what this node advertises, and none
-    of this will depend on what the peer says it consumed.
+    is checked, and what the peer charges it is the business of whoever runs it (#567).
+    The next reading corrects the estimate, up or down (``_read_child``).
 
     Our own account on each peer is checked first: it pays the starts and the top-ups
     of these children, and nothing else may take MU from it.
 
-    A tick that cannot reach the peer charges nothing and loses nothing: the totals are
-    only advanced by a reading that succeeded, so the next one that does charges
-    everything metered since. A peer that answers but no longer knows the instance has
-    stopped it on its own, and the row here follows it down.
+    A tick that cannot reach the peer still charges the time, at the last shape that is
+    known: our price does not need the peer, and an instance that cannot pay is stopped
+    all the same. What the peer charged loses nothing: the totals are only advanced by a
+    reading that succeeded, so the next one that does measures everything since. A peer
+    that answers but no longer knows the instance has stopped it on its own, and the row
+    here follows it down.
 
     An instance that cannot pay is stopped, exactly as a local one is, and
     `stop_instance` hands its father whatever is left.
@@ -1014,11 +1152,13 @@ def maintain_delegated_instances(debug_mode: bool = False):
                         stop_instance(token=vmachine_id, reason=dead_instances.PEER_STOPPED)
                     except Exception as stop_error:
                         log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
-                elif debug_mode:
-                    log.LOGGER(
-                        f"Peer {peer_id} is unreachable; not charging the delegated "
-                        f"instance {vmachine_id} this tick."
-                    )
+                else:
+                    # The time is charged without the peer: our price does not need it.
+                    # What the peer charged waits for the next reading.
+                    if debug_mode:
+                        log.LOGGER(f"Peer {peer_id} is unreachable; charging the delegated "
+                                   f"instance {vmachine_id} for its time only.")
+                    settle_child(row, 0, _unmoved_state(row), debug_mode=debug_mode)
                 continue
 
             charge_peer_mu, state = read

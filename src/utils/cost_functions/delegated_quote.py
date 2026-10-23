@@ -1,7 +1,8 @@
 """A quote that asks the peers: how long it may wait, and how it stops (#551).
 
-``GetServiceEstimatedCost`` offers the best of the local price and the price of a peer
-plus commission. Three rules keep that from turning one question into a flood:
+``GetServiceEstimatedCost`` asks the peers whether one of them can run a service that
+this node has no room for, at no loss (#577). Three rules keep that from turning one
+question into a flood:
 
 * **A time budget, not a depth.** The caller's gRPC deadline says how long it waits.
   This node keeps a part of it for its own work (``OWN_SHARE``, at least
@@ -19,9 +20,6 @@ plus commission. Three rules keep that from turning one question into a flood:
   ``network.QUERY_CACHE_PEER_TTL_SECONDS``, by the service and the configuration with
   the deposit. The same question asked again in that time does not ask the peers again
   (``peer_round``).
-* **The quote is an offer.** The price given to a client is kept for
-  ``network.QUERY_CACHE_TTL_SECONDS``. If the launch would cost more, the launcher does
-  not delegate to that peer (``launch_service``).
 """
 
 import threading
@@ -30,7 +28,7 @@ from typing import Callable, Dict, Iterator, Optional
 
 from src.utils.config import ConfigManager
 from src.utils.tools.query_cache import (
-    HIT, QueryCache, canonical_key, peer_quote_ttl, quote_ttl,
+    HIT, QueryCache, canonical_key, peer_quote_ttl,
 )
 
 env_manager = ConfigManager()
@@ -159,17 +157,3 @@ def peer_round(
         QueryCache().remember(key, _copy_quotes(quotes), ttl)
     return quotes
 
-
-def _offer_key(client_id: str, service_hash: str) -> str:
-    return canonical_key("delegated-offer", str(client_id), str(service_hash))
-
-
-def remember_offer(client_id: str, service_hash: str, cost_mu: int) -> None:
-    """Keep what this node offered ``client_id`` for ``service_hash``, as the start cost."""
-    QueryCache().remember(_offer_key(client_id, service_hash), int(cost_mu), quote_ttl())
-
-
-def recall_offer(client_id: str, service_hash: str) -> Optional[int]:
-    """The start cost this node offered, or None if it offered nothing recently."""
-    status, value = QueryCache().recall(_offer_key(client_id, service_hash))
-    return int(value) if status == HIT else None

@@ -225,8 +225,20 @@ TABLES = {
     # (every movement but those of its father); `verified_father_net_peer_mu` the top-ups
     # less the withdrawals of its father among them; `father_net_peer_mu` the same for all
     # the `ModifyDeposit` that this node has sent, written with the rows that they leave
-    # here; `charged_peer_mu` what the tick has taken from the deposit for it.
+    # here; `charged_peer_mu` what the tick has measured that the peer charged for it.
     # `statement_ticks` counts the ticks since the statement of the child was last read.
+    # A delegated child is charged what this node advertises (#577), by the same
+    # figures as a local one: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `arch`
+    # and the `launch_*_bp` are what `local_instances` keeps, and `charged_until` is the
+    # time (epoch seconds) that the tick has charged up to. The service changes its
+    # resources on the peer, and the statement of the child shows them: the shape is our
+    # shape at the start (`base_*`) changed by what the resources on the peer changed
+    # since the first ones that its statement showed (`peer_base_*`, NULL until then).
+    # The floors of the two nodes differ, so only the changes are taken from the peer.
+    # The `max_*` are the most that this node charges it for (the `at_most` of the
+    # manifest, or the start when it declares none), so that the figures of the peer
+    # cannot raise the charge above what the service can hold. `charged_peer_mu` is what the
+    # peer has charged this node for it, and no part of what the child is charged.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -246,6 +258,27 @@ TABLES = {
             father_net_peer_mu TEXT NOT NULL DEFAULT '0',
             charged_peer_mu TEXT NOT NULL DEFAULT '0',
             sent_peer_mu TEXT DEFAULT NULL,
+            mem_limit INTEGER DEFAULT NULL,
+            disk_space INTEGER DEFAULT NULL,
+            cpu_period INTEGER DEFAULT NULL,
+            cpu_quota INTEGER DEFAULT NULL,
+            max_mem_limit INTEGER DEFAULT NULL,
+            max_disk_space INTEGER DEFAULT NULL,
+            max_cpu_period INTEGER DEFAULT NULL,
+            max_cpu_quota INTEGER DEFAULT NULL,
+            base_mem_limit INTEGER DEFAULT NULL,
+            base_disk_space INTEGER DEFAULT NULL,
+            base_cpu_period INTEGER DEFAULT NULL,
+            base_cpu_quota INTEGER DEFAULT NULL,
+            peer_base_mem_limit INTEGER DEFAULT NULL,
+            peer_base_disk_space INTEGER DEFAULT NULL,
+            peer_base_cpu_period INTEGER DEFAULT NULL,
+            peer_base_cpu_quota INTEGER DEFAULT NULL,
+            arch TEXT DEFAULT NULL,
+            launch_cpu_bp INTEGER DEFAULT NULL,
+            launch_mem_bp INTEGER DEFAULT NULL,
+            launch_disk_bp INTEGER DEFAULT NULL,
+            charged_until REAL DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL

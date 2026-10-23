@@ -13,8 +13,7 @@ from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
 from src.utils.cost_functions.architecture_resources import executes_locally
-from src.utils.cost_functions.delegated_quote import recall_offer
-from src.utils.cost_functions.delegation_commission import start_commission, with_commission
+from src.utils.cost_functions.delegated_price import own_price, peer_build_mu
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
     balance_after_build,
@@ -96,38 +95,55 @@ def _mu(amount: celaut_pb2.Amount) -> int:
     return int(amount.n or 0)
 
 
+def _own_price(service: celaut.Service, metadata: celaut.Metadata,
+               configuration: celaut_pb2.Configuration) -> Optional[celaut_pb2.EstimatedCost]:
+    """What this node charges for the service when a peer runs it (#577), or None if it
+    cannot price it: then no peer is covered, and only the local node is a candidate."""
+    try:
+        return own_price(
+            metadata=metadata, configuration=configuration,
+            resources=service.container.resources,
+            arch=get_arch_tag(service=service, metadata=metadata), service=service,
+        )
+    except Exception as e:
+        log.LOGGER(f"Could not price the service for a peer: {e}")
+        return None
+
+
 def _client_charge_mu(peer: str, estimated_cost: celaut_pb2.EstimatedCost,
                       configuration: celaut_pb2.Configuration,
-                      requested: bool = True) -> int:
+                      requested: bool = True,
+                      own: Optional[celaut_pb2.EstimatedCost] = None) -> int:
     """What the father pays at the start, in MU: its ``initial_mu``, and nothing else (#563).
 
-    The build and, for a peer, the commission and the build of the peer are taken out of
-    this amount. They are not added to it. So the most that the start can cost the father
-    is this figure, and the father does not add the build to its own estimate.
+    The build is taken out of this amount. It is not added to it. So the most that the
+    start can cost the father is this figure, and the father does not add the build to
+    its own estimate.
 
     ``requested`` says whether the father set the amount. If it did, the amount is
     ``configuration.initial_mu`` as it is, and a candidate that it does not fund is
     skipped (``_funding_failure``). If it did not, the node uses the least amount that
-    starts the service with the default balance: the quote of the candidate, which is
-    the build plus that balance (``configuration.initial_mu`` holds the balance that the
-    quotes asked for). For a peer, the quote has the commission of this node on its
-    build too (``with_commission``).
+    starts the service with the default balance: its own price, which is the build plus
+    that balance (``configuration.initial_mu`` holds the balance that the quotes asked
+    for). It is the same for ``local`` and for a peer (#577): ``own`` is the price of
+    this node, and the quote of a peer is not part of it.
     """
     if requested:
         return _mu(configuration.initial_mu)
-    if peer == 'local':
-        return from_amount(estimated_cost.cost)
-    return from_amount(with_commission(estimated_cost, _mu(configuration.initial_mu)).cost)
+    return from_amount((estimated_cost if peer == 'local' else own).cost)
 
 
 def _delegation_terms(estimated_cost: celaut_pb2.EstimatedCost,
-                      configuration: celaut_pb2.Configuration) -> tuple[int, int]:
-    """The build of the peer and the commission of this node, in local MU.
+                      configuration: celaut_pb2.Configuration,
+                      own: celaut_pb2.EstimatedCost) -> tuple[int, int]:
+    """The build of this node and the build of the peer, in local MU.
 
-    Both come out of the amount that the father paid. ``configuration.initial_mu`` is the
-    balance that the quote asked for, which is what the build is measured above.
+    The first comes out of what the father paid, and the second out of what this node
+    sends the peer. ``configuration.initial_mu`` is the balance that the quotes asked
+    for: both prices are the build plus it, so each build is what is left above it.
     """
-    return start_commission(estimated_cost, _mu(configuration.initial_mu))
+    balance_asked = _mu(configuration.initial_mu)
+    return peer_build_mu(own, balance_asked), peer_build_mu(estimated_cost, balance_asked)
 
 
 def _funding_failure(
@@ -139,15 +155,18 @@ def _funding_failure(
         metadata: celaut.Metadata,
         service_id: Optional[str],
         arch: Optional[str],
+        own: Optional[celaut_pb2.EstimatedCost] = None,
 ) -> Optional[str]:
     """Why ``initial_mu`` does not start the service on this candidate, or None if it does.
 
     Checked before the father is charged, so a start that does not fit charges nothing.
-    For ``local`` it is the whole rule: the build must fit, and what is left must pay one
-    maintenance period (``start_funding``). For a peer it is the part that this node can
-    know. The peer sets its own build and its own price at the start, and it applies the
-    whole rule itself. A peer that rejects the start for a small amount is not at fault,
-    and this node does not lower its reputation for that.
+    The build of this node must fit, and what is left must pay one maintenance period
+    (``start_funding``). For a peer these are the build and the period of ``own``, the
+    price of this node for a delegated instance, and what is left must also fund the
+    build and a period of the peer, as it quoted them: it sets its own build and its own
+    price at the start, and it applies the whole rule itself. A peer that rejects the
+    start for a small amount is not at fault, and this node does not lower its
+    reputation for that.
     """
     try:
         if peer == 'local':
@@ -162,10 +181,18 @@ def _funding_failure(
                 ),
             )
         else:
-            build_mu, commission_mu = _delegation_terms(estimated_cost, configuration)
+            if own is None:
+                return "this node could not price the service, so no peer is covered"
+            own_build, peer_build = _delegation_terms(estimated_cost, configuration, own)
+            # The balance is what this node sends the peer, and the peer applies its
+            # own rule to it.
+            balance_mu = balance_after_build(
+                initial_mu=initial_mu, build_mu=own_build,
+                minimum_mu=_mu(own.init_maintenance_cost),
+            )
             balance_after_build(
-                initial_mu=initial_mu - commission_mu,
-                build_mu=build_mu,
+                initial_mu=balance_mu,
+                build_mu=peer_build,
                 # What the peer quoted for one period, at its current price. The peer
                 # checks the worst case of its own bound at the start.
                 minimum_mu=_mu(estimated_cost.init_maintenance_cost)
@@ -225,22 +252,23 @@ def _force_delegate(
             f"for service {service_id} (unreachable, or it doesn't have the service)."
         )
 
-    # The father pays `initial_mu`, and the commission of this node and the build of
-    # the peer come out of it (#563). Nothing is charged for an amount that does not fit.
+    # The father pays `initial_mu`, and the build of this node comes out of it (#563).
+    # Nothing is charged for an amount that does not fit.
+    own = _own_price(service, metadata, configuration)
+    if own is None:
+        raise Exception(f"force_execution: this node could not price service {service_id}.")
     initial_mu = _client_charge_mu(
-        forced_peer, estimated_cost, configuration, requested=initial_mu_requested
+        forced_peer, estimated_cost, configuration, requested=initial_mu_requested, own=own,
     )
-    build_mu, commission_mu = _delegation_terms(estimated_cost, configuration)
-    try:
-        balance_after_build(
-            initial_mu=initial_mu - commission_mu,
-            build_mu=build_mu,
-            minimum_mu=_mu(estimated_cost.init_maintenance_cost)
-            if estimated_cost.HasField("init_maintenance_cost") else 0,
-        )
-    except StartAmountTooSmall as e:
-        raise Exception(f"force_execution: {e}") from e
+    funding_failure = _funding_failure(
+        peer=forced_peer, estimated_cost=estimated_cost, configuration=configuration,
+        initial_mu=initial_mu, service=service, metadata=metadata, service_id=service_id,
+        arch=get_arch_tag(service=service, metadata=metadata), own=own,
+    )
+    if funding_failure:
+        raise Exception(f"force_execution: {funding_failure}")
 
+    own_build_mu, peer_build_value = _delegation_terms(estimated_cost, configuration, own)
     refund_container = []
     start_charge = []
     if not spend_mu(
@@ -264,8 +292,9 @@ def _force_delegate(
         recursion_guard_token=recursion_guard_token,
         refund_container=refund_container,
         father_ip=father_ip,
-        commission_mu=commission_mu,
-        build_mu=build_mu,
+        own_build_mu=own_build_mu,
+        peer_build_mu=peer_build_value,
+        service=service,
     )
     bind_child_token(start_charge, instance.token)
 
@@ -516,7 +545,10 @@ def launch_service(
                 f"{father_id}; pinning execution to the local node (no delegation)."
             )
 
-        offered_mu = recall_offer(father_id, service_id) if father_id and service_id else None
+        # One price of this node for the whole launch (#577): the balancer keeps the peers
+        # that it covers, and a father whose service a peer runs pays it.
+        own = None if pin_local or require_parent_colocation \
+            else _own_price(service, metadata, configuration)
         for peer, estimated_cost in execution_balancer(
                 resources=service.container.resources,
                 service_id=service_id,
@@ -526,6 +558,7 @@ def launch_service(
                 recursion_guard_token=recursion_guard_token,
                 arch=get_arch_tag(service=service, metadata=metadata),
                 service=service,
+                own=own,
         ):
             try:
                 if require_parent_colocation and peer != 'local':
@@ -549,25 +582,13 @@ def launch_service(
                             launch_failures.append(f"local: {failure}")
                     continue
 
-                # What the father pays: its `initial_mu`, and only that (#563). The build,
-                # and for a peer the commission and the build of the peer, are taken out
-                # of it.
+                # What the father pays: its `initial_mu`, and only that (#563). The build
+                # is taken out of it. The father pays what this node advertises, whoever
+                # runs the service (#577).
                 initial_mu = _client_charge_mu(
-                    peer, estimated_cost, configuration, requested=initial_mu_requested
+                    peer, estimated_cost, configuration, requested=initial_mu_requested,
+                    own=own,
                 )
-
-                # The quote is an offer (#551). If this node quoted the client less than a
-                # peer now costs with commission, it does not delegate to that peer: it
-                # neither pays the difference nor charges more than it offered. The next
-                # candidate may still fit. A father that set its own `initial_mu` is not
-                # charged more than it set, and the check below decides if that is enough.
-                if peer != 'local' and offered_mu is not None and not initial_mu_requested:
-                    if initial_mu > offered_mu:
-                        launch_failures.append(
-                            f"{peer}: costs {initial_mu} MU now, more than the {offered_mu} MU "
-                            "this node offered"
-                        )
-                        continue
 
                 # An amount that does not fund the build and one maintenance period
                 # charges nothing: the next candidate may need less.
@@ -580,6 +601,7 @@ def launch_service(
                     metadata=metadata,
                     service_id=service_id,
                     arch=get_arch_tag(service=service, metadata=metadata),
+                    own=own,
                 )
                 if funding_failure:
                     launch_failures.append(f"{peer}: {funding_failure}")
@@ -611,7 +633,8 @@ def launch_service(
 
                 # Delegate the service instance execution.
                 if peer != 'local':
-                    build_mu, commission_mu = _delegation_terms(estimated_cost, configuration)
+                    own_build_mu, peer_build_value = _delegation_terms(
+                        estimated_cost, configuration, own)
                     instance = delegate_execution(
                         service_id=service_id,
                         peer=peer,
@@ -623,8 +646,9 @@ def launch_service(
                         # Needed to pick which of our addresses to advertise if the
                         # instance has to be tunnelled through this node.
                         father_ip=father_ip,
-                        commission_mu=commission_mu,
-                        build_mu=build_mu,
+                        own_build_mu=own_build_mu,
+                        peer_build_mu=peer_build_value,
+                        service=service,
                     )
 
                 else:
