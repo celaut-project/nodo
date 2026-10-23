@@ -827,6 +827,12 @@ class CheckStartTests(unittest.TestCase):
         self.assertEqual((balance, mark), (55, None))
 
 
+# A start of this node (#578): its reference, and the detail of its ``child_start``. The
+# check takes it for one of ours (``_check``).
+_REF = "ab" * 32
+_START = '{"start_ref":"%s"}' % _REF
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class CheckOurAccountTests(unittest.TestCase):
     """The statement of our own account on a peer, read at each tick (#570)."""
@@ -842,7 +848,8 @@ class CheckOurAccountTests(unittest.TestCase):
         sc.get_peer_client.return_value = "client-on-peer"
         sc.get_peer_statement_mark.return_value = stored or {}
         sc.delegated_starts_on_peer.return_value = starts or {ledger.instance_ref(PEER_TOKEN): 100}
-        sc.open_start_attempts.return_value = attempts or []
+        sc.start_attempts.return_value = attempts or []
+        sc.orphan_starts.return_value = []
         sc.top_up_reservations.return_value = [(1, ledger.instance_ref(PEER_TOKEN), 1000, 1000)]
         sc.get_statement_counters.return_value = counters or dict(self.COUNTERS)
         fetch = fetch or _fetch_of(book)
@@ -852,6 +859,7 @@ class CheckOurAccountTests(unittest.TestCase):
                 patch.object(statement_check, "stored_rates", return_value=rates or self.RATES), \
                 patch.object(maintain, "_peer_rates", return_value=rates or self.RATES), \
                 patch.object(statement_check, "settle_failed_reads"), \
+                patch.object(statement_check.start_refs, "ours", side_effect=lambda r: r == _REF), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement") as penalise_none:
             if max_pages:
@@ -868,7 +876,7 @@ class CheckOurAccountTests(unittest.TestCase):
         return {"seq": mark.seq, "hash": mark.hash, "balance_mu": mark.balance, "ts": mark.ts}
 
     def test_our_own_movements_move_the_mark_to_the_last_one(self):
-        book = _book((500, "credit"), (-100, "child_start"),
+        book = _book((500, "credit"), (-100, "child_start", "", _START),
                      (0, "child_bound", ledger.instance_ref(PEER_TOKEN), '{"starts_seq":"2"}'),
                      (-1, "statement_query"), account="client-on-peer")
 
@@ -898,22 +906,22 @@ class CheckOurAccountTests(unittest.TestCase):
 
     def test_a_start_in_progress_is_matched_with_its_attempt_and_the_mark_goes_past_it(self):
         now = int(time.time())
-        book = _book((500, "credit", "", "", now - 5), (-100, "child_start", "", "", now),
+        book = _book((500, "credit", "", "", now - 5), (-100, "child_start", "", _START, now),
                      (-999, "debit", "", "", now), account="client-on-peer")
 
-        sc, penalise = self._check(book, attempts=[(4, now - 3, 100)])
+        sc, penalise = self._check(book, attempts=[(4, _REF, now - 3, 100)])
 
         self.assertEqual(penalise.call_args.args[4], 3)
         self.assertEqual(sc.set_peer_statement_mark.call_args.args[1], 3)
         self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["attempts"],
-                         {4: (2, 100, now, False)})
+                         {_REF: (2, 100, False, "")})
 
     def test_the_statements_queries_are_counted_once_and_the_mark_goes_past_them(self):
         now = int(time.time())
-        book = _book((500, "credit", "", "", now - 5), (-100, "child_start", "", "", now),
+        book = _book((500, "credit", "", "", now - 5), (-100, "child_start", "", _START, now),
                      (-1, "statement_query", "", "", now), account="client-on-peer")
 
-        sc, _ = self._check(book, attempts=[(4, now - 3, 100)])
+        sc, _ = self._check(book, attempts=[(4, _REF, now - 3, 100)])
 
         # With the mark, in the same transaction.
         self.assertEqual(sc.set_peer_statement_mark.call_args.kwargs["queries_verified"], (1, 1))

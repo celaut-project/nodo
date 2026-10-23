@@ -389,6 +389,14 @@ def serve():
     except Exception as e:
         log.LOGGER(f'Could not restore delegated tunnel endpoints: {e}')
 
+    # A start that ran when the last daemon stopped did not finish. A request that asks
+    # for it again by its reference learns that it failed (#578).
+    try:
+        from src.database.sql_connection import SQLConnection
+        SQLConnection().fail_running_start_refs()
+    except Exception as e:
+        log.LOGGER(f'Could not close the starts of the last daemon: {e}')
+
     # Detached `nodo tunnel`s that were running before the restart come back, on the
     # ports their clients were given. In the background: each waits for its child to
     # bind, and the gateway must not wait for that.

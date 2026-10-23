@@ -51,7 +51,8 @@ MAINTENANCE = "maintenance"
 """One maintenance period of an instance."""
 CHILD_START = "child_start"
 """The account paid the ``initial_mu`` of a child. The child is named by the
-``child_bound`` that follows once it exists."""
+``child_bound`` that follows once it exists. ``detail.start_ref`` is the StartReference
+of the request, in hex, when the request had one (#578)."""
 TOP_UP = "top_up"
 """``ModifyDeposit`` with a positive difference: negative on the father, positive on
 the child."""

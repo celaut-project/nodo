@@ -7,7 +7,7 @@ from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_message_mode, rpc_input
 from src.gateway.client_gate import ClientRequired, require_caller
 from src.gateway.utils import save_service
-from src.utils import logger as log
+from src.utils import logger as log, start_ref
 from src.utils.bee_client import BeeClient, Buffer, Dir, StreamControl
 from src.utils.hashing import get_configured_hash_id
 from src.manager.maintain import add_wanted
@@ -76,6 +76,11 @@ class AbstractInputServiceIterable:
     # Also at class level: with no control, the request is read with no skip requests.
     control: Optional[StreamControl] = None
 
+    # The StartReference of the request (#578), and whether the answer was sent before
+    # the service was read: a request asked again by its reference.
+    start_ref: bytes = b""
+    answered: bool = False
+
     def __init__(self, request_iterator, context):
         # The parse side queues a skip request when a block that this node holds starts
         # to arrive (bee_rpc.control.StreamControl, issue #371), and __iter__ sends it
@@ -119,6 +124,13 @@ class AbstractInputServiceIterable:
 
             case celaut_pb2.Configuration:
                 self.configuration = r
+
+            case celaut_pb2.StartReference:
+                if len(r.ref) > start_ref.MAX_BYTES:
+                    raise Exception(
+                        f"The start reference has {len(r.ref)} bytes, and the most is "
+                        f"{start_ref.MAX_BYTES}.")
+                self.start_ref = r.ref
 
             case celaut.Metadata.HashTag.Hash:
                 self.hashes.add(Hash(r))
@@ -173,6 +185,11 @@ class AbstractInputServiceIterable:
                     service_dir=r.dir,
                     service_hash=self.service_hash
                 )
+
+        if not self.generated:
+            yield from self.repeat()
+            if self.answered:
+                return
 
         if self.service_saved and not self.generated:
             # DDOS protection (issue #428): checked here rather than in start(),
@@ -252,6 +269,9 @@ class AbstractInputServiceIterable:
                     yield r
                 else:
                     yield from self.__pattern_matching(r)
+                if self.answered:
+                    # The rest of the request is not needed.
+                    return
             # Only when the request stream ends, not when the caller cancels it. Neither
             # side has the service: the node does not hold it, and the request did not
             # carry it. Answering nothing left the caller to guess why.
@@ -273,6 +293,11 @@ class AbstractInputServiceIterable:
 
     def start(self):
         pass
+
+    def repeat(self) -> Generator[Buffer, None, None]:
+        """The answer to a request that was made already, before the service is read.
+        It sets ``answered`` when it gives one."""
+        return iter(())
 
     def generate(self) -> Generator[Buffer, None, None]:
         pass

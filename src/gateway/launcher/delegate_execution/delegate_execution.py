@@ -7,13 +7,13 @@ from src.utils.config import ConfigManager
 
 from protos import celaut_pb2
 from src.database import ledger
-from src.manager import balance_statement, statement_check
+from src.manager import balance_statement, orphan_starts, statement_check
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils.utils import from_amount
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer, refresh_balance_on_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
-from src.utils import utils, logger as log
+from src.utils import start_ref, utils, logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.monetary import format_mu
 from src.payment_system.mu_conversion import (
@@ -179,12 +179,19 @@ def delegate_execution(
     The balance of the child on the peer comes from its statement (#570), which also
     shows what the peer took for the start: ``_check_start`` checks it, and the mark it
     returns is where the maintenance tick goes on from.
+
+    The start goes with a new reference of this node (#578). When the peer does not
+    answer in time, it is asked again with the same reference and a short deadline, and
+    the child that it started, if any, is stopped: the father already got an error. If
+    that fails too, the check of our account on the peer finds the ``child_start`` of
+    the reference and does the same (``orphan_starts``).
     """
-    # The token of the child once the peer has started it. A start that times out has none
-    # to stop: TODO(#578). Its attempt stays unbound, and the peer may still take its start
-    # from our account (``statement_check.account_faults``).
+    # The token of the child once the peer has started it.
     external_token: Optional[str] = None
-    attempt_id: Optional[int] = None
+    client_id: Optional[str] = None
+    reference = start_ref.new()
+    reference_hex = reference.hex()
+    attempted = False
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
@@ -223,7 +230,9 @@ def delegate_execution(
         # this start, and the movement may show before this node knows the child, or when
         # it never does (a timeout). See `statement_check.account_faults`.
         started_at = time.time()
-        attempt_id = SQLConnection().add_start_attempt(peer, sent_peer_mu)
+        start_ref.begin(reference_hex)
+        SQLConnection().add_start_attempt(peer, reference_hex, sent_peer_mu)
+        attempted = True
         service_instance = BeeClient.start_service(
             peer_channel(peer),
             utils.service_extended(
@@ -232,14 +241,15 @@ def delegate_execution(
                 # TODO: Could pass only the previously selected configuration with the estimate cost
                 #  request, now is allowing to select another (that could be reasonable).
                 client_id=client_id,
-                recursion_guard_token=recursion_guard_token
+                recursion_guard_token=recursion_guard_token,
+                start_ref=reference,
             ),
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
         )
         if service_instance is None:
             raise RuntimeError(f'{peer} closed the start with no answer.')
         external_token = service_instance.token
-        SQLConnection().bind_start_attempt(attempt_id, external_token)
+        SQLConnection().bind_start_attempt(peer, reference_hex, external_token)
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 
         build_peer_mu = convert_mu(
@@ -313,11 +323,15 @@ def delegate_execution(
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
         if external_token:
             _stop_on_peer(peer, external_token)
-        elif attempt_id is not None and not statement_check.unreachable(e):
+        elif attempted and statement_check.unreachable(e):
+            # No answer: the peer may have the start still, or have finished it.
+            orphan_starts.stop_orphan(peer, client_id, reference_hex,
+                                      statement_check.peer_call_timeout())
+        elif attempted:
             # The peer refused the start. It gives back the start of each candidate that
             # it tried before it answers, so the attempt holds no new movement.
             try:
-                SQLConnection().refuse_start_attempt(attempt_id)
+                SQLConnection().refuse_start_attempt(peer, reference_hex)
             except Exception as refuse_error:
                 log.LOGGER(f'Could not close the start attempt on {peer}: {refuse_error}')
         try:
@@ -325,3 +339,5 @@ def delegate_execution(
         except IndexError:
             pass
         raise e
+    finally:
+        start_ref.end(reference_hex)

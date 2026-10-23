@@ -11,8 +11,9 @@ StartService_input_indices = {
     4: celaut_pb2.Metadata.HashTag.Hash,
     5: celaut_pb2.Metadata,
     6: celaut_pb2.Service,
+    7: celaut_pb2.StartReference,
 }
-StartService_input_message_mode = {1: True, 2: True, 3: True, 4: True, 5: True, 6: False}  # False yield a Dir.
+StartService_input_message_mode = {1: True, 2: True, 3: True, 4: True, 5: True, 6: False, 7: True}  # False yield a Dir.
 
 # GetService answers with the StartService envelope's 4/5/6 (see GATEWAY_RPCS), and
 # bee-rpc wants a message mode for exactly the indices it parses: the Service, index 6,
