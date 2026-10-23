@@ -284,6 +284,14 @@ class TheQuoteTests(unittest.TestCase):
         self.assertFalse(covers(own, quote(1_200, 11)))
         self.assertTrue(covers(own, celaut.EstimatedCost()))
 
+    def test_a_peer_is_not_covered_when_the_service_may_grow_into_a_loss(self):
+        # The service changes its resources on the peer (#577): one period at the most
+        # that it may grow to must be covered too.
+        own = celaut.EstimatedCost(cost=celaut.Amount(n="1300"),
+                                   max_maintenance_cost=celaut.Amount(n="40"))
+        self.assertTrue(covers(own, celaut.EstimatedCost(max_maintenance_cost=celaut.Amount(n="40"))))
+        self.assertFalse(covers(own, celaut.EstimatedCost(max_maintenance_cost=celaut.Amount(n="41"))))
+
 
 if __name__ == "__main__":
     unittest.main()

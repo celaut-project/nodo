@@ -50,8 +50,12 @@ def peer_build_mu(peer_cost: celaut_pb2.EstimatedCost, initial_mu: int) -> int:
 def covers(own: celaut_pb2.EstimatedCost, peer_cost: celaut_pb2.EstimatedCost) -> bool:
     """True if what this node charges covers what the peer would charge it.
 
-    The start (the cost has the same balance in both, so this compares the builds) and
-    one maintenance period at the start. A peer that quoted no period is covered by it.
+    The start (the cost has the same balance in both, so this compares the builds), one
+    maintenance period at the start, and one period at the most that the service may grow
+    to: the service changes its resources on the peer, and this node charges it for them
+    by its own rates (``maintain.measured_shape``). A peer that quoted no period is
+    covered by it.
     """
     return _mu(own.cost) >= _mu(peer_cost.cost) \
-        and _mu(own.init_maintenance_cost) >= _mu(peer_cost.init_maintenance_cost)
+        and _mu(own.init_maintenance_cost) >= _mu(peer_cost.init_maintenance_cost) \
+        and _mu(own.max_maintenance_cost) >= _mu(peer_cost.max_maintenance_cost)

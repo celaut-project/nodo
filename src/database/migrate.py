@@ -230,7 +230,11 @@ TABLES = {
     # A delegated child is charged what this node advertises (#577), by the same
     # figures as a local one: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `arch`
     # and the `launch_*_bp` are what `local_instances` keeps, and `charged_until` is the
-    # time (epoch seconds) that the tick has charged up to. `charged_peer_mu` is what the
+    # time (epoch seconds) that the tick has charged up to. The shape is the last one
+    # that the statement of the child showed: the service changes its resources on the
+    # peer. The `max_*` are the most that this node charges it for (the `at_most` of the
+    # manifest, or the `at_init` when it declares none), so that the figures of the peer
+    # cannot raise the charge above what the service can hold. `charged_peer_mu` is what the
     # peer has charged this node for it, and no part of what the child is charged.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
@@ -255,6 +259,10 @@ TABLES = {
             disk_space INTEGER DEFAULT NULL,
             cpu_period INTEGER DEFAULT NULL,
             cpu_quota INTEGER DEFAULT NULL,
+            max_mem_limit INTEGER DEFAULT NULL,
+            max_disk_space INTEGER DEFAULT NULL,
+            max_cpu_period INTEGER DEFAULT NULL,
+            max_cpu_quota INTEGER DEFAULT NULL,
             arch TEXT DEFAULT NULL,
             launch_cpu_bp INTEGER DEFAULT NULL,
             launch_mem_bp INTEGER DEFAULT NULL,

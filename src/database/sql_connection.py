@@ -2704,7 +2704,8 @@ class SQLConnection(metaclass=Singleton):
                    peer_statement_hash, verified_consumption_peer_mu,
                    verified_father_net_peer_mu, father_net_peer_mu, charged_peer_mu,
                    mem_limit, disk_space, cpu_period, cpu_quota, arch,
-                   launch_cpu_bp, launch_mem_bp, launch_disk_bp, charged_until
+                   launch_cpu_bp, launch_mem_bp, launch_disk_bp, charged_until,
+                   max_mem_limit, max_disk_space, max_cpu_period, max_cpu_quota
             FROM delegated_instances WHERE killed_at IS NULL
             ''' + ('AND token_delegation = ?' if token is not None else ''),
             (token,) if token is not None else ())
@@ -2733,6 +2734,10 @@ class SQLConnection(metaclass=Singleton):
                 'launch_mem_bp': row[20],
                 'launch_disk_bp': row[21],
                 'charged_until': row[22],
+                'max_mem_limit': row[23],
+                'max_disk_space': row[24],
+                'max_cpu_period': row[25],
+                'max_cpu_quota': row[26],
             }
             for row in result.fetchall()
         ]
@@ -3148,8 +3153,10 @@ class SQLConnection(metaclass=Singleton):
             sent_peer_mu (int): The ``initial_mu`` sent to the peer, in its MU.
             shape (Optional[Mapping]): What the tick charges the instance by (#577):
                 ``mem_limit``, ``disk_space``, ``cpu_period``, ``cpu_quota``, ``arch`` and
-                ``launch_bp``, as ``add_local_instance`` takes them. None stores NULL: an
-                instance with no shape is charged nothing.
+                ``launch_bp``, as ``add_local_instance`` takes them, and the most that it is
+                charged for: ``max_mem_limit``, ``max_disk_space``, ``max_cpu_period`` and
+                ``max_cpu_quota``. None stores NULL: an instance with no shape is charged
+                nothing.
             mark (Optional[Mapping]): The movement of the child's statement on the
                 peer that ``peer_balance_mu`` is the balance after: ``seq``, ``hash``
                 and ``ts`` (see `delegated_instances`). None when the statement
@@ -3168,15 +3175,19 @@ class SQLConnection(metaclass=Singleton):
                     token_delegation, id, peer_id, father_id, serialized_instance, service_id,
                     balance_mu, peer_balance_mu, peer_statement_seq, peer_statement_ts,
                     peer_statement_hash, sent_peer_mu, mem_limit, disk_space, cpu_period,
-                    cpu_quota, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp,
-                    charged_until, launched_at
+                    cpu_quota, max_mem_limit, max_disk_space, max_cpu_period, max_cpu_quota,
+                    arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, charged_until,
+                    launched_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        CURRENT_TIMESTAMP)
             ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id,
                   str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
                   mark.get("hash"), str(int(sent_peer_mu)),
                   shape.get("mem_limit"), shape.get("disk_space"), shape.get("cpu_period"),
-                  shape.get("cpu_quota"), shape.get("arch"), launch_bp.get("cpu"),
+                  shape.get("cpu_quota"), shape.get("max_mem_limit"),
+                  shape.get("max_disk_space"), shape.get("max_cpu_period"),
+                  shape.get("max_cpu_quota"), shape.get("arch"), launch_bp.get("cpu"),
                   launch_bp.get("mem"), launch_bp.get("disk"), time.time()))
             self._append_opening(cursor, encrypted_external_token, movements)
 
@@ -3199,7 +3210,8 @@ class SQLConnection(metaclass=Singleton):
         return _as_int(row['balance_mu']) if row else 0
 
     def settle_delegated_tick(self, token: str, charge_mu: int, mark: Mapping,
-                              detail: Optional[Mapping] = None) -> Optional[int]:
+                              detail: Optional[Mapping] = None,
+                              movements: Sequence[ledger.Movement] = ()) -> Optional[int]:
         """Charge a delegated instance and move its mark, in one transaction.
 
         The charge and the mark are one fact. What the maintenance tick charges is this
@@ -3215,15 +3227,21 @@ class SQLConnection(metaclass=Singleton):
         ``charged_delta`` (what is added to ``charged_peer_mu``, in the MU of the peer: what
         the peer charged this node, which the child is not charged, and is negative for a
         correction). A total that is not there is left as it is. ``charged_until`` is the
-        time the charge goes up to.
+        time the charge goes up to, and ``shape`` the resources that the next ticks charge
+        for (``mem_limit``, ``disk_space``, ``cpu_period``, ``cpu_quota``).
 
-        Returns the seq of the row that was written, or None when nothing was.
+        ``movements`` are more rows of the instance, after the charge and signed as they
+        move its balance: what a statement of the child showed that the estimate of the
+        ticks got wrong, and the changes of its resources.
+
+        Returns the seq of the last row that was written, or None when nothing was.
 
         Args:
             token (str): The token of the external container.
             charge_mu (int): What the instance is charged, in our MU.
             mark (Mapping): The new mark.
             detail (Optional[Mapping]): The cause of the charge.
+            movements (Sequence[ledger.Movement]): More rows, in order.
         """
         def work(cursor):
             row = cursor.execute(
@@ -3236,6 +3254,10 @@ class SQLConnection(metaclass=Singleton):
             if int(charge_mu) > 0:
                 seq = self._move(cursor, row['id'], -int(charge_mu), ledger.MAINTENANCE,
                                  detail=detail)
+            for movement in movements:
+                if int(movement.amount_mu) != 0:
+                    seq = self._move(cursor, row['id'], int(movement.amount_mu), movement.kind,
+                                     detail=movement.detail)
             totals, params = '', []
             if "verified_consumption" in mark:
                 totals += ', verified_consumption_peer_mu = ?'
@@ -3249,6 +3271,10 @@ class SQLConnection(metaclass=Singleton):
             if "charged_until" in mark:
                 totals += ', charged_until = ?'
                 params.append(mark["charged_until"])
+            for key in ("mem_limit", "disk_space", "cpu_period", "cpu_quota"):
+                if key in (mark.get("shape") or {}):
+                    totals += f', {key} = ?'
+                    params.append(int(mark["shape"][key]))
             cursor.execute(f'''
                 UPDATE delegated_instances
                 SET peer_balance_mu = ?, peer_statement_seq = ?, peer_statement_ts = ?,

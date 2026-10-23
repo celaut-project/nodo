@@ -86,9 +86,10 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         """What the ticks measured that the peer has charged for the child."""
         return self.sc.get_delegated_instances()[0]["charged_peer_mu"]
 
-    def tick(self, statement=False, own_mu=0):
+    def tick(self, statement=False, own_mu=0, price=None):
         """One maintenance tick. ``statement``: whether the statement is read at it.
-        ``own_mu``: what this node's price charges the child at it."""
+        ``own_mu``: what this node's price charges the child at it, or ``price`` the
+        cost function that says it."""
         row = self.sc.get_delegated_instances()[0]
 
         def answer(peer, client, token="", from_seq=0, rows=None):
@@ -103,7 +104,8 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
                 patch.object(maintain, "stop_instance"), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
-                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu), \
+                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu,
+                             side_effect=price), \
                 patch.object(self.sc, "child_statement_due", return_value=statement):
             charge, state = maintain._read_child(row)
             maintain.settle_child(row, charge, state)
@@ -143,6 +145,41 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         self.assertEqual([r["kind"] for r in rows], ["start", "maintenance"])
         for row in rows:
             self.assertNotIn("peer", row["detail"] or "")
+
+    def test_the_shape_that_a_statement_shows_is_charged_from_then_on(self):
+        """The service doubled its memory on the peer, where this node does not see it.
+
+        One MU per GiB and second. The statement shows 10 s at 2 GiB that the ticks
+        charged at 1 GiB, and the ticks after it charge 2 GiB.
+        """
+        def price(system_resources, seconds, **_):
+            return (system_resources.mem_limit >> 30) * int(seconds)
+
+        def shape(gib):
+            return {"mem_limit": gib << 30, "disk_space": 0, "cpu_period": 0, "cpu_quota": 0}
+
+        SQLConnection._connection.execute(
+            "UPDATE delegated_instances SET mem_limit = ?, disk_space = 0, cpu_period = 0, "
+            "cpu_quota = 0, charged_until = NULL", (1 << 30,))
+        SQLConnection._connection.commit()
+        self.peer.add(-5, "maintenance", ts=self.now - 50,
+                      detail=ledger.canonical_detail(dict(shape(2), seconds=10)))
+
+        self.tick(statement=True, price=price)
+
+        self.assertEqual(self.deposit, 900 - 10)
+        row = self.sc.get_delegated_instances()[0]
+        self.assertEqual(row["mem_limit"], 2 << 30)
+
+        SQLConnection._connection.execute(
+            "UPDATE delegated_instances SET charged_until = ?", (time.time() - 100,))
+        SQLConnection._connection.commit()
+        self.tick(statement=False, price=price)
+
+        self.assertAlmostEqual(self.deposit, 900 - 10 - 200, delta=2)
+        kinds = [r["kind"] for r in SQLConnection._connection.execute(
+            "SELECT kind FROM balance_movements WHERE account_id = ? ORDER BY seq", (ALIAS,))]
+        self.assertEqual(kinds, ["start", "maintenance", "maintenance"])
 
     def test_the_balance_between_statements_charges_the_same(self):
         for _ in range(3):

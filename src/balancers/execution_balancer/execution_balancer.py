@@ -218,7 +218,8 @@ def _sorted_at_a_profit(
 
     The client pays what this node advertises, whoever runs the service (#577), so a
     peer is a cost to cover: it is a candidate only if ``own``, the price of this node,
-    covers its quote (``delegated_price.covers``). The cost yielded is still the quote
+    covers its quote, also at the most that the service may grow to
+    (``delegated_price.covers``). The cost yielded is still the quote
     of the peer: the launcher needs it for what the peer takes. Without ``own`` no
     price can be covered, and only the local node is a candidate.
     """

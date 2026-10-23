@@ -685,7 +685,8 @@ class SettleChildTests(unittest.TestCase):
 
         self.assertTrue(ok)
         sc.settle_delegated_tick.assert_called_once_with(
-            token=PEER_TOKEN, charge_mu=0, mark=dict(self.STATE, charged_until=1060.0))
+            token=PEER_TOKEN, charge_mu=0, mark=dict(self.STATE, charged_until=1060.0),
+            movements=[])
 
     def test_a_deposit_that_does_not_cover_the_charge_is_emptied_and_the_instance_stopped(self):
         ok, sc, stop, _ = self._settle(10 ** 9)
@@ -699,6 +700,103 @@ class SettleChildTests(unittest.TestCase):
 
         self.assertGreater(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 1_000_000)
         stop.assert_not_called()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class MeasuredShapeTests(unittest.TestCase):
+    """The resources that the child holds on the peer, from its statement (#577).
+
+    The price here is one MU per MiB of memory and second, so that a shape is a figure.
+    """
+
+    MIB = 1 << 20
+    ROW = dict(SettleChildTests.ROW, mem_limit=1024 << 20, charged_until=1000.0)
+
+    @staticmethod
+    def _price(system_resources, seconds, **_):
+        return (system_resources.mem_limit >> 20) * int(seconds)
+
+    def _period(self, mem_mib, seconds=10, seq=1, **shape):
+        detail = {"seconds": seconds, "mem_limit": mem_mib << 20,
+                  "disk_space": SettleChildTests.ROW["disk_space"],
+                  "cpu_period": 100_000, "cpu_quota": 50_000}
+        detail.update(shape)
+        return statement_check.Row(seq=seq, ts=seq, amount=-1, balance_after=0,
+                                   kind=ledger.MAINTENANCE, ref="", detail=detail)
+
+    def _settle(self, rows, row=None, **kwargs):
+        sc = MagicMock()
+        state = dict(SettleChildTests.STATE, rows=tuple(rows))
+        with patch.object(maintain, "sc", sc), \
+                patch.object(maintain.time, "time", return_value=1060.0), \
+                patch.object(maintain, "system_scarcity", return_value={}), \
+                patch.object(maintain, "compute_maintenance_cost", side_effect=self._price), \
+                patch.object(maintain, "prices",
+                             return_value=SimpleNamespace(modify_resources_mu=7)), \
+                patch.object(maintain, "stop_instance") as stop, \
+                patch.object(maintain, "ALLOW_DEBT", False), \
+                patch.object(maintain, "format_mu", str):
+            maintain.settle_child(dict(row or self.ROW), 0, state, **kwargs)
+        return sc.settle_delegated_tick.call_args.kwargs, stop
+
+    def test_a_child_that_grew_on_the_peer_pays_the_difference_and_the_ticks_follow(self):
+        # 10 s at 2 GiB were charged at the 1 GiB of the row: 10 240 MU more.
+        kwargs, _ = self._settle([self._period(2048)])
+
+        self.assertEqual(kwargs["charge_mu"], 1024 * 60)
+        self.assertEqual([(m.kind, m.amount_mu) for m in kwargs["movements"]],
+                         [(ledger.MAINTENANCE, -10_240)])
+        self.assertEqual(kwargs["mark"]["shape"]["mem_limit"], 2048 << 20)
+        self.assertNotIn("rows", kwargs["mark"])
+
+    def test_a_child_that_shrank_gets_back_what_it_was_charged_too_much(self):
+        kwargs, _ = self._settle([self._period(512), self._period(512, seq=2)])
+
+        self.assertEqual([(m.kind, m.amount_mu) for m in kwargs["movements"]],
+                         [(ledger.MAINTENANCE, 10_240)])
+        self.assertEqual(kwargs["mark"]["shape"]["mem_limit"], 512 << 20)
+
+    def test_a_shape_above_what_the_service_can_hold_is_charged_as_the_most_it_can(self):
+        # The peer writes 4 GiB, and the manifest lets the service grow to 1.5 GiB.
+        kwargs, _ = self._settle([self._period(4096)], row=dict(self.ROW, max_mem_limit=1536 << 20))
+
+        self.assertEqual(kwargs["movements"][0].amount_mu, -(1536 - 1024) * 10)
+        self.assertEqual(kwargs["mark"]["shape"]["mem_limit"], 1536 << 20)
+
+    def test_more_vcpus_than_the_service_can_hold_are_held_down_to_its_most(self):
+        row = dict(self.ROW, max_cpu_period=100_000, max_cpu_quota=200_000)
+        kwargs, _ = self._settle([self._period(1024, cpu_quota=800_000)], row=row)
+
+        self.assertEqual(kwargs["mark"]["shape"]["cpu_quota"], 200_000)
+
+    def test_each_change_of_resources_is_charged_at_the_rate_of_this_node(self):
+        change = statement_check.Row(seq=1, ts=1, amount=-99, balance_after=0,
+                                     kind=ledger.RESOURCE_CHANGE, ref="")
+        kwargs, _ = self._settle([change, change])
+
+        self.assertEqual([(m.kind, m.amount_mu) for m in kwargs["movements"]],
+                         [(ledger.RESOURCE_CHANGE, -7), (ledger.RESOURCE_CHANGE, -7)])
+
+    def test_a_period_that_does_not_say_its_resources_changes_nothing(self):
+        silent = statement_check.Row(seq=1, ts=1, amount=-99, balance_after=0,
+                                     kind=ledger.MAINTENANCE, ref="", detail={"seconds": 10})
+        kwargs, _ = self._settle([silent])
+
+        self.assertEqual(kwargs["movements"], [])
+        self.assertNotIn("shape", kwargs["mark"])
+
+    def test_the_same_shape_changes_nothing_but_is_kept(self):
+        kwargs, _ = self._settle([self._period(1024)])
+
+        self.assertEqual(kwargs["movements"], [])
+        self.assertEqual(kwargs["mark"]["shape"]["mem_limit"], 1024 << 20)
+
+    def test_a_correction_that_the_deposit_does_not_cover_stops_the_instance(self):
+        kwargs, stop = self._settle([self._period(2048)], row=dict(self.ROW, balance_mu=70_000))
+
+        # 61 440 for the tick and 10 240 for the correction: 71 680, more than it holds.
+        self.assertEqual(kwargs["charge_mu"], 70_000)
+        stop.assert_called_once()
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

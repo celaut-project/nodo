@@ -105,6 +105,10 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'launch_cpu_bp': None,
                 'launch_mem_bp': None,
                 'launch_disk_bp': None,
+                'max_mem_limit': None,
+                'max_disk_space': None,
+                'max_cpu_period': None,
+                'max_cpu_quota': None,
             },
         )
 

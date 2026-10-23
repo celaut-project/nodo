@@ -478,8 +478,8 @@ here. What it does not use comes back to this node when the instance stops.
 
 **This node delegates only at no loss.** The balancer compares what this node charges, by
 its advertisement, with what the peer quotes, converted to our MU, and a peer is a
-candidate only if the first covers the second: the start (the builds) and one maintenance
-period. `GetServiceEstimatedCost` is always the price of this node: the local price if it
+candidate only if the first covers the second: the start (the builds), one maintenance
+period at the start, and one at the most that the service may grow to. `GetServiceEstimatedCost` is always the price of this node: the local price if it
 has room, and its own price, which it charges for a service that a covered peer runs,
 if it has not. The advertised rates do not yet include an estimate of what the peers
 charge: an operator that delegates a lot has to price for it.
@@ -502,7 +502,19 @@ can get back: `config.initial_mu`, in our MU, less the build of this node (the o
 start charge, borne exactly as a local one is). It is spent by
 `maintain.maintain_delegated_instances`, at our price: the shape of the instance (kept on
 its row, as `local_instances` keeps it), our rates and our scarcity, for the time since the
-last charge. When the instance stops, `stop_instance` hands
+last charge.
+
+The service changes its resources on the peer: `ModifyServiceSystemResources` goes to the
+node that runs it, and this node does not see it. It sees it in the statement of the
+child, where each `maintenance` movement says the resources and the seconds that the peer
+priced. So the ticks charge the **last shape that is known**, and each statement that is
+read corrects the periods that it covers: our price for the shape that the peer shows,
+less our price for the shape that was charged (a `maintenance` row with `adjustment` in
+its detail, positive or negative). The last shape goes on the row for the next ticks. Each
+`resource_change` of the child is charged at our `MODIFY_RESOURCES_MU`. The figures of the
+peer are held down to the most that the service can hold: the `at_most` of its manifest,
+or its `at_init` when it declares none. A peer that writes more cannot raise what this
+node charges its own client. When the instance stops, `stop_instance` hands
 the remainder back through the same `credit_father` a local stop uses — after the row
 is deleted, so a stop that is retried cannot pay twice.
 

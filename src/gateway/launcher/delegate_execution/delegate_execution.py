@@ -161,18 +161,26 @@ def _priced_shape(service: Optional[celaut.Service], metadata, service_id: Optio
     the resources that the instance holds, the architecture that selects the memory price,
     and the price at the launch, which bounds the tick (``launch_price_bp``). Empty without
     the service: an instance with no shape is charged nothing.
+
+    The service changes its resources on the peer, and the statement of the child shows
+    them (``maintain.settle_child``). The ``max_*`` are the most that this node charges it
+    for: the ``at_most`` of the manifest, or the ``at_init`` if it declares none.
     """
-    if service is None or not service.container.resources.HasField("at_init"):
+    declared = service.container.resources if service is not None else None
+    if declared is None or not declared.HasField("at_init"):
         return {}
     try:
         arch = get_arch_tag(service=service, metadata=metadata)
     except UnsupportedArchitectureException:
         arch = None
-    resources = resolve_billable_resources(
-        service.container.resources.at_init, service_id, service=service)
+    resources = resolve_billable_resources(declared.at_init, service_id, service=service)
+    most = resolve_billable_resources(declared.at_most, service_id, service=service) \
+        if declared.HasField("at_most") else resources
     return {
         "mem_limit": int(resources.mem_limit), "disk_space": int(resources.disk_space),
         "cpu_period": int(resources.cpu_period), "cpu_quota": int(resources.cpu_quota),
+        "max_mem_limit": int(most.mem_limit), "max_disk_space": int(most.disk_space),
+        "max_cpu_period": int(most.cpu_period), "max_cpu_quota": int(most.cpu_quota),
         "arch": arch, "launch_bp": launch_price_bp(system_scarcity()),
     }
 
