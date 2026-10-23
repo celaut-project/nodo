@@ -125,7 +125,7 @@ class RemoveCommandTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-        patcher = patch.object(remove_cmd.os, "geteuid", return_value=0)
+        patcher = patch.object(remove_cmd, "refuse_unwritable", return_value=False)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -177,13 +177,24 @@ class RemoveCommandTests(unittest.TestCase):
         self.assertIn("2 instance(s)", printed)
         self.assertIn("will rebuild it", printed)
 
-    def test_without_root_nothing_is_removed(self):
-        with patch.object(remove_cmd.os, "geteuid", return_value=1000):
+    def test_without_write_access_nothing_is_removed(self):
+        with patch.object(remove_cmd, "refuse_unwritable", return_value=True):
             printed, remove_bundle = self._run(SERVICE_ID, SERVICE_ID, freed=10)
 
         remove_bundle.assert_not_called()
         self.assertTrue((self.registry / SERVICE_ID).is_file())
-        self.assertIn("superuser", printed)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class WriteAccessGuardTests(unittest.TestCase):
+    def test_only_existing_directories_without_write_access_are_blocked(self):
+        from src.utils import privileges
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(privileges.os, "access", side_effect=lambda p, m: p != tmp):
+                blocked = privileges.unwritable_dirs([tmp, tmp + "/missing"])
+
+        self.assertEqual(blocked, [tmp])
 
 
 if __name__ == "__main__":

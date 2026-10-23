@@ -465,7 +465,7 @@ class ReclaimTests(CacheFixture):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PruneCommandTests(unittest.TestCase):
     def setUp(self):
-        patcher = patch.object(prune_cmd.os, "geteuid", return_value=0)
+        patcher = patch.object(prune_cmd, "refuse_unwritable", return_value=False)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -564,18 +564,17 @@ class PruneCommandTests(unittest.TestCase):
     def test_dry_run_needs_no_root(self):
         # Reading disk is not a privileged act, and an operator hunting for space
         # should not have to sudo to be told there is none.
-        with patch.object(prune_cmd.os, "geteuid", return_value=1000):
+        with patch.object(prune_cmd, "refuse_unwritable", return_value=True):
             printed, reclaim = self._run(["--dry-run"], runtimes=[self._entry()])
 
         reclaim.assert_not_called()
-        self.assertNotIn("superuser", printed)
+        self.assertIn("Dry run", printed)
 
-    def test_without_root_a_real_prune_refuses(self):
-        with patch.object(prune_cmd.os, "geteuid", return_value=1000):
-            printed, reclaim = self._run([], runtimes=[self._entry()])
+    def test_without_write_access_a_real_prune_refuses(self):
+        with patch.object(prune_cmd, "refuse_unwritable", return_value=True):
+            _printed, reclaim = self._run([], runtimes=[self._entry()])
 
         reclaim.assert_not_called()
-        self.assertIn("superuser", printed)
 
     def test_kept_failures_are_shown_not_silently_skipped(self):
         kept = self._entry(

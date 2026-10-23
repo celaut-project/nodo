@@ -2,7 +2,7 @@ import os
 import shutil
 
 from src.commands.__by_tag import get_id
-from src.utils.privileges import sudo_rerun
+from src.utils.privileges import refuse_unwritable
 from src.commands.inspect_service import format_size
 from src.utils.config import ConfigManager
 
@@ -42,13 +42,17 @@ def _remove_path(path: str, description: str) -> None:
         print(f"Warning: {description} {path} does not exist.")
 
 
+def _bundles_root() -> str:
+    try:
+        from src.virtualizers.microvm import paths
+
+        return str(paths.family_root())
+    except Exception:
+        return ""
+
+
 def remove(service: str):
     service_id = get_id(service)
-
-    # Check if script is run as root
-    if os.geteuid() != 0:
-        print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
-        return
 
     # `get_id` answers "" for a name it cannot resolve, and every path built below
     # from "" is its own parent directory -- so an unknown name used to delete the
@@ -56,6 +60,11 @@ def remove(service: str):
     # removed for a service the node does not know.
     if not service_id:
         print(f"No service on this node matches '{service}'. Nothing was removed.")
+        return
+
+    # Not root: write access to what is deleted. An install without sudo owns its
+    # storage as the service user, and a half-done removal is worse than a refusal.
+    if refuse_unwritable([REGISTRY, METADATA_REGISTRY, _bundles_root()]):
         return
 
     running = _running_instances_of(service_id)

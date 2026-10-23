@@ -154,6 +154,32 @@ def sudo_rerun() -> str:
     return sudo_nodo(" ".join(shlex.quote(a) for a in sys.argv[1:]))
 
 
+def unwritable_dirs(directories: Sequence[str]) -> List[str]:
+    """The existing ``directories`` this process cannot delete entries from.
+
+    Removing a file needs write and search access on its directory, not root: a
+    node installed without sudo owns its storage as the service user, and an
+    operator in that user's group can clean it. A directory that does not exist
+    has nothing to remove and is not listed.
+    """
+    return [
+        d for d in directories
+        if os.path.isdir(d) and not os.access(d, os.W_OK | os.X_OK)
+    ]
+
+
+def refuse_unwritable(directories: Sequence[str]) -> bool:
+    """Print why and return True when some of ``directories`` cannot be written."""
+    blocked = unwritable_dirs(directories)
+    if not blocked:
+        return False
+    print(
+        "This user cannot write to: " + ", ".join(blocked) + ".\n"
+        "Run it as the user that owns them, or with: " + sudo_rerun()
+    )
+    return True
+
+
 # setpriv (util-linux): clears the inheritable and ambient sets, then execs.
 SETPRIV_DROP_ALL = ("--inh-caps=-all", "--ambient-caps=-all", "--")
 

@@ -25,12 +25,11 @@ This is disk reclamation that happens to end a VM's life, never a disk-only
 sweep that leaves the books talking about something that no longer exists.
 """
 
-import os
 import sys
 from typing import List, Optional, Sequence, Tuple
 
 from src.commands.inspect_service import format_size
-from src.utils.privileges import sudo_rerun
+from src.utils.privileges import refuse_unwritable
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -138,12 +137,13 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
         print("Usage: nodo prune [--all] [--dry-run]")
         return
 
-    # Root, like `remove` and `kill`: these trees are written by a node running as
-    # root, and a partial removal by an unprivileged user would leave a half-freed
-    # directory and report a number that was never true.
-    if not dry_run and os.geteuid() != 0:
-        print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
-        return
+    # Write access to the trees, not root: a partial removal would leave a
+    # half-freed directory and report a number that was never true.
+    if not dry_run:
+        from src.virtualizers.microvm import paths
+
+        if refuse_unwritable([str(paths.runtime_root()), str(paths.failures_root())]):
+            return
 
     # Read from the microVM family rather than through `virtualizers.interface`,
     # deliberately: what this command reports is a disk layout -- runtime
