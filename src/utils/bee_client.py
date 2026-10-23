@@ -189,13 +189,14 @@ class BeeClient:
             partitions_message_mode_parser: Any = True,
             timeout: Optional[float] = None,
             default=None,
+            block_skip: bool = False,
     ):
         """The common case: exactly one response message is expected, or
         ``default`` (a closed port, a peer that never answers, ...)."""
         return next(
             BeeClient.call(
                 method, input, indices_parser, indices_serializer,
-                partitions_message_mode_parser, timeout,
+                partitions_message_mode_parser, timeout, block_skip,
             ),
             default,
         )
@@ -393,6 +394,9 @@ class BeeClient:
             indices_parser=rpc_output("GetServiceEstimatedCost"),
             indices_serializer=rpc_input("GetServiceEstimatedCost"),
             timeout=timeout,
+            # The peer says which blocks of the Service it holds, and this node stops
+            # sending them (issue #371). A peer that does not say it gets them all.
+            block_skip=True,
         )
 
     @staticmethod
@@ -406,6 +410,8 @@ class BeeClient:
             indices_parser=rpc_output("StartService"),
             indices_serializer=rpc_input("StartService"),
             timeout=timeout,
+            # As in ``get_service_estimated_cost``: the Service may go with the call.
+            block_skip=True,
         ))
 
     @staticmethod

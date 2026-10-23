@@ -1,3 +1,4 @@
+import concurrent.futures
 import os
 from typing import Optional, Generator, Set, Tuple
 
@@ -7,7 +8,7 @@ from protos.gateway_bee import StartService_input_message_mode, rpc_input
 from src.gateway.client_gate import ClientRequired, require_caller
 from src.gateway.utils import save_service
 from src.utils import logger as log
-from src.utils.bee_client import BeeClient, Buffer, Dir
+from src.utils.bee_client import BeeClient, Buffer, Dir, StreamControl
 from src.utils.hashing import get_configured_hash_id
 from src.manager.maintain import add_wanted
 from src.utils.config import ConfigManager
@@ -22,6 +23,16 @@ CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
 
 class BreakIteration(Exception):
     pass
+
+
+# How long the handler waits for the parser before it looks for skip requests to send.
+# A skip request is queued while a block of the Service is being read, which can take a
+# long time, so the handler cannot only look for them between two parsed messages. The
+# wait is short because the sender goes on with the body of the block until the request
+# arrives. A message that the parser has ready does not wait for it.
+SKIP_POLL_SECONDS = 0.005
+
+_END = object()
 
 
 def find_service_hash(_hash: celaut.Metadata.HashTag.Hash) \
@@ -62,11 +73,20 @@ class AbstractInputServiceIterable:
     # reads "the sender gave no hop count" rather than failing on the attribute.
     recursion_guard_hops: Optional[int] = None
 
+    # Also at class level: with no control, the request is read with no skip requests.
+    control: Optional[StreamControl] = None
+
     def __init__(self, request_iterator, context):
+        # The parse side queues a skip request when a block that this node holds starts
+        # to arrive (bee_rpc.control.StreamControl, issue #371), and __iter__ sends it
+        # in the response direction. A sender that asked for it (`block_skip`) stops
+        # the body of the block. Any other sender gets a Buffer that its parser drops.
+        self.control = StreamControl()
         self.parser_iterator = BeeClient.parse(
             request_iterator,
             indices=rpc_input(self.RPC),
-            partitions_message_mode=StartService_input_message_mode
+            partitions_message_mode=StartService_input_message_mode,
+            control=self.control,
         )
 
         self.context = context
@@ -193,10 +213,45 @@ class AbstractInputServiceIterable:
             yield from self.generate()
             self.generated = True
 
+    def _parsed(self) -> Generator[object, None, None]:
+        """The messages of the request, and the skip requests for the sender.
+
+        A message is parsed on a worker thread, one at a time, so the order of the
+        handler does not change: the next message is read when the handler asks for it.
+        While the worker reads a message (a Service of many blocks is one message), this
+        thread sends the skip requests that the reading queues. They are Buffers; no
+        message of the request is one.
+        """
+        if self.control is None:
+            yield from self.parser_iterator
+            return
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            while True:
+                future = executor.submit(next, self.parser_iterator, _END)
+                while True:
+                    try:
+                        message = future.result(timeout=SKIP_POLL_SECONDS)
+                        break
+                    except concurrent.futures.TimeoutError:
+                        yield from self.control.pending_outbound()
+                # A skip that the last message queued goes before the next answer.
+                yield from self.control.pending_outbound()
+                if message is _END:
+                    return
+                yield message
+        finally:
+            # A worker that waits for the request is not killed. It ends with the call.
+            executor.shutdown(wait=False)
+
     def __iter__(self):
         self.start()
         try:
-            yield from (t for r in self.parser_iterator for t in self.__pattern_matching(r))
+            for r in self._parsed():
+                if type(r) is Buffer:
+                    yield r
+                else:
+                    yield from self.__pattern_matching(r)
             # Only when the request stream ends, not when the caller cancels it. Neither
             # side has the service: the node does not hold it, and the request did not
             # carry it. Answering nothing left the caller to guess why.
