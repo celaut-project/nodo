@@ -65,9 +65,9 @@ def _forced_generator(
         # uses a caller-supplied token as-is rather than generating its own.
         yield celaut_pb2.RecursionGuard(token=token)
 
-        # No initial_mu: `launch_service` uses the quote of the peer as the amount that
-        # the client pays (#563). `delegate_execution` sends the peer that amount less
-        # the commission, converted to the executor's MU. The client's funding above is
+        # No initial_mu: `launch_service` uses the price of this node as the amount that
+        # the client pays (#563, #577). `delegate_execution` sends the peer that amount
+        # less the build of this node, converted to the executor's MU. The client's funding above is
         # a local matter and must not travel as the instance's balance -- charging the
         # client is what it is for.
         config = celaut_pb2.Configuration()

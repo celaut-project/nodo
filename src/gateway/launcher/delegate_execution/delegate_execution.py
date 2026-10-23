@@ -5,7 +5,7 @@ from typing import Callable, List, Optional, Tuple
 from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 
-from protos import celaut_pb2
+from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database import ledger
 from src.manager import balance_statement, orphan_starts, statement_check
 from src.manager.manager import get_client_id_on_other_peer
@@ -20,9 +20,11 @@ from src.payment_system.mu_conversion import (
     configuration_for_peer,
     convert_mu,
     matching_payment_system,
-    peer_mu_in_local,
 )
+from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
+from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
+from src.virtualizers.interface import resolve_billable_resources
 
 
 env_manager = ConfigManager()
@@ -152,6 +154,29 @@ def _check_start(peer: str, client_id: str, external_token: str,
     return from_amount(statement.balance), mark
 
 
+def _priced_shape(service: Optional[celaut.Service], metadata, service_id: Optional[str]) -> dict:
+    """What the tick charges this node's price for: the shape of the instance (#577).
+
+    The same figures that ``local_instances`` keeps, in the columns of the delegated row:
+    the resources that the instance holds, the architecture that selects the memory price,
+    and the price at the launch, which bounds the tick (``launch_price_bp``). Empty without
+    the service: an instance with no shape is charged nothing.
+    """
+    if service is None or not service.container.resources.HasField("at_init"):
+        return {}
+    try:
+        arch = get_arch_tag(service=service, metadata=metadata)
+    except UnsupportedArchitectureException:
+        arch = None
+    resources = resolve_billable_resources(
+        service.container.resources.at_init, service_id, service=service)
+    return {
+        "mem_limit": int(resources.mem_limit), "disk_space": int(resources.disk_space),
+        "cpu_period": int(resources.cpu_period), "cpu_quota": int(resources.cpu_quota),
+        "arch": arch, "launch_bp": launch_price_bp(system_scarcity()),
+    }
+
+
 def delegate_execution(
                         service_id: str,
                         peer: str,
@@ -160,25 +185,28 @@ def delegate_execution(
                         recursion_guard_token,
                         refund_container: List[Callable],
                         father_ip: str = "",
-                        commission_mu: int = 0,
-                        build_mu: int = 0,
+                        own_build_mu: int = 0,
+                        peer_build_mu: int = 0,
+                        service: Optional[celaut.Service] = None,
                    ) -> celaut_pb2.ServiceInstance:
     """Run this service on ``peer`` and open the child's local account.
 
-    ``config.initial_mu`` is what the father paid, in local MU (#563). This node keeps
-    ``commission_mu`` of it and sends the peer the rest, in the MU of the peer. The peer
-    takes its own build from that amount, and what is left is the balance of the child
-    there. ``build_mu`` is the build that the peer quoted, in local MU.
+    ``config.initial_mu`` is what the father paid, in local MU (#563). The child is
+    charged what this node advertises (#577), as a local one is: this node keeps its own
+    build, ``own_build_mu``, and the rest is the balance of the child. That balance is what
+    the father can get back, and it is what this node sends the peer, in the MU of the
+    peer. The peer takes its own build from it, ``peer_build_mu`` as it quoted it, in local
+    MU, and the rest is the balance of the child there. The account of the child here
+    opens with the ``start`` and the ``build`` of this node, and shows nothing of the
+    peer.
 
-    A delegated child keeps its deposit on this node, exactly as a local one does, so
-    the father is refunded from this node's own books when the child stops. That deposit
-    is what the father can get back: the amount that was sent, less the build of the
-    peer, in local MU. Its account here opens with the ``start``, the ``commission`` of
-    this node and that ``build``.
+    ``service`` gives the shape that the maintenance tick prices the child by
+    (``_priced_shape``).
 
     The balance of the child on the peer comes from its statement (#570), which also
     shows what the peer took for the start: ``_check_start`` checks it, and the mark it
-    returns is where the maintenance tick goes on from.
+    returns is where the tick goes on from. It is what the peer charges this node, and the
+    margin of the delegation is what the child is charged less that.
 
     The start goes with a new reference of this node (#578). When the peer does not
     answer in time, it is asked again with the same reference and a short deadline, and
@@ -196,13 +224,16 @@ def delegate_execution(
         log.LOGGER('The service is launched on node ' + str(peer))
 
         initial_mu = _mu(config.initial_mu) if config.HasField("initial_mu") else 0
-        sent_mu = initial_mu - int(commission_mu)
+        # What the father can get back: the balance of the child, as a local one has it.
+        balance_mu = initial_mu - int(own_build_mu)
+        sent_mu = balance_mu
         if sent_mu <= 0:
-            # Nothing is left for the peer after the commission: the same rejection as
-            # an amount that does not fit the build, and nothing was charged to the peer.
+            # Nothing is left for the peer after the build of this node: the same
+            # rejection as an amount that does not fit the build, and nothing was
+            # charged to the peer.
             raise StartAmountTooSmall(
-                f'initial_mu {initial_mu} MU does not cover the commission of this node, '
-                f'{int(commission_mu)} MU, and a start on {peer}.'
+                f'initial_mu {initial_mu} MU does not cover the build of this node, '
+                f'{int(own_build_mu)} MU, and a start on {peer}.'
             )
 
         # The configuration travels to the peer's Gateway, which reads MU on its
@@ -253,7 +284,7 @@ def delegate_execution(
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 
         build_peer_mu = convert_mu(
-            int(build_mu),
+            int(peer_build_mu),
             from_mu_per_unit=payment_system.local_mu_per_unit,
             to_mu_per_unit=payment_system.peer_mu_per_unit,
             round_up=True,
@@ -266,13 +297,8 @@ def delegate_execution(
             # The peer could not be read: use what its quote says. The tick corrects the
             # mark at the next reading, and the instance is not lost over a failed read.
             peer_balance_mu = max(sent_peer_mu - build_peer_mu, 0)
-            balance_mu = max(sent_mu - int(build_mu), 0)
         else:
             peer_balance_mu = child_balance_peer
-            balance_in_local = peer_mu_in_local(peer, child_balance_peer)
-            # Never more than what was sent: the child cannot hold more than it got.
-            balance_mu = max(sent_mu - int(build_mu), 0) if balance_in_local is None \
-                else min(balance_in_local, sent_mu)
 
         # The peer advertised its own addresses. If our client cannot reach them,
         # stand in for the service locally and hand over our endpoints instead —
@@ -296,10 +322,9 @@ def delegate_execution(
             # restart and firewall cleanup targets the address actually handed out.
             serialized_instance=published_instance.SerializeToString(),
             service_id=service_id,
-            # What the father can get back, in our MU: what he paid, less the commission
-            # of this node and less the build of the peer. The commission and the build
-            # are the part of the start that this node and the peer keep. The
-            # maintenance tick spends this figure down by what the peer meters.
+            # What the father can get back, in our MU: what he paid, less the build of
+            # this node. The maintenance tick spends it down by our price, and what the
+            # peer takes for the child is no part of it.
             balance_mu=balance_mu,
             # The balance of the child as the peer reports it, on its scale. This is the
             # mark the first tick measures against, so it is what the peer holds after
@@ -309,12 +334,11 @@ def delegate_execution(
             peer_balance_mu=peer_balance_mu,
             movements=(
                 ledger.Movement(ledger.START, initial_mu),
-                ledger.Movement(ledger.COMMISSION, -int(commission_mu)),
-                ledger.Movement(ledger.BUILD, balance_mu - sent_mu,
-                                detail={"peer_id": peer}),
+                ledger.Movement(ledger.BUILD, -int(own_build_mu)),
             ),
             sent_peer_mu=sent_peer_mu,
             mark=mark,
+            shape=_priced_shape(service, metadata, service_id),
         )
         service_instance.token = encrypted_external_token
         service_instance.instance.CopyFrom(published_instance)

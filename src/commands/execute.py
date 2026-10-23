@@ -64,7 +64,7 @@ def resolve_service_hash(service: str) -> str:
 # It is emphatically *not* the instance's balance. The node sets `initial_mu` from the
 # resources actually requested (`manager.default_initial_balance`) plus the build, and
 # takes the build out of it. When the service is delegated, `delegate_execution` sends
-# the peer that amount less the commission, in the executor's own MU scale. Passing one
+# the peer that amount less the build of this node, in the executor's own MU scale. Passing one
 # figure for both -- as this did -- made the quote come out above the very balance meant
 # to pay it, and shipped a local MU figure to a peer that reads MU on a different scale.
 DEV_CLIENT_FUNDING_MU = 10**12

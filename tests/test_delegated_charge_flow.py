@@ -1,12 +1,15 @@
-"""What a delegated child is charged over many ticks, against a real database (#570).
+"""What a delegated child costs its peer over many ticks, against a real database (#570).
 
 Each tick estimates from the balance of the child on the peer, and every so often a
 statement replaces the estimate with what its movements say. Whatever the order and the
-timing, what the child is charged in total is what it consumed: what its father moves with
-``ModifyDeposit`` is not consumption, and a late statement corrects an early estimate.
+timing, what the peer is measured to have charged in total (``charged_peer_mu``) is what
+the child consumed: what its father moves with ``ModifyDeposit`` is not consumption, and a
+late statement corrects an early estimate.
 
-The peer is a ``FakeLedger`` of the child. Its MU are ours one for one, with no
-commission, so that a figure is a figure.
+What the child itself is charged is this node's price (#577), and does not depend on any
+of this: here it is zero unless a test sets it, so that the deposit is what the father
+moved. The peer is a ``FakeLedger`` of the child. Its MU are ours one for one, so that a
+figure is a figure.
 """
 import sqlite3
 import threading
@@ -24,7 +27,6 @@ try:
     from src.database.sql_connection import SQLConnection
     from src.manager import maintain, statement_check
     from src.manager.manager import delegation_lock
-    from src.utils.cost_functions import delegation_commission
     from tests.statement_chain import FakeLedger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -79,8 +81,14 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                       ts=self.now - 60 + len(self.peer.rows))
         self.sc.move_delegated_deposit(ALIAS, FATHER, amount, amount)
 
-    def tick(self, statement=False):
-        """One maintenance tick. ``statement``: whether the statement is read at it."""
+    @property
+    def measured(self):
+        """What the ticks measured that the peer has charged for the child."""
+        return self.sc.get_delegated_instances()[0]["charged_peer_mu"]
+
+    def tick(self, statement=False, own_mu=0):
+        """One maintenance tick. ``statement``: whether the statement is read at it.
+        ``own_mu``: what this node's price charges the child at it."""
         row = self.sc.get_delegated_instances()[0]
 
         def answer(peer, client, token="", from_seq=0, rows=None):
@@ -93,9 +101,9 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(statement_check, "stored_rates", return_value={}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client"), \
                 patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
-                patch.object(maintain, "peer_mu_in_local", side_effect=lambda p, a, **k: a), \
                 patch.object(maintain, "stop_instance"), \
-                patch.object(delegation_commission, "commission_percent", return_value=0.0), \
+                patch.object(maintain, "system_scarcity", return_value={}), \
+                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu), \
                 patch.object(self.sc, "child_statement_due", return_value=statement):
             charge, state = maintain._read_child(row)
             maintain.settle_child(row, charge, state)
@@ -110,19 +118,43 @@ class DelegatedChargeFlowTests(unittest.TestCase):
             self.consume(5)
             self.tick(statement=True)
 
-        self.assertEqual(self.deposit, 900 - 15)
+        self.assertEqual(self.measured, 15)
+
+    def test_the_child_is_charged_the_price_of_this_node_whatever_the_peer_charges(self):
+        # The peer charged 5 and this node charges 8 (#577): the deposit follows the price
+        # of this node, and the peer is measured on its own.
+        self.consume(5)
+        self.tick(statement=True, own_mu=8)
+
+        self.assertEqual(self.deposit, 900 - 8)
+        self.assertEqual(self.measured, 5)
+        # A peer that charges more than this node does is a loss of this node, not a charge.
+        self.consume(50)
+        self.tick(statement=True, own_mu=8)
+        self.assertEqual(self.deposit, 900 - 16)
+        self.assertEqual(self.measured, 55)
+
+    def test_the_rows_of_the_child_name_nothing_of_the_peer(self):
+        self.consume(5)
+        self.tick(statement=True, own_mu=8)
+
+        rows = SQLConnection._connection.execute(
+            "SELECT kind, detail FROM balance_movements WHERE account_id = ?", (ALIAS,)).fetchall()
+        self.assertEqual([r["kind"] for r in rows], ["start", "maintenance"])
+        for row in rows:
+            self.assertNotIn("peer", row["detail"] or "")
 
     def test_the_balance_between_statements_charges_the_same(self):
         for _ in range(3):
             self.consume(5)
             self.tick(statement=False)
         # Estimated all along: the same as a statement would have said.
-        self.assertEqual(self.deposit, 900 - 15)
+        self.assertEqual(self.measured, 15)
 
         self.consume(5)
         self.tick(statement=True)
 
-        self.assertEqual(self.deposit, 900 - 20)
+        self.assertEqual(self.measured, 20)
         row = self.sc.get_delegated_instances()[0]
         self.assertEqual((row["verified_consumption_peer_mu"], row["charged_peer_mu"]), (20, 20))
 
@@ -146,9 +178,9 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(statement_check, "stored_rates", return_value={}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client"), \
                 patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
-                patch.object(maintain, "peer_mu_in_local", side_effect=lambda p, a, **k: a), \
                 patch.object(maintain, "stop_instance"), \
-                patch.object(delegation_commission, "commission_percent", return_value=0.0), \
+                patch.object(maintain, "system_scarcity", return_value={}), \
+                patch.object(maintain, "compute_maintenance_cost", return_value=0), \
                 patch.object(self.sc, "child_statement_due", return_value=False):
             tick = threading.Thread(target=maintain.maintain_delegated_instances)
             tick.start()
@@ -187,7 +219,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
 
         self.tick(statement=False)
 
-        self.assertEqual(self.deposit, 900 - 5)
+        self.assertEqual(self.measured, 5)
 
     def test_a_withdrawal_of_the_father_is_not_charged_as_consumption(self):
         self.consume(5)
@@ -197,32 +229,34 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         self.consume(5)
         self.tick(statement=True)
 
-        # 900 less 100 that the father took out, less the 10 that the child spent.
-        self.assertEqual(self.deposit, 900 - 100 - 10)
+        # 100 that the father took out is not consumption: the child spent 10.
+        self.assertEqual(self.measured, 10)
+        self.assertEqual(self.deposit, 900 - 100)
         self.assertEqual(self.sc.get_balance_by_client_id(FATHER), 5000 + 100)
 
     def test_a_top_up_of_the_father_hides_no_consumption(self):
         self.father_moves(200)
         self.consume(30)
         self.tick(statement=False)
-        self.assertEqual(self.deposit, 900 + 200 - 30)
+        self.assertEqual(self.measured, 30)
 
         self.tick(statement=True)
 
-        self.assertEqual(self.deposit, 900 + 200 - 30)
+        self.assertEqual(self.measured, 30)
+        self.assertEqual(self.deposit, 900 + 200)
 
     def test_a_statement_corrects_an_estimate_that_was_too_high(self):
         """The peer shows less than the balance said: the next charge gives MU back."""
         self.consume(10)
         self.tick(statement=False)
-        self.assertEqual(self.deposit, 900 - 10)
+        self.assertEqual(self.measured, 10)
         # A refund of 4 that the balance reading did not show at the time it was taken.
         self.peer.add(4, "refund", ts=self.now - 30)
 
         charge = self.tick(statement=True)
 
         self.assertEqual(charge, -4)
-        self.assertEqual(self.deposit, 900 - 6)
+        self.assertEqual(self.measured, 6)
 
     def test_an_estimate_that_is_too_low_is_corrected_upward(self):
         self.consume(10)
@@ -231,7 +265,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         self.consume(7)
         self.tick(statement=True)
 
-        self.assertEqual(self.deposit, 900 - 17)
+        self.assertEqual(self.measured, 17)
 
     def test_a_balance_that_rises_alone_never_gives_MU_back(self):
         """A peer that reports a higher balance than the truth credits nobody."""
@@ -269,12 +303,12 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(maintain, "_balance_held_on", return_value=10 ** 9), \
                 patch.object(statement_check, "stored_rates", return_value={}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client"), \
-                patch.object(maintain, "peer_mu_in_local", side_effect=lambda p, a, **k: a), \
-                patch.object(delegation_commission, "commission_percent", return_value=0.0), \
+                patch.object(maintain, "system_scarcity", return_value={}), \
+                patch.object(maintain, "compute_maintenance_cost", return_value=0), \
                 patch.object(self.sc, "get_delegated_instances", return_value=[row]):
             maintain.close_delegated_charge(PEER_TOKEN)
 
-        self.assertEqual(self.deposit, 900 - 9)
+        self.assertEqual(self.measured, 9)
 
     def test_a_peer_that_rewrites_its_history_costs_it_the_chain_and_the_mark_goes_on(self):
         self.consume(5)

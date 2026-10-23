@@ -225,8 +225,13 @@ TABLES = {
     # (every movement but those of its father); `verified_father_net_peer_mu` the top-ups
     # less the withdrawals of its father among them; `father_net_peer_mu` the same for all
     # the `ModifyDeposit` that this node has sent, written with the rows that they leave
-    # here; `charged_peer_mu` what the tick has taken from the deposit for it.
+    # here; `charged_peer_mu` what the tick has measured that the peer charged for it.
     # `statement_ticks` counts the ticks since the statement of the child was last read.
+    # A delegated child is charged what this node advertises (#577), by the same
+    # figures as a local one: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `arch`
+    # and the `launch_*_bp` are what `local_instances` keeps, and `charged_until` is the
+    # time (epoch seconds) that the tick has charged up to. `charged_peer_mu` is what the
+    # peer has charged this node for it, and no part of what the child is charged.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -246,6 +251,15 @@ TABLES = {
             father_net_peer_mu TEXT NOT NULL DEFAULT '0',
             charged_peer_mu TEXT NOT NULL DEFAULT '0',
             sent_peer_mu TEXT DEFAULT NULL,
+            mem_limit INTEGER DEFAULT NULL,
+            disk_space INTEGER DEFAULT NULL,
+            cpu_period INTEGER DEFAULT NULL,
+            cpu_quota INTEGER DEFAULT NULL,
+            arch TEXT DEFAULT NULL,
+            launch_cpu_bp INTEGER DEFAULT NULL,
+            launch_mem_bp INTEGER DEFAULT NULL,
+            launch_disk_bp INTEGER DEFAULT NULL,
+            charged_until REAL DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL

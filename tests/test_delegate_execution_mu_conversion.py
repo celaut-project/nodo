@@ -1,7 +1,7 @@
 """Delegation must cross the local/peer MU boundary exactly once.
 
 The configuration is the only thing that crosses here, and it carries the amount that
-the peer gets: what the father paid, less the commission of this node (#563). The
+the peer gets: what the father paid, less the build of this node (#563, #577). The
 balance check does not cross: `balance_on_other_peer` already answers in our MU, so both
 sides of it are local and converting one of them would break it.
 """
@@ -58,11 +58,11 @@ class DelegateExecutionMuConversionTests(unittest.TestCase):
                 config=local_config,
                 recursion_guard_token="token-a",
                 refund_container=[],
-                commission_mu=100_000,
+                own_build_mu=100_000,
             )
 
         self.assertIs(result, instance)
-        # The peer gets what the father paid less the commission, and it is the
+        # The peer gets what the father paid less the build of this node, and it is the
         # balance check that compares it with the account: 900 000 of ours.
         convert_config.assert_called_once_with(
             local_config, payment_system=payment_system, initial_mu=900_000

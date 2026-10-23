@@ -16,8 +16,8 @@ wholesale position with that peer. It is to give the delegated child the same ki
 local account a local child has:
 
 * the father's deposit is parked on the delegation row, in our MU;
-* the maintenance tick charges it what the child's statement on the peer says it
-  spent (#570);
+* the maintenance tick charges it what this node advertises for the child, as for a
+  local one (#577), and measures what the peer charges this node (#570);
 * the stop hands whatever is left back to the father, after the row is gone;
 * the peer's own refund settles on the peer, and is only logged here.
 
@@ -40,7 +40,6 @@ try:
     from src.gateway.launcher.delegate_execution import delegate_execution as delegate_mod
     from src.manager import maintain, manager, statement_check
     from src.utils import dead_instances
-    from src.utils.cost_functions import delegation_commission
     from tests.statement_chain import FakeLedger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -61,16 +60,16 @@ LEFTOVER = 400_000
 class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
     """What `delegate_execution` sends to the peer, and what it writes on the row it creates.
 
-    The father pays `initial_mu` and nothing else (#563). This node keeps its commission
-    and sends the peer the rest, in the MU of the peer. The peer takes its build from
-    that amount. The peer MU are worth half of ours here (two of them for one local MU).
+    The father pays `initial_mu` and nothing else (#563). This node keeps its own build
+    and sends the peer the rest, in the MU of the peer (#577). The peer takes its build
+    from that amount. The peer MU are worth half of ours here (two of them for one local MU).
     """
 
     PAYMENT_SYSTEM = SimpleNamespace(
         local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
     )
 
-    def _delegate(self, *, initial_mu, commission_mu=0, build_mu=0, child_balance=None,
+    def _delegate(self, *, initial_mu, own_build_mu=0, peer_build_mu=0, child_balance=None,
                   start_error=None, mark=None, record_error=None, stop_error=None):
         """Run a delegation. ``child_balance`` is what the peer reports, in its MU, and
         ``mark`` the last movement of its statement."""
@@ -99,9 +98,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(
             delegate_mod, "_check_start", return_value=(child_balance, mark)
-        ) as check_start, patch.object(
-            delegate_mod, "peer_mu_in_local", side_effect=lambda peer, amount, **_: amount // 2
-        ), patch.object(delegate_mod, "SQLConnection") as sql_connection, patch.object(
+        ) as check_start, patch.object(delegate_mod, "SQLConnection") as sql_connection, patch.object(
             delegate_mod.BeeClient, "stop_service", side_effect=stop_error
         ) as stop_service:
             sql_connection.return_value.add_delegated_instance.side_effect = record_error
@@ -115,8 +112,8 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
                     config=config,
                     recursion_guard_token="token-a",
                     refund_container=[lambda: refunds.append(True)],
-                    commission_mu=commission_mu,
-                    build_mu=build_mu,
+                    own_build_mu=own_build_mu,
+                    peer_build_mu=peer_build_mu,
                 )
             except Exception as e:
                 error = e
@@ -129,24 +126,24 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
             ),
         )
 
-    def test_the_peer_is_sent_what_the_father_paid_less_the_commission(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           child_balance=1_580_000)
+    def test_the_peer_is_sent_what_the_father_paid_less_the_build_of_this_node(self):
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
+                           child_balance=1_400_000)
 
         self.assertIsNone(r.error)
-        # 990 000 of ours, and two peer MU for each.
-        self.assertEqual(int(r.sent.initial_mu.n), 1_980_000)
+        # 900 000 of ours, and two peer MU for each.
+        self.assertEqual(int(r.sent.initial_mu.n), 1_800_000)
 
     def test_the_row_keeps_what_the_father_can_get_back_in_our_mu(self):
-        """The amount sent, less the build of the peer, as the peer reports it.
+        """What the father paid, less the build of this node: as a local child has it.
 
-        The peer took 400 000 of its MU for the build: 200 000 of ours. So the father can
-        get back 990 000 - 200 000, and never the commission or the build.
+        The peer took 400 000 of its MU for its own build: that is the cost of this node,
+        and no part of what the father can get back (#577).
         """
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           child_balance=1_580_000)
+        r = self._delegate(own_build_mu=100_000, peer_build_mu=200_000, initial_mu=1_000_000,
+                           child_balance=1_400_000)
 
-        self.assertEqual(r.written["balance_mu"], 790_000)
+        self.assertEqual(r.written["balance_mu"], 900_000)
 
     def test_the_mark_of_the_tick_is_the_balance_that_the_peer_reports(self):
         """Not the amount that travelled: the peer already took its build from it.
@@ -155,15 +152,15 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         tick, as consumption.
         """
         mark = {"seq": 2, "ts": 100, "hash": "abc"}
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           child_balance=1_580_000, mark=mark)
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
+                           child_balance=1_400_000, mark=mark)
 
-        self.assertEqual(r.written["peer_balance_mu"], 1_580_000)
+        self.assertEqual(r.written["peer_balance_mu"], 1_400_000)
         self.assertEqual(r.written["mark"], mark)
 
     def test_the_chain_of_the_new_child_is_read_for_its_mark(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           child_balance=1_580_000)
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
+                           child_balance=1_400_000)
 
         r.check_start.assert_called_once()
         args = r.check_start.call_args.args
@@ -171,39 +168,42 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         # The mark is as old as the request: the account was written after it.
         self.assertLessEqual(args[3], time.time())
 
-    def test_the_account_opens_with_the_start_the_commission_and_the_build(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           child_balance=1_580_000)
+    def test_the_account_opens_with_the_start_and_the_build_of_this_node(self):
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
+                           child_balance=1_400_000)
 
         movements = r.written["movements"]
-        self.assertEqual([m.kind for m in movements],
-                         [ledger.START, ledger.COMMISSION, ledger.BUILD])
-        self.assertEqual([m.amount_mu for m in movements], [1_000_000, -10_000, -200_000])
-        self.assertEqual(r.written["sent_peer_mu"], 1_980_000)
+        self.assertEqual([m.kind for m in movements], [ledger.START, ledger.BUILD])
+        self.assertEqual([m.amount_mu for m in movements], [1_000_000, -100_000])
+        # Nothing of the peer: the child is one more instance of this node.
+        self.assertTrue(all(not m.detail for m in movements))
+        self.assertEqual(r.written["sent_peer_mu"], 1_800_000)
 
-    def test_an_unreadable_peer_leaves_the_balance_that_its_quote_says(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+    def test_an_unreadable_peer_leaves_the_balance_of_this_node_and_the_quote_of_the_peer(self):
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
                            child_balance=None)
 
         self.assertIsNone(r.error)
-        self.assertEqual(r.written["balance_mu"], 790_000)
-        self.assertEqual(r.written["peer_balance_mu"], 1_580_000)
+        self.assertEqual(r.written["balance_mu"], 900_000)
+        # What was sent, less the build that the peer quoted: 1 800 000 - 400 000.
+        self.assertEqual(r.written["peer_balance_mu"], 1_400_000)
 
-    def test_a_peer_cannot_report_more_than_it_was_sent(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=0,
+    def test_the_balance_of_the_row_does_not_follow_what_the_peer_reports(self):
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=0,
                            child_balance=9_000_000)
 
-        self.assertEqual(r.written["balance_mu"], 990_000)
+        self.assertEqual(r.written["balance_mu"], 900_000)
+        self.assertEqual(r.written["peer_balance_mu"], 9_000_000)
 
-    def test_an_amount_that_the_commission_takes_whole_is_refused_and_refunded(self):
-        r = self._delegate(initial_mu=10_000, commission_mu=10_000)
+    def test_an_amount_that_the_build_of_this_node_takes_whole_is_refused_and_refunded(self):
+        r = self._delegate(initial_mu=100_000, own_build_mu=100_000)
 
         self.assertIsNotNone(r.error)
         self.assertEqual(r.refunds, [True])
         r.start.assert_not_called()
 
     def test_a_start_that_the_peer_rejects_refunds_the_father(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
                            start_error=Exception("initial_mu is less than the build"))
 
         self.assertIsNotNone(r.error)
@@ -213,8 +213,8 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
     def test_a_start_that_fails_after_the_peer_answered_stops_the_child_there(self):
         """The father got his MU back and an error: nobody holds the instance, and left
         alone it would run on the MU that this node sent until they ran out."""
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           child_balance=1_580_000, record_error=Exception("disk is full"))
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
+                           child_balance=1_400_000, record_error=Exception("disk is full"))
 
         self.assertIsNotNone(r.error)
         self.assertEqual(r.refunds, [True])
@@ -222,44 +222,40 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         self.assertEqual(r.stop_service.call_args.kwargs["token"], PEER_TOKEN)
 
     def test_a_cleanup_that_fails_does_not_hide_the_error_or_the_refund(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
-                           child_balance=1_580_000, record_error=Exception("disk is full"),
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
+                           child_balance=1_400_000, record_error=Exception("disk is full"),
                            stop_error=Exception("peer is gone"))
 
         self.assertEqual(str(r.error), "disk is full")
         self.assertEqual(r.refunds, [True])
 
     def test_a_start_that_never_got_a_token_has_nothing_to_stop(self):
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=200_000,
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
                            start_error=Exception("timed out"))
 
         self.assertIsNotNone(r.error)
         r.stop_service.assert_not_called()
 
-    def test_a_child_that_already_spent_keeps_the_instance_and_is_charged(self):
+    def test_a_child_that_already_spent_keeps_the_instance(self):
         """The child reads less than the amount less the build: a tick, or its dependencies.
 
         Two readings of a balance cannot tell that from a peer that took too much, so the
-        start goes on, and the father pays what the peer reports the child spent.
+        start goes on. What the child is charged is this node's price, from the first tick.
         """
-        r = self._delegate(initial_mu=1_000_000, commission_mu=10_000, build_mu=0,
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=0,
                            child_balance=1_000_000)
 
         self.assertIsNone(r.error)
-        self.assertEqual(r.written["balance_mu"], 500_000)
+        self.assertEqual(r.written["balance_mu"], 900_000)
         self.assertEqual(r.written["peer_balance_mu"], 1_000_000)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DelegatedMaintenanceTickTests(unittest.TestCase):
-    """The sweep that charges a delegated deposit for what the peer metered."""
+    """The sweep that charges a delegated deposit what this node advertises (#577)."""
 
-    # The peer's MU are worth half of ours here, so a conversion that silently used
-    # the wrong scale shows up as a factor of two rather than as the same number.
-    PAYMENT_SYSTEM = SimpleNamespace(
-        local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
-    )
     MARK = {"peer_balance_mu": 1_400_000, "seq": 9, "ts": 190, "hash": "abc"}
+    OWN_MU = 250_000
 
     def _row(self, **overrides):
         row = {
@@ -270,12 +266,14 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
             'serialized_instance': None,
             'balance_mu': 1_000_000,
             'peer_balance_mu': 2_000_000,
+            'mem_limit': 1 << 30, 'disk_space': 1 << 30, 'cpu_period': 100_000,
+            'cpu_quota': 100_000, 'arch': None, 'charged_until': time.time() - 60,
         }
         row.update(overrides)
         return row
 
     def _tick(self, row, *, spent=600_000, read_raises=None, peer_reachable=True,
-              rates=True, rows=None, due=True):
+              rows=None, due=True, own_mu=OWN_MU):
         sc = MagicMock()
         sc.get_delegated_instances.return_value = rows or [row]
         sc.get_delegated_row.side_effect = lambda token: next(
@@ -289,30 +287,21 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 patch.object(maintain, "_check_our_account") as check_account, \
                 patch.object(maintain, "_read_child", read), \
                 patch.object(maintain, "is_peer_available", return_value=peer_reachable), \
-                patch.object(
-                    maintain, "peer_mu_in_local",
-                    side_effect=(self._convert if rates else lambda *a, **k: None)
-                ), \
+                patch.object(maintain, "system_scarcity", return_value={}), \
+                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu), \
                 patch.object(maintain, "stop_instance") as stop, \
                 patch.object(maintain, "ALLOW_DEBT", False), \
-                patch.object(maintain, "format_mu", str), \
-                patch.object(delegation_commission, "commission_percent",
-                             return_value=self.commission_percent):
+                patch.object(maintain, "format_mu", str):
             maintain.maintain_delegated_instances()
         self.check_account = check_account
         return sc, stop
 
-    # The tests below are about the reading and the mark, so no commission (#551) unless
-    # a test sets one.
-    commission_percent = 0.0
-
-    @staticmethod
-    def _convert(peer_id, amount_mu, *, round_up=False):
-        """The peer's MU in ours at PAYMENT_SYSTEM's rates, rounding as asked."""
-        numerator = amount_mu * 1_000_000_000
-        if round_up:
-            return -(-numerator // 2_000_000_000)
-        return numerator // 2_000_000_000
+    def _mark(self, sc):
+        """The mark that was written, less the time that it is charged up to."""
+        mark = dict(sc.settle_delegated_tick.call_args.kwargs["mark"])
+        self.assertIn("charged_until", mark)
+        del mark["charged_until"]
+        return mark
 
     def test_our_account_is_read_only_when_its_ticks_are_due(self):
         self._tick(self._row(), due=False)
@@ -324,32 +313,23 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
 
         self.check_account.assert_called_once_with(PEER_ID, debug_mode=False)
 
-    def test_the_client_pays_what_the_peer_metered_since_the_mark(self):
-        """600 000 of the peer's MU spent, worth 300 000 of ours."""
+    def test_the_client_pays_the_price_of_this_node_and_not_what_the_peer_metered(self):
+        """The peer metered 600 000 of its MU. The child is charged 250 000, our price."""
         sc, stop = self._tick(self._row(), spent=600_000)
 
-        sc.settle_delegated_tick.assert_called_once_with(
-            token=PEER_TOKEN, charge_mu=300_000, mark=self.MARK,
-            detail={"peer_id": PEER_ID, "peer_mu": "600000", "commission_mu": "0"},
-        )
+        kwargs = sc.settle_delegated_tick.call_args.kwargs
+        self.assertEqual(kwargs["charge_mu"], self.OWN_MU)
+        self.assertEqual(self._mark(sc), self.MARK)
+        # The row says what a local one says, and nothing of the peer.
+        self.assertEqual(set(kwargs["detail"]),
+                         {"seconds", "mem_limit", "disk_space", "cpu_period", "cpu_quota"})
         stop.assert_not_called()
 
-    def test_the_client_also_pays_the_commission_on_what_the_peer_metered(self):
-        """300 000 of ours metered, plus 5 %: 315 000. No minimum on a tick (#551)."""
-        self.commission_percent = 5.0
-        with patch.object(delegation_commission, "commission_min_mu", return_value=10**9):
-            sc, stop = self._tick(self._row(), spent=600_000)
-
-        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 315_000)
-        stop.assert_not_called()
-
-    def test_an_instance_that_cannot_pay_what_it_consumed_is_stopped(self):
+    def test_an_instance_that_cannot_pay_its_price_is_stopped(self):
         """The same reaper a local instance gets, and the row is emptied first.
 
-        Every MU on it is already owed to the peer for runtime that happened, so
-        letting `stop_instance` refund it would hand the father back time this node
-        paid for. What the node absorbs is only the part the deposit could not
-        reach.
+        Every MU on it is already owed for runtime that happened, so letting
+        `stop_instance` refund it would hand the father back time this node paid for.
         """
         sc, stop = self._tick(self._row(balance_mu=100), spent=600_000)
 
@@ -357,7 +337,8 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 100)
 
     def test_a_peer_that_cannot_be_reached_charges_nothing_and_loses_nothing(self):
-        """The mark stays put, so the next reading that works charges the whole gap.
+        """The mark stays put, and so does the time that was charged up to, so the next
+        reading that works charges the whole gap.
 
         A tick that charged a guess here, or advanced the mark without charging,
         would turn an unreachable peer into free runtime or into an invented bill.
@@ -381,23 +362,12 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
 
         stop.assert_called_once_with(token=OUR_ALIAS, reason=dead_instances.PEER_STOPPED)
 
-    def test_a_child_that_spent_nothing_is_only_re_marked(self):
-        sc, stop = self._tick(self._row(), spent=0)
+    def test_a_child_with_nothing_to_charge_is_only_re_marked(self):
+        sc, stop = self._tick(self._row(), own_mu=0)
 
-        sc.settle_delegated_tick.assert_called_once_with(
-            token=PEER_TOKEN, charge_mu=0, mark=self.MARK
-        )
-        stop.assert_not_called()
-
-    def test_no_common_payment_system_charges_nothing_rather_than_zero(self):
-        """What the peer metered is real; what it is worth here is unknown.
-
-        Charging zero would say the runtime was free, and advancing the mark would
-        make that permanent. Both wait for a rate.
-        """
-        sc, stop = self._tick(self._row(), rates=False)
-
-        sc.settle_delegated_tick.assert_not_called()
+        kwargs = sc.settle_delegated_tick.call_args.kwargs
+        self.assertEqual(kwargs["charge_mu"], 0)
+        self.assertEqual(self._mark(sc), self.MARK)
         stop.assert_not_called()
 
     def test_one_instance_that_will_not_stop_does_not_strand_the_rest(self):
@@ -412,15 +382,15 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 patch.object(maintain, "_check_our_account"), \
                 patch.object(maintain, "_read_child", return_value=(600_000, self.MARK)), \
                 patch.object(maintain, "is_peer_available", return_value=True), \
-                patch.object(maintain, "peer_mu_in_local", side_effect=self._convert), \
+                patch.object(maintain, "system_scarcity", return_value={}), \
+                patch.object(maintain, "compute_maintenance_cost", return_value=self.OWN_MU), \
                 patch.object(maintain, "stop_instance", side_effect=[RuntimeError("no"), None]), \
                 patch.object(maintain, "ALLOW_DEBT", False), \
-                patch.object(maintain, "format_mu", str), \
-                patch.object(delegation_commission, "commission_percent", return_value=0.0):
+                patch.object(maintain, "format_mu", str):
             maintain.maintain_delegated_instances()
 
         self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["token"], "second-token")
-        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 300_000)
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], self.OWN_MU)
 
 
 def _book(*movements, account=PEER_TOKEN):
@@ -657,61 +627,75 @@ class ReadChildTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class SettleChildTests(unittest.TestCase):
-    """What the tick does with what a child owes: charge it, give back, or stop it."""
+    """What the tick does with a child: charge our price, or stop it (#577)."""
 
-    ROW = {'token': PEER_TOKEN, 'id': OUR_ALIAS, 'peer_id': PEER_ID, 'balance_mu': 1_000_000}
+    ROW = {
+        'token': PEER_TOKEN, 'id': OUR_ALIAS, 'peer_id': PEER_ID, 'balance_mu': 1_000_000,
+        'mem_limit': 1 << 30, 'disk_space': 2 << 30, 'cpu_period': 100_000, 'cpu_quota': 50_000,
+        'arch': "linux/amd64", 'launch_cpu_bp': 10_000, 'launch_mem_bp': 11_000,
+        'launch_disk_bp': 12_000, 'charged_until': 1000.0,
+    }
     STATE = {"peer_balance_mu": 1, "seq": 2, "hash": "h", "ts": 3}
 
-    def _settle(self, charge, row=None, rates=True, **kwargs):
+    def _settle(self, own_mu, charge_peer_mu=0, row=None, now=1060.0, **kwargs):
         sc = MagicMock()
         with patch.object(maintain, "sc", sc), \
-                patch.object(maintain, "peer_mu_in_local",
-                             side_effect=(DelegatedMaintenanceTickTests._convert if rates
-                                          else lambda *a, **k: None)), \
+                patch.object(maintain.time, "time", return_value=now), \
+                patch.object(maintain, "system_scarcity", return_value={"cpu": 1.0}), \
+                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu) as cost, \
                 patch.object(maintain, "stop_instance") as stop, \
                 patch.object(maintain, "ALLOW_DEBT", False), \
-                patch.object(maintain, "format_mu", str), \
-                patch.object(delegation_commission, "commission_percent", return_value=10.0):
-            result = maintain.settle_child(row or dict(self.ROW), charge, dict(self.STATE), **kwargs)
-        return result, sc, stop
+                patch.object(maintain, "format_mu", str):
+            result = maintain.settle_child(
+                row or dict(self.ROW), charge_peer_mu, dict(self.STATE), **kwargs)
+        return result, sc, stop, cost
 
-    def test_a_charge_is_taken_with_its_commission_rounded_up(self):
-        ok, sc, _ = self._settle(401)
+    def test_the_charge_is_the_cost_function_of_a_local_instance_on_the_shape_of_the_row(self):
+        ok, sc, _, cost = self._settle(222)
 
-        # 401 of the peer's are 201 of ours, rounded up, and 10 % of them is 21 more.
         self.assertTrue(ok)
+        kwargs = cost.call_args.kwargs
+        resources = kwargs["system_resources"]
+        self.assertEqual((resources.mem_limit, resources.disk_space,
+                          resources.cpu_period, resources.cpu_quota),
+                         (1 << 30, 2 << 30, 100_000, 50_000))
+        # The time since the last charge, our scarcity, the arch and the price at launch.
+        self.assertEqual(kwargs["seconds"], 60.0)
+        self.assertEqual(kwargs["scarcity"], {"cpu": 1.0})
+        self.assertEqual(kwargs["arch"], "linux/amd64")
+        self.assertEqual(kwargs["launch_bp"], {"cpu": 10_000, "mem": 11_000, "disk": 12_000})
         self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 222)
 
-    def test_a_correction_gives_back_rounded_down_with_its_commission_rounded_down(self):
-        ok, sc, _ = self._settle(-401)
+    def test_the_time_charged_up_to_moves_with_the_charge(self):
+        _, sc, _, _ = self._settle(222)
 
-        # 401 of the peer's are 200 of ours, rounded down, and 10 % of them is 20 more.
-        self.assertTrue(ok)
-        kwargs = sc.settle_delegated_tick.call_args.kwargs
-        self.assertEqual((kwargs["charge_mu"], kwargs["refund_mu"]), (0, 220))
+        self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["mark"],
+                         dict(self.STATE, charged_until=1060.0))
+
+    def test_what_the_peer_charged_is_no_part_of_the_charge(self):
+        # The peer metered more, and a correction that gives back, and neither reaches it.
+        for charge_peer_mu in (10 ** 6, -401):
+            _, sc, _, _ = self._settle(222, charge_peer_mu=charge_peer_mu)
+            kwargs = sc.settle_delegated_tick.call_args.kwargs
+            self.assertEqual(kwargs["charge_mu"], 222)
+            self.assertNotIn("refund_mu", kwargs)
 
     def test_nothing_to_charge_only_moves_the_state(self):
-        ok, sc, _ = self._settle(0)
+        ok, sc, _, _ = self._settle(0)
 
         self.assertTrue(ok)
         sc.settle_delegated_tick.assert_called_once_with(
-            token=PEER_TOKEN, charge_mu=0, mark=self.STATE)
-
-    def test_a_figure_that_nothing_can_convert_is_not_settled_this_time(self):
-        ok, sc, _ = self._settle(1000, rates=False)
-
-        self.assertFalse(ok)
-        sc.settle_delegated_tick.assert_not_called()
+            token=PEER_TOKEN, charge_mu=0, mark=dict(self.STATE, charged_until=1060.0))
 
     def test_a_deposit_that_does_not_cover_the_charge_is_emptied_and_the_instance_stopped(self):
-        ok, sc, stop = self._settle(10 ** 9)
+        ok, sc, stop, _ = self._settle(10 ** 9)
 
         self.assertTrue(ok)
         self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 1_000_000)
         stop.assert_called_once_with(token=OUR_ALIAS, reason=dead_instances.OUT_OF_BALANCE)
 
     def test_a_stop_that_is_under_way_charges_the_whole_figure_and_stops_nothing(self):
-        ok, sc, stop = self._settle(10 ** 9, stop_if_short=False)
+        ok, sc, stop, _ = self._settle(10 ** 9, stop_if_short=False)
 
         self.assertGreater(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 1_000_000)
         stop.assert_not_called()

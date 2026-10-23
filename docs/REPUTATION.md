@@ -118,7 +118,7 @@ them, which would rank peers on the shape of a failure.
 ## What a peer charges, from its statements
 
 This node pays `initial_mu` for a start and sends the peer that amount less its own
-commission (#563). The peer takes its build from the amount that it got, and must take
+build (#563, #577). The peer takes its build from the amount that it got, and must take
 nothing else from the account of this node. While the child runs, the peer charges its
 maintenance to the balance of the child.
 

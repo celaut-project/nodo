@@ -263,7 +263,7 @@ def configuration_for_peer(config, *, payment_system: MatchingPaymentSystem,
 
     ``initial_mu`` replaces the amount of ``config``, in local MU, before the
     conversion. A start through a peer sends the peer less than the caller paid:
-    the commission of this node stays here (#563), and the peer takes its own build
+    the build of this node stays here (#563, #577), and the peer takes its own build
     from what it gets. The amount rounds **down**, as every amount handed to a peer.
     """
     peer_config = type(config)()

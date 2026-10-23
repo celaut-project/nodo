@@ -21,7 +21,7 @@ from protos import celaut_pb2 as celaut  # noqa: E402
 from src.gateway.launcher.local_execution import local_execution as local_execute
 from src.payment_system.mu_conversion import MatchingPaymentSystem, configuration_for_peer
 from src.utils.cost_functions import start_funding
-from src.utils.cost_functions.delegation_commission import start_commission, with_commission
+from src.utils.cost_functions.delegated_price import covers, peer_build_mu
 from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, worst_case_charge_mu
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
@@ -263,19 +263,26 @@ class TheQuoteTests(unittest.TestCase):
                 general_cost_functions.compute_start_service_cost(celaut.Metadata(), 1_000), 1_300
             )
 
-    def test_the_commission_is_on_the_build_of_the_peer_and_not_on_the_balance(self):
+    def test_the_build_of_the_peer_is_what_its_quote_has_above_the_balance(self):
         peer_cost = celaut.EstimatedCost(cost=celaut.Amount(n="1200"))
 
-        with patch("src.utils.cost_functions.delegation_commission.commission_percent",
-                   return_value=5.0), \
-                patch("src.utils.cost_functions.delegation_commission.commission_min_mu",
-                      return_value=0):
-            build_mu, commission_mu = start_commission(peer_cost, 1_000)
-            offer = with_commission(peer_cost, 1_000)
+        self.assertEqual(peer_build_mu(peer_cost, 1_000), 200)
+        # A quote below the balance has no build.
+        self.assertEqual(peer_build_mu(peer_cost, 5_000), 0)
 
-        self.assertEqual((build_mu, commission_mu), (200, 10))
-        # The least `initial_mu` through this node: the quote of the peer and the commission.
-        self.assertEqual(int(offer.cost.n), 1_210)
+    def test_a_peer_is_covered_when_our_price_is_not_below_its_quote(self):
+        # The start and one period (#577): what this node charges covers what the peer
+        # would charge it, and a peer that quotes more is not covered.
+        def quote(cost, period):
+            return celaut.EstimatedCost(
+                cost=celaut.Amount(n=str(cost)), init_maintenance_cost=celaut.Amount(n=str(period)))
+
+        own = quote(1_300, 10)
+        self.assertTrue(covers(own, quote(1_200, 10)))
+        self.assertTrue(covers(own, quote(1_300, 5)))
+        self.assertFalse(covers(own, quote(1_301, 5)))
+        self.assertFalse(covers(own, quote(1_200, 11)))
+        self.assertTrue(covers(own, celaut.EstimatedCost()))
 
 
 if __name__ == "__main__":

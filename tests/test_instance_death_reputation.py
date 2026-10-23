@@ -94,13 +94,15 @@ class InstanceDeathReputationTests(unittest.TestCase):
         row = {
             "peer_id": "peer-1", "token": "token-1", "id": "vm-2",
             "peer_balance_mu": 1000, "balance_mu": 1,
+            "mem_limit": 1 << 30, "disk_space": 1 << 30, "cpu_period": 100000,
+            "cpu_quota": 100000, "charged_until": 0.0,
         }
         with patch.object(maintain.sc, "get_delegated_instances", return_value=[row]), \
              patch.object(maintain.sc, "settle_delegated_tick"), \
              patch.object(maintain, "_check_our_account"), \
              patch.object(maintain, "_read_child", return_value=(1000, {"peer_balance_mu": 0})), \
-             patch.object(maintain, "peer_mu_in_local", return_value=500), \
-             patch.object(maintain, "commission_on", return_value=0), \
+             patch.object(maintain, "system_scarcity", return_value={}), \
+             patch.object(maintain, "compute_maintenance_cost", return_value=500), \
              patch.object(maintain, "ALLOW_DEBT", False), \
              patch.object(maintain, "stop_instance", self.stop), \
              patch.object(maintain, "_reputation_interface", return_value=self.reputation):

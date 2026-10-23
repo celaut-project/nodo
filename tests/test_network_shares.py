@@ -377,6 +377,7 @@ class LaunchPlacementTests(unittest.TestCase):
             # Pricing is not tested here: what funds a start has its own tests (#563).
             "_funding_failure": None,
             "_delegation_terms": (0, 0),
+            "_own_price": cost,
         }
         with ExitStack() as stack:
             for name, value in patches.items():

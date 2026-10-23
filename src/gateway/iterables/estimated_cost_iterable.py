@@ -18,18 +18,16 @@ from src.utils.network_policy import (
     enforce_network_policy,
     tor_egress_unready_reason,
 )
-from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
 from src.balancers.execution_balancer.execution_balancer import quotes_from_peers
 from src.utils.arch_guard import arch_from_tags
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.delegated_quote import (
     delegation_time_budget,
     peer_round,
-    remember_offer,
 )
-from src.utils.cost_functions.delegation_commission import with_commission
+from src.utils.cost_functions.delegated_price import covers, own_price
 from src.utils.logger import LOGGER as logger
-from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
+from src.utils.utils import get_only_the_ip_from_context, to_amount
 
 
 env_manager = ConfigManager()
@@ -41,8 +39,8 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
     # https://github.com/celaut-project/nodo/issues/70
     
     # With network.DELEGATE_EXECUTION this call also asks the peers (#551): this node
-    # delegates StartService, so its quote offers the best of the local price and a
-    # peer's price plus commission. It does not suppose that the client knows the same
+    # delegates StartService, so it offers a service that only a peer can run, at its own
+    # price (#577). It does not suppose that the client knows the same
     # peers. The time the caller gives (its gRPC deadline) limits how long the peers
     # are asked, and each hop gives its own peers less: see
     # `src/utils/cost_functions/delegated_quote.py`.
@@ -104,7 +102,6 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             if price is None:
                 # No peer offers it either: the client gets the reason of this node.
                 raise local_refusal
-            self._remember_offer(price)
 
             yield from BeeClient.respond(
                 message_iterator=price,
@@ -180,12 +177,14 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             service: celaut_pb2.Service,
             local_price: Optional[celaut_pb2.EstimatedCost],
     ) -> Optional[celaut_pb2.EstimatedCost]:
-        """The best offer of this node: the local price, or a peer's price and commission.
+        """The offer of this node: always its own price, never the price of a peer (#577).
 
-        This node delegates ``StartService`` (``network.DELEGATE_EXECUTION``), so its
-        quote says so too (#551). It does not suppose that the client knows the same
-        peers. The peers are asked within the time the caller gives
-        (``delegation_time_budget``), and the client gets the total only.
+        This node delegates ``StartService`` (``network.DELEGATE_EXECUTION``), so it can
+        offer a service that it has no room for, if a peer runs it at no loss: the price
+        of a peer is covered by the price of this node (``delegated_price.covers``). The
+        client pays what this node advertises, whoever runs the service. It does not
+        suppose that the client knows the same peers. The peers are asked within the time
+        the caller gives (``delegation_time_budget``).
         """
         if not env_manager.get("network.DELEGATE_EXECUTION", True):
             return local_price
@@ -215,22 +214,25 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         if not quotes:
             # No peer answered in time: the same answer as a node that does not delegate.
             return local_price
-        candidates = {peer: with_commission(cost, initial_mu) for peer, cost in quotes.items()}
         if local_price is not None:
-            candidates["local"] = local_price
-        if not candidates:
-            return None
-        for _, best in estimated_cost_sorter(estimated_costs=candidates):
-            return best
+            return local_price
+        try:
+            arch = get_arch_tag(service=service, metadata=self.metadata)
+        except UnsupportedArchitectureException:
+            arch = None
+        own = own_price(
+            metadata=self.metadata, configuration=configuration,
+            resources=service.container.resources, arch=arch, service=service,
+        )
+        if own is not None and any(covers(own, cost) for cost in quotes.values()):
+            return own
         return None
 
     def _initial_mu(self, service: celaut_pb2.Service) -> Optional[int]:
         """The balance that the quote asks for, in local MU: the one asked for, or this node's default.
 
-        The cost of a quote is the build plus this balance (#563), so the build of a peer
-        is what its cost has above it, and the commission is on that build only
-        (``delegation_commission``). It has to be known before a peer's price can be
-        offered. None if it cannot be known.
+        The cost of a quote is the build plus this balance (#563). It has to be known
+        before the peers can be asked. None if it cannot be known.
         """
         if self.configuration.HasField("initial_mu") and self.configuration.initial_mu.n:
             return int(self.configuration.initial_mu.n)
@@ -247,12 +249,6 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         except Exception as e:
             logger(f"No default deposit for {self.service_hash}, so no peer price is offered: {e}")
             return None
-
-    def _remember_offer(self, price: celaut_pb2.EstimatedCost) -> None:
-        """Keep the offer, so that the launch does not charge more than it (#551)."""
-        client_id = getattr(self, "client_id", None)
-        if client_id:
-            remember_offer(client_id, self.service_hash, int(price.cost.n or 0))
 
     def _quote(self) -> Tuple[
         celaut_pb2.EstimatedCost, celaut_pb2.Service.Container.Resources, Optional[str],
