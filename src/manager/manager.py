@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Generator, Tuple
+from typing import Dict, Generator, Iterable, List, Optional, Tuple
 import secrets
 import threading
 
@@ -1455,6 +1455,27 @@ def delegation_lock(alias: str) -> threading.RLock:
     ``modify_deposit`` holds it, the tick charges that child at the next tick."""
     with _delegation_locks_guard:
         return _delegation_locks.setdefault(alias, threading.RLock())
+
+
+def forget_delegation_locks(alive: Iterable[str]) -> int:
+    """Drop the locks of the instances that are not in ``alive``, and return how many.
+
+    Without this, ``_delegation_locks`` keeps one entry for each alias for ever. A lock
+    that a thread holds stays. A thread that took a lock just before it was dropped can
+    run at the same time as another thread that makes a new one, but only for an
+    instance that is dead: ``modify_deposit`` gives an error for it."""
+    alive = set(alive)
+    dropped = 0
+    with _delegation_locks_guard:
+        for alias in [alias for alias in _delegation_locks if alias not in alive]:
+            lock = _delegation_locks[alias]
+            if lock.acquire(blocking=False):
+                try:
+                    del _delegation_locks[alias]
+                    dropped += 1
+                finally:
+                    lock.release()
+    return dropped
 
 
 def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:

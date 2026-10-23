@@ -4,7 +4,7 @@ import shutil
 import threading
 import time
 import traceback
-from typing import Optional
+from typing import Dict, Optional
 
 import grpc
 
@@ -13,7 +13,7 @@ from src.database import ledger
 from src.manager import balance_statement, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
+from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.utils.cost_functions.delegation_commission import commission_floor_on, commission_on
 from src.utils.bee_client import BeeClient, Dir
@@ -513,6 +513,11 @@ def _save_our_mark(peer_id: str, mark: statement_check.Mark,
         queries_verified=queries)
 
 
+# The balance that paid for the last head of our account on each peer, when that head
+# showed a balance that pays for no movement (``_check_our_account``).
+_head_read_with: Dict[str, int] = {}
+
+
 def _payable_balance(peer_id: str, metrics_balance: int) -> int:
     """What our account on ``peer_id`` pays reads with. That is the balance that
     ``Metrics`` gives, but never less than the signed floor: the balance that the peer
@@ -556,10 +561,20 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
             # The balance that the peer reports in ``Metrics`` is free and not signed: a
             # peer could report one that pays for nothing, just before each read. The
             # head of the account is signed, and costs a fixed part only.
-            signed = _signed_balance(peer_id, client_id, mark, balance, rates, debug_mode)
-            if signed is not None:
-                balance = signed
-                rows_asked = statement_check.page_rows(balance, rates)
+            # A head that was read with this balance or a higher one showed that no
+            # movement is paid for: it is read again only when the balance grows.
+            payable = balance
+            if payable > _head_read_with.get(peer_id, -1):
+                signed = _signed_balance(peer_id, client_id, mark, balance, rates, debug_mode)
+                if signed is not None:
+                    balance = signed
+                    rows_asked = statement_check.page_rows(balance, rates)
+                    if rows_asked > 0:
+                        _head_read_with.pop(peer_id, None)
+                    else:
+                        _head_read_with[peer_id] = payable
+        else:
+            _head_read_with.pop(peer_id, None)
         if rows_asked <= 0:
             log.LOGGER(f"Our balance on {peer_id}, {balance} MU, does not pay for a statement.")
             return
@@ -1003,6 +1018,7 @@ def maintain_delegated_instances(debug_mode: bool = False):
             settle_child(row, charge_peer_mu, state, debug_mode=debug_mode)
         finally:
             lock.release()
+    forget_delegation_locks(listed.get('id') for listed in delegated)
 
 
 def enforce_activity_window(debug_mode: bool = False):

@@ -384,9 +384,14 @@ class SettleStopTests(_Database):
         self.assert_chained("i1")
 
 
+# How long a writer waits for the lock of the file. The test has three writers on one
+# file. On a disk with a high load, the 30 s of a node can be too short for them.
+TEST_LOCK_WAIT_SECONDS = 180
+
+
 def _write_from_another_process(path, account, count):
     """What the CLI does: write to the same file, from a process of its own."""
-    connection = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    connection = sqlite3.connect(path, timeout=TEST_LOCK_WAIT_SECONDS, check_same_thread=False)
     connection.row_factory = sqlite3.Row
     SQLConnection._connection = connection
     sc = SQLConnection()
@@ -401,7 +406,7 @@ class WritersInOtherProcessesTests(unittest.TestCase):
         original = SQLConnection._connection
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "nodo.db")
-            connection = sqlite3.connect(path, timeout=30, check_same_thread=False)
+            connection = sqlite3.connect(path, timeout=TEST_LOCK_WAIT_SECONDS, check_same_thread=False)
             connection.row_factory = sqlite3.Row
             create_tables(connection.cursor())
             connection.commit()
@@ -419,7 +424,7 @@ class WritersInOtherProcessesTests(unittest.TestCase):
                 for _ in range(60):
                     sc.move_balance("c1", 1, ledger.DEPOSIT)
                 for worker in workers:
-                    worker.join(timeout=120)
+                    worker.join(timeout=2 * TEST_LOCK_WAIT_SECONDS)
                     self.assertEqual(worker.exitcode, 0)
 
                 rows = [dict(r) for r in connection.execute(

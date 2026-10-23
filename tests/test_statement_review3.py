@@ -581,6 +581,66 @@ class LowMetricsTests(_Node):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class HeadReadTests(_Node):
+    """A balance that pays for the head only: the head is not paid again and again."""
+
+    RATES = {"statement_query_mu": 10, "statement_row_mu": 1}
+
+    def setUp(self):
+        super().setUp()
+        maintain._head_read_with.clear()
+        self.addCleanup(maintain._head_read_with.clear)
+        self.heads = 0
+        fetch = self.peer.fetch
+
+        def counted(peer_id, client_id, token="", from_seq=0, **kwargs):
+            self.heads += from_seq <= 0
+            return fetch(peer_id, client_id, token=token, from_seq=from_seq, **kwargs)
+
+        self.peer.fetch = counted
+
+    def test_a_balance_that_does_not_grow_reads_the_head_once(self):
+        self.metrics = 10
+        for _ in range(3):
+            self.check()
+
+        self.assertEqual(self.heads, 1)
+
+    def test_a_balance_that_grows_reads_the_head_again(self):
+        self.metrics = 10
+        self.check()
+        self.metrics = 11
+        self.check()
+
+        self.assertEqual(self.heads, 2)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ForgetLocksTests(unittest.TestCase):
+    """``manager._delegation_locks`` does not keep the locks of dead instances."""
+
+    def setUp(self):
+        manager._delegation_locks.clear()
+        self.addCleanup(manager._delegation_locks.clear)
+
+    def test_a_lock_of_an_instance_that_is_not_alive_is_dropped(self):
+        delegation_lock("alive")
+        delegation_lock("dead")
+
+        self.assertEqual(manager.forget_delegation_locks(["alive"]), 1)
+        self.assertEqual(list(manager._delegation_locks), ["alive"])
+
+    def test_a_lock_that_a_thread_holds_stays(self):
+        lock = delegation_lock("dead")
+        holder = threading.Thread(target=lock.acquire)
+        holder.start()
+        holder.join()
+
+        self.assertEqual(manager.forget_delegation_locks([]), 0)
+        self.assertIn("dead", manager._delegation_locks)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class RefusalWindowTests(_Node):
     """Point 12: a refusal is scored once in 24 hours, not once in a day of UTC."""
 
