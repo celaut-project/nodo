@@ -21,10 +21,9 @@ from src.payment_system.mu_conversion import (
     convert_mu,
     matching_payment_system,
 )
-from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
+from src.utils.cost_functions.delegated_price import priced_shape
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
-from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
-from src.virtualizers.interface import resolve_billable_resources
+from src.virtualizers.architecture import get_arch_tag
 
 
 env_manager = ConfigManager()
@@ -154,37 +153,6 @@ def _check_start(peer: str, client_id: str, external_token: str,
     return from_amount(statement.balance), mark
 
 
-def _priced_shape(service: Optional[celaut.Service], metadata, service_id: Optional[str]) -> dict:
-    """What the tick charges this node's price for: the shape of the instance (#577).
-
-    The same figures that ``local_instances`` keeps, in the columns of the delegated row:
-    the resources that the instance holds, the architecture that selects the memory price,
-    and the price at the launch, which bounds the tick (``launch_price_bp``). Empty without
-    the service: an instance with no shape is charged nothing.
-
-    The service changes its resources on the peer, and the statement of the child shows
-    them (``maintain.settle_child``). The ``max_*`` are the most that this node charges it
-    for: the ``at_most`` of the manifest, or the ``at_init`` if it declares none.
-    """
-    declared = service.container.resources if service is not None else None
-    if declared is None or not declared.HasField("at_init"):
-        return {}
-    try:
-        arch = get_arch_tag(service=service, metadata=metadata)
-    except UnsupportedArchitectureException:
-        arch = None
-    resources = resolve_billable_resources(declared.at_init, service_id, service=service)
-    most = resolve_billable_resources(declared.at_most, service_id, service=service) \
-        if declared.HasField("at_most") else resources
-    return {
-        "mem_limit": int(resources.mem_limit), "disk_space": int(resources.disk_space),
-        "cpu_period": int(resources.cpu_period), "cpu_quota": int(resources.cpu_quota),
-        "max_mem_limit": int(most.mem_limit), "max_disk_space": int(most.disk_space),
-        "max_cpu_period": int(most.cpu_period), "max_cpu_quota": int(most.cpu_quota),
-        "arch": arch, "launch_bp": launch_price_bp(system_scarcity()),
-    }
-
-
 def delegate_execution(
                         service_id: str,
                         peer: str,
@@ -209,7 +177,7 @@ def delegate_execution(
     peer.
 
     ``service`` gives the shape that the maintenance tick prices the child by
-    (``_priced_shape``).
+    (``delegated_price.priced_shape``).
 
     The balance of the child on the peer comes from its statement (#570), which also
     shows what the peer took for the start: ``_check_start`` checks it, and the mark it
@@ -346,7 +314,9 @@ def delegate_execution(
             ),
             sent_peer_mu=sent_peer_mu,
             mark=mark,
-            shape=_priced_shape(service, metadata, service_id),
+            shape=priced_shape(service, metadata, service_id,
+                               get_arch_tag(service=service, metadata=metadata)
+                               if service is not None else None),
         )
         service_instance.token = encrypted_external_token
         service_instance.instance.CopyFrom(published_instance)

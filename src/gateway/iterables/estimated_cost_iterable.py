@@ -184,9 +184,10 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         of a peer is covered by the price of this node (``delegated_price.covers``). The
         client pays what this node advertises, whoever runs the service. It does not
         suppose that the client knows the same peers. The peers are asked within the time
-        the caller gives (``delegation_time_budget``).
+        the caller gives (``delegation_time_budget``), and only when this node has no room:
+        with room, the offer is the local price, and the peers would change nothing.
         """
-        if not env_manager.get("network.DELEGATE_EXECUTION", True):
+        if local_price is not None or not env_manager.get("network.DELEGATE_EXECUTION", True):
             return local_price
         budget = delegation_time_budget(getattr(self, "context", None))
         if budget is None:
@@ -206,25 +207,21 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 configuration=configuration, peer_arch=peer_arch, timeout=budget,
             ),
         )
-        if quotes is None:
-            # This node is already asking its peers this question: the question came
-            # back to it through a loop, or two clients asked at once. Answer with what
-            # is known here, without a second round of questions.
-            return local_price
         if not quotes:
-            # No peer answered in time: the same answer as a node that does not delegate.
-            return local_price
-        if local_price is not None:
+            # None: this node is already asking its peers this question (it came back
+            # through a loop, or two clients asked at once). Empty: no peer answered in
+            # time. Either way, the answer of a node that does not delegate.
             return local_price
         try:
-            arch = get_arch_tag(service=service, metadata=self.metadata)
-        except UnsupportedArchitectureException:
-            arch = None
-        own = own_price(
-            metadata=self.metadata, configuration=configuration,
-            resources=service.container.resources, arch=arch, service=service,
-        )
-        if own is not None and any(covers(own, cost) for cost in quotes.values()):
+            own = own_price(
+                metadata=self.metadata, configuration=configuration,
+                resources=service.container.resources,
+                arch=get_arch_tag(service=service, metadata=self.metadata), service=service,
+            )
+        except Exception as e:
+            logger(f"Could not price {self.service_hash} for a peer, so no peer is offered: {e}")
+            return None
+        if any(covers(own, cost) for cost in quotes.values()):
             return own
         return None
 

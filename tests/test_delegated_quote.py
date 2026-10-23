@@ -295,7 +295,7 @@ class QuoteTests(_FreshCache, unittest.TestCase):
                     side_effect=lambda message_iterator, indices: iter([message_iterator]))
             patched(cost_mod, "delegation_time_budget", return_value=budget)
             patched(cost_mod, "own_price", return_value=own or price(1_300))
-            asked = patched(cost_mod, "quotes_from_peers", return_value=peers)
+            asked = self.asked = patched(cost_mod, "quotes_from_peers", return_value=peers)
             out = list(it.generate())
         return out[0], asked
 
@@ -316,6 +316,11 @@ class QuoteTests(_FreshCache, unittest.TestCase):
         # The client pays what this node advertises, whoever runs the service.
         offer, _ = self._quote({"peer-a": price(1_200)}, local=price(1_305))
         self.assertEqual(offer.cost.n, "1305")
+
+    def test_with_room_here_the_peers_are_not_asked(self):
+        offer, asked = self._quote({"peer-a": price(1)}, local=price(1_300))
+        self.assertEqual(offer.cost.n, "1300")
+        asked.assert_not_called()
 
     def test_with_no_peer_answer_the_local_price_is_offered_as_before(self):
         offer, _ = self._quote({}, local=price(1_300))
@@ -343,7 +348,7 @@ class QuoteTests(_FreshCache, unittest.TestCase):
         self.assertEqual(offer.cost.n, "1300")
         asked.assert_not_called()
 
-    def test_a_question_that_comes_back_through_a_loop_gets_the_local_price(self):
+    def test_a_question_that_comes_back_through_a_loop_starts_no_second_round(self):
         # The round that is open had the deposit in other MU: 999, not 1 000.
         # The client sent its own metadata, and the question that comes back has the
         # metadata of the registry: the round stops on this node all the same.
@@ -352,49 +357,50 @@ class QuoteTests(_FreshCache, unittest.TestCase):
         client_metadata = celaut.Metadata()
         client_metadata.hashtag.hash.add(type=b"\x01", value=b"from-the-client")
         with delegated_quote.asking_peers_for(open_round):
-            offer, asked = self._quote({"peer-a": price(1)}, metadata=client_metadata)
-        self.assertEqual(offer.cost.n, "1300")
-        asked.assert_not_called()
+            with self.assertRaises(Exception):
+                self._quote(executes=False, peers={"peer-a": price(1)}, metadata=client_metadata)
+        self.asked.assert_not_called()
 
     def test_the_round_is_remembered_without_the_metadata(self):
         # The peers get the hashes only, and read the metadata from their registry.
-        self._quote({"peer-a": price(1_200)})
+        self._quote(executes=False, peers={"peer-a": price(1_200)})
         other = celaut.Metadata()
         other.hashtag.hash.add(type=b"\x01", value=b"from-the-client")
-        _, asked = self._quote({"peer-a": price(1)}, metadata=other)
+        _, asked = self._quote(executes=False, peers={"peer-a": price(1)}, metadata=other)
         asked.assert_not_called()
 
     def test_a_round_on_another_question_does_not_stop_this_one(self):
         env = celaut.Configuration()
         env.environment_variables.add(key="MODE", value=b"fast")
         with delegated_quote.asking_peers_for(delegated_quote.loop_key("svc", env)):
-            offer, asked = self._quote({"peer-a": price(1_200)})
+            offer, asked = self._quote(executes=False, peers={"peer-a": price(1_200)})
         self.assertEqual(offer.cost.n, "1300")
         asked.assert_called_once()
 
     def test_the_same_question_again_does_not_ask_the_peers_again(self):
-        first, asked_first = self._quote({"peer-a": price(1_200)})
-        second, asked_second = self._quote({"peer-a": price(1)})
+        first, asked_first = self._quote(executes=False, peers={"peer-a": price(1_200)})
+        second, asked_second = self._quote(executes=False, peers={"peer-a": price(1)})
         asked_first.assert_called_once()
         asked_second.assert_not_called()
         self.assertEqual((first.cost.n, second.cost.n), ("1300", "1300"))
 
     def test_the_round_is_remembered_by_the_full_question(self):
         # Another deposit is another price on the peer: the round is not reused.
-        self._quote({"peer-a": price(1_200)})
-        _, asked = self._quote({"peer-a": price(1_300)}, deposit=1_100)
+        self._quote(executes=False, peers={"peer-a": price(1_200)})
+        _, asked = self._quote(executes=False, peers={"peer-a": price(1_300)}, deposit=1_100)
         asked.assert_called_once()
 
     def test_an_empty_round_is_not_remembered(self):
-        self._quote({})
-        offer, asked = self._quote({"peer-a": price(1_200)})
+        with self.assertRaises(Exception):
+            self._quote(executes=False, peers={})
+        offer, asked = self._quote(executes=False, peers={"peer-a": price(1_200)})
         asked.assert_called_once()
         self.assertEqual(offer.cost.n, "1300")
 
     def test_with_no_peer_ttl_the_round_is_not_remembered(self):
         with mock.patch.object(delegated_quote, "peer_quote_ttl", return_value=0.0):
-            self._quote({"peer-a": price(1_200)})
-            _, asked = self._quote({"peer-a": price(1_200)})
+            self._quote(executes=False, peers={"peer-a": price(1_200)})
+            _, asked = self._quote(executes=False, peers={"peer-a": price(1_200)})
         asked.assert_called_once()
 
 
@@ -451,8 +457,8 @@ class LaunchTests(_FreshCache, unittest.TestCase):
 
     def test_the_client_pays_its_initial_mu_and_the_build_of_this_node_comes_out_of_it(self):
         # The quotes ask for a balance of 1 500, and the peer quotes it with a build of
-        # 200: 1 700. This node has a build of 40.
-        r = self._launch([("peer-a", price(1_700))], initial_mu=1_500, build_mu=40)
+        # 200: 1 700. This node quotes it with a build of 40: 1 540.
+        r = self._launch([("peer-a", price(1_700))], initial_mu=1_500, own=price(1_540))
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_500)
         kwargs = r.delegate.call_args.kwargs
@@ -504,7 +510,7 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         # of peer-b has no build: 230 MU are left.
         cheap = price(430, init=50)
         free = price(230, init=50)
-        r = self._launch([("peer-a", cheap), ("peer-b", free)], initial_mu=230)
+        r = self._launch([("peer-a", cheap), ("peer-b", free)], initial_mu=230, own=price(230))
         self.assertIsNone(r.error)
         self.assertEqual(r.delegate.call_args.kwargs["peer"], "peer-b")
         self.assertEqual(r.spend.call_count, 1)

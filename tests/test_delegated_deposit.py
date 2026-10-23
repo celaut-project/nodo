@@ -288,7 +288,7 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 patch.object(maintain, "_read_child", read), \
                 patch.object(maintain, "is_peer_available", return_value=peer_reachable), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
-                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu), \
+                patch.object(maintain, "charge_at_launch_price", return_value=own_mu), \
                 patch.object(maintain, "stop_instance") as stop, \
                 patch.object(maintain, "ALLOW_DEBT", False), \
                 patch.object(maintain, "format_mu", str):
@@ -336,19 +336,26 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
         stop.assert_called_once_with(token=OUR_ALIAS, reason=dead_instances.OUT_OF_BALANCE)
         self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 100)
 
-    def test_a_peer_that_cannot_be_reached_charges_nothing_and_loses_nothing(self):
-        """The mark stays put, and so does the time that was charged up to, so the next
-        reading that works charges the whole gap.
-
-        A tick that charged a guess here, or advanced the mark without charging,
-        would turn an unreachable peer into free runtime or into an invented bill.
+    def test_a_peer_that_cannot_be_reached_still_has_the_time_charged(self):
+        """Our price does not need the peer, so the time is charged and an instance that
+        cannot pay is stopped. The mark stays put, and the next reading that works
+        measures the whole gap of what the peer charged.
         """
         sc, stop = self._tick(
             self._row(), read_raises=RuntimeError("unreachable"), peer_reachable=False
         )
 
-        sc.settle_delegated_tick.assert_not_called()
+        kwargs = sc.settle_delegated_tick.call_args.kwargs
+        self.assertEqual(kwargs["charge_mu"], self.OWN_MU)
+        self.assertEqual(self._mark(sc), {"peer_balance_mu": 2_000_000, "seq": None,
+                                          "hash": None, "ts": None})
         stop.assert_not_called()
+
+    def test_a_peer_that_cannot_be_reached_does_not_save_an_instance_that_cannot_pay(self):
+        sc, stop = self._tick(self._row(balance_mu=100), read_raises=RuntimeError("unreachable"),
+                              peer_reachable=False)
+
+        stop.assert_called_once_with(token=OUR_ALIAS, reason=dead_instances.OUT_OF_BALANCE)
 
     def test_a_peer_that_no_longer_knows_the_instance_stops_it_here_too(self):
         """It is up and answering; the instance is simply gone there.
@@ -383,7 +390,7 @@ class DelegatedMaintenanceTickTests(unittest.TestCase):
                 patch.object(maintain, "_read_child", return_value=(600_000, self.MARK)), \
                 patch.object(maintain, "is_peer_available", return_value=True), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
-                patch.object(maintain, "compute_maintenance_cost", return_value=self.OWN_MU), \
+                patch.object(maintain, "charge_at_launch_price", return_value=self.OWN_MU), \
                 patch.object(maintain, "stop_instance", side_effect=[RuntimeError("no"), None]), \
                 patch.object(maintain, "ALLOW_DEBT", False), \
                 patch.object(maintain, "format_mu", str):
@@ -642,7 +649,7 @@ class SettleChildTests(unittest.TestCase):
         with patch.object(maintain, "sc", sc), \
                 patch.object(maintain.time, "time", return_value=now), \
                 patch.object(maintain, "system_scarcity", return_value={"cpu": 1.0}), \
-                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu) as cost, \
+                patch.object(maintain, "charge_at_launch_price", return_value=own_mu) as cost, \
                 patch.object(maintain, "stop_instance") as stop, \
                 patch.object(maintain, "ALLOW_DEBT", False), \
                 patch.object(maintain, "format_mu", str):
@@ -659,9 +666,9 @@ class SettleChildTests(unittest.TestCase):
         self.assertEqual((resources.mem_limit, resources.disk_space,
                           resources.cpu_period, resources.cpu_quota),
                          (1 << 30, 2 << 30, 100_000, 50_000))
-        # The time since the last charge, our scarcity, the arch and the price at launch.
+        # The time since the last charge, the arch and the price at launch: the scarcity of
+        # this node now says nothing about a delegated instance.
         self.assertEqual(kwargs["seconds"], 60.0)
-        self.assertEqual(kwargs["scarcity"], {"cpu": 1.0})
         self.assertEqual(kwargs["arch"], "linux/amd64")
         self.assertEqual(kwargs["launch_bp"], {"cpu": 10_000, "mem": 11_000, "disk": 12_000})
         self.assertEqual(sc.settle_delegated_tick.call_args.kwargs["charge_mu"], 222)
@@ -686,7 +693,7 @@ class SettleChildTests(unittest.TestCase):
         self.assertTrue(ok)
         sc.settle_delegated_tick.assert_called_once_with(
             token=PEER_TOKEN, charge_mu=0, mark=dict(self.STATE, charged_until=1060.0),
-            movements=[])
+            detail=None, movements=[])
 
     def test_a_deposit_that_does_not_cover_the_charge_is_emptied_and_the_instance_stopped(self):
         ok, sc, stop, _ = self._settle(10 ** 9)
@@ -710,7 +717,12 @@ class MeasuredShapeTests(unittest.TestCase):
     """
 
     MIB = 1 << 20
-    ROW = dict(SettleChildTests.ROW, mem_limit=1024 << 20, charged_until=1000.0)
+    # Our shape at the start, and the first that the peer showed: here the same figures.
+    START = {"mem_limit": 1024 << 20, "disk_space": SettleChildTests.ROW["disk_space"],
+             "cpu_period": 100_000, "cpu_quota": 50_000}
+    ROW = dict(SettleChildTests.ROW, **START, charged_until=1000.0,
+               **{f"base_{k}": v for k, v in START.items()},
+               **{f"peer_base_{k}": v for k, v in START.items()})
 
     @staticmethod
     def _price(system_resources, seconds, **_):
@@ -730,7 +742,7 @@ class MeasuredShapeTests(unittest.TestCase):
         with patch.object(maintain, "sc", sc), \
                 patch.object(maintain.time, "time", return_value=1060.0), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
-                patch.object(maintain, "compute_maintenance_cost", side_effect=self._price), \
+                patch.object(maintain, "charge_at_launch_price", side_effect=self._price), \
                 patch.object(maintain, "prices",
                              return_value=SimpleNamespace(modify_resources_mu=7)), \
                 patch.object(maintain, "stop_instance") as stop, \
@@ -770,12 +782,38 @@ class MeasuredShapeTests(unittest.TestCase):
         self.assertEqual(kwargs["mark"]["shape"]["cpu_quota"], 200_000)
 
     def test_each_change_of_resources_is_charged_at_the_rate_of_this_node(self):
-        change = statement_check.Row(seq=1, ts=1, amount=-99, balance_after=0,
-                                     kind=ledger.RESOURCE_CHANGE, ref="")
-        kwargs, _ = self._settle([change, change])
+        changes = [statement_check.Row(seq=seq, ts=seq, amount=-99, balance_after=0,
+                                       kind=ledger.RESOURCE_CHANGE, ref="") for seq in (1, 2)]
+        kwargs, _ = self._settle(changes)
 
         self.assertEqual([(m.kind, m.amount_mu) for m in kwargs["movements"]],
                          [(ledger.RESOURCE_CHANGE, -7), (ledger.RESOURCE_CHANGE, -7)])
+
+    def test_a_change_of_resources_that_the_peer_gave_back_is_not_charged(self):
+        # The hotplug failed on the peer, and it refunded the charge of the change.
+        change = statement_check.Row(seq=1, ts=1, amount=-99, balance_after=0,
+                                     kind=ledger.RESOURCE_CHANGE, ref="")
+        refund = statement_check.Row(seq=2, ts=2, amount=99, balance_after=0,
+                                     kind=ledger.REFUND, ref="", detail={"refunds_seq": "1"})
+        kwargs, _ = self._settle([change, refund])
+
+        self.assertEqual(kwargs["movements"], [])
+
+    def test_only_the_changes_of_the_peer_are_taken_not_its_floors(self):
+        # The peer bills more for the same service (its image, its MIN_MEM_MIB): its first
+        # period is the start there, and only what it changed since reaches our shape.
+        row = {k: v for k, v in self.ROW.items() if not k.startswith("peer_base_")}
+        kwargs, _ = self._settle([self._period(1536, seq=1), self._period(1536, seq=2)], row=row)
+        self.assertEqual(kwargs["movements"], [])
+        self.assertEqual(kwargs["mark"]["peer_base"]["mem_limit"], 1536 << 20)
+        self.assertEqual(kwargs["mark"]["shape"]["mem_limit"], 1024 << 20)
+
+        # It grows 512 MiB on the peer: ours grows 512 MiB, from our own start.
+        row.update({f"peer_base_{k}": v for k, v in kwargs["mark"]["peer_base"].items()})
+        kwargs, _ = self._settle([self._period(2048, seq=3)], row=row)
+        self.assertEqual(kwargs["mark"]["shape"]["mem_limit"], 1536 << 20)
+        self.assertEqual(kwargs["movements"][0].amount_mu, -512 * 10)
+        self.assertNotIn("peer_base", kwargs["mark"])
 
     def test_a_period_that_does_not_say_its_resources_changes_nothing(self):
         silent = statement_check.Row(seq=1, ts=1, amount=-99, balance_after=0,
@@ -817,15 +855,25 @@ class CloseDelegatedChargeTests(unittest.TestCase):
         self.assertEqual(settle.call_args.args[1], 7)
         self.assertFalse(settle.call_args.kwargs["stop_if_short"])
 
-    def test_a_failure_to_close_never_stops_the_stop(self):
+    def test_a_peer_that_cannot_be_read_still_has_the_time_charged(self):
         sc = MagicMock()
-        sc.get_delegated_instances.return_value = [dict(self.ROW)]
+        sc.get_delegated_instances.return_value = [dict(self.ROW, peer_balance_mu=5)]
         with patch.object(maintain, "sc", sc), \
                 patch.object(maintain, "_read_child", side_effect=RuntimeError("peer is gone")), \
                 patch.object(maintain, "settle_child") as settle:
             maintain.close_delegated_charge(PEER_TOKEN)
 
-        settle.assert_not_called()
+        self.assertEqual(settle.call_args.args[1:], (0, {"peer_balance_mu": 5, "seq": None,
+                                                         "hash": None, "ts": None}))
+        self.assertFalse(settle.call_args.kwargs["stop_if_short"])
+
+    def test_a_failure_to_close_never_stops_the_stop(self):
+        sc = MagicMock()
+        sc.get_delegated_instances.return_value = [dict(self.ROW)]
+        with patch.object(maintain, "sc", sc), \
+                patch.object(maintain, "_read_child", side_effect=RuntimeError("peer is gone")), \
+                patch.object(maintain, "settle_child", side_effect=RuntimeError("disk is full")):
+            maintain.close_delegated_charge(PEER_TOKEN)
 
     def test_an_instance_that_is_not_there_is_ignored(self):
         sc = MagicMock()

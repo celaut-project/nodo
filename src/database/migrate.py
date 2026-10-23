@@ -230,10 +230,13 @@ TABLES = {
     # A delegated child is charged what this node advertises (#577), by the same
     # figures as a local one: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `arch`
     # and the `launch_*_bp` are what `local_instances` keeps, and `charged_until` is the
-    # time (epoch seconds) that the tick has charged up to. The shape is the last one
-    # that the statement of the child showed: the service changes its resources on the
-    # peer. The `max_*` are the most that this node charges it for (the `at_most` of the
-    # manifest, or the `at_init` when it declares none), so that the figures of the peer
+    # time (epoch seconds) that the tick has charged up to. The service changes its
+    # resources on the peer, and the statement of the child shows them: the shape is our
+    # shape at the start (`base_*`) changed by what the resources on the peer changed
+    # since the first ones that its statement showed (`peer_base_*`, NULL until then).
+    # The floors of the two nodes differ, so only the changes are taken from the peer.
+    # The `max_*` are the most that this node charges it for (the `at_most` of the
+    # manifest, or the start when it declares none), so that the figures of the peer
     # cannot raise the charge above what the service can hold. `charged_peer_mu` is what the
     # peer has charged this node for it, and no part of what the child is charged.
     "delegated_instances": '''
@@ -263,6 +266,14 @@ TABLES = {
             max_disk_space INTEGER DEFAULT NULL,
             max_cpu_period INTEGER DEFAULT NULL,
             max_cpu_quota INTEGER DEFAULT NULL,
+            base_mem_limit INTEGER DEFAULT NULL,
+            base_disk_space INTEGER DEFAULT NULL,
+            base_cpu_period INTEGER DEFAULT NULL,
+            base_cpu_quota INTEGER DEFAULT NULL,
+            peer_base_mem_limit INTEGER DEFAULT NULL,
+            peer_base_disk_space INTEGER DEFAULT NULL,
+            peer_base_cpu_period INTEGER DEFAULT NULL,
+            peer_base_cpu_quota INTEGER DEFAULT NULL,
             arch TEXT DEFAULT NULL,
             launch_cpu_bp INTEGER DEFAULT NULL,
             launch_mem_bp INTEGER DEFAULT NULL,

@@ -293,5 +293,65 @@ class TheQuoteTests(unittest.TestCase):
         self.assertFalse(covers(own, celaut.EstimatedCost(max_maintenance_cost=celaut.Amount(n="41"))))
 
 
+
+class DelegatedPriceTests(unittest.TestCase):
+    """The price of this node for an instance that a peer runs (#577)."""
+
+    def _own(self, resources, scarcity=IDLE, **config):
+        from src.utils.cost_functions import delegated_price
+
+        with _config(**config), \
+                patch.object(delegated_price, "system_scarcity", return_value=scarcity), \
+                patch.object(delegated_price, "build_charge_mu", return_value=300), \
+                patch.object(delegated_price, "resolve_billable_resources",
+                             side_effect=lambda shape, *_, **__: shape):
+            return delegated_price.own_price(
+                celaut.Metadata(), celaut.Configuration(initial_mu=celaut.Amount(n="1000")),
+                resources)
+
+    def test_a_delegated_instance_is_not_free_while_this_node_is(self):
+        resources = celaut.Service.Container.Resources(at_init=_guest())
+        own = self._own(resources, free_tier__FREE_WHILE_SCARCITY_BELOW=0.5)
+
+        # The build and the period are charged although this node is idle and free.
+        self.assertEqual(int(own.cost.n), 1_300)
+        self.assertGreater(int(own.init_maintenance_cost.n), 0)
+
+    def test_the_period_is_priced_at_the_multiplier_of_the_launch(self):
+        resources = celaut.Service.Container.Resources(at_init=_guest(), at_most=_guest())
+        idle = self._own(resources, IDLE)
+        full = self._own(resources, {CPU: 1.0, MEM: 1.0, DISK: 1.0})
+
+        self.assertGreater(int(full.init_maintenance_cost.n), int(idle.init_maintenance_cost.n))
+        self.assertEqual(full.init_maintenance_cost.n, full.max_maintenance_cost.n)
+
+    def test_a_manifest_with_no_start_is_charged_the_floors(self):
+        from src.utils.cost_functions import delegated_price
+
+        floors = celaut.Sysresources(mem_limit=GIB, cpu_period=100000, cpu_quota=100000)
+        with patch.object(delegated_price, "resolve_billable_resources", return_value=floors):
+            start, most = delegated_price.billable_shapes(celaut.Service.Container.Resources())
+        self.assertEqual((start.mem_limit, most.mem_limit), (GIB, GIB))
+
+    def test_an_architecture_this_node_does_not_have_is_charged_the_build(self):
+        from src.utils.cost_functions import delegated_price
+        from src.virtualizers.architecture import UnsupportedArchitectureException
+
+        with _config(), patch.object(delegated_price, "build_charge_mu",
+                                     side_effect=UnsupportedArchitectureException(arch="x")):
+            self.assertEqual(delegated_price.own_build_mu(celaut.Metadata()), 10_000_000)
+
+    def test_a_period_is_compared_per_second(self):
+        # This node prices 60 s, and the peer 10 s: 60 MU against 11 MU is a loss.
+        own = celaut.EstimatedCost(init_maintenance_cost=celaut.Amount(n="60"),
+                                   maintenance_seconds_loop=60)
+        dear = celaut.EstimatedCost(init_maintenance_cost=celaut.Amount(n="11"),
+                                    maintenance_seconds_loop=10)
+        cheap = celaut.EstimatedCost(init_maintenance_cost=celaut.Amount(n="10"),
+                                     maintenance_seconds_loop=10)
+        self.assertFalse(covers(own, dear))
+        self.assertTrue(covers(own, cheap))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -441,7 +441,7 @@ decision about its own guest, and the row records what it holds either way.
 ### An instance that runs on a peer
 
 A delegated instance is charged to its father what this node advertises (#577), like a
-local one: the same cost functions, its resources, our rates and our scarcity. Nothing
+local one: our cost functions, its resources and our rates. Nothing
 of the peer reaches the father: the rows of its ledger are those of a local instance, and
 a peer that raises its prices does not raise the price of the instance. Seen from the
 service, it is one more instance of this node.
@@ -478,8 +478,9 @@ here. What it does not use comes back to this node when the instance stops.
 
 **This node delegates only at no loss.** The balancer compares what this node charges, by
 its advertisement, with what the peer quotes, converted to our MU, and a peer is a
-candidate only if the first covers the second: the start (the builds), one maintenance
-period at the start, and one at the most that the service may grow to. `GetServiceEstimatedCost` is always the price of this node: the local price if it
+candidate only if the first covers the second: the start (the builds), and the
+maintenance per second at the start and at the most that the service may grow to (each
+node prices a period of its own `MANAGER_ITERATION_TIME`). `GetServiceEstimatedCost` is always the price of this node: the local price if it
 has room, and its own price, which it charges for a service that a covered peer runs,
 if it has not. The advertised rates do not yet include an estimate of what the peers
 charge: an operator that delegates a lot has to price for it.
@@ -501,20 +502,33 @@ The father's claim is the first row and only the first row. It is opened with wh
 can get back: `config.initial_mu`, in our MU, less the build of this node (the one-off
 start charge, borne exactly as a local one is). It is spent by
 `maintain.maintain_delegated_instances`, at our price: the shape of the instance (kept on
-its row, as `local_instances` keeps it), our rates and our scarcity, for the time since the
-last charge.
+its row, as `local_instances` keeps it) and our rates, for the time since the last charge.
+Two things are not as for a local instance, because its load is on the peer and not here:
+it is **never free** (`free_tier` gives away the capacity of this node, which it does not
+use, while the peer charges this node for it), and it is priced at the **scarcity of its
+launch** for its whole life (`execution_cost.charge_at_launch_price`). The time is charged
+also when the peer cannot be reached: our price does not need it, and an instance that
+cannot pay is stopped all the same. So is the last charge before a stop.
 
 The service changes its resources on the peer: `ModifyServiceSystemResources` goes to the
 node that runs it, and this node does not see it. It sees it in the statement of the
 child, where each `maintenance` movement says the resources and the seconds that the peer
-priced. So the ticks charge the **last shape that is known**, and each statement that is
-read corrects the periods that it covers: our price for the shape that the peer shows,
-less our price for the shape that was charged (a `maintenance` row with `adjustment` in
-its detail, positive or negative). The last shape goes on the row for the next ticks. Each
-`resource_change` of the child is charged at our `MODIFY_RESOURCES_MU`. The figures of the
-peer are held down to the most that the service can hold: the `at_most` of its manifest,
-or its `at_init` when it declares none. A peer that writes more cannot raise what this
-node charges its own client. When the instance stops, `stop_instance` hands
+priced. The floors of the two nodes are not the same (the disk of an image that only one
+of them has built, `MIN_MEM_MIB`, the vCPU of a service that declares none), so the
+figures of the peer are not compared with ours: only their **changes** are taken. The
+first period that a statement shows is the start on the peer (`peer_base_*`), and the
+shape of the child is our shape at the start (`base_*`) changed as much as the resources
+on the peer changed since then. A change before the first period of the peer is not seen.
+
+So the ticks charge the **last shape that is known**, and each statement that is read
+corrects the periods that it covers: our price for the shape of the child, less our
+price for the shape that was charged (a `maintenance` row with `adjustment` in its
+detail, positive or negative). The last shape goes on the row for the next ticks. Each
+`resource_change` of the child that the peer did not give back is charged at our
+`MODIFY_RESOURCES_MU`. The shape is held down to the most that the service can hold: the
+`at_most` of its manifest, or its start when it declares none. A peer that writes more
+cannot raise what this node charges its own client. A manifest that declares no
+`at_init` is charged the floors of this node, as a local instance is. When the instance stops, `stop_instance` hands
 the remainder back through the same `credit_father` a local stop uses — after the row
 is deleted, so a stop that is retried cannot pay twice.
 
@@ -560,8 +574,8 @@ emptied first rather than refunded: every MU on it is already owed to the peer f
 runtime that happened, so what the node absorbs is only the part the deposit could not
 reach. That reading is also the liveness check. A peer that answers but no longer knows the
 instance has stopped it on its own, and the row here follows it down; a peer that
-cannot be reached charges nothing and loses nothing, because the totals only advance
-with a reading that succeeded, so the next one bills everything metered since. The
+cannot be reached loses nothing of what it charged, because the totals only advance
+with a reading that succeeded, so the next one measures everything since. The
 charge, the totals and the mark are written in one transaction (`settle_delegated_tick`).
 
 What the peer refunds at that moment is the *other* account. It is credited to this

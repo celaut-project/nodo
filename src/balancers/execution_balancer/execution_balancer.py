@@ -241,6 +241,7 @@ def execution_balancer(
         recursion_guard_token: str = None,
         arch: Optional[str] = None,
         service: Optional[celaut.Service] = None,
+        own: Optional[celaut_pb2.EstimatedCost] = None,
 ) -> Generator[tuple[str, celaut_pb2.EstimatedCost], None, None]:
     """Every candidate's price for this service, cheapest first.
 
@@ -253,6 +254,11 @@ def execution_balancer(
     ``service`` is the manifest, and is local-only for the same reason: it is read
     to notice a ``read_mode=ro`` declaration, which changes what this node's disk
     floors mean for the quote it offers. A peer applies its own.
+
+    ``own`` is the price of this node for the service when a peer runs it
+    (``delegated_price.own_price``): a peer is a candidate only if it covers its quote.
+    The launcher gives the price that it then charges, so that both are the same figure.
+    Not given, it is priced here.
     """
 
     # sorted by cost, tuple of celaut.Instances or 'local' and cost
@@ -291,10 +297,6 @@ def execution_balancer(
     else:
         log.LOGGER('network.EXECUTE_LOCALLY is off; this node prices no work for itself.')
 
-    # What this node charges for the service, whoever runs it (#577). The local quote
-    # is it when this node has room; a delegating node prices it without the room.
-    own = peers.get('local')
-
     # A node that will not delegate does not ask anyone for a price: the peer loop is
     # one GetServiceEstimatedCost round-trip per known peer, all of it spent on
     # candidates that could never be selected. Skipping it leaves 'local' as the only
@@ -325,7 +327,7 @@ def execution_balancer(
     else:
         log.LOGGER('network.DELEGATE_EXECUTION is off; only the local node is considered.')
 
-    if own is None and len(peers) > 0:
+    if own is None and any(peer != 'local' for peer in peers):
         try:
             own = own_price(
                 metadata=metadata, configuration=configuration,

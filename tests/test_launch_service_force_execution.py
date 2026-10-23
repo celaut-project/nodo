@@ -28,10 +28,11 @@ class ForceDelegateTests(unittest.TestCase):
         self.configuration.initial_mu.n = "1000"
         self.cost = celaut.EstimatedCost()
         self.cost.cost.n = "1100"
-        # The build of this node has its own tests: here it is free.
-        build = patch.object(launch_service_mod, "start_build_mu", return_value=0)
-        build.start()
-        self.addCleanup(build.stop)
+        # The price of this node has its own tests: here it has no build.
+        own = patch.object(launch_service_mod, "_own_price",
+                           side_effect=lambda *_: celaut.EstimatedCost(cost=self.configuration.initial_mu))
+        own.start()
+        self.addCleanup(own.stop)
 
     def _call(self):
         return launch_service_mod._force_delegate(
@@ -126,7 +127,8 @@ class ForceDelegateTests(unittest.TestCase):
         ) as mock_delegate, patch.object(
             launch_service_mod.sc, "internal_instance_exists", return_value=False
         ), patch.object(
-            launch_service_mod, "start_build_mu", return_value=40
+            launch_service_mod, "_own_price",
+            return_value=celaut.EstimatedCost(cost=celaut.Amount(n="1040")),
         ):
             self._call()
 

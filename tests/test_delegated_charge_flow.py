@@ -104,7 +104,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
                 patch.object(maintain, "stop_instance"), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
-                patch.object(maintain, "compute_maintenance_cost", return_value=own_mu,
+                patch.object(maintain, "charge_at_launch_price", return_value=own_mu,
                              side_effect=price), \
                 patch.object(self.sc, "child_statement_due", return_value=statement):
             charge, state = maintain._read_child(row)
@@ -158,9 +158,12 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         def shape(gib):
             return {"mem_limit": gib << 30, "disk_space": 0, "cpu_period": 0, "cpu_quota": 0}
 
+        # Our start and the first shape that the peer showed: 1 GiB on both.
+        columns = ", ".join(f"{prefix}mem_limit = ?, {prefix}disk_space = 0, "
+                            f"{prefix}cpu_period = 0, {prefix}cpu_quota = 0"
+                            for prefix in ("", "base_", "peer_base_"))
         SQLConnection._connection.execute(
-            "UPDATE delegated_instances SET mem_limit = ?, disk_space = 0, cpu_period = 0, "
-            "cpu_quota = 0, charged_until = NULL", (1 << 30,))
+            f"UPDATE delegated_instances SET {columns}, charged_until = NULL", (1 << 30,) * 3)
         SQLConnection._connection.commit()
         self.peer.add(-5, "maintenance", ts=self.now - 50,
                       detail=ledger.canonical_detail(dict(shape(2), seconds=10)))
@@ -217,7 +220,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
                 patch.object(maintain, "stop_instance"), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
-                patch.object(maintain, "compute_maintenance_cost", return_value=0), \
+                patch.object(maintain, "charge_at_launch_price", return_value=0), \
                 patch.object(self.sc, "child_statement_due", return_value=False):
             tick = threading.Thread(target=maintain.maintain_delegated_instances)
             tick.start()
@@ -341,7 +344,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(statement_check, "stored_rates", return_value={}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client"), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
-                patch.object(maintain, "compute_maintenance_cost", return_value=0), \
+                patch.object(maintain, "charge_at_launch_price", return_value=0), \
                 patch.object(self.sc, "get_delegated_instances", return_value=[row]):
             maintain.close_delegated_charge(PEER_TOKEN)
 

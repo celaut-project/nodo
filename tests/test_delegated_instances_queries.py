@@ -109,6 +109,14 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'max_disk_space': None,
                 'max_cpu_period': None,
                 'max_cpu_quota': None,
+                'base_mem_limit': None,
+                'base_disk_space': None,
+                'base_cpu_period': None,
+                'base_cpu_quota': None,
+                'peer_base_mem_limit': None,
+                'peer_base_disk_space': None,
+                'peer_base_cpu_period': None,
+                'peer_base_cpu_quota': None,
             },
         )
 

@@ -261,6 +261,22 @@ def worst_case_charge_mu(
     return _charge_at(system_resources, seconds, bps, arch, p)
 
 
+def charge_at_launch_price(
+    system_resources: celaut.Sysresources,
+    seconds: float,
+    launch_bp: Mapping[str, int],
+    arch: Optional[str] = None,
+) -> int:
+    """MU for holding the resources for `seconds`, at the price of a launch (`launch_price_bp`).
+
+    The price of a delegated instance (#577). Its load is on the peer and not here, so
+    the scarcity of this node says nothing about it: it is priced at the multiplier of
+    its launch for its whole life. And it is never free: `launch_price_bp` records the
+    base price for a launch while the node is free.
+    """
+    return _charge_at(system_resources, seconds, launch_bp, arch, prices())
+
+
 def _charge_at(
     system_resources: celaut.Sysresources,
     seconds: float,

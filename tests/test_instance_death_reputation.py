@@ -102,7 +102,7 @@ class InstanceDeathReputationTests(unittest.TestCase):
              patch.object(maintain, "_check_our_account"), \
              patch.object(maintain, "_read_child", return_value=(1000, {"peer_balance_mu": 0})), \
              patch.object(maintain, "system_scarcity", return_value={}), \
-             patch.object(maintain, "compute_maintenance_cost", return_value=500), \
+             patch.object(maintain, "charge_at_launch_price", return_value=500), \
              patch.object(maintain, "ALLOW_DEBT", False), \
              patch.object(maintain, "stop_instance", self.stop), \
              patch.object(maintain, "_reputation_interface", return_value=self.reputation):
