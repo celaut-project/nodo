@@ -132,3 +132,93 @@ def test_the_balance_check_logs_the_config_error_and_its_type(monkeypatch):
         "ErgoNodeUrlNotConfigured" in line and "ledgers.ergo.NODE_URL is not set" in line
         for line in logged
     ), logged
+
+
+# -- hidden mode: the crawl never leaves the host directly (#552) ------------------
+
+STRANGER = "https://stranger.example:9053"
+
+
+class _Answer:
+    def __init__(self, data):
+        self.data = data
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.data
+
+
+def _hidden(monkeypatch, *, egress=True):
+    monkeypatch.setattr(manager_ergo, "hidden_mode", lambda: True)
+    monkeypatch.setattr(manager_ergo, "service_egress_via_tor", lambda: egress)
+    monkeypatch.setattr(manager_ergo, "is_local_address", lambda host: host == "192.168.1.5")
+
+
+def _tor(monkeypatch, answers):
+    asked = []
+
+    def get(url, timeout):
+        asked.append(url)
+        return 200, json.dumps(answers[url]).encode()
+
+    monkeypatch.setattr(manager_ergo.routing_http, "get", get)
+    return asked
+
+
+def test_a_hidden_crawl_makes_no_direct_request(config, monkeypatch, tmp_path):
+    _hidden(monkeypatch)
+    (tmp_path / "peers.json").write_text(json.dumps({STRANGER: {}}))
+    direct = []
+    monkeypatch.setattr(manager_ergo.requests, "get", _unreachable(direct))
+    asked = _tor(monkeypatch, {
+        f"{STRANGER}/peers/connected": [{"restApiUrl": "https://other.example:9053"}],
+        "https://other.example:9053/info": {"genesisBlockId": "genesis"},
+        "https://other.example:9053/peers/connected": [],
+    })
+
+    found = manager_ergo.get_refresh_peers()
+
+    assert direct == []
+    assert "https://other.example:9053/info" in asked
+    assert "https://other.example:9053" in found
+    # the file that feeds the `pow:` candidates is still written
+    assert "https://other.example:9053" in json.loads((tmp_path / "peers.json").read_text())
+
+
+def test_a_hidden_crawl_without_tor_egress_asks_nobody(config, monkeypatch, tmp_path):
+    _hidden(monkeypatch, egress=False)
+    known = {STRANGER: {"appVersion": "6.0"}}
+    (tmp_path / "peers.json").write_text(json.dumps(known))
+    direct = []
+    monkeypatch.setattr(manager_ergo.requests, "get", _unreachable(direct))
+    asked = _tor(monkeypatch, {})
+
+    assert manager_ergo.get_refresh_peers() == {}
+    assert direct == [] and asked == []
+    assert json.loads((tmp_path / "peers.json").read_text()) == known
+
+
+def test_a_hidden_crawl_keeps_the_operators_own_network_direct(config, monkeypatch):
+    _hidden(monkeypatch)
+    direct = []
+
+    def get(url, *args, **kwargs):
+        direct.append(url)
+        return _Answer([])
+
+    monkeypatch.setattr(manager_ergo.requests, "get", get)
+    asked = _tor(monkeypatch, {})
+
+    assert manager_ergo._crawl_get_json("http://192.168.1.5:9053/peers/connected") == []
+    assert direct == ["http://192.168.1.5:9053/peers/connected"] and asked == []
+
+
+def test_a_crawl_that_is_not_hidden_goes_direct(config, monkeypatch):
+    monkeypatch.setattr(manager_ergo, "hidden_mode", lambda: False)
+    monkeypatch.setattr(manager_ergo.requests, "get", lambda url, **kw: _Answer({"ok": True}))
+    asked = _tor(monkeypatch, {})
+
+    assert manager_ergo._crawl_get_json(f"{STRANGER}/info") == {"ok": True}
+    assert asked == []

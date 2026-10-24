@@ -626,9 +626,11 @@ What hidden mode does not hide:
 - The own outbound traffic of the node (the Ergo explorer and node, Bitcoin, the energy
   meter) still shows the IP to the operator of that service.
 - The Ergo crawl (`src/manager/ergo.py`) asks the nodes that other Ergo nodes announce.
-  It does this from the host, not through Tor. The crawl writes the file that is a
-  source of `pow:` candidates. A node that an attacker runs can announce its own server
-  as a node, and that server sees the IP address. This is issue #552.
+  In hidden mode it goes through Tor (the same `HTTPTunnelPort` as the `pow:` checks),
+  so an attacker's server that is announced as a node does not see the IP address. With
+  `routing.tor.SERVICE_EGRESS: false` the crawl does not ask at all, and the file that
+  it writes keeps its last content. An address of your own networks stays direct. The
+  clients of `ledgers.*` and the energy meter are still not covered (issue #552).
 - Payments and reputation on the ledger are public. If the identity is funded from an
   account that is linked to a person, the identity is linked too.
 - Tor does not protect against an observer that sees both ends of a circuit.
