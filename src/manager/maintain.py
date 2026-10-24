@@ -678,6 +678,35 @@ def _signed_balance(peer_id: str, client_id: str, mark: statement_check.Mark, ba
     return from_amount(statement.balance)
 
 
+def _check_maintenance_quote(row: dict, rows, since_ts: Optional[int]) -> None:
+    """Score the peer of ``row`` when ``rows``, the movements of the child that were just
+    checked after the mark dated ``since_ts``, charge more maintenance than the peer
+    quoted for the child (#567, ``statement_check.maintenance_overcharge``).
+
+    The quote is the one that the peer gave for this instance, kept on the row in its MU
+    (``quote_*``), not its rates of today: a peer that raised its prices since is held to
+    the price that it signed. It is for the most resources of the service, so a hotplug
+    up to them is not an overcharge. A row with no quote is not checked.
+
+    Only the peer is scored, with ``MAINTENANCE_OVERCHARGED``: not the service and not
+    the client. A price above the quote shows at every period, so it is scored at most
+    once in ``statement_check.FAULT_WINDOW_SECONDS`` for each child, and once for each
+    movement. The charge of the child and the instance do not change: this node absorbs
+    the excess. Never raises.
+    """
+    try:
+        fault = statement_check.maintenance_overcharge(
+            rows, statement_check.MaintenanceQuote.of_row(row), since_ts)
+        if fault is None:
+            return
+        seq, problem = fault
+        statement_check.penalise_once(
+            row.get('peer_id'), row['token'], Reason.MAINTENANCE_OVERCHARGED, problem, seq,
+            window=statement_check.FAULT_WINDOW_SECONDS, per_account=True)
+    except Exception as e:
+        log.LOGGER(f"Could not check the maintenance of {row.get('id')} against its quote: {e}")
+
+
 def _balance_held_on(peer_id: str) -> int:
     """What we hold on ``peer_id`` now, in its MU: read for free from its ``Metrics``."""
     from src.manager.metrics import refresh_balance_on_peer
@@ -722,6 +751,10 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
     A statement is asked for only when our balance on the peer pays for it: a refusal for
     lack of balance is then the peer contradicting the balance that it reports, and when
     it does not, the tick goes on from the balance and no one is scored.
+
+    The movements of a statement that continues the mark are also checked against the
+    maintenance quote of the peer (``_check_maintenance_quote``). That changes nothing
+    in what is returned.
     """
     peer_id, token = row.get('peer_id'), row['token']
     # With no seq the mark is not a movement, and its balance is the last reading.
@@ -776,6 +809,7 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             checked = True
             rows = tuple(chain.rows)
             statement_check.settle_failed_reads(peer_id, token, chain.rows, statement.head_seq)
+            _check_maintenance_quote(row, chain.rows, start.ts)
         else:
             if chain.problem:
                 statement_check.penalise_chain(peer_id, token, chain, from_seq)
@@ -1077,9 +1111,10 @@ def maintain_delegated_instances(debug_mode: bool = False):
 
     Every tick estimates from the balance, which the peer gives for free, and every
     ``ledger.STATEMENT_READ_EVERY_TICKS`` ticks the statement replaces the estimate with
-    what the movements say. What a statement shows is never judged: the chain of the child
-    is checked, and what the peer charges it is the business of whoever runs it (#567).
-    The next reading corrects the estimate, up or down (``_read_child``).
+    what the movements say. The chain of the child is checked, and its maintenance against
+    the quote that the peer gave for it: a peer that charges more is scored, and this node
+    absorbs the excess (#567, ``_check_maintenance_quote``). The next reading corrects the
+    estimate, up or down (``_read_child``).
 
     Our own account on each peer is checked first: it pays the starts and the top-ups
     of these children, and nothing else may take MU from it.

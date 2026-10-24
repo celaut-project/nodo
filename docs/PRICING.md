@@ -300,7 +300,7 @@ the tick and the quote come from the same function.
 | `init_maintenance_cost` | One tick for the resources at the start, at the load now. This is the launch price. |
 | `max_maintenance_cost` | One tick for the maximum resources, at the highest multiplier that the bound allows. No tick can charge more. |
 | `cost` | The least `initial_mu` that starts the service: the build, plus the balance that the instance has after it. The balance is `INITIAL_RUNTIME_HOURS` at the worst case (launch multiplier times the bound). |
-| `variance` | Not computed (0). The node does not need it: `max_maintenance_cost` is the limit. |
+| `variance` | Not computed (0). The node does not need it: `max_maintenance_cost` is the limit. A node that delegates to this one allows `max_maintenance_cost` times `1 + variance` (#567). |
 
 With the bound off, `max_maintenance_cost` is the charge at the current load, as before:
 the node does not promise a limit, and the client has no worst case to read.
@@ -450,8 +450,11 @@ The **margin is the difference**: what this node charges the instance, less what
 charges this node for it (read from its statement, #570 and #571). It is not stored as a
 figure: it is the movements of the child here, against `charged_peer_mu`. A peer that
 raises its prices after the delegation is a loss of this node: the instance is charged
-our price, and it is not moved or stopped for it. Scoring a peer that goes over its signed
-quote is #567.
+our price, and it is not moved or stopped for it. A peer that charges more maintenance
+than the quote that it gave for the instance loses reputation (#567): the delegated row
+keeps that quote in the MU of the peer, and each statement of the child is checked
+against it (see
+[`REPUTATION.md`](REPUTATION.md#a-child)).
 
 The father pays `initial_mu`, as for a local instance (#563). This node keeps its own
 build (`start_build_mu`), and sends the peer the rest of the amount, in the MU of the

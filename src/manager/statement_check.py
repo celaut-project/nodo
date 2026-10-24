@@ -15,20 +15,25 @@ Of its own account it checks two things:
    (each one carries a reference of this node, #578), their top-ups up to what was sent,
    and the statements that it asked for.
 
-Of a child it checks the chain, and nothing else. What the peer charges a child is the
-business of whoever runs the child, and this node only charges its father what the child
-consumed, which the movements say (``consumption``).
+Of a child it checks the chain, and the maintenance that the peer charges it against the
+quote that the peer gave for it (``maintenance_overcharge``, #567). The other charges of
+the child are the business of whoever runs it. This node charges its father its own price,
+and what the movements say the child consumed is the cost of the delegation
+(``consumption``).
 
-A peer whose statement does not continue the chain, or that charges our account what
-this node did not cause, loses ``STATEMENT_PENALTY``: the same as a service that does
-not hash to its id, because in every case the peer signed something false about money.
+A peer whose statement does not continue the chain, that charges our account what this
+node did not cause, or that charges a child more maintenance than it quoted, loses
+``STATEMENT_PENALTY``: the same as a service that does not hash to its id, because in
+every case the peer signed something false about money, or broke a price that it signed.
 
 The functions here are pure unless they say otherwise; ``maintain`` and
 ``delegate_execution`` read the statements and act on what these return.
 """
 import json
+import math
 import time
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import grpc
@@ -348,6 +353,75 @@ def father_net(rows: Iterable[Row]) -> int:
     """The top-ups of the father in ``rows`` less its withdrawals, in the MU of the peer
     and signed as the child sees them: a top-up is positive."""
     return sum(row.amount for row in rows if caused_by_father(row))
+
+
+@dataclass(frozen=True)
+class MaintenanceQuote:
+    """What the peer quoted for one maintenance period of a child, in its MU (#567):
+    ``max_mu`` for ``seconds`` seconds, and the ``variance`` of the quote."""
+    max_mu: int
+    seconds: int
+    variance: float = 0.0
+
+    @staticmethod
+    def of_row(row: Mapping) -> Optional["MaintenanceQuote"]:
+        """The quote on a delegated row (``quote_*``), or None when the row holds none.
+
+        A quote with no period, or with a ``max_maintenance_cost`` of 0, is no limit: a
+        node quotes 0 for a service that declares no ``at_most``."""
+        try:
+            max_mu = int(row.get("quote_max_maintenance_cost") or 0)
+            seconds = int(row.get("quote_maintenance_seconds_loop") or 0)
+            variance = float(row.get("quote_variance") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if max_mu <= 0 or seconds <= 0:
+            return None
+        if not math.isfinite(variance) or variance < 0:
+            variance = 0.0
+        return MaintenanceQuote(max_mu, seconds, variance)
+
+
+def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote],
+                           since_ts: Optional[int] = None) -> Optional[Tuple[int, str]]:
+    """Whether the ``maintenance`` movements in ``rows`` charge more than ``quote``.
+
+    ``rows`` are the movements of a child after its mark, checked by ``verify_chain``,
+    and ``since_ts`` is the date of the mark. The cost of the interval is the sum of the
+    ``maintenance`` movements, and its seconds are the sum of the ``seconds`` in their
+    detail (``tick_detail``). Both are on the scale of the peer: nothing is converted.
+    The time that this node did not read the peer is not in the interval, so a long
+    time between two reads is not an overcharge.
+
+    The interval charges too much when its cost per second is more than
+    ``max_mu / seconds * (1 + variance)`` of the quote. Each movement can round up by
+    1 MU. The seconds count up to the time from ``since_ts`` to the last movement, and
+    one period: a peer cannot lower its cost per second with seconds that did not pass.
+    A movement with no seconds charges for no time.
+
+    Returns ``(seq, problem)``, with the seq of the first ``maintenance`` movement of
+    the interval, or None.
+    """
+    if quote is None:
+        return None
+    periods = [row for row in rows if row.kind == ledger.MAINTENANCE]
+    if not periods:
+        return None
+    cost = -sum(row.amount for row in periods)
+    if cost <= 0:
+        return None
+    seconds = sum(max(0, _detail_int(row.detail, "seconds") or 0) for row in periods)
+    if since_ts is not None:
+        passed = int(periods[-1].ts) - int(since_ts) + quote.seconds + CLOCK_SKEW_SECONDS
+        seconds = min(seconds, max(0, passed))
+    allowed = (Fraction(quote.max_mu) * seconds * (1 + Fraction(quote.variance))
+               / quote.seconds + len(periods))
+    if cost <= allowed:
+        return None
+    return periods[0].seq, (
+        f"movements {periods[0].seq} to {periods[-1].seq} charge {cost} MU of maintenance "
+        f"for {seconds} s, and the quote allows {math.floor(allowed)} MU "
+        f"({quote.max_mu} MU per {quote.seconds} s, variance {quote.variance})")
 
 
 def start_grace_seconds() -> int:
@@ -901,7 +975,7 @@ def _invalid_statement():
 
 
 def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: int = 0,
-                  window: int = 0) -> None:
+                  window: int = 0, per_account: bool = False) -> None:
     """Score a fault of a peer, once: the same fault read again costs it nothing.
 
     A fault is the peer, the account (by ``account_ref``, never the credential), the
@@ -910,12 +984,17 @@ def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: in
     so the record is in the database. A different fault, at another movement, is
     scored. A fault that shows no movement has a ``window`` (seconds): it is scored
     again only when the last one is older than that (``statement_faults``).
+
+    ``per_account``: the ``window`` is the one of the account and the reason, at any
+    movement. A fault that goes on over many movements, as a price above the quote does
+    at every period, is then scored once in the window, and a movement only once.
     """
     from src.database.sql_connection import SQLConnection
     from src.reputation_system import interface
 
     account_ref = ledger.account_ref(account)
     log.LOGGER(f"Statement of {account_ref[:8]} on {peer_id}: {problem}")
-    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq, window):
+    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq, window,
+                                                  any_seq=per_account):
         return
     interface.update_peer_reputation(peer_id=peer_id, amount=STATEMENT_PENALTY, reason=reason)

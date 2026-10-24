@@ -12,6 +12,7 @@ from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.arch_guard import arch_from_tags
 from src.utils.cost_functions.architecture_resources import ask_of, should_skip_peer
+from src.utils.cost_functions import peer_quotes
 from src.utils.cost_functions.delegated_price import covers, own_price
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
@@ -108,7 +109,9 @@ def estimate_cost_on_peer(
 
     The configuration is converted to the target peer's MU before asking for a
     quote, and the returned quote is converted back to local MU.  This leaves
-    the balancer and the caller with one comparable/accountable scale.
+    the balancer and the caller with one comparable/accountable scale. The quote as
+    the peer sent it, in its MU, is kept in ``peer_quotes``: a delegated row stores it,
+    and the maintenance charge of the peer is checked against it (#567).
 
     A quote already obtained for this very question is reused for
     `network.QUERY_CACHE_PEER_TTL_SECONDS` (#456), so launches that price the same service
@@ -129,8 +132,10 @@ def estimate_cost_on_peer(
         if key is not None:
             status, remembered = QueryCache().recall(key)
             if status == HIT:
-                reused = type(remembered)()
-                reused.CopyFrom(remembered)
+                local, signed = remembered
+                reused = type(local)()
+                reused.CopyFrom(local)
+                peer_quotes.remember(peer_id, reused, signed)
                 return reused
         peer_cost = BeeClient.get_service_estimated_cost(
             peer_channel(peer_id),
@@ -143,10 +148,15 @@ def estimate_cost_on_peer(
             timeout=_shorter(_timeout_for_cost_request(), timeout),
         )
         cost = estimated_cost_for_local(peer_cost, payment_system=payment_system)  # MUpeer -> MUlocal
+        if cost is not None:
+            # The quote as the peer sent it, for the check of its maintenance charge (#567).
+            peer_quotes.remember(peer_id, cost, peer_cost)
         if key is not None and cost is not None:
             kept = type(cost)()
             kept.CopyFrom(cost)
-            QueryCache().remember(key, kept, ttl)
+            signed = type(peer_cost)()
+            signed.CopyFrom(peer_cost)
+            QueryCache().remember(key, (kept, signed), ttl)
         return cost
     except Exception as e:
         _log_cost_request_exception(peer_id=peer_id, exc=e)

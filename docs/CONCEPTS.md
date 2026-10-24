@@ -130,7 +130,9 @@ as the statement "if the child spends more than X at one time, I prefer that it 
 A client that thinks a node charged too much does not need a limit in advance. The node
 signs each `EstimatedCost`, and that message has a `variance`. The client keeps the
 signed quote. If the real cost is more than the quote allows, the quote and the real
-cost are the proof for a negative reputation.
+cost are the proof for a negative reputation. A node does the same with a peer that it
+delegates to: it keeps the quote of the peer for the instance, and scores the peer when
+the statement of the child shows more maintenance than the quote allows (#567).
 
 The cost of the start is inside this limit. The client pays `initial_mu` and nothing
 else (#563). The node takes the cost of the build from the balance of the new instance,

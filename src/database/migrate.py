@@ -239,6 +239,11 @@ TABLES = {
     # manifest, or the start when it declares none), so that the figures of the peer
     # cannot raise the charge above what the service can hold. `charged_peer_mu` is what the
     # peer has charged this node for it, and no part of what the child is charged.
+    # The `quote_*` columns are the maintenance quote that the peer gave for this instance
+    # (#567): `init_maintenance_cost`, `max_maintenance_cost`, `maintenance_seconds_loop`
+    # and `variance` of its `EstimatedCost`, in the MU of the peer, not converted. The
+    # statements of the child are checked against them. NULL: no quote was kept, and the
+    # charge of the peer is not checked.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -274,6 +279,10 @@ TABLES = {
             peer_base_disk_space INTEGER DEFAULT NULL,
             peer_base_cpu_period INTEGER DEFAULT NULL,
             peer_base_cpu_quota INTEGER DEFAULT NULL,
+            quote_init_maintenance_cost TEXT DEFAULT NULL,
+            quote_max_maintenance_cost TEXT DEFAULT NULL,
+            quote_maintenance_seconds_loop INTEGER DEFAULT NULL,
+            quote_variance REAL DEFAULT NULL,
             arch TEXT DEFAULT NULL,
             launch_cpu_bp INTEGER DEFAULT NULL,
             launch_mem_bp INTEGER DEFAULT NULL,
