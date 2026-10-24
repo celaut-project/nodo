@@ -1,11 +1,14 @@
 from typing import Optional, Dict
 import os, json, requests
+from urllib.parse import urlsplit
 
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 from concurrent.futures import ThreadPoolExecutor
 
 from src.utils.network import internet_available
+from src.routing import tunneled_http as routing_http
+from src.routing.policy import hidden_mode, is_local_address, service_egress_via_tor
 from src.utils.ergo_node_url import ergo_node_url_problem, is_valid_ergo_node_url
 
 env_manager = ConfigManager()
@@ -35,8 +38,45 @@ MAINNET_P2P_PORT = 9030
 #: dropped by the same verification like any other candidate if it is wrong.
 MAINNET_REST_PORT = 9053
 
+#: How long the crawl waits for one peer. The ``/info`` read had no limit before; a peer
+#: that holds the connection open must not hold the crawl with it.
+CRAWL_TIMEOUT = 5
 
-def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
+
+class CrawlSkipped(requests.RequestException):
+    """A hidden node did not ask this peer: it could not do so without being seen."""
+
+
+def _crawl_get_json(url: str):
+    """One GET of the crawl, answered as JSON.
+
+    The crawl asks nodes that strangers announce, so the destination is chosen by whoever
+    runs them, and a direct request shows them the IP address of the node. A hidden node
+    (``routing.HIDDEN``) therefore sends it through Tor, as the ``pow:`` checks do
+    (``pow_networks._get_json``), or does not send it: never directly. An address of the
+    operator's own networks stays direct, since an exit could not reach it and only the
+    operator can see that traffic. Failures are ``requests.RequestException``, which is
+    what the crawl already handles.
+    """
+    host = urlsplit(url).hostname or ""
+    if not hidden_mode() or is_local_address(host):
+        response = requests.get(url, timeout=CRAWL_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
+    if not service_egress_via_tor():
+        raise CrawlSkipped(f"{url}: not asked, hidden mode without routing.tor.SERVICE_EGRESS")
+    try:
+        status, body = routing_http.get(url, timeout=CRAWL_TIMEOUT)
+        if status != 200:
+            raise CrawlSkipped(f"{url}: HTTP {status}")
+        return json.loads(body)
+    except CrawlSkipped:
+        raise
+    except Exception as e:  # a transport failure of the tunnel, or a body that is not JSON
+        raise CrawlSkipped(f"{url} (through Tor): {type(e).__name__}") from e
+
+
+def __available_ergo_node(url: Optional[str], crawl: bool = False) -> Optional[Dict]:
     ergo_node_url = env_manager.get("ledgers.ergo.NODE_URL") if not url else url
     problem = ergo_node_url_problem(ergo_node_url)
     if problem:
@@ -44,10 +84,12 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
         return None
     try:
         info_url = f"{str(ergo_node_url).strip().rstrip('/')}/info"
-        response = requests.get(info_url)
-        response.raise_for_status() 
-
-        data = response.json()
+        if crawl:
+            data = _crawl_get_json(info_url)
+        else:
+            response = requests.get(info_url)
+            response.raise_for_status()
+            data = response.json()
 
         if data.get("genesisBlockId") == env_manager.get("ledgers.ergo.GENESIS_BLOCK_ID"):
             return {
@@ -112,16 +154,14 @@ def get_refresh_peers() -> Dict[str, Dict]:
     
     def fetch_peers(url: str):
         try:
-            response = requests.get(f"{url}/peers/connected", timeout=5)
-            response.raise_for_status()
-            data = response.json()
+            data = _crawl_get_json(f"{url}/peers/connected")
             
             for peer in data:
                 rest_api_url = peer.get("restApiUrl")
                 if rest_api_url and rest_api_url not in checked_peers:
                     checked_peers.add(rest_api_url)
                     
-                    node_info = __available_ergo_node(rest_api_url)
+                    node_info = __available_ergo_node(rest_api_url, crawl=True)
                     if node_info:
                         # Added alongside the existing keys, never replacing the
                         # entry's shape: a file written by an older nodo simply has
