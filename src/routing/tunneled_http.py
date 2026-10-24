@@ -8,7 +8,7 @@ name of the target for SNI and for the certificate check.
 
 import http.client
 import ssl
-from typing import Tuple
+from typing import Mapping, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 from src.routing.base import RoutingUnavailable
@@ -19,6 +19,17 @@ MAX_BODY_BYTES = 4 * 1024 * 1024
 
 def get(url: str, timeout: float) -> Tuple[int, bytes]:
     """``(status, body)`` of ``GET url``, through Tor. Raises on any transport failure."""
+    return request("GET", url, timeout, headers={"Accept": "application/json"})
+
+
+def request(
+    method: str,
+    url: str,
+    timeout: float,
+    body: Union[bytes, str, None] = None,
+    headers: Optional[Mapping[str, str]] = None,
+) -> Tuple[int, bytes]:
+    """``(status, body)`` of one request, through Tor. Raises on any transport failure."""
     from src.routing import registry
 
     proxy_port = registry.TOR.http_tunnel_port()
@@ -39,7 +50,11 @@ def get(url: str, timeout: float) -> Tuple[int, bytes]:
         path = parts.path or "/"
         if parts.query:
             path += "?" + parts.query
-        connection.request("GET", path, headers={"Accept": "application/json"})
+        connection.request(
+            method, path,
+            body=body.encode("utf-8") if isinstance(body, str) else body,
+            headers=dict(headers or {}),
+        )
         response = connection.getresponse()
         return response.status, response.read(MAX_BODY_BYTES)
     finally:

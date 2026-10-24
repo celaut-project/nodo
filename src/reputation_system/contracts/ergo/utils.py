@@ -1,6 +1,7 @@
 from binascii import hexlify
 from typing import Iterator, List, NamedTuple, Optional
 import requests
+from src.routing import ledger_http
 
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
@@ -166,7 +167,7 @@ def iter_unspent_boxes_by_registers(
     fetched = 0
     while fetched < max_boxes:
         url = f"{api_url}/api/v1/boxes/unspent/search?offset={offset}&limit={page_size}"
-        response = requests.post(url, json=body, timeout=30)
+        response = ledger_http.post(url, json=body, timeout=30)
         if response.status_code != 200:
             raise ValueError(
                 f"Register-filtered box search failed: HTTP {response.status_code} "
@@ -205,7 +206,7 @@ def iter_unspent_boxes_by_token(
             f"{api_url}/api/v1/boxes/unspent/byTokenId/{token_id}"
             f"?limit={page_size}&offset={offset}"
         )
-        response = requests.get(url, timeout=30)
+        response = ledger_http.get(url, timeout=30)
         if response.status_code != 200:
             raise ValueError(
                 f"Box lookup for token {token_id} failed: HTTP {response.status_code}"
@@ -415,7 +416,7 @@ def get_boxes_by_token_ids(ergo, node_url: str, token_ids: List[str]) -> list:
     box_ids = []
     for token_id in unique_ids:
         url = f"{node_url}/blockchain/box/byTokenId/{token_id}"
-        response = requests.get(url, timeout=15)
+        response = ledger_http.get(url, timeout=15)
         if response.status_code != 200:
             raise ValueError(f"Could not fetch token {token_id}: HTTP {response.status_code}")
 
@@ -493,7 +494,7 @@ def iter_unspent_boxes_by_address(api_url: str, address: str, page_size: int = 5
     fetched = 0
     while fetched < max_boxes:
         url = f"{api_url}/api/v1/boxes/unspent/byAddress/{address}?limit={page_size}&offset={offset}"
-        response = requests.get(url, timeout=30)
+        response = ledger_http.get(url, timeout=30)
         if response.status_code != 200:
             raise ValueError(f"Box lookup failed: HTTP {response.status_code} - {response.text[:200]}")
 

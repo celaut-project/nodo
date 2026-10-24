@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 import requests
+from src.routing import ledger_http
 
 from src.reputation_system.contracts.ergo.utils import explorer_api_url
 from src.utils.logger import LOGGER
@@ -169,7 +170,7 @@ def transaction_history(address: str, limit: int = 10) -> List[Dict]:
     """
     url = f"{explorer_api_url().rstrip('/')}/api/v1/addresses/{address}/transactions"
     try:
-        response = requests.get(
+        response = ledger_http.get(
             url, params={"offset": 0, "limit": int(limit)}, timeout=TIMEOUT_SECONDS
         )
     except requests.exceptions.RequestException as exc:

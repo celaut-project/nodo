@@ -25,6 +25,7 @@ for any node id, ours or a peer's, since nothing here depends on holding a key.
 from typing import Dict, Iterator, List, Optional
 
 import requests
+from src.routing import ledger_http
 
 from src.reputation_system.contracts.ergo.utils import (
     ProofStanding,
@@ -64,7 +65,7 @@ def _explorer_json(url: str) -> Optional[dict]:
     published about this node, and dropping it would understate the node's reputation.
     """
     try:
-        response = requests.get(url, timeout=30)
+        response = ledger_http.get(url, timeout=30)
     except requests.RequestException as e:
         logger(f"Reputation read failed for {url}: {e}")
         return None

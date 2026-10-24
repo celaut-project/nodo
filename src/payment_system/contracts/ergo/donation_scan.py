@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
 
 import requests
+from src.routing import ledger_http
 
 from src.payment_system.contracts.ergo.ergo_tree import p2pk_proposition_bytes_from_pk
 from src.reputation_system.contracts.ergo.utils import explorer_api_url
@@ -59,7 +60,7 @@ class ExplorerUnavailable(Exception):
 
 def _get(url: str, params: Optional[dict] = None) -> dict:
     try:
-        response = requests.get(url, params=params or {}, timeout=_TIMEOUT)
+        response = ledger_http.get(url, params=params or {}, timeout=_TIMEOUT)
     except requests.exceptions.RequestException as exc:
         raise ExplorerUnavailable(f"{url}: {exc}") from exc
     if response.status_code == 404:
