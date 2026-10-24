@@ -395,8 +395,10 @@ def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote
 
     The interval charges too much when its cost per second is more than
     ``max_mu / seconds * (1 + variance)`` of the quote. Each movement can round up by
-    1 MU. The seconds count up to the time from ``since_ts`` to the last movement, and
-    one period: a peer cannot lower its cost per second with seconds that did not pass.
+    1 MU. The seconds count up to the time from ``since_ts`` to the last movement, one
+    period, and ``CLOCK_SKEW_SECONDS`` for the difference between the clocks of the two
+    nodes: a peer cannot lower its cost per second with seconds that did not pass, beyond
+    that margin.
     A movement with no seconds charges for no time.
 
     Returns ``(seq, problem)``, with the seq of the first ``maintenance`` movement of
