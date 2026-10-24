@@ -1,5 +1,5 @@
 import time
-from hashlib import sha256
+import secrets
 from typing import Callable, List, Optional, Tuple
 
 from src.utils.bee_client import BeeClient
@@ -257,7 +257,9 @@ def delegate_execution(
             raise RuntimeError(f'{peer} closed the start with no answer.')
         external_token = service_instance.token
         SQLConnection().bind_start_attempt(peer, reference_hex, external_token)
-        encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
+        # The alias is a bearer credential on this node, so it is a random value of its
+        # own: derived from the peer's token, a leak of one would be a leak of both (#576).
+        alias: str = secrets.token_hex(32)
 
         build_peer_mu = convert_mu(
             int(peer_build_mu),
@@ -292,7 +294,7 @@ def delegate_execution(
         SQLConnection().add_delegated_instance(
             father_id=father_id,
             peer_id=peer,  # Add node_uri.
-            encrypted_external_token=encrypted_external_token,  # Add token.
+            alias=alias,
             external_token=external_token,
             # Store what the client is told, so tunnels can be restored after a
             # restart and firewall cleanup targets the address actually handed out.
@@ -318,7 +320,7 @@ def delegate_execution(
                                get_arch_tag(service=service, metadata=metadata)
                                if service is not None else None),
         )
-        service_instance.token = encrypted_external_token
+        service_instance.token = alias
         service_instance.instance.CopyFrom(published_instance)
         return service_instance
     except Exception as e:

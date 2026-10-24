@@ -56,7 +56,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         self.peer.add(-100, "build")
         self.sc.add_client(FATHER, 5000, None)
         self.sc.add_delegated_instance(
-            father_id=FATHER, encrypted_external_token=ALIAS, external_token=PEER_TOKEN,
+            father_id=FATHER, alias=ALIAS, external_token=PEER_TOKEN,
             peer_id="peer", serialized_instance=b"", service_id="s", balance_mu=900,
             peer_balance_mu=900, movements=(ledger.Movement(ledger.START, 900),),
             sent_peer_mu=1000, mark=self._mark(2),
