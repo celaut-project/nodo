@@ -202,9 +202,10 @@ continues the mark is an interval:
 
 - Its cost is the sum of its `maintenance` movements. Its seconds are the sum of the
   `seconds` that each of them priced, but no more than the time from the mark to the last
-  of them, and one period. So the time that this node could not read the peer is not in
+  of them, one period, and `CLOCK_SKEW_SECONDS` (120 s) for the difference between the
+  clocks of the two nodes. So the time that this node could not read the peer is not in
   the interval, and a peer cannot lower its price per second with seconds that did not
-  pass.
+  pass, beyond that 120 s margin.
 - The interval charges too much when its cost per second is more than
   `max_maintenance_cost / maintenance_seconds_loop * (1 + variance)`, with 1 MU for each
   movement for the rounding. The comparison is on the scale of the peer, before any
