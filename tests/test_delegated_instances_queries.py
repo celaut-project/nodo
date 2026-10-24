@@ -117,6 +117,11 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'peer_base_disk_space': None,
                 'peer_base_cpu_period': None,
                 'peer_base_cpu_quota': None,
+                # No quote was given: the charge of the peer is not checked (#567).
+                'quote_init_maintenance_cost': None,
+                'quote_max_maintenance_cost': None,
+                'quote_maintenance_seconds_loop': None,
+                'quote_variance': None,
             },
         )
 

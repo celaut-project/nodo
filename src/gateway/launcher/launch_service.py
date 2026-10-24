@@ -13,6 +13,7 @@ from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
 from src.utils.cost_functions.architecture_resources import executes_locally
+from src.utils.cost_functions import peer_quotes
 from src.utils.cost_functions.delegated_price import own_price, peer_build_mu
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
@@ -295,6 +296,7 @@ def _force_delegate(
         own_build_mu=own_build_mu,
         peer_build_mu=peer_build_value,
         service=service,
+        peer_quote=peer_quotes.signed(forced_peer, estimated_cost),
     )
     bind_child_token(start_charge, instance.token)
 
@@ -649,6 +651,9 @@ def launch_service(
                         own_build_mu=own_build_mu,
                         peer_build_mu=peer_build_value,
                         service=service,
+                        # The quote as the peer signed it, in its MU: the tick checks
+                        # the maintenance charge of the peer against it (#567).
+                        peer_quote=peer_quotes.signed(peer, estimated_cost),
                     )
 
                 else:

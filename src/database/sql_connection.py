@@ -124,6 +124,11 @@ def _chat_service(row) -> Optional[dict]:
     return {'id': row['service_id'], 'tags': list(metadata.hashtag.tag)}
 
 
+def _mu_text(value) -> Optional[str]:
+    """A MU figure as the TEXT that a MU column holds, or None for None."""
+    return None if value is None else str(int(value))
+
+
 def _as_int(value) -> int:
     """A MU column read back as a whole number, defaulting to zero.
 
@@ -2708,7 +2713,8 @@ class SQLConnection(metaclass=Singleton):
                    max_mem_limit, max_disk_space, max_cpu_period, max_cpu_quota,
                    base_mem_limit, base_disk_space, base_cpu_period, base_cpu_quota,
                    peer_base_mem_limit, peer_base_disk_space, peer_base_cpu_period,
-                   peer_base_cpu_quota
+                   peer_base_cpu_quota, quote_init_maintenance_cost,
+                   quote_max_maintenance_cost, quote_maintenance_seconds_loop, quote_variance
             FROM delegated_instances WHERE killed_at IS NULL
             ''' + ('AND token_delegation = ?' if token is not None else ''),
             (token,) if token is not None else ())
@@ -2749,6 +2755,10 @@ class SQLConnection(metaclass=Singleton):
                 'peer_base_disk_space': row[32],
                 'peer_base_cpu_period': row[33],
                 'peer_base_cpu_quota': row[34],
+                'quote_init_maintenance_cost': _as_int(row[35]) if row[35] is not None else None,
+                'quote_max_maintenance_cost': _as_int(row[36]) if row[36] is not None else None,
+                'quote_maintenance_seconds_loop': row[37],
+                'quote_variance': row[38],
             }
             for row in result.fetchall()
         ]
@@ -3143,7 +3153,8 @@ class SQLConnection(metaclass=Singleton):
                                balance_mu: int = 0, peer_balance_mu: int = 0,
                                movements: Optional[Sequence[ledger.Movement]] = None,
                                sent_peer_mu: int = 0, mark: Optional[Mapping] = None,
-                               shape: Optional[Mapping] = None):
+                               shape: Optional[Mapping] = None,
+                               quote: Optional[Mapping] = None):
         """
         Adds an external container to the database, with the first rows of its account.
 
@@ -3172,10 +3183,16 @@ class SQLConnection(metaclass=Singleton):
                 peer that ``peer_balance_mu`` is the balance after: ``seq``, ``hash``
                 and ``ts`` (see `delegated_instances`). None when the statement
                 could not be read.
+            quote (Optional[Mapping]): The maintenance quote of the peer for this
+                instance, in the MU of the peer (#567): ``init_maintenance_cost``,
+                ``max_maintenance_cost``, ``maintenance_seconds_loop`` and ``variance``
+                (``peer_quotes.maintenance_terms``). None stores NULL: the charge of the
+                peer is then not checked.
         """
         movements = _opening_movements(balance_mu, movements)
         mark = mark or {}
         shape = shape or {}
+        quote = quote or {}
         launch_bp = shape.get("launch_bp") or {}
 
         def work(cursor):
@@ -3189,10 +3206,11 @@ class SQLConnection(metaclass=Singleton):
                     cpu_quota, max_mem_limit, max_disk_space, max_cpu_period, max_cpu_quota,
                     base_mem_limit, base_disk_space, base_cpu_period, base_cpu_quota,
                     arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, charged_until,
-                    launched_at
+                    quote_init_maintenance_cost, quote_max_maintenance_cost,
+                    quote_maintenance_seconds_loop, quote_variance, launched_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (external_token, alias, peer_id, father_id, serialized_instance, service_id,
                   str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
                   mark.get("hash"), str(int(sent_peer_mu)),
@@ -3202,7 +3220,10 @@ class SQLConnection(metaclass=Singleton):
                   shape.get("max_cpu_quota"), shape.get("base_mem_limit"),
                   shape.get("base_disk_space"), shape.get("base_cpu_period"),
                   shape.get("base_cpu_quota"), shape.get("arch"), launch_bp.get("cpu"),
-                  launch_bp.get("mem"), launch_bp.get("disk"), time.time()))
+                  launch_bp.get("mem"), launch_bp.get("disk"), time.time(),
+                  _mu_text(quote.get("init_maintenance_cost")),
+                  _mu_text(quote.get("max_maintenance_cost")),
+                  quote.get("maintenance_seconds_loop"), quote.get("variance")))
             self._append_opening(cursor, alias, movements)
 
         self._transaction(work)
@@ -3714,21 +3735,33 @@ class SQLConnection(metaclass=Singleton):
         return self._transaction(work)
 
     def record_statement_fault(self, peer_id: str, account_ref: str, reason: str,
-                               seq: int, window: int = 0) -> bool:
+                               seq: int, window: int = 0, any_seq: bool = False) -> bool:
         """Write a fault of ``peer_id`` in a statement. True if it was not written yet:
         that is the one time that it is scored.
 
         With ``window`` (seconds), the fault shows no movement. It is written and scored
         again only when the last one is older than ``window``. The last one is the one of
-        the same peer, account, reason and seq."""
+        the same peer, account, reason and seq.
+
+        With ``any_seq``, the last one is the one of the same peer, account and reason,
+        at any seq, and a seq that holds a fault of the reason is not written again: a
+        fault that shows at many movements is scored once in the window, and a movement
+        once (#567)."""
         now = int(time.time())
 
         def work(cursor):
+            if any_seq:
+                if cursor.execute(
+                        'SELECT 1 FROM statement_faults WHERE peer_id = ? AND account_ref = ? '
+                        'AND reason = ? AND seq = ?',
+                        (peer_id, account_ref, reason, int(seq))).fetchone():
+                    return False
             if window > 0:
                 last = cursor.execute(
                     'SELECT MAX(ts) FROM statement_faults WHERE peer_id = ? AND account_ref = ? '
-                    'AND reason = ? AND seq = ? AND period > 0',
-                    (peer_id, account_ref, reason, int(seq))).fetchone()[0]
+                    'AND reason = ?' + ('' if any_seq else ' AND seq = ? AND period > 0'),
+                    (peer_id, account_ref, reason) + (() if any_seq else (int(seq),))
+                ).fetchone()[0]
                 if last is not None and now - int(last) < int(window):
                     return False
             cursor.execute('''

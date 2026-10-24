@@ -44,6 +44,13 @@ class Reason:
     not cause: a start that is not one of ours, a top-up of an instance that is not ours,
     or more statements than this node asked for (#570)."""
 
+    MAINTENANCE_OVERCHARGED = "maintenance_overcharged"
+    """The statement of a child that this node delegated to the peer charges more
+    maintenance per second than the peer quoted for it: more than `max_maintenance_cost`
+    per `maintenance_seconds_loop`, times `1 + variance`. The quote that the peer signed
+    for the instance is the proof, on the scale of the peer. The instance and its charge
+    to the client do not change: this node absorbs the excess (#567)."""
+
     # Services.
     INSTANCE_LOST = "instance_lost"
     """The instance's virtual machine no longer exists and had to be pruned."""

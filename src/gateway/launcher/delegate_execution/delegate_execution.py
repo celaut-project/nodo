@@ -22,6 +22,7 @@ from src.payment_system.mu_conversion import (
     matching_payment_system,
 )
 from src.utils.cost_functions.delegated_price import priced_shape
+from src.utils.cost_functions.peer_quotes import maintenance_terms
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
 from src.virtualizers.architecture import get_arch_tag
 
@@ -164,6 +165,7 @@ def delegate_execution(
                         own_build_mu: int = 0,
                         peer_build_mu: int = 0,
                         service: Optional[celaut.Service] = None,
+                        peer_quote: Optional[celaut_pb2.EstimatedCost] = None,
                    ) -> celaut_pb2.ServiceInstance:
     """Run this service on ``peer`` and open the child's local account.
 
@@ -178,6 +180,11 @@ def delegate_execution(
 
     ``service`` gives the shape that the maintenance tick prices the child by
     (``delegated_price.priced_shape``).
+
+    ``peer_quote`` is the quote of the peer for this start, as the peer sent it, in its
+    MU (``peer_quotes.signed``). Its maintenance figures go on the row, not converted:
+    the tick checks the charge of the peer against them (#567). None: the row has no
+    quote, and that charge is not checked.
 
     The balance of the child on the peer comes from its statement (#570), which also
     shows what the peer took for the start: ``_check_start`` checks it, and the mark it
@@ -319,6 +326,8 @@ def delegate_execution(
             shape=priced_shape(service, metadata, service_id,
                                get_arch_tag(service=service, metadata=metadata)
                                if service is not None else None),
+            # What the peer signed for one maintenance period, in its MU (#567).
+            quote=maintenance_terms(peer_quote),
         )
         service_instance.token = alias
         service_instance.instance.CopyFrom(published_instance)

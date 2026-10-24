@@ -188,10 +188,39 @@ says.
 
 ### A child
 
-For a child, this node checks the chain and nothing else. What the peer charges a child
-is the business of whoever runs it: the father is charged what the child consumed, and
-the peer's build, ticks and tunnels are not judged. See [`PRICING.md`](PRICING.md) for
-how that charge is found.
+For a child, this node checks the chain, and the maintenance that the peer charges the
+child against the quote that the peer gave for it (#567). The father is charged the price
+of this node (#577), so what the peer charges is the cost of the delegation, and the
+margin of this node is the difference. The build of the peer and its tunnels are not
+judged. See [`PRICING.md`](PRICING.md) for how the charges are found.
+
+**The maintenance against the quote.** When this node delegates a start, it keeps the
+maintenance quote of the peer on the delegated row (`quote_*`): `init_maintenance_cost`,
+`max_maintenance_cost`, `maintenance_seconds_loop` and `variance` of its
+`EstimatedCost`, in the MU of the peer, not converted. Each statement of the child that
+continues the mark is an interval:
+
+- Its cost is the sum of its `maintenance` movements. Its seconds are the sum of the
+  `seconds` that each of them priced, but no more than the time from the mark to the last
+  of them, and one period. So the time that this node could not read the peer is not in
+  the interval, and a peer cannot lower its price per second with seconds that did not
+  pass.
+- The interval charges too much when its cost per second is more than
+  `max_maintenance_cost / maintenance_seconds_loop * (1 + variance)`, with 1 MU for each
+  movement for the rounding. The comparison is on the scale of the peer, before any
+  conversion.
+- `max_maintenance_cost` is the price of the most resources of the service, so a hotplug
+  up to them is not an overcharge.
+- The quote is the one that the peer signed for this instance. A peer that raises its
+  prices after the delegation is held to the price that it signed, not to its rates of
+  today.
+- A row with no quote, or a quote with a `max_maintenance_cost` of 0 (a service with no
+  `at_most`) or no period, is not checked.
+
+A peer that charges more loses `maintenance_overcharged`. The signed quote is the proof.
+Only the peer is scored: not the service and not the client. The instance is not moved
+or stopped, and its charge to the client does not change: this node chose to delegate,
+so it absorbs the excess (#577).
 
 ### What costs a peer reputation
 
@@ -199,6 +228,7 @@ how that charge is found.
 |---|---|---|
 | A statement that does not continue the chain, is not signed by it, or does not come at all from a peer that answers | `statement_inconsistent` | -1000 |
 | A charge to our account that this node did not cause | `statement_overcharged` | -1000 |
+| More maintenance on a child than the quote that it gave for it | `maintenance_overcharged` | -1000 |
 
 The same scale as a service that does not hash to its id (`get_service_wrong_hash`): in
 every case the peer signed or reported something false about money. A fault is scored
@@ -210,7 +240,10 @@ as it refuses. The 24 hours start when it is scored, not at midnight UTC. After 
 statement that does not continue the chain the mark goes to the head, and the movements
 up to there are not checked. A statement dated far from the clock of this node is
 different: the clock that is wrong can be ours. It is scored at most once in 24 hours,
-and the mark stays where it is.
+and the mark stays where it is. A price above the quote shows at every period, for as
+long as the peer keeps it. So `maintenance_overcharged` is scored at most once in 24
+hours for each child, at the first movement of the interval, and a movement is never
+scored twice.
 
 A statement that does not continue the chain is any of these: the head is behind the
 mark, or is dated far from the clock of this node; a movement does not hang from the one
