@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
+from src.routing import ledger_http
 
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER
@@ -95,7 +96,7 @@ class ChainBackend:
             {"jsonrpc": "1.0", "id": self._id, "method": method, "params": params or []}
         )
         try:
-            response = requests.post(
+            response = ledger_http.post(
                 url, data=payload, headers=headers, timeout=TIMEOUT_SECONDS
             )
         except requests.exceptions.RequestException as exc:

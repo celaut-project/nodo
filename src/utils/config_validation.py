@@ -813,7 +813,7 @@ def validate_routing_config(config: Dict[str, Any]) -> None:
         tor = {}
     if not isinstance(tor, dict):
         raise ConfigValidationError("routing.tor must be a mapping.")
-    for key in ("ENABLED", "ANNOUNCE"):
+    for key in ("ENABLED", "ANNOUNCE", "LEDGER_VIA_TOR"):
         value = tor.get(key, "auto")
         if not isinstance(value, bool) and value != "auto":
             raise ConfigValidationError(

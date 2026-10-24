@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 from protos import celaut_pb2
 from src.utils.ledger_descriptors import ergo_payment_ledger as _ergo_ledger
 import requests
+from src.routing import ledger_http
 from hashlib import sha3_256
 from src.database import sql_connection
 from src.payment_system.exceptions import DoubleSpendingAttempt
@@ -271,7 +272,7 @@ def __balance_total(address) -> Optional[dict]:
     ergo = __init_ergo()
     explorer_api = ergo.get_api_url()
     url = f"{explorer_api}/api/v1/addresses/{str(address.toString())}/balance/total"
-    response = requests.get(url)
+    response = ledger_http.get(url)
     if response.status_code != 200:
         LOGGER(f"Error fetching the total balance: {response.status_code} - {response.text}")
         return None
@@ -903,7 +904,7 @@ def _await_settlement(tx_id: str, script: bytes, asset, ergo=None) -> celaut_pb2
         ergo = __init_ergo()
     for _ in range(0, WAIT_TX_ATTEMPTS):
         sleep(WAIT_TX_SLEEP_TIME)
-        response = requests.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
+        response = ledger_http.get(f"{ergo.get_api_url()}/api/v1/transactions/{tx_id}")
         if response.status_code != 200:
             if response.status_code != 404:
                 LOGGER(f"{ergo.get_api_url()} tx {tx_id} check failed: {response.status_code}")
@@ -959,7 +960,7 @@ EXPLORER_PAGE_SIZE = 100
 
 def _explorer_json(url: str, params: Optional[dict] = None) -> dict:
     """One explorer GET with a timeout. A bad status raises, so the proof fails closed."""
-    response = requests.get(url, params=params, timeout=EXPLORER_TIMEOUT_SECONDS)
+    response = ledger_http.get(url, params=params, timeout=EXPLORER_TIMEOUT_SECONDS)
     if response.status_code != 200:
         raise RuntimeError(f"Error fetching UTXOs: {response.status_code} - {response.text}")
     return response.json()

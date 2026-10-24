@@ -519,6 +519,7 @@ The plan is in
 | `routing.tor.ANNOUNCE` | `auto` | Announce an onion address for the gateway. `auto`: announce if `ENABLED` is `true`, and in hidden mode. `true`: announce. `false`: never. |
 | `routing.tor.CLEARNET_VIA_EXIT` | `false` | Hidden mode only. Call peers that have a clearnet address through a Tor exit. |
 | `routing.tor.SERVICE_EGRESS` | `true` | Hidden mode only. Send the outside TCP of the services this node runs through Tor. `false`: do not run those services here. |
+| `routing.tor.LEDGER_VIA_TOR` | `auto` | Send the node's own requests to its ledger services (Ergo explorer and node, Bitcoin explorer and backend, reputation reads, energy meter) through Tor. `auto`: Tor in hidden mode, direct otherwise. `false` in hidden mode shows the IP address to those services. An address of your own networks is always direct. If Tor is wanted and not running, the request fails and is never sent direct. |
 
 ### Calling `.onion` peers
 
@@ -623,14 +624,16 @@ keep that address. Use a new `identity.MNEMONIC` for a hidden node.
 
 What hidden mode does not hide:
 
-- The own outbound traffic of the node (the Ergo explorer and node, Bitcoin, the energy
-  meter) still shows the IP to the operator of that service.
+- The own outbound traffic of the node to its ledger services goes through Tor with
+  `routing.tor.LEDGER_VIA_TOR: auto`. With `false` it still shows the IP to the operator
+  of that service. The Ergo node library of the payment system (ErgoAppKit, on the
+  JVM) makes its own connections, and these are not routed through Tor.
 - The Ergo crawl (`src/manager/ergo.py`) asks the nodes that other Ergo nodes announce.
   In hidden mode it goes through Tor (the same `HTTPTunnelPort` as the `pow:` checks),
   so an attacker's server that is announced as a node does not see the IP address. With
   `routing.tor.SERVICE_EGRESS: false` the crawl does not ask at all, and the file that
   it writes keeps its last content. An address of your own networks stays direct. The
-  clients of `ledgers.*` and the energy meter are still not covered (issue #552).
+  clients of `ledgers.*` and the energy meter follow `routing.tor.LEDGER_VIA_TOR`.
 - Payments and reputation on the ledger are public. If the identity is funded from an
   account that is linked to a person, the identity is linked too.
 - Tor does not protect against an observer that sees both ends of a circuit.

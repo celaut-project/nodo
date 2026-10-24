@@ -168,8 +168,9 @@ def http_get_json(url: str, timeout_seconds: float) -> Optional[Any]:
         return None
     try:
         import requests
+        from src.routing import ledger_http
 
-        response = requests.get(url, timeout=max(0.1, float(timeout_seconds)))
+        response = ledger_http.get(url, timeout=max(0.1, float(timeout_seconds)))
         response.raise_for_status()
         return response.json()
     except Exception:

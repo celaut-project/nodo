@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import requests
+from src.routing import ledger_http
 
 from src.payment_system.contracts.bitcoin import signer
 from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
@@ -62,7 +63,7 @@ class ExplorerBackend:
     def _get(self, path: str) -> Any:
         url = f"{self._url}{path}"
         try:
-            response = requests.get(url, timeout=TIMEOUT_SECONDS)
+            response = ledger_http.get(url, timeout=TIMEOUT_SECONDS)
         except requests.exceptions.RequestException as exc:
             raise BackendUnavailable(
                 f"explorer {path} failed: {type(exc).__name__}"
@@ -84,7 +85,7 @@ class ExplorerBackend:
     def _post(self, path: str, body: str) -> str:
         """POST ``body`` as plain text and return the plain-text answer."""
         try:
-            response = requests.post(
+            response = ledger_http.post(
                 f"{self._url}{path}", data=body, timeout=TIMEOUT_SECONDS,
                 headers={"content-type": "text/plain"},
             )

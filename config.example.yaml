@@ -63,6 +63,7 @@ routing:
   #   - calls every peer through Tor. Without CLEARNET_VIA_EXIT, a peer that has only a
   #     clearnet address is not called at all;
   #   - sends the outside TCP of its services through Tor (routing.tor.SERVICE_EGRESS);
+  #   - sends its own ledger requests through Tor (routing.tor.LEDGER_VIA_TOR);
   #   - never gives an instance a public address. The caller uses the service tunnel
   #     (network.DELEGATION_TUNNEL_POLICY is `always`);
   #   - has no address expiry, rounds its benchmark scores, and skips the check that
@@ -107,6 +108,17 @@ routing:
     # Exits block many ports and add latency. false: such services are not run here
     # and a peer runs them instead.
     SERVICE_EGRESS: true
+    # The node's own requests to its ledger services (the Ergo explorer and node, the
+    # Bitcoin explorer and backend, the reputation reads, the energy meter) show the IP
+    # address of this host to the service that answers.
+    #   auto  - through Tor in hidden mode, direct otherwise.
+    #   true  - through Tor.
+    #   false - direct. In hidden mode this tells those services your address.
+    # An address of your own networks (loopback, private ranges, routing.LOCAL_NETWORKS)
+    # is always direct. If Tor is wanted and is not running, the request fails: it is
+    # never sent direct instead. The Ergo node library of the payment system
+    # (ErgoAppKit, on the JVM) makes its own connections and is not covered.
+    LEDGER_VIA_TOR: auto
 
 virtualizers:
   # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed

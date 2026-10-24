@@ -57,6 +57,22 @@ def service_egress_via_tor() -> bool:
     return env_manager.get("routing.tor.SERVICE_EGRESS", True) is not False
 
 
+def ledger_via_tor() -> bool:
+    """Whether the node's own requests to its ledger services go through Tor.
+
+    ``routing.tor.LEDGER_VIA_TOR``: ``true`` and ``false`` are literal. ``auto`` (the
+    default) is Tor in hidden mode and direct otherwise. These requests (the Ergo
+    explorer and node, the Bitcoin explorer and backend, the reputation reads, the energy
+    meter) go to services that the operator chose, but the service still sees the IP
+    address of the host. An address of the operator's own networks is never sent
+    through Tor (see ``is_local_address``).
+    """
+    value = env_manager.get("routing.tor.LEDGER_VIA_TOR", "auto")
+    if isinstance(value, bool):
+        return value
+    return hidden_mode()
+
+
 LOCAL_NETWORKS_KEY = "routing.LOCAL_NETWORKS"
 
 

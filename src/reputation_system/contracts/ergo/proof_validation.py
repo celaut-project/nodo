@@ -116,6 +116,7 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     callers can tell "the chain says no" from "the chain did not answer".
     """
     import requests
+    from src.routing import ledger_http
 
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     problem = ergo_node_url_problem(node_url)
@@ -124,7 +125,7 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
 
     url = f"{str(node_url).strip().rstrip('/')}/blockchain/box/byTokenId/{token_id}"
     try:
-        response = requests.get(url, timeout=30)
+        response = ledger_http.get(url, timeout=30)
     except requests.RequestException as e:
         raise ProofLookupUnavailable(f"Could not reach the Ergo node at {node_url}: {e}")
 
@@ -373,6 +374,7 @@ def _search_boxes_by_r7(api_url: str, owner_proposition_hex: str) -> Optional[Li
     :func:`_boxes_off_canonical_contract`).
     """
     import requests
+    from src.routing import ledger_http
 
     api_url = str(api_url).rstrip("/")
     url = f"{api_url}/api/v1/boxes/unspent/search"
@@ -387,7 +389,7 @@ def _search_boxes_by_r7(api_url: str, owner_proposition_hex: str) -> Optional[Li
         "assets": [],
     }
     try:
-        response = requests.post(url, json=body, params={"limit": 50, "offset": 0}, timeout=30)
+        response = ledger_http.post(url, json=body, params={"limit": 50, "offset": 0}, timeout=30)
     except requests.RequestException as e:
         logger(f"R7-filtered search unavailable ({e}); falling back to paginated scan.")
         return None
