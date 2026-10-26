@@ -983,8 +983,10 @@ balancers:
 
 costs:
   # How much tunnelled traffic accumulates before it is billed. Smaller reacts faster to
-  # an empty balance, larger costs less bookkeeping.
-  TUNNEL_CHARGE_INTERVAL_KB: 1024
+  # an empty balance, larger costs less bookkeeping: each charge is a ledger commit that
+  # stalls the relay, so on a slow disk a small value caps tunnel throughput. A tunnel
+  # can overrun an empty balance by up to this much (64 MiB by default).
+  TUNNEL_CHARGE_INTERVAL_KB: 65536
   # Let an instance keep running with a negative balance instead of being stopped.
   #
   # An empty balance is the only thing that reaps an instance nobody stops: the

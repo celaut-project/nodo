@@ -110,7 +110,11 @@ DEFAULT_UDP_IDLE_TIMEOUT_S = 30.0
 # Grace period for the writer thread to notice the tunnel is closing.
 WRITER_JOIN_TIMEOUT_S = 2.0
 
-DEFAULT_TUNNEL_CHARGE_INTERVAL_KB = 1024  # Bill once per MiB relayed.
+# Bill once per 64 MiB relayed. Every charge is a ledger transaction that waits for
+# the disk, and the relay does not read the service socket while it waits, so a
+# small interval caps throughput at (interval / commit time): 1 MiB per charge ran
+# at 5 MiB/s on a spinning disk, 64 MiB at 47 MiB/s. See docs/TUNNELING.md.
+DEFAULT_TUNNEL_CHARGE_INTERVAL_KB = 65536
 
 BYTES_PER_KB = 1024
 
