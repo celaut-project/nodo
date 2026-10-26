@@ -146,7 +146,7 @@ authorises the tunnel in the first place.
 | --- | --- | --- |
 | `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel stream — with `nodo tunnel`, each TCP connection or UDP flow through the local port. `nodo tunnel` prints it (`open_fee_mu` in `--json`) and the TUI asks y/N with the amount before opening one. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
 | `pricing.NET_MU_PER_GIB` | `2000000` | Charged per GiB relayed, counting **both** directions. |
-| `costs.TUNNEL_CHARGE_INTERVAL_KB` | `1024` | How much traffic accumulates before it is billed. |
+| `costs.TUNNEL_CHARGE_INTERVAL_KB` | `65536` | How much traffic accumulates before it is billed. Each charge is a ledger commit during which the relay reads nothing, so a small interval limits throughput on a slow disk (see below). |
 
 Set a price to `0` to stop charging for it. Prices are in MU; see
 [`PRICING.md`](PRICING.md).
@@ -160,8 +160,14 @@ Two honest details:
 * Traffic is accounted **after** it moves, never before, so data already written
   is never discarded for lack of funds. The cost is that an empty balance is
   noticed one block late — a tunnel can overrun by up to
-  `costs.TUNNEL_CHARGE_INTERVAL_KB` before closing. Shrink the interval to tighten
-  that bound.
+  `costs.TUNNEL_CHARGE_INTERVAL_KB` (64 MiB by default) before closing. Shrink the
+  interval to tighten that bound.
+* The interval is also a throughput knob. Every charge is a transaction that waits
+  for the disk, and the relay does not read the service while it waits. Moving
+  64 MiB through a tunnel on a spinning disk (~93 ms per commit measured on a copy
+  of the database) took 12.9 s (5.0 MiB/s) billed every 1 MiB, and 1.35 s
+  (47.4 MiB/s) billed once; the direct transfer ran at ~410 MiB/s. Billed bytes
+  and MU were identical in both runs.
 * Whether an empty balance actually stops anything depends on `costs.ALLOW_DEBT`,
   which is `true` in the shipped config. With debt allowed, tunnels are metered
   and logged but not cut off.
