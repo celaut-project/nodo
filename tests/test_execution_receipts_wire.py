@@ -365,11 +365,27 @@ class StartReceiptTests(unittest.TestCase):
             self.assertIsNone(le._start_receipt(token=TOKEN, service_id="ab" * 32,
                                                 config=celaut_pb2.Configuration(), initial_mu=1))
 
-    def test_a_receipt_that_cannot_be_built_does_not_fail_the_start(self):
+    def test_no_service_id_gives_no_receipt_and_a_warning(self):
+        """A start receipt with an empty service_id fails every check, so the node does
+        not sign one (#593 review)."""
+        from src.gateway.launcher.local_execution import local_execution as le
+        for service_id in (None, "", "not hex", "abc"):
+            with self.subTest(service_id=service_id), _node_identity(), \
+                    mock.patch.object(le.log, "LOGGER") as logger, \
+                    mock.patch.object(er, "start_receipt") as sign:
+                self.assertIsNone(le._start_receipt(token=TOKEN, service_id=service_id,
+                                                    config=celaut_pb2.Configuration(),
+                                                    initial_mu=1))
+                sign.assert_not_called()
+                self.assertIn("WARNING", logger.call_args.args[0])
+
+    def test_the_start_movement_names_the_execution(self):
         from src.gateway.launcher.local_execution import local_execution as le
         with _node_identity():
-            self.assertIsNone(le._start_receipt(token=TOKEN, service_id="not hex",
-                                                config=celaut_pb2.Configuration(), initial_mu=1))
+            self.assertEqual(le.execution_cause(TOKEN),
+                             {"execution_name": er.execution_name(TOKEN, _peer_id())})
+        with mock.patch.object(er, "node_peer_id", return_value=None):
+            self.assertIsNone(le.execution_cause(TOKEN))
 
     def test_start_service_carries_the_receipt(self):
         with _node_identity():
