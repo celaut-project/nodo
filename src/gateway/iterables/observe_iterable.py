@@ -180,10 +180,11 @@ class ObserveIterable:
                 elif chain is not None and event.get("kind") == "packet":
                     _record_packet(chain, event)
                 if chain is not None and chain.due():
-            # The observation ended on its own (the instance stopped): the close.
                     checkpoint = chain.checkpoint()
                     if checkpoint is not None:
                         yield _receipt_event(checkpoint)
+            # The observation ended on its own (the instance stopped): the close. A
+            # caller that cancels gets none (see rpc_tunnel._relay).
             if chain is not None:
                 close = chain.checkpoint(final=True)
                 if close is not None:

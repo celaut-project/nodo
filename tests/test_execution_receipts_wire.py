@@ -8,6 +8,7 @@ the instance lookups, the charge and the identity key are patched. What these pi
 * a caller that does not ask gets no index 2, and nothing is hashed for it;
 * the chains hold only billed messages, and the ``tunnel`` movements of the ledger
   name the execution and the stream, and add up to the ``mu_charged`` of the close;
+* a cancelled stream has no close, and no error;
 * the celaut-gateway layer declares the new formats.
 """
 import socket
@@ -247,6 +248,27 @@ class TunnelReceiptTests(unittest.TestCase):
                 is_active=_deadline())
             out = list(relay)
         self.assertTrue(all(isinstance(m, bytes) for m in out))
+
+    def test_a_cancelled_stream_has_no_close_and_no_error(self):
+        """The gateway calls relay.close() when the caller cancels: a generator cannot
+        yield after GeneratorExit, so there is no close (docs: a missing close is not
+        by itself proof of a fault). The tunnel is still torn down and settled."""
+        port = _echo_server()
+        with ExitStack() as stack:
+            stack.enter_context(_node_identity())
+            stack.enter_context(mock.patch.object(
+                rpc_tunnel.sc, "get_internal_instance", return_value=_instance(port)))
+            stack.enter_context(mock.patch.object(
+                rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"))
+            stack.enter_context(mock.patch("src.manager.manager.spend_mu", return_value=True))
+            settle = stack.enter_context(mock.patch.object(rpc_tunnel.TrafficMeter, "settle"))
+            requests = iter([celaut_pb2.TokenMessage(token=TOKEN, slot=str(port), receipts=True)])
+            conn, relay = rpc_tunnel.service_tunnel(requests, is_active=_deadline())
+            first = next(relay)
+            relay.close()                       # what the gateway does on a cancel
+        self.assertEqual(first, b"HELLO")
+        settle.assert_called_once()
+        self.assertEqual(conn.fileno(), -1)     # the socket is closed
 
     def _billed_run(self, balance, payload):
         """A tunnel with real billing: 5 MU to open it, 1 MU per byte, a block of 1 KiB."""

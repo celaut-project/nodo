@@ -530,8 +530,10 @@ def _relay(
 
     With ``receipts``, it also yields the checkpoints (``ExecutionReceipt``) when they
     are due, and the ``close`` after the tunnel is torn down and settled, so the close
-    carries the whole charge. A relay that is closed from outside (the RPC was
-    cancelled) yields no close: nobody is left to receive it.
+    carries the whole charge. A relay that is closed from outside (the caller cancelled
+    the RPC, or the gateway called ``relay.close()``) yields no close: a generator
+    cannot yield after ``GeneratorExit``, and nobody is left to receive it. So a
+    missing close is not proof of a fault (docs/EXECUTION_RECEIPTS.md).
     """
     stream_id = inbound.opened(**stream) if stream else None
     stop = threading.Event()
