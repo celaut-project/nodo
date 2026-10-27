@@ -109,3 +109,22 @@ def pid_alive(pid: int, process_name: str = "") -> bool:
     if process_name and not pid_matches(pid=pid, process_name=process_name):
         return False
     return True
+
+
+def control_socket_missing(path: str) -> bool:
+    """Is the control socket gone, as opposed to out of this process's sight?
+
+    ``os.path.exists`` answers ``False`` for both. The socket directory is root's
+    (``/run/nodo/ch`` is ``0700``), so a caller without root's rights -- a command
+    run without sudo against a node installed with sudo -- reads every live
+    guest's socket as missing and tears down guests that are running. Only a
+    socket that is actually absent counts; one this process cannot look at is not
+    evidence, the same call ``pid_alive`` makes for a pid it cannot signal.
+    """
+    try:
+        os.stat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
