@@ -36,7 +36,14 @@ def _take(argv: List[str], flag: str) -> Optional[str]:
 
 
 def read_receipts(path: str) -> List:
-    """Every receipt in ``path``, in file order. See the module docstring for the shapes."""
+    """Every receipt in ``path``, in file order. See the module docstring for the shapes.
+
+    Raises ``OSError`` for a file it cannot open, and ``ValueError`` for any content
+    that is not receipts: bad JSON, an entry that is not an object, or an object that
+    is not an ``ExecutionReceipt`` (an unknown field, a bad base64 value, a wrong type).
+    A client runs this on files that it did not write, so no other error comes out.
+    """
+    from google.protobuf import json_format
     from src.identity.execution_receipt import from_json_dict
 
     with open(path, "r", encoding="utf-8") as f:
@@ -49,7 +56,17 @@ def read_receipts(path: str) -> List:
         document = document["receipts"]
     if isinstance(document, dict):
         document = [document]
-    return [from_json_dict(entry) for entry in document]
+    if not isinstance(document, list):
+        raise ValueError("the file is not a receipt, a list of receipts or one per line")
+    receipts = []
+    for index, entry in enumerate(document):
+        if not isinstance(entry, dict):
+            raise ValueError(f"entry {index} is not a JSON object")
+        try:
+            receipts.append(from_json_dict(entry))
+        except (json_format.ParseError, TypeError, AttributeError) as e:
+            raise ValueError(f"entry {index} is not an ExecutionReceipt: {e}") from e
+    return receipts
 
 
 def write_receipt(path: str, receipt) -> None:
@@ -103,7 +120,7 @@ def verify_command(argv: List[str]) -> bool:
         return catalogue.emit_error(as_json, USAGE)
     try:
         receipts = read_receipts(argv[0])
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:  # a JSON nested too deep: RecursionError
         return catalogue.emit_error(as_json, f"Cannot read receipts from {argv[0]}: {e}")
     if not receipts:
         return catalogue.emit_error(as_json, f"No receipt in {argv[0]}.")
