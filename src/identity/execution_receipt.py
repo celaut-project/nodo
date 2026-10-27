@@ -545,6 +545,28 @@ def _scheme_is_ours(scheme) -> bool:
     )
 
 
+# The signed fields that only some kinds or planes use. A field that a receipt does not
+# use must be empty or zero (docs/EXECUTION_RECEIPTS.md), and problems() checks it:
+# a value there is signed, so a reader could take it for a claim.
+_START_FIELDS = ("service_id", "envs_digest", "initial_mu")
+_STREAM_FIELDS = ("plane", "session", "slot", "seq", "in_events", "in_bytes", "in_head",
+                  "out_events", "out_bytes", "out_head", "mu_charged", "coverage",
+                  "capture_mode", "degraded_reason")
+_TUNNEL_FIELDS = ("slot", "mu_charged")
+_OBSERVE_FIELDS = ("capture_mode", "degraded_reason")
+
+
+def _is_set(receipt: celaut_pb2.ExecutionReceipt, field: str) -> bool:
+    """Whether ``field`` adds anything to the canonical text: a text, a number, or a
+    message (service_id, an Amount) with a value in it."""
+    value = getattr(receipt, field)
+    if field == "service_id":
+        return bool(bytes(value.type) or bytes(value.value))
+    if field in ("initial_mu", "mu_charged"):
+        return bool(value.n)
+    return bool(value)
+
+
 def problems(receipt: celaut_pb2.ExecutionReceipt, *, peer_id: Optional[str] = None,
              token: Optional[str] = None) -> List[str]:
     """Why ``receipt`` is not a valid receipt; an empty list when it is.
@@ -570,19 +592,37 @@ def problems(receipt: celaut_pb2.ExecutionReceipt, *, peer_id: Optional[str] = N
         found.append("session is not lowercase hex")
 
     if r.kind == KIND_START:
-        if not bytes(r.service_id.value) or not r.envs_digest or not r.initial_mu.n:
+        if not bytes(r.service_id.type) or not bytes(r.service_id.value) \
+                or not r.envs_digest or not r.initial_mu.n:
             found.append("a start receipt needs service_id, envs_digest and initial_mu")
-        if r.plane or r.session or r.seq:
-            found.append("a start receipt has no stream fields")
+        used = [f for f in _STREAM_FIELDS if _is_set(r, f)]
+        if used:
+            found.append(f"a start receipt has no stream fields (set: {', '.join(used)})")
     elif r.kind in (KIND_CHECKPOINT, KIND_CLOSE):
         if r.plane not in PLANES:
             found.append(f"plane {r.plane!r} is not one of {', '.join(PLANES)}")
-        if r.coverage not in COVERAGES:
-            found.append(f"coverage {r.coverage!r} is not one of {', '.join(COVERAGES)}")
+        elif r.coverage not in PLANE_COVERAGES[r.plane]:
+            found.append(f"coverage {r.coverage!r} is not one of "
+                         f"{', '.join(PLANE_COVERAGES[r.plane])} for plane {r.plane}")
         if not r.session or r.seq < 1 or not r.in_head or not r.out_head:
             found.append("a checkpoint needs session, seq >= 1, in_head and out_head")
-        if r.envs_digest or bytes(r.service_id.value) or r.initial_mu.n:
-            found.append("a checkpoint has no start fields")
+        used = [f for f in _START_FIELDS if _is_set(r, f)]
+        if used:
+            found.append(f"a checkpoint has no start fields (set: {', '.join(used)})")
+        if r.plane == PLANE_TUNNEL:
+            if not r.slot or not r.mu_charged.n:
+                found.append("a tunnel checkpoint needs slot and mu_charged")
+            used = [f for f in _OBSERVE_FIELDS if _is_set(r, f)]
+            if used:
+                found.append(f"a tunnel checkpoint has no capture fields (set: {', '.join(used)})")
+        elif r.plane == PLANE_OBSERVE:
+            if not r.capture_mode:
+                found.append("an observe checkpoint needs capture_mode")
+            elif r.coverage == COVERAGE_TAP and r.capture_mode != "pcap":
+                found.append(f"coverage {COVERAGE_TAP} needs capture_mode pcap")
+            used = [f for f in _TUNNEL_FIELDS if _is_set(r, f)]
+            if used:
+                found.append(f"an observe checkpoint has no tunnel fields (set: {', '.join(used)})")
 
     if not _scheme_is_ours(r.signature_scheme):
         found.append("signature_scheme is not the ed25519 scheme this code verifies")
