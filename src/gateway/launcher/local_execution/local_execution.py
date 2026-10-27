@@ -394,9 +394,11 @@ def local_execution(
             cpu_quota=int(resolved_resources.cpu_quota),
             arch=service_arch,
             launch_bp=launch_bp,
-            # What the father paid, and the build taken from it (#570).
+            # What the father paid, and the build taken from it (#570). The start
+            # names the execution as its receipt does (#419).
             movements=(
-                ledger.Movement(ledger.START, initial_mu),
+                ledger.Movement(ledger.START, initial_mu,
+                                detail=execution_cause(vmachine_id)),
                 ledger.Movement(ledger.BUILD, -build_mu),
             ),
         )
@@ -512,6 +514,14 @@ def local_execution(
     if receipt is not None:
         service_instance.receipt.CopyFrom(receipt)
     return service_instance
+
+
+def execution_cause(token: str) -> Optional[dict]:
+    """The cause of the ``start`` movement of ``token``: its execution name (#419), the
+    name that its receipts carry. None if this node has no identity key."""
+    from src.identity import execution_receipt
+    name = execution_receipt.node_execution_name(token)
+    return {"execution_name": name} if name else None
 
 
 def _start_receipt(token: str, service_id: Optional[str],

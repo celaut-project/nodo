@@ -190,8 +190,10 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         movements = r.written["movements"]
         self.assertEqual([m.kind for m in movements], [ledger.START, ledger.BUILD])
         self.assertEqual([m.amount_mu for m in movements], [1_000_000, -100_000])
-        # Nothing of the peer: the child is one more instance of this node.
-        self.assertTrue(all(not m.detail for m in movements))
+        # Nothing of the peer: the child is one more instance of this node. The start
+        # names the execution as its receipt does (#419), and nothing else.
+        self.assertLessEqual(set(movements[0].detail or {}), {"execution_name"})
+        self.assertFalse(movements[1].detail)
         self.assertEqual(r.written["sent_peer_mu"], 1_800_000)
 
     def test_an_unreadable_peer_leaves_the_balance_of_this_node_and_the_quote_of_the_peer(self):

@@ -74,12 +74,16 @@ not change anything here.
 Receipts
 --------
 A caller that asks for them (``TokenMessage.receipts``) gets checkpoints of the
-execution receipt (#419, docs/EXECUTION_RECEIPTS.md): beside each
+execution receipt (#419, docs/EXECUTION_RECEIPTS.md): after each successful
 ``TrafficMeter.add``, the relayed message goes into one of two hash chains (into
 the service, out of it), and every ``receipts.CHECKPOINT_BYTES`` or
 ``receipts.CHECKPOINT_SECONDS`` the node signs the counters, the two heads and what
-the tunnel was charged. A caller that does not ask gets the stream it always got: an
-older client would refuse index 2, and nothing is hashed for it.
+the tunnel was charged. A message that the meter refuses (no balance, no daily
+allowance) is not in the chains, so the signed counters show only accepted traffic. Every
+``tunnel`` movement of the ledger names the execution (``execution_name``) and, with
+receipts, the stream (``session``), so the charge of a stream in the balance statement
+is the ``mu_charged`` of its last receipt. A caller that does not ask gets no index 2,
+and nothing is hashed for it.
 """
 
 import select
@@ -178,9 +182,12 @@ class TrafficMeter:
     ``spend_mu`` honours for us.
     """
 
-    def __init__(self, token: str, target: str) -> None:
+    def __init__(self, token: str, target: str, cause: Optional[dict] = None) -> None:
         self.token = token
         self.target = target
+        # Added to the detail of each `tunnel` movement: the execution name, and the
+        # receipt stream when there is one (#419).
+        self.cause = dict(cause or {})
         self.exhausted = threading.Event()
 
         self._lock = threading.Lock()
@@ -218,7 +225,7 @@ class TrafficMeter:
         from src.manager.manager import spend_mu
 
         if spend_mu(id=self.token, amount_mu=amount_mu, debug_mode=False,
-                    kind=ledger.TUNNEL, detail=detail):
+                    kind=ledger.TUNNEL, detail={**self.cause, **detail}):
             # _spend() itself runs unlocked (spend_mu can be slow, and add()
             # already serializes the accounting that decides the amount), but the
             # writer thread and this generator's thread can both land here, so
@@ -478,11 +485,11 @@ def _pump_to_service(
             messages += 1
             inbound.count(stream_id, bytes_in=len(message))
             activity[0] = time.monotonic()  # caller->service counts as activity too
-            if receipts is not None:
-                receipts.record(execution_receipt.DIRECTION_IN, message)
 
             if not meter.add(len(message)):
-                break  # Out of funds.
+                break  # Out of funds. Not billed, so not in the receipt chain.
+            if receipts is not None:
+                receipts.record(execution_receipt.DIRECTION_IN, message)
 
     except Exception as e:
         # Includes the caller cancelling the RPC and the service closing its
@@ -592,11 +599,13 @@ def _relay(
             messages += 1
             inbound.count(stream_id, bytes_out=len(data))
 
-            if receipts is not None:
-                receipts.record(execution_receipt.DIRECTION_OUT, data)
             # Charged before handing it over: what the caller receives is what it
             # pays for, and an exhausted balance stops the next read, not this one.
+            # Recorded only when billed: the last message that the meter refuses still
+            # goes to the caller, but it is not in the chain.
             billable = meter.add(len(data))
+            if billable and receipts is not None:
+                receipts.record(execution_receipt.DIRECTION_OUT, data)
             yield data
             if not billable:
                 break  # Out of funds.
@@ -672,17 +681,6 @@ def service_tunnel(
     if host_limits.daily_allowance_spent():
         raise TunnelError(host_limits.daily_allowance_reason())
 
-    # Charged before connecting: an instance that cannot pay to open the tunnel
-    # gets a clean refusal instead of a socket it will lose mid-transfer.
-    meter = TrafficMeter(token=token, target=target)
-    if not meter.charge_open():
-        raise TunnelError(
-            f"Instance '{token}' has not enough balance to open a tunnel."
-        )
-
-    conn = _connect(ip, port, transport)
-    logger(f"{LOG_PREFIX} {target}: tunnel established.")
-
     receipts = None
     if want_receipts:
         receipts = execution_receipt.ReceiptChain.for_node(
@@ -691,6 +689,27 @@ def service_tunnel(
         )
         if receipts is None:
             logger(f"{LOG_PREFIX} {target}: receipts asked, but this node has no identity key.")
+
+    # The cause of each `tunnel` movement names the execution, as the receipts do, and
+    # the stream of the receipts: a reader ties the charge to the receipt (#419).
+    cause = {}
+    if receipts is not None:
+        cause = {"execution_name": receipts.name, "session": receipts.session}
+    else:
+        name = execution_receipt.node_execution_name(token)
+        if name:
+            cause = {"execution_name": name}
+
+    # Charged before connecting: an instance that cannot pay to open the tunnel
+    # gets a clean refusal instead of a socket it will lose mid-transfer.
+    meter = TrafficMeter(token=token, target=target, cause=cause)
+    if not meter.charge_open():
+        raise TunnelError(
+            f"Instance '{token}' has not enough balance to open a tunnel."
+        )
+
+    conn = _connect(ip, port, transport)
+    logger(f"{LOG_PREFIX} {target}: tunnel established.")
 
     relay = _relay(
         iterator=iterator,

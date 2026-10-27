@@ -310,6 +310,17 @@ def node_peer_id() -> Optional[str]:
     return key[0] if key is not None else None
 
 
+def node_execution_name(token: str) -> Optional[str]:
+    """The execution name of ``token`` on this node, or None if the node has no key.
+
+    The ledger writes it in the cause of the ``start`` and ``tunnel`` movements of the
+    instance, so that a reader of a balance statement and of a receipt can see that
+    they are about the same execution.
+    """
+    peer_id = node_peer_id()
+    return execution_name(token, peer_id) if peer_id else None
+
+
 def start_receipt(
         token: str,
         service_id: celaut_pb2.Metadata.HashTag.Hash,

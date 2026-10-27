@@ -42,7 +42,9 @@ client, or the operator with ``nodo credit_client``. ``detail.reason`` says whic
 DEBIT = "debit"
 """The operator took MU from a client with ``nodo credit_client --decrement``."""
 START = "start"
-"""The ``initial_mu`` that a new instance received from its father."""
+"""The ``initial_mu`` that a new instance received from its father.
+``detail.execution_name`` is the name that the execution receipts of the instance carry
+(#419), when the node has an identity key."""
 BUILD = "build"
 """The build of the service, taken from the ``initial_mu`` of a new instance."""
 MAINTENANCE = "maintenance"
@@ -61,7 +63,10 @@ REFUND = "refund"
 """MU that goes back to the father: what a stopped child did not use (negative on the
 child, positive on the father), or a charge given back because the start failed."""
 TUNNEL = "tunnel"
-"""A ``ServiceTunnel``: the opening, or the traffic."""
+"""A ``ServiceTunnel``: the opening (``detail.open``), or the traffic (``detail.bytes``).
+``detail.execution_name`` names the execution as its receipts do (#419), and
+``detail.session`` is the receipt stream of the tunnel when the caller asked for
+receipts: the sum of the rows of one session is the ``mu_charged`` of its ``close``."""
 RESOURCE_CHANGE = "resource_change"
 """``ModifyServiceSystemResources``."""
 STATEMENT_QUERY = "statement_query"

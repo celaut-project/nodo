@@ -298,6 +298,10 @@ def delegate_execution(
             father_ip=father_ip,
         )
 
+        # Imported here: local_execution pulls in the virtualizer stack.
+        from src.gateway.launcher.local_execution.local_execution import (
+            _start_receipt, execution_cause,
+        )
         SQLConnection().add_delegated_instance(
             father_id=father_id,
             peer_id=peer,  # Add node_uri.
@@ -318,7 +322,7 @@ def delegate_execution(
             # taken from the amount before the child had a balance.
             peer_balance_mu=peer_balance_mu,
             movements=(
-                ledger.Movement(ledger.START, initial_mu),
+                ledger.Movement(ledger.START, initial_mu, detail=execution_cause(alias)),
                 ledger.Movement(ledger.BUILD, -int(own_build_mu)),
             ),
             sent_peer_mu=sent_peer_mu,
