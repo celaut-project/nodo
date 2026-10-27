@@ -405,6 +405,7 @@ class ReceiptChain:
         self._pending_events = 0
         self._pending_bytes = 0
         self._last_checkpoint = monotonic()
+        self._retry_at = 0.0
 
     @classmethod
     def for_node(cls, token: str, plane: str, coverage: str, **kwargs) -> Optional["ReceiptChain"]:
@@ -434,40 +435,54 @@ class ReceiptChain:
         with self._lock:
             if self._closed or not self._pending_events:
                 return False
+            now = self._monotonic()
+            if now < self._retry_at:
+                return False
             return self._pending_bytes >= self._every_bytes or \
-                self._monotonic() - self._last_checkpoint >= self._every_seconds
+                now - self._last_checkpoint >= self._every_seconds
 
     def checkpoint(self, *, mu_charged: Optional[int] = None,
                    final: bool = False) -> Optional[celaut_pb2.ExecutionReceipt]:
-        """The next signed checkpoint, or the ``close`` with ``final``. None once closed."""
+        """The next signed checkpoint, or the ``close`` with ``final``.
+
+        None once closed, or when the signer fails: then nothing changes (see the class).
+        The signature is made under the lock, so the counters that it covers are the
+        ones that it resets. It takes tens of microseconds.
+        """
         with self._lock:
             if self._closed:
+                return None
+            (in_events, in_bytes, in_head), (out_events, out_bytes, out_head) = (
+                tuple(self._chains[DIRECTION_IN]), tuple(self._chains[DIRECTION_OUT])
+            )
+            receipt = celaut_pb2.ExecutionReceipt(
+                kind=KIND_CLOSE if final else KIND_CHECKPOINT,
+                execution_name=self.name,
+                ts=int(self._clock()),
+                plane=self.plane,
+                session=self.session,
+                slot=self.slot,
+                seq=self._seq + 1,
+                in_events=in_events, in_bytes=in_bytes, in_head=in_head,
+                out_events=out_events, out_bytes=out_bytes, out_head=out_head,
+                coverage=self.coverage,
+                capture_mode=self.capture_mode,
+                degraded_reason=self.degraded_reason,
+            )
+            if mu_charged is not None:
+                receipt.mu_charged.n = str(int(mu_charged))
+            try:
+                self._signer(receipt)
+            except Exception as e:
+                self._retry_at = self._monotonic() + self._every_seconds
+                from src.utils.logger import LOGGER
+                LOGGER(f"[receipts] Cannot sign {receipt.kind} {receipt.seq} of stream "
+                       f"{self.session}: {e}. The stream goes on with no receipt.")
                 return None
             self._seq += 1
             self._closed = final
             self._pending_events = self._pending_bytes = 0
             self._last_checkpoint = self._monotonic()
-            (in_events, in_bytes, in_head), (out_events, out_bytes, out_head) = (
-                tuple(self._chains[DIRECTION_IN]), tuple(self._chains[DIRECTION_OUT])
-            )
-            seq = self._seq
-        receipt = celaut_pb2.ExecutionReceipt(
-            kind=KIND_CLOSE if final else KIND_CHECKPOINT,
-            execution_name=self.name,
-            ts=int(self._clock()),
-            plane=self.plane,
-            session=self.session,
-            slot=self.slot,
-            seq=seq,
-            in_events=in_events, in_bytes=in_bytes, in_head=in_head,
-            out_events=out_events, out_bytes=out_bytes, out_head=out_head,
-            coverage=self.coverage,
-            capture_mode=self.capture_mode,
-            degraded_reason=self.degraded_reason,
-        )
-        if mu_charged is not None:
-            receipt.mu_charged.n = str(int(mu_charged))
-        self._signer(receipt)
         return receipt
 
 
