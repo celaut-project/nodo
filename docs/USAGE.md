@@ -487,14 +487,18 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo`
 
-- **logs `[-n <lines>] [--json]`**  
+- **logs `[-n <lines>] [--grep <regex> [-i] [--invert]] [--json]`**  
   Shows real-time application logs for monitoring (follows until Ctrl+C). With
-  `-n`, prints the last N lines and exits; `--json` prints them as one object.  
+  `-n`, prints the last N lines and exits; `--json` prints them as one object.
+  `--grep` keeps only the lines that match the regular expression. `-i` ignores
+  case. `--invert` keeps the lines that do not match. The node log has no time
+  or level on its lines, so there is no filter for them.  
   **Example:**  
   `nodo logs`  
-  `nodo logs -n 200`
+  `nodo logs -n 200`  
+  `nodo logs --grep tunnel -i -n 50`
 
-- **logs `<instance> [--stream stdout|stderr|serial] [-n <lines>] [--json]`**  
+- **logs `<instance> [--stream stdout|stderr|serial] [-n <lines>] [--grep <regex> [-i] [--invert]] [--json]`**  
   Shows the logs that the node saved when a local instance died. The instance
   can be an id or a name. If two dead instances have the same name, the newest
   one is used. A live instance has no saved logs.  

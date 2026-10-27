@@ -30,7 +30,7 @@ GROUPS: List[Group] = [
             ("status", "the TUI's overview, scriptable (--json)"),
             ("doctor", "check, and fix, what stops it serving"),
             ("daemon start|status|stop|restart", "control the nodo.service systemd unit"),
-            ("logs", "follow the log (-n <lines>: tail, exit)"),
+            ("logs", "follow the log (-n <lines>: tail, exit; --grep <regex>: filter)"),
             ("envs", "print the effective config.yaml"),
             ("config <subcommand>", "get, set, append, remove, profile"),
             ("schedule", "working hours, demand by hour (--json)"),

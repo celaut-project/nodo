@@ -506,6 +506,8 @@ pub enum InputMode {
     /// A new element for the list the All page's selection points at.
     AddConfigItem,
     FilterConfig,
+    /// The LOGS page's `/`: text a node log line must hold to be shown.
+    FilterLogs,
     /// Amount entry for crediting/debiting the selected client's balance.
     CreditClient,
     /// Yes/no confirmation before a destructive action (delete service, kill instance).
@@ -3197,6 +3199,8 @@ pub struct App {
     pub services: StatefulList<Service>,
     pub config_all: Vec<ConfigEntry>,
     pub config_filter: String,
+    /// Case-insensitive text a node log line must hold to be shown on LOGS. Empty shows all.
+    pub log_filter: String,
     /// Open/selected state for the collapsible configuration tree. The identifier
     /// is the per-segment token path (e.g. `["virtualizers", "ch", "MIN_MEM_MIB"]`,
     /// or `["servers", "[1]", "id"]` for a sequence element), which lets the tree
@@ -3510,6 +3514,7 @@ impl Default for App {
             services: StatefulList::with_items(Vec::new()),
             config_all,
             config_filter: String::new(),
+            log_filter: String::new(),
             config_tree_state: TreeState::default(),
             cell: CellState::default(),
             config_document: read_effective_yaml(&paths.config).ok(),
@@ -3556,7 +3561,7 @@ impl Default for App {
             conversation_messages: Vec::new(),
             instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
-            node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
+            node_logs: read_last_matching(&paths.log, 250, "").unwrap_or_default(),
             stats: DashboardStats::default(),
             node_info: NodeInfo {
                 service_status: "checking…".to_string(),
@@ -4380,6 +4385,25 @@ impl App {
         self.edit_kind = EditKind::Text;
     }
 
+    pub fn open_log_filter(&mut self) {
+        self.input_mode = InputMode::FilterLogs;
+        self.input = self.log_filter.clone();
+        self.input_title = "Filter node log lines".to_string();
+        self.edit_kind = EditKind::Text;
+    }
+
+    pub fn clear_log_filter(&mut self) {
+        self.log_filter.clear();
+        self.reload_node_logs();
+        self.status = "Log filter cleared".to_string();
+    }
+
+    /// Read the node log again, keeping only the lines the log filter accepts.
+    pub fn reload_node_logs(&mut self) {
+        self.node_logs =
+            read_last_matching(&self.paths.log, 250, &self.log_filter).unwrap_or_default();
+    }
+
     pub fn clear_config_filter(&mut self) {
         self.config_filter.clear();
         self.apply_config_filter();
@@ -4703,9 +4727,16 @@ impl App {
     /// `FilterConfig` reacts as-you-type (search results narrow immediately
     /// instead of waiting for Enter); `EditConfig`/`Connect` are unaffected.
     pub fn on_input_changed(&mut self) {
-        if self.input_mode == InputMode::FilterConfig {
-            self.config_filter = self.input.clone();
-            self.apply_config_filter();
+        match self.input_mode {
+            InputMode::FilterConfig => {
+                self.config_filter = self.input.clone();
+                self.apply_config_filter();
+            }
+            InputMode::FilterLogs => {
+                self.log_filter = self.input.clone();
+                self.reload_node_logs();
+            }
+            _ => {}
         }
     }
 
@@ -4773,6 +4804,13 @@ impl App {
                 let count = self.config_match_count();
                 self.close_input();
                 self.status = format!("Configuration filter: {count} matching values");
+            }
+            InputMode::FilterLogs => {
+                self.log_filter = self.input.trim().to_string();
+                self.reload_node_logs();
+                let count = self.node_logs.len();
+                self.close_input();
+                self.status = format!("Log filter: {count} matching lines");
             }
             InputMode::PickProfile => self.submit_profile_selection(),
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
@@ -6625,7 +6663,7 @@ impl App {
         }
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
-        self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
+        self.reload_node_logs();
 
         // Prices and the display unit come from config.yaml, which the operator may be
         // editing from outside the TUI. Re-reading them here keeps the bars and every
@@ -8441,7 +8479,14 @@ fn is_secret_path(path: &str) -> bool {
 }
 
 pub(crate) fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
+    read_last_matching(path, count, "")
+}
+
+/// The last `count` lines, out of the last 256 KiB of the file, that hold `needle`
+/// (ignoring case). An empty `needle` keeps every line.
+pub(crate) fn read_last_matching(path: &Path, count: usize, needle: &str) -> io::Result<Vec<String>> {
     const TAIL_BYTES: u64 = 256 * 1024;
+    let needle = needle.to_lowercase();
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
     let offset = length.saturating_sub(TAIL_BYTES);
@@ -8456,6 +8501,9 @@ pub(crate) fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<Strin
     };
     let mut lines = VecDeque::with_capacity(count);
     for line in content.lines() {
+        if !needle.is_empty() && !line.to_lowercase().contains(&needle) {
+            continue;
+        }
         if lines.len() == count {
             lines.pop_front();
         }
@@ -11734,6 +11782,24 @@ ergo: Cold Wallet: 9cold\n";
         );
         // Live expansion shouldn't require Enter to have been pressed.
         assert_eq!(app.config_filter, "gateway");
+    }
+
+    #[test]
+    fn typing_in_the_log_filter_keeps_only_matching_lines_ignoring_case() {
+        let dir = std::env::temp_dir().join(format!("nodo-log-filter-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("app.log");
+        std::fs::write(&log, "Tunnel open\nother\ntunnel closed\n").unwrap();
+        let mut app = App::default();
+        app.paths.log = log.clone();
+        app.input_mode = InputMode::FilterLogs;
+
+        app.input = "TUNNEL".to_string();
+        app.on_input_changed();
+
+        assert_eq!(app.log_filter, "TUNNEL");
+        assert_eq!(app.node_logs, vec!["Tunnel open", "tunnel closed"]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
