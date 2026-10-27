@@ -485,7 +485,7 @@ def gateway_component() -> Layer:
                          "genesis 64 zeros; a tunnel records only the messages that "
                          "its meter accepted",
         "receipt.kinds": "start,checkpoint,close",
-        "receipt.coverage": "client-tunnel,full-instance-tap,counters-only",
+        "receipt.coverage": "client-tunnel,instance-tap,counters-only",
         "receipt.tunnel": "TokenMessage.receipts: ExecutionReceipt at index 2; a close "
                           "when the stream stops normally",
         "receipt.ledger": "detail.execution_name on start and tunnel movements; "

@@ -88,33 +88,41 @@ def _receipt_chain(session: Dict[str, Any],
                    include_packets: bool) -> Optional[execution_receipt.ReceiptChain]:
     """The receipt chain of an Observe stream (#419), from its session event.
 
-    The coverage is what the stream lets the node attest: every packet of the
-    instance with its bytes only for a pcap capture that sends the frames, and only
-    counts and lengths otherwise. ``capture_mode`` and ``degraded_reason`` go inside
-    the signed payload, so a conntrack receipt cannot be read as more than it is.
+    The coverage is what the stream lets the node attest: the packets that the
+    capture got, with their bytes, only for a pcap capture that sends the frames, and
+    only counts and lengths otherwise. Never "every packet": the capture keeps at most
+    ``DEFAULT_SNAPLEN`` bytes of a frame, and the kernel drops packets when this
+    reader is slow (``instance-tap``). ``capture_mode`` and ``degraded_reason`` go
+    inside the signed payload, so a conntrack receipt cannot be read as more than it is.
     """
     capture_mode = session.get("capture_mode") or ""
-    full = capture_mode == "pcap" and include_packets
+    tap = capture_mode == "pcap" and include_packets
     return execution_receipt.ReceiptChain.for_node(
         session.get("instance_id") or "",
         execution_receipt.PLANE_OBSERVE,
-        execution_receipt.COVERAGE_FULL_TAP if full else execution_receipt.COVERAGE_COUNTERS,
+        execution_receipt.COVERAGE_TAP if tap else execution_receipt.COVERAGE_COUNTERS,
         capture_mode=capture_mode,
         degraded_reason=session.get("degraded_reason") or "",
     )
 
 
 def _record_packet(chain: execution_receipt.ReceiptChain, event: Dict[str, Any]) -> None:
-    """One packet event into the chain of its direction: the frame the event carries
-    (none with conntrack), at its wire length."""
+    """One packet event into the chain of its direction, as the client gets it.
+
+    With a frame, the length is the length of that frame, so the length and the digest
+    are over the same bytes: the captured bytes, which a cut frame has fewer of than
+    the wire. ``frame_len`` is the same number (``observe_event_stream`` sets it to the
+    captured length). With no frame (no ``include_packets``, or conntrack), the length
+    is ``frame_len`` (0 when there is none) and the payload is empty.
+    """
     direction = (event.get("record", {}).get("direction") or "").upper()
     if direction not in ("IN", "OUT"):
         return
-    frame = event.get("frame") or b""
-    length = event.get("frame_len")
+    frame = bytes(event.get("frame") or b"")
+    length = len(frame) if frame else int(event.get("frame_len") or 0)
     chain.record(
         execution_receipt.DIRECTION_IN if direction == "IN" else execution_receipt.DIRECTION_OUT,
-        bytes(frame), len(frame) if length is None else int(length),
+        frame, length,
     )
 
 

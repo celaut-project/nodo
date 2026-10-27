@@ -354,8 +354,8 @@ class ChainTests(unittest.TestCase):
         self.assertNotEqual(er.replay_chain(events, er.DIRECTION_OUT)[2], head)
 
     def test_a_length_apart_from_the_payload(self):
-        # A capture cut at its snap length: the wire length is what counts.
-        count, total, _ = er.replay_chain([(1500, b"\x00" * 64)], er.DIRECTION_IN)
+        # A counters-only packet: a length and no frame.
+        count, total, _ = er.replay_chain([(1500, b"")], er.DIRECTION_IN)
         self.assertEqual((count, total), (1, 1500))
 
     def test_no_event_is_the_genesis(self):
