@@ -392,7 +392,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             return Ok(());
         }
         InputMode::Normal => {}
-        // Text-entry modals: Connect, EditConfig, AddConfigItem, FilterConfig.
+        // Text-entry modals: Connect, EditConfig, AddConfigItem, FilterConfig, FilterLogs.
         _ => {
             let is_bool_editor =
                 app.input_mode == InputMode::EditConfig && app.edit_kind == EditKind::Bool;
@@ -685,6 +685,12 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('x')) if app.page() == Page::Config => {
             app.clear_config_filter()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('/')) if app.page() == Page::Logs => {
+            app.open_log_filter()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('x')) if app.page() == Page::Logs => {
+            app.clear_log_filter()
         }
         // DOCS: ↑/↓ and ←/→ reach it through on_up/on_down/on_left/on_right; these
         // are the reading keys no other page needs.

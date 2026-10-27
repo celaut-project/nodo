@@ -230,6 +230,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         | InputMode::EditConfig
         | InputMode::AddConfigItem
         | InputMode::FilterConfig
+        | InputMode::FilterLogs
         | InputMode::CreditClient
         | InputMode::AddCustomUnit
         | InputMode::NewChatTopic
@@ -5343,7 +5344,12 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     let split =
         Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)]).split(area);
     let node_text = visible_tail(&app.node_logs, split[0].height.saturating_sub(2) as usize);
-    draw_wrapped_text(frame, node_text, section_block(" NODE LOG • app.log ", text_colour()), split[0]);
+    let node_title = if app.log_filter.is_empty() {
+        " NODE LOG • app.log ".to_string()
+    } else {
+        format!(" NODE LOG • app.log • filter: {} ", app.log_filter)
+    };
+    draw_wrapped_text(frame, node_text, section_block(&node_title, text_colour()), split[0]);
     let action_text = visible_tail(&app.app_logs, split[1].height.saturating_sub(2) as usize);
     draw_wrapped_text(frame, action_text, section_block(" TUI ACTIONS ", accent()), split[1]);
 }
@@ -5396,7 +5402,7 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
         Page::Config => {
             "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  u reset staged  \u{2022}  U reset all  \u{2022}  / filter  \u{2022}  q quit"
         }
-        Page::Logs => "q quit",
+        Page::Logs => "/ filter  \u{2022}  x clear filter  \u{2022}  q quit",
         Page::Docs => {
             "\u{2191}/\u{2193} PgUp/PgDn Home/End  \u{2022}  \u{2190}/\u{2192} index/page  \u{2022}  \u{23ce} open/follow  \u{2022}  l/L link  \u{2022}  / search  \u{2022}  n/N match  \u{2022}  \u{232b} back  \u{2022}  r reload"
         }

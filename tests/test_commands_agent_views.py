@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import sys
+import shutil
 import tempfile
 import types
 import unittest
@@ -303,6 +304,44 @@ class LogsAndDocsTests(unittest.TestCase):
             ok, out = _run(logs.logs, main_dir, ["-n", "3", "--json"])
         self.assertTrue(ok)
         self.assertEqual(_json(out)["lines"], ["line 7", "line 8", "line 9"])
+
+    def _log_dir(self, text):
+        main_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, main_dir, True)
+        os.makedirs(os.path.join(main_dir, "storage"))
+        with open(os.path.join(main_dir, "storage", "app.log"), "w") as f:
+            f.write(text)
+        return main_dir
+
+    def test_grep_keeps_the_last_matching_lines(self):
+        from src.commands import logs
+        main_dir = self._log_dir("".join(f"tunnel {i}\nother {i}\n" for i in range(5)))
+        ok, out = _run(logs.logs, main_dir, ["--grep", "tunnel", "-n", "2", "--json"])
+        self.assertTrue(ok)
+        self.assertEqual(_json(out)["lines"], ["tunnel 3", "tunnel 4"])
+
+    def test_grep_can_ignore_case_and_invert(self):
+        from src.commands import logs
+        main_dir = self._log_dir("Error one\nfine\nerror two\n")
+        ok, out = _run(logs.logs, main_dir, ["--grep=ERROR", "-i", "-n", "9", "--json"])
+        self.assertEqual(_json(out)["lines"], ["Error one", "error two"])
+        ok, out = _run(logs.logs, main_dir, ["--grep", "error", "--invert", "-n", "9", "--json"])
+        self.assertEqual(_json(out)["lines"], ["Error one", "fine"])
+
+    def test_a_bad_pattern_or_a_lone_invert_is_an_error(self):
+        from src.commands import logs
+        main_dir = self._log_dir("x\n")
+        ok, out = _run(logs.logs, main_dir, ["--grep", "(", "-n", "1", "--json"])
+        self.assertFalse(ok)
+        self.assertIn("not a valid pattern", out)
+        ok, out = _run(logs.logs, main_dir, ["--invert", "-n", "1", "--json"])
+        self.assertFalse(ok)
+        self.assertIn("--invert needs --grep", out)
+
+    def test_the_grep_value_is_not_taken_for_an_instance(self):
+        from src.commands import logs
+        self.assertIsNone(logs._instance_option(["--grep", "word", "-i"]))
+        self.assertEqual(logs._instance_option(["--grep", "word", "abc"]), "abc")
 
     def test_docs_list_and_page(self):
         from src.commands import docs
