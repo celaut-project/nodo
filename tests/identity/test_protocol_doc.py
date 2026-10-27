@@ -97,7 +97,7 @@ class GatewayProseTests(unittest.TestCase):
         self.assertIn(f"  Field 1, client_id: singular string. {client}", self.prose)
 
     def test_a_oneof_is_named_by_its_field_numbers(self):
-        self.assertIn("  Fields 10, 11, 12, 13 are one oneof", self.prose)
+        self.assertIn("  Fields 10, 11, 12, 13, 14 are one oneof", self.prose)
 
     def test_the_prose_is_not_part_of_formal(self):
         # The descriptions are for a reader. A reworded comment must not change what

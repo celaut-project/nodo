@@ -631,11 +631,11 @@ if __name__ == "__main__":
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class RespondWithOnlyBytesTests(unittest.TestCase):
-    """ServiceTunnel answers with its own table, ``out:0=bytes``.
+    """ServiceTunnel answers with its own table, ``out:0=bytes,2=ExecutionReceipt``.
 
-    With only index 0, bee_rpc gets the index from the first message with an unguarded
-    ``next()``. BeeClient.respond reads that message first, so a relay that closes with
-    no reply gives an empty stream, not a RuntimeError.
+    Index 2 carries the receipt checkpoints (#419), only for a caller that asks. A
+    relay that closes with no reply gives an empty stream, not a RuntimeError, and the
+    bytes still go out at index 0, which an older client parses with ``{0: bytes}``.
     """
 
     def setUp(self):
@@ -644,8 +644,8 @@ class RespondWithOnlyBytesTests(unittest.TestCase):
         self.respond = BeeClient.respond
         self.indices = rpc_output("ServiceTunnel")
 
-    def test_the_table_has_only_index_zero(self):
-        self.assertEqual(self.indices, {0: bytes})
+    def test_the_table_has_bytes_and_receipts(self):
+        self.assertEqual(self.indices, {0: bytes, 2: celaut.ExecutionReceipt})
 
     def test_a_relay_with_no_reply_is_an_empty_stream(self):
         self.assertEqual(list(self.respond(message_iterator=iter([]), indices=self.indices)), [])
