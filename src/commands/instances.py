@@ -5,6 +5,7 @@ from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.utils.monetary import format_mu
+from src.utils.privileges import can_admin_network
 try:
     from src.virtualizers.microvm.observability import get_vm_runtime_snapshot
 except Exception:  # pragma: no cover - defensive fallback for minimal environments
@@ -107,6 +108,14 @@ def _instance_is_stale(instance_id: str) -> bool:
         return False
 
 def _prune_stale_instances() -> None:
+    # Stopping a guest deletes its tap and its firewall rules, which needs root or
+    # ``CAP_NET_ADMIN`` (``nodo kill`` asks the daemon when it has neither). Done
+    # here without them it purges the row and the refund while the guest, its tap
+    # and its rules stay behind. The daemon's maintenance tick prunes the same
+    # guests with the rights to finish the job, so a listing leaves them to it.
+    if not can_admin_network():
+        return
+
     conn = sqlite3.connect(DATABASE_FILE)
     try:
         cursor = conn.cursor()

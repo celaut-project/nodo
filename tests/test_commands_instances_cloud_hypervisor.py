@@ -222,6 +222,8 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
             self._build_db(db_path)
 
             with patch.object(instances_cmd, "DATABASE_FILE", db_path), patch.object(
+                instances_cmd, "can_admin_network", return_value=True
+            ), patch.object(
                 instances_cmd,
                 "_instance_is_stale",
                 side_effect=lambda instance_id: instance_id in ("vm-ch", "vm-qemu"),
@@ -243,6 +245,28 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
         self.assertNotIn("ID: vm-ch", rendered)
         self.assertNotIn("ID: vm-qemu", rendered)
         self.assertIn("ID: vm-docker", rendered)
+
+    def test_listing_without_network_admin_leaves_stale_instances_to_the_daemon(self):
+        # Stopping a guest deletes its tap and firewall rules. A caller that
+        # cannot do that used to purge the row anyway and leak the rest.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "instances.sqlite")
+            self._build_db(db_path)
+
+            with patch.object(instances_cmd, "DATABASE_FILE", db_path), patch.object(
+                instances_cmd, "can_admin_network", return_value=False
+            ), patch.object(
+                instances_cmd, "_instance_is_stale", return_value=True
+            ), patch(
+                "src.manager.manager.stop_instance"
+            ) as stop_instance, patch(
+                "src.virtualizers.interface.kill"
+            ) as vm_kill:
+                with redirect_stdout(io.StringIO()):
+                    instances_cmd.list_instances(groupable=False)
+
+        stop_instance.assert_not_called()
+        vm_kill.assert_not_called()
 
     def _stale_with_socket_stat(self, stat_error):
         state = {"pid": 4242, "control_socket": "/run/nodo/ch/ch-vm.sock"}
