@@ -1,8 +1,9 @@
-from typing import Any, Dict, Generator
+from typing import Any, Dict, Generator, Optional
 
 from protos import celaut_pb2
 from protos.gateway_bee import rpc_input, rpc_output
 from src.commands.observe import observe_event_stream, ObserveInstanceError
+from src.identity import execution_receipt
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.logger import LOGGER as logger
 
@@ -83,6 +84,44 @@ def _event_to_proto(event: Dict[str, Any]) -> celaut_pb2.ObserveEvent:
     return proto
 
 
+def _receipt_chain(session: Dict[str, Any],
+                   include_packets: bool) -> Optional[execution_receipt.ReceiptChain]:
+    """The receipt chain of an Observe stream (#419), from its session event.
+
+    The coverage is what the stream lets the node attest: every packet of the
+    instance with its bytes only for a pcap capture that sends the frames, and only
+    counts and lengths otherwise. ``capture_mode`` and ``degraded_reason`` go inside
+    the signed payload, so a conntrack receipt cannot be read as more than it is.
+    """
+    capture_mode = session.get("capture_mode") or ""
+    full = capture_mode == "pcap" and include_packets
+    return execution_receipt.ReceiptChain.for_node(
+        session.get("instance_id") or "",
+        execution_receipt.PLANE_OBSERVE,
+        execution_receipt.COVERAGE_FULL_TAP if full else execution_receipt.COVERAGE_COUNTERS,
+        capture_mode=capture_mode,
+        degraded_reason=session.get("degraded_reason") or "",
+    )
+
+
+def _record_packet(chain: execution_receipt.ReceiptChain, event: Dict[str, Any]) -> None:
+    """One packet event into the chain of its direction: the frame the event carries
+    (none with conntrack), at its wire length."""
+    direction = (event.get("record", {}).get("direction") or "").upper()
+    if direction not in ("IN", "OUT"):
+        return
+    frame = event.get("frame") or b""
+    length = event.get("frame_len")
+    chain.record(
+        execution_receipt.DIRECTION_IN if direction == "IN" else execution_receipt.DIRECTION_OUT,
+        bytes(frame), len(frame) if length is None else int(length),
+    )
+
+
+def _receipt_event(receipt: celaut_pb2.ExecutionReceipt) -> celaut_pb2.ObserveEvent:
+    return celaut_pb2.ObserveEvent(kind="receipt", receipt=receipt)
+
+
 class ObserveIterable:
     """Stream a running instance's live observability data over the gateway.
 
@@ -122,9 +161,11 @@ class ObserveIterable:
 
         instance_id = request.instance_id
         include_packets = bool(request.include_packets)
+        include_receipts = bool(request.include_receipts)
         logger(f'Observe request for instance {instance_id} '
-               f'(include_packets={include_packets}).')
+               f'(include_packets={include_packets}, include_receipts={include_receipts}).')
 
+        chain: Optional[execution_receipt.ReceiptChain] = None
         try:
             for event in observe_event_stream(
                     instance_id,
@@ -132,6 +173,19 @@ class ObserveIterable:
                     should_stop=self._should_stop,
             ):
                 yield _event_to_proto(event)
+                if not include_receipts:
+                    continue
+                if event.get("kind") == "session":
+                    chain = _receipt_chain(event, include_packets)
+                elif chain is not None and event.get("kind") == "packet":
+                    _record_packet(chain, event)
+                if chain is not None and chain.due():
+                    yield _receipt_event(chain.checkpoint())
+            # The observation ended on its own (the instance stopped): the close.
+            if chain is not None:
+                close = chain.checkpoint(final=True)
+                if close is not None:
+                    yield _receipt_event(close)
         except (ObserveInstanceError, ValueError) as exc:
             # Not found / not running / ambiguous id: end with a structured
             # notice instead of aborting, so the client learns why.
