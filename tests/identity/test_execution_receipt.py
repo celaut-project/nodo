@@ -319,11 +319,108 @@ class TamperTests(unittest.TestCase):
         receipt.signature = _key().sign(er.signed_bytes(receipt)).hex()
         self.assertFalse(er.verify(receipt))
 
-    def test_the_fields_a_kind_does_not_use(self):
+
+def _resign(receipt):
+    """Sign ``receipt`` again with the vector key, as a node that signs a bad shape."""
+    receipt.signature = _key().sign(er.signed_bytes(receipt)).hex()
+    return receipt
+
+
+def _observe_checkpoint(coverage=None, capture_mode="pcap"):
+    chain = er.ReceiptChain(
+        VECTOR_TOKEN, er.PLANE_OBSERVE, coverage or er.COVERAGE_TAP,
+        capture_mode=capture_mode, signer=_signer(), peer_id=VECTOR_PEER_ID,
+        session=VECTOR_SESSION, clock=lambda: VECTOR_TS)
+    chain.record(er.DIRECTION_OUT, b"frame")
+    return chain.checkpoint()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ShapeTests(unittest.TestCase):
+    """A field that the kind or the plane does not use is empty or zero (the doc). It is
+    signed, so a signed receipt with a value there fails ``problems()`` (#593 review)."""
+
+    def _refused(self, receipt, expected):
+        found = er.problems(_resign(receipt))
+        self.assertTrue(any(expected in p for p in found), found)
+
+    def test_the_valid_shapes(self):
+        for receipt in (_start(), _checkpoint(), _observe_checkpoint(),
+                        _observe_checkpoint(er.COVERAGE_COUNTERS, "conntrack")):
+            with self.subTest(kind=receipt.kind, plane=receipt.plane):
+                self.assertEqual(er.problems(receipt), [])
+
+    def test_a_start_receipt_with_a_stream_field(self):
+        values = {
+            "plane": er.PLANE_TUNNEL, "session": VECTOR_SESSION, "slot": "8080", "seq": 1,
+            "in_events": 1, "in_bytes": 1, "in_head": VECTOR_IN_HEAD, "out_events": 1,
+            "out_bytes": 1, "out_head": VECTOR_OUT_HEAD, "coverage": er.COVERAGE_TAP,
+            "capture_mode": "pcap", "degraded_reason": "x",
+        }
+        for field, value in values.items():
+            with self.subTest(field=field):
+                receipt = _start()
+                setattr(receipt, field, value)
+                self._refused(receipt, f"a start receipt has no stream fields (set: {field})")
+        with self.subTest(field="mu_charged"):
+            receipt = _start()
+            receipt.mu_charged.n = "1"
+            self._refused(receipt, "a start receipt has no stream fields (set: mu_charged)")
+
+    def test_a_start_receipt_with_no_service_type(self):
         receipt = _start()
-        receipt.seq = 1
-        receipt.signature = _key().sign(er.signed_bytes(receipt)).hex()
-        self.assertIn("a start receipt has no stream fields", er.problems(receipt))
+        receipt.service_id.type = b""
+        self._refused(receipt, "a start receipt needs service_id")
+
+    def test_a_checkpoint_with_a_start_field(self):
+        for field in ("service_id", "envs_digest", "initial_mu"):
+            with self.subTest(field=field):
+                receipt = _checkpoint()
+                if field == "service_id":
+                    receipt.service_id.type = VECTOR_SERVICE_TYPE
+                elif field == "envs_digest":
+                    receipt.envs_digest = VECTOR_ENVS_DIGEST
+                else:
+                    receipt.initial_mu.n = "1"
+                self._refused(receipt, f"a checkpoint has no start fields (set: {field})")
+
+    def test_a_tunnel_checkpoint_with_capture_fields(self):
+        for field in ("capture_mode", "degraded_reason"):
+            with self.subTest(field=field):
+                receipt = _checkpoint()
+                setattr(receipt, field, "pcap")
+                self._refused(receipt, f"a tunnel checkpoint has no capture fields (set: {field})")
+
+    def test_a_tunnel_checkpoint_needs_slot_and_charge(self):
+        for field in ("slot", "mu_charged"):
+            with self.subTest(field=field):
+                receipt = _checkpoint()
+                receipt.ClearField(field)
+                self._refused(receipt, "a tunnel checkpoint needs slot and mu_charged")
+
+    def test_an_observe_checkpoint_with_tunnel_fields(self):
+        for field in ("slot", "mu_charged"):
+            with self.subTest(field=field):
+                receipt = _observe_checkpoint()
+                if field == "slot":
+                    receipt.slot = "8080"
+                else:
+                    receipt.mu_charged.n = "1"
+                self._refused(receipt, f"an observe checkpoint has no tunnel fields (set: {field})")
+
+    def test_a_coverage_of_the_wrong_plane(self):
+        receipt = _checkpoint()
+        receipt.coverage = er.COVERAGE_TAP
+        self._refused(receipt, "is not one of client-tunnel for plane tunnel")
+        receipt = _observe_checkpoint()
+        receipt.coverage = er.COVERAGE_CLIENT_TUNNEL
+        self._refused(receipt, "for plane observe")
+
+    def test_an_instance_tap_needs_pcap(self):
+        self._refused(_observe_checkpoint(er.COVERAGE_TAP, "conntrack"),
+                      "coverage instance-tap needs capture_mode pcap")
+        self._refused(_observe_checkpoint(er.COVERAGE_COUNTERS, ""),
+                      "an observe checkpoint needs capture_mode")
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

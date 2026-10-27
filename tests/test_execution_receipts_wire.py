@@ -373,7 +373,8 @@ class StartReceiptTests(unittest.TestCase):
 
     def test_start_service_carries_the_receipt(self):
         with _node_identity():
-            receipt = er.start_receipt(TOKEN, celaut_pb2.Metadata.HashTag.Hash(value=b"s"), {}, 1)
+            receipt = er.start_receipt(
+                TOKEN, celaut_pb2.Metadata.HashTag.Hash(type=b"t", value=b"s"), {}, 1)
         instance = celaut_pb2.ServiceInstance(token=TOKEN, receipt=receipt)
         buffers = list(bee.serialize_to_buffer(message_iterator=instance,
                                                indices=rpc_output("StartService")))
