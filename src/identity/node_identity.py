@@ -73,6 +73,10 @@ _CLIENT_BINDING_PREFIX: Final[str] = "celaut-client-binding:"
 # this node signs for its owner, who can hold it up as evidence of a charge.
 _STATEMENT_PREFIX: Final[str] = "celaut-balance-statement:"
 
+# Domain separation for an execution receipt (#419, docs/EXECUTION_RECEIPTS.md): what
+# this node signs about one execution it runs, which a client can hold up against it.
+_RECEIPT_PREFIX: Final[str] = "celaut-execution-receipt:"
+
 
 def component_formal(pairs: Dict[str, str]) -> bytes:
     """``key=value`` lines, sorted by key, UTF-8: the canonical body of a ``formal``.
@@ -709,6 +713,16 @@ def statement_payload(peer_id: str, statement_digest: str) -> str:
     that this signature cannot be read as any other thing that the key signs.
     """
     return f"{_STATEMENT_PREFIX}{peer_id}|{statement_digest}"
+
+
+def receipt_payload(peer_id: str, receipt_digest: str) -> str:
+    """The exact string a node signs to vouch for an execution receipt (#419).
+
+    ``receipt_digest`` is ``execution_receipt.receipt_digest``, which covers every field
+    of the receipt but the salt of its envs and the signature. The same shape as
+    :func:`statement_payload`, with a prefix of its own.
+    """
+    return f"{_RECEIPT_PREFIX}{peer_id}|{receipt_digest}"
 
 
 def client_binding_payload(peer_id: str, client_id: str) -> str:
