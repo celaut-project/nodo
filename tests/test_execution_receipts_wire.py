@@ -5,10 +5,7 @@ the instance lookups, the charge and the identity key are patched. What these pi
 
 * a caller that asks for receipts gets checkpoints and a close whose chains it can
   rebuild from its own messages, all signed by the node;
-* a caller that does not ask gets the stream it always got (an older client refuses
-  an index it does not know);
-* an older client reads a ServiceInstance with a receipt, and an older node reads a
-  TokenMessage that asks for them;
+* a caller that does not ask gets no index 2, and nothing is hashed for it;
 * the celaut-gateway layer declares the new formats.
 """
 import socket
@@ -25,7 +22,6 @@ try:
     from bee_rpc import client as bee
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
-    from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
     from protos import celaut_pb2
     from protos.gateway_bee import rpc_input, rpc_output
     from src.identity import execution_receipt as er
@@ -96,16 +92,6 @@ def _instance(port):
     ).SerializeToString()
 
 
-def _legacy_class(name, fields):
-    """A message class as an older build has it: only ``fields`` (name, number, type)."""
-    file = descriptor_pb2.FileDescriptorProto(name=f"legacy_{name}.proto", package="legacy419",
-                                              syntax="proto3")
-    message = file.message_type.add(name=name)
-    for field_name, number, kind in fields:
-        message.field.add(name=field_name, number=number, label=1, type=kind)
-    pool = descriptor_pool.DescriptorPool()
-    pool.Add(file)
-    return message_factory.GetMessageClass(pool.FindMessageTypeByName(f"legacy419.{name}"))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -184,7 +170,7 @@ class TunnelReceiptTests(unittest.TestCase):
         self.assertTrue(all(isinstance(m, bytes) for m in out))
         record.assert_not_called()                     # nothing is hashed for it
 
-    def test_an_older_client_parses_a_stream_without_receipts(self):
+    def test_a_stream_without_receipts_has_only_index_0(self):
         _sent, out = self._run(
             lambda port: celaut_pb2.TokenMessage(token=TOKEN, slot=str(port)), [b"ab"],
         )
@@ -219,11 +205,6 @@ class TunnelReceiptTests(unittest.TestCase):
             out = list(relay)
         self.assertTrue(all(isinstance(m, bytes) for m in out))
 
-    def test_an_older_node_ignores_the_request_for_receipts(self):
-        legacy = _legacy_class("TokenMessage", [("token", 1, 9), ("slot", 2, 9)])
-        parsed = legacy.FromString(
-            celaut_pb2.TokenMessage(token=TOKEN, slot="80", receipts=True).SerializeToString())
-        self.assertEqual((parsed.token, parsed.slot), (TOKEN, "80"))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -257,13 +238,10 @@ class StartReceiptTests(unittest.TestCase):
             self.assertIsNone(le._start_receipt(token=TOKEN, service_id="not hex",
                                                 config=celaut_pb2.Configuration(), initial_mu=1))
 
-    def test_an_older_client_reads_a_service_instance_with_a_receipt(self):
+    def test_start_service_carries_the_receipt(self):
         with _node_identity():
             receipt = er.start_receipt(TOKEN, celaut_pb2.Metadata.HashTag.Hash(value=b"s"), {}, 1)
         instance = celaut_pb2.ServiceInstance(token=TOKEN, receipt=receipt)
-        legacy = _legacy_class("ServiceInstance", [("token", 1, 9), ("instance", 2, 12)])
-        self.assertEqual(legacy.FromString(instance.SerializeToString()).token, TOKEN)
-        # And the round trip through StartService's own indices keeps the receipt.
         buffers = list(bee.serialize_to_buffer(message_iterator=instance,
                                                indices=rpc_output("StartService")))
         parsed = next(bee.parse_from_buffer(request_iterator=iter(buffers),
