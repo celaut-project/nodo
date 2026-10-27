@@ -75,6 +75,7 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
     same_component,
+    receipt_payload,
     statement_payload,
 )
 from src.identity import protocol_doc
@@ -462,6 +463,30 @@ def gateway_component() -> Layer:
                                  "client_id or instance token",
         "statement.instance_ref": "blake2b-256 hex of UTF-8 of celaut-ledger-instance:token",
         "statement.digest.hex": "lowercase hex of UTF-8; empty for an empty text",
+        "receipt.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
+        "receipt.signature.payload": receipt_payload(peer_id, "<receipt_digest>"),
+        "receipt.digest": "blake2b-256 hex of UTF-8 of hex(kind)|peer_id|execution_name|"
+                          "ts|hex(service_id.type)~hex(service_id.value)|envs_digest|"
+                          "hex(initial_mu.n)|hex(plane)|session|hex(slot)|seq|in_events|"
+                          "in_bytes|in_head|out_events|out_bytes|out_head|"
+                          "hex(mu_charged.n)|hex(coverage)|hex(capture_mode)|"
+                          "hex(degraded_reason)|scheme",
+        "receipt.digest.hex": "lowercase hex of UTF-8; empty for an empty text; numbers "
+                              "decimal; an unused field empty or 0",
+        "receipt.digest.scheme": "blake2b-256 hex of UTF-8 of peer.digest.scheme of "
+                                 "signature_scheme",
+        "receipt.execution_name": "blake2b-256 hex of UTF-8(instance token) || the 32 raw "
+                                  "bytes of the public key",
+        "receipt.envs_digest": "blake2b-256 hex of envs_salt || UTF-8 of '/'.join(origin~"
+                               "hex(name)~hex(value) sorted by UTF-8 of name); origin "
+                               "client or node",
+        "receipt.chain": "blake2b-256 hex of UTF-8 of prev|seq|direction|length|"
+                         "blake2b-256 hex of payload; seq from 1; direction in or out; "
+                         "genesis 64 zeros",
+        "receipt.kinds": "start,checkpoint,close",
+        "receipt.coverage": "client-tunnel,full-instance-tap,counters-only",
+        "receipt.tunnel": "TokenMessage.receipts: ExecutionReceipt at index 2; a close "
+                          "when the stream stops normally",
         "client_binding.payload": client_binding_payload(peer_id, client_id),
         "client_binding.signature": "Peer.signature_scheme, lowercase hex",
         "ledger_attestation.payload": attestation_payload(peer_id),
@@ -521,6 +546,27 @@ def gateway_component() -> Layer:
         "cannot show other movements for the same seq later. A statement names no "
         "credential: the account and the instances are hashes of their tokens. A "
         "statement with no valid signature is not valid.\n"
+        "\n"
+        "EXECUTION RECEIPTS. A receipt is a statement that the node signs about one "
+        "execution that it runs. The answer of StartService contains a start receipt. "
+        "A ServiceTunnel caller that sets TokenMessage.receipts gets checkpoints at "
+        "index 2. An Observe caller that sets include_receipts gets them as events of "
+        "kind receipt. The last checkpoint of a stream has the kind close. The node "
+        "signs each receipt with the key and the scheme of its Peer. The signed text "
+        "is \"" + receipt_payload("<public_key>", "<receipt_digest>") + "\". The "
+        "receipt digest is a BLAKE2b-256 hash of a text that the formal field "
+        "specifies. This text contains all the fields of the receipt, but not "
+        "envs_salt and not the signature. A receipt names its execution by a hash of "
+        "the instance token and the public key. It never contains the token. The "
+        "envs digest is a hash of a random salt and of the environment variables of "
+        "the service, so the holder can show the receipt and keep the values secret. "
+        "Each stream has two hash chains: one for the events into the instance, and "
+        "one for the events out of it. Each event adds its seq, its direction, its "
+        "length and the hash of its bytes to the chain. A client that keeps the "
+        "messages can calculate the same chains. Two valid receipts for the same "
+        "execution, stream and seq, with a different content, prove that the node "
+        "lied. A receipt is evidence against the node only: it is never evidence for "
+        "it. A receipt with no valid signature is not valid.\n"
         "\n"
         "OTHER SIGNATURES. To bind a client_id to its identity, a peer signs the "
         "text \"" + client_binding_payload("<peer_id>", "<client_id>") + "\". The wallet "
