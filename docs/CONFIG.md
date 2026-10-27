@@ -223,6 +223,18 @@ write to from their own process.
 | `ledger.MAX_STATEMENT_PAGES_PER_TICK` | `4` | The most pages that one read of our account on a peer takes. A reader that is behind goes on at the next read. |
 | `ledger.STATEMENT_READ_EVERY_TICKS` | `30` | The ticks between two reads of our account on a peer, and between two reads of the statement of a delegated child. A read costs MU, and the rows are kept for the retention, so reading less often only delays a detection. It is held to a tenth of `MIN_PEER_RETENTION_DAYS`. |
 
+## `receipts` — execution receipts
+
+A caller of `ServiceTunnel` (with `TokenMessage.receipts`) or of `Observe` (with
+`include_receipts`) gets signed checkpoints of the execution receipt of the instance. See
+[`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md#implementation-status). A caller that
+does not ask gets none, and nothing is hashed for it.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `receipts.CHECKPOINT_BYTES` | `1048576` | Sign a checkpoint when this many bytes passed in the stream since the last one. |
+| `receipts.CHECKPOINT_SECONDS` | `5` | Sign a checkpoint when this many seconds passed since the last one, if there was new traffic. An idle stream gets none. |
+
 ## `builder` — build tuning
 
 | Key | Default | Meaning |
