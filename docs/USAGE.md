@@ -42,16 +42,22 @@ Every command an agent needs is non-interactive and most have a `--json` form; s
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--name <instance-name>] [-e key value] [--no-input] <service id | service tag | '.celaut.bee' file path>`**  
+- **execute `[--name <instance-name>] [-e key value] [--no-input] [--receipt <file>] <service id | service tag | '.celaut.bee' file path>`**  
   Launches a service instance. The address it prints is reachable from this host only; use `nodo tunnel` to reach the instance from elsewhere. Use `--name` to assign a human-readable instance name. Use `-e` to add service environment variables.  
   `execute` compares the `-e` values with the env vars that the service declares (see `nodo service_envs`). The node does not say which vars the service needs, and the service may not work without all of them, so none is forced.  
   - In a terminal, `execute` asks one by one for each var that was not given with `-e`. Press Enter to leave a var unset.  
   - Without a terminal, or with `--no-input`, `execute` does not ask. It reports the missing vars and starts the instance without them.  
   `execute` never prints the values, only the names.  
+  Use `--receipt <file>` to keep the signed start receipt of the instance (one JSON line, appended). Check it with `nodo receipt verify <file> --token <instance>` (see [Execution receipts](EXECUTION_RECEIPTS.md)).  
   **Example:**  
   `nodo execute 1234567890abcdef`
   `nodo execute -e workers 8 -e timeout 20 1234567890abcdef`
   `nodo execute --no-input -e BLOCK_ID 9a3f… my_service_tag`
+
+- **receipt verify `<file>` `[--token <instance token>]` `[--peer <peer_id>]` `[--json]`**  
+  Checks execution receipts: the signature of each one, and across them the counters, the closes and any contradiction (two signed receipts for the same seq with different content). `<file>` is JSON: one receipt, a list, or one per line, in the proto3 JSON form of `celaut.ExecutionReceipt`, which `execute --receipt` writes. `--token` checks that each receipt names that instance. Exit code 0 only when all are valid. It needs no database and no daemon.  
+  **Example:**  
+  `nodo receipt verify receipts.jsonl --token 5f0c… --json`
 
 - **service_envs `<service id | service tag>` `[--json]`**  
   Lists the env vars that the service asks for: name, format tags and prose. If the service is not on this node, it is acquired first, as `execute` does.  
@@ -1299,6 +1305,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `clients [<client>] [--json] [--limit N]` | clients, or one with its history |
 | `reputation [<peer>] [--json]` | what the network stakes on us (or on a peer) |
 | `verify_reputation <peer>` | validate a peer's reputation proof and ownership |
+| `receipt verify <file> [--token t] [--peer p] [--json]` | check signed execution receipts |
 | `submit_reputation` / `sync_reputation_proof` | publish / reconcile this node's proof |
 | `earnings [--json]` | money taken in, per network and window |
 | `donations [--json]` | who we fund, who we count |

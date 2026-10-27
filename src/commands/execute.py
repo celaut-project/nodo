@@ -225,6 +225,17 @@ def reject_removed_remote_flag(args: list[str]) -> None:
         sys.exit(1)
 
 
+def save_start_receipt(response, path: str) -> None:
+    """Keep the start receipt of ``response`` in ``path`` (one JSON line, appended)."""
+    if not response.HasField("receipt"):
+        print("⚠️  The node gave no start receipt.", flush=True)
+        return
+    from src.commands.receipt import write_receipt
+    write_receipt(path, response.receipt)
+    print(f"\n🧾 Start receipt saved to {path} (check it with: nodo receipt verify {path} "
+          f"--token {response.token}).", flush=True)
+
+
 def print_endpoints(response) -> None:
     """Print the HTTP endpoints (if any) a `ServiceInstance` response exposes."""
     endpoints: list[str] = []
@@ -349,8 +360,12 @@ def execute(
     silent: bool = False,
     check_envs: bool = False,
     ask_envs: bool = False,
+    receipt_path: str | None = None,
 ):
     """Launch ``service`` through this node's gateway.
+
+    ``receipt_path``, when given, gets the signed start receipt (#419) as one JSON line,
+    the shape ``nodo receipt verify`` reads.
 
     ``check_envs`` compares ``envs`` with the variables the service declares
     (:func:`complete_envs`), asking for the missing ones when ``ask_envs`` is set. Both
@@ -395,6 +410,8 @@ def execute(
 
         print_endpoints(response)
         print_host_exposure_note(response)
+        if receipt_path:
+            save_start_receipt(response, receipt_path)
 
     finally:
         if sink:
