@@ -518,8 +518,19 @@ if __name__ == '__main__':
                 # is not asked for: a required one aborts, an optional one is reported.
                 no_input = "--no-input" in args and not args.remove("--no-input")
 
+                # Where to keep the signed start receipt (#419), for `nodo receipt verify`.
+                receipt_path = None
+                if "--receipt" in args:
+                    try:
+                        receipt_index = args.index("--receipt")
+                        receipt_path = args[receipt_index + 1]
+                        args = args[:receipt_index] + args[receipt_index + 2:]
+                    except IndexError:
+                        print("Error: --receipt requires a file path", flush=True)
+                        sys.exit(1)
+
                 if len(args) != 1:
-                    print("Usage: nodo execute [--name instance-name] [-e key value] [--no-input] <service id|service tag|'.celaut' file path>", flush=True)
+                    print("Usage: nodo execute [--name instance-name] [-e key value] [--no-input] [--receipt file] <service id|service tag|'.celaut' file path>", flush=True)
                     sys.exit(1)
 
                 try:
@@ -534,6 +545,7 @@ if __name__ == '__main__':
                     instance_name=instance_name,
                     check_envs=True,
                     ask_envs=sys.stdin.isatty() and not no_input,
+                    receipt_path=receipt_path,
                 )
 
             case "force_execution":
@@ -1123,6 +1135,11 @@ if __name__ == '__main__':
             case "resources":
                 from src.commands.resources import resources
                 ok = resources(argv=sys.argv[2:])
+                _exit(0 if ok else 1)
+
+            case "receipt":
+                from src.commands.receipt import receipt_command
+                ok = receipt_command(argv=sys.argv[2:])
                 _exit(0 if ok else 1)
 
             case "verify_reputation":

@@ -152,6 +152,7 @@ COMMANDS = sorted(
         "tx_history",
         "increase_peer_deposit",
         "verify_reputation",
+        "receipt",
         "pay",
         "credit_client",
         "debit_client",
