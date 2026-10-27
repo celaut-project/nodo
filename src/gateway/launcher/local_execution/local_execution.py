@@ -502,7 +502,41 @@ def local_execution(
         f"uri_slots={len(uri_slots)}"
     )
     
-    return celaut_pb2.ServiceInstance(
+    service_instance = celaut_pb2.ServiceInstance(
         token=vmachine_id,
         instance=instance
     )
+    receipt = _start_receipt(
+        token=vmachine_id, service_id=service_id, config=config, initial_mu=initial_mu,
+    )
+    if receipt is not None:
+        service_instance.receipt.CopyFrom(receipt)
+    return service_instance
+
+
+def _start_receipt(token: str, service_id: Optional[str],
+                   config: celaut_pb2.Configuration,
+                   initial_mu: int) -> Optional[celaut_pb2.ExecutionReceipt]:
+    """The signed start receipt (#419), or None.
+
+    ``config`` is the Configuration the service got, after ``extract_instance_name``
+    took out the reserved instance-name key. The digest covers the raw bytes of every
+    value, secrets too: it is salted, and the values never leave the node in it.
+
+    A receipt that cannot be built does not fail the start: the instance runs and is
+    billed, and the client gets no receipt, which is what it can hold against the node.
+    """
+    from src.identity import execution_receipt
+    from src.utils.hashing import get_configured_hash_id
+    try:
+        return execution_receipt.start_receipt(
+            token=token,
+            service_id=celaut_pb2.Metadata.HashTag.Hash(
+                type=get_configured_hash_id(), value=bytes.fromhex(service_id or ""),
+            ),
+            envs=keyvalue.to_dict(config.environment_variables),
+            initial_mu=initial_mu,
+        )
+    except Exception as e:
+        log.LOGGER(f"No start receipt for {token}: {e}")
+        return None
