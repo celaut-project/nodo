@@ -563,7 +563,9 @@ def _relay(
 
             if not readable:
                 if receipts is not None and receipts.due():
-                    yield receipts.checkpoint(mu_charged=meter.billed_mu)
+                    checkpoint = receipts.checkpoint(mu_charged=meter.billed_mu)
+                    if checkpoint is not None:
+                        yield checkpoint
                 # A datagram socket never reports EOF, so silence is the only
                 # signal we get that an exchange is over. Fire on inactivity in
                 # *either* direction, not only after the caller half-closes: a
@@ -599,7 +601,9 @@ def _relay(
             if not billable:
                 break  # Out of funds.
             if receipts is not None and receipts.due():
-                yield receipts.checkpoint(mu_charged=meter.billed_mu)
+                checkpoint = receipts.checkpoint(mu_charged=meter.billed_mu)
+                if checkpoint is not None:
+                    yield checkpoint
 
     except OSError as e:
         # For connected UDP this is where an ICMP port-unreachable lands.

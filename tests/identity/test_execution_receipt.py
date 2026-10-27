@@ -400,6 +400,33 @@ class ChainTests(unittest.TestCase):
         chain.record(er.DIRECTION_OUT, b"1234567")
         self.assertTrue(chain.due())        # 10 bytes since the last one
 
+    def test_a_signer_that_fails_changes_nothing(self):
+        """Sign first, then change the state (#593 review): a failed signature does not
+        use the seq and does not close the chain, and it does not raise."""
+        clock = _Clock(100.0)
+        calls = []
+
+        def flaky(receipt):
+            calls.append(receipt.seq)
+            if len(calls) <= 2:
+                raise RuntimeError("no key")
+            er.sign_with(receipt, _key())
+
+        chain = _chain(signer=flaky, every_bytes=1, every_seconds=5, monotonic=clock)
+        chain.record(er.DIRECTION_IN, b"ab")
+        self.assertTrue(chain.due())
+        self.assertIsNone(chain.checkpoint(mu_charged=1))
+        self.assertFalse(chain.due())             # waits one every_seconds to try again
+        clock.now += 5
+        self.assertTrue(chain.due())
+        self.assertIsNone(chain.checkpoint(mu_charged=1, final=True))   # close fails too
+        chain.record(er.DIRECTION_IN, b"cd")      # the chain is still open
+        close = chain.checkpoint(mu_charged=2, final=True)
+        self.assertEqual(calls, [1, 1, 1])        # the failed tries did not use the seq
+        self.assertEqual((close.kind, close.seq, close.in_events), (er.KIND_CLOSE, 1, 2))
+        self.assertTrue(er.verify(close, token=VECTOR_TOKEN))
+        self.assertIsNone(chain.checkpoint())
+
     def test_two_streams_have_two_sessions(self):
         self.assertNotEqual(
             er.ReceiptChain(VECTOR_TOKEN, er.PLANE_TUNNEL, er.COVERAGE_CLIENT_TUNNEL,
