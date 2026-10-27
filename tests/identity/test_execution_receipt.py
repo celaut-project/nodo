@@ -556,6 +556,13 @@ class CacheTests(unittest.TestCase):
                                return_value="abandon " * 11 + "about"):
             self.assertIsNotNone(er.node_signer())
 
+    def test_the_execution_name_of_this_node(self):
+        from unittest import mock
+        with mock.patch.object(er, "node_peer_id", return_value=VECTOR_PEER_ID):
+            self.assertEqual(er.node_execution_name(VECTOR_TOKEN), VECTOR_EXECUTION_NAME)
+        with mock.patch.object(er, "node_peer_id", return_value=None):
+            self.assertIsNone(er.node_execution_name(VECTOR_TOKEN))
+
 
 if __name__ == "__main__":
     unittest.main()

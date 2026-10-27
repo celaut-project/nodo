@@ -6,6 +6,8 @@ the instance lookups, the charge and the identity key are patched. What these pi
 * a caller that asks for receipts gets checkpoints and a close whose chains it can
   rebuild from its own messages, all signed by the node;
 * a caller that does not ask gets no index 2, and nothing is hashed for it;
+* the chains hold only billed messages, and the ``tunnel`` movements of the ledger
+  name the execution and the stream, and add up to the ``mu_charged`` of the close;
 * the celaut-gateway layer declares the new formats.
 """
 import socket
@@ -13,6 +15,7 @@ import threading
 import time
 import unittest
 from contextlib import ExitStack, contextmanager
+from types import SimpleNamespace
 from unittest import mock
 
 IMPORT_ERROR = None
@@ -92,6 +95,46 @@ def _instance(port):
     ).SerializeToString()
 
 
+def _sink_server():
+    """A service that says HELLO and then only reads: no echo, so the order of the
+    charges in the test below does not depend on two threads."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    server.settimeout(DEADLINE_S)
+    port = server.getsockname()[1]
+
+    def run():
+        try:
+            conn, _ = server.accept()
+            with conn:
+                conn.sendall(b"HELLO")
+                while conn.recv(4096):
+                    pass
+        except OSError:
+            pass
+        finally:
+            server.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    return port
+
+
+class _Ledger:
+    """``spend_mu`` as the tunnel calls it: it keeps the rows that it wrote, and it
+    refuses when ``balance`` is spent."""
+
+    def __init__(self, balance):
+        self.balance = balance
+        self.rows = []
+
+    def __call__(self, *, id, amount_mu, debug_mode, kind, detail):
+        if amount_mu > self.balance:
+            return False
+        self.balance -= amount_mu
+        self.rows.append({"amount": amount_mu, "kind": kind, "detail": dict(detail)})
+        return True
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -205,6 +248,74 @@ class TunnelReceiptTests(unittest.TestCase):
             out = list(relay)
         self.assertTrue(all(isinstance(m, bytes) for m in out))
 
+    def _billed_run(self, balance, payload):
+        """A tunnel with real billing: 5 MU to open it, 1 MU per byte, a block of 1 KiB."""
+        port = _sink_server()
+        ledger = _Ledger(balance)
+        real_get = rpc_tunnel.env_manager.get
+
+        def get(key, default=None):
+            return 1 if key == "costs.TUNNEL_CHARGE_INTERVAL_KB" else real_get(key, default)
+
+        def requests():
+            yield celaut_pb2.TokenMessage(token=TOKEN, slot=str(port), receipts=True)
+            for message in payload:
+                time.sleep(0.05)
+                yield message
+
+        with ExitStack() as stack:
+            stack.enter_context(_node_identity())
+            stack.enter_context(mock.patch.object(
+                rpc_tunnel.sc, "get_internal_instance", return_value=_instance(port)))
+            stack.enter_context(mock.patch.object(
+                rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"))
+            stack.enter_context(mock.patch("src.manager.manager.spend_mu", ledger))
+            stack.enter_context(mock.patch.object(
+                rpc_tunnel, "prices",
+                return_value=SimpleNamespace(tunnel_open_mu=5, net_mu_per_gib=1)))
+            stack.enter_context(mock.patch.object(rpc_tunnel, "traffic_charge_mu", lambda n: n))
+            stack.enter_context(mock.patch.object(rpc_tunnel.env_manager, "get", get))
+            _conn, relay = rpc_tunnel.service_tunnel(requests(), is_active=_deadline())
+            out = list(relay)
+        receipts = [m for m in out if isinstance(m, celaut_pb2.ExecutionReceipt)]
+        return ledger, [m for m in out if isinstance(m, bytes)], receipts
+
+    def test_the_close_is_the_sum_of_the_tunnel_movements_of_its_stream(self):
+        """Two signed sources must agree (#593 review): the ledger rows of the tunnel
+        name the execution and the stream, and they add up to mu_charged."""
+        ledger, got, receipts = self._billed_run(10 ** 9, [b"x" * 700, b"y" * 700, b"z"])
+        close = receipts[-1]
+        self.assertEqual(close.kind, er.KIND_CLOSE)
+        self.assertTrue(er.check_sequence(receipts, peer_id=_peer_id(), token=TOKEN)["valid"])
+        self.assertEqual({r["kind"] for r in ledger.rows}, {"tunnel"})
+        self.assertGreaterEqual(len(ledger.rows), 3)   # the open, a block, the settle
+        for row in ledger.rows:
+            self.assertEqual(row["detail"]["execution_name"], close.execution_name)
+            self.assertEqual(row["detail"]["session"], close.session)
+        self.assertEqual(sum(r["amount"] for r in ledger.rows), int(close.mu_charged.n))
+        self.assertEqual(int(close.mu_charged.n), 5 + 1400 + 1 + 5)   # open + every byte
+        self.assertEqual((close.in_events, close.in_bytes), (3, 1401))
+
+    def test_a_message_that_is_not_billed_is_not_in_the_chain(self):
+        """Recorded after the charge (#593 review): with an empty balance, the message
+        that the meter refuses is not in the signed counters."""
+        # 5 to open, then 1000 MU: the first block (1024 bytes) is refused.
+        ledger, got, receipts = self._billed_run(5 + 1000, [b"x" * 700, b"y" * 700, b"z"])
+        close = receipts[-1]
+        self.assertEqual(close.kind, er.KIND_CLOSE)
+        self.assertTrue(er.verify(close, token=TOKEN))
+        # HELLO and the first message are accepted (705 bytes: no block yet). The second
+        # one crosses the block, the charge fails, and the tunnel stops: not recorded,
+        # and "z" is never sent.
+        self.assertEqual((close.in_events, close.in_bytes, close.in_head),
+                         er.replay_chain([b"x" * 700], er.DIRECTION_IN))
+        self.assertEqual((close.out_events, close.out_bytes), (1, 5))
+        # The ledger and the receipt agree. The settle bills what is left after the
+        # refused block (1405 - 1024 bytes); the recorded bytes that the refused block
+        # held are not billed: at most one block, the overrun that TrafficMeter allows.
+        self.assertEqual(sum(r["amount"] for r in ledger.rows), int(close.mu_charged.n))
+        self.assertEqual(int(close.mu_charged.n), 5 + 381)
+        self.assertLess(close.in_bytes + close.out_bytes - 381, 1024)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -332,7 +443,8 @@ class DeclarationTests(unittest.TestCase):
         self.assertEqual(pairs["receipt.signature.payload"],
                          "celaut-execution-receipt:<public_key_hex>|<receipt_digest>")
         for key in ("receipt.digest", "receipt.execution_name", "receipt.envs_digest",
-                    "receipt.chain", "receipt.kinds", "receipt.coverage", "receipt.tunnel"):
+                    "receipt.chain", "receipt.kinds", "receipt.coverage", "receipt.tunnel",
+                    "receipt.ledger"):
             self.assertIn(key, pairs)
         self.assertIn("out:0=bytes,2=celaut.ExecutionReceipt", pairs["rpc.ServiceTunnel"])
         self.assertIn("schema.celaut.ExecutionReceipt", pairs)

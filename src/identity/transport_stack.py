@@ -482,11 +482,14 @@ def gateway_component() -> Layer:
                                "client or node",
         "receipt.chain": "blake2b-256 hex of UTF-8 of prev|seq|direction|length|"
                          "blake2b-256 hex of payload; seq from 1; direction in or out; "
-                         "genesis 64 zeros",
+                         "genesis 64 zeros; a tunnel records only the messages that "
+                         "its meter accepted",
         "receipt.kinds": "start,checkpoint,close",
         "receipt.coverage": "client-tunnel,full-instance-tap,counters-only",
         "receipt.tunnel": "TokenMessage.receipts: ExecutionReceipt at index 2; a close "
                           "when the stream stops normally",
+        "receipt.ledger": "detail.execution_name on start and tunnel movements; "
+                          "detail.session on tunnel movements of a receipt stream",
         "client_binding.payload": client_binding_payload(peer_id, client_id),
         "client_binding.signature": "Peer.signature_scheme, lowercase hex",
         "ledger_attestation.payload": attestation_payload(peer_id),
