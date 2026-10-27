@@ -512,5 +512,50 @@ class SequenceTests(unittest.TestCase):
         self.assertIn("execution_name", er.to_json_dict(receipt))
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CacheTests(unittest.TestCase):
+    """The open path of a tunnel or an Observe session reads the config and the key
+    once per process, not once per stream (#593 review)."""
+
+    def setUp(self):
+        self._saved = (er._intervals, er._node_key)
+        er._intervals = er._node_key = None
+
+    def tearDown(self):
+        er._intervals, er._node_key = self._saved
+
+    def test_the_intervals_are_read_once(self):
+        from unittest import mock
+        from src.utils import config as config_module
+        with mock.patch.object(config_module.ConfigManager, "get",
+                               side_effect=lambda key, default=None: 7) as get:
+            self.assertEqual(er.checkpoint_intervals(), (7, 7.0))
+            self.assertEqual(er.checkpoint_intervals(), (7, 7.0))
+        self.assertEqual(get.call_count, 2)       # two keys, read one time
+
+    def test_the_key_is_read_once(self):
+        from unittest import mock
+        from src.identity import node_identity
+        mnemonic = "abandon " * 11 + "about"
+        with mock.patch.object(node_identity, "get_identity_mnemonic",
+                               return_value=mnemonic) as read:
+            peer_id = er.node_peer_id()
+            for _ in range(3):
+                er.ReceiptChain.for_node(VECTOR_TOKEN, er.PLANE_TUNNEL,
+                                         er.COVERAGE_CLIENT_TUNNEL, slot="1")
+            self.assertEqual(er.node_peer_id(), peer_id)
+        self.assertEqual(read.call_count, 1)
+        self.assertEqual(peer_id, node_identity._cached_keypair(mnemonic)[0])
+
+    def test_no_key_is_not_kept(self):
+        from unittest import mock
+        from src.identity import node_identity
+        with mock.patch.object(node_identity, "get_identity_mnemonic", return_value=None):
+            self.assertIsNone(er.node_signer())
+        with mock.patch.object(node_identity, "get_identity_mnemonic",
+                               return_value="abandon " * 11 + "about"):
+            self.assertIsNotNone(er.node_signer())
+
+
 if __name__ == "__main__":
     unittest.main()
