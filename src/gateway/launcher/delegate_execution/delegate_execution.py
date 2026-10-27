@@ -331,6 +331,10 @@ def delegate_execution(
         )
         service_instance.token = alias
         service_instance.instance.CopyFrom(published_instance)
+        # The peer's start receipt names the execution by the peer's token, which the
+        # caller never gets: it gets the alias. Passing it on as if it were this node's
+        # would hand the caller a receipt it cannot tie to its token (#419).
+        service_instance.ClearField("receipt")
         return service_instance
     except Exception as e:
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
