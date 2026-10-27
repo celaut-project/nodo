@@ -9,6 +9,7 @@ the instance lookups, the charge and the identity key are patched. What these pi
 * the chains hold only billed messages, and the ``tunnel`` movements of the ledger
   name the execution and the stream, and add up to the ``mu_charged`` of the close;
 * a cancelled stream has no close, and no error;
+* a delegated start gets a start receipt signed by this node, for the alias;
 * the celaut-gateway layer declares the new formats.
 """
 import socket
@@ -338,6 +339,59 @@ class TunnelReceiptTests(unittest.TestCase):
         self.assertEqual(sum(r["amount"] for r in ledger.rows), int(close.mu_charged.n))
         self.assertEqual(int(close.mu_charged.n), 5 + 381)
         self.assertLess(close.in_bytes + close.out_bytes - 381, 1024)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DelegatedStartReceiptTests(unittest.TestCase):
+    """A delegated start gets a start receipt signed by this node as the executor, with
+    the alias as the token (#593 review). The receipt of the peer is not passed on."""
+
+    def test_this_node_signs_the_start_of_a_delegated_instance(self):
+        from src.gateway.launcher.delegate_execution import delegate_execution as delegate_mod
+        from src.utils.instance_names import INTERNAL_INSTANCE_NAME_ENV
+        config = celaut_pb2.Configuration()
+        config.initial_mu.n = "1000000"
+        for key, value in (("GREETING", b"hola"), (INTERNAL_INSTANCE_NAME_ENV, b"my-name")):
+            entry = config.environment_variables.add()
+            entry.key, entry.value = key, value
+        peer_key = ed25519.Ed25519PrivateKey.from_private_bytes(bytes(32))
+        peer_receipt = er.start_receipt(
+            "peer-token", celaut_pb2.Metadata.HashTag.Hash(type=b"t", value=b"s"), {}, 1,
+            signer=lambda r: er.sign_with(r, peer_key), peer_id="11" * 32)
+        answer = celaut_pb2.ServiceInstance(token="peer-token", receipt=peer_receipt)
+        payment_system = SimpleNamespace(local_mu_per_unit=1, peer_mu_per_unit=1)
+
+        with _node_identity(), \
+                mock.patch.object(delegate_mod, "matching_payment_system", return_value=payment_system), \
+                mock.patch.object(delegate_mod, "configuration_for_peer", return_value=config), \
+                mock.patch.object(delegate_mod, "balance_on_other_peer", return_value=10 ** 9), \
+                mock.patch.object(delegate_mod, "get_client_id_on_other_peer", return_value="c"), \
+                mock.patch.object(delegate_mod, "peer_channel"), \
+                mock.patch.object(delegate_mod.BeeClient, "start_service", return_value=answer), \
+                mock.patch.object(delegate_mod.delegated_endpoints, "should_tunnel", return_value=False), \
+                mock.patch.object(delegate_mod, "_child_balance_on_peer", return_value=None), \
+                mock.patch.object(delegate_mod, "SQLConnection") as sql_connection:
+            result = delegate_mod.delegate_execution(
+                service_id="ab" * 32, peer="peer-a", father_id="client-a",
+                metadata=celaut_pb2.Metadata(), config=config,
+                recursion_guard_token="guard", refund_container=[], own_build_mu=100_000,
+            )
+
+        alias = result.token
+        self.assertNotEqual(alias, "peer-token")
+        receipt = result.receipt
+        self.assertEqual(receipt.peer_id, _peer_id())          # this node, not the peer
+        self.assertTrue(er.verify(receipt, peer_id=_peer_id(), token=alias))
+        self.assertEqual(bytes(receipt.service_id.value), bytes.fromhex("ab" * 32))
+        # The credit that this node gives to the client: the `start` movement.
+        self.assertEqual(receipt.initial_mu.n, "1000000")
+        # The envs of the request, without the reserved instance name.
+        self.assertEqual(receipt.envs_digest,
+                         er.envs_digest({"GREETING": b"hola"}, receipt.envs_salt))
+        movements = sql_connection.return_value.add_delegated_instance.call_args.kwargs["movements"]
+        start = [m for m in movements if m.kind == "start"][0]
+        self.assertEqual(start.amount_mu, 1_000_000)
+        self.assertEqual(start.detail, {"execution_name": receipt.execution_name})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

@@ -24,6 +24,7 @@ from src.payment_system.mu_conversion import (
 from src.utils.cost_functions.delegated_price import priced_shape
 from src.utils.cost_functions.peer_quotes import maintenance_terms
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
+from src.utils.instance_names import extract_instance_name
 from src.virtualizers.architecture import get_arch_tag
 
 
@@ -335,10 +336,20 @@ def delegate_execution(
         )
         service_instance.token = alias
         service_instance.instance.CopyFrom(published_instance)
-        # The peer's start receipt names the execution by the peer's token, which the
-        # caller never gets: it gets the alias. Passing it on as if it were this node's
-        # would hand the caller a receipt it cannot tie to its token (#419).
-        service_instance.ClearField("receipt")
+        # The client does not know about the delegation, so this node signs a normal
+        # start receipt as the executor (#419): the alias is the token, the service and
+        # the envs are those of the request, and initial_mu is the credit that this node
+        # gives to the client (the `start` movement), not the balance of the child on
+        # the peer. The receipt of the peer names the peer's token and is not passed on.
+        receipt = _start_receipt(
+            token=alias, service_id=service_id,
+            config=extract_instance_name(config)[1] or celaut_pb2.Configuration(),
+            initial_mu=initial_mu,
+        )
+        if receipt is not None:
+            service_instance.receipt.CopyFrom(receipt)
+        else:
+            service_instance.ClearField("receipt")
         return service_instance
     except Exception as e:
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
