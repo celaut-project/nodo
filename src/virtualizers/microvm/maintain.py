@@ -34,7 +34,7 @@ from src.virtualizers.microvm.hypervisor import Hypervisor
 from src.utils import dead_instances
 from src.virtualizers.microvm.kill import kill as kill_vm
 from src.virtualizers.microvm.members import member
-from src.virtualizers.microvm.process import pid_alive
+from src.virtualizers.microvm.process import control_socket_missing, pid_alive
 from src.virtualizers.microvm.runtime_state import (
     list_runtime_dirs,
     list_runtime_states,
@@ -104,7 +104,7 @@ def maintain(
         return
 
     control_socket = str(state.get("control_socket") or "").strip()
-    if control_socket and not Path(control_socket).exists():
+    if control_socket and control_socket_missing(control_socket):
         log.LOGGER(hypervisor.log(
             vmachine_id,
             f"event=maintain unhealthy reason=control_socket_missing pid={pid} socket={control_socket}",

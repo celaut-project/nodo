@@ -164,6 +164,32 @@ class MicroVMLifecycleTests(unittest.TestCase):
 
         self.assertEqual(removed, ["vm-socket"])
 
+    def test_maintain_keeps_a_guest_whose_control_socket_it_cannot_see(self):
+        """A socket this process may not stat is not a socket that is gone.
+
+        `/run/nodo/ch` is root's, so a caller without root's rights reads every
+        live guest's socket as missing under ``Path.exists`` and would remove it.
+        """
+        removed = []
+
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 444, "control_socket": "/run/nodo/ch/ch-vm.sock"},
+        ), patch.object(
+            microvm_maintain, "_state_is_alive", return_value=True
+        ), patch.object(
+            microvm_process.os, "stat", side_effect=PermissionError()
+        ):
+            microvm_maintain.maintain(
+                members.CH,
+                vmachine_id="vm-root-socket",
+                debug_mode=True,
+                remove_and_penalize=lambda vmachine_id: removed.append(vmachine_id),
+            )
+
+        self.assertEqual(removed, [])
+
     def test_maintain_checks_a_qemu_guests_socket_too(self):
         """The check is the family's, so it covers whatever member recorded one.
 
