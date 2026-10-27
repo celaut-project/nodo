@@ -244,6 +244,28 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
         self.assertNotIn("ID: vm-qemu", rendered)
         self.assertIn("ID: vm-docker", rendered)
 
+    def _stale_with_socket_stat(self, stat_error):
+        state = {"pid": 4242, "control_socket": "/run/nodo/ch/ch-vm.sock"}
+        with patch(
+            "src.virtualizers.microvm.runtime_state.load_runtime_state",
+            return_value=state,
+        ), patch(
+            "src.virtualizers.microvm.runtime_state.recorded_process_name",
+            return_value="nodo-ch-vm",
+        ), patch(
+            "src.virtualizers.microvm.process.pid_alive",
+            return_value=True,
+        ), patch.object(instances_cmd.os, "stat", side_effect=stat_error):
+            return instances_cmd._instance_is_stale("vm-ch")
+
+    def test_live_guest_with_unreadable_control_socket_is_not_stale(self):
+        # `/run/nodo/ch` is root-only: run without sudo, `os.path.exists` read
+        # every live guest's socket as missing and `nodo instances` pruned them.
+        self.assertFalse(self._stale_with_socket_stat(PermissionError()))
+
+    def test_guest_with_missing_control_socket_is_stale(self):
+        self.assertTrue(self._stale_with_socket_stat(FileNotFoundError()))
+
 
 if __name__ == "__main__":
     unittest.main()

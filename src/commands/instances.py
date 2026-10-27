@@ -62,6 +62,23 @@ def _has_runtime_snapshot(virtualizer) -> bool:
     except Exception:
         return False
 
+def _control_socket_missing(path: str) -> bool:
+    """Is the control socket gone, as opposed to out of this process's sight?
+
+    ``os.path.exists`` answers ``False`` for both. The socket directory is root's
+    (``/run/nodo/ch`` is ``0700``), so a command run without sudo against a node
+    installed with sudo reads every live guest's socket as missing, and
+    ``nodo instances`` then pruned guests that were running. Only a socket that is
+    actually absent counts; one this process cannot look at is not evidence.
+    """
+    try:
+        os.stat(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
 def _instance_is_stale(instance_id: str) -> bool:
     """Is this row's guest gone, judged by what the launcher actually recorded?
 
@@ -85,7 +102,7 @@ def _instance_is_stale(instance_id: str) -> bool:
         if pid <= 0 or not pid_alive(pid=pid, process_name=recorded_process_name(state)):
             return True
         control_socket = str(state.get("control_socket") or "").strip()
-        return bool(control_socket) and not os.path.exists(control_socket)
+        return bool(control_socket) and _control_socket_missing(control_socket)
     except Exception:
         return False
 
