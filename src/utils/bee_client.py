@@ -129,7 +129,7 @@ class BeeClient:
         """Serialize a handler's response -- ``yield from`` this.
 
         ``indices`` is the method's table as it is (``rpc_output``), also when it has
-        only index 0 (``ServiceTunnel``). For such a table, bee_rpc gets the index from
+        only index 0. For such a table, bee_rpc gets the index from
         the first message with an unguarded ``next()``. Thus a response with no message
         stops with a RuntimeError, not with an empty stream. This method reads the first
         message before bee_rpc does, and sends an empty stream if there is none.

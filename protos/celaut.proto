@@ -577,6 +577,9 @@ message TokenMessage {
     // In ServiceTunnel: the internal port, as a decimal number. It must be one of the
     // Instance.uri_slot.internal_port values. Other methods do not use it.
     optional string slot = 2;
+    // In ServiceTunnel: true to also get the checkpoints of the execution receipt, as
+    // ExecutionReceipt at index 2 of the response. Other methods do not use it.
+    bool receipts = 3;
 }
 
 // The cost to run a service on the node. The node that answers sets it.
@@ -769,6 +772,91 @@ message BalanceStatement {
     string signature = 11;
 }
 
+// An execution receipt (docs/EXECUTION_RECEIPTS.md): a statement that the node signs
+// about one execution that it runs. It gives a client evidence against the node. It is
+// never evidence for the node. The celaut-gateway layer gives the exact text that the
+// node signs and how to calculate each hash. A receipt is one of three kinds:
+//   * "start": the answer of StartService gives it. It names the service, the
+//     environment variables and the amount of the start.
+//   * "checkpoint": a ServiceTunnel or Observe stream gives it from time to time. It
+//     gives the counters and the hash chains of the stream up to that point.
+//   * "close": the last checkpoint of a stream. The node sends it when the stream
+//     stops normally. A stream that stops without it is a truncated stream.
+// A field that the kind does not use is empty or zero, and the signature covers it too.
+message ExecutionReceipt {
+    // "start", "checkpoint" or "close".
+    string kind = 1;
+    // The peer_id of the node that signs: its public key, in lowercase hexadecimal.
+    string peer_id = 2;
+    // The name of the execution: blake2b-256 hex of the UTF-8 bytes of the instance
+    // token followed by the 32 bytes of the public key (not its hexadecimal text). The
+    // client, who has the token, can calculate it. A receipt never contains the token.
+    string execution_name = 3;
+    // When the node signed, in unix seconds, on the clock of the node.
+    int64 ts = 4;
+
+    // Only in "start". The service of the instance, as the content hash with which the
+    // registry of the node keeps it.
+    Metadata.HashTag.Hash service_id = 5;
+    // Only in "start". blake2b-256 hex of envs_salt followed by the UTF-8 of the
+    // canonical text of the environment variables that the service got. The
+    // celaut-gateway layer gives the canonical text.
+    string envs_digest = 6;
+    // Only in "start". A random value that the node selects for each start. The
+    // signature does not cover it: it lets the holder of the receipt show the digest
+    // to others and keep the values secret.
+    bytes envs_salt = 7;
+    // Only in "start". The Configuration.initial_mu of the start, in MU: what the node
+    // charged the caller, the build included.
+    Amount initial_mu = 8;
+
+    // Only in "checkpoint" and "close". The stream: "tunnel" (ServiceTunnel) or
+    // "observe" (Observe).
+    string plane = 9;
+    // Only in "checkpoint" and "close". A random identifier of the stream, in
+    // lowercase hexadecimal, that the node selects when the stream starts.
+    string session = 10;
+    // Only in "checkpoint" and "close" of a tunnel. The slot of the tunnel.
+    string slot = 11;
+    // Only in "checkpoint" and "close". The number of the checkpoint in the stream: 1
+    // for the first, and one more for each next checkpoint.
+    uint64 seq = 12;
+    // Only in "checkpoint" and "close". The events into the instance: for a tunnel,
+    // the messages from the caller that the node sent to the service; for Observe,
+    // the packets with direction "IN".
+    uint64 in_events = 13;
+    // The bytes of these events.
+    uint64 in_bytes = 14;
+    // The hash chain of these events. The celaut-gateway layer gives how to calculate
+    // it.
+    string in_head = 15;
+    // The events out of the instance: for a tunnel, the messages from the service that
+    // the node sent to the caller; for Observe, the packets with direction "OUT".
+    uint64 out_events = 16;
+    // The bytes of these events.
+    uint64 out_bytes = 17;
+    // The hash chain of these events.
+    string out_head = 18;
+    // Only for a tunnel. What the node charged the instance for this tunnel up to the
+    // checkpoint, in MU: the charge to open it and the traffic it billed.
+    Amount mu_charged = 19;
+    // Only in "checkpoint" and "close". What the node can see of the traffic of the
+    // instance: "client-tunnel" (all the bytes of this tunnel, and nothing else),
+    // "full-instance-tap" (each packet of the instance, with its bytes) or
+    // "counters-only" (only counts and lengths).
+    string coverage = 20;
+    // Only for Observe. The capture mode of the session: "pcap" or "conntrack".
+    string capture_mode = 21;
+    // Only for Observe. Why the capture is not full. Empty when it is full.
+    string degraded_reason = 22;
+
+    // The scheme of the signature, as on the Peer, without the prose.
+    Peer.SignatureScheme signature_scheme = 23;
+    // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
+    // that the node signs. A receipt without a valid signature is not valid.
+    string signature = 24;
+}
+
 // The answer of StartService.
 message ServiceInstance {
     // The instance token. It is the credential for StopService, ModifyDeposit,
@@ -776,6 +864,9 @@ message ServiceInstance {
     string token = 1;
     // The addresses of the instance.
     Instance instance = 2;
+    // The start receipt of the instance, signed by the node that runs it. Absent if
+    // the node has no identity key, and when the node gave the start to a peer.
+    ExecutionReceipt receipt = 3;
 }
 
 // The identity (issue #236) is a keypair of the node's own, on no ledger. It is
@@ -1069,6 +1160,9 @@ message ObserveRequest {
     // True to also get one event for each packet. Without it, the stream has only the
     // session, the metrics and the notices.
     bool include_packets = 2;
+    // True to also get the checkpoints of the execution receipt, as events of kind
+    // "receipt". The hash chains cover the packet events of this stream.
+    bool include_receipts = 3;
 }
 
 // src/commands/observe.py makes these events (metrics_record, serialize_event).
@@ -1078,8 +1172,8 @@ message ObserveEvent {
     // The time of the event, as HH:MM:SS in the local time of the node. Empty in the
     // notice that tells why the observation did not start.
     string time = 1;
-    // The kind of the event: "session", "metrics", "packet" or "notice". It names the
-    // field of the oneof that the event sets.
+    // The kind of the event: "session", "metrics", "packet", "notice" or "receipt". It
+    // names the field of the oneof that the event sets.
     string kind = 2;
 
     // How the node observes the instance. It is the first event and it occurs one time,
@@ -1187,6 +1281,9 @@ message ObserveEvent {
         Packet packet = 12;
         // A notice. Only when kind is "notice".
         Notice notice = 13;
+        // A checkpoint of the execution receipt. Only when kind is "receipt", and only
+        // if the request has include_receipts.
+        ExecutionReceipt receipt = 14;
     }
 }
 
@@ -1209,10 +1306,10 @@ service Gateway {
     // Starts a service. The caller sends a Client and the service as content hashes, as
     // Metadata or as the full Service. It can also send a Configuration and a
     // RecursionGuard, and a StartReference that makes the request idempotent. The node
-    // returns a ServiceInstance with the addresses of the instance and its token. The
-    // node can start the service on a peer and give the addresses of that instance. If
-    // the node does not have the service and the caller does not send it, the node
-    // refuses with an error.
+    // returns a ServiceInstance with the addresses of the instance, its token and a
+    // signed start receipt. The node can start the service on a peer and give the
+    // addresses of that instance. If the node does not have the service and the caller
+    // does not send it, the node refuses with an error.
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Stops an instance. The TokenMessage gives the instance token. The node gives the
     // balance that the instance did not use back to its parent, and returns a Refund
@@ -1305,7 +1402,9 @@ service Gateway {
     // each side sends raw bytes at index 0. For a TCP slot, when the stream of the
     // caller stops, the node closes the write side of the connection to the service.
     // For a UDP slot, each message is one datagram. The node takes the traffic cost
-    // from the balance of the instance.
+    // from the balance of the instance. If the TokenMessage has receipts, the node also
+    // sends signed checkpoints of the execution receipt at index 2, and a "close"
+    // checkpoint when the stream stops normally.
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes an ObserveRequest and returns a stream of ObserveEvent. If the observation
     // starts, the first event is a session event. If not, the stream has only one

@@ -158,10 +158,10 @@ class GatewayServicer(object):
         """Starts a service. The caller sends a Client and the service as content hashes, as
         Metadata or as the full Service. It can also send a Configuration and a
         RecursionGuard, and a StartReference that makes the request idempotent. The node
-        returns a ServiceInstance with the addresses of the instance and its token. The
-        node can start the service on a peer and give the addresses of that instance. If
-        the node does not have the service and the caller does not send it, the node
-        refuses with an error.
+        returns a ServiceInstance with the addresses of the instance, its token and a
+        signed start receipt. The node can start the service on a peer and give the
+        addresses of that instance. If the node does not have the service and the caller
+        does not send it, the node refuses with an error.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -343,7 +343,9 @@ class GatewayServicer(object):
         each side sends raw bytes at index 0. For a TCP slot, when the stream of the
         caller stops, the node closes the write side of the connection to the service.
         For a UDP slot, each message is one datagram. The node takes the traffic cost
-        from the balance of the instance.
+        from the balance of the instance. If the TokenMessage has receipts, the node also
+        sends signed checkpoints of the execution receipt at index 2, and a "close"
+        checkpoint when the stream stops normally.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
