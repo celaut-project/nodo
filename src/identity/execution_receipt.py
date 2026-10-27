@@ -59,9 +59,17 @@ PLANES = (PLANE_TUNNEL, PLANE_OBSERVE)
 # What a stream lets the node see (docs/EXECUTION_RECEIPTS.md, "four planes"). A reader
 # must not take a receipt for more than its coverage says.
 COVERAGE_CLIENT_TUNNEL = "client-tunnel"
-COVERAGE_FULL_TAP = "full-instance-tap"
+# The packets that the capture got, with the bytes it holds. Not "full": the capture
+# keeps at most its snap length of a frame, and the kernel drops packets when the
+# reader is slow. So this coverage is not proof that the instance sent nothing else.
+COVERAGE_TAP = "instance-tap"
 COVERAGE_COUNTERS = "counters-only"
-COVERAGES = (COVERAGE_CLIENT_TUNNEL, COVERAGE_FULL_TAP, COVERAGE_COUNTERS)
+COVERAGES = (COVERAGE_CLIENT_TUNNEL, COVERAGE_TAP, COVERAGE_COUNTERS)
+# The coverages that each plane can have.
+PLANE_COVERAGES = {
+    PLANE_TUNNEL: (COVERAGE_CLIENT_TUNNEL,),
+    PLANE_OBSERVE: (COVERAGE_TAP, COVERAGE_COUNTERS),
+}
 
 # The two chains of a stream. "in" is into the instance (caller -> service, or a packet
 # with direction IN), "out" is out of it.

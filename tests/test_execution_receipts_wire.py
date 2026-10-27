@@ -391,7 +391,7 @@ class ObserveReceiptTests(unittest.TestCase):
          "capture_mode": "pcap", "degraded_reason": ""},
         {"kind": "packet", "time": "12:00:01", "frame_len": 60, "frame": b"\x01" * 60,
          "source": "pcap", "record": {"direction": "IN"}},
-        {"kind": "packet", "time": "12:00:01", "frame_len": 1500, "frame": b"\x02" * 64,
+        {"kind": "packet", "time": "12:00:01", "frame_len": 64, "frame": b"\x02" * 64,
          "source": "pcap", "record": {"direction": "OUT"}},
         {"kind": "metrics", "time": "12:00:02", "alive": True},
     ]
@@ -425,16 +425,25 @@ class ObserveReceiptTests(unittest.TestCase):
         close = receipts[0]
         self.assertEqual(close.kind, er.KIND_CLOSE)
         self.assertEqual((close.plane, close.coverage, close.capture_mode),
-                         (er.PLANE_OBSERVE, er.COVERAGE_FULL_TAP, "pcap"))
+                         (er.PLANE_OBSERVE, er.COVERAGE_TAP, "pcap"))
         self.assertEqual((close.in_events, close.in_bytes), (1, 60))
-        self.assertEqual((close.out_events, close.out_bytes), (1, 1500))
+        self.assertEqual((close.out_events, close.out_bytes), (1, 64))
         packets = [e.packet for e in events if e.kind == "packet"]
         self.assertEqual(close.out_head, er.replay_chain(
-            [(p.frame_len, p.raw_frame) for p in packets if p.direction == "OUT"],
-            er.DIRECTION_OUT)[2])
+            [p.raw_frame for p in packets if p.direction == "OUT"], er.DIRECTION_OUT)[2])
         self.assertTrue(er.verify(close, token=TOKEN))
         close.capture_mode = "conntrack"
         self.assertFalse(er.verify(close, token=TOKEN))
+
+    def test_the_length_and_the_digest_are_over_the_same_bytes(self):
+        """A frame that the capture cut (#593 review): the chain has the length of the
+        bytes that the digest covers, and the coverage does not claim every packet."""
+        events = list(self.EVENTS)
+        events[2] = dict(events[2], frame_len=1500)     # a length that is not the frame's
+        close = [e.receipt for e in self._events(True, events=events) if e.kind == "receipt"][-1]
+        self.assertEqual((close.out_events, close.out_bytes, close.out_head),
+                         er.replay_chain([b"\x02" * 64], er.DIRECTION_OUT))
+        self.assertEqual(close.coverage, "instance-tap")
 
     def test_conntrack_is_counters_only(self):
         events = [dict(self.EVENTS[0], capture_mode="conntrack",
@@ -468,6 +477,7 @@ class DeclarationTests(unittest.TestCase):
                     "receipt.chain", "receipt.kinds", "receipt.coverage", "receipt.tunnel",
                     "receipt.ledger"):
             self.assertIn(key, pairs)
+        self.assertEqual(pairs["receipt.coverage"], "client-tunnel,instance-tap,counters-only")
         self.assertIn("out:0=bytes,2=celaut.ExecutionReceipt", pairs["rpc.ServiceTunnel"])
         self.assertIn("schema.celaut.ExecutionReceipt", pairs)
         self.assertIn("EXECUTION RECEIPTS.", prose)
