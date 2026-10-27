@@ -127,7 +127,8 @@ digest of the exchanged messages are not the same claim.
 
 > **Consequence:** a receipt covering only the client's tunnel does not establish that
 > the service spoke to nothing else. Whoever reads it will ask, so the coverage field
-> answers it: *client tunnel*, *full instance tap*, or *counters only*.
+> answers it: *client tunnel*, *instance tap*, or *counters only*. Even the tap is not
+> proof of silence: it can cut a frame and drop packets.
 
 ---
 
@@ -189,7 +190,9 @@ falls far short of what was paid for, contradicts a document neither party contr
 and has no final one. This is a judgement, not a derivation: it rests on a policy that
 a node which took payment must be able to produce a closing receipt. It is the only
 category where the client's word matters, and therefore the one a reader should
-discount.
+discount. A client that cancels its own stream gets no close either (see
+[Implementation status](#when-a-stream-has-no-close)), so a missing close is not by
+itself proof of a fault.
 
 **5. A reproducibility contradiction.** Re-run `service_id` with the signed envs and
 the signed input transcript; if the output digest differs, the receipt is false.
@@ -257,11 +260,16 @@ already public and that it signed.
 ## Delegation
 
 When execution is delegated (`delegate_execution`, the `delegated_instances` table),
-the node that took the request cannot attest the execution. It can sign that it
-delegated, and pass on the executor's own receipt: a client that asked A and was
-served by B ends up with a chain A→B. A cannot forge B's receipt — the signature is
-B's — but it can **omit** it, so the executor's receipt is something the client
-requires as a condition, not something it hopes to receive.
+the client does not know about it: it asked A, and A answers. So A signs a normal
+`start` receipt as the executor. The token is the alias that the client got, the
+service and the envs are those of the request, and `initial_mu` is the credit that A
+gives to the client (the `start` movement of the alias), not the balance of the child
+on B. A does not pass on B's receipt: it names B's token, which the client never gets.
+A is answerable for what it signed, and B is answerable to A.
+
+A delegated instance gets no `checkpoint` and no `close`: `ServiceTunnel` refuses a
+delegated token (`_resolve_target`), and the caller tunnels to the addresses that A
+published. This is a limit of the current code.
 
 ## What receipts do not give
 
@@ -304,7 +312,8 @@ Non-negotiable, all for reasons already argued in the identity module:
    checkpoints on a third `ServiceTunnel` index. **Done (#419).**
 3. **A closing receipt with declared coverage**, and checkpoints over `Observe` with
    `capture_mode` inside the signed payload. **Done (#419)**, as the `close` of each
-   stream. See [Open points](#open-points).
+   stream. There is no receipt for the whole execution at `StopService`: the balance
+   statement signs the refund and the total spent.
 4. **Publication**: the receipt-type object, the digest on-chain, the body
    content-addressed off-chain. **Not done.**
 
@@ -329,10 +338,12 @@ One message, `celaut.ExecutionReceipt`, for three kinds:
 | Kind | Where the client gets it | What it says |
 | --- | --- | --- |
 | `start` | `ServiceInstance.receipt`, in the answer of `StartService` | `service_id`, `envs_digest` (and `envs_salt`), `initial_mu` |
-| `checkpoint` | `ServiceTunnel` index 2, or an `Observe` event of kind `receipt` | the stream: `plane`, `session`, `slot`, `seq`, the two chains, `mu_charged`, `coverage`, `capture_mode`, `degraded_reason` |
+| `checkpoint` | `ServiceTunnel` index 2, or an `Observe` event of kind `receipt` | the stream: `plane`, `session`, `seq`, the two chains, `coverage`; a tunnel also `slot` and `mu_charged`; Observe also `capture_mode` and `degraded_reason` |
 | `close` | the same place, as the last message of the stream | the same fields as a checkpoint; the stream stopped normally |
 
-A field that the kind does not use is empty or zero. The signature covers it too.
+A field that the kind or the plane does not use is empty or zero. The signature covers
+it too, so a verifier refuses a receipt that sets one (see
+[Checking receipts](#checking-receipts)).
 
 ### What the node signs
 
@@ -393,13 +404,45 @@ are the packet events with direction `IN` and `OUT`.
     head_k = blake2b_256_hex(UTF-8(head_{k-1} "|" k "|" direction "|" length "|"
                                    blake2b_256_hex(payload)))
 
-`k` counts the events of that chain from 1. `length` is the length of the payload,
-except for `Observe`, where it is the wire length of the frame (`frame_len`), and the
-payload is the captured frame (empty with `conntrack`).
+`k` counts the events of that chain from 1. `length` is the length of the payload.
+For `Observe`, the payload is the `raw_frame` of the packet event, and `length` is its
+length: the captured bytes, which `frame_len` also gives. With no frame (no
+`include_packets`, or `conntrack`), the payload is empty and `length` is `frame_len`
+(0 when there is none). The capture keeps at most 65535 bytes of a frame, so a client
+that has the full wire frame from elsewhere must cut it to the same length.
 
 Each direction has its own chain. A client can rebuild each one from what it sent and
 what it got: one bee-rpc message is one event. The order in which the node saw the two
 directions mix is not a thing that the client can know, so it is not in the chains.
+
+A tunnel records a message only after `TrafficMeter.add` accepts it. A message that the
+meter refuses (the balance or the daily allowance is spent) ends the tunnel, and it is
+not in the chain. The node can still have given that last message to the service or to
+the caller, so the client compares the chain with its first `in_events` (or
+`out_events`) messages.
+
+The meter bills whole blocks of `costs.TUNNEL_CHARGE_INTERVAL_KB` and settles the rest
+when the tunnel closes. So `mu_charged` is the price of the bytes in the chains, plus
+the charge to open. When the balance runs out, it can be less by at most one block: the
+refused block held bytes of messages that were already accepted. This is the overrun
+that `TrafficMeter` allows, and it is in favour of the client.
+
+### Receipts and the balance statement
+
+The balance statement (`GetBalanceStatement`) and the receipts are two signed sources
+for the same execution. They must agree, and a reader can check it:
+
+- The `start` movement of the instance has `detail.execution_name`, the name of its
+  receipts. Its amount is the `initial_mu` of the `start` receipt.
+- Each `tunnel` movement has `detail.execution_name` and, when the caller asked for
+  receipts, `detail.session`. The sum of the `tunnel` movements of one session is the
+  `mu_charged` of the `close` of that stream, and of the last checkpoint before a
+  cancel.
+
+The ledger names an account by `blake2b("celaut-ledger-instance:" + token)`, and a
+receipt names the execution by `blake2b(token || peer_id_raw)`. The `execution_name` in
+the detail lets a reader that has only the two documents link them. Neither name
+opens the instance.
 
 ### When the node signs a checkpoint
 
@@ -407,49 +450,75 @@ When `receipts.CHECKPOINT_BYTES` (default 1 MiB) or `receipts.CHECKPOINT_SECONDS
 (default 5 s) passed since the last checkpoint, and only if new traffic came. An idle
 stream gets none. `seq` starts at 1. The `close` comes after the tunnel is torn down
 and its last partial block is billed, so its `mu_charged` is the whole charge of the
-tunnel: the open charge and the traffic. A stream that the caller cancels gets no
-close, because nobody is there to receive it.
+tunnel: the open charge and the traffic. The config is read once per process.
+
+The node signs first, and changes the state of the stream after. If the signature
+fails, the stream goes on with no receipt, the `seq` is not used, and the node tries
+again after `receipts.CHECKPOINT_SECONDS`. A `close` that fails does not close the
+chain.
+
+### When a stream has no close
+
+The node sends the `close` only when the stream stops on its own: the service closed,
+the caller stopped sending, the balance ran out, or the instance stopped (Observe). If
+the caller cancels the RPC, gRPC closes the response generator, and a generator cannot
+yield after `GeneratorExit`: the node sends no `close`, and nobody is there to get it.
+So **a missing close is not by itself proof of a fault**. The highest checkpoint and
+the `tunnel` movements of its session in the balance statement still show what the
+node relayed and charged.
 
 ### What a caller must ask for
 
-Nothing changes for a caller that does not ask:
-
-- `ServiceTunnel`: set `TokenMessage.receipts`. An older client does not know index 2
-  and refuses it, so the node never sends it unasked. An older node ignores the
-  field and sends no checkpoint.
+- `ServiceTunnel`: set `TokenMessage.receipts`. Without it, the response has no index
+  2, and the node hashes nothing.
 - `Observe`: set `ObserveRequest.include_receipts`.
-- `StartService`: nothing. `ServiceInstance.receipt` is a new field, and an older
-  client ignores it.
+- `StartService`: nothing. The answer always has the start receipt.
 
-With no request, the node hashes nothing.
+Receipts on a stream are opt-in so that a caller that does not keep them costs the node
+no hashing and gets no message that it must parse.
 
 ### Coverage
 
 | `coverage` | When |
 | --- | --- |
-| `client-tunnel` | every `ServiceTunnel` stream: all the bytes of this tunnel, and nothing else of the instance |
-| `full-instance-tap` | `Observe` with `capture_mode` `pcap` and `include_packets`: each packet of the instance, with its bytes |
+| `client-tunnel` | every `ServiceTunnel` stream: all the billed bytes of this tunnel, and nothing else of the instance |
+| `instance-tap` | `Observe` with `capture_mode` `pcap` and `include_packets`: the packets of the instance that the capture got, with the bytes that it holds |
 | `counters-only` | `Observe` with `conntrack`, or without `include_packets`: counts and lengths only |
+
+`instance-tap` is not "every packet". The capture keeps at most 65535 bytes of a frame,
+and the kernel drops packets when the reader is slow. So an `instance-tap` receipt is
+not proof that the instance sent nothing else.
 
 ### Checking receipts
 
 `nodo receipt verify <file> [--token <token>] [--peer <peer_id>] [--json]` reads a
 JSON file (one receipt, a list, or one per line, in the proto3 JSON form) and checks
-each signature, then the set: one node and one name, counters and charge that do not
+each receipt, then the set: one node and one name, counters and charge that do not
 go down, nothing after a close, and **contradictions** (two valid receipts for the
 same start, or for the same `seq` of the same stream, with different content). A gap
 in `seq` is reported but is not an error. `nodo execute --receipt <file>` keeps the
-start receipt in that form. The check needs no database, no daemon and no network.
+start receipt in that form. The check needs no database, no daemon and no network. A
+file that is not receipts gives "Cannot read receipts" (with `--json`, a JSON error),
+never a traceback.
 
-### Open points
+Each receipt must have the fields of its kind and plane, and no other signed field:
 
-- **Delegation.** When this node gives a start to a peer, the peer's start receipt
-  names the peer's token, and the caller gets an alias. The node removes the receipt
-  from the answer, so a delegated start has none. The doc asks for a chain A→B: A
-  signs that it delegated, and passes on B's receipt. Not done.
-- **A closing receipt for the execution.** The `close` of a stream closes that stream.
-  `StopService` does not sign a receipt for the whole execution (the refund and what
-  was spent). It is a small addition to `Refund`, if wanted.
+- `start`: `service_id` (type and value), `envs_digest` and `initial_mu`, and no
+  stream field.
+- `checkpoint` and `close`: `plane`, `session`, `seq` ≥ 1, `in_head`, `out_head`, a
+  `coverage` of its plane, and no start field.
+  - `tunnel`: `slot` and `mu_charged`; coverage `client-tunnel`; no `capture_mode`
+    and no `degraded_reason`.
+  - `observe`: `capture_mode`; coverage `instance-tap` (only with `pcap`) or
+    `counters-only`; no `slot` and no `mu_charged`.
+
+### Limits and open points
+
+- **Delegation.** A delegated start gets a `start` receipt signed by this node (see
+  [Delegation](#delegation)), but no `checkpoint` and no `close`: `ServiceTunnel`
+  refuses a delegated token.
+- **No receipt at `StopService`.** The `close` of a stream closes that stream. The
+  balance statement already signs the refund and the total spent.
 - **Contradictions are not stored.** The node does not keep the receipts that it
   signs. A client keeps them.
 - **Phase 4**: see the PR of #419 for a proposal.

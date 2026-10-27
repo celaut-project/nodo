@@ -724,7 +724,10 @@ message BalanceMovement {
     // is none. For a maintenance period: "seconds", and the resources that the node
     // priced ("mem_limit", "disk_space", "cpu_period", "cpu_quota"). For a refund of a
     // charge that was not used: "refunds_seq", the seq of that charge. For a
-    // child_bound: "starts_seq", the seq of the child_start whose child it names.
+    // child_bound: "starts_seq", the seq of the child_start whose child it names. For a
+    // start: "execution_name", the name that the execution receipts of the instance
+    // carry. For a tunnel: "open" or "bytes", "execution_name", and "session", the
+    // receipt stream of the tunnel when the caller asked for receipts.
     string detail = 7;
     // The hash of the movement before this one. For the first movement, the genesis
     // hash of the account: blake2b-256 hex of "celaut-balance-genesis:" followed by the
@@ -781,7 +784,8 @@ message BalanceStatement {
 //   * "checkpoint": a ServiceTunnel or Observe stream gives it from time to time. It
 //     gives the counters and the hash chains of the stream up to that point.
 //   * "close": the last checkpoint of a stream. The node sends it when the stream
-//     stops normally. A stream that stops without it is a truncated stream.
+//     stops normally. A caller that cancels the stream gets no close, so a stream with
+//     no close is not by itself proof of a fault.
 // A field that the kind does not use is empty or zero, and the signature covers it too.
 message ExecutionReceipt {
     // "start", "checkpoint" or "close".
@@ -807,7 +811,8 @@ message ExecutionReceipt {
     // to others and keep the values secret.
     bytes envs_salt = 7;
     // Only in "start". The Configuration.initial_mu of the start, in MU: what the node
-    // charged the caller, the build included.
+    // charged the caller, the build included. It is the amount of the "start" movement
+    // of the instance in its balance statement.
     Amount initial_mu = 8;
 
     // Only in "checkpoint" and "close". The stream: "tunnel" (ServiceTunnel) or
@@ -837,12 +842,15 @@ message ExecutionReceipt {
     uint64 out_bytes = 17;
     // The hash chain of these events.
     string out_head = 18;
-    // Only for a tunnel. What the node charged the instance for this tunnel up to the
-    // checkpoint, in MU: the charge to open it and the traffic it billed.
+    // Only for a tunnel, and always there. What the node charged the instance for this
+    // tunnel up to the checkpoint, in MU: the charge to open it and the traffic it
+    // billed. It is the sum of the "tunnel" movements of this session in the balance
+    // statement. The chains cover only the messages that the meter accepted.
     Amount mu_charged = 19;
     // Only in "checkpoint" and "close". What the node can see of the traffic of the
     // instance: "client-tunnel" (all the bytes of this tunnel, and nothing else),
-    // "full-instance-tap" (each packet of the instance, with its bytes) or
+    // "instance-tap" (the packets of the instance that the capture got, with the bytes
+    // that it holds: the capture cuts a long frame and can drop packets under load) or
     // "counters-only" (only counts and lengths).
     string coverage = 20;
     // Only for Observe. The capture mode of the session: "pcap" or "conntrack".
@@ -864,8 +872,9 @@ message ServiceInstance {
     string token = 1;
     // The addresses of the instance.
     Instance instance = 2;
-    // The start receipt of the instance, signed by the node that runs it. Absent if
-    // the node has no identity key, and when the node gave the start to a peer.
+    // The start receipt of the instance, signed by the node that answers. When the node
+    // gave the start to a peer, it signs the receipt as the executor, with the token
+    // that the caller got. Absent if the node has no identity key.
     ExecutionReceipt receipt = 3;
 }
 
