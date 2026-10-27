@@ -533,20 +533,33 @@ def _start_receipt(token: str, service_id: Optional[str],
     took out the reserved instance-name key. The digest covers the raw bytes of every
     value, secrets too: it is salted, and the values never leave the node in it.
 
-    A receipt that cannot be built does not fail the start: the instance runs and is
-    billed, and the client gets no receipt, which is what it can hold against the node.
+    ``delegate_execution`` uses it too, with the alias as the token: the client does
+    not know about the delegation, so this node signs as the executor.
+
+    A ``service_id`` that is empty or not hex gives no receipt and a warning: a signed
+    receipt with no service in it fails every check. A receipt that cannot be built
+    does not fail the start: the instance runs and is billed, and the client gets no
+    receipt, which is what it can hold against the node.
     """
     from src.identity import execution_receipt
     from src.utils.hashing import get_configured_hash_id
     try:
+        service_id_bytes = bytes.fromhex(service_id or "")
+    except ValueError:
+        service_id_bytes = b""
+    if not service_id_bytes:
+        log.LOGGER(f"WARNING: no start receipt for {token}: the service_id "
+                   f"{service_id!r} is not a hex hash.")
+        return None
+    try:
         return execution_receipt.start_receipt(
             token=token,
             service_id=celaut_pb2.Metadata.HashTag.Hash(
-                type=get_configured_hash_id(), value=bytes.fromhex(service_id or ""),
+                type=get_configured_hash_id(), value=service_id_bytes,
             ),
             envs=keyvalue.to_dict(config.environment_variables),
             initial_mu=initial_mu,
         )
     except Exception as e:
-        log.LOGGER(f"No start receipt for {token}: {e}")
+        log.LOGGER(f"WARNING: no start receipt for {token}: {e}")
         return None
