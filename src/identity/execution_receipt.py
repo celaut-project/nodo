@@ -276,23 +276,38 @@ def sign_with(receipt: celaut_pb2.ExecutionReceipt, private_key: ed25519.Ed25519
     receipt.signature = private_key.sign(signed_bytes(receipt)).hex()
 
 
-def node_signer() -> Optional[Callable[[celaut_pb2.ExecutionReceipt], None]]:
-    """A signer with this node's identity key, or None if the node has none.
+# This node's identity, ``(peer_id, private key)``, read once. The identity mnemonic
+# does not change while the node runs (``node_identity.get_identity_mnemonic``), and a
+# tunnel or an Observe session that asks for receipts must not read the config on its
+# open path. None is not kept: a process that reads it before the config is loaded
+# reads it again later.
+_node_key: Optional[Tuple[str, ed25519.Ed25519PrivateKey]] = None
+_node_key_lock = threading.Lock()
 
-    Read per call and not cached: the key is cached already (``_cached_keypair``), and a
-    test that changes the mnemonic must not get the old one.
-    """
-    from src.identity.node_identity import _cached_keypair, get_identity_mnemonic
-    mnemonic = get_identity_mnemonic()
-    if not mnemonic:
+
+def _node_identity_key() -> Optional[Tuple[str, ed25519.Ed25519PrivateKey]]:
+    global _node_key
+    with _node_key_lock:
+        if _node_key is None:
+            from src.identity.node_identity import _cached_keypair, get_identity_mnemonic
+            mnemonic = get_identity_mnemonic()
+            if mnemonic:
+                _node_key = _cached_keypair(mnemonic)
+        return _node_key
+
+
+def node_signer() -> Optional[Callable[[celaut_pb2.ExecutionReceipt], None]]:
+    """A signer with this node's identity key, or None if the node has none."""
+    key = _node_identity_key()
+    if key is None:
         return None
-    private_key = _cached_keypair(mnemonic)[1]
+    private_key = key[1]
     return lambda receipt: sign_with(receipt, private_key)
 
 
 def node_peer_id() -> Optional[str]:
-    from src.identity.node_identity import get_node_public_key_hex
-    return get_node_public_key_hex()
+    key = _node_identity_key()
+    return key[0] if key is not None else None
 
 
 def start_receipt(
@@ -335,12 +350,19 @@ def start_receipt(
 # The chains of a stream
 # ---------------------------------------------------------------------------------
 
+_intervals: Optional[Tuple[int, float]] = None
+
+
 def checkpoint_intervals() -> Tuple[int, float]:
     """``(bytes, seconds)`` from ``receipts.CHECKPOINT_BYTES`` / ``CHECKPOINT_SECONDS``.
 
+    Read once per process, as the config itself is (``ConfigManager.ensure_loaded``).
     Anything unreadable or not positive takes the default: the intervals are a policy,
     and a bad value must not stop a tunnel.
     """
+    global _intervals
+    if _intervals is not None:
+        return _intervals
     every_bytes, every_seconds = DEFAULT_CHECKPOINT_BYTES, DEFAULT_CHECKPOINT_SECONDS
     try:
         from src.utils.config import ConfigManager
@@ -349,19 +371,25 @@ def checkpoint_intervals() -> Tuple[int, float]:
         every_seconds = float(config.get("receipts.CHECKPOINT_SECONDS", every_seconds))
     except Exception:
         pass
-    return (
+    _intervals = (
         every_bytes if every_bytes > 0 else DEFAULT_CHECKPOINT_BYTES,
         every_seconds if every_seconds > 0 else DEFAULT_CHECKPOINT_SECONDS,
     )
+    return _intervals
 
 
 class ReceiptChain:
     """The two hash chains and the checkpoints of one stream.
 
-    ``record`` is called beside ``TrafficMeter.add`` from both threads of a tunnel (or
-    from the Observe loop), so it holds a lock. ``checkpoint`` is called by the thread
-    that writes the response, when :meth:`due` says so, and once at the end with
-    ``final=True`` for the ``close``. Nothing is sent after the close.
+    ``record`` is called after a successful ``TrafficMeter.add`` from both threads of a
+    tunnel (or from the Observe loop), so it holds a lock. ``checkpoint`` is called by
+    the thread that writes the response, when :meth:`due` says so, and once at the end
+    with ``final=True`` for the ``close``. Nothing is sent after the close.
+
+    ``checkpoint`` signs first and changes the state after. If the signer fails, the
+    state stays as it was (the ``seq`` is not used, and a failed ``close`` does not close
+    the chain), the stream goes on with no receipt, and the next try waits one
+    ``every_seconds``.
 
     Each direction has its own chain and its own event count, so a client can rebuild
     each one from the messages it sent and got (:func:`replay_chain`): the order in which
