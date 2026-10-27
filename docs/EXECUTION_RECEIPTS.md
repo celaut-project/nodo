@@ -299,17 +299,160 @@ Non-negotiable, all for reasons already argued in the identity module:
 
 1. **A start receipt.** Sign `(peer_id, execution name, service_id, envs digest, ts,
    initial MU)` and return it from `StartService`. Every field already exists in
-   `local_instances`; no data path is touched.
+   `local_instances`; no data path is touched. **Done (#419).**
 2. **Chain and checkpoints in the tunnel.** Hash alongside `TrafficMeter.add`; emit
-   checkpoints on a third `ServiceTunnel` index.
+   checkpoints on a third `ServiceTunnel` index. **Done (#419).**
 3. **A closing receipt with declared coverage**, and checkpoints over `Observe` with
-   `capture_mode` inside the signed payload.
+   `capture_mode` inside the signed payload. **Done (#419)**, as the `close` of each
+   stream. See [Open points](#open-points).
 4. **Publication**: the receipt-type object, the digest on-chain, the body
-   content-addressed off-chain.
+   content-addressed off-chain. **Not done.**
 
 Phases 1 and 2 are independently useful: phase 1 already makes categories 2 and 3
 above reachable for anything billed per call, and phase 2 is what makes an
 interrupted execution provable.
+
+---
+
+## Implementation status
+
+The code is `src/identity/execution_receipt.py`. The test vectors are in
+`tests/identity/test_execution_receipt.py`: a fixed key and fixed fields give fixed
+texts, digests and signatures. Another implementation must give the same bytes. The
+celaut-gateway layer of each address declares the same encodings (`receipt.*` in its
+`formal`), so a reader does not need this code.
+
+### The message
+
+One message, `celaut.ExecutionReceipt`, for three kinds:
+
+| Kind | Where the client gets it | What it says |
+| --- | --- | --- |
+| `start` | `ServiceInstance.receipt`, in the answer of `StartService` | `service_id`, `envs_digest` (and `envs_salt`), `initial_mu` |
+| `checkpoint` | `ServiceTunnel` index 2, or an `Observe` event of kind `receipt` | the stream: `plane`, `session`, `slot`, `seq`, the two chains, `mu_charged`, `coverage`, `capture_mode`, `degraded_reason` |
+| `close` | the same place, as the last message of the stream | the same fields as a checkpoint; the stream stopped normally |
+
+A field that the kind does not use is empty or zero. The signature covers it too.
+
+### What the node signs
+
+The node signs the UTF-8 bytes of
+
+    celaut-execution-receipt:<peer_id>|<receipt_digest>
+
+with its identity key, in the scheme of its `Peer`. This is the shape of the balance
+statement, with its own prefix. `receipt_digest` is the lowercase hex of
+Blake2b-256 over the UTF-8 of this text, with the fields in this order:
+
+    hex(kind) | peer_id | execution_name | ts
+    | hex(service_id.type) ~ hex(service_id.value) | envs_digest | hex(initial_mu.n)
+    | hex(plane) | session | hex(slot) | seq
+    | in_events | in_bytes | in_head | out_events | out_bytes | out_head
+    | hex(mu_charged.n) | hex(coverage) | hex(capture_mode) | hex(degraded_reason)
+    | blake2b_256_hex(UTF-8(scheme))
+
+- `hex()` of a text is the lowercase hex of its UTF-8. Every free text goes through
+  it. A number is decimal. A hash is lowercase hex. An unused field is empty, or `0`.
+- `scheme` is the text that the Peer digest uses for its scheme
+  (`peer.digest.scheme`). A receipt carries its scheme without the prose.
+- `envs_salt` and `signature` are not in the text.
+- A verifier refuses a hash field that is not hex of the right length. Thus no field
+  can contain `|`, and the text has one reading only.
+
+### The execution name
+
+    execution_name = blake2b_256(UTF-8(token) || peer_id_raw)
+
+`token` is the instance token, as the string in `ServiceInstance.token`. `peer_id_raw`
+is the 32 bytes of the public key, **not** its hex text. Thus the spelling of the hex
+does not change the name. This is the decision in #419. The receipt never contains
+the token.
+
+### The envs digest
+
+    envs_digest = blake2b_256(envs_salt || UTF-8(canonical_envs))
+    canonical_envs = "/".join(origin "~" hex(name) "~" hex(value))   sorted by UTF-8(name)
+
+- `value` is the raw bytes that the service got, not decoded text.
+- `origin` is `client` or `node`. Today every entry is `client`: the node gives its
+  network resolution and its dependency wiring in `/__config__`, not in the env map.
+- The map is the one after the node removes `__nodo_instance_name`. That key is the
+  name of the instance, not a variable of the service.
+- `envs_salt` is 16 random bytes for each start. The receipt carries it, but the
+  signature does not cover it. Thus a client can publish the signed receipt without
+  the salt, and the digest does not show a value that is easy to guess.
+
+### The chains
+
+A stream has two chains: `in` (into the instance) and `out` (out of it). For a tunnel,
+`in` is each message from the caller that the node sent to the service, and `out` is
+each message from the service that the node sent to the caller. For `Observe`, they
+are the packet events with direction `IN` and `OUT`.
+
+    head_0 = "0" * 64
+    head_k = blake2b_256_hex(UTF-8(head_{k-1} "|" k "|" direction "|" length "|"
+                                   blake2b_256_hex(payload)))
+
+`k` counts the events of that chain from 1. `length` is the length of the payload,
+except for `Observe`, where it is the wire length of the frame (`frame_len`), and the
+payload is the captured frame (empty with `conntrack`).
+
+Each direction has its own chain. A client can rebuild each one from what it sent and
+what it got: one bee-rpc message is one event. The order in which the node saw the two
+directions mix is not a thing that the client can know, so it is not in the chains.
+
+### When the node signs a checkpoint
+
+When `receipts.CHECKPOINT_BYTES` (default 1 MiB) or `receipts.CHECKPOINT_SECONDS`
+(default 5 s) passed since the last checkpoint, and only if new traffic came. An idle
+stream gets none. `seq` starts at 1. The `close` comes after the tunnel is torn down
+and its last partial block is billed, so its `mu_charged` is the whole charge of the
+tunnel: the open charge and the traffic. A stream that the caller cancels gets no
+close, because nobody is there to receive it.
+
+### What a caller must ask for
+
+Nothing changes for a caller that does not ask:
+
+- `ServiceTunnel`: set `TokenMessage.receipts`. An older client does not know index 2
+  and refuses it, so the node never sends it unasked. An older node ignores the
+  field and sends no checkpoint.
+- `Observe`: set `ObserveRequest.include_receipts`.
+- `StartService`: nothing. `ServiceInstance.receipt` is a new field, and an older
+  client ignores it.
+
+With no request, the node hashes nothing.
+
+### Coverage
+
+| `coverage` | When |
+| --- | --- |
+| `client-tunnel` | every `ServiceTunnel` stream: all the bytes of this tunnel, and nothing else of the instance |
+| `full-instance-tap` | `Observe` with `capture_mode` `pcap` and `include_packets`: each packet of the instance, with its bytes |
+| `counters-only` | `Observe` with `conntrack`, or without `include_packets`: counts and lengths only |
+
+### Checking receipts
+
+`nodo receipt verify <file> [--token <token>] [--peer <peer_id>] [--json]` reads a
+JSON file (one receipt, a list, or one per line, in the proto3 JSON form) and checks
+each signature, then the set: one node and one name, counters and charge that do not
+go down, nothing after a close, and **contradictions** (two valid receipts for the
+same start, or for the same `seq` of the same stream, with different content). A gap
+in `seq` is reported but is not an error. `nodo execute --receipt <file>` keeps the
+start receipt in that form. The check needs no database, no daemon and no network.
+
+### Open points
+
+- **Delegation.** When this node gives a start to a peer, the peer's start receipt
+  names the peer's token, and the caller gets an alias. The node removes the receipt
+  from the answer, so a delegated start has none. The doc asks for a chain A→B: A
+  signs that it delegated, and passes on B's receipt. Not done.
+- **A closing receipt for the execution.** The `close` of a stream closes that stream.
+  `StopService` does not sign a receipt for the whole execution (the refund and what
+  was spent). It is a small addition to `Refund`, if wanted.
+- **Contradictions are not stored.** The node does not keep the receipts that it
+  signs. A client keeps them.
+- **Phase 4**: see the PR of #419 for a proposal.
 
 ## What a client identity would add
 
