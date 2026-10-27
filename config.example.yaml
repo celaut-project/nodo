@@ -364,6 +364,15 @@ ledger:
   # detection.
   STATEMENT_READ_EVERY_TICKS: 30
 
+# Execution receipts (issue #419): what this node signs about one execution it runs. A
+# ServiceTunnel or Observe caller that asks for them gets a signed checkpoint when this
+# many bytes, or this many seconds, passed since the last one (whichever comes first,
+# and only after new traffic), and a close when the stream stops. Each checkpoint costs
+# one Ed25519 signature.
+receipts:
+  CHECKPOINT_BYTES: 1048576
+  CHECKPOINT_SECONDS: 5
+
 builder:
   WAIT_FOR_CONTAINER: 60
   WAIT_FOR_UNLOCK_MEMORY: 60

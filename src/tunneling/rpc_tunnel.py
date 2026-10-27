@@ -15,6 +15,9 @@ The stream is ``TokenMessage | bytes -> bytes``:
    decimal internal port to reach.
 2. Every subsequent message is raw ``bytes``, forwarded to the service.
 3. Everything the service sends back is yielded as raw ``bytes``.
+4. If the ``TokenMessage`` has ``receipts``, the node also yields signed
+   ``ExecutionReceipt`` checkpoints at index 2, and a ``close`` one when the stream
+   stops normally. See *Receipts*.
 
 beeRPC delivers messages whole: one message in is one message out, never merged
 or split. That is what makes datagram slots possible (see *Transports*).
@@ -67,6 +70,16 @@ stream:
 
 QUIC as the *caller-to-node* transport is a separate, future front end; it does
 not change anything here.
+
+Receipts
+--------
+A caller that asks for them (``TokenMessage.receipts``) gets checkpoints of the
+execution receipt (#419, docs/EXECUTION_RECEIPTS.md): beside each
+``TrafficMeter.add``, the relayed message goes into one of two hash chains (into
+the service, out of it), and every ``receipts.CHECKPOINT_BYTES`` or
+``receipts.CHECKPOINT_SECONDS`` the node signs the counters, the two heads and what
+the tunnel was charged. A caller that does not ask gets the stream it always got: an
+older client would refuse index 2, and nothing is hashed for it.
 """
 
 import select
@@ -77,6 +90,7 @@ from typing import Callable, Generator, Iterator, List, Optional, Tuple
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
+from src.identity import execution_receipt
 from src.tunneling import inbound, logger
 from src.utils import host_limits
 from src.utils.config import ConfigManager
@@ -188,6 +202,12 @@ class TrafficMeter:
     def enabled(self) -> bool:
         return prices().net_mu_per_gib > 0
 
+    @property
+    def billed_mu(self) -> int:
+        """What this tunnel has charged so far: the open charge and the billed blocks."""
+        with self._lock:
+            return self._billed_mu
+
     def _spend(self, amount_mu: int, detail: dict) -> bool:
         if amount_mu <= 0:
             return True
@@ -294,8 +314,8 @@ def _udp_idle_timeout() -> float:
         return DEFAULT_UDP_IDLE_TIMEOUT_S
 
 
-def _handshake(iterator: Iterator) -> Tuple[str, str]:
-    """Consume the leading ``TokenMessage`` and return ``(token, slot)``."""
+def _handshake(iterator: Iterator) -> Tuple[str, str, bool]:
+    """Consume the leading ``TokenMessage`` and return ``(token, slot, receipts)``."""
     first = next(iterator, None)
 
     if first is None:
@@ -312,7 +332,7 @@ def _handshake(iterator: Iterator) -> Tuple[str, str]:
     if not first.HasField("slot") or not first.slot:
         raise TunnelError("TokenMessage carries no slot; the target port is required.")
 
-    return first.token, first.slot
+    return first.token, first.slot, bool(first.receipts)
 
 
 def _declared_slot_ports(instance: celaut_pb2.Instance) -> set:
@@ -420,6 +440,7 @@ def _pump_to_service(
     meter: TrafficMeter,
     activity: List[float],
     stream_id: Optional[str] = None,
+    receipts: Optional[execution_receipt.ReceiptChain] = None,
 ) -> None:
     """Forward caller payload to the service until the caller stops sending.
 
@@ -457,6 +478,8 @@ def _pump_to_service(
             messages += 1
             inbound.count(stream_id, bytes_in=len(message))
             activity[0] = time.monotonic()  # caller->service counts as activity too
+            if receipts is not None:
+                receipts.record(execution_receipt.DIRECTION_IN, message)
 
             if not meter.add(len(message)):
                 break  # Out of funds.
@@ -490,12 +513,18 @@ def _relay(
     is_udp: bool,
     meter: TrafficMeter,
     stream: Optional[dict] = None,
+    receipts: Optional[execution_receipt.ReceiptChain] = None,
 ) -> Generator[bytes, None, None]:
     """Yield everything the service sends while forwarding the caller's payload.
 
     ``stream`` describes the tunnel for the operator's list of inbound streams
     (``inbound.opened``): it is registered once relaying starts and dropped when it
     ends, so a relay that is never iterated is never listed.
+
+    With ``receipts``, it also yields the checkpoints (``ExecutionReceipt``) when they
+    are due, and the ``close`` after the tunnel is torn down and settled, so the close
+    carries the whole charge. A relay that is closed from outside (the RPC was
+    cancelled) yields no close: nobody is left to receive it.
     """
     stream_id = inbound.opened(**stream) if stream else None
     stop = threading.Event()
@@ -515,6 +544,7 @@ def _relay(
             "meter": meter,
             "activity": activity,
             "stream_id": stream_id,
+            "receipts": receipts,
         },
         name=f"tunnel-writer-{target}",
         daemon=True,
@@ -532,6 +562,8 @@ def _relay(
             readable, _, _ = select.select([conn], [], [], POLL_INTERVAL_S)
 
             if not readable:
+                if receipts is not None and receipts.due():
+                    yield receipts.checkpoint(mu_charged=meter.billed_mu)
                 # A datagram socket never reports EOF, so silence is the only
                 # signal we get that an exchange is over. Fire on inactivity in
                 # *either* direction, not only after the caller half-closes: a
@@ -558,12 +590,16 @@ def _relay(
             messages += 1
             inbound.count(stream_id, bytes_out=len(data))
 
+            if receipts is not None:
+                receipts.record(execution_receipt.DIRECTION_OUT, data)
             # Charged before handing it over: what the caller receives is what it
             # pays for, and an exhausted balance stops the next read, not this one.
             billable = meter.add(len(data))
             yield data
             if not billable:
                 break  # Out of funds.
+            if receipts is not None and receipts.due():
+                yield receipts.checkpoint(mu_charged=meter.billed_mu)
 
     except OSError as e:
         # For connected UDP this is where an ICMP port-unreachable lands.
@@ -586,6 +622,13 @@ def _relay(
         writer.join(timeout=WRITER_JOIN_TIMEOUT_S)
         meter.settle()
         inbound.closed(stream_id)
+
+    # Reached only when the relay ended on its own (the service closed, the caller
+    # stopped, the balance ran out), not when it was closed from outside.
+    if receipts is not None:
+        close = receipts.checkpoint(mu_charged=meter.billed_mu, final=True)
+        if close is not None:
+            yield close
 
 
 def service_tunnel(
@@ -612,7 +655,7 @@ def service_tunnel(
     ``caller`` (the gateway passes ``context.peer()``) is who the stream is relayed
     for, as ``nodo tunnels --inbound`` lists it.
     """
-    token, slot = _handshake(iterator)
+    token, slot, want_receipts = _handshake(iterator)
     logger(f"{LOG_PREFIX} Handshake for token={token} slot={slot}")
 
     ip, port, transport = _resolve_target(token, slot)
@@ -636,6 +679,15 @@ def service_tunnel(
     conn = _connect(ip, port, transport)
     logger(f"{LOG_PREFIX} {target}: tunnel established.")
 
+    receipts = None
+    if want_receipts:
+        receipts = execution_receipt.ReceiptChain.for_node(
+            token, execution_receipt.PLANE_TUNNEL,
+            execution_receipt.COVERAGE_CLIENT_TUNNEL, slot=slot,
+        )
+        if receipts is None:
+            logger(f"{LOG_PREFIX} {target}: receipts asked, but this node has no identity key.")
+
     relay = _relay(
         iterator=iterator,
         conn=conn,
@@ -650,5 +702,6 @@ def service_tunnel(
             "transport": transport.value,
             "target": f"{ip}:{port}",
         },
+        receipts=receipts,
     )
     return conn, relay
