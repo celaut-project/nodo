@@ -321,6 +321,19 @@ class TamperTests(unittest.TestCase):
         self.assertTrue(er.verify(stripped))
         self.assertTrue(er.envs_match(stripped, VECTOR_ENVS, salt=receipt.envs_salt))
 
+    def test_the_signature_has_one_spelling(self):
+        """Final review of #593: bytes.fromhex reads uppercase and spaces, so the same
+        signature verified in other spellings."""
+        good = _start()
+        self.assertTrue(er.verify(good))
+        for spelling in (good.signature.upper(),
+                         " ".join(good.signature[i:i + 2] for i in range(0, 128, 2)),
+                         good.signature + "00", ""):
+            with self.subTest(spelling=spelling[:20]):
+                receipt = _start()
+                receipt.signature = spelling
+                self.assertIn("signature is not 128 lowercase hex", er.problems(receipt))
+
     def test_a_separator_cannot_be_moved_between_fields(self):
         receipt = _start()
         receipt.envs_digest = receipt.envs_digest[:10] + "|" + receipt.envs_digest[11:]

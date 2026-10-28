@@ -97,6 +97,7 @@ DEFAULT_CHECKPOINT_SECONDS = 5.0
 
 _HEX = frozenset(string.hexdigits.lower())
 _DIGEST_HEX_LENGTH = 64
+_SIGNATURE_HEX_LENGTH = 128  # Ed25519: 64 bytes
 
 
 def _blake2b_256(data: bytes) -> bytes:
@@ -612,6 +613,9 @@ def problems(receipt: celaut_pb2.ExecutionReceipt, *, peer_id: Optional[str] = N
             found.append(f"{field} is not a 64-hex digest")
     if r.session and not _is_hex(r.session):
         found.append("session is not lowercase hex")
+    # bytes.fromhex reads uppercase and spaces too: one spelling only, as the proto says.
+    if not _is_hex(r.signature, _SIGNATURE_HEX_LENGTH):
+        found.append("signature is not 128 lowercase hex")
     if r.envs_salt and (r.kind != KIND_START or len(r.envs_salt) != ENVS_SALT_BYTES):
         found.append(f"envs_salt is not {ENVS_SALT_BYTES} bytes of a start receipt")
 
