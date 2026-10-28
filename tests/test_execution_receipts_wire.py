@@ -333,12 +333,41 @@ class TunnelReceiptTests(unittest.TestCase):
         self.assertEqual((close.in_events, close.in_bytes, close.in_head),
                          er.replay_chain([b"x" * 700], er.DIRECTION_IN))
         self.assertEqual((close.out_events, close.out_bytes), (1, 5))
-        # The ledger and the receipt agree. The settle bills what is left after the
-        # refused block (1405 - 1024 bytes); the recorded bytes that the refused block
-        # held are not billed: at most one block, the overrun that TrafficMeter allows.
+        # The ledger and the receipt agree. The refused message is not billed: not the
+        # refused block, and not what is left of it after the block (1405 - 1024 bytes).
+        # The recorded bytes that the refused block held are not billed either: less
+        # than one block, the overrun that TrafficMeter allows.
         self.assertEqual(sum(r["amount"] for r in ledger.rows), int(close.mu_charged.n))
-        self.assertEqual(int(close.mu_charged.n), 5 + 381)
-        self.assertLess(close.in_bytes + close.out_bytes - 381, 1024)
+        self.assertEqual(int(close.mu_charged.n), 5)
+        self.assertLess(close.in_bytes + close.out_bytes, 1024)
+
+    def test_mu_charged_is_never_more_than_the_chains_cover(self):
+        """Final review of #593: a refused message of 2000 bytes after HELLO. The block is
+        refused, and the 981 bytes left of the message were billed at the settle, so the
+        close said 986 MU for 5 bytes in the chains. The node must not bill bytes that no
+        receipt shows."""
+        ledger, got, receipts = self._billed_run(5 + 1000, [b"x" * 2000])
+        close = receipts[-1]
+        self.assertEqual(close.kind, er.KIND_CLOSE)
+        self.assertEqual((close.in_events, close.out_events), (0, 1))
+        self.assertEqual(sum(r["amount"] for r in ledger.rows), int(close.mu_charged.n))
+        self.assertLessEqual(int(close.mu_charged.n), 5 + close.in_bytes + close.out_bytes)
+
+    def test_bytes_after_the_balance_ran_out_are_not_billed(self):
+        """The other direction spent the balance: add() refuses this message, so the
+        relay does not record it, and the settle must not bill it either."""
+        ledger = _Ledger(10 ** 9)
+        with mock.patch("src.manager.manager.spend_mu", ledger), \
+                mock.patch.object(rpc_tunnel, "prices",
+                                  return_value=SimpleNamespace(tunnel_open_mu=0, net_mu_per_gib=1)), \
+                mock.patch.object(rpc_tunnel, "traffic_charge_mu", lambda n: n):
+            meter = rpc_tunnel.TrafficMeter(token=TOKEN, target="t")
+            self.assertTrue(meter.add(10))
+            meter.exhausted.set()
+            self.assertFalse(meter.add(300))
+            meter.settle()
+        self.assertEqual(sum(r["amount"] for r in ledger.rows), 10)
+        self.assertEqual(meter.billed_mu, 10)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

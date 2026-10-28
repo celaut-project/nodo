@@ -273,16 +273,28 @@ class TrafficMeter:
         if not self.enabled:
             return not self.exhausted.is_set()
 
+        # A message that the meter refuses is not in the receipt chain (#419), so none of
+        # its bytes are billed: not after the other direction spent the balance, and not
+        # the part of it that is left after a refused block. Otherwise the settle bills
+        # bytes that no receipt shows, and mu_charged is more than the chains cover.
         with self._lock:
+            if self.exhausted.is_set():
+                return False
             self._relayed_bytes += byte_count
             self._unbilled_bytes += byte_count
             blocks, self._unbilled_bytes = divmod(self._unbilled_bytes, self._interval_bytes)
             if not blocks:
-                return not self.exhausted.is_set()
+                return True
             billed_bytes = blocks * self._interval_bytes
             amount_mu = traffic_charge_mu(billed_bytes)
+            # When blocks > 0, what is left is part of this message only.
+            left_of_this_message = self._unbilled_bytes
 
-        return self._spend(amount_mu, {"bytes": billed_bytes})
+        if self._spend(amount_mu, {"bytes": billed_bytes}):
+            return True
+        with self._lock:
+            self._unbilled_bytes -= min(left_of_this_message, self._unbilled_bytes)
+        return False
 
     def settle(self) -> None:
         """Bill the partial block left over when the tunnel closes."""
