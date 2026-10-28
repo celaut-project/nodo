@@ -82,7 +82,7 @@ the tunnel was charged. A message that the meter refuses (no balance, no daily
 allowance) is not in the chains, so the signed counters show only accepted traffic. Every
 ``tunnel`` movement of the ledger names the execution (``execution_name``) and, with
 receipts, the stream (``session``), so the charge of a stream in the balance statement
-is the ``mu_charged`` of its last receipt. A caller that does not ask gets no index 2,
+is the ``mu_charged`` of its close (after a cancel, at least that of its last checkpoint). A caller that does not ask gets no index 2,
 and nothing is hashed for it.
 """
 
