@@ -423,7 +423,9 @@ A tunnel records a message only after `TrafficMeter.add` accepts it. A message t
 meter refuses (the balance or the daily allowance is spent) ends the tunnel, and it is
 not in the chain. The node can still have given that last message to the service or to
 the caller, so the client compares the chain with its first `in_events` (or
-`out_events`) messages.
+`out_events`) messages. On a UDP slot, a datagram that the node cannot send to
+the service (for example `EMSGSIZE`) is dropped. It is not in the `in` chain, and the
+client cannot know which one it was.
 
 The meter bills whole blocks of `costs.TUNNEL_CHARGE_INTERVAL_KB` and settles the rest
 when the tunnel closes. So `mu_charged` is the price of the bytes in the chains, plus
@@ -443,8 +445,9 @@ for the same execution. They must agree, and a reader can check it:
   receipts. Its amount is the `initial_mu` of the `start` receipt.
 - Each `tunnel` movement has `detail.execution_name` and, when the caller asked for
   receipts, `detail.session`. The sum of the `tunnel` movements of one session is the
-  `mu_charged` of the `close` of that stream, and of the last checkpoint before a
-  cancel.
+  `mu_charged` of the `close` of that stream. After a cancel there is no close, and
+  the sum is **at least** the `mu_charged` of the last checkpoint: the node still bills
+  the traffic after that checkpoint and the last partial block.
 
 The ledger names an account by `blake2b("celaut-ledger-instance:" + token)`, and a
 receipt names the execution by `blake2b(token || peer_id_raw)`. The `execution_name` in
@@ -473,6 +476,10 @@ yield after `GeneratorExit`: the node sends no `close`, and nobody is there to g
 So **a missing close is not by itself proof of a fault**. The highest checkpoint and
 the `tunnel` movements of its session in the balance statement still show what the
 node relayed and charged.
+
+This limit is accepted for now (review of #593): **a cancelled stream has no close
+receipt**, and the node does not sign one later. A client that wants a close stops
+sending and lets the service end the stream, instead of cancelling the RPC.
 
 ### What a caller must ask for
 
@@ -524,6 +531,8 @@ Each receipt must have the fields of its kind and plane, and no other signed fie
 - **Delegation.** A delegated start gets a `start` receipt signed by this node (see
   [Delegation](#delegation)), but no `checkpoint` and no `close`: `ServiceTunnel`
   refuses a delegated token.
+- **No close for a cancelled stream.** Accepted for now. See
+  [When a stream has no close](#when-a-stream-has-no-close).
 - **No receipt at `StopService`.** The `close` of a stream closes that stream. The
   balance statement already signs the refund and the total spent.
 - **Contradictions are not stored.** The node does not keep the receipts that it
