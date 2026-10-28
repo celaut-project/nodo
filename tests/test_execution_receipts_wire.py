@@ -250,6 +250,29 @@ class TunnelReceiptTests(unittest.TestCase):
             out = list(relay)
         self.assertTrue(all(isinstance(m, bytes) for m in out))
 
+    def test_a_key_that_cannot_be_read_does_not_stop_the_tunnel(self):
+        """Final review of #593: the tunnel asks for the execution name of its ledger
+        rows. A bad identity.MNEMONIC must give no receipts, not a failed tunnel."""
+        from src.identity import node_identity
+        port = _echo_server()
+        saved, er._node_key = er._node_key, None
+        try:
+            with mock.patch.object(node_identity, "get_identity_mnemonic",
+                                   return_value="not a mnemonic"), \
+                    mock.patch.object(rpc_tunnel.sc, "get_internal_instance",
+                                      return_value=_instance(port)), \
+                    mock.patch.object(rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"), \
+                    mock.patch("src.manager.manager.spend_mu", return_value=True):
+                _conn, relay = rpc_tunnel.service_tunnel(
+                    iter([celaut_pb2.TokenMessage(token=TOKEN, slot=str(port), receipts=True),
+                          b"x"]),
+                    is_active=_deadline())
+                out = list(relay)
+        finally:
+            er._node_key = saved
+        self.assertTrue(out)
+        self.assertTrue(all(isinstance(m, bytes) for m in out))
+
     def test_a_cancelled_stream_has_no_close_and_no_error(self):
         """The gateway calls relay.close() when the caller cancels: a generator cannot
         yield after GeneratorExit, so there is no close (docs: a missing close is not
