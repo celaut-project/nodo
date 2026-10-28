@@ -231,7 +231,17 @@ def save_start_receipt(response, path: str) -> None:
         print("⚠️  The node gave no start receipt.", flush=True)
         return
     from src.commands.receipt import write_receipt
-    write_receipt(path, response.receipt)
+    try:
+        write_receipt(path, response.receipt)
+    except OSError as e:
+        # The instance runs, and the node does not keep the receipt: print it, so that
+        # the client does not lose it.
+        import json
+        from src.identity.execution_receipt import to_json_dict
+        print(f"⚠️  Cannot write the start receipt to {path}: {e}. Keep this line "
+              f"in a file for `nodo receipt verify`:", flush=True)
+        print(json.dumps(to_json_dict(response.receipt), sort_keys=True), flush=True)
+        return
     print(f"\n🧾 Start receipt saved to {path} (check it with: nodo receipt verify {path} "
           f"--token {response.token}).", flush=True)
 

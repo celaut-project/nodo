@@ -12,6 +12,8 @@ import unittest
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()   # src.commands.execute reads the storage path of the config
     from cryptography.hazmat.primitives.asymmetric import ed25519
     from protos import celaut_pb2
     from src.commands import receipt as receipt_command
@@ -79,6 +81,28 @@ class VerifyCommandTests(unittest.TestCase):
         ok, out = self._run(["verify", path, "--token", "tok", "--json"])
         self.assertTrue(ok, out)
         self.assertTrue(json.loads(out)["valid"])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class SaveStartReceiptTests(unittest.TestCase):
+    """Final review of #593: ``nodo execute --receipt`` writes the file after the start.
+    A path that cannot be written raised OSError, after the start was paid, and the
+    receipt was lost: the node does not keep it."""
+
+    def test_a_path_that_cannot_be_written_prints_the_receipt(self):
+        from src.commands.execute import save_start_receipt
+        key = ed25519.Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        receipt = er.start_receipt(
+            "tok", celaut_pb2.Metadata.HashTag.Hash(type=b"t", value=b"s"), {}, 1,
+            signer=lambda r: er.sign_with(r, key),
+            peer_id="03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8")
+        response = celaut_pb2.ServiceInstance(token="tok", receipt=receipt)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            save_start_receipt(response, "/nonexistent/dir/receipt.json")
+        lines = out.getvalue().strip().splitlines()
+        self.assertIn("Cannot write the start receipt", lines[0])
+        self.assertEqual(er.from_json_dict(json.loads(lines[-1])), receipt)
 
 
 if __name__ == "__main__":
