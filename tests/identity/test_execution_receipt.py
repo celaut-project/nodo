@@ -699,6 +699,22 @@ class CacheTests(unittest.TestCase):
                                return_value="abandon " * 11 + "about"):
             self.assertIsNotNone(er.node_signer())
 
+    def test_a_key_that_cannot_be_read_gives_no_receipt_and_no_error(self):
+        """Final review of #593: every start and every tunnel asks for the execution
+        name. A bad identity.MNEMONIC raised ValueError out of node_execution_name, and
+        failed the start or the tunnel."""
+        from unittest import mock
+        from src.identity import node_identity
+        with mock.patch.object(node_identity, "get_identity_mnemonic",
+                               return_value="not a mnemonic"):
+            self.assertIsNone(er.node_execution_name(VECTOR_TOKEN))
+            self.assertIsNone(er.node_signer())
+            self.assertIsNone(er.ReceiptChain.for_node(
+                VECTOR_TOKEN, er.PLANE_TUNNEL, er.COVERAGE_CLIENT_TUNNEL, slot="1"))
+            self.assertIsNone(er.start_receipt(
+                VECTOR_TOKEN, celaut_pb2.Metadata.HashTag.Hash(type=b"\x01", value=b"\x02"),
+                {}, 1))
+
     def test_the_execution_name_of_this_node(self):
         from unittest import mock
         with mock.patch.object(er, "node_peer_id", return_value=VECTOR_PEER_ID):

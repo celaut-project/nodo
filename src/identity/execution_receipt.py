@@ -317,13 +317,21 @@ _node_key_lock = threading.Lock()
 
 
 def _node_identity_key() -> Optional[Tuple[str, ed25519.Ed25519PrivateKey]]:
+    """This node's key, or None. Never raises: every start and every tunnel asks for it
+    (the execution name in the ledger), and a receipt is not a reason to fail them. A
+    key that cannot be read (a bad ``identity.MNEMONIC``) gives no receipt, and a line
+    in the log."""
     global _node_key
     with _node_key_lock:
         if _node_key is None:
-            from src.identity.node_identity import _cached_keypair, get_identity_mnemonic
-            mnemonic = get_identity_mnemonic()
-            if mnemonic:
-                _node_key = _cached_keypair(mnemonic)
+            try:
+                from src.identity.node_identity import _cached_keypair, get_identity_mnemonic
+                mnemonic = get_identity_mnemonic()
+                if mnemonic:
+                    _node_key = _cached_keypair(mnemonic)
+            except Exception as e:
+                from src.utils.logger import LOGGER
+                LOGGER(f"[receipts] Cannot read the identity key: {e}. No receipts.")
         return _node_key
 
 
