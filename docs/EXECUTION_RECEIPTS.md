@@ -425,7 +425,10 @@ The meter bills whole blocks of `costs.TUNNEL_CHARGE_INTERVAL_KB` and settles th
 when the tunnel closes. So `mu_charged` is the price of the bytes in the chains, plus
 the charge to open. When the balance runs out, it can be less by at most one block: the
 refused block held bytes of messages that were already accepted. This is the overrun
-that `TrafficMeter` allows, and it is in favour of the client.
+that `TrafficMeter` allows, and it is in favour of the client. It is never more: the
+meter bills no byte of a message that it refused (not the part after the refused
+block, and not a message after the other direction spent the balance), so the node
+never charges for a byte that no receipt shows.
 
 ### Receipts and the balance statement
 
