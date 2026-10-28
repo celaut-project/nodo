@@ -806,9 +806,10 @@ message ExecutionReceipt {
     // canonical text of the environment variables that the service got. The
     // celaut-gateway layer gives the canonical text.
     string envs_digest = 6;
-    // Only in "start". A random value that the node selects for each start. The
+    // Only in "start". 16 random bytes that the node selects for each start. The
     // signature does not cover it: it lets the holder of the receipt show the digest
-    // to others and keep the values secret.
+    // to others and keep the values secret. A verifier refuses a salt of another
+    // length, because nothing separates the salt from the canonical text.
     bytes envs_salt = 7;
     // Only in "start". The Configuration.initial_mu of the start, in MU: what the node
     // charged the caller, the build included. It is the amount of the "start" movement

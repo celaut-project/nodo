@@ -392,6 +392,10 @@ the token.
 - `envs_salt` is 16 random bytes for each start. The receipt carries it, but the
   signature does not cover it. Thus a client can publish the signed receipt without
   the salt, and the digest does not show a value that is easy to guess.
+- A verifier refuses a salt that is not exactly 16 bytes. Nothing separates the salt
+  from the canonical text, so a longer salt can hold the first entries of the map,
+  and a holder could then open the digest with fewer variables than the service got.
+  `execution_receipt.envs_match` does this check.
 
 ### The chains
 

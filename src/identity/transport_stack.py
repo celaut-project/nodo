@@ -479,7 +479,7 @@ def gateway_component() -> Layer:
                                   "bytes of the public key",
         "receipt.envs_digest": "blake2b-256 hex of envs_salt || UTF-8 of '/'.join(origin~"
                                "hex(name)~hex(value) sorted by UTF-8 of name); origin "
-                               "client or node",
+                               "client or node; envs_salt exactly 16 bytes",
         "receipt.chain": "blake2b-256 hex of UTF-8 of prev|seq|direction|length|"
                          "blake2b-256 hex of payload; seq from 1; direction in or out; "
                          "genesis 64 zeros; a tunnel records only the messages that "

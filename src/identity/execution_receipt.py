@@ -169,8 +169,30 @@ def envs_digest(envs: Mapping[str, bytes], salt: bytes,
     digest by whoever reads a published receipt. It travels in the receipt
     (``envs_salt``) but outside what the node signs, so a client can publish the
     signed receipt without it.
+
+    The salt is always :data:`ENVS_SALT_BYTES` long, and a verifier must refuse another
+    length (:func:`envs_match`): nothing separates the salt from the text, so a longer
+    salt could hold the first entries of the map and open the digest with fewer.
     """
     return _blake2b_256(bytes(salt) + canonical_envs(envs, origins).encode("utf-8")).hex()
+
+
+def envs_match(receipt: celaut_pb2.ExecutionReceipt, envs: Mapping[str, bytes],
+               origins: Optional[Mapping[str, str]] = None,
+               salt: Optional[bytes] = None) -> bool:
+    """Whether ``envs`` is the map that the ``start`` receipt names.
+
+    ``salt`` defaults to the ``envs_salt`` of the receipt. A salt of another length
+    than :data:`ENVS_SALT_BYTES` never matches. This only compares the digest: check
+    the signature with :func:`verify`.
+    """
+    salt = bytes(receipt.envs_salt if salt is None else salt)
+    if receipt.kind != KIND_START or len(salt) != ENVS_SALT_BYTES:
+        return False
+    try:
+        return envs_digest(envs, salt, origins) == receipt.envs_digest
+    except ValueError:  # an unknown origin
+        return False
 
 
 def chain_link(prev: str, seq: int, direction: str, length: int, payload_digest: str) -> str:
@@ -590,6 +612,8 @@ def problems(receipt: celaut_pb2.ExecutionReceipt, *, peer_id: Optional[str] = N
             found.append(f"{field} is not a 64-hex digest")
     if r.session and not _is_hex(r.session):
         found.append("session is not lowercase hex")
+    if r.envs_salt and (r.kind != KIND_START or len(r.envs_salt) != ENVS_SALT_BYTES):
+        found.append(f"envs_salt is not {ENVS_SALT_BYTES} bytes of a start receipt")
 
     if r.kind == KIND_START:
         if not bytes(r.service_id.type) or not bytes(r.service_id.value) \

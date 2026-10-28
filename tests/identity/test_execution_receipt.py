@@ -243,6 +243,10 @@ class TamperTests(unittest.TestCase):
         descriptor = receipt.DESCRIPTOR.fields_by_name[field]
         if field == "signature_scheme":
             receipt.signature_scheme.components[0].tags.append("other")
+        elif field == "envs_salt":
+            # Another salt of the same length: a salt of another length is refused.
+            salt = bytes(receipt.envs_salt) or bytes(er.ENVS_SALT_BYTES)
+            receipt.envs_salt = bytes([salt[0] ^ 1]) + salt[1:]
         elif descriptor.message_type is not None:
             value = getattr(receipt, field)
             if descriptor.message_type.name == "Amount":
@@ -271,7 +275,8 @@ class TamperTests(unittest.TestCase):
                 if field in self.UNSIGNED:
                     self.assertEqual(er.receipt_digest(receipt), digest)
                     if field == "envs_salt":
-                        self.assertTrue(er.verify(receipt))
+                        # Not signed; and only a start receipt carries a salt.
+                        self.assertEqual(er.verify(receipt), receipt.kind == er.KIND_START)
                 else:
                     self.assertNotEqual(er.receipt_digest(receipt), digest)
                     self.assertFalse(er.verify(receipt))
@@ -287,6 +292,34 @@ class TamperTests(unittest.TestCase):
         self.assertEqual(er.envs_digest(VECTOR_ENVS, receipt.envs_salt), receipt.envs_digest)
         receipt.envs_salt = bytes(16)
         self.assertNotEqual(er.envs_digest(VECTOR_ENVS, receipt.envs_salt), receipt.envs_digest)
+
+    def test_a_longer_salt_cannot_open_the_envs_with_fewer_variables(self):
+        """Final review of #593: nothing separates the salt from the text, so a salt that
+        holds the first entry opens the same digest with the rest of the map only."""
+        receipt = _start()
+        self.assertTrue(er.envs_match(receipt, VECTOR_ENVS))
+        first = sorted(VECTOR_ENVS, key=lambda k: k.encode())[0]
+        rest = {k: v for k, v in VECTOR_ENVS.items() if k != first}
+        long_salt = bytes(receipt.envs_salt) + (
+            er.canonical_envs({first: VECTOR_ENVS[first]}) + "/").encode()
+        # The digest alone has two readings...
+        self.assertEqual(er.envs_digest(rest, long_salt), receipt.envs_digest)
+        # ...so the check refuses any salt that is not 16 bytes.
+        self.assertFalse(er.envs_match(receipt, rest, salt=long_salt))
+        receipt.envs_salt = long_salt
+        self.assertFalse(er.envs_match(receipt, rest))
+        self.assertIn(f"envs_salt is not {er.ENVS_SALT_BYTES} bytes of a start receipt",
+                      er.problems(receipt))
+
+    def test_envs_match_needs_the_right_map_and_a_start(self):
+        receipt = _start()
+        self.assertFalse(er.envs_match(receipt, {**VECTOR_ENVS, "extra": b"1"}))
+        self.assertFalse(er.envs_match(_checkpoint(), VECTOR_ENVS))
+        stripped = celaut_pb2.ExecutionReceipt()
+        stripped.CopyFrom(receipt)
+        stripped.ClearField("envs_salt")          # published without the salt
+        self.assertTrue(er.verify(stripped))
+        self.assertTrue(er.envs_match(stripped, VECTOR_ENVS, salt=receipt.envs_salt))
 
     def test_a_separator_cannot_be_moved_between_fields(self):
         receipt = _start()
