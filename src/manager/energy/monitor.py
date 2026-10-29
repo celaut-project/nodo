@@ -312,7 +312,8 @@ def _instance_usage_usec() -> Dict[str, Optional[int]]:
     base = _cgroups_base()
     usage: Dict[str, Optional[int]] = {}
     try:
-        ids = SQLConnection().get_all_internal_containers_ids()
+        # No cgroup to read for a suspended instance (issue #594): it has no VM.
+        ids = SQLConnection().get_running_internal_containers_ids()
     except Exception as exc:
         log.LOGGER(f"{LOG_PREFIX} could not list local instances: {exc}")
         return usage

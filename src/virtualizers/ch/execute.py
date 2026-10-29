@@ -329,18 +329,12 @@ def execute(
             # The disk is the instance: nothing below may replace it. What the guest
             # reads from it -- configuration, entrypoint, environment -- is already
             # there, so none of it is injected again.
-            spec = launch_spec.read(runtime_dir)
-            if spec is None or not spec.revivable:
-                raise MicroVMError(f"Instance {vmachine_id} has no launch spec to revive it from.")
-            if not rootfs_path.exists():
-                raise MicroVMError(f"Instance {vmachine_id} has no disk to revive: {rootfs_path}")
+            spec, metadata_disk_path = launch_spec.load_for_revive(
+                runtime_dir, rootfs_path, rootfs_read_only, vmachine_id)
             assigment_ports = dict(spec.assigment_ports)
             by_local = spec.by_local
             network_resolution = spec.network_resolution
             shares = NO_SHARES
-            metadata_disk_path = runtime_dir / rootfs.METADATA_DISK_NAME if rootfs_read_only else None
-            if metadata_disk_path is not None and not metadata_disk_path.exists():
-                raise MicroVMError(f"Instance {vmachine_id} has no metadata disk to revive: {metadata_disk_path}")
             log.LOGGER(f"[CH][{vmachine_id}] reviving on its own disk: {rootfs_path}")
         else:
             shutil.copy2(bundle["rootfs_path"], rootfs_path)
@@ -429,15 +423,9 @@ def execute(
                     f"{metadata_disk_path}"
                 )
 
-            # What a revive will need, written once the launch has decided it. A
-            # launch with shares is not revivable: their daemons and mounts belong to
-            # it, and this version does not rebuild them.
-            launch_spec.write(runtime_dir, launch_spec.LaunchSpec(
-                assigment_ports=dict(assigment_ports or {}),
-                by_local=by_local,
-                network_resolution=list(network_resolution),
-                revivable=not shares.mounts_state and not shares.exported_share_ids,
-            ))
+            # What a revive will need, written once the launch has decided it.
+            launch_spec.record_launch(
+                runtime_dir, assigment_ports, by_local, network_resolution, shares)
 
         tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")

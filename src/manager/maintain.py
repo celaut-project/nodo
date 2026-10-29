@@ -364,6 +364,45 @@ _revive_not_before: Dict[str, float] = {}
 _revived_at: Dict[str, float] = {}
 
 
+# At most this many instances are started again in one pass of the manager. A revive waits
+# for the guest's boot, and after a host reboot every instance is waiting to be revived:
+# started all at once in the one thread that also charges, sweeps and settles, they would
+# stall everything else for as long as all of them take to boot. The rest wait one pass.
+REVIVES_PER_PASS = 1
+
+
+def _can_pay_a_tick(token: str, balance_mu: int, scarcity=None) -> bool:
+    """Whether an instance holding ``balance_mu`` could pay the next maintenance tick.
+
+    The tick suspends an instance whose balance is *below one tick's charge*, not only
+    one at zero. Starting it again on any positive balance would have the next tick
+    suspend it and the one after revive it: a boot and a kill every pass, for as long as
+    the balance stays in between. So an instance comes back only when it can pay what
+    the tick will ask -- the same figure, priced the same way. A node that allows debt
+    never suspends for lack of MU, so there the balance is not in the way.
+    """
+    if ALLOW_DEBT:
+        return True
+    try:
+        sys_req = sc.get_sys_req(id=token)
+        charge_mu = compute_maintenance_cost(
+            system_resources=celaut.Sysresources(
+                mem_limit=sys_req['mem_limit'] or 0,
+                disk_space=sys_req['disk_space'] or 0,
+                cpu_period=sys_req['cpu_period'] or 0,
+                cpu_quota=sys_req['cpu_quota'] or 0,
+            ),
+            seconds=MANAGER_ITERATION_TIME,
+            scarcity=scarcity,
+            arch=_row_arch(sys_req),
+            launch_bp=_row_launch_bp(sys_req),
+        )
+    except Exception as e:
+        log.LOGGER(f"Could not price a tick for {token}: {e}")
+        return False
+    return int(balance_mu) >= int(charge_mu)
+
+
 def revive_backoff_seconds(failures: int) -> float:
     """The wait before the next attempt after ``failures`` in a row: none for the first
     (a crash is tried again at once), then 1 s, 2 s, 4 s ... up to the cap."""
@@ -392,8 +431,9 @@ def revive_suspended_instances(now: Optional[float] = None) -> int:
 
     Two kinds wait here with the same disk: one that ran out of MU and was topped up,
     and one whose VM went down on its own. Both come back the same way, as the same
-    instance. One that fails to start is not given up: it stays suspended with its disk
-    and waits longer before the next try. Returns how many came back.
+    instance, once they hold enough to pay a tick. One that fails to start is not given
+    up: it stays suspended with its disk and waits longer before the next try. At most
+    `REVIVES_PER_PASS` come back per pass. Returns how many came back.
     """
     now = time.monotonic() if now is None else now
     revived = 0
@@ -402,14 +442,22 @@ def revive_suspended_instances(now: Optional[float] = None) -> int:
     except Exception as e:
         log.LOGGER(f"Error reading the suspended instances: {e}")
         return 0
+    scarcity = None
     for row in suspended:
+        if revived >= REVIVES_PER_PASS:
+            break
         token = row["id"]
         try:
-            if int(row.get("balance_mu") or 0) <= 0:
-                continue
+            balance = int(row.get("balance_mu") or 0)
         except (TypeError, ValueError):
             continue
+        if balance <= 0:
+            continue
         if now < _revive_not_before.get(token, 0.0):
+            continue
+        if scarcity is None:
+            scarcity = system_scarcity()
+        if not _can_pay_a_tick(token, balance, scarcity):
             continue
         try:
             if revive_instance(token):
@@ -1666,18 +1714,25 @@ def reap_expired_suspensions() -> int:
 
     A suspended instance (issue #594) keeps its disk for `instances.SUSPENDED_GRACE_SECONDS`
     so that its father can bring it back with a top-up. After that it dies with the cause
-    it had, `out_of_balance`, and its disk and address are released. One that holds MU
-    again is not touched, however long it has been suspended: it is waiting to be started,
-    not to be deleted. Returns the number it deleted.
+    it had, `out_of_balance`, and its disk and address are released. One that holds enough
+    to pay a tick again is not touched, however long it has been suspended: it is waiting
+    to be started, not to be deleted. One that holds something, but not that much, is
+    still out of balance -- it would be suspended again on the next tick -- and goes too.
+    Returns the number it deleted.
     """
     deleted = 0
     try:
         grace = dead_instances.suspended_grace_seconds()
+        scarcity = None
         for row in sc.get_suspended_local_instances():
-            if int(row.get("balance_mu") or 0) > 0:
-                continue
             if int(row.get("suspended_for_s") or 0) < grace:
                 continue
+            balance = int(row.get("balance_mu") or 0)
+            if balance > 0:
+                if scarcity is None:
+                    scarcity = system_scarcity()
+                if _can_pay_a_tick(row["id"], balance, scarcity):
+                    continue
             try:
                 log.LOGGER(f"Grace period of suspended instance {row['id']} is over; deleting it.")
                 if stop_instance(token=row["id"], reason=dead_instances.OUT_OF_BALANCE) is not None:

@@ -47,9 +47,7 @@ def _direct_kill_local_instance(instance_id: str, reason: str) -> None:
     finally:
         conn.close()
 
-def _column_exists(connection, table: str, column: str) -> bool:
-    # PRAGMA cannot be parameterised; every caller passes a literal.
-    return any(row[1] == column for row in connection.execute(f"PRAGMA table_info({table})"))
+from src.commands._catalogue import column_exists
 
 
 def _has_runtime_snapshot(virtualizer) -> bool:
@@ -110,7 +108,7 @@ def _prune_stale_instances() -> None:
         # A suspended instance has no VM on purpose (issue #594): reading that as a lost
         # guest would delete the disk that suspending it kept.
         where = "killed_at IS NULL"
-        if _column_exists(conn, "local_instances", "suspended_at"):
+        if column_exists(conn, "local_instances", "suspended_at"):
             where += " AND suspended_at IS NULL"
         cursor.execute(f"SELECT id FROM local_instances WHERE {where}")
         candidates = [row[0] for row in cursor.fetchall()]
@@ -370,7 +368,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
             # This reads the file directly, so it can run before the daemon has added a
             # column a newer release introduced: a missing one reads as not suspended.
             suspended_column = (
-                "suspended_at" if _column_exists(conn, "local_instances", "suspended_at") else "NULL"
+                "suspended_at" if column_exists(conn, "local_instances", "suspended_at") else "NULL"
             )
             cursor.execute(
                 "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer, "

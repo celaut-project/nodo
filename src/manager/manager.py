@@ -125,8 +125,6 @@ def _target_dev_client_balance(amount_mu: int) -> int:
     return int(amount_mu) + 1
 
 
-# The `detail.reason` of the credit that funds a dev client.
-DEV_CLIENT_CREDIT = "dev_client"
 # The `detail.reason` of the credit that keeps an unlimited client funded.
 UNLIMITED_CLIENT_CREDIT = "unlimited_client"
 
@@ -1343,8 +1341,10 @@ def handle_internal_failure(token: str, reason: str) -> Optional[object]:
     except Exception:
         has_gas = False
     if has_gas and revivable(token):
-        suspend_instance(token=token, reason=reason)
-        return True
+        # False means there was nothing to suspend: already suspended (handled), or gone,
+        # in which case `stop_instance` below clears whatever the VM left behind.
+        if suspend_instance(token=token, reason=reason) or sc.is_local_instance_suspended(id=token):
+            return True
     return stop_instance(token=token, reason=reason)
 
 
@@ -1382,6 +1382,18 @@ def revive_instance(token: str) -> bool:
         cpu_period=int(sys_req['cpu_period'] or 0),
         cpu_quota=int(sys_req['cpu_quota'] or 0),
     ))
+
+    # The same admission a launch gets. A suspended instance holds no memory or CPU, so
+    # that room may have been taken since; starting it anyway would put the node over its
+    # own ceiling. It stays suspended and is tried again, like any other failed start.
+    from src.utils.cost_functions.resource_availability import get_resource_availability
+
+    availability = get_resource_availability(resources=resources, arch=sys_req['arch'])
+    if not availability["can_execute"]:
+        raise RuntimeError(
+            f"No room to revive {token} right now: "
+            f"{availability.get('reason') or 'not enough resources.'}"
+        )
     log.LOGGER(f"Reviving instance {token} on its own disk.")
     _, vm_ip, _ = vm_execute(
         assigment_ports=None,
