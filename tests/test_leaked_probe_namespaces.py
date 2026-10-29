@@ -179,9 +179,10 @@ class AllocatorSkipsProbeAddressesTests(unittest.TestCase):
         from src.virtualizers.microvm import network
 
         self.network = network
-        patcher = patch.object(network, "used_ips", return_value=set())
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, value in (("used_ips", set()), ("reserved_ip", None)):
+            patcher = patch.object(network, name, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_a_guest_is_never_given_an_address_a_probe_holds(self):
         with patch.object(self.network, "_probe_held_ips", return_value=set()):

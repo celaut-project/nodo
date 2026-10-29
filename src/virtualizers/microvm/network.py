@@ -106,15 +106,36 @@ def _probe_held_ips() -> set[str]:
         return set()
 
 
+def reserved_ip(vmachine_id: str) -> Optional[str]:
+    """The address this id already holds, or None if it holds none.
+
+    An instance that is suspended or waiting to be revived keeps its row (and so its
+    address) while its VM is gone: that row, or a runtime state a crashed VM left
+    behind, is the reservation. :func:`used_ips` counts it against every *other* id,
+    and this is how the owner gets it back, so a revived instance comes up on exactly
+    the address it had instead of probing past its own reservation.
+    """
+    state = list_runtime_states().get(vmachine_id) or {}
+    ip = state.get("ip")
+    if isinstance(ip, str) and ip:
+        return ip
+    return sc.get_internal_ip(id=vmachine_id) or None
+
+
 def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     """An address and MAC for this VM, derived from its id rather than served.
 
     No DHCP, so the address is stable for the life of the VM and the firewall can
     be written against it before the guest exists. Derived from the id and then
-    probed against :func:`used_ips`, so two VMs never share one and a relaunch of
-    the same id lands on the same address whenever it is free. Addresses held by
-    a reachability probe's namespace are skipped too: the node has no record of
+    probed against :func:`used_ips`, so two VMs never share one. An id that already
+    holds an address (see :func:`reserved_ip`) gets that address back, whatever the
+    probe would now pick: it is its own reservation, and a revived instance has to
+    come back on the address its clients and its firewall rules know. Addresses held
+    by a reachability probe's namespace are skipped too: the node has no record of
     them, but they answer on the bridge all the same.
+
+    The MAC, like the tap name (:func:`create_tap`), is a pure function of the id, so
+    nothing needs reserving for them: two ids only share one by a hash collision.
     """
     network = ip_network()
     gateway_ip = ipaddress.ip_address(NETWORK_GATEWAY_IP)
@@ -127,8 +148,19 @@ def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     if hosts <= 1:
         raise MicroVMError(f"No usable host addresses in subnet {NETWORK_SUBNET}")
 
-    used = used_ips() | _probe_held_ips()
     digest = hashlib.sha256(vmachine_id.encode("utf-8")).digest()
+    mac = f"02:{digest[0]:02x}:{digest[1]:02x}:{digest[2]:02x}:{digest[3]:02x}:{digest[4]:02x}"
+
+    held = reserved_ip(vmachine_id)
+    if held:
+        try:
+            held_address = ipaddress.ip_address(held)
+        except ValueError:
+            held_address = None
+        if held_address is not None and held_address in network and held_address != gateway_ip:
+            return held, mac
+
+    used = used_ips() | _probe_held_ips()
     seed = int.from_bytes(digest[:8], "big")
 
     selected_ip: Optional[str] = None
@@ -146,7 +178,6 @@ def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     if not selected_ip:
         raise MicroVMError(f"No available IPs in subnet {NETWORK_SUBNET}")
 
-    mac = f"02:{digest[0]:02x}:{digest[1]:02x}:{digest[2]:02x}:{digest[3]:02x}:{digest[4]:02x}"
     return selected_ip, mac
 
 
