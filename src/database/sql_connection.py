@@ -86,6 +86,9 @@ TRACEABILITY_TABLES = (
 # this an in-place upgrade would fail to record every donation it pays.
 TRACEABILITY_COLUMNS = {
     "payments": {"purpose": "TEXT DEFAULT NULL"},
+    # Read by the maintenance thread (issue #594); `retire_unmetered_column` fills it
+    # from the column it replaces.
+    "clients": {"unlimited": "INTEGER NOT NULL DEFAULT 0"},
     # Read by every maintenance tick (issue #594), so a node upgraded in place cannot
     # wait for `nodo migrate` to add it: without it the tick would raise "no such
     # column: suspended_at" on the first sweep after the restart.
@@ -259,12 +262,16 @@ def _ensure_traceability_tables(connection) -> None:
             ensure_columns,
             ensure_tables,
             forget_peer_rates_per_whole_unit,
+            retire_unmetered_column,
         )
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
         for table, columns in TRACEABILITY_COLUMNS.items():
             ensure_columns(cursor, table, columns)
+        # `clients.unmetered` became `clients.unlimited` (issue #594); like the rest of
+        # this, it cannot wait for `nodo migrate` after an in-place upgrade.
+        retire_unmetered_column(cursor)
         # The restart after pulling new code is the only upgrade path (see above), so
         # the one-shot rate migration runs here too, not only from `migrate`.
         forget_peer_rates_per_whole_unit(cursor)
@@ -731,7 +738,7 @@ class SQLConnection(metaclass=Singleton):
     # Client Methods
 
     def add_client(self, client_id: str, balance_mu: int, last_usage: Optional[float],
-                   unmetered: bool = False, reason: str = "free_tier"):
+                   unlimited: bool = False, reason: str = "free_tier"):
         """
         Adds a client to the database. A client id that exists already raises.
 
@@ -740,29 +747,44 @@ class SQLConnection(metaclass=Singleton):
             balance_mu (int): Its starting balance, in MU. Written in the ledger as a
                 ``credit``, because nobody paid it in.
             last_usage (Optional[float]): The last usage time.
-            unmetered (bool): Never charge this client. Set for the node's own dev
-                clients, which used to express the same thing by holding a balance of
-                1e256 -- a flag written as a number.
+            unlimited (bool): Keep this client funded: the maintenance thread tops its
+                balance up to a target. Set for the node's own dev clients. Its balance
+                is a finite figure like anyone's, and what it spends is in the ledger.
             reason (str): Why the client gets ``balance_mu``: the ``detail`` of the
                 credit.
         """
         def work(cursor):
             cursor.execute('''
-                INSERT INTO clients (id, balance_mu, last_usage, unmetered)
+                INSERT INTO clients (id, balance_mu, last_usage, unlimited)
                 VALUES (?, ?, ?, ?)
-            ''', (client_id, str(balance_mu), last_usage, int(bool(unmetered))))
+            ''', (client_id, str(balance_mu), last_usage, int(bool(unlimited))))
             if int(balance_mu):
                 self._append_movement(cursor, client_id, int(balance_mu), int(balance_mu),
                                       ledger.CREDIT, detail={"reason": reason})
 
         self._transaction(work)
 
-    def client_is_unmetered(self, client_id: str) -> bool:
-        """True for a client the node never charges (its own dev clients)."""
+    def client_is_unlimited(self, client_id: str) -> bool:
+        """True for a client the node keeps funded (its own dev clients, by default)."""
         row = self._execute(
-            'SELECT unmetered FROM clients WHERE id = ?', (client_id,)
+            'SELECT unlimited FROM clients WHERE id = ?', (client_id,)
         ).fetchone()
-        return bool(row['unmetered']) if row else False
+        return bool(row['unlimited']) if row else False
+
+    def set_client_unlimited(self, client_id: str, unlimited: bool) -> bool:
+        """Turn the automatic top-up of a client on or off. False if there is no such client.
+
+        Turning it off only stops the top-ups: what the client already holds stays.
+        """
+        cursor = self._execute(
+            'UPDATE clients SET unlimited = ? WHERE id = ?', (int(bool(unlimited)), client_id)
+        )
+        return cursor.rowcount > 0
+
+    def get_unlimited_clients(self) -> List[dict]:
+        """The clients the node keeps funded, with their balance in MU."""
+        result = self._execute('SELECT id, balance_mu FROM clients WHERE unlimited = 1 ORDER BY id')
+        return [{'id': row['id'], 'balance_mu': _as_int(row['balance_mu'])} for row in result.fetchall()]
 
     def get_clients(self) -> List[dict]:
         """

@@ -149,7 +149,7 @@ class ClientViewTests(unittest.TestCase):
     def setUp(self):
         connection = _fresh_database()
         with connection:
-            connection.execute("INSERT INTO clients (id, balance_mu, unmetered) VALUES ('client-1', '500', 1)")
+            connection.execute("INSERT INTO clients (id, balance_mu, unlimited) VALUES ('client-1', '500', 1)")
             connection.execute(
                 "INSERT INTO deposit_tokens (id, client_id, status, created_at) "
                 "VALUES ('tok-1', 'client-1', 'payed', '2026-01-03 09:59:00')")
@@ -166,7 +166,7 @@ class ClientViewTests(unittest.TestCase):
         self.assertTrue(ok)
         client = _json(out)["clients"][0]
         self.assertEqual(client["balance_mu"], 500)
-        self.assertTrue(client["unmetered"])
+        self.assertTrue(client["unlimited"])
 
     def test_one_client_carries_the_detail_card(self):
         ok, out = _run(self.clients.clients_command, ["client-1", "--json"])

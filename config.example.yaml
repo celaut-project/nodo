@@ -1200,6 +1200,12 @@ client:
   # when it tops up: a funded client is an active one.
   CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION: 1000
   DEV_CLIENT_POOL_SIZE: 1
+  # A client marked unlimited (`nodo clients unlimited <id> on`; the node's own dev-*
+  # clients are by default) is kept funded: the maintenance thread tops its balance up
+  # to this many MU, as an ordinary credit in the ledger. Nobody has infinite MU. Turning
+  # the flag off stops the top-ups and takes nothing back. The default is 100 ERG at one
+  # MU per nanoERG. 0 turns the top-up off.
+  UNLIMITED_TARGET_BALANCE_MU: 100000000000
   # If false, no client (local or peer) can open a NEW deposit -- GenerateDepositToken
   # is refused outright. A client that already holds MU keeps spending it normally;
   # this only cuts off acquiring more. Use to stop onboarding new demand (or new

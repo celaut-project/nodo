@@ -205,7 +205,7 @@ directory; it does not build, pack, or execute the service itself:
   [`../PACKING.md`](../PACKING.md)).
 
 `ggconf` also records the sandbox as a `rundev::<path>` local instance under an
-unmetered dev client, so it shows up like any other instance for `nodo observe`
+unlimited dev client, so it shows up like any other instance for `nodo observe`
 / `nodo instances` without ever having been packed. A service that declares a
 `guest` shared directory additionally needs a `__shares__` JSON file beside
 `__config__` — see [`../SHARED_FILESYSTEMS.md`](../SHARED_FILESYSTEMS.md).
