@@ -101,7 +101,6 @@ GROUPS: List[Group] = [
             ("chat_close <id>", "close a conversation (local only)"),
             ("chat_reopen <id>", "reopen a closed conversation"),
             ("clients [<client>]", "list clients, or one with its history (--json)"),
-            ("clients unlimited <client> on|off", "keep a client funded, or stop topping it up"),
             ("reputation [<peer>]", "what the network stakes on us (--json)"),
             ("verify_reputation <peer>", "validate a peer's reputation proof and ownership"),
             ("receipt verify <file>", "check signed execution receipts (--token, --json)"),

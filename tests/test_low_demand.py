@@ -188,7 +188,7 @@ def _install_fake_sql_connection(monkeypatch, ids):
     fake = types.ModuleType("src.database.sql_connection")
 
     class _FakeSC:
-        def get_all_internal_containers_ids(self):
+        def get_running_internal_containers_ids(self):
             return list(ids)
 
     fake.SQLConnection = _FakeSC
