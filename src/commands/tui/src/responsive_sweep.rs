@@ -145,7 +145,7 @@ fn client(id: &str) -> Client {
         id: id.to_string(),
         balance: "5000".to_string(),
         last_usage: "2026-09-30 12:00".to_string(),
-        unmetered: false,
+        unlimited: false,
     }
 }
 

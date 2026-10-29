@@ -1105,11 +1105,17 @@ nodo tunnel_close <tunnel id> --json       # and close one
   records an `operator_adjustment` reputation event in the same transaction.
   JSON: `{"peer_id", "delta", "reputation_score", "reputation_index"}`.
 
+- **clients `unlimited <client_id> on|off`**
+  Have the node keep a client funded (issue #594). On, the maintenance thread tops the
+  client up to `client.UNLIMITED_TARGET_BALANCE_MU` whenever it holds less, as an ordinary
+  `credit` in the ledger: nobody has infinite MU. Off, the top-ups stop and the MU the
+  client already holds stay with it. The node's own `dev-*` clients are unlimited by default.
+
 - **clients `[<client_id>] [--json] [--limit N]`**
-  No id lists every client as before (now with whether it is metered). An id adds
+  No id lists every client as before (now with whether it is unlimited). An id adds
   the CLIENTS detail card: what it paid us, its deposit tokens, the instances it
   started here, and the peer it is bound to, if any. JSON: `{"clients": [...]}` /
-  `{"client": {"id", "balance_mu", "balance_display", "last_usage", "unmetered",
+  `{"client": {"id", "balance_mu", "balance_display", "last_usage", "unlimited",
   "payments", "deposit_tokens", "instances", "bound_peer_id"}}`.
 
 - **services `[<service>] [--json] [--limit N]`**

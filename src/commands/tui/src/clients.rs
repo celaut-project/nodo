@@ -15,10 +15,10 @@ pub struct Client {
     pub id: String,
     pub balance: String,
     pub last_usage: String,
-    /// A client this node never charges — its own dev clients. Stored on the row
-    /// since before this page existed, and shown nowhere until it did: an operator
-    /// wondering why a balance never moves is owed this word.
-    pub unmetered: bool,
+    /// A client this node keeps funded: its balance is topped up to a target whenever
+    /// it holds less, so its own dev clients never run dry. An operator wondering why
+    /// a balance keeps coming back is owed this word.
+    pub unlimited: bool,
 }
 
 impl Identifiable for Client {
@@ -60,8 +60,11 @@ pub struct ClientDetail {
 
 pub fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
     let connection = Connection::open(database)?;
-    let mut statement =
-        connection.prepare("SELECT id, balance_mu, last_usage, unmetered FROM clients")?;
+    // The daemon adds `unlimited` when it starts after an upgrade, so a database this
+    // page opens first reads as nobody being unlimited rather than failing the page.
+    let mut statement = connection
+        .prepare("SELECT id, balance_mu, last_usage, unlimited FROM clients")
+        .or_else(|_| connection.prepare("SELECT id, balance_mu, last_usage, 0 FROM clients"))?;
     let clients = statement
         .query_map([], |row| {
             let last_usage = row
@@ -72,7 +75,7 @@ pub fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
                 id: row.get(0)?,
                 balance: row.get::<_, String>(1)?,
                 last_usage,
-                unmetered: row.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
+                unlimited: row.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
             })
         })?
         .collect();
@@ -244,8 +247,8 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
                 client.id.clone().into(),
                 app.money.format_raw(&client.balance).into(),
                 client.last_usage.clone().into(),
-                // A balance that never moves is the flag doing its job, not a bug.
-                TextCell::from(if client.unmetered { "never charged" } else { "" })
+                // A balance that keeps coming back is the flag doing its job, not a bug.
+                TextCell::from(if client.unlimited { "kept funded" } else { "" })
                     .style(Style::default().fg(muted())),
             ];
             (cells, Style::default())
@@ -301,9 +304,9 @@ fn client_detail_lines(
             "Last usage",
             nonempty(&client.last_usage, "—").to_string(),
         ));
-        if client.unmetered {
+        if client.unlimited {
             lines.push(Line::from(Span::styled(
-                "Never charged (unmetered): one of this node's own dev clients.",
+                "Unlimited: the node tops this client up to a target (the node's own dev clients are).",
                 Style::default().fg(muted()),
             )));
         }
@@ -403,7 +406,7 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE peer (id TEXT PRIMARY KEY, local_client_id TEXT);
                  CREATE TABLE clients (id TEXT PRIMARY KEY, balance_mu TEXT,
-                                    last_usage FLOAT, unmetered INTEGER NOT NULL DEFAULT 0);
+                                    last_usage FLOAT, unlimited INTEGER NOT NULL DEFAULT 0);
                  CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
                                     direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
                                     deposit_token TEXT, ledger TEXT, contract_hash TEXT,
@@ -469,14 +472,14 @@ mod tests {
     }
 
     #[test]
-    fn the_unmetered_flag_reaches_the_table() {
-        let dir = temp_dir("unmetered");
+    fn the_unlimited_flag_reaches_the_table() {
+        let dir = temp_dir("unlimited");
         let database = history_database(&dir);
 
         let clients = get_clients(&database).unwrap();
 
         assert_eq!(clients.len(), 1);
-        assert!(clients[0].unmetered, "a dev client is never charged");
+        assert!(clients[0].unlimited, "a dev client is kept funded");
 
         let _ = fs::remove_dir_all(&dir);
     }

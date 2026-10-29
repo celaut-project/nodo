@@ -239,7 +239,7 @@ class GenerateClientTests(unittest.TestCase):
         self.client_count = 0
         self.created = []
 
-        def add_client(client_id, balance_mu, last_usage, unmetered=False):
+        def add_client(client_id, balance_mu, last_usage, unlimited=False):
             # The real table has `id` as its primary key, so a duplicate raises rather
             # than overwriting a balance. Two racing requests for one id is what that
             # protects, and the stub has to behave the same way or the test is a lie.

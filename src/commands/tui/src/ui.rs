@@ -8345,7 +8345,7 @@ mod tests {
                         id: id.to_string(),
                         balance: "0".to_string(),
                         last_usage: String::new(),
-                        unmetered: false,
+                        unlimited: false,
                     })
                     .collect(),
             );

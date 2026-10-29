@@ -93,7 +93,7 @@ TABLES = {
             id TEXT PRIMARY KEY,
             balance_mu TEXT,
             last_usage FLOAT NULL,
-            unmetered INTEGER NOT NULL DEFAULT 0
+            unlimited INTEGER NOT NULL DEFAULT 0
         )
     ''',
     "uri": '''
@@ -969,8 +969,39 @@ def create_tables(cursor):
         "protocol_stack": "BLOB DEFAULT NULL",
     })
     retire_slot_table(cursor)
+    retire_unmetered_column(cursor)
     ensure_peer_address_uniqueness(cursor)
     forget_peer_rates_per_whole_unit(cursor)
+
+
+def retire_unmetered_column(cursor) -> None:
+    """Replace ``clients.unmetered`` with ``clients.unlimited`` (issue #594).
+
+    ``unmetered`` said "never charge this client" and nothing ever read it: the tick
+    charged every instance, and a dev client only stayed alive because its balance was
+    kept just above what it was about to spend. ``unlimited`` says what the operator
+    actually wants, "keep this client funded": the maintenance thread tops its balance
+    up to a target, with the same ledger rows as any other credit.
+
+    The values carry over -- an unmetered client is an unlimited one -- and so does every
+    dev client, since "the node's own dev clients are unlimited by default" has to hold
+    for the ones that predate the column too. Run once: it is a no-op when the old
+    column is gone. On an SQLite too old to drop a column the old one stays, unused.
+    """
+    try:
+        columns = [row[1] for row in cursor.execute("PRAGMA table_info(clients)").fetchall()]
+        if "unmetered" not in columns:
+            return
+        if "unlimited" not in columns:
+            cursor.execute("ALTER TABLE clients ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0")
+        cursor.execute("UPDATE clients SET unlimited = 1 WHERE unmetered = 1 OR id LIKE 'dev-%'")
+        try:
+            cursor.execute("ALTER TABLE clients DROP COLUMN unmetered")
+            print("Replaced 'clients.unmetered' with 'clients.unlimited'.")
+        except sqlite3.Error:
+            pass
+    except sqlite3.Error as e:
+        print(f"Error replacing 'clients.unmetered': {e}")
 
 
 def retire_slot_table(cursor) -> None:

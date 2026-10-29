@@ -10,21 +10,23 @@ def _client_records(connection, client_id=None):
     """Every client row (or one), as plain data -- what both renderings read."""
     from src.commands._catalogue import column_exists, mu_or_none
 
-    unmetered = "unmetered" if column_exists(connection, "clients", "unmetered") else "0"
-    query = f"SELECT id, balance_mu, last_usage, {unmetered} FROM clients"
+    # Read straight off the file, so it can run before the daemon has upgraded a database
+    # that still has `unmetered` (issue #594): a missing column reads as not unlimited.
+    unlimited = "unlimited" if column_exists(connection, "clients", "unlimited") else "0"
+    query = f"SELECT id, balance_mu, last_usage, {unlimited} FROM clients"
     params = ()
     if client_id is not None:
         query += " WHERE id = ?"
         params = (client_id,)
     records = []
-    for id_, balance_mu, last_usage, is_unmetered in connection.execute(query, params).fetchall():
+    for id_, balance_mu, last_usage, is_unlimited in connection.execute(query, params).fetchall():
         balance = mu_or_none(balance_mu)
         records.append({
             "id": id_,
             "balance_mu": balance,
             "balance_display": format_mu(balance) if balance is not None else None,
             "last_usage": last_usage,
-            "unmetered": bool(is_unmetered),
+            "unlimited": bool(is_unlimited),
         })
     return records
 
@@ -56,8 +58,33 @@ def _client_detail(connection, client_id, limit):
     return detail
 
 
+def set_unlimited_command(client_id: str, setting: str) -> bool:
+    """``nodo clients unlimited <client_id> on|off``: have the node keep a client funded.
+
+    On, the maintenance thread tops the client up to `client.UNLIMITED_TARGET_BALANCE_MU`
+    -- an ordinary credit in the ledger, never infinite MU. Off, it stops, and the MU the
+    client already holds stay with it. The node's own dev clients are on by default.
+    """
+    from src.database.sql_connection import SQLConnection
+    from src.manager.manager import unlimited_target_balance_mu
+
+    if setting not in ("on", "off"):
+        print("usage: nodo clients unlimited <client_id> on|off")
+        return False
+    if not SQLConnection().set_client_unlimited(client_id, setting == "on"):
+        print(f"No client with id {client_id}.")
+        return False
+    if setting == "on":
+        print(f"Client {client_id} is unlimited: the node tops it up to "
+              f"{format_mu(unlimited_target_balance_mu())} whenever it holds less.")
+    else:
+        print(f"Client {client_id} is no longer topped up. What it holds stays with it.")
+    return True
+
+
 def clients_command(argv=None) -> bool:
-    """``nodo clients [<client_id>] [--json] [--limit N]``.
+    """``nodo clients [<client_id>] [--json] [--limit N]``, or
+    ``nodo clients unlimited <client_id> on|off``.
 
     No id lists every client, as it always has. An id narrows to one and adds the
     TUI's CLIENTS detail card: payments, deposit tokens, instances, bound peer.
@@ -65,6 +92,11 @@ def clients_command(argv=None) -> bool:
     from src.commands import _catalogue as catalogue
 
     argv = list(argv or [])
+    if argv and argv[0] == "unlimited":
+        if len(argv) != 3:
+            print("usage: nodo clients unlimited <client_id> on|off")
+            return False
+        return set_unlimited_command(argv[1], argv[2])
     as_json = "--json" in argv
     try:
         limit = catalogue.take_limit(argv)
@@ -105,8 +137,8 @@ def clients_command(argv=None) -> bool:
         print("[Balance & Usage]")
         print(f"  Balance: {record['balance_display'] or 'Invalid balance'}")
         print(f"  Last Usage: {record['last_usage'] if record['last_usage'] is not None else 'None'}")
-        if record["unmetered"]:
-            print("  Metering: unmetered")
+        if record["unlimited"]:
+            print("  Unlimited: the node keeps this client funded")
         if client_id is not None:
             print(f"  Bound peer: {record['bound_peer_id'] or 'None'}")
             print(f"[Payments] ({len(record['payments'])}, newest first)")

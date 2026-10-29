@@ -663,7 +663,7 @@ There is no balance migration: no node runs in production, so balances reset.
 | `FREE_TRIAL_GAS_AMOUNT` | `free_tier.CREDIT_MU_PER_NEW_CLIENT` |
 | `DEFAULT_INITIAL_GAS_AMOUNT` (+ `_FACTOR`, `USE_`) | derived: price of the requested resources × a configured initial runtime window |
 | `MIN_DEPOSIT_PEER`, `TOTAL_REFILLED_DEPOSIT` | derived from the on-chain floor and a target fee overhead |
-| `DEV_CLIENT_GAS_AMOUNT` (1e256) | an `unmetered` flag on dev clients — that is what the number was trying to say |
+| `DEV_CLIENT_GAS_AMOUNT` (1e256) | an `unlimited` flag on clients: the maintenance thread tops them up to `client.UNLIMITED_TARGET_BALANCE_MU`, a finite figure — that is what the number was trying to say |
 | `INIT_COST_CONFIGURATION_FACTOR`, `MAINTENANCE_COST_CONFIGURATION_FACTOR` | gone; they scaled a unitless number |
 | `EXPONENTIAL_COST_FACTOR` (module constant) | `pricing.SCARCITY_CURVE`, applied per resource |
 

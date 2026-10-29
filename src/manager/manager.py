@@ -113,15 +113,62 @@ def _get_client_balance(client_id: str) -> Optional[int]:
 
 
 def _target_dev_client_balance(amount_mu: int) -> int:
-    """Dev clients are unmetered, so their balance only has to clear whatever the
-    caller is about to spend.
+    """What a dev client has to hold to start something that costs ``amount_mu``.
 
-    This used to be `max(DEV_CLIENT_GAS_AMOUNT, ...)` with DEV_CLIENT_GAS_AMOUNT set to
-    1e256 -- a number chosen to mean "never runs out", which is a flag pretending to be
-    an amount. `sc.add_client(unmetered=True)` says it directly, and the balance stays a
-    figure a human can read.
+    The least that clears it: the periodic top-up of an unlimited client
+    (`top_up_unlimited_clients`) is what keeps it funded beyond that, to a target, so
+    this only has to cover a launch that arrives before the next one. It used to be
+    `max(DEV_CLIENT_GAS_AMOUNT, ...)` with DEV_CLIENT_GAS_AMOUNT set to 1e256 -- a
+    number chosen to mean "never runs out", which is a flag pretending to be an amount.
+    The balance stays a figure a human can read.
     """
     return int(amount_mu) + 1
+
+
+# The `detail.reason` of the credit that funds a dev client.
+DEV_CLIENT_CREDIT = "dev_client"
+# The `detail.reason` of the credit that keeps an unlimited client funded.
+UNLIMITED_CLIENT_CREDIT = "unlimited_client"
+
+# What the maintenance thread tops an unlimited client up to, in MU, if the operator sets
+# nothing: 100 ERG at the default of one MU per nanoERG.
+DEFAULT_UNLIMITED_TARGET_BALANCE_MU = 100_000_000_000
+
+
+def unlimited_target_balance_mu() -> int:
+    """The balance the maintenance thread keeps an unlimited client at
+    (`client.UNLIMITED_TARGET_BALANCE_MU`). Zero or less turns the top-up off."""
+    try:
+        return int(env_manager.get(
+            "client.UNLIMITED_TARGET_BALANCE_MU", DEFAULT_UNLIMITED_TARGET_BALANCE_MU))
+    except (TypeError, ValueError):
+        return DEFAULT_UNLIMITED_TARGET_BALANCE_MU
+
+
+def top_up_unlimited_clients() -> int:
+    """Credit every unlimited client that holds less than the target up to it.
+
+    The operator marks a client unlimited (`nodo clients unlimited <id> on`) to say "keep
+    this one funded", and the node's own dev clients are unlimited by default. Nobody has
+    infinite MU: the balance is a finite figure, each top-up is an ordinary `credit` row
+    in the ledger, and what the client spends is booked like any other client's. Turning
+    the flag off stops the top-ups and takes nothing back. Returns how many were topped up.
+    """
+    target = unlimited_target_balance_mu()
+    if target <= 0:
+        return 0
+    topped_up = 0
+    for client in sc.get_unlimited_clients():
+        missing = target - int(client['balance_mu'])
+        if missing <= 0:
+            continue
+        try:
+            sc.move_balance(client['id'], missing, ledger.CREDIT,
+                            detail={"reason": UNLIMITED_CLIENT_CREDIT})
+            topped_up += 1
+        except Exception as e:
+            log.LOGGER(f"Could not top up the unlimited client {client['id']}: {e}")
+    return topped_up
 
 
 # The `detail.reason` of the credit that funds a dev client.
@@ -134,7 +181,7 @@ def _create_dev_client(prefix: str, amount_mu: Optional[int] = None) -> str:
         client_id=client_id,
         balance_mu=_target_dev_client_balance(amount_mu or 0),
         last_usage=None,
-        unmetered=True,
+        unlimited=True,
         reason=DEV_CLIENT_CREDIT,
     )
     return client_id
@@ -205,7 +252,7 @@ def get_dev_clients(amount_mu: int) -> Generator[str, None, None]:
         if client_balance is None:
             continue
         # The pool only holds `_target_dev_client_balance(0)`, so filtering on the balance
-        # alone yields nothing for any real amount. Dev clients are unmetered: raise the
+        # alone yields nothing for any real amount. Dev clients are unlimited: raise the
         # one handed out, as `_acquire_dev_client` does. The generator is lazy, so only the
         # clients actually consumed are topped up.
         target_balance = _target_dev_client_balance(amount_mu)
