@@ -86,6 +86,7 @@ is the ``mu_charged`` of its close (after a cancel, at least that of its last ch
 and nothing is hashed for it.
 """
 
+import contextlib
 import select
 import socket
 import threading
@@ -127,6 +128,13 @@ DEFAULT_UDP_IDLE_TIMEOUT_S = 30.0
 
 # Grace period for the writer thread to notice the tunnel is closing.
 WRITER_JOIN_TIMEOUT_S = 2.0
+
+# How long a tunnel with receipts waits, at its end, for a message that the writer thread
+# is still accounting (a slow ledger write, or the shaping wait) before it signs the
+# close. It waits only while the writer is inside that step, so a normal close is not
+# slower. The wait has an end: a ledger that does not answer must not hold the stream
+# open (#419).
+CLOSE_CHARGE_WAIT_S = 10.0
 
 # Bill once per 64 MiB relayed. Every charge is a ledger transaction that waits for
 # the disk, and the relay does not read the service socket while it waits, so a
@@ -191,6 +199,9 @@ class TrafficMeter:
         self.exhausted = threading.Event()
 
         self._lock = threading.Lock()
+        # Wakes `wait_idle` when a message is accounted. It shares `_lock`.
+        self._idle = threading.Condition(self._lock)
+        self._accounting = 0   # messages that are between their charge and their record
         self._unbilled_bytes = 0
         self._billed_mu = 0
         self._relayed_bytes = 0
@@ -295,6 +306,32 @@ class TrafficMeter:
         with self._lock:
             self._unbilled_bytes -= min(left_of_this_message, self._unbilled_bytes)
         return False
+
+    @contextlib.contextmanager
+    def accounting(self) -> Iterator[None]:
+        """Mark a message as being accounted: from its charge to its record in the chain.
+
+        The writer thread wraps ``add`` and ``record`` in it. :meth:`wait_idle` waits
+        for the mark, so the close does not show a charge without its message in the
+        chains, or a message without its charge (#419).
+        """
+        with self._lock:
+            self._accounting += 1
+        try:
+            yield
+        finally:
+            with self._idle:
+                self._accounting -= 1
+                self._idle.notify_all()
+
+    def wait_idle(self, timeout: float) -> bool:
+        """Wait until no message is being accounted, at most ``timeout`` seconds.
+
+        Returns False if one still is. The close of a stream with receipts is signed
+        after this, so its ``mu_charged`` and its chains cover the same messages (#419).
+        """
+        with self._idle:
+            return self._idle.wait_for(lambda: self._accounting == 0, timeout)
 
     def settle(self) -> None:
         """Bill the partial block left over when the tunnel closes."""
@@ -498,10 +535,12 @@ def _pump_to_service(
             inbound.count(stream_id, bytes_in=len(message))
             activity[0] = time.monotonic()  # caller->service counts as activity too
 
-            if not meter.add(len(message)):
-                break  # Out of funds. Not billed, so not in the receipt chain.
-            if receipts is not None:
-                receipts.record(execution_receipt.DIRECTION_IN, message)
+            # One step for the meter and the chain: the close waits for it (#419).
+            with meter.accounting():
+                if not meter.add(len(message)):
+                    break  # Out of funds. Not billed, so not in the receipt chain.
+                if receipts is not None:
+                    receipts.record(execution_receipt.DIRECTION_IN, message)
 
     except Exception as e:
         # Includes the caller cancelling the RPC and the service closing its
@@ -647,6 +686,12 @@ def _relay(
         # The writer may still be parked on the caller's iterator; it is a daemon
         # and gRPC breaks that iterator when the RPC ends, so don't wait forever.
         writer.join(timeout=WRITER_JOIN_TIMEOUT_S)
+        # The writer can still be accounting a message (a slow charge). Wait for it, so
+        # the close below shows its charge and its message. Only with receipts: nothing
+        # else reads the total.
+        if receipts is not None and not meter.wait_idle(CLOSE_CHARGE_WAIT_S):
+            logger(f"{LOG_PREFIX} {target}: a message is still being accounted after "
+                   f"{CLOSE_CHARGE_WAIT_S:g}s; the close may differ from the ledger.")
         meter.settle()
         inbound.closed(stream_id)
 

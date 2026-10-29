@@ -460,7 +460,14 @@ When `receipts.CHECKPOINT_BYTES` (default 1 MiB) or `receipts.CHECKPOINT_SECONDS
 (default 5 s) passed since the last checkpoint, and only if new traffic came. An idle
 stream gets none. `seq` starts at 1. The `close` comes after the tunnel is torn down
 and its last partial block is billed, so its `mu_charged` is the whole charge of the
-tunnel: the open charge and the traffic. The config is read once per process.
+tunnel: the open charge and the traffic. The node also waits for a message that the
+writer thread is accounting when the tunnel ends: from the charge of the message to its
+record in the chain (a slow ledger write, or the shaping wait). It waits at most
+`rpc_tunnel.CLOSE_CHARGE_WAIT_S` (10 s), and only while the writer is in that step. So the
+`close` shows the charge and the message together. If the step does not end in that
+time, the node logs it and signs the `close` anyway: it then can differ from the ledger,
+and the node does not hold the stream open.
+The config is read once per process.
 
 The node signs first, and changes the state of the stream after. If the signature
 fails, the stream goes on with no receipt, the `seq` is not used, and the node tries

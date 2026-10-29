@@ -97,9 +97,10 @@ def _instance(port):
     ).SerializeToString()
 
 
-def _sink_server():
+def _sink_server(close_after=None):
     """A service that says HELLO and then only reads: no echo, so the order of the
-    charges in the test below does not depend on two threads."""
+    charges in the test below does not depend on two threads. With ``close_after``, it
+    closes the connection once it has read that many bytes."""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", 0))
@@ -112,8 +113,14 @@ def _sink_server():
             conn, _ = server.accept()
             with conn:
                 conn.sendall(b"HELLO")
-                while conn.recv(4096):
-                    pass
+                got = 0
+                while True:
+                    data = conn.recv(4096)
+                    if not data:
+                        break
+                    got += len(data)
+                    if close_after is not None and got >= close_after:
+                        break
         except OSError:
             pass
         finally:
@@ -125,13 +132,17 @@ def _sink_server():
 
 class _Ledger:
     """``spend_mu`` as the tunnel calls it: it keeps the rows that it wrote, and it
-    refuses when ``balance`` is spent."""
+    refuses when ``balance`` is spent. With ``delay_s``, a charge of traffic is slow:
+    the row is written at the end of the delay, as a slow database does."""
 
-    def __init__(self, balance):
+    def __init__(self, balance, delay_s=0.0):
         self.balance = balance
+        self.delay_s = delay_s
         self.rows = []
 
     def __call__(self, *, id, amount_mu, debug_mode, kind, detail):
+        if self.delay_s and "bytes" in detail:
+            time.sleep(self.delay_s)
         if amount_mu > self.balance:
             return False
         self.balance -= amount_mu
@@ -294,10 +305,10 @@ class TunnelReceiptTests(unittest.TestCase):
         settle.assert_called_once()
         self.assertEqual(conn.fileno(), -1)     # the socket is closed
 
-    def _billed_run(self, balance, payload):
+    def _billed_run(self, balance, payload, ledger=None, close_after=None):
         """A tunnel with real billing: 5 MU to open it, 1 MU per byte, a block of 1 KiB."""
-        port = _sink_server()
-        ledger = _Ledger(balance)
+        port = _sink_server(close_after)
+        ledger = ledger or _Ledger(balance)
         real_get = rpc_tunnel.env_manager.get
 
         def get(key, default=None):
@@ -391,6 +402,73 @@ class TunnelReceiptTests(unittest.TestCase):
             meter.settle()
         self.assertEqual(sum(r["amount"] for r in ledger.rows), 10)
         self.assertEqual(meter.billed_mu, 10)
+
+    def test_the_close_waits_for_a_charge_that_is_in_flight(self):
+        """Final review of #593: the service closes while the writer is in a slow charge.
+        The writer join gives up first (patched short). The close must still count that
+        charge, or it shows less than the ledger and reads as an overcharge. HELLO and
+        the message are exactly one block (5 + 1019 bytes): the writer bills it, and the
+        settle has nothing left to bill (a slow settle would give the writer the time that
+        it needs, and hide the race)."""
+        ledger = _Ledger(10 ** 9, delay_s=0.4)
+        with mock.patch.object(rpc_tunnel, "WRITER_JOIN_TIMEOUT_S", 0.05):
+            ledger, got, receipts = self._billed_run(
+                0, [b"x" * 1019], ledger=ledger, close_after=1019)
+        close = receipts[-1]
+        self.assertEqual(close.kind, er.KIND_CLOSE)
+        self.assertTrue(er.check_sequence(receipts, peer_id=_peer_id(), token=TOKEN)["valid"])
+        self.assertEqual(sum(r["amount"] for r in ledger.rows), int(close.mu_charged.n))
+        self.assertEqual(int(close.mu_charged.n), 5 + 1019 + 5)   # open + every byte
+        self.assertEqual((close.in_events, close.in_bytes), (1, 1019))   # and its message
+
+    def test_the_close_waits_for_a_message_that_is_not_recorded_yet(self):
+        """The charge is done, and the writer is not yet at the record of the chain. The
+        close must show the message that its mu_charged pays for."""
+        real_record = er.ReceiptChain.record
+
+        def slow_record(chain, direction, payload):
+            if direction == er.DIRECTION_IN:
+                time.sleep(0.4)
+            return real_record(chain, direction, payload)
+
+        with mock.patch.object(rpc_tunnel, "WRITER_JOIN_TIMEOUT_S", 0.05), \
+                mock.patch.object(er.ReceiptChain, "record", slow_record):
+            ledger, got, receipts = self._billed_run(
+                10 ** 9, [b"x" * 1019], close_after=1019)
+        close = receipts[-1]
+        self.assertEqual(close.kind, er.KIND_CLOSE)
+        self.assertEqual(sum(r["amount"] for r in ledger.rows), int(close.mu_charged.n))
+        self.assertEqual((close.in_events, close.in_bytes), (1, 1019))
+
+    def test_the_wait_for_a_charge_has_an_end(self):
+        """A ledger that does not answer must not hold the stream: the wait stops."""
+        release = threading.Event()
+
+        def stuck(**_):
+            release.wait(5)
+            return True
+
+        def account(meter):
+            with meter.accounting():
+                meter.add(1024)   # one block: a charge
+
+        with mock.patch("src.manager.manager.spend_mu", stuck), \
+                mock.patch.object(rpc_tunnel, "prices",
+                                  return_value=SimpleNamespace(tunnel_open_mu=0, net_mu_per_gib=1)), \
+                mock.patch.object(rpc_tunnel, "traffic_charge_mu", lambda n: n), \
+                mock.patch.object(rpc_tunnel.env_manager, "get",
+                                  lambda key, default=None: 1
+                                  if key == "costs.TUNNEL_CHARGE_INTERVAL_KB" else default):
+            meter = rpc_tunnel.TrafficMeter(token=TOKEN, target="t")
+            self.assertTrue(meter.wait_idle(0.1))       # nothing is being accounted
+            worker = threading.Thread(target=account, args=(meter,), daemon=True)
+            worker.start()
+            time.sleep(0.1)
+            self.assertFalse(meter.wait_idle(0.1))      # still in the step
+            release.set()
+            worker.join(2)
+            self.assertTrue(meter.wait_idle(0.1))
+        self.assertEqual(meter.billed_mu, 1024)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
