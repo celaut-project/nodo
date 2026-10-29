@@ -985,8 +985,10 @@ def retire_unmetered_column(cursor) -> None:
 
     The values carry over -- an unmetered client is an unlimited one -- and so does every
     dev client, since "the node's own dev clients are unlimited by default" has to hold
-    for the ones that predate the column too. Run once: it is a no-op when the old
-    column is gone. On an SQLite too old to drop a column the old one stays, unused.
+    for the ones that predate the column too. The values are copied only by the call that
+    adds the new column, so what the operator chooses afterwards is never undone by a
+    later start. On an SQLite too old to drop a column the old one stays, unused, and
+    the drop is simply tried again; it is a no-op once the old column is gone.
     """
     try:
         columns = [row[1] for row in cursor.execute("PRAGMA table_info(clients)").fetchall()]
@@ -994,7 +996,7 @@ def retire_unmetered_column(cursor) -> None:
             return
         if "unlimited" not in columns:
             cursor.execute("ALTER TABLE clients ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0")
-        cursor.execute("UPDATE clients SET unlimited = 1 WHERE unmetered = 1 OR id LIKE 'dev-%'")
+            cursor.execute("UPDATE clients SET unlimited = 1 WHERE unmetered = 1 OR id LIKE 'dev-%'")
         try:
             cursor.execute("ALTER TABLE clients DROP COLUMN unmetered")
             print("Replaced 'clients.unmetered' with 'clients.unlimited'.")

@@ -146,10 +146,12 @@ class ReviveTickTests(unittest.TestCase):
         self.addCleanup(lambda: [t.clear() for t in (
             maintain._revive_failures, maintain._revive_not_before, maintain._revived_at)])
 
-    def _tick(self, rows, revive, now=1000.0):
+    def _tick(self, rows, revive, now=1000.0, can_pay=True):
         ids = [row["id"] for row in rows]
         with mock.patch.object(maintain.sc, "get_suspended_local_instances", return_value=rows), \
                 mock.patch.object(maintain.sc, "get_all_internal_containers_ids", return_value=ids), \
+                mock.patch.object(maintain, "_can_pay_a_tick", return_value=can_pay), \
+                mock.patch.object(maintain, "system_scarcity", return_value={}), \
                 mock.patch.object(maintain, "revive_instance", side_effect=revive) as revive_mock:
             revived = maintain.revive_suspended_instances(now=now)
         return revived, [call.args[0] for call in revive_mock.call_args_list]
@@ -158,6 +160,25 @@ class ReviveTickTests(unittest.TestCase):
         rows = [{"id": "with", "balance_mu": "5"}, {"id": "without", "balance_mu": "0"}]
         revived, tried = self._tick(rows, revive=lambda token: True)
         self.assertEqual((revived, tried), (1, ["with"]))
+
+    def test_one_that_cannot_pay_a_tick_is_not_started_to_be_suspended_again(self):
+        # Out of balance is below one tick's charge, not only zero: with 5 MU against a
+        # charge of 100 the next tick would suspend it again, a boot and a kill every pass.
+        rows = [{"id": "a", "balance_mu": "5"}]
+        revived, tried = self._tick(rows, revive=lambda token: True, can_pay=False)
+        self.assertEqual((revived, tried), (0, []))
+
+    def test_only_a_few_are_started_per_pass_so_the_tick_is_not_stalled(self):
+        rows = [{"id": f"vm-{n}", "balance_mu": "5"} for n in range(5)]
+        revived, tried = self._tick(rows, revive=lambda token: True)
+        self.assertEqual(revived, maintain.REVIVES_PER_PASS)
+        self.assertEqual(len(tried), maintain.REVIVES_PER_PASS)
+
+    def test_one_that_fails_does_not_use_up_the_pass_of_the_next(self):
+        rows = [{"id": "bad", "balance_mu": "5"}, {"id": "good", "balance_mu": "5"}]
+        revived, tried = self._tick(
+            rows, revive=lambda token: (_ for _ in ()).throw(RuntimeError("no boot")) if token == "bad" else True)
+        self.assertEqual((revived, tried), (1, ["bad", "good"]))
 
     def test_one_that_fails_is_not_given_up_and_waits_longer(self):
         rows = [{"id": "a", "balance_mu": "5"}]
@@ -214,6 +235,24 @@ class HandleFailureTests(unittest.TestCase):
         suspend.assert_not_called()
         stop.assert_called_once()
 
+    def test_one_that_is_already_gone_is_stopped_so_nothing_it_left_is_kept(self):
+        with mock.patch.object(manager.sc, "get_instance_balance", return_value=10), \
+                mock.patch.object(manager, "revivable", return_value=True), \
+                mock.patch.object(manager, "suspend_instance", return_value=False), \
+                mock.patch.object(manager.sc, "is_local_instance_suspended", return_value=False), \
+                mock.patch.object(manager, "stop_instance", return_value=None) as stop:
+            self.assertIsNone(manager.handle_internal_failure("vm", dead_instances.PROCESS_LOST))
+        stop.assert_called_once()
+
+    def test_one_that_was_already_suspended_counts_as_handled(self):
+        with mock.patch.object(manager.sc, "get_instance_balance", return_value=10), \
+                mock.patch.object(manager, "revivable", return_value=True), \
+                mock.patch.object(manager, "suspend_instance", return_value=False), \
+                mock.patch.object(manager.sc, "is_local_instance_suspended", return_value=True), \
+                mock.patch.object(manager, "stop_instance") as stop:
+            self.assertTrue(manager.handle_internal_failure("vm", dead_instances.PROCESS_LOST))
+        stop.assert_not_called()
+
     def test_an_unreadable_balance_is_not_gas(self):
         with mock.patch.object(manager.sc, "get_instance_balance", side_effect=Exception("gone")), \
                 mock.patch.object(manager, "revivable", return_value=True), \
@@ -226,11 +265,11 @@ class HandleFailureTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ReviveInstanceTests(unittest.TestCase):
-    def _revive(self, execute_effect=None, suspended=True):
+    def _revive(self, execute_effect=None, suspended=True, room=True):
         calls = []
         service = celaut.Service()
         service.container.resources.at_most.mem_limit = 999
-        sys_req = {"mem_limit": 111, "disk_space": 222, "cpu_period": 100, "cpu_quota": 50}
+        sys_req = {"mem_limit": 111, "disk_space": 222, "cpu_period": 100, "cpu_quota": 50, "arch": None}
 
         def record(name, result=None):
             def run(*args, **kwargs):
@@ -248,6 +287,8 @@ class ReviveInstanceTests(unittest.TestCase):
                 mock.patch.object(manager.sc, "resume_local_instance",
                                   side_effect=record("resume", True)), \
                 mock.patch("src.utils.utils.read_service_from_disk", return_value=service), \
+                mock.patch("src.utils.cost_functions.resource_availability.get_resource_availability",
+                           return_value={"can_execute": room, "reason": "memory is taken"}), \
                 mock.patch.object(manager, "kill", side_effect=record("kill", True)), \
                 mock.patch.object(manager, "vm_execute",
                                   side_effect=execute_effect or record("execute", ("vm", "192.168.200.7", None))):
@@ -282,6 +323,14 @@ class ReviveInstanceTests(unittest.TestCase):
     def test_a_failed_start_raises_and_leaves_it_suspended(self):
         result, calls = self._revive(execute_effect=mock.Mock(side_effect=MicroVMError("no boot")))
         self.assertIsInstance(result, MicroVMError)
+        self.assertNotIn("resume", [name for name, _ in calls])
+
+    def test_it_is_admitted_like_a_launch_and_stays_suspended_when_there_is_no_room(self):
+        # A suspended instance holds no memory or CPU, so its room may have been taken.
+        result, calls = self._revive(room=False)
+        self.assertIsInstance(result, RuntimeError)
+        self.assertIn("memory is taken", str(result))
+        self.assertNotIn("execute", [name for name, _ in calls])
         self.assertNotIn("resume", [name for name, _ in calls])
 
     def test_an_instance_that_is_not_suspended_is_left_alone(self):

@@ -239,7 +239,9 @@ def _real_workload_present() -> bool:
     try:
         from src.database.sql_connection import SQLConnection
 
-        ids = SQLConnection().get_all_internal_containers_ids() or []
+        # The running ones: a suspended instance (issue #594) has no VM, and one that sits
+        # waiting for MU would otherwise keep the fallback from ever running.
+        ids = SQLConnection().get_running_internal_containers_ids() or []
         own = _state.running_token
         real = [i for i in ids if i != own]
         return len(real) > 0

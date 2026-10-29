@@ -267,11 +267,12 @@ def _ensure_traceability_tables(connection) -> None:
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
+        # `clients.unmetered` became `clients.unlimited` (issue #594); like the rest of
+        # this, it cannot wait for `nodo migrate` after an in-place upgrade. First, so
+        # that it is the one that adds the new column and copies the old values into it.
+        retire_unmetered_column(cursor)
         for table, columns in TRACEABILITY_COLUMNS.items():
             ensure_columns(cursor, table, columns)
-        # `clients.unmetered` became `clients.unlimited` (issue #594); like the rest of
-        # this, it cannot wait for `nodo migrate` after an in-place upgrade.
-        retire_unmetered_column(cursor)
         # The restart after pulling new code is the only upgrade path (see above), so
         # the one-shot rate migration runs here too, not only from `migrate`.
         forget_peer_rates_per_whole_unit(cursor)

@@ -183,10 +183,8 @@ def kill(vmachine_id: str, archive: bool = False, keep_disk: bool = False) -> bo
     With ``keep_disk`` true it stops the guest but leaves its disk where it is, for a
     suspended instance that will be started again (issue #594).
     """
-    if keep_disk:
-        return _backend_of(vmachine_id).kill(
-            vmachine_id=vmachine_id, archive=archive, keep_disk=True)
-    return _backend_of(vmachine_id).kill(vmachine_id=vmachine_id, archive=archive)
+    return _backend_of(vmachine_id).kill(
+        vmachine_id=vmachine_id, archive=archive, keep_disk=keep_disk)
 
 
 def revivable(vmachine_id: str) -> bool:

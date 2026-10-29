@@ -72,11 +72,33 @@ class MigrationTests(unittest.TestCase):
         # The operator's choice for a dev client is not undone the next time it runs.
         self.assertEqual(self._unlimited(connection)["dev-legacy"], 0)
 
-    def test_a_database_with_the_column_already_added_by_the_upgrade_is_filled_from_the_old_one(self):
+    def test_the_values_are_copied_only_by_the_call_that_adds_the_column(self):
+        # What a node whose SQLite cannot drop a column looks like after its first start:
+        # both columns there. A later start must not switch back on what the operator
+        # turned off.
         connection = self._old_database()
         connection.execute("ALTER TABLE clients ADD COLUMN unlimited INTEGER NOT NULL DEFAULT 0")
+        connection.execute("UPDATE clients SET unlimited = 0")
         retire_unmetered_column(connection.cursor())
+        self.assertEqual(set(self._unlimited(connection).values()), {0})
+
+    def test_a_failed_drop_does_not_fail_the_migration(self):
+        connection = self._old_database()
+
+        class NoDropCursor:
+            """A cursor on an SQLite too old to drop a column."""
+
+            def __init__(self, cursor):
+                self._cursor = cursor
+
+            def execute(self, sql, *args):
+                if "DROP COLUMN" in sql:
+                    raise sqlite3.OperationalError('near "DROP": syntax error')
+                return self._cursor.execute(sql, *args)
+
+        retire_unmetered_column(NoDropCursor(connection.cursor()))
         self.assertEqual(self._unlimited(connection)["flagged"], 1)
+        self.assertIn("unmetered", _columns(connection, "clients"))
 
     def test_a_fresh_database_and_a_missing_table_are_left_alone(self):
         fresh = sqlite3.connect(":memory:")

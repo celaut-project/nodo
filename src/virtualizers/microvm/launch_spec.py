@@ -18,7 +18,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 
@@ -82,3 +82,45 @@ def read(runtime_dir: Path) -> Optional[LaunchSpec]:
         return None
     except Exception:
         return None
+
+
+def record_launch(runtime_dir: Path, assigment_ports: Optional[Dict[int, int]], by_local: bool,
+                  network_resolution, shares) -> None:
+    """Write the spec of a launch that has just decided all of it.
+
+    A launch with shares is not revivable: their daemons and mounts belong to it, and a
+    revive does not rebuild them. Shared by both backends so they agree on what that
+    means.
+    """
+    write(runtime_dir, LaunchSpec(
+        assigment_ports=dict(assigment_ports or {}),
+        by_local=by_local,
+        network_resolution=list(network_resolution),
+        revivable=not shares.mounts_state and not shares.exported_share_ids,
+    ))
+
+
+def load_for_revive(runtime_dir: Path, rootfs_path: Path, rootfs_read_only: bool,
+                    vmachine_id: str) -> Tuple[LaunchSpec, Optional[Path]]:
+    """What a revive starts from: the spec, and the metadata disk of a read-only rootfs.
+
+    Raises ``MicroVMError`` if the instance cannot be started again -- no spec, one that
+    says it cannot be, or a disk that is not there -- and the caller leaves the directory
+    alone: it is all the instance has. Shared by both backends so their checks cannot
+    drift apart.
+    """
+    from src.virtualizers.microvm import rootfs
+    from src.virtualizers.microvm.errors import MicroVMError
+
+    spec = read(runtime_dir)
+    if spec is None or not spec.revivable:
+        raise MicroVMError(f"Instance {vmachine_id} has no launch spec to revive it from.")
+    if not Path(rootfs_path).exists():
+        raise MicroVMError(f"Instance {vmachine_id} has no disk to revive: {rootfs_path}")
+    metadata_disk_path = None
+    if rootfs_read_only:
+        metadata_disk_path = Path(runtime_dir) / rootfs.METADATA_DISK_NAME
+        if not metadata_disk_path.exists():
+            raise MicroVMError(
+                f"Instance {vmachine_id} has no metadata disk to revive: {metadata_disk_path}")
+    return spec, metadata_disk_path

@@ -125,8 +125,10 @@ class SuspensionRowTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class GraceTests(unittest.TestCase):
-    def _reap(self, rows, grace):
+    def _reap(self, rows, grace, can_pay=True):
         with mock.patch.object(maintain.dead_instances, "suspended_grace_seconds", return_value=grace), \
+                mock.patch.object(maintain, "_can_pay_a_tick", return_value=can_pay), \
+                mock.patch.object(maintain, "system_scarcity", return_value={}), \
                 mock.patch.object(maintain.sc, "get_suspended_local_instances", return_value=rows), \
                 mock.patch.object(maintain, "stop_instance", return_value=0) as stop:
             deleted = maintain.reap_expired_suspensions()
@@ -147,6 +149,14 @@ class GraceTests(unittest.TestCase):
         deleted, stops = self._reap(
             [{"id": "a", "balance_mu": "7", "suspended_for_s": 10 ** 9}], grace=100)
         self.assertEqual((deleted, stops), (0, []))
+
+    def test_one_that_holds_a_little_but_cannot_pay_a_tick_is_deleted_too(self):
+        # Out of balance is "below one tick's charge", not only zero: left alone, it
+        # would be suspended again on every tick and never deleted.
+        deleted, stops = self._reap(
+            [{"id": "a", "balance_mu": "5", "suspended_for_s": 500}], grace=100, can_pay=False)
+        self.assertEqual(deleted, 1)
+        self.assertEqual([stop["token"] for stop in stops], ["a"])
 
     def test_one_that_cannot_be_deleted_does_not_stop_the_others(self):
         rows = [{"id": "a", "balance_mu": "0", "suspended_for_s": 500},
