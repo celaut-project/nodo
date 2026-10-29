@@ -91,11 +91,20 @@ def _cleanup_tap(hypervisor: Hypervisor, vmachine_id: str, tap_name: Optional[st
         log.LOGGER(hypervisor.log(vmachine_id, f"error cleaning tap {tap_name}: {e}"))
 
 
-def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False) -> bool:
+def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False,
+         keep_disk: bool = False) -> bool:
     """Tear down one microVM. If ``archive`` is true, save its logs first.
 
     Only an instance with a row in the database sets ``archive``. An orphan guest
     has no row, so nobody can read its archive.
+
+    ``keep_disk`` stops the guest and gives back everything the host held for it --
+    process, firewall rules, tap, cgroup, socket, shares -- but leaves the runtime
+    directory, and the rootfs image in it, where it is (issue #594: a suspended
+    instance is started again from that disk). Its state file goes, since it
+    describes a process that no longer exists: left behind it would read as a dead
+    guest to the janitor. Only an instance with a row, suspended, may ask for this:
+    the directory is then not an orphan, and ``nodo prune`` knows to leave it.
     """
     state = load_runtime_state(vmachine_id) or {}
     pid = int(state.get("pid") or 0)
@@ -135,11 +144,11 @@ def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False) -> boo
 
     # The guest process is dead here, so its logs are complete. Save them before the
     # runtime directory goes: it holds the only copy.
-    if archive:
+    if archive and not keep_disk:
         dead_instances.archive_runtime(vmachine_id, state)
 
     try:
-        if runtime_dir and runtime_dir.exists():
+        if runtime_dir and runtime_dir.exists() and not keep_disk:
             shutil.rmtree(runtime_dir, ignore_errors=True)
             log.LOGGER(hypervisor.log(vmachine_id, f"event=cleanup runtime_dir_removed={runtime_dir}"))
     except Exception as e:

@@ -264,7 +264,7 @@ class TheWiringTests(unittest.TestCase):
 
         spend = MagicMock(return_value=True)
         with _config(), \
-                patch.object(maintain.sc, "get_all_internal_containers_ids", return_value=["vm-1"]), \
+                patch.object(maintain.sc, "get_running_internal_containers_ids", return_value=["vm-1"]), \
                 patch.object(maintain.sc, "get_sys_req", return_value=row), \
                 patch.object(maintain.sc, "record_instance_consumption"), \
                 patch.object(maintain, "vm_maintain"), \

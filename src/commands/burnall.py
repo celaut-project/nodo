@@ -108,7 +108,8 @@ def _confirmed(total: int, roots: int, remote: int = 0) -> bool:
     mean it pass --yes.
     """
     print("─" * 75)
-    print(f"  This stops ALL {total} instance(s) this node is running or paying for.")
+    print(f"  This stops ALL {total} instance(s) this node is running or paying for,")
+    print("  and deletes the disk of every one, suspended ones included.")
     if remote:
         print(f"  {remote} of them run on a peer, billed to this node's deposit there.")
     print("  There is no undo.")
@@ -204,9 +205,19 @@ def burnall(argv: List[str] = None) -> None:
     roots = sum(1 for i in ids if depths[i] == 0)
 
     print(THRONE)
+    # A suspended instance (issue #594) is not running, but it holds a disk and an
+    # address, and it is stopped here like any other: this is how its disk is deleted
+    # without waiting for `instances.SUSPENDED_GRACE_SECONDS`.
+    try:
+        suspended = {row["id"] for row in sc.get_suspended_local_instances()}
+    except Exception:
+        suspended = set()
+
     print(f"{len(ordered)} instance(s), parents first:")
     for i in ordered:
         where = "  delegated" if i in delegated else ""
+        if i in suspended:
+            where += "  suspended (its disk is deleted too)"
         print(f"  {'  ' * depths[i]}{i[:16]}  (depth {depths[i]}){where}")
 
     if dry_run:

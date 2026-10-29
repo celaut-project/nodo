@@ -155,7 +155,11 @@ TABLES = {
     ''',
     # A row with `killed_at` set is a dead instance, kept so the operator can read
     # what happened. A row with `killed_at` NULL is alive. A dead row never becomes
-    # alive again (see TRIGGERS). `name` is unique among live rows only (see INDEXES),
+    # alive again (see TRIGGERS). `suspended_at` is set on a live row whose VM is
+    # stopped but whose disk is kept (issue #594): it ran out of MU, and its father
+    # can still top it up before the grace period ends. It is a live row on purpose --
+    # its address stays reserved, its name stays taken and its account stays open to
+    # the top-up -- and only a kill or the end of the grace period makes it dead. `name` is unique among live rows only (see INDEXES),
     # so the name of a dead instance can be used again.
     #
     # launch_cpu_bp, launch_mem_bp and launch_disk_bp are the scarcity multiplier of
@@ -191,7 +195,8 @@ TABLES = {
             launch_disk_bp INTEGER DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
-            death_reason TEXT DEFAULT NULL
+            death_reason TEXT DEFAULT NULL,
+            suspended_at DATETIME DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -919,6 +924,9 @@ def create_tables(cursor):
         "launch_mem_bp": "INTEGER DEFAULT NULL",
         "launch_disk_bp": "INTEGER DEFAULT NULL",
         "launched_at": "DATETIME DEFAULT NULL",
+        # NULL on every row written before this column existed: none of them is
+        # suspended.
+        "suspended_at": "DATETIME DEFAULT NULL",
     })
     ensure_columns(cursor, "delegated_instances", {
         "launched_at": "DATETIME DEFAULT NULL",

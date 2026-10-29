@@ -340,6 +340,12 @@ instances:
   DEAD_MAX_ROWS: 200
   # Keep at most this many bytes (the last ones) of each guest log at death.
   DEAD_LOG_MAX_BYTES: 1048576
+  # An instance whose balance reaches 0 is not killed: its VM stops, but its disk,
+  # its address and its row stay, and its father can top it up to bring it back.
+  # This is how many seconds it waits like that before the node deletes it. The
+  # default is 7 days. 0 turns the wait off: the instance dies at once and its disk
+  # goes. `nodo burnall` deletes these disks whatever this says.
+  SUSPENDED_GRACE_SECONDS: 604800
 
 # The ledger of balance movements (issue #570): one row for each change of the balance
 # of a client or an instance, which its owner reads with GetBalanceStatement.

@@ -14,7 +14,7 @@ from src.database import ledger
 from src.manager import balance_statement, orphan_starts, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
+from src.manager.manager import ALLOW_DEBT, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
@@ -360,7 +360,10 @@ def maintain_vmachines(debug_mode: bool=False):
     # priced against the same machine state, and psutil is read once instead of per VM.
     scarcity = system_scarcity(force_refresh=True)
 
-    live_instances = sc.get_all_internal_containers_ids()
+    # Only the instances whose VM is meant to be running: a suspended one (issue #594)
+    # has no process to check and no resources to charge, and finding it "lost" would
+    # delete the very disk that suspending it kept.
+    live_instances = sc.get_running_internal_containers_ids()
     # An id is never reused, so once an instance is gone its entry can go too. Keeps the
     # set the size of what is running rather than of everything that ever ran.
     _instances_penalised.difference_update(
@@ -448,8 +451,14 @@ def maintain_vmachines(debug_mode: bool=False):
             # father can cause is not evidence against the service. The cause stays on
             # record in `death_reason`. The delegated tick below has the same rule.
             try:
-                log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
-                stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
+                if dead_instances.suspended_grace_seconds() > 0:
+                    # Not a death: the father can still top it up. Its disk is kept
+                    # until the grace period ends (`reap_expired_suspensions`).
+                    log.LOGGER(f"Suspending container {vmachine_id} due to insufficient balance.")
+                    suspend_instance(token=vmachine_id)
+                else:
+                    log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
+                    stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
             except Exception as e:
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
@@ -1559,6 +1568,34 @@ def _manager_loop() -> None:
             sleep(MANAGER_FAILURE_BACKOFF)
 
 
+def reap_expired_suspensions() -> int:
+    """Delete the suspended instances whose grace period is over and that were never topped up.
+
+    A suspended instance (issue #594) keeps its disk for `instances.SUSPENDED_GRACE_SECONDS`
+    so that its father can bring it back with a top-up. After that it dies with the cause
+    it had, `out_of_balance`, and its disk and address are released. One that holds MU
+    again is not touched, however long it has been suspended: it is waiting to be started,
+    not to be deleted. Returns the number it deleted.
+    """
+    deleted = 0
+    try:
+        grace = dead_instances.suspended_grace_seconds()
+        for row in sc.get_suspended_local_instances():
+            if int(row.get("balance_mu") or 0) > 0:
+                continue
+            if int(row.get("suspended_for_s") or 0) < grace:
+                continue
+            try:
+                log.LOGGER(f"Grace period of suspended instance {row['id']} is over; deleting it.")
+                if stop_instance(token=row["id"], reason=dead_instances.OUT_OF_BALANCE) is not None:
+                    deleted += 1
+            except Exception as e:
+                log.LOGGER(f"Error deleting suspended instance {row['id']}: {e}")
+    except Exception as e:
+        log.LOGGER(f"Error in the suspended instance sweep: {e}")
+    return deleted
+
+
 DEAD_SWEEP_INTERVAL_S = 3600
 _last_dead_sweep = 0.0
 
@@ -1639,6 +1676,7 @@ def _manager_pass(short_interval_count: int) -> int:
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
+    reap_expired_suspensions()
     sweep_dead_instances()
     sweep_balance_movements()
     maintain_delegated_instances(debug_mode=DEBUG_MODE())

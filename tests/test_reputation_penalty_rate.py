@@ -130,7 +130,7 @@ class InstancePenaltyTests(unittest.TestCase):
         maintain_module._penalise_instance_once("instance-1", -100, Reason.INSTANCE_LOST)
         self.assertTrue(maintain_module._instances_penalised)
 
-        with mock.patch.object(maintain_module.sc, "get_all_internal_containers_ids",
+        with mock.patch.object(maintain_module.sc, "get_running_internal_containers_ids",
                                return_value=[]), \
                 mock.patch.object(maintain_module, "system_scarcity", return_value={}):
             maintain_module.maintain_vmachines()

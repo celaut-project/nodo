@@ -86,6 +86,10 @@ TRACEABILITY_TABLES = (
 # this an in-place upgrade would fail to record every donation it pays.
 TRACEABILITY_COLUMNS = {
     "payments": {"purpose": "TEXT DEFAULT NULL"},
+    # Read by every maintenance tick (issue #594), so a node upgraded in place cannot
+    # wait for `nodo migrate` to add it: without it the tick would raise "no such
+    # column: suspended_at" on the first sweep after the restart.
+    "local_instances": {"suspended_at": "DATETIME DEFAULT NULL"},
     # `peer` is a base table every install already has, so unlike a wholly new table
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
     # upgraded in place would raise "no such column: local_client_id" on the first
@@ -1218,6 +1222,54 @@ class SQLConnection(metaclass=Singleton):
         ''')
         return [row['id'] for row in result.fetchall()]
 
+    def get_running_internal_containers_ids(self) -> List[str]:
+        """The ids of the local instances whose VM is meant to be running.
+
+        `get_all_internal_containers_ids` also returns a suspended instance (issue
+        #594): its row is live, but its VM is stopped on purpose, so whatever looks
+        for a process to check, a figure to read or a balance to charge asks this one.
+        """
+        result = self._execute('''
+            SELECT id FROM local_instances WHERE killed_at IS NULL AND suspended_at IS NULL
+        ''')
+        return [row['id'] for row in result.fetchall()]
+
+    def suspend_local_instance(self, id: str) -> bool:
+        """Mark a live local instance suspended: VM stopped, disk and row kept.
+
+        True if this call suspended it, False if it is already suspended or not alive,
+        so the call is safe to repeat. Not a death: the row stays live, which is what
+        keeps its address reserved and its account open to a top-up.
+        """
+        cursor = self._execute('''
+            UPDATE local_instances SET suspended_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND killed_at IS NULL AND suspended_at IS NULL
+        ''', (id,))
+        suspended = cursor.rowcount > 0
+        if suspended:
+            _local_capacity_changed()
+        return suspended
+
+    def get_suspended_local_instances(self) -> List[dict]:
+        """The suspended local instances, oldest suspension first, with their balance
+        and how many seconds ago each was suspended."""
+        result = self._execute('''
+            SELECT id, name, father_id, balance_mu, suspended_at,
+                   CAST(strftime('%s', 'now') AS INTEGER)
+                       - CAST(strftime('%s', suspended_at) AS INTEGER) AS suspended_for_s
+            FROM local_instances
+            WHERE killed_at IS NULL AND suspended_at IS NOT NULL
+            ORDER BY suspended_at, id
+        ''')
+        return [dict(row) for row in result.fetchall()]
+
+    def is_local_instance_suspended(self, id: str) -> bool:
+        row = self._execute('''
+            SELECT 1 FROM local_instances
+            WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
+        ''', (id,)).fetchone()
+        return row is not None
+
     def get_committed_resources(self) -> List[dict]:
         """The resource grant of every instance on this node, one row each.
 
@@ -1229,9 +1281,15 @@ class SQLConnection(metaclass=Singleton):
         Every row, dev instances included. The ceiling is on what nodo occupies on this
         machine, and memory held by a dev instance is as unavailable to the person using
         the PC as any other.
+
+        A suspended instance (issue #594) has no VM, so it holds no memory and no CPU,
+        but its disk image is still on this machine: only the disk is counted for it.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE killed_at IS NULL
+            SELECT CASE WHEN suspended_at IS NULL THEN mem_limit ELSE 0 END AS mem_limit,
+                   disk_space, cpu_period,
+                   CASE WHEN suspended_at IS NULL THEN cpu_quota ELSE 0 END AS cpu_quota
+            FROM local_instances WHERE killed_at IS NULL
         ''')
         return [dict(row) for row in result.fetchall()]
 

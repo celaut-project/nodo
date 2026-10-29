@@ -47,6 +47,11 @@ def _direct_kill_local_instance(instance_id: str, reason: str) -> None:
     finally:
         conn.close()
 
+def _column_exists(connection, table: str, column: str) -> bool:
+    # PRAGMA cannot be parameterised; every caller passes a literal.
+    return any(row[1] == column for row in connection.execute(f"PRAGMA table_info({table})"))
+
+
 def _has_runtime_snapshot(virtualizer) -> bool:
     """Does this instance's backend have a local process to snapshot at all?
 
@@ -102,7 +107,12 @@ def _prune_stale_instances() -> None:
     conn = sqlite3.connect(DATABASE_FILE)
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM local_instances WHERE killed_at IS NULL")
+        # A suspended instance has no VM on purpose (issue #594): reading that as a lost
+        # guest would delete the disk that suspending it kept.
+        where = "killed_at IS NULL"
+        if _column_exists(conn, "local_instances", "suspended_at"):
+            where += " AND suspended_at IS NULL"
+        cursor.execute(f"SELECT id FROM local_instances WHERE {where}")
         candidates = [row[0] for row in cursor.fetchall()]
     except sqlite3.Error:
         return
@@ -355,10 +365,16 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
-            cursor.execute(
-                "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances WHERE killed_at IS NULL"
+            # This reads the file directly, so it can run before the daemon has added a
+            # column a newer release introduced: a missing one reads as not suspended.
+            suspended_column = (
+                "suspended_at" if _column_exists(conn, "local_instances", "suspended_at") else "NULL"
             )
-            for id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
+            cursor.execute(
+                "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer, "
+                f"{suspended_column} FROM local_instances WHERE killed_at IS NULL"
+            )
+            for id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer, suspended_at in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -375,7 +391,8 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                 vm_mem_rss = "N/A"
                 vm_mem_limit_cgroup = "N/A"
                 vm_mem_current_cgroup = "N/A"
-                if groupable and _has_runtime_snapshot(runtime_virtualizer) and id_:
+                # A suspended instance has no VM, so there is no process to read.
+                if groupable and not suspended_at and _has_runtime_snapshot(runtime_virtualizer) and id_:
                     snapshot = get_vm_runtime_snapshot(vmachine_id=id_)
                     vm_pid = str(snapshot.get("pid")) if snapshot.get("pid") is not None else "N/A"
                     vm_uptime = seconds_to_readable(snapshot.get("uptime_s"))
@@ -395,6 +412,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'balance': balance_value,
+                    'state': 'suspended' if suspended_at else 'running',
                     'location': 'local',
                     'virtualizer': runtime_virtualizer,
                     'mem_limit': bytes_to_readable(mem_limit),
@@ -407,12 +425,13 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     **({
                         'service_id': service,
                         'balance_mu': _int_or_none(balance_mu),
+                        'suspended_at': suspended_at,
                         'mem_limit_bytes': mem_limit,
                         'disk_space_bytes': disk_space,
                         'uris': get_uris(si) if si else [],
                         'runtime': get_vm_runtime_snapshot(vmachine_id=id_)
-                        if _has_runtime_snapshot(runtime_virtualizer) and id_ else None,
-                        'usage': _live_usage(id_) if id_ else None,
+                        if not suspended_at and _has_runtime_snapshot(runtime_virtualizer) and id_ else None,
+                        'usage': _live_usage(id_) if id_ and not suspended_at else None,
                         'tunnels': tunnel_ids(id_, name),
                     } if as_json else {}),
                 })
@@ -444,6 +463,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
                     'balance': balance_value,
+                    'state': 'running',
                     'location': peer_id or 'Unknown Peer',
                     'virtualizer': 'delegated',
                     'mem_limit': 'N/A',
@@ -519,6 +539,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
             ("Parent ID", "parent_id"),
             ("Parent Type", "parent_type"),
             ("Balance", "balance"),
+            ("State", "state"),
             ("Location", "location"),
             ("Virtualizer", "virtualizer"),
             ("Memory limit", "mem_limit"),
