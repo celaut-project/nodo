@@ -109,7 +109,7 @@ class SuspensionRowTests(unittest.TestCase):
         from src.database import sql_connection
         self.assertEqual(
             sql_connection.TRACEABILITY_COLUMNS["local_instances"],
-            {"suspended_at": "DATETIME DEFAULT NULL"})
+            {"suspended_at": "DATETIME DEFAULT NULL", "suspended_reason": "TEXT DEFAULT NULL"})
 
     def test_an_old_database_gets_the_column(self):
         connection = sqlite3.connect(":memory:")
@@ -176,9 +176,10 @@ class SuspendInstanceTests(unittest.TestCase):
         with mock.patch.object(manager.sc, "internal_instance_exists", return_value=True), \
                 mock.patch.object(manager, "kill", side_effect=lambda **kw: order.append(("kill", kw))), \
                 mock.patch.object(manager.sc, "suspend_local_instance",
-                                  side_effect=lambda token: order.append(("mark", token)) or True):
+                                  side_effect=lambda token, reason: order.append(("mark", token, reason)) or True):
             self.assertTrue(manager.suspend_instance("a"))
         self.assertEqual([step[0] for step in order], ["kill", "mark"])
+        self.assertEqual(order[1], ("mark", "a", dead_instances.OUT_OF_BALANCE))
         self.assertEqual(order[0][1], {"vmachine_id": "a", "archive": False, "keep_disk": True})
 
     def test_an_instance_that_is_gone_is_left_alone(self):

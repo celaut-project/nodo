@@ -196,7 +196,8 @@ TABLES = {
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL,
-            suspended_at DATETIME DEFAULT NULL
+            suspended_at DATETIME DEFAULT NULL,
+            suspended_reason TEXT DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -927,6 +928,9 @@ def create_tables(cursor):
         # NULL on every row written before this column existed: none of them is
         # suspended.
         "suspended_at": "DATETIME DEFAULT NULL",
+        # Why it is suspended: `out_of_balance`, or the internal failure that took its
+        # VM down (`process_lost`, `guest_panic`). It decides what brings it back.
+        "suspended_reason": "TEXT DEFAULT NULL",
     })
     ensure_columns(cursor, "delegated_instances", {
         "launched_at": "DATETIME DEFAULT NULL",

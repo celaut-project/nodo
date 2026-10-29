@@ -122,8 +122,16 @@ def maintain(
         # only kills what it finds registered, and this branch exists precisely
         # for a process no liveness test will flag again. A double kill is
         # harmless; a missed one pins the resources for good.
+        #
+        # Its disk stays when the instance can be revived (issue #594): a panic is an
+        # internal failure, and what the guest wrote is what a revive keeps. Whether it
+        # is revived or stopped is decided by the caller, which stops it for good --
+        # and removes the disk -- when it cannot.
         try:
-            kill_vm(hypervisor, vmachine_id=vmachine_id, archive=True)
+            if _can_be_revived(vmachine_id):
+                kill_vm(hypervisor, vmachine_id=vmachine_id, keep_disk=True)
+            else:
+                kill_vm(hypervisor, vmachine_id=vmachine_id, archive=True)
         except Exception as e:
             log.LOGGER(hypervisor.log(vmachine_id, f"event=maintain panic_kill_failed error={e}"))
         remove_and_penalize(vmachine_id=vmachine_id, reason=dead_instances.GUEST_PANIC)
@@ -134,6 +142,21 @@ def maintain(
             vmachine_id,
             f"event=maintain healthy pid={pid}, control_socket={control_socket or '<none>'}",
         ))
+
+
+def _can_be_revived(vmachine_id: str) -> bool:
+    """Whether this instance has a row and a disk and launch spec to start it again from.
+
+    Such an instance whose VM is gone is not an orphan to sweep: its row is live, and
+    the tick decides whether it is revived or stopped. Sweeping it here would delete the
+    one thing a revive needs.
+    """
+    try:
+        from src.virtualizers.interface import revivable
+
+        return sc.internal_instance_exists(id=vmachine_id) and revivable(vmachine_id)
+    except Exception:
+        return False
 
 
 def orphan_reason(vmachine_id: str, state) -> Optional[str]:
@@ -184,6 +207,8 @@ def sweep_orphans(debug_mode: bool = False) -> None:
     for vmachine_id, state in states.items():
         reason = orphan_reason(vmachine_id=vmachine_id, state=state)
         if not reason:
+            continue
+        if reason != "orphan_runtime_state" and _can_be_revived(vmachine_id):
             continue
 
         recorded = recorded_virtualizer(state)
@@ -291,6 +316,8 @@ def scan_orphan_runtimes() -> List[PruneEntry]:
     for vmachine_id, state in states.items():
         reason = orphan_reason(vmachine_id=vmachine_id, state=state)
         if not reason:
+            continue
+        if reason != "orphan_runtime_state" and _can_be_revived(vmachine_id):
             continue
         path = dirs.get(vmachine_id)
         entries.append(

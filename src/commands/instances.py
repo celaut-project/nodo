@@ -123,9 +123,11 @@ def _prune_stale_instances() -> None:
         if not _instance_is_stale(instance_id):
             continue
         try:
-            from src.manager.manager import stop_instance
+            from src.manager.manager import handle_internal_failure
 
-            if stop_instance(token=instance_id, reason=dead_instances.PROCESS_LOST) is None:
+            # Revived if it can be (issue #594), so a listing never deletes the disk of
+            # an instance the daemon is about to bring back.
+            if handle_internal_failure(token=instance_id, reason=dead_instances.PROCESS_LOST) is None:
                 _direct_kill_local_instance(instance_id, dead_instances.PROCESS_LOST)
         except Exception:
             # `stop_instance` is the normal teardown; this is the fallback for a

@@ -89,7 +89,10 @@ TRACEABILITY_COLUMNS = {
     # Read by every maintenance tick (issue #594), so a node upgraded in place cannot
     # wait for `nodo migrate` to add it: without it the tick would raise "no such
     # column: suspended_at" on the first sweep after the restart.
-    "local_instances": {"suspended_at": "DATETIME DEFAULT NULL"},
+    "local_instances": {
+        "suspended_at": "DATETIME DEFAULT NULL",
+        "suspended_reason": "TEXT DEFAULT NULL",
+    },
     # `peer` is a base table every install already has, so unlike a wholly new table
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
     # upgraded in place would raise "no such column: local_client_id" on the first
@@ -1234,27 +1237,42 @@ class SQLConnection(metaclass=Singleton):
         ''')
         return [row['id'] for row in result.fetchall()]
 
-    def suspend_local_instance(self, id: str) -> bool:
+    def suspend_local_instance(self, id: str, reason: Optional[str] = None) -> bool:
         """Mark a live local instance suspended: VM stopped, disk and row kept.
 
-        True if this call suspended it, False if it is already suspended or not alive,
-        so the call is safe to repeat. Not a death: the row stays live, which is what
-        keeps its address reserved and its account open to a top-up.
+        ``reason`` is why (`out_of_balance`, or the internal failure). True if this call
+        suspended it, False if it is already suspended or not alive, so the call is safe
+        to repeat. Not a death: the row stays live, which is what keeps its address
+        reserved and its account open to a top-up.
         """
         cursor = self._execute('''
-            UPDATE local_instances SET suspended_at = CURRENT_TIMESTAMP
+            UPDATE local_instances SET suspended_at = CURRENT_TIMESTAMP, suspended_reason = ?
             WHERE id = ? AND killed_at IS NULL AND suspended_at IS NULL
-        ''', (id,))
+        ''', (reason, id))
         suspended = cursor.rowcount > 0
         if suspended:
             _local_capacity_changed()
         return suspended
 
+    def resume_local_instance(self, id: str) -> bool:
+        """Mark a suspended local instance running again, once its VM is up.
+
+        True if this call resumed it. The inverse of `suspend_local_instance`.
+        """
+        cursor = self._execute('''
+            UPDATE local_instances SET suspended_at = NULL, suspended_reason = NULL
+            WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
+        ''', (id,))
+        resumed = cursor.rowcount > 0
+        if resumed:
+            _local_capacity_changed()
+        return resumed
+
     def get_suspended_local_instances(self) -> List[dict]:
-        """The suspended local instances, oldest suspension first, with their balance
-        and how many seconds ago each was suspended."""
+        """The suspended local instances, oldest suspension first, with their balance,
+        why they are suspended and how many seconds ago each was suspended."""
         result = self._execute('''
-            SELECT id, name, father_id, balance_mu, suspended_at,
+            SELECT id, name, father_id, balance_mu, suspended_at, suspended_reason,
                    CAST(strftime('%s', 'now') AS INTEGER)
                        - CAST(strftime('%s', suspended_at) AS INTEGER) AS suspended_for_s
             FROM local_instances
