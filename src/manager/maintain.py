@@ -14,7 +14,7 @@ from src.database import ledger
 from src.manager import balance_statement, orphan_starts, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ALLOW_DEBT, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
+from src.manager.manager import ALLOW_DEBT, handle_internal_failure, revive_instance, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
@@ -347,12 +347,104 @@ def _penalise_instance_once(vmachine_id: str, amount: int, reason: str):
     )
 
 
+# How long an instance has to run after a revive before a new failure counts as a fresh
+# one rather than another turn of a crash loop.
+REVIVE_STABLE_AFTER_S = 120
+# The longest wait between two attempts to start an instance that keeps failing. The
+# wait grows with each failure and stops growing here; the attempts never stop, because
+# an instance that still has MU is entitled to them and a loop that burns its own
+# balance ends by itself when it runs out. The wait is only there so that a broken
+# service does not saturate the host or fill the log.
+REVIVE_BACKOFF_CAP_S = 60
+
+# Per instance: consecutive failures, when it may be tried next, and when it last came
+# back. In memory on purpose: a restart of the node is itself a reason to try again now.
+_revive_failures: Dict[str, int] = {}
+_revive_not_before: Dict[str, float] = {}
+_revived_at: Dict[str, float] = {}
+
+
+def revive_backoff_seconds(failures: int) -> float:
+    """The wait before the next attempt after ``failures`` in a row: none for the first
+    (a crash is tried again at once), then 1 s, 2 s, 4 s ... up to the cap."""
+    if failures <= 0:
+        return 0.0
+    return float(min(2 ** (failures - 1), REVIVE_BACKOFF_CAP_S))
+
+
+def _note_instance_down(vmachine_id: str, now: Optional[float] = None) -> None:
+    """An instance's VM went down on its own: count it, and say when to try it again.
+
+    One that had been running for a while is a fresh failure and starts from zero; one
+    that went down soon after its last revive is a crash loop and waits longer each time.
+    """
+    now = time.monotonic() if now is None else now
+    revived = _revived_at.get(vmachine_id)
+    if revived is not None and now - revived < REVIVE_STABLE_AFTER_S:
+        _revive_failures[vmachine_id] = _revive_failures.get(vmachine_id, 0) + 1
+    else:
+        _revive_failures[vmachine_id] = 0
+    _revive_not_before[vmachine_id] = now + revive_backoff_seconds(_revive_failures[vmachine_id])
+
+
+def revive_suspended_instances(now: Optional[float] = None) -> int:
+    """Start again the suspended instances that have MU and are past their backoff.
+
+    Two kinds wait here with the same disk: one that ran out of MU and was topped up,
+    and one whose VM went down on its own. Both come back the same way, as the same
+    instance. One that fails to start is not given up: it stays suspended with its disk
+    and waits longer before the next try. Returns how many came back.
+    """
+    now = time.monotonic() if now is None else now
+    revived = 0
+    try:
+        suspended = sc.get_suspended_local_instances()
+    except Exception as e:
+        log.LOGGER(f"Error reading the suspended instances: {e}")
+        return 0
+    for row in suspended:
+        token = row["id"]
+        try:
+            if int(row.get("balance_mu") or 0) <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if now < _revive_not_before.get(token, 0.0):
+            continue
+        try:
+            if revive_instance(token):
+                revived += 1
+                _revived_at[token] = time.monotonic()
+                log.LOGGER(f"Instance {token} is running again.")
+        except Exception as e:
+            _revive_failures[token] = _revive_failures.get(token, 0) + 1
+            wait = revive_backoff_seconds(_revive_failures[token])
+            _revive_not_before[token] = now + wait
+            log.LOGGER(
+                f"Could not revive {token} (failure {_revive_failures[token]}, "
+                f"next try in {wait:.0f}s): {e}"
+            )
+    # An id is never reused, so an instance that no longer exists no longer needs its
+    # entries. A running one keeps them: its next failure is counted against them.
+    try:
+        alive = set(sc.get_all_internal_containers_ids())
+    except Exception:
+        return revived
+    for table in (_revive_failures, _revive_not_before, _revived_at):
+        for token in [token for token in table if token not in alive]:
+            table.pop(token, None)
+    return revived
+
+
 def maintain_vmachines(debug_mode: bool=False):
     def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
         _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
-        log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
+        # Revived if it can be (issue #594): it still has MU, so it stays afloat, and
+        # what it wrote to its disk is not lost with the VM.
+        log.LOGGER(f"Instance {vmachine_id} lost its virtual machine ({reason}).")
         try:
-            stop_instance(token=vmachine_id, reason=reason)
+            _note_instance_down(vmachine_id)
+            handle_internal_failure(token=vmachine_id, reason=reason)
         except Exception as e:
             log.LOGGER(f"Error prunning container {vmachine_id}: {e}")
     
@@ -1676,6 +1768,7 @@ def _manager_pass(short_interval_count: int) -> int:
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
+    revive_suspended_instances()
     reap_expired_suspensions()
     sweep_dead_instances()
     sweep_balance_movements()

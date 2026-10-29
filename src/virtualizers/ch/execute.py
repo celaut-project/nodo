@@ -32,7 +32,7 @@ from src.virtualizers.ch import vgic
 from src.virtualizers.firewall import resolve_slot_transport_protocols, remove_vm_rules as vm_remove_vm_rules
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import guest as microvm_guest
-from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm import launch_spec, limits, network, paths, rootfs, serial
 from src.virtualizers.microvm.host import ensure_private_dir
 from src.virtualizers.microvm.bundle_formats import (
     ROOTFS_FORMAT_EXT4,
@@ -220,8 +220,19 @@ def execute(
     system_resources: celaut.Service.Container.Resources,
     father_id: str,
     register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
+    revive_id: Optional[str] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
     """Boot ``service`` as a microVM and return (vmachine_id, vm_ip, resolved).
+
+    ``revive_id`` starts instance ``revive_id`` again from the disk it already has
+    (issue #594) instead of building a new one: same id, so the same address, MAC and
+    tap; no copy of the rootfs, which would throw away what the guest wrote; and no
+    injection of the configuration, entrypoint or environment, which are already on
+    that disk. What the host decided at the first launch -- the ports it assigned, the
+    peers its firewall allowed -- comes from the launch spec kept beside the disk.
+    ``system_resources.at_init`` is then what the instance holds *now*, not what its
+    manifest declared. A failed revive tears the guest down but never touches the disk:
+    the instance is still there to be tried again, and the disk is all it has.
 
     ``register_instance`` is called once, with those same three values, the instant
     the hypervisor process exists -- not when this function returns. A guest starts
@@ -241,7 +252,8 @@ def execute(
     booting -- unlike QEMU, whose ``-m`` is fixed once the process exists.
     """
     initial_system_resources = system_resources.at_init
-    vmachine_id = generate_vmachine_id()
+    reviving = revive_id is not None
+    vmachine_id = revive_id or generate_vmachine_id()
     log_prefix = CH.prefix(vmachine_id)
     runtime_dir = paths.runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
@@ -313,91 +325,119 @@ def execute(
                 f"Unable to prepare API socket path {api_socket_path}: {e}"
             ) from e
 
-        shutil.copy2(bundle["rootfs_path"], rootfs_path)
-        log.LOGGER(f"[CH][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
+        if reviving:
+            # The disk is the instance: nothing below may replace it. What the guest
+            # reads from it -- configuration, entrypoint, environment -- is already
+            # there, so none of it is injected again.
+            spec = launch_spec.read(runtime_dir)
+            if spec is None or not spec.revivable:
+                raise MicroVMError(f"Instance {vmachine_id} has no launch spec to revive it from.")
+            if not rootfs_path.exists():
+                raise MicroVMError(f"Instance {vmachine_id} has no disk to revive: {rootfs_path}")
+            assigment_ports = dict(spec.assigment_ports)
+            by_local = spec.by_local
+            network_resolution = spec.network_resolution
+            shares = NO_SHARES
+            metadata_disk_path = runtime_dir / rootfs.METADATA_DISK_NAME if rootfs_read_only else None
+            if metadata_disk_path is not None and not metadata_disk_path.exists():
+                raise MicroVMError(f"Instance {vmachine_id} has no metadata disk to revive: {metadata_disk_path}")
+            log.LOGGER(f"[CH][{vmachine_id}] reviving on its own disk: {rootfs_path}")
+        else:
+            shutil.copy2(bundle["rootfs_path"], rootfs_path)
+            log.LOGGER(f"[CH][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
 
-        network_resolution = rootfs.build_network_resolution(service=service, father_id=father_id, config=config)
-        log.LOGGER(f"[CH][{vmachine_id}] network resolution entries: {len(network_resolution)}")
-        cfg = rootfs.build_configuration_file(
-            config=config,
-            resources=initial_system_resources,
-            network_resolution=network_resolution,
-        )
-
-        with open(config_host_path, "wb") as f:
-            f.write(cfg.SerializeToString())
-        log.LOGGER(
-            f"[CH][{vmachine_id}] config serialized: {config_host_path} "
-            f"({config_host_path.stat().st_size} bytes)"
-        )
-
-        # Where this instance's own files go. The image for a writable rootfs, a
-        # separate metadata disk for a read-only one -- same guest paths either
-        # way, so nothing below has to know which it is.
-        guest_metadata = rootfs.GuestMetadata(
-            image_path=rootfs_path,
-            runtime_dir=runtime_dir,
-            read_only=rootfs_read_only,
-        )
-
-        config_targets = rootfs.guest_config_targets(service=service)
-        log.LOGGER(
-            f"[CH][{vmachine_id}] guest config targets={config_targets} "
-            f"(service.container.config_declaration.path={list(service.container.config_declaration.path)})"
-        )
-        for target_path in config_targets:
-            log.LOGGER(f"[CH][{vmachine_id}] injecting config into guest target: {target_path}")
-            guest_metadata.put(host_file=config_host_path, guest_target=target_path)
-        log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
-
-        with open(entrypoint_host_path, "w", encoding="utf-8") as f:
-            f.write(f"{resolved_entrypoint}\n")
-        log.LOGGER(f"[CH][{vmachine_id}] entrypoint metadata serialized: {entrypoint_host_path}")
-        guest_metadata.put(
-            host_file=entrypoint_host_path,
-            guest_target=rootfs.GUEST_ENTRYPOINT_PATH,
-        )
-        log.LOGGER(
-            f"[CH][{vmachine_id}] guest entrypoint injection completed: "
-            f"{rootfs.GUEST_ENTRYPOINT_PATH}"
-        )
-
-        # Environment variables also delivered as real Linux env vars (#405), on
-        # top of the ones already inside __config__.config.environment_variables
-        # unconditionally. Optional: no file at all when none of the declared
-        # variables survives src.utils.guest_env.linux_env_vars.
-        rootfs.inject_guest_envs(
-            config=config,
-            envs_host_path=envs_host_path,
-            guest_metadata=guest_metadata,
-            log_prefix=log_prefix,
-        )
-
-        # Shared filesystems (parent -> child inheritance), whose whole model
-        # lives in src/utils/shared_filesystems.py and is materialized the same
-        # way for both hypervisors. VirtioFS is the backend only -- the service
-        # spec never mentions it -- and an ordinary service that declares no
-        # share gets an empty setup here.
-        shares = materialize_shares(
-            service=service,
-            config=config,
-            vmachine_id=vmachine_id,
-            father_id=father_id,
-            rootfs_path=rootfs_path,
-            runtime_dir=runtime_dir,
-            log_prefix=log_prefix,
-            metadata=guest_metadata,
-        )
-
-        # Written once, after every put: the metadata disk is populated whole by
-        # `mkfs.ext4 -d`, not appended to. None on the writable path, where the
-        # files went into the image itself.
-        metadata_disk_path = guest_metadata.finalize()
-        if metadata_disk_path is not None:
-            log.LOGGER(
-                f"[CH][{vmachine_id}] metadata disk built for read-only rootfs: "
-                f"{metadata_disk_path}"
+            network_resolution = rootfs.build_network_resolution(service=service, father_id=father_id, config=config)
+            log.LOGGER(f"[CH][{vmachine_id}] network resolution entries: {len(network_resolution)}")
+            cfg = rootfs.build_configuration_file(
+                config=config,
+                resources=initial_system_resources,
+                network_resolution=network_resolution,
             )
+
+            with open(config_host_path, "wb") as f:
+                f.write(cfg.SerializeToString())
+            log.LOGGER(
+                f"[CH][{vmachine_id}] config serialized: {config_host_path} "
+                f"({config_host_path.stat().st_size} bytes)"
+            )
+
+            # Where this instance's own files go. The image for a writable rootfs, a
+            # separate metadata disk for a read-only one -- same guest paths either
+            # way, so nothing below has to know which it is.
+            guest_metadata = rootfs.GuestMetadata(
+                image_path=rootfs_path,
+                runtime_dir=runtime_dir,
+                read_only=rootfs_read_only,
+            )
+
+            config_targets = rootfs.guest_config_targets(service=service)
+            log.LOGGER(
+                f"[CH][{vmachine_id}] guest config targets={config_targets} "
+                f"(service.container.config_declaration.path={list(service.container.config_declaration.path)})"
+            )
+            for target_path in config_targets:
+                log.LOGGER(f"[CH][{vmachine_id}] injecting config into guest target: {target_path}")
+                guest_metadata.put(host_file=config_host_path, guest_target=target_path)
+            log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
+
+            with open(entrypoint_host_path, "w", encoding="utf-8") as f:
+                f.write(f"{resolved_entrypoint}\n")
+            log.LOGGER(f"[CH][{vmachine_id}] entrypoint metadata serialized: {entrypoint_host_path}")
+            guest_metadata.put(
+                host_file=entrypoint_host_path,
+                guest_target=rootfs.GUEST_ENTRYPOINT_PATH,
+            )
+            log.LOGGER(
+                f"[CH][{vmachine_id}] guest entrypoint injection completed: "
+                f"{rootfs.GUEST_ENTRYPOINT_PATH}"
+            )
+
+            # Environment variables also delivered as real Linux env vars (#405), on
+            # top of the ones already inside __config__.config.environment_variables
+            # unconditionally. Optional: no file at all when none of the declared
+            # variables survives src.utils.guest_env.linux_env_vars.
+            rootfs.inject_guest_envs(
+                config=config,
+                envs_host_path=envs_host_path,
+                guest_metadata=guest_metadata,
+                log_prefix=log_prefix,
+            )
+
+            # Shared filesystems (parent -> child inheritance), whose whole model
+            # lives in src/utils/shared_filesystems.py and is materialized the same
+            # way for both hypervisors. VirtioFS is the backend only -- the service
+            # spec never mentions it -- and an ordinary service that declares no
+            # share gets an empty setup here.
+            shares = materialize_shares(
+                service=service,
+                config=config,
+                vmachine_id=vmachine_id,
+                father_id=father_id,
+                rootfs_path=rootfs_path,
+                runtime_dir=runtime_dir,
+                log_prefix=log_prefix,
+                metadata=guest_metadata,
+            )
+
+            # Written once, after every put: the metadata disk is populated whole by
+            # `mkfs.ext4 -d`, not appended to. None on the writable path, where the
+            # files went into the image itself.
+            metadata_disk_path = guest_metadata.finalize()
+            if metadata_disk_path is not None:
+                log.LOGGER(
+                    f"[CH][{vmachine_id}] metadata disk built for read-only rootfs: "
+                    f"{metadata_disk_path}"
+                )
+
+            # What a revive will need, written once the launch has decided it. A
+            # launch with shares is not revivable: their daemons and mounts belong to
+            # it, and this version does not rebuild them.
+            launch_spec.write(runtime_dir, launch_spec.LaunchSpec(
+                assigment_ports=dict(assigment_ports or {}),
+                by_local=by_local,
+                network_resolution=list(network_resolution),
+                revivable=not shares.mounts_state and not shares.exported_share_ids,
+            ))
 
         tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -736,7 +776,10 @@ def execute(
         log.LOGGER(f"[CH][{vmachine_id}] deleting runtime state entry")
         delete_runtime_state(vmachine_id)
 
-        if runtime_dir.exists():
+        if reviving:
+            # Not the disk: it is all this instance has, and it can be tried again.
+            log.LOGGER(f"[CH][{vmachine_id}] revive failed; keeping the runtime directory: {runtime_dir}")
+        elif runtime_dir.exists():
             if CONSERVE_RUNTIME_DIR_ON_FAILURE:
 
                 log.LOGGER(f"[CH][{vmachine_id}] preserving runtime directory for debugging: {runtime_dir}")

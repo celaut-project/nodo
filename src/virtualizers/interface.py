@@ -189,6 +189,24 @@ def kill(vmachine_id: str, archive: bool = False, keep_disk: bool = False) -> bo
     return _backend_of(vmachine_id).kill(vmachine_id=vmachine_id, archive=archive)
 
 
+def revivable(vmachine_id: str) -> bool:
+    """Whether this instance can be started again from its own disk (issue #594).
+
+    It has to have been launched in a way a revive can reproduce, which its launch spec
+    -- kept beside its disk -- says, and that disk has to be there. Only the microVM
+    family keeps either; for any other backend the answer is no, and the instance dies
+    as it always did.
+    """
+    try:
+        from src.virtualizers.microvm import launch_spec, paths
+
+        runtime_dir = paths.runtime_vm_dir(vmachine_id)
+        spec = launch_spec.read(runtime_dir)
+        return bool(spec and spec.revivable and any(runtime_dir.glob("rootfs.*")))
+    except Exception:
+        return False
+
+
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[..., None]) -> None:
     """Check the status of a running service and remove it if it has exited."""
     _backend_of(vmachine_id).maintain(
@@ -232,9 +250,14 @@ def execute(
         system_resources: celaut_pb2.Service.Container.Resources,
         father_id: str,
         register_instance: Optional[Callable[[str, str, celaut_pb2.Sysresources], None]] = None,
+        revive_id: Optional[str] = None,
 ) -> Tuple[str, str, celaut_pb2.Sysresources]:
     """
     Execute a built service and return (vmachine_id, vmachine_ip, resolved_resources).
+
+    ``revive_id`` starts that existing instance again from its own disk (issue #594)
+    instead of building a new one; ``system_resources.at_init`` is then what it holds
+    now. See the backends' ``execute``.
 
     ``system_resources`` is the whole declared range, ``at_init`` *and* ``at_most``,
     because which end a backend has to act on at launch is a property of the
@@ -264,6 +287,7 @@ def execute(
     unchanged; a foreign-arch service takes QEMU when emulation is enabled and
     available, else ``select_virtualizer`` raises ``UnsupportedArchitectureException``.
     """
+    extra = {"revive_id": revive_id} if revive_id is not None else {}
     return backend(select_virtualizer(service=service)).execute(
         assigment_ports=assigment_ports,
         by_local=by_local,
@@ -273,6 +297,7 @@ def execute(
         system_resources=system_resources,
         father_id=father_id,
         register_instance=register_instance,
+        **extra,
     )
 
 

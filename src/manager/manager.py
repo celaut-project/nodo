@@ -44,6 +44,8 @@ from src.utils.monetary import free_tier, format_mu
 from src.payment_system.mu_conversion import convert_mu, matching_payment_system
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
+from src.virtualizers.interface import execute as vm_execute
+from src.virtualizers.interface import revivable
 from src.virtualizers.interface import hotplug
 from src.virtualizers.interface import resolve_billable_resources
 from src.virtualizers.firewall import (
@@ -1256,23 +1258,99 @@ def _death_record(token: str, father_id: Optional[str], reason: str, leftover_mu
     return record
 
 
-def suspend_instance(token: str) -> bool:
+def suspend_instance(token: str, reason: str = dead_instances.OUT_OF_BALANCE) -> bool:
     """Stop an instance's VM and keep everything else: its disk, row, address and account.
 
-    What an instance that ran out of MU gets instead of `stop_instance` (issue #594).
-    Nothing is settled and nobody is paid: the instance is not dead, and its father can
-    still top it up. True if this call suspended it; False if it already was, or is gone.
+    What an instance that cannot run gets instead of `stop_instance` (issue #594): one
+    that ran out of MU, or whose VM went down on its own. Nothing is settled and nobody
+    is paid: the instance is not dead. ``reason`` is recorded, and says what brings it
+    back -- a top-up, or just another try. True if this call suspended it; False if it
+    already was, or is gone.
 
     The VM goes first and the row is marked after, so a failure in between leaves a
-    live row with no VM -- which the next tick, finding the balance still at 0, suspends
-    again. The other order would leave a suspended row whose VM is still running, which
-    nothing would ever look at.
+    live row with no VM -- which the next tick suspends again. The other order would
+    leave a suspended row whose VM is still running, which nothing would ever look at.
     """
     if not sc.internal_instance_exists(id=token):
         return False
-    log.LOGGER(f"Suspend instance {token}: balance exhausted, keeping its disk.")
+    log.LOGGER(f"Suspend instance {token} ({reason}): keeping its disk.")
     kill(vmachine_id=token, archive=False, keep_disk=True)
-    return sc.suspend_local_instance(token)
+    return sc.suspend_local_instance(token, reason)
+
+
+def handle_internal_failure(token: str, reason: str) -> Optional[object]:
+    """What becomes of an instance whose VM went down on its own (`process_lost`,
+    `guest_panic`): it is revived if it can be, and stopped if it cannot.
+
+    Revived means suspended here, and started again by `revive_instance` on the next
+    tick that finds it with MU and past its backoff. It can be if it still has MU --
+    while it has gas it must stay afloat -- and its disk and launch spec allow it. An
+    instance that cannot pay is `out_of_balance`, not lost: it is the tick's to deal
+    with, and what it gets is the same suspension.
+
+    Returns what `stop_instance` returns when it stops the instance (None if there was
+    nothing to stop), and True when it suspends it.
+    """
+    try:
+        has_gas = int(sc.get_instance_balance(id=token) or 0) > 0
+    except Exception:
+        has_gas = False
+    if has_gas and revivable(token):
+        suspend_instance(token=token, reason=reason)
+        return True
+    return stop_instance(token=token, reason=reason)
+
+
+def revive_instance(token: str) -> bool:
+    """Start a suspended instance again, from its own disk, as the same instance.
+
+    Same id, so the same address, MAC and tap: its clients and its firewall rules keep
+    working. Its entrypoint runs again, and what it wrote to its disk is still there.
+    True if it is running. Raises if it could not be started, and then it stays
+    suspended with its disk, to be tried again.
+
+    The old VM is torn down first, always: a false `process_lost` (#591) must never end
+    with two VMs on one disk, and the tap and cgroup the old one held must be free.
+    """
+    from src.utils.utils import read_service_from_disk
+
+    if not sc.is_local_instance_suspended(id=token):
+        return False
+    service_id = sc.get_service_id_by_container_id(id=token)
+    father_id = sc.get_internal_father_id(id=token)
+    sys_req = sc.get_sys_req(id=token)
+    service = read_service_from_disk(service_hash=service_id)
+    if not service:
+        raise RuntimeError(f"Service {service_id} of instance {token} is not on the local registry.")
+
+    kill(vmachine_id=token, archive=False, keep_disk=True)
+
+    # What it holds now, not what its manifest declared: a resize since the launch is in
+    # the row. The ceiling stays the manifest's.
+    resources = celaut_pb2.Service.Container.Resources()
+    resources.CopyFrom(service.container.resources)
+    resources.at_init.CopyFrom(celaut_pb2.Sysresources(
+        mem_limit=int(sys_req['mem_limit'] or 0),
+        disk_space=int(sys_req['disk_space'] or 0),
+        cpu_period=int(sys_req['cpu_period'] or 0),
+        cpu_quota=int(sys_req['cpu_quota'] or 0),
+    ))
+    log.LOGGER(f"Reviving instance {token} on its own disk.")
+    _, vm_ip, _ = vm_execute(
+        assigment_ports=None,
+        by_local=True,
+        service_id=service_id,
+        service=service,
+        config=None,
+        system_resources=resources,
+        father_id=father_id,
+        revive_id=token,
+    )
+    recorded_ip = sc.get_internal_ip(id=token)
+    if recorded_ip and recorded_ip != vm_ip:
+        log.LOGGER(f"[WARN] Instance {token} came back on {vm_ip}, not on {recorded_ip}.")
+    sc.resume_local_instance(token)
+    return True
 
 
 def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.MANUAL_KILL) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.

@@ -41,7 +41,7 @@ from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.virtualizers.microvm import bundle as microvm_bundle
-from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm import launch_spec, limits, network, paths, rootfs, serial
 from src.virtualizers.microvm.host import ensure_private_dir
 from src.virtualizers.microvm.bundle_formats import (
     ROOTFS_FORMAT_EXT4,
@@ -385,8 +385,14 @@ def execute(
     system_resources: celaut.Service.Container.Resources,
     father_id: str,
     register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
+    revive_id: Optional[str] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
     """Emulated counterpart of :func:`src.virtualizers.ch.execute.execute`.
+
+    ``revive_id`` starts that existing instance again from its own disk (issue #594),
+    exactly as it does there: same id, address, MAC and tap; no new rootfs and no
+    injection; the ports and firewall peers from the launch spec kept beside the disk;
+    and a failure that never removes the disk.
 
     Same contract: build the guest from its bundle, wire host networking and
     firewall, boot it, wait for the guest to come up, and return
@@ -411,7 +417,8 @@ def execute(
     pages in a balloon and is not made here.
     """
     initial_system_resources = system_resources.at_init
-    vmachine_id = generate_vmachine_id()
+    reviving = revive_id is not None
+    vmachine_id = revive_id or generate_vmachine_id()
     log_prefix = QEMU_HYPERVISOR.prefix(vmachine_id)
     runtime_dir = paths.runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
@@ -474,74 +481,102 @@ def execute(
         runtime_dir.mkdir(parents=True, exist_ok=True)
         ensure_private_dir(qmp_socket_path.parent)
         log.LOGGER(f"[QEMU][{vmachine_id}] QMP socket dir prepared: {qmp_socket_path.parent}")
-        shutil.copy2(bundle["rootfs_path"], rootfs_path)
-        log.LOGGER(f"[QEMU][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
+        if reviving:
+            # The disk is the instance: nothing below may replace it. What the guest
+            # reads from it -- configuration, entrypoint, environment -- is already
+            # there, so none of it is injected again.
+            spec = launch_spec.read(runtime_dir)
+            if spec is None or not spec.revivable:
+                raise MicroVMError(f"Instance {vmachine_id} has no launch spec to revive it from.")
+            if not rootfs_path.exists():
+                raise MicroVMError(f"Instance {vmachine_id} has no disk to revive: {rootfs_path}")
+            assigment_ports = dict(spec.assigment_ports)
+            by_local = spec.by_local
+            network_resolution = spec.network_resolution
+            shares = NO_SHARES
+            metadata_disk_path = runtime_dir / rootfs.METADATA_DISK_NAME if rootfs_read_only else None
+            if metadata_disk_path is not None and not metadata_disk_path.exists():
+                raise MicroVMError(f"Instance {vmachine_id} has no metadata disk to revive: {metadata_disk_path}")
+            log.LOGGER(f"[QEMU][{vmachine_id}] reviving on its own disk: {rootfs_path}")
+        else:
+            shutil.copy2(bundle["rootfs_path"], rootfs_path)
+            log.LOGGER(f"[QEMU][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
 
-        network_resolution = rootfs.build_network_resolution(
-            service=service, father_id=father_id, config=config
-        )
-        cfg = rootfs.build_configuration_file(
-            config=config,
-            resources=initial_system_resources,
-            network_resolution=network_resolution,
-        )
-        with open(config_host_path, "wb") as f:
-            f.write(cfg.SerializeToString())
-
-        # Same carrier choice as CH: the image when it is writable, a metadata
-        # disk when it is not. See rootfs.GuestMetadata.
-        guest_metadata = rootfs.GuestMetadata(
-            image_path=rootfs_path,
-            runtime_dir=runtime_dir,
-            read_only=rootfs_read_only,
-        )
-
-        for target_path in rootfs.guest_config_targets(service=service):
-            guest_metadata.put(host_file=config_host_path, guest_target=target_path)
-
-        with open(entrypoint_host_path, "w", encoding="utf-8") as f:
-            f.write(f"{resolved_entrypoint}\n")
-        guest_metadata.put(
-            host_file=entrypoint_host_path,
-            guest_target=rootfs.GUEST_ENTRYPOINT_PATH,
-        )
-        # No /etc/hosts nor /etc/resolv.conf: name resolution is not the node's to
-        # install in someone else's filesystem. See the note in
-        # src/virtualizers/microvm/network.py.
-        log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/entrypoint)")
-
-        # Environment variables also delivered as real Linux env vars (#405), on
-        # top of the ones already inside __config__.config.environment_variables
-        # unconditionally. Optional: no file at all when none of the declared
-        # variables survives src.utils.guest_env.linux_env_vars.
-        rootfs.inject_guest_envs(
-            config=config,
-            envs_host_path=envs_host_path,
-            guest_metadata=guest_metadata,
-            log_prefix=log_prefix,
-        )
-
-        # Shared filesystems (parent -> child inheritance). Identical semantics to
-        # CH, and the same materialization: only the guest device wiring
-        # (vhost-user-fs vs CH's --fs) is this backend's own, built below from
-        # the mount state.
-        shares = materialize_shares(
-            service=service,
-            config=config,
-            vmachine_id=vmachine_id,
-            father_id=father_id,
-            rootfs_path=rootfs_path,
-            runtime_dir=runtime_dir,
-            log_prefix=log_prefix,
-            metadata=guest_metadata,
-        )
-
-        metadata_disk_path = guest_metadata.finalize()
-        if metadata_disk_path is not None:
-            log.LOGGER(
-                f"[QEMU][{vmachine_id}] metadata disk built for read-only rootfs: "
-                f"{metadata_disk_path}"
+            network_resolution = rootfs.build_network_resolution(
+                service=service, father_id=father_id, config=config
             )
+            cfg = rootfs.build_configuration_file(
+                config=config,
+                resources=initial_system_resources,
+                network_resolution=network_resolution,
+            )
+            with open(config_host_path, "wb") as f:
+                f.write(cfg.SerializeToString())
+
+            # Same carrier choice as CH: the image when it is writable, a metadata
+            # disk when it is not. See rootfs.GuestMetadata.
+            guest_metadata = rootfs.GuestMetadata(
+                image_path=rootfs_path,
+                runtime_dir=runtime_dir,
+                read_only=rootfs_read_only,
+            )
+
+            for target_path in rootfs.guest_config_targets(service=service):
+                guest_metadata.put(host_file=config_host_path, guest_target=target_path)
+
+            with open(entrypoint_host_path, "w", encoding="utf-8") as f:
+                f.write(f"{resolved_entrypoint}\n")
+            guest_metadata.put(
+                host_file=entrypoint_host_path,
+                guest_target=rootfs.GUEST_ENTRYPOINT_PATH,
+            )
+            # No /etc/hosts nor /etc/resolv.conf: name resolution is not the node's to
+            # install in someone else's filesystem. See the note in
+            # src/virtualizers/microvm/network.py.
+            log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/entrypoint)")
+
+            # Environment variables also delivered as real Linux env vars (#405), on
+            # top of the ones already inside __config__.config.environment_variables
+            # unconditionally. Optional: no file at all when none of the declared
+            # variables survives src.utils.guest_env.linux_env_vars.
+            rootfs.inject_guest_envs(
+                config=config,
+                envs_host_path=envs_host_path,
+                guest_metadata=guest_metadata,
+                log_prefix=log_prefix,
+            )
+
+            # Shared filesystems (parent -> child inheritance). Identical semantics to
+            # CH, and the same materialization: only the guest device wiring
+            # (vhost-user-fs vs CH's --fs) is this backend's own, built below from
+            # the mount state.
+            shares = materialize_shares(
+                service=service,
+                config=config,
+                vmachine_id=vmachine_id,
+                father_id=father_id,
+                rootfs_path=rootfs_path,
+                runtime_dir=runtime_dir,
+                log_prefix=log_prefix,
+                metadata=guest_metadata,
+            )
+
+            metadata_disk_path = guest_metadata.finalize()
+            if metadata_disk_path is not None:
+                log.LOGGER(
+                    f"[QEMU][{vmachine_id}] metadata disk built for read-only rootfs: "
+                    f"{metadata_disk_path}"
+                )
+
+            # What a revive will need, written once the launch has decided it. A
+            # launch with shares is not revivable: their daemons and mounts belong to
+            # it, and this version does not rebuild them.
+            launch_spec.write(runtime_dir, launch_spec.LaunchSpec(
+                assigment_ports=dict(assigment_ports or {}),
+                by_local=by_local,
+                network_resolution=list(network_resolution),
+                revivable=not shares.mounts_state and not shares.exported_share_ids,
+            ))
 
         tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[QEMU][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -854,7 +889,10 @@ def execute(
 
         delete_runtime_state(vmachine_id)
 
-        if runtime_dir.exists():
+        if reviving:
+            # Not the disk: it is all this instance has, and it can be tried again.
+            log.LOGGER(f"[QEMU][{vmachine_id}] revive failed; keeping the runtime directory: {runtime_dir}")
+        elif runtime_dir.exists():
             shutil.rmtree(runtime_dir, ignore_errors=True)
 
         if isinstance(e, (MicroVMError, UnsupportedArchitectureException)):

@@ -31,11 +31,13 @@ class InstanceDeathReputationTests(unittest.TestCase):
         self.reputation = MagicMock()
         self.stop = MagicMock()
         self.suspend = MagicMock()
+        self.handle = MagicMock()
 
     def _local_tick(self, vm_maintain=None, spend_ok=True, grace=0):
         with patch.object(maintain.sc, "get_running_internal_containers_ids", return_value=["vm-1"]), \
              patch.object(maintain.dead_instances, "suspended_grace_seconds", return_value=grace), \
              patch.object(maintain, "suspend_instance", self.suspend), \
+             patch.object(maintain, "handle_internal_failure", self.handle), \
              patch.object(maintain.sc, "get_sys_req", return_value=dict(SYS_REQ)), \
              patch.object(maintain.sc, "record_instance_consumption"), \
              patch.object(maintain, "vm_maintain", side_effect=vm_maintain), \
@@ -79,9 +81,11 @@ class InstanceDeathReputationTests(unittest.TestCase):
         self.reputation.update_vmachine_reputation.assert_called_once_with(
             vmachine_id="vm-1", amount=-100, reason=Reason.INSTANCE_LOST
         )
-        self.stop.assert_called_once_with(
+        # Revived if it can be (issue #594): the decision is `handle_internal_failure`'s.
+        self.handle.assert_called_once_with(
             token="vm-1", reason=dead_instances.PROCESS_LOST
         )
+        self.stop.assert_not_called()
 
     def test_a_guest_panic_lowers_the_reputation(self):
         self._local_tick(
@@ -91,9 +95,10 @@ class InstanceDeathReputationTests(unittest.TestCase):
         self.reputation.update_vmachine_reputation.assert_called_once_with(
             vmachine_id="vm-1", amount=-100, reason=Reason.INSTANCE_LOST
         )
-        self.stop.assert_called_once_with(
+        self.handle.assert_called_once_with(
             token="vm-1", reason=dead_instances.GUEST_PANIC
         )
+        self.stop.assert_not_called()
 
     def test_a_charge_that_works_scores_nothing(self):
         self._local_tick(spend_ok=True)
