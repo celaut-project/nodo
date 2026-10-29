@@ -1256,6 +1256,25 @@ def _death_record(token: str, father_id: Optional[str], reason: str, leftover_mu
     return record
 
 
+def suspend_instance(token: str) -> bool:
+    """Stop an instance's VM and keep everything else: its disk, row, address and account.
+
+    What an instance that ran out of MU gets instead of `stop_instance` (issue #594).
+    Nothing is settled and nobody is paid: the instance is not dead, and its father can
+    still top it up. True if this call suspended it; False if it already was, or is gone.
+
+    The VM goes first and the row is marked after, so a failure in between leaves a
+    live row with no VM -- which the next tick, finding the balance still at 0, suspends
+    again. The other order would leave a suspended row whose VM is still running, which
+    nothing would ever look at.
+    """
+    if not sc.internal_instance_exists(id=token):
+        return False
+    log.LOGGER(f"Suspend instance {token}: balance exhausted, keeping its disk.")
+    kill(vmachine_id=token, archive=False, keep_disk=True)
+    return sc.suspend_local_instance(token)
+
+
 def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.MANUAL_KILL) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     """Stop an instance and hand its unspent deposit back, returning that figure.
 

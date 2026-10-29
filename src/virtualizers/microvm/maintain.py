@@ -261,6 +261,15 @@ def _failures_root() -> Optional[Path]:
     return paths.failures_root() if paths.optional_family_root() else None
 
 
+def _is_suspended(vmachine_id: str) -> bool:
+    try:
+        return sc.is_local_instance_suspended(id=vmachine_id)
+    except Exception:
+        # Cannot tell: keep the disk. Removing the image of an instance that may
+        # come back is the mistake that cannot be undone.
+        return True
+
+
 def scan_orphan_runtimes() -> List[PruneEntry]:
     """Runtime entries this node can reclaim, largest first.
 
@@ -297,6 +306,10 @@ def scan_orphan_runtimes() -> List[PruneEntry]:
 
     for vmachine_id, path in dirs.items():
         if vmachine_id in states:
+            continue
+        # A suspended instance's disk is kept on purpose, with no state file: it is
+        # waiting for a top-up, and only a kill or its grace period may remove it.
+        if _is_suspended(vmachine_id):
             continue
         age = _age_seconds(path, now)
         if age is not None and age < STATELESS_RUNTIME_GRACE_SECONDS:

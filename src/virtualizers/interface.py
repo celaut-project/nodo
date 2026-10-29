@@ -176,11 +176,16 @@ def hotplug(
     )
 
 
-def kill(vmachine_id: str, archive: bool = False) -> bool:
+def kill(vmachine_id: str, archive: bool = False, keep_disk: bool = False) -> bool:
     """Kill a running service, routed to the backend that launched it.
 
     With ``archive`` true, the backend saves the guest logs before it removes them.
+    With ``keep_disk`` true it stops the guest but leaves its disk where it is, for a
+    suspended instance that will be started again (issue #594).
     """
+    if keep_disk:
+        return _backend_of(vmachine_id).kill(
+            vmachine_id=vmachine_id, archive=archive, keep_disk=True)
     return _backend_of(vmachine_id).kill(vmachine_id=vmachine_id, archive=archive)
 
 

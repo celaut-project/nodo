@@ -30,9 +30,12 @@ class InstanceDeathReputationTests(unittest.TestCase):
         maintain._instances_penalised.clear()
         self.reputation = MagicMock()
         self.stop = MagicMock()
+        self.suspend = MagicMock()
 
-    def _local_tick(self, vm_maintain=None, spend_ok=True):
-        with patch.object(maintain.sc, "get_all_internal_containers_ids", return_value=["vm-1"]), \
+    def _local_tick(self, vm_maintain=None, spend_ok=True, grace=0):
+        with patch.object(maintain.sc, "get_running_internal_containers_ids", return_value=["vm-1"]), \
+             patch.object(maintain.dead_instances, "suspended_grace_seconds", return_value=grace), \
+             patch.object(maintain, "suspend_instance", self.suspend), \
              patch.object(maintain.sc, "get_sys_req", return_value=dict(SYS_REQ)), \
              patch.object(maintain.sc, "record_instance_consumption"), \
              patch.object(maintain, "vm_maintain", side_effect=vm_maintain), \
@@ -54,12 +57,21 @@ class InstanceDeathReputationTests(unittest.TestCase):
         return vm_maintain
 
     def test_out_of_balance_scores_nothing_and_is_recorded(self):
-        self._local_tick(spend_ok=False)
+        # No grace period: the instance dies at once, as it did before suspension.
+        self._local_tick(spend_ok=False, grace=0)
 
         self.reputation.update_vmachine_reputation.assert_not_called()
         self.stop.assert_called_once_with(
             token="vm-1", reason=dead_instances.OUT_OF_BALANCE
         )
+        self.suspend.assert_not_called()
+
+    def test_out_of_balance_with_a_grace_period_suspends_instead_of_killing(self):
+        self._local_tick(spend_ok=False, grace=3600)
+
+        self.reputation.update_vmachine_reputation.assert_not_called()
+        self.suspend.assert_called_once_with(token="vm-1")
+        self.stop.assert_not_called()
 
     def test_a_lost_machine_lowers_the_reputation(self):
         self._local_tick(vm_maintain=self._the_virtualizer_finds_it_dead(None))

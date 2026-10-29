@@ -28,6 +28,7 @@ LOG_NAMES = ("stdout", "stderr", "serial")
 DEFAULT_RETENTION_DAYS = 14
 DEFAULT_MAX_ROWS = 200
 DEFAULT_LOG_MAX_BYTES = 1024 * 1024
+DEFAULT_SUSPENDED_GRACE_SECONDS = 7 * 24 * 3600
 
 # Reasons recorded in `death_reason`. One name for one cause.
 MANUAL_KILL = "manual_kill"
@@ -54,6 +55,19 @@ def retention_max_rows() -> int:
 
 def log_max_bytes() -> int:
     return int(env_manager.get("instances.DEAD_LOG_MAX_BYTES", DEFAULT_LOG_MAX_BYTES))
+
+
+def suspended_grace_seconds() -> int:
+    """How long an instance that ran out of MU keeps its disk before it is deleted.
+
+    ``0`` (or less) means no grace: it dies at once and its disk goes, as it did
+    before suspension existed.
+    """
+    try:
+        return max(0, int(env_manager.get(
+            "instances.SUSPENDED_GRACE_SECONDS", DEFAULT_SUSPENDED_GRACE_SECONDS)))
+    except (TypeError, ValueError):
+        return DEFAULT_SUSPENDED_GRACE_SECONDS
 
 
 def dead_root() -> Path:
