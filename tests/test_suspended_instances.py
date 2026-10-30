@@ -111,7 +111,8 @@ class SuspensionRowTests(unittest.TestCase):
             sql_connection.TRACEABILITY_COLUMNS["local_instances"],
             {"suspended_at": "DATETIME DEFAULT NULL", "suspended_reason": "TEXT DEFAULT NULL",
              "revive_count": "INTEGER NOT NULL DEFAULT 0", "last_revive_reason": "TEXT DEFAULT NULL",
-             "last_revived_at": "DATETIME DEFAULT NULL"})
+             "last_revived_at": "DATETIME DEFAULT NULL",
+             "revive_failing_since": "DATETIME DEFAULT NULL"})
 
     def test_an_old_database_gets_the_column(self):
         connection = sqlite3.connect(":memory:")
@@ -127,8 +128,10 @@ class SuspensionRowTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class GraceTests(unittest.TestCase):
-    def _reap(self, rows, grace, can_pay=True):
+    def _reap(self, rows, grace, can_pay=True, failing_grace=86400):
         with mock.patch.object(maintain.dead_instances, "suspended_grace_seconds", return_value=grace), \
+                mock.patch.object(maintain.dead_instances, "revive_failure_grace_seconds",
+                                  return_value=failing_grace), \
                 mock.patch.object(maintain, "_can_pay_a_tick", return_value=can_pay), \
                 mock.patch.object(maintain, "system_scarcity", return_value={}), \
                 mock.patch.object(maintain.sc, "get_suspended_local_instances", return_value=rows), \
@@ -169,6 +172,31 @@ class GraceTests(unittest.TestCase):
               "suspended_reason": dead_instances.PROCESS_LOST}], grace=100, can_pay=False)
         self.assertEqual(deleted, 1)
         self.assertEqual(stops, [{"token": "a", "reason": dead_instances.PROCESS_LOST}])
+
+    def test_one_that_can_never_start_is_stopped_once_its_revives_failed_long_enough(self):
+        # It has MU, so the out of balance grace never applies to it: without this it
+        # held its disk, address and name for ever (F3 of the review of #595).
+        rows = [{"id": "a", "balance_mu": "10000", "suspended_for_s": 10 ** 7,
+                 "suspended_reason": dead_instances.PROCESS_LOST, "revive_failing_for_s": 100}]
+        deleted, stops = self._reap(rows, grace=10 ** 9, failing_grace=100)
+        self.assertEqual(deleted, 1)
+        self.assertEqual(stops, [{"token": "a", "reason": dead_instances.PROCESS_LOST}])
+
+    def test_one_whose_revives_have_not_failed_long_enough_waits(self):
+        rows = [{"id": "a", "balance_mu": "10000", "suspended_for_s": 10 ** 7,
+                 "suspended_reason": dead_instances.GUEST_PANIC, "revive_failing_for_s": 99}]
+        self.assertEqual(self._reap(rows, grace=10, failing_grace=100), (0, []))
+
+    def test_one_with_mu_and_no_failed_revive_is_never_stopped(self):
+        rows = [{"id": "a", "balance_mu": "10000", "suspended_for_s": 10 ** 9,
+                 "suspended_reason": dead_instances.PROCESS_LOST, "revive_failing_for_s": None}]
+        self.assertEqual(self._reap(rows, grace=10, failing_grace=0), (0, []))
+
+    def test_the_revive_failure_grace_comes_from_the_config(self):
+        with mock.patch.object(dead_instances.env_manager, "get", return_value=0):
+            self.assertEqual(dead_instances.revive_failure_grace_seconds(), 0)
+        with mock.patch.object(dead_instances.env_manager, "get", return_value="junk"):
+            self.assertEqual(dead_instances.revive_failure_grace_seconds(), 24 * 3600)
 
     def test_one_that_cannot_be_deleted_does_not_stop_the_others(self):
         rows = [{"id": "a", "balance_mu": "0", "suspended_for_s": 500},

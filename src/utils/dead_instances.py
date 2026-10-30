@@ -34,6 +34,7 @@ DEFAULT_RETENTION_DAYS = 14
 DEFAULT_MAX_ROWS = 200
 DEFAULT_LOG_MAX_BYTES = 1024 * 1024
 DEFAULT_SUSPENDED_GRACE_SECONDS = 7 * 24 * 3600
+DEFAULT_REVIVE_FAILURE_GRACE_SECONDS = 24 * 3600
 
 # Reasons recorded in `death_reason`. One name for one cause.
 MANUAL_KILL = "manual_kill"
@@ -73,6 +74,20 @@ def suspended_grace_seconds() -> int:
             "instances.SUSPENDED_GRACE_SECONDS", DEFAULT_SUSPENDED_GRACE_SECONDS)))
     except (TypeError, ValueError):
         return DEFAULT_SUSPENDED_GRACE_SECONDS
+
+
+def revive_failure_grace_seconds() -> int:
+    """How long a suspended instance with MU may keep failing to start before it is stopped.
+
+    Counted from the first revive of a run that failed (the service is gone from the
+    registry, the host has no room for it). The instance is then stopped with a refund,
+    and dies with the cause it was suspended for. ``0`` stops it at the first failure.
+    """
+    try:
+        return max(0, int(env_manager.get(
+            "instances.REVIVE_FAILURE_GRACE_SECONDS", DEFAULT_REVIVE_FAILURE_GRACE_SECONDS)))
+    except (TypeError, ValueError):
+        return DEFAULT_REVIVE_FAILURE_GRACE_SECONDS
 
 
 def dead_root() -> Path:
