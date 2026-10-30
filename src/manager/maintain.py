@@ -1737,7 +1737,9 @@ def reap_expired_suspensions() -> int:
 
     A suspended instance (issue #594) keeps its disk for `instances.SUSPENDED_GRACE_SECONDS`
     so that its father can bring it back with a top-up. After that it dies with the cause
-    it had, `out_of_balance`, and its disk and address are released. One that holds enough
+    it was suspended for, and its disk and address are released: `out_of_balance`, or the
+    internal failure (`process_lost`, `guest_panic`) of one whose VM went down with less
+    than a tick left, which was never revived for lack of MU. One that holds enough
     to pay a tick again is not touched, however long it has been suspended: it is waiting
     to be started, not to be deleted. One that holds something, but not that much, is
     still out of balance -- it would be suspended again on the next tick -- and goes too.
@@ -1757,8 +1759,10 @@ def reap_expired_suspensions() -> int:
                 if _can_pay_a_tick(row["id"], balance, scarcity):
                     continue
             try:
-                log.LOGGER(f"Grace period of suspended instance {row['id']} is over; deleting it.")
-                if stop_instance(token=row["id"], reason=dead_instances.OUT_OF_BALANCE) is not None:
+                reason = row.get("suspended_reason") or dead_instances.OUT_OF_BALANCE
+                log.LOGGER(f"Grace period of suspended instance {row['id']} ({reason}) is over; "
+                           f"deleting it.")
+                if stop_instance(token=row["id"], reason=reason) is not None:
                     deleted += 1
             except Exception as e:
                 log.LOGGER(f"Error deleting suspended instance {row['id']}: {e}")

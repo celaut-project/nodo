@@ -158,6 +158,16 @@ class GraceTests(unittest.TestCase):
         self.assertEqual(deleted, 1)
         self.assertEqual([stop["token"] for stop in stops], ["a"])
 
+    def test_one_lost_with_less_than_a_tick_dies_with_the_cause_it_was_suspended_for(self):
+        # Its VM went down with MU left, but not a tick's worth: it was never revived for
+        # lack of MU, and the cause on record is still the failure (F11 of the review
+        # of #595).
+        deleted, stops = self._reap(
+            [{"id": "a", "balance_mu": "5", "suspended_for_s": 500,
+              "suspended_reason": dead_instances.PROCESS_LOST}], grace=100, can_pay=False)
+        self.assertEqual(deleted, 1)
+        self.assertEqual(stops, [{"token": "a", "reason": dead_instances.PROCESS_LOST}])
+
     def test_one_that_cannot_be_deleted_does_not_stop_the_others(self):
         rows = [{"id": "a", "balance_mu": "0", "suspended_for_s": 500},
                 {"id": "b", "balance_mu": "0", "suspended_for_s": 500}]
