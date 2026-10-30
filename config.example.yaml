@@ -352,6 +352,13 @@ instances:
   # revives have failed for this many seconds in a row. The default is 24 hours. 0
   # stops it at the first failure.
   REVIVE_FAILURE_GRACE_SECONDS: 86400
+  # An instance out of balance holds its disk and its address while it waits, and it
+  # pays nothing for them. Each father may keep at most this many of them, and this
+  # much disk in them (in GiB): over either, its oldest go first. 0 turns a cap off.
+  # Whatever the caps say, when a launch finds no free disk or no free address, the
+  # oldest of these go, from any father, before the launch is refused.
+  MAX_SUSPENDED_PER_FATHER: 10
+  MAX_SUSPENDED_DISK_GIB_PER_FATHER: 20
 
 # The ledger of balance movements (issue #570): one row for each change of the balance
 # of a client or an instance, which its owner reads with GetBalanceStatement.

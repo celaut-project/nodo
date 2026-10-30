@@ -205,6 +205,8 @@ instance never starts again.
 | `instances.DEAD_LOG_MAX_BYTES` | `1048576` | Keep the last bytes of each guest log, up to this size. |
 | `instances.SUSPENDED_GRACE_SECONDS` | `604800` | An instance whose balance reaches 0 is suspended, not killed: its VM stops and its disk and address stay. This is how long it waits for a top-up before it is deleted. `0` deletes it at once. `nodo burnall` deletes these disks whatever this says. |
 | `instances.REVIVE_FAILURE_GRACE_SECONDS` | `86400` | A suspended instance that has MU is started again on its own disk. One that cannot be started (its service is gone from the registry, the host has no room for it) is stopped with a refund once its revives have failed for this long in a row, counted from the first failure and kept in the database. It dies with the cause it was suspended for. A revive that works resets the count. `0` stops it at the first failure. |
+| `instances.MAX_SUSPENDED_PER_FATHER` | `10` | How many instances out of balance one father may keep suspended. They hold a disk and an address and pay nothing for them; over the cap, the father's oldest are deleted (with a refund) when the next one is suspended. `0` is no cap. |
+| `instances.MAX_SUSPENDED_DISK_GIB_PER_FATHER` | `20` | The same, for the disk those instances hold, in GiB. `0` is no cap. Independently of both caps, a launch (or a revive) refused for disk alone, or one that finds no free address in the guest subnet, first deletes the oldest suspended instances out of balance, from any father, and tries again. A suspended instance that has MU (an internal failure, or one that was topped up) is never deleted this way. |
 
 ## `ledger` — balance movements
 

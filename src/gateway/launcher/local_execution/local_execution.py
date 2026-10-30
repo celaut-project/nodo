@@ -78,6 +78,12 @@ def _serialize_envs(config: Optional[celaut.Configuration]) -> str:
     return json.dumps(envs, sort_keys=True) if envs else ""
 
 
+def _no_free_address(error: Exception) -> bool:
+    """Whether a launch failed because the guest subnet has no free address
+    (`microvm.network.deterministic_ip_and_mac`)."""
+    return "No available IPs" in str(error)
+
+
 def _refund(refund_container: List[Callable]) -> None:
     """Give the charge of the start back to the father, if it was taken."""
     try:
@@ -406,16 +412,38 @@ def local_execution(
 
     # Execute virtualizer process.
     try:
-        vmachine_id, vmachine_ip, resolved_resources = execute(
-            assigment_ports=assigment_ports,
-            by_local=by_local,
-            service_id=service_id,
-            service=service,
-            config=config,
-            system_resources=resources,
-            father_id=father_id,
-            register_instance=_register_instance,
-        )
+        try:
+            vmachine_id, vmachine_ip, resolved_resources = execute(
+                assigment_ports=assigment_ports,
+                by_local=by_local,
+                service_id=service_id,
+                service=service,
+                config=config,
+                system_resources=resources,
+                father_id=father_id,
+                register_instance=_register_instance,
+            )
+        except Exception as e:
+            # Every address of the guest subnet is taken. One held by a suspended
+            # instance that nobody pays for goes before this launch is refused (F4 of
+            # the review of #595), and the launch is tried once more.
+            if registered_id or not _no_free_address(e):
+                raise
+            from src.manager.maintain import reclaim_suspended_address
+
+            if not reclaim_suspended_address():
+                raise
+            log.LOGGER("Retrying the launch on the address of a deleted suspended instance.")
+            vmachine_id, vmachine_ip, resolved_resources = execute(
+                assigment_ports=assigment_ports,
+                by_local=by_local,
+                service_id=service_id,
+                service=service,
+                config=config,
+                system_resources=resources,
+                father_id=father_id,
+                register_instance=_register_instance,
+            )
     except Exception:
         # A launch that failed after the guest started leaves a row for an instance
         # that is not running: the backend has already torn the VM down, so the row

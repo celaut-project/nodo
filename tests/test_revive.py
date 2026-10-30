@@ -333,6 +333,31 @@ class ReviveInstanceTests(unittest.TestCase):
         self.assertNotIn("execute", [name for name, _ in calls])
         self.assertNotIn("resume", [name for name, _ in calls])
 
+    def test_its_own_disk_is_not_asked_for_again(self):
+        # It is on this machine already, and counted in what the node holds.
+        seen = {}
+
+        def availability(resources, arch=None):
+            seen["resources"] = resources
+            return {"can_execute": True, "reason": ""}
+
+        service = celaut.Service()
+        service.container.resources.at_most.disk_space = 10 ** 9
+        with mock.patch.object(manager.sc, "is_local_instance_suspended", return_value=True), \
+                mock.patch.object(manager.sc, "get_service_id_by_container_id", return_value="svc"), \
+                mock.patch.object(manager.sc, "get_internal_father_id", return_value="father"), \
+                mock.patch.object(manager.sc, "get_sys_req", return_value={
+                    "mem_limit": 1, "disk_space": 10 ** 9, "cpu_period": 1, "cpu_quota": 1, "arch": None}), \
+                mock.patch.object(manager.sc, "get_internal_ip", return_value="192.168.200.7"), \
+                mock.patch.object(manager.sc, "resume_local_instance", return_value=True), \
+                mock.patch("src.utils.utils.read_service_from_disk", return_value=service), \
+                mock.patch("src.utils.cost_functions.resource_availability.get_resource_availability",
+                           side_effect=availability), \
+                mock.patch.object(manager, "kill"), \
+                mock.patch.object(manager, "vm_execute", return_value=("vm", "192.168.200.7", None)):
+            self.assertTrue(manager.revive_instance("vm"))
+        self.assertFalse(seen["resources"].at_most.HasField("disk_space"))
+
     def test_an_instance_that_is_not_suspended_is_left_alone(self):
         result, calls = self._revive(suspended=False)
         self.assertIs(result, False)

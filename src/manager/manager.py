@@ -1397,9 +1397,14 @@ def _revive_locked(token: str) -> bool:
     # The same admission a launch gets. A suspended instance holds no memory or CPU, so
     # that room may have been taken since; starting it anyway would put the node over its
     # own ceiling. It stays suspended and is tried again, like any other failed start.
-    from src.utils.cost_functions.resource_availability import get_resource_availability
+    from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
 
-    availability = get_resource_availability(resources=resources, arch=sys_req['arch'])
+    # Its disk is already on this machine, and counted in what the node holds: asking
+    # for it again would refuse a revive for room it already has, or delete others for it.
+    admission = celaut_pb2.Service.Container.Resources()
+    admission.CopyFrom(resources)
+    admission.at_most.ClearField("disk_space")
+    availability = availability_reclaiming_disk(resources=admission, arch=sys_req['arch'])
     if not availability["can_execute"]:
         raise RuntimeError(
             f"No room to revive {token} right now: "

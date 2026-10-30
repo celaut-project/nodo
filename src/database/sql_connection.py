@@ -1319,7 +1319,7 @@ class SQLConnection(metaclass=Singleton):
         why they are suspended, how many seconds ago each was suspended and, for one
         whose revives fail, how many seconds ago the first of them failed (else None)."""
         result = self._execute('''
-            SELECT id, name, father_id, balance_mu, suspended_at, suspended_reason,
+            SELECT id, name, father_id, balance_mu, disk_space, suspended_at, suspended_reason,
                    CAST(strftime('%s', 'now') AS INTEGER)
                        - CAST(strftime('%s', suspended_at) AS INTEGER) AS suspended_for_s,
                    CASE WHEN revive_failing_since IS NULL THEN NULL

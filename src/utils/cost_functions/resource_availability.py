@@ -166,6 +166,42 @@ def _benchmark_shortfalls(resources: celaut.Service.Container.Resources, arch: O
     return found
 
 
+# How a shortfall of disk reads, in `_sysreq_shortfalls` and in `host_limits._breach`.
+_DISK_SHORTFALLS = ("Insufficient disk", "Disk ceiling reached")
+
+
+def short_of_disk_only(availability: Dict[str, Any]) -> bool:
+    """Whether ``availability`` (what `get_resource_availability` returned) refused for disk
+    and for nothing else: then freeing disk is all it takes to admit the instance."""
+    if availability.get("can_execute"):
+        return False
+    parts = [part.strip() for part in str(availability.get("reason") or "").split(" | ") if part.strip()]
+    return bool(parts) and all(part.startswith(_DISK_SHORTFALLS) for part in parts)
+
+
+def availability_reclaiming_disk(
+        resources: celaut.Service.Container.Resources,
+        arch: Optional[str] = None,
+) -> Dict[str, Any]:
+    """`get_resource_availability` for a launch or a revive that is about to happen.
+
+    Refused for disk alone, it first deletes the suspended instances that nobody pays
+    for (out of balance, oldest first) until the instance fits or there are none left,
+    and asks again (F4 of the review of #595). Never for a question that launches
+    nothing, such as a peer's GetResourceAvailability: a question must not delete
+    anything.
+    """
+    availability = get_resource_availability(resources=resources, arch=arch)
+    if not short_of_disk_only(availability):
+        return availability
+    from src.manager.maintain import reclaim_suspended_disk
+
+    if reclaim_suspended_disk(
+            lambda: short_of_disk_only(get_resource_availability(resources=resources, arch=arch))):
+        availability = get_resource_availability(resources=resources, arch=arch)
+    return availability
+
+
 def get_resource_availability(
         resources: celaut.Service.Container.Resources,
         arch: Optional[str] = None,
