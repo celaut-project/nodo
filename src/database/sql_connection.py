@@ -102,6 +102,8 @@ TRACEABILITY_COLUMNS = {
         # Written by every failed revive, read by the reaper.
         "revive_failing_since": "DATETIME DEFAULT NULL",
     },
+    # Read by every delegated tick (issue #594).
+    "delegated_instances": {"suspended_at": "DATETIME DEFAULT NULL"},
     # `peer` is a base table every install already has, so unlike a wholly new table
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
     # upgraded in place would raise "no such column: local_client_id" on the first
@@ -2841,7 +2843,12 @@ class SQLConnection(metaclass=Singleton):
                    base_mem_limit, base_disk_space, base_cpu_period, base_cpu_quota,
                    peer_base_mem_limit, peer_base_disk_space, peer_base_cpu_period,
                    peer_base_cpu_quota, quote_init_maintenance_cost,
-                   quote_max_maintenance_cost, quote_maintenance_seconds_loop, quote_variance
+                   quote_max_maintenance_cost, quote_maintenance_seconds_loop, quote_variance,
+                   suspended_at,
+                   CASE WHEN suspended_at IS NULL THEN NULL
+                        ELSE CAST(strftime('%s', 'now') AS INTEGER)
+                             - CAST(strftime('%s', suspended_at) AS INTEGER)
+                   END AS suspended_for_s
             FROM delegated_instances WHERE killed_at IS NULL
             ''' + ('AND token_delegation = ?' if token is not None else ''),
             (token,) if token is not None else ())
@@ -2886,9 +2893,36 @@ class SQLConnection(metaclass=Singleton):
                 'quote_max_maintenance_cost': _as_int(row[36]) if row[36] is not None else None,
                 'quote_maintenance_seconds_loop': row[37],
                 'quote_variance': row[38],
+                'suspended_at': row[39],
+                'suspended_for_s': row[40],
             }
             for row in result.fetchall()
         ]
+
+    def set_delegated_suspended(self, token: str, suspended: bool) -> bool:
+        """Mark a live delegated instance suspended on its peer, or running again.
+
+        True if this call changed it. The row stays alive either way: the father can
+        still top it up, and the top-up reaches the peer (``modify_deposit``).
+        """
+        if suspended:
+            cursor = self._execute('''
+                UPDATE delegated_instances SET suspended_at = CURRENT_TIMESTAMP
+                WHERE token_delegation = ? AND killed_at IS NULL AND suspended_at IS NULL
+            ''', (token,))
+        else:
+            cursor = self._execute('''
+                UPDATE delegated_instances SET suspended_at = NULL
+                WHERE token_delegation = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
+            ''', (token,))
+        return cursor.rowcount > 0
+
+    def is_delegated_suspended(self, token: str) -> bool:
+        row = self._execute('''
+            SELECT 1 FROM delegated_instances
+            WHERE token_delegation = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
+        ''', (token,)).fetchone()
+        return row is not None
 
     def mark_delegated_killed(self, token: str, reason: str) -> bool:
         """Mark a delegated instance as dead. Keep the row for the operator to read.

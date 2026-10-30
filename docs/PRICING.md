@@ -567,6 +567,14 @@ a charge that comes from a balance alone is never negative. What this node has s
 read before the peer is asked, so a `ModifyDeposit` that lands in between can only make a
 charge smaller for a moment, and no instance is stopped for what its father caused.
 
+The `Metrics` also say whether the peer has the child suspended (`suspended`, issue #594):
+its deposit there ran out, and the peer keeps its disk but runs nothing. While it says so
+the row here is suspended too (`delegated_instances.suspended_at`) and the tick charges the
+father nothing for the time; `charged_until` still moves, so that time is never charged
+later. A top-up of the father reaches the peer, which starts the child again, and the row
+follows at the next reading. A child that is still suspended after
+`instances.SUSPENDED_GRACE_SECONDS` here is stopped, with a refund, whatever the peer does.
+
 A quote frozen at delegation would drift three ways that are all invisible from here — the
 peer repricing its resources, the two `mu_per_unit` rates moving against each other, and a
 `hotplug` making the child bigger than the shape it was quoted at. The sum happens on the

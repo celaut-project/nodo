@@ -41,6 +41,7 @@ try:
     from src.gateway.launcher.delegate_execution import delegate_execution as delegate_mod
     from src.manager import maintain, manager, statement_check
     from src.utils import dead_instances
+    from src.utils.utils import to_amount
     from tests.statement_chain import FakeLedger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -469,9 +470,9 @@ class ReadChildTests(unittest.TestCase):
                 patch.object(statement_check, "stored_rates", return_value=rates or {}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client-on-peer"), \
                 patch.object(maintain, "_peer_rates", return_value={}), \
-                patch.object(maintain, "instance_balance_on_peer",
+                patch.object(maintain, "instance_metrics_on_peer",
                              side_effect=RuntimeError("gone") if balance is None else None,
-                             return_value=balance), \
+                             return_value=celaut.Metrics(balance=to_amount(balance or 0))), \
                 patch.object(statement_check, "settle_failed_reads"), \
                 patch.object(statement_check, "penalise_once") as penalise, \
                 patch.object(statement_check, "penalise_no_statement") as self.penalise_none:

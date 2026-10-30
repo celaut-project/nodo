@@ -22,11 +22,13 @@ try:
     from tests.config_bootstrap import load_example_config
 
     load_example_config()
+    from protos import celaut_pb2
     from src.database import ledger
     from src.database.migrate import create_tables
     from src.database.sql_connection import SQLConnection
     from src.manager import maintain, statement_check
     from src.manager.manager import delegation_lock
+    from src.utils.utils import to_amount
     from tests.statement_chain import FakeLedger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -101,7 +103,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(maintain, "_balance_held_on", return_value=10 ** 9), \
                 patch.object(statement_check, "stored_rates", return_value={}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client"), \
-                patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
+                patch.object(maintain, "instance_metrics_on_peer", side_effect=lambda **_: celaut_pb2.Metrics(balance=to_amount(self.peer.balance))), \
                 patch.object(maintain, "stop_instance"), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
                 patch.object(maintain, "charge_at_launch_price", return_value=own_mu,
@@ -217,7 +219,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
                 patch.object(maintain, "_balance_held_on", return_value=10 ** 9), \
                 patch.object(statement_check, "stored_rates", return_value={}), \
                 patch.object(maintain, "get_client_id_on_other_peer", return_value="client"), \
-                patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
+                patch.object(maintain, "instance_metrics_on_peer", side_effect=lambda **_: celaut_pb2.Metrics(balance=to_amount(self.peer.balance))), \
                 patch.object(maintain, "stop_instance"), \
                 patch.object(maintain, "system_scarcity", return_value={}), \
                 patch.object(maintain, "charge_at_launch_price", return_value=0), \
@@ -322,7 +324,7 @@ class DelegatedChargeFlowTests(unittest.TestCase):
         self.sc.move_delegated_deposit(ALIAS, FATHER, 200, 200)
 
         with patch.object(maintain, "sc", self.sc), \
-                patch.object(maintain, "instance_balance_on_peer", return_value=self.peer.balance), \
+                patch.object(maintain, "instance_metrics_on_peer", side_effect=lambda **_: celaut_pb2.Metrics(balance=to_amount(self.peer.balance))), \
                 patch.object(self.sc, "child_statement_due", return_value=False):
             charge, _ = maintain._read_child(row)
 

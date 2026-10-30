@@ -300,7 +300,8 @@ TABLES = {
             charged_until REAL DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
-            death_reason TEXT DEFAULT NULL
+            death_reason TEXT DEFAULT NULL,
+            suspended_at DATETIME DEFAULT NULL
         )
     ''',
     # Every start that this node asked a peer for, written before the peer is asked
@@ -947,6 +948,9 @@ def create_tables(cursor):
     })
     ensure_columns(cursor, "delegated_instances", {
         "launched_at": "DATETIME DEFAULT NULL",
+        # Set while the peer has the child suspended (issue #594): this node charges
+        # nothing for it then, and stops it at the end of its own grace period.
+        "suspended_at": "DATETIME DEFAULT NULL",
     })
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",

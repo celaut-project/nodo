@@ -452,11 +452,14 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
+            delegated_suspended = (
+                "suspended_at" if column_exists(conn, "delegated_instances", "suspended_at") else "NULL"
+            )
             cursor.execute(
                 "SELECT token_delegation, id, peer_id, father_id, serialized_instance, service_id, "
-                "balance_mu FROM delegated_instances WHERE killed_at IS NULL"
+                f"balance_mu, {delegated_suspended} FROM delegated_instances WHERE killed_at IS NULL"
             )
-            for external_token, id, peer_id, father_id, si, service, balance_mu in cursor.fetchall():
+            for external_token, id, peer_id, father_id, si, service, balance_mu, suspended_at in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
 
                 # The deposit this node holds for the instance, in our MU -- the same
@@ -477,7 +480,8 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
                     'balance': balance_value,
-                    'state': 'running',
+                    # The peer has it suspended (issue #594): this node charges nothing for it.
+                    'state': 'suspended on the peer' if suspended_at else 'running',
                     'location': peer_id or 'Unknown Peer',
                     'virtualizer': 'delegated',
                     'mem_limit': 'N/A',
@@ -490,6 +494,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     **({
                         'service_id': service,
                         'balance_mu': _int_or_none(balance_mu),
+                        'suspended_at': suspended_at,
                         'uris': get_uris(si) if si else [],
                     } if as_json else {}),
                 })
