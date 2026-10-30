@@ -35,6 +35,8 @@ DEFAULT_MAX_ROWS = 200
 DEFAULT_LOG_MAX_BYTES = 1024 * 1024
 DEFAULT_SUSPENDED_GRACE_SECONDS = 7 * 24 * 3600
 DEFAULT_REVIVE_FAILURE_GRACE_SECONDS = 24 * 3600
+DEFAULT_MAX_SUSPENDED_PER_FATHER = 10
+DEFAULT_MAX_SUSPENDED_DISK_GIB_PER_FATHER = 20
 
 # Reasons recorded in `death_reason`. One name for one cause.
 MANUAL_KILL = "manual_kill"
@@ -74,6 +76,26 @@ def suspended_grace_seconds() -> int:
             "instances.SUSPENDED_GRACE_SECONDS", DEFAULT_SUSPENDED_GRACE_SECONDS)))
     except (TypeError, ValueError):
         return DEFAULT_SUSPENDED_GRACE_SECONDS
+
+
+def _non_negative(key: str, default):
+    try:
+        return max(0, type(default)(env_manager.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def max_suspended_per_father() -> int:
+    """How many instances out of balance one father may keep suspended. ``0`` is no cap."""
+    return _non_negative("instances.MAX_SUSPENDED_PER_FATHER", DEFAULT_MAX_SUSPENDED_PER_FATHER)
+
+
+def max_suspended_disk_bytes_per_father() -> int:
+    """How much disk, in bytes, the suspended instances out of balance of one father may
+    keep. ``0`` is no cap."""
+    gib = _non_negative("instances.MAX_SUSPENDED_DISK_GIB_PER_FATHER",
+                        float(DEFAULT_MAX_SUSPENDED_DISK_GIB_PER_FATHER))
+    return int(gib * 1024 ** 3)
 
 
 def revive_failure_grace_seconds() -> int:

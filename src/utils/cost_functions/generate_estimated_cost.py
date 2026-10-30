@@ -1,6 +1,6 @@
 from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
-from src.utils.cost_functions.resource_availability import get_resource_availability
+from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
 from src.utils.cost_functions.general_cost_functions import (
     compute_maintenance_cost,
     compute_start_service_cost,
@@ -62,7 +62,9 @@ def generate_estimated_cost(
     initial_mu = from_amount(config.initial_mu) \
         if config and config.HasField("initial_mu") else 0
 
-    if check_availability and not get_resource_availability(resources=resources, arch=arch)["can_execute"]:
+    # Only the launcher checks here (the balancer's local candidate, its preflight), so a
+    # refusal for disk alone may free the disk of suspended instances nobody pays for.
+    if check_availability and not availability_reclaiming_disk(resources=resources, arch=arch)["can_execute"]:
         return
 
     # The least `initial_mu` that starts the service: the one-off build, plus the balance

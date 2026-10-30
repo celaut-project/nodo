@@ -5,7 +5,7 @@ import shutil
 import threading
 import time
 import traceback
-from typing import Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 import grpc
 
@@ -653,7 +653,11 @@ def maintain_vmachines(debug_mode: bool=False):
                     # Not a death: the father can still top it up. Its disk is kept
                     # until the grace period ends (`reap_expired_suspensions`).
                     log.LOGGER(f"Suspending container {vmachine_id} due to insufficient balance.")
-                    suspend_instance(token=vmachine_id)
+                    if suspend_instance(token=vmachine_id):
+                        try:
+                            enforce_suspension_caps(sc.get_internal_father_id(id=vmachine_id))
+                        except Exception as e:
+                            log.LOGGER(f"Error holding the father of {vmachine_id} to the caps: {e}")
                 else:
                     log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
                     stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
@@ -1820,6 +1824,106 @@ def reap_expired_suspensions() -> int:
     except Exception as e:
         log.LOGGER(f"Error in the suspended instance sweep: {e}")
     return deleted
+
+
+def _reclaimable_suspensions(father_id: Optional[str] = None) -> List[dict]:
+    """The suspended instances whose disk and address may go before their grace ends.
+
+    Only the ones out of balance that still cannot pay a tick: they hold a disk and an
+    address that nobody pays for (F4 of the review of #595). One suspended for an
+    internal failure has MU and is entitled to its revives, and one that was topped up
+    is waiting to start. Oldest suspension first. ``father_id`` keeps one father's.
+    """
+    rows = []
+    scarcity = None
+    for row in sc.get_suspended_local_instances():
+        if (row.get("suspended_reason") or dead_instances.OUT_OF_BALANCE) != dead_instances.OUT_OF_BALANCE:
+            continue
+        if father_id is not None and row.get("father_id") != father_id:
+            continue
+        balance = int(row.get("balance_mu") or 0)
+        if balance > 0:
+            if scarcity is None:
+                scarcity = system_scarcity()
+            if _can_pay_a_tick(row["id"], balance, scarcity):
+                continue
+        rows.append(row)
+    return rows
+
+
+def _reclaim(row: dict, why: str) -> bool:
+    log.LOGGER(f"Deleting suspended instance {row['id']} of {row.get('father_id')} "
+               f"before its grace period ends: {why}.")
+    try:
+        return stop_instance(token=row["id"], reason=dead_instances.OUT_OF_BALANCE) is not None
+    except Exception as e:
+        log.LOGGER(f"Error deleting suspended instance {row['id']}: {e}")
+        return False
+
+
+def enforce_suspension_caps(father_id: str) -> int:
+    """Hold one father's suspended instances out of balance to the caps, oldest first.
+
+    `instances.MAX_SUSPENDED_PER_FATHER` instances and
+    `instances.MAX_SUSPENDED_DISK_GIB_PER_FATHER` of disk (`0` is no cap). Without them a
+    client could launch instances with a deposit of about one tick and have them hold
+    their disks and addresses for the whole grace period, for free. Returns how many
+    were deleted.
+    """
+    max_count = dead_instances.max_suspended_per_father()
+    max_disk = dead_instances.max_suspended_disk_bytes_per_father()
+    if not max_count and not max_disk:
+        return 0
+    try:
+        rows = _reclaimable_suspensions(father_id)
+    except Exception as e:
+        log.LOGGER(f"Error reading the suspended instances of {father_id}: {e}")
+        return 0
+    count = len(rows)
+    disk = sum(int(row.get("disk_space") or 0) for row in rows)
+    deleted = 0
+    for row in rows:
+        over_count = bool(max_count) and count > max_count
+        over_disk = bool(max_disk) and disk > max_disk
+        if not (over_count or over_disk):
+            break
+        if _reclaim(row, "its father holds more suspended instances than the node allows"):
+            deleted += 1
+        count -= 1
+        disk -= int(row.get("disk_space") or 0)
+    return deleted
+
+
+def reclaim_suspended_disk(still_short: Callable[[], bool]) -> int:
+    """Delete suspended instances out of balance, oldest first, while ``still_short()``.
+
+    What a launch or a revive refused for disk does before it gives up: the disk of an
+    instance nobody pays for goes before work that is paid for is turned away. Returns
+    how many were deleted.
+    """
+    deleted = 0
+    try:
+        rows = _reclaimable_suspensions()
+    except Exception as e:
+        log.LOGGER(f"Error reading the suspended instances: {e}")
+        return 0
+    for row in rows:
+        if not still_short():
+            break
+        if _reclaim(row, "a launch needs its disk"):
+            deleted += 1
+    return deleted
+
+
+def reclaim_suspended_address() -> bool:
+    """Delete the oldest suspended instance out of balance, for a launch that found no free
+    address. True if one was deleted, and its address is free."""
+    try:
+        rows = _reclaimable_suspensions()
+    except Exception as e:
+        log.LOGGER(f"Error reading the suspended instances: {e}")
+        return False
+    return any(_reclaim(row, "a launch needs its address") for row in rows[:1])
 
 
 DEAD_SWEEP_INTERVAL_S = 3600
