@@ -485,7 +485,13 @@ def revive_suspended_instances(now: Optional[float] = None) -> int:
 
 
 def maintain_vmachines(debug_mode: bool=False):
+    # The instances this sweep found without their VM. Each is suspended or stopped by
+    # `handle_internal_failure` before the charge below, and neither is charged a tick:
+    # a suspended instance is charged nothing, and a dead one has settled already.
+    lost_this_sweep = set()
+
     def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
+        lost_this_sweep.add(vmachine_id)
         _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
         # Revived if it can be (issue #594): it still has MU, so it stays afloat, and
         # what it wrote to its disk is not lost with the VM.
@@ -523,7 +529,9 @@ def maintain_vmachines(debug_mode: bool=False):
 
         if debug_mode: log.LOGGER(f"Checking vmachine: {vmachine_id}")
         vm_maintain(vmachine_id=vmachine_id, debug_mode=debug_mode, remove_and_penalize=remove_and_penalize_vmachine)
-        
+        if vmachine_id in lost_this_sweep:
+            continue
+
         try:
             sys_req = sc.get_sys_req(id=vmachine_id)
         except Exception as e:

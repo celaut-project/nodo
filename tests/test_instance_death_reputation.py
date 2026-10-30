@@ -34,6 +34,7 @@ class InstanceDeathReputationTests(unittest.TestCase):
         self.handle = MagicMock()
 
     def _local_tick(self, vm_maintain=None, spend_ok=True, grace=0):
+        self.spend = MagicMock(return_value=spend_ok)
         with patch.object(maintain.sc, "get_running_internal_containers_ids", return_value=["vm-1"]), \
              patch.object(maintain.dead_instances, "suspended_grace_seconds", return_value=grace), \
              patch.object(maintain, "suspend_instance", self.suspend), \
@@ -41,7 +42,7 @@ class InstanceDeathReputationTests(unittest.TestCase):
              patch.object(maintain.sc, "get_sys_req", return_value=dict(SYS_REQ)), \
              patch.object(maintain.sc, "record_instance_consumption"), \
              patch.object(maintain, "vm_maintain", side_effect=vm_maintain), \
-             patch.object(maintain, "spend_mu", return_value=spend_ok), \
+             patch.object(maintain, "spend_mu", self.spend), \
              patch.object(maintain, "stop_instance", self.stop), \
              patch.object(maintain, "system_scarcity", return_value=IDLE), \
              patch.object(maintain, "_reputation_interface", return_value=self.reputation), \
@@ -99,6 +100,13 @@ class InstanceDeathReputationTests(unittest.TestCase):
             token="vm-1", reason=dead_instances.GUEST_PANIC
         )
         self.stop.assert_not_called()
+
+    def test_the_pass_that_finds_the_machine_lost_does_not_charge_it(self):
+        # Suspended or stopped by `handle_internal_failure`: either way it has no VM to
+        # pay for in this tick (F9 of the review of #595).
+        self._local_tick(vm_maintain=self._the_virtualizer_finds_it_dead(None))
+        self.handle.assert_called_once()
+        self.spend.assert_not_called()
 
     def test_a_charge_that_works_scores_nothing(self):
         self._local_tick(spend_ok=True)
