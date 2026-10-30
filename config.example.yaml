@@ -346,6 +346,12 @@ instances:
   # default is 7 days. 0 turns the wait off: the instance dies at once and its disk
   # goes. `nodo burnall` deletes these disks whatever this says.
   SUSPENDED_GRACE_SECONDS: 604800
+  # An instance whose VM went down while it had MU is started again on its own disk,
+  # for as long as it has MU. One that cannot be started at all (its service is gone
+  # from the registry, the host has no room for it) is stopped, with a refund, once its
+  # revives have failed for this many seconds in a row. The default is 24 hours. 0
+  # stops it at the first failure.
+  REVIVE_FAILURE_GRACE_SECONDS: 86400
 
 # The ledger of balance movements (issue #570): one row for each change of the balance
 # of a client or an instance, which its owner reads with GetBalanceStatement.

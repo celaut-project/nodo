@@ -200,7 +200,8 @@ TABLES = {
             suspended_reason TEXT DEFAULT NULL,
             revive_count INTEGER NOT NULL DEFAULT 0,
             last_revive_reason TEXT DEFAULT NULL,
-            last_revived_at DATETIME DEFAULT NULL
+            last_revived_at DATETIME DEFAULT NULL,
+            revive_failing_since DATETIME DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -940,6 +941,9 @@ def create_tables(cursor):
         "revive_count": "INTEGER NOT NULL DEFAULT 0",
         "last_revive_reason": "TEXT DEFAULT NULL",
         "last_revived_at": "DATETIME DEFAULT NULL",
+        # When the first of the revives that failed in a row failed, NULL once one
+        # works: what `instances.REVIVE_FAILURE_GRACE_SECONDS` counts from.
+        "revive_failing_since": "DATETIME DEFAULT NULL",
     })
     ensure_columns(cursor, "delegated_instances", {
         "launched_at": "DATETIME DEFAULT NULL",

@@ -378,6 +378,28 @@ class ResumeRowTests(unittest.TestCase):
         self.assertEqual((row[0], row[1]), (2, dead_instances.GUEST_PANIC))
         self.assertIsNotNone(row[2])
 
+    def test_the_first_failed_revive_is_kept_until_one_works(self):
+        self.sc.suspend_local_instance("a", dead_instances.PROCESS_LOST)
+        connection = SQLConnection._connection
+        connection.execute("UPDATE local_instances SET revive_failing_since = "
+                           "datetime('now', '-300 seconds') WHERE id = 'a'")
+        self.sc.note_failed_revive("a")     # a later failure does not move the start
+        failing_for = self.sc.get_suspended_local_instances()[0]["revive_failing_for_s"]
+        self.assertGreaterEqual(failing_for, 300)
+        self.sc.resume_local_instance("a")
+        self.assertIsNone(connection.execute(
+            "SELECT revive_failing_since FROM local_instances WHERE id = 'a'").fetchone()[0])
+
+    def test_a_revive_that_raises_is_recorded_in_the_row(self):
+        self.sc.suspend_local_instance("a", dead_instances.PROCESS_LOST)
+        maintain._revive_not_before.clear()
+        with mock.patch.object(maintain, "sc", self.sc), \
+                mock.patch.object(maintain, "_can_pay_a_tick", return_value=True), \
+                mock.patch.object(maintain, "system_scarcity", return_value={}), \
+                mock.patch.object(maintain, "revive_instance", side_effect=RuntimeError("gone")):
+            maintain.revive_suspended_instances(now=0.0)
+        self.assertIsNotNone(self.sc.get_suspended_local_instances()[0]["revive_failing_for_s"])
+
     def test_resuming_a_running_or_dead_instance_does_nothing(self):
         self.assertFalse(self.sc.resume_local_instance("a"))
         self.sc.suspend_local_instance("a")

@@ -468,6 +468,10 @@ def revive_suspended_instances(now: Optional[float] = None) -> int:
                 _revived_at[token] = time.monotonic()
                 log.LOGGER(f"Instance {token} is running again.")
         except Exception as e:
+            try:
+                sc.note_failed_revive(token)
+            except Exception as db_error:
+                log.LOGGER(f"Could not record the failed revive of {token}: {db_error}")
             _revive_failures[token] = _revive_failures.get(token, 0) + 1
             wait = revive_backoff_seconds(_revive_failures[token])
             _revive_not_before[token] = now + wait
@@ -1740,16 +1744,31 @@ def reap_expired_suspensions() -> int:
     it was suspended for, and its disk and address are released: `out_of_balance`, or the
     internal failure (`process_lost`, `guest_panic`) of one whose VM went down with less
     than a tick left, which was never revived for lack of MU. One that holds enough
-    to pay a tick again is not touched, however long it has been suspended: it is waiting
-    to be started, not to be deleted. One that holds something, but not that much, is
-    still out of balance -- it would be suspended again on the next tick -- and goes too.
-    Returns the number it deleted.
+    to pay a tick again is waiting to be started, not to be deleted, and its own grace is
+    `instances.REVIVE_FAILURE_GRACE_SECONDS`, counted from the first of its revives that
+    failed: one that can never start (its service is gone from the registry, the host has
+    no room for it) would otherwise hold its disk, address and name, and its father's
+    deposit, for ever. It is stopped with a refund. One that holds something, but not
+    enough for a tick, is still out of balance -- it would be suspended again on the next
+    tick -- and goes too. Returns the number it deleted.
     """
     deleted = 0
     try:
         grace = dead_instances.suspended_grace_seconds()
+        failing_grace = dead_instances.revive_failure_grace_seconds()
         scarcity = None
         for row in sc.get_suspended_local_instances():
+            failing_for = row.get("revive_failing_for_s")
+            if failing_for is not None and int(failing_for) >= failing_grace:
+                reason = row.get("suspended_reason") or dead_instances.PROCESS_LOST
+                log.LOGGER(f"Suspended instance {row['id']} ({reason}) has failed to start "
+                           f"for {int(failing_for)}s; stopping it.")
+                try:
+                    if stop_instance(token=row["id"], reason=reason) is not None:
+                        deleted += 1
+                except Exception as e:
+                    log.LOGGER(f"Error stopping suspended instance {row['id']}: {e}")
+                continue
             if int(row.get("suspended_for_s") or 0) < grace:
                 continue
             balance = int(row.get("balance_mu") or 0)

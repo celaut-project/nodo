@@ -99,6 +99,8 @@ TRACEABILITY_COLUMNS = {
         "revive_count": "INTEGER NOT NULL DEFAULT 0",
         "last_revive_reason": "TEXT DEFAULT NULL",
         "last_revived_at": "DATETIME DEFAULT NULL",
+        # Written by every failed revive, read by the reaper.
+        "revive_failing_since": "DATETIME DEFAULT NULL",
     },
     # `peer` is a base table every install already has, so unlike a wholly new table
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
@@ -1293,6 +1295,7 @@ class SQLConnection(metaclass=Singleton):
             SET revive_count = COALESCE(revive_count, 0) + 1,
                 last_revive_reason = suspended_reason,
                 last_revived_at = CURRENT_TIMESTAMP,
+                revive_failing_since = NULL,
                 suspended_at = NULL, suspended_reason = NULL
             WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
         ''', (id,))
@@ -1301,13 +1304,28 @@ class SQLConnection(metaclass=Singleton):
             _local_capacity_changed()
         return resumed
 
+    def note_failed_revive(self, id: str) -> None:
+        """Record that a revive of a suspended instance failed. The first failure of a
+        run of them is kept: the grace of `instances.REVIVE_FAILURE_GRACE_SECONDS` counts
+        from it, and a revive that works clears it (`resume_local_instance`)."""
+        self._execute('''
+            UPDATE local_instances
+            SET revive_failing_since = COALESCE(revive_failing_since, CURRENT_TIMESTAMP)
+            WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
+        ''', (id,))
+
     def get_suspended_local_instances(self) -> List[dict]:
         """The suspended local instances, oldest suspension first, with their balance,
-        why they are suspended and how many seconds ago each was suspended."""
+        why they are suspended, how many seconds ago each was suspended and, for one
+        whose revives fail, how many seconds ago the first of them failed (else None)."""
         result = self._execute('''
             SELECT id, name, father_id, balance_mu, suspended_at, suspended_reason,
                    CAST(strftime('%s', 'now') AS INTEGER)
-                       - CAST(strftime('%s', suspended_at) AS INTEGER) AS suspended_for_s
+                       - CAST(strftime('%s', suspended_at) AS INTEGER) AS suspended_for_s,
+                   CASE WHEN revive_failing_since IS NULL THEN NULL
+                        ELSE CAST(strftime('%s', 'now') AS INTEGER)
+                             - CAST(strftime('%s', revive_failing_since) AS INTEGER)
+                   END AS revive_failing_for_s
             FROM local_instances
             WHERE killed_at IS NULL AND suspended_at IS NOT NULL
             ORDER BY suspended_at, id
