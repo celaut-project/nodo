@@ -349,6 +349,14 @@ The default balance is what buys runtime, and it is derived from the requested r
 instance and an 8 GiB one no longer start with the same funding. The maintenance ticks
 then spend that balance down.
 
+A tick charges a local instance for the seconds since its last charge, not for a fixed
+`MANAGER_ITERATION_TIME`: a pass of the manager lasts as long as its work does (a revive
+waits for a guest's boot), and the time over the interval used to be unbilled. It charges
+at least one interval, which is what the first charge after a launch, a revive or a
+restart of the daemon is, and at most six (`maintain.LOCAL_TICK_MAX_INTERVALS`), so that a
+host that stalled does not bill a span in which no guest ran. The `maintenance` movement
+carries the seconds it priced, which is what the father checks it against (#570).
+
 With `pricing.MAX_PRICE_VOLATILITY` on, the hours are priced at the launch multiplier times
 the bound (see [above](#bounding-the-price-of-a-running-instance)): twice the price at an
 idle node with the shipped `2.0`. No tick can charge more, so a price rise cannot stop the
