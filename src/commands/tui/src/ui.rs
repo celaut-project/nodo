@@ -1963,6 +1963,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
                 },
             ),
             metric_line("Service", instance.service.clone()),
+            metric_line("State", state_detail(instance)),
             // Spelled out rather than shortened: the card is where an operator
             // finds out *what kind* of requester this is, which the table's narrow
             // cell can only hint at.
@@ -2023,6 +2024,34 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         detail,
         series(0),
     );
+}
+
+/// The `State` line: whether the VM runs, and how often the node started it again on
+/// its own disk (issue #594). The count is what makes a crash loop visible: between two
+/// turns the instance is back with the same id and address, and nothing else changes.
+fn state_detail(instance: &Instance) -> String {
+    if !instance.is_local() {
+        return "the owning peer's to report".to_string();
+    }
+    let revive = &instance.revive;
+    let state = match revive.suspended.as_deref() {
+        None => "running".to_string(),
+        Some("") => "suspended • VM stopped, disk kept".to_string(),
+        Some(reason) => format!("suspended ({reason}) • VM stopped, disk kept"),
+    };
+    if revive.count == 0 {
+        return state;
+    }
+    let last = match (&revive.last_reason, revive.last_age_secs) {
+        (Some(reason), Some(secs)) => format!(
+            ", last after {reason} {} ago",
+            format_duration_compact(Some(secs as f64))
+        ),
+        (Some(reason), None) => format!(", last after {reason}"),
+        (None, Some(secs)) => format!(", last {} ago", format_duration_compact(Some(secs as f64))),
+        (None, None) => String::new(),
+    };
+    format!("{state} • revived {}×{last}", revive.count)
 }
 
 /// The `Started` line: how long the instance has been up, and what is left of its
@@ -7286,9 +7315,28 @@ mod tests {
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                revive: crate::app::InstanceRevive::default(),
                 age_secs: None,
                 client: crate::app::InstanceClient::None,
             }
+        }
+
+        /// A crash loop shows on the card (F6 of the review of #595): the instance is
+        /// back with the same id after each turn, and only the count grows.
+        #[test]
+        fn the_state_line_shows_the_suspension_and_the_revives() {
+            use super::super::state_detail;
+            let mut item = instance(None, InstanceUsage::default());
+            assert_eq!(state_detail(&item), "running");
+            item.revive = crate::app::InstanceRevive {
+                suspended: Some("process_lost".to_string()),
+                count: 3,
+                last_reason: Some("guest_panic".to_string()),
+                last_age_secs: Some(90),
+            };
+            let text = state_detail(&item);
+            assert!(text.starts_with("suspended (process_lost)"), "{text}");
+            assert!(text.contains("revived 3×, last after guest_panic"), "{text}");
         }
 
         /// A raw percentage is ambiguous on its own: 180% is nearly idle on 4 vCPUs and
@@ -7396,6 +7444,7 @@ mod tests {
             consumption_age_secs: Some(45.0),
             energy_watts: Some(12.0),
             energy_share: Some(0.3),
+            revive: crate::app::InstanceRevive::default(),
             age_secs: Some(7_200.0),
             client: crate::app::InstanceClient::Client("client-9f2".to_string()),
         }]);
@@ -8329,6 +8378,7 @@ mod tests {
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                revive: crate::app::InstanceRevive::default(),
                 age_secs: None,
                 client: crate::app::InstanceClient::None,
             }

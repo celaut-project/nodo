@@ -1016,6 +1016,7 @@ mod tests {
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                revive: crate::app::InstanceRevive::default(),
                 age_secs: None,
                 client: InstanceClient::None,
             }
