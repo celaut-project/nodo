@@ -8107,8 +8107,13 @@ fn get_delegated_instances(
     } else {
         ""
     };
+    let suspended = if column_exists(connection, "delegated_instances", "suspended_at") {
+        "suspended_at"
+    } else {
+        "NULL"
+    };
     let mut statement = connection.prepare(&format!(
-        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances{alive}"
+        "SELECT id, peer_id, service_id, father_id, {age}, {suspended} FROM delegated_instances{alive}"
     ))?;
     let instances = statement
         .query_map([], |row| {
@@ -8125,6 +8130,7 @@ fn get_delegated_instances(
                 peer_id
             };
             let age_secs: Option<i64> = row.get::<_, Option<i64>>(4)?.filter(|secs| *secs >= 0);
+            let suspended_at: Option<String> = row.get(5)?;
             Ok(Instance {
                 id,
                 name: String::new(),
@@ -8154,7 +8160,12 @@ fn get_delegated_instances(
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
-                revive: crate::app::InstanceRevive::default(),
+                // Suspended on the peer that runs it (issue #594): this node charges
+                // nothing for it until the peer runs it again.
+                revive: InstanceRevive {
+                    suspended: suspended_at.map(|_| "on the peer".to_string()),
+                    ..InstanceRevive::default()
+                },
             })
         })?
         .collect();

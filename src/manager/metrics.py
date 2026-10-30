@@ -49,6 +49,9 @@ def __get_metrics_internal(id: str) -> celaut_pb2.Metrics:
     """
     return celaut_pb2.Metrics(
         balance=to_amount(sc.get_instance_balance(id=id)),
+        # Its father, when it delegated it here, stops charging while it is (F1 of the
+        # review of #595): nothing runs, and this node charges it nothing either.
+        suspended=sc.is_local_instance_suspended(id=id),
     )
 
 
@@ -88,6 +91,12 @@ def _in_local_mu(peer_id: str, peer_balance_mu: int) -> int:
         logger(f'Cannot express the balance on {peer_id} in our own MU.')
         return 0
     return local
+
+
+def instance_metrics_on_peer(peer_id: str, token: str) -> celaut_pb2.Metrics:
+    """The ``Metrics`` of a delegated instance as the peer keeps them: its balance, in the
+    *peer's* MU, and whether the peer has it suspended. Raises as `instance_balance_on_peer`."""
+    return __get_metrics_external(peer_id=peer_id, token=token)
 
 
 def instance_balance_on_peer(peer_id: str, token: str) -> int:
@@ -216,5 +225,7 @@ def get_metrics(token: str) -> celaut_pb2.Metrics:
         # report the balance of an account that is not the client's, on a scale that
         # is not his either.
         return celaut_pb2.Metrics(
-            balance=to_amount(sc.get_delegated_balance(token=token))
+            balance=to_amount(sc.get_delegated_balance(token=token)),
+            # Suspended on the peer that runs it, which is what this node reports on.
+            suspended=sc.is_delegated_suspended(token=token),
         )

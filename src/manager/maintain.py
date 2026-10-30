@@ -15,7 +15,7 @@ from src.manager import balance_statement, orphan_starts, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, top_up_unlimited_clients, handle_internal_failure, revive_instance, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
-from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
+from src.manager.metrics import balance_on_other_peer, instance_metrics_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
 from src.reputation_system.onchain_indexer import tick as onchain_reputation_tick
@@ -982,6 +982,9 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
 
     statement, error, asked, checked = None, None, False, False
     rows = ()
+    # Whether the peer has the child suspended, from its ``Metrics``; None when they
+    # were not read. A peer from before the field says False.
+    suspended = None
     if force_statement or mark.seq is None or sc.child_statement_due(
             token, ledger.statement_read_every_ticks(MANAGER_ITERATION_TIME)):
         try:
@@ -1033,7 +1036,8 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             verified_sent = sent
     else:
         try:
-            balance_now = instance_balance_on_peer(peer_id=peer_id, token=token)
+            metrics = instance_metrics_on_peer(peer_id=peer_id, token=token)
+            balance_now, suspended = from_amount(metrics.balance), bool(metrics.suspended)
         except Exception as metrics_error:
             # Neither answer: the peer is down, or it does not know the instance. The
             # caller tells the two apart.
@@ -1052,6 +1056,15 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
         if debug_mode:
             log.LOGGER(f"Charging {row.get('id')} from the balance on {peer_id}, not from its statement.")
 
+    if suspended is None:
+        # A tick that read the statement reads the flag too: a child whose statement is
+        # read at every tick would never be seen suspended otherwise.
+        try:
+            suspended = bool(instance_metrics_on_peer(peer_id=peer_id, token=token).suspended)
+        except Exception as e:
+            if debug_mode:
+                log.LOGGER(f"Could not read whether {row.get('id')} is suspended on {peer_id}: {e}")
+
     owed = verified + (new.balance - balance_now) + (sent - verified_sent)
     charge = owed - charged
     if not checked:
@@ -1062,7 +1075,7 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
     return charge, {
         "peer_balance_mu": new.balance, "seq": new.seq, "hash": new.hash or None, "ts": new.ts,
         "verified_consumption": verified, "verified_father_net": verified_sent,
-        "charged_delta": charge, "rows": rows,
+        "charged_delta": charge, "rows": rows, "peer_suspended": suspended,
     }
 
 
@@ -1201,7 +1214,7 @@ def _unmoved_state(row: dict) -> dict:
 
 
 def settle_child(row: dict, charge_peer_mu: int, state: dict, *, stop_if_short: bool = True,
-                 debug_mode: bool = False) -> bool:
+                 charge_time: bool = True, debug_mode: bool = False) -> bool:
     """Charge the child what this node advertises for the time since the last charge, and
     write what the peer charged this node.
 
@@ -1219,7 +1232,9 @@ def settle_child(row: dict, charge_peer_mu: int, state: dict, *, stop_if_short: 
 
     Writes the rows, the totals and the mark in one transaction (``settle_delegated_tick``).
     With ``stop_if_short`` an instance whose deposit does not cover the charge is stopped,
-    as a local one is. Returns True.
+    as a local one is. ``charge_time=False`` is for a child that the peer has suspended:
+    nothing runs, so the time is not charged, and ``charged_until`` still moves, so that
+    the time it was suspended is never charged later. Returns True.
     """
     peer_id, token, vmachine_id = row.get('peer_id'), row['token'], row.get('id')
     state = dict(state)
@@ -1228,7 +1243,7 @@ def settle_child(row: dict, charge_peer_mu: int, state: dict, *, stop_if_short: 
     since = row.get('charged_until')
     seconds = max(0.0, now - float(since)) if since else 0.0
     state["charged_until"] = now
-    charge_mu = _delegated_price(row, _shape(row) or {}, seconds)
+    charge_mu = _delegated_price(row, _shape(row) or {}, seconds) if charge_time else 0
     detail = statement_check.tick_detail(row, seconds)
 
     movements = []
@@ -1401,18 +1416,63 @@ def maintain_delegated_instances(debug_mode: bool = False):
                         log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
                 else:
                     # The time is charged without the peer: our price does not need it.
-                    # What the peer charged waits for the next reading.
+                    # What the peer charged waits for the next reading. One that the peer
+                    # had suspended at the last reading is still taken for suspended.
                     if debug_mode:
                         log.LOGGER(f"Peer {peer_id} is unreachable; charging the delegated "
                                    f"instance {vmachine_id} for its time only.")
-                    settle_child(row, 0, _unmoved_state(row), debug_mode=debug_mode)
+                    settle_child(row, 0, _unmoved_state(row), debug_mode=debug_mode,
+                                 charge_time=not row.get('suspended_at'))
                 continue
 
             charge_peer_mu, state = read
-            settle_child(row, charge_peer_mu, state, debug_mode=debug_mode)
+            if _follow_peer_suspension(row, state.get("peer_suspended")):
+                continue
+            settle_child(row, charge_peer_mu, state, debug_mode=debug_mode,
+                         charge_time=not _suspended_on_peer(row, state))
         finally:
             lock.release()
     forget_delegation_locks(listed.get('id') for listed in delegated)
+
+
+def _suspended_on_peer(row: dict, state: dict) -> bool:
+    """Whether the peer has the child suspended: what it said now, or, when it was not
+    asked, what the row says."""
+    said = state.get("peer_suspended")
+    return bool(row.get('suspended_at')) if said is None else bool(said)
+
+
+def _follow_peer_suspension(row: dict, said: Optional[bool]) -> bool:
+    """Mirror on our row what the peer says of the child, and stop it once our grace ends.
+
+    A peer suspends a child whose deposit there ran out (issue #594) -- its price rose
+    over the quote, say -- and the child still answers ``Metrics`` and its statement. The
+    parent used to go on charging the father for it, every tick, for as long as the
+    peer's grace or the father's deposit lasted, with nothing running (F1 of the review
+    of #595). While the peer says so the row is suspended and charged nothing; the
+    father's top-up reaches the peer (``modify_deposit``), which starts it again, and the
+    row follows. After `instances.SUSPENDED_GRACE_SECONDS` here it is stopped, with a
+    refund, whatever the peer does. ``said`` None (not asked) changes nothing.
+
+    True when it stopped the instance: the tick has nothing left to settle for it.
+    """
+    token, vmachine_id, peer_id = row['token'], row.get('id'), row.get('peer_id')
+    suspended = bool(row.get('suspended_at'))
+    suspended_for = int(row.get('suspended_for_s') or 0)
+    if said is not None and bool(said) != suspended:
+        if sc.set_delegated_suspended(token, bool(said)):
+            log.LOGGER(f"Peer {peer_id} has {'suspended' if said else 'resumed'} the delegated "
+                       f"instance {vmachine_id}; {'not charging it' if said else 'charging it again'}.")
+        suspended, suspended_for = bool(said), 0
+    if not suspended or suspended_for < dead_instances.suspended_grace_seconds():
+        return False
+    log.LOGGER(f"The delegated instance {vmachine_id} has been suspended on {peer_id} for the "
+               f"whole grace period; stopping it.")
+    try:
+        stop_instance(token=vmachine_id, reason=dead_instances.OUT_OF_BALANCE)
+    except Exception as e:
+        log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {e}")
+    return True
 
 
 def enforce_activity_window(debug_mode: bool = False):

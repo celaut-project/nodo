@@ -1141,6 +1141,9 @@ nodo tunnel_close <tunnel id> --json       # and close one
   while it runs), `revive_count`, and the `last_revive_reason` and `last_revived_at`
   of the last time its VM was started again on its own disk. The printed list shows
   them as `State: suspended (<reason>)` and `Revives: <n> (last: <reason>, <time>)`.
+  A delegated instance carries `suspended_at` too: set while the peer has it suspended,
+  `State: suspended on the peer`. This node charges its father nothing then, and stops
+  it, with a refund, once it has been suspended for `instances.SUSPENDED_GRACE_SECONDS`.
 
 - **earnings `[--json]`**
   The EARNINGS page's money half: what each payment network brought in over the

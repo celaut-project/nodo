@@ -2031,7 +2031,10 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
 /// turns the instance is back with the same id and address, and nothing else changes.
 fn state_detail(instance: &Instance) -> String {
     if !instance.is_local() {
-        return "the owning peer's to report".to_string();
+        return match instance.revive.suspended {
+            Some(_) => "suspended on the peer • not charged until it runs again".to_string(),
+            None => "the owning peer's to report".to_string(),
+        };
     }
     let revive = &instance.revive;
     let state = match revive.suspended.as_deref() {

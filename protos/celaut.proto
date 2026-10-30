@@ -676,6 +676,11 @@ message Metrics {
     // The balance, in MU. For an instance token, the balance of the instance. For a
     // client_id, the balance of the client.
     Amount balance = 1;
+    // True if the instance is suspended: its virtual machine is stopped and the node
+    // keeps its disk, its address and its balance. The node does not charge an instance
+    // while it is suspended. A deposit that pays one maintenance period starts it again.
+    // False for a client_id, and for an instance that runs.
+    bool suspended = 2;
 }
 
 // The request of GetBalanceStatement. The caller asks for a range of movements by their

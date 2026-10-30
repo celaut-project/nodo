@@ -122,6 +122,8 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'quote_max_maintenance_cost': None,
                 'quote_maintenance_seconds_loop': None,
                 'quote_variance': None,
+                'suspended_at': None,
+                'suspended_for_s': None,
             },
         )
 
