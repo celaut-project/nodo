@@ -25,6 +25,11 @@ env_manager = ConfigManager()
 
 DIR_NAME = "instances_dead"
 LOG_NAMES = ("stdout", "stderr", "serial")
+# What a suspension leaves of the run that just ended (issue #594): each log is moved to
+# ``<log>.1`` before the instance is revived, so the boot that follows does not write
+# over the panic or the exit that caused the revive. Archived as ``<name>.previous.log``.
+PREVIOUS_SUFFIX = ".1"
+PREVIOUS = "previous"
 DEFAULT_RETENTION_DAYS = 14
 DEFAULT_MAX_ROWS = 200
 DEFAULT_LOG_MAX_BYTES = 1024 * 1024
@@ -117,6 +122,9 @@ def archive_runtime(instance_id: str, state: Dict[str, Any]) -> None:
             source = state.get(f"{name}_log")
             if isinstance(source, str) and source.strip():
                 _tail_copy(Path(source), target / f"{name}.log", limit)
+                previous = Path(source + PREVIOUS_SUFFIX)
+                if previous.is_file():
+                    _tail_copy(previous, target / f"{name}.{PREVIOUS}.log", limit)
         state_file = target / "runtime_state.json"
         state_file.write_text(json.dumps(state, indent=2, default=str))
         state_file.chmod(0o600)
@@ -150,11 +158,48 @@ def list_logs(instance_id: str) -> Dict[str, Path]:
         base = dead_dir(instance_id)
     except ValueError:
         return {}
+    names = [name for log_name in LOG_NAMES for name in (log_name, f"{log_name}.{PREVIOUS}")]
     return {
         name: base / f"{name}.log"
-        for name in LOG_NAMES
+        for name in names
         if (base / f"{name}.log").is_file()
     }
+
+
+def keep_previous_logs(state: Dict[str, Any]) -> None:
+    """Move each log of a run that ended to ``<log>.1``, over the one before.
+
+    For a VM that stops while its instance stays (a suspension): the next boot opens its
+    logs afresh, and the run that failed is the one the operator needs to read. Only the
+    last failed run is kept beside the disk, so a crash loop does not fill it. Never
+    raises.
+    """
+    for name in LOG_NAMES:
+        source = state.get(f"{name}_log")
+        if not (isinstance(source, str) and source.strip()):
+            continue
+        try:
+            if Path(source).is_file():
+                Path(source).replace(source + PREVIOUS_SUFFIX)
+        except OSError as e:
+            log.LOGGER(f"Could not keep the log {source} of the run that ended: {e}")
+
+
+def logs_left_in(runtime_dir: Path) -> Dict[str, Any]:
+    """The log paths of a runtime directory whose state file is gone, as a state has them.
+
+    A suspension deletes the state file and keeps the directory, and the logs in it are
+    named ``<backend>.<name>.log``. A stop that finds no state archives these.
+    """
+    found: Dict[str, Any] = {}
+    try:
+        for name in LOG_NAMES:
+            matches = sorted(runtime_dir.glob(f"*.{name}.log"))
+            if matches:
+                found[f"{name}_log"] = str(matches[0])
+    except OSError:
+        pass
+    return found
 
 
 def remove_dirs(instance_ids: Iterable[str]) -> None:
