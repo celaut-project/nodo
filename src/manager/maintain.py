@@ -364,6 +364,30 @@ _revive_not_before: Dict[str, float] = {}
 _revived_at: Dict[str, float] = {}
 
 
+# When each running local instance was last charged (`time.monotonic()`). A pass of the
+# manager takes longer than `MANAGER_ITERATION_TIME` whenever its work does -- a revive
+# waits for a guest's boot, seconds on KVM and more under QEMU/TCG -- and the sleep comes
+# after the work, so a tick of fixed length left that time unbilled for every instance
+# that ran through it (F7 of the review of #595). The tick charges what elapsed since
+# the instance's last charge instead, as the delegated tick does with `charged_until`.
+# Never less than one interval, which is what the first charge after a launch, a revive
+# or a restart of the daemon is; never more than `LOCAL_TICK_MAX_INTERVALS` of them, so
+# that a host that stalled (a suspend to RAM, a stopped daemon) does not bill a span in
+# which no guest ran. In memory on purpose, like the backoff: after a restart the first
+# tick is one interval.
+LOCAL_TICK_MAX_INTERVALS = 6
+_local_charged_at: Dict[str, float] = {}
+
+
+def _seconds_to_charge(vmachine_id: str, now: float) -> int:
+    """The seconds the tick charges ``vmachine_id`` for, read at ``now``."""
+    last = _local_charged_at.get(vmachine_id)
+    if last is None:
+        return MANAGER_ITERATION_TIME
+    elapsed = int(round(now - last))
+    return max(MANAGER_ITERATION_TIME, min(elapsed, LOCAL_TICK_MAX_INTERVALS * MANAGER_ITERATION_TIME))
+
+
 # At most this many instances are started again in one pass of the manager. A revive waits
 # for the guest's boot, and after a host reboot every instance is waiting to be revived:
 # started all at once in the one thread that also charges, sweeps and settles, they would
@@ -534,6 +558,10 @@ def maintain_vmachines(debug_mode: bool=False):
             _instances_penalised.difference_update(
                 {key for key in _instances_penalised if key[0] not in alive}
             )
+    # A suspended or dead instance is not charged; when it runs again, its first charge
+    # is one interval.
+    for token in [token for token in _local_charged_at if token not in set(live_instances)]:
+        _local_charged_at.pop(token, None)
 
     # Summed as the sweep goes, so the hourly history costs one addition rather than a
     # second pass over the instances.
@@ -589,6 +617,8 @@ def maintain_vmachines(debug_mode: bool=False):
             sys_req = dict(sys_req)
             sys_req['disk_space'] = resolved_disk
 
+        charged_at = time.monotonic()
+        seconds = _seconds_to_charge(vmachine_id, charged_at)
         charge_mu = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
                 mem_limit=sys_req['mem_limit'] or 0,
@@ -596,7 +626,7 @@ def maintain_vmachines(debug_mode: bool=False):
                 cpu_period=sys_req['cpu_period'] or 0,
                 cpu_quota=sys_req['cpu_quota'] or 0,
             ),
-            seconds=MANAGER_ITERATION_TIME,
+            seconds=seconds,
             scarcity=scarcity,
             arch=_row_arch(sys_req),
             # What this instance was launched at, so that a rise of the load since
@@ -605,13 +635,14 @@ def maintain_vmachines(debug_mode: bool=False):
             launch_bp=_row_launch_bp(sys_req),
         )
         if debug_mode:
-            log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {MANAGER_ITERATION_TIME}s")
+            log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {seconds}s")
 
         if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode,
                         kind=ledger.MAINTENANCE,
                         # What the father checks this charge against (#570): the
                         # resources and the seconds it priced.
-                        detail=statement_check.tick_detail(sys_req, MANAGER_ITERATION_TIME)):
+                        detail=statement_check.tick_detail(sys_req, seconds)):
+            _local_charged_at.pop(vmachine_id, None)
             # No penalty for the service here. The father holds the balance of the
             # instance, and he can empty it on purpose with small top-ups (see
             # "Limit what an instance can spend" in docs/CONCEPTS.md). A death that the
@@ -643,7 +674,8 @@ def maintain_vmachines(debug_mode: bool=False):
             # paid: sample it for the burn-rate figure. Sourced from charge_mu (not a
             # balance diff) so a top-up between ticks never reads as negative spend. The
             # dev-vmachine skip above means no sample is recorded when nothing is charged.
-            sc.record_instance_consumption(id=vmachine_id, charge_mu=charge_mu, seconds=MANAGER_ITERATION_TIME)
+            _local_charged_at[vmachine_id] = charged_at
+            sc.record_instance_consumption(id=vmachine_id, charge_mu=charge_mu, seconds=seconds)
             charged_this_tick += int(charge_mu or 0)
             if debug_mode: log.LOGGER(f"Charged {vmachine_id} for the interval it just held.")
 

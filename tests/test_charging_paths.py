@@ -150,6 +150,65 @@ class MaintenanceTickTests(unittest.TestCase):
         )
 
 
+class ElapsedTimeTickTests(unittest.TestCase):
+    """The local tick charges the seconds since the last charge (F7 of the review of
+    #595): a pass that ran long -- a revive waits for a boot -- used to bill one fixed
+    interval for all of it."""
+
+    def setUp(self):
+        from src.manager import maintain
+        self.maintain = maintain
+        maintain._local_charged_at.clear()
+        self.addCleanup(maintain._local_charged_at.clear)
+        self.interval = maintain.MANAGER_ITERATION_TIME
+
+    def test_the_first_charge_is_one_interval(self):
+        self.assertEqual(self.maintain._seconds_to_charge("vm-1", now=1000.0), self.interval)
+
+    def test_a_long_pass_is_charged_for_what_it_lasted(self):
+        self.maintain._local_charged_at["vm-1"] = 1000.0
+        self.assertEqual(self.maintain._seconds_to_charge("vm-1", now=1000.0 + self.interval + 7),
+                         self.interval + 7)
+
+    def test_never_less_than_one_interval_nor_more_than_the_cap(self):
+        self.maintain._local_charged_at["vm-1"] = 1000.0
+        self.assertEqual(self.maintain._seconds_to_charge("vm-1", now=1000.5), self.interval)
+        self.assertEqual(self.maintain._seconds_to_charge("vm-1", now=10 ** 6),
+                         self.maintain.LOCAL_TICK_MAX_INTERVALS * self.interval)
+
+    def test_the_sweep_charges_and_records_the_elapsed_seconds(self):
+        import time
+        maintain = self.maintain
+        maintain._local_charged_at["vm-1"] = time.monotonic() - (self.interval + 7)
+        spend, record = MagicMock(return_value=True), MagicMock()
+        with _config(), \
+             patch.object(maintain.sc, "get_running_internal_containers_ids", return_value=["vm-1"]), \
+             patch.object(maintain.sc, "get_all_internal_containers_ids", return_value=["vm-1"]), \
+             patch.object(maintain.sc, "get_sys_req", return_value=dict(MaintenanceTickTests.SYS_REQ)), \
+             patch.object(maintain.sc, "record_instance_consumption", record), \
+             patch.object(maintain, "vm_maintain"), \
+             patch.object(maintain, "spend_mu", spend), \
+             patch.object(maintain, "system_scarcity", return_value=IDLE), \
+             patch.object(maintain, "_reputation_interface"), \
+             patch.object(maintain, "vm_janitor_cleanup_orphans"):
+            maintain.maintain_vmachines(debug_mode=False)
+        seconds = self.interval + 7
+        self.assertEqual(record.call_args.kwargs["seconds"], seconds)
+        self.assertEqual(spend.call_args.kwargs["detail"],
+                         maintain.statement_check.tick_detail(MaintenanceTickTests.SYS_REQ, seconds))
+        self.assertEqual(spend.call_args.kwargs["amount_mu"],
+                         1_000_000 * seconds // 3600 + 4_000_000 * seconds // 3600
+                         + 100_000 * 10 * seconds // 3600)
+
+    def test_an_instance_that_stops_running_starts_from_one_interval_again(self):
+        maintain = self.maintain
+        maintain._local_charged_at["vm-1"] = 1.0
+        with patch.object(maintain.sc, "get_running_internal_containers_ids", return_value=[]), \
+             patch.object(maintain, "system_scarcity", return_value=IDLE):
+            maintain.maintain_vmachines(debug_mode=False)
+        self.assertNotIn("vm-1", maintain._local_charged_at)
+
+
 class InstanceDeductionTests(unittest.TestCase):
     """`autospec=True` throughout, deliberately.
 
