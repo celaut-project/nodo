@@ -989,6 +989,10 @@ def retire_unmetered_column(cursor) -> None:
     adds the new column, so what the operator chooses afterwards is never undone by a
     later start. On an SQLite too old to drop a column the old one stays, unused, and
     the drop is simply tried again; it is a no-op once the old column is gone.
+
+    One-way: an older checkout writes ``unmetered`` on every new client and fails once
+    the column is gone. docs/INSTALL.md lists it among the migrations that need a backup
+    to go back.
     """
     try:
         columns = [row[1] for row in cursor.execute("PRAGMA table_info(clients)").fetchall()]

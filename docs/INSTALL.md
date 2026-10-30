@@ -503,6 +503,15 @@ as the invoking user, nodo can always stop it — no privileged signal involved.
 "$PY_VENV_BIN" "$TARGET_DIR/nodo.py" migrate
 ```
 
+The daemon runs the same migrations on start, so an upgrade in place needs no step of
+its own. Some of them cannot be undone: once they ran, the database no longer works with
+an older checkout. Back up `storage/database.sqlite` before an upgrade if you may need to
+go back to the version you had.
+
+| Migration | Since | What an older checkout does with the new database |
+|---|---|---|
+| `clients.unmetered` replaced by `clients.unlimited` | #594 | Fails to create any client: `table clients has no column named unmetered`. Restore the backup to go back. |
+
 ## 13) Configure service and wrapper
 
 Create the `systemd` unit from template:
