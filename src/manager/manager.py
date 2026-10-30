@@ -14,6 +14,7 @@ from src.tunneling import delegated_endpoints
 
 from src.utils import logger as log
 from src.utils import dead_instances
+from src.utils.instance_lock import forget as forget_instance_lock, instance_lock
 from src.utils import utils
 from src.utils.bee_client import BeeClient
 from src.routing import registry as routing
@@ -1316,11 +1317,12 @@ def suspend_instance(token: str, reason: str = dead_instances.OUT_OF_BALANCE) ->
     live row with no VM -- which the next tick suspends again. The other order would
     leave a suspended row whose VM is still running, which nothing would ever look at.
     """
-    if not sc.internal_instance_exists(id=token):
-        return False
-    log.LOGGER(f"Suspend instance {token} ({reason}): keeping its disk.")
-    kill(vmachine_id=token, archive=False, keep_disk=True)
-    return sc.suspend_local_instance(token, reason)
+    with instance_lock(token):
+        if not sc.internal_instance_exists(id=token):
+            return False
+        log.LOGGER(f"Suspend instance {token} ({reason}): keeping its disk.")
+        kill(vmachine_id=token, archive=False, keep_disk=True)
+        return sc.suspend_local_instance(token, reason)
 
 
 def handle_internal_failure(token: str, reason: str) -> Optional[object]:
@@ -1358,7 +1360,16 @@ def revive_instance(token: str) -> bool:
 
     The old VM is torn down first, always: a false `process_lost` (#591) must never end
     with two VMs on one disk, and the tap and cgroup the old one held must be free.
+
+    Under the instance's lock, so a stop waits for the boot and then stops the VM that
+    came up. If the row is no longer suspended once the guest is up -- something
+    changed it without the lock -- the new VM is killed, not left running unbilled.
     """
+    with instance_lock(token):
+        return _revive_locked(token)
+
+
+def _revive_locked(token: str) -> bool:
     from src.utils.utils import read_service_from_disk
 
     if not sc.is_local_instance_suspended(id=token):
@@ -1408,7 +1419,11 @@ def revive_instance(token: str) -> bool:
     recorded_ip = sc.get_internal_ip(id=token)
     if recorded_ip and recorded_ip != vm_ip:
         log.LOGGER(f"[WARN] Instance {token} came back on {vm_ip}, not on {recorded_ip}.")
-    sc.resume_local_instance(token)
+    if not sc.resume_local_instance(token):
+        log.LOGGER(f"[WARN] Instance {token} stopped being suspended during its revive; "
+                   f"killing the VM that came up.")
+        kill(vmachine_id=token, archive=False, keep_disk=sc.internal_instance_exists(id=token))
+        return False
     return True
 
 
@@ -1441,7 +1456,20 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
     ``reason`` says why the instance dies. It is recorded in `death_reason`. The
     row stays in the database with `killed_at` set, and a dead instance never
     becomes alive again. A stop on an instance that is already dead does nothing.
+
+    A local instance is stopped under its lock (`instance_lock`): a revive that is
+    booting it finishes first, and the stop then takes down the VM that came up.
     """
+    if not sc.internal_instance_exists(id=token):
+        return _stop_instance(token, credit, reason)
+    with instance_lock(token):
+        refund = _stop_instance(token, credit, reason)
+        if refund is not None:
+            forget_instance_lock(token)
+        return refund
+
+
+def _stop_instance(token: str, credit: bool, reason: str) -> Optional[int]:
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
     reserved_mem_limit = 0
