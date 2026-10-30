@@ -411,19 +411,22 @@ def revive_backoff_seconds(failures: int) -> float:
     return float(min(2 ** (failures - 1), REVIVE_BACKOFF_CAP_S))
 
 
-def _note_instance_down(vmachine_id: str, now: Optional[float] = None) -> None:
+def _note_instance_down(vmachine_id: str, now: Optional[float] = None) -> bool:
     """An instance's VM went down on its own: count it, and say when to try it again.
 
     One that had been running for a while is a fresh failure and starts from zero; one
     that went down soon after its last revive is a crash loop and waits longer each time.
+    Returns True for a fresh failure, False for another turn of a loop.
     """
     now = time.monotonic() if now is None else now
     revived = _revived_at.get(vmachine_id)
-    if revived is not None and now - revived < REVIVE_STABLE_AFTER_S:
-        _revive_failures[vmachine_id] = _revive_failures.get(vmachine_id, 0) + 1
-    else:
+    fresh = not (revived is not None and now - revived < REVIVE_STABLE_AFTER_S)
+    if fresh:
         _revive_failures[vmachine_id] = 0
+    else:
+        _revive_failures[vmachine_id] = _revive_failures.get(vmachine_id, 0) + 1
     _revive_not_before[vmachine_id] = now + revive_backoff_seconds(_revive_failures[vmachine_id])
+    return fresh
 
 
 def revive_suspended_instances(now: Optional[float] = None) -> int:
@@ -492,12 +495,16 @@ def maintain_vmachines(debug_mode: bool=False):
 
     def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
         lost_this_sweep.add(vmachine_id)
+        # One penalty per failure, not per turn of a crash loop: a loss right after a
+        # revive is the same failure again. One that comes after the instance ran for a
+        # while is a new one, and scores again.
+        if _note_instance_down(vmachine_id):
+            _instances_penalised.discard((vmachine_id, Reason.INSTANCE_LOST))
         _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
         # Revived if it can be (issue #594): it still has MU, so it stays afloat, and
         # what it wrote to its disk is not lost with the VM.
         log.LOGGER(f"Instance {vmachine_id} lost its virtual machine ({reason}).")
         try:
-            _note_instance_down(vmachine_id)
             handle_internal_failure(token=vmachine_id, reason=reason)
         except Exception as e:
             log.LOGGER(f"Error prunning container {vmachine_id}: {e}")
@@ -511,10 +518,18 @@ def maintain_vmachines(debug_mode: bool=False):
     # delete the very disk that suspending it kept.
     live_instances = sc.get_running_internal_containers_ids()
     # An id is never reused, so once an instance is gone its entry can go too. Keeps the
-    # set the size of what is running rather than of everything that ever ran.
-    _instances_penalised.difference_update(
-        {key for key in _instances_penalised if key[0] not in set(live_instances)}
-    )
+    # set the size of what is alive rather than of everything that ever ran. A suspended
+    # instance is alive: it keeps its entry, so that the next turn of its crash loop
+    # does not score the same failure again.
+    if _instances_penalised:
+        try:
+            alive = set(sc.get_all_internal_containers_ids())
+        except Exception:
+            alive = None
+        if alive is not None:
+            _instances_penalised.difference_update(
+                {key for key in _instances_penalised if key[0] not in alive}
+            )
 
     # Summed as the sweep goes, so the hourly history costs one addition rather than a
     # second pass over the instances.

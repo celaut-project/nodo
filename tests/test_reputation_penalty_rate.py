@@ -9,6 +9,7 @@ have the same shape whenever pruning fails and the row survives into the next sw
 So each of them fires once per episode: on the way down for a peer (armed again when
 it answers), and once per instance per outcome.
 """
+import time
 import unittest
 from unittest import mock
 
@@ -132,10 +133,77 @@ class InstancePenaltyTests(unittest.TestCase):
 
         with mock.patch.object(maintain_module.sc, "get_running_internal_containers_ids",
                                return_value=[]), \
+                mock.patch.object(maintain_module.sc, "get_all_internal_containers_ids",
+                                  return_value=[]), \
                 mock.patch.object(maintain_module, "system_scarcity", return_value={}):
             maintain_module.maintain_vmachines()
 
         self.assertFalse(maintain_module._instances_penalised)
+
+    def test_a_suspended_instance_keeps_its_entry(self):
+        """Suspended is alive (#594): its VM is not running, but it is the same instance."""
+        maintain_module._penalise_instance_once("instance-1", -100, Reason.INSTANCE_LOST)
+
+        with mock.patch.object(maintain_module.sc, "get_running_internal_containers_ids",
+                               return_value=[]), \
+                mock.patch.object(maintain_module.sc, "get_all_internal_containers_ids",
+                                  return_value=["instance-1"]), \
+                mock.patch.object(maintain_module, "system_scarcity", return_value={}):
+            maintain_module.maintain_vmachines()
+
+        self.assertIn(("instance-1", Reason.INSTANCE_LOST), maintain_module._instances_penalised)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CrashLoopPenaltyTests(unittest.TestCase):
+    """A crash loop is one failure (F8 of the review of #595): the instance is revived
+    and goes down again, and each turn used to score the service once more."""
+
+    def setUp(self):
+        maintain_module._instances_penalised.clear()
+        for table in (maintain_module._revive_failures, maintain_module._revive_not_before,
+                      maintain_module._revived_at):
+            table.clear()
+        self.reputation = mock.MagicMock()
+        for patch in (
+            mock.patch.object(maintain_module, "_reputation_interface", return_value=self.reputation),
+            mock.patch.object(maintain_module.sc, "get_running_internal_containers_ids",
+                              return_value=["instance-1"]),
+            mock.patch.object(maintain_module.sc, "get_all_internal_containers_ids",
+                              return_value=["instance-1"]),
+            mock.patch.object(maintain_module, "system_scarcity", return_value={}),
+            mock.patch.object(maintain_module, "handle_internal_failure"),
+            mock.patch.object(maintain_module, "vm_maintain", side_effect=self._lost),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    @staticmethod
+    def _lost(vmachine_id, debug_mode, remove_and_penalize):
+        remove_and_penalize(vmachine_id=vmachine_id)
+
+    def _turn(self, revived_ago_s):
+        # A pass while it is suspended, with no VM to check, then one after its revive.
+        with mock.patch.object(maintain_module.sc, "get_running_internal_containers_ids",
+                               return_value=[]):
+            maintain_module.maintain_vmachines()
+        maintain_module._revived_at["instance-1"] = time.monotonic() - revived_ago_s
+        maintain_module.maintain_vmachines()
+
+    def test_each_turn_of_a_loop_does_not_score_again(self):
+        maintain_module.maintain_vmachines()
+        for _ in range(3):
+            self._turn(revived_ago_s=5)
+
+        self.reputation.update_vmachine_reputation.assert_called_once_with(
+            vmachine_id="instance-1", amount=-100, reason=Reason.INSTANCE_LOST
+        )
+
+    def test_a_loss_after_it_ran_a_while_is_a_new_failure(self):
+        maintain_module.maintain_vmachines()
+        self._turn(revived_ago_s=maintain_module.REVIVE_STABLE_AFTER_S + 1)
+
+        self.assertEqual(self.reputation.update_vmachine_reputation.call_count, 2)
 
 
 if __name__ == "__main__":
