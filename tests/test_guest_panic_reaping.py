@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from src.utils import dead_instances
     from src.virtualizers.microvm import guest_panic
     from src.virtualizers.microvm import maintain as microvm_maintain
     from src.virtualizers.microvm import members
@@ -94,32 +95,46 @@ class PanickedGuestIsReapedTests(unittest.TestCase):
 
     STATE = {"pid": 555, "serial_log": "/irrelevant-mocked"}
 
-    def _run(self, hypervisor, panic_line, kill_effect=None):
+    def _run(self, hypervisor, panic_line, kill_effect=None, revivable=False):
         removed = []
         kill_kwargs = (
             {"side_effect": kill_effect} if kill_effect else {"return_value": True}
         )
+        # The caller is told why (issue #594): a panic is an internal failure, and the
+        # caller decides whether the instance is revived or stopped.
+        def remove_and_penalize(vmachine_id, reason=None):
+            removed.append(vmachine_id)
+            self.reasons.append(reason)
+
+        self.reasons = []
         with patch.object(microvm_maintain, "load_runtime_state", return_value=dict(self.STATE)), \
              patch.object(microvm_maintain, "_state_is_alive", return_value=True), \
              patch.object(microvm_maintain, "guest_panic_line", return_value=panic_line), \
+             patch.object(microvm_maintain, "_can_be_revived", return_value=revivable), \
              patch.object(microvm_maintain, "kill_vm", **kill_kwargs) as kill_mock:
             microvm_maintain.maintain(
                 hypervisor,
                 vmachine_id="vm-1",
                 debug_mode=False,
-                remove_and_penalize=lambda vmachine_id: removed.append(vmachine_id),
+                remove_and_penalize=remove_and_penalize,
             )
         return kill_mock, removed
 
     def test_ch_kills_the_hypervisor_of_a_panicked_guest(self):
         kill_mock, removed = self._run(members.CH, "Kernel panic - not syncing: x")
-        kill_mock.assert_called_once_with(members.CH, vmachine_id="vm-1")
+        kill_mock.assert_called_once_with(members.CH, vmachine_id="vm-1", archive=True)
         self.assertEqual(removed, ["vm-1"])
+        self.assertEqual(self.reasons, [dead_instances.GUEST_PANIC])
 
     def test_qemu_kills_the_emulator_of_a_panicked_guest(self):
         kill_mock, removed = self._run(members.QEMU, "Kernel panic - not syncing: x")
-        kill_mock.assert_called_once_with(members.QEMU, vmachine_id="vm-1")
+        kill_mock.assert_called_once_with(members.QEMU, vmachine_id="vm-1", archive=True)
         self.assertEqual(removed, ["vm-1"])
+
+    def test_one_that_can_be_revived_keeps_its_disk(self):
+        kill_mock, removed = self._run(members.CH, "Kernel panic - not syncing: x", revivable=True)
+        kill_mock.assert_called_once_with(members.CH, vmachine_id="vm-1", keep_disk=True)
+        self.assertEqual(self.reasons, [dead_instances.GUEST_PANIC])
 
     def test_a_healthy_guest_is_left_running(self):
         for hypervisor in (members.CH, members.QEMU):
