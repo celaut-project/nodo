@@ -367,14 +367,17 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
         if cursor.fetchone():
             # This reads the file directly, so it can run before the daemon has added a
             # column a newer release introduced: a missing one reads as not suspended.
-            suspended_column = (
-                "suspended_at" if column_exists(conn, "local_instances", "suspended_at") else "NULL"
-            )
+            def optional_column(column, missing="NULL"):
+                return column if column_exists(conn, "local_instances", column) else missing
+
             cursor.execute(
                 "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer, "
-                f"{suspended_column} FROM local_instances WHERE killed_at IS NULL"
+                f"{optional_column('suspended_at')}, {optional_column('suspended_reason')}, "
+                f"{optional_column('revive_count', '0')}, {optional_column('last_revive_reason')}, "
+                f"{optional_column('last_revived_at')} FROM local_instances WHERE killed_at IS NULL"
             )
-            for id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer, suspended_at in cursor.fetchall():
+            for (id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer, suspended_at,
+                 suspended_reason, revive_count, last_revive_reason, last_revived_at) in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -412,7 +415,14 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'balance': balance_value,
-                    'state': 'suspended' if suspended_at else 'running',
+                    'state': (f"suspended ({suspended_reason})" if suspended_reason else 'suspended')
+                    if suspended_at else 'running',
+                    # A crash loop shows here (issue #594): how many times the VM was
+                    # started again on its own disk, and the last time why and when.
+                    'revives': (
+                        f"{int(revive_count)} (last: {last_revive_reason or 'unknown'}, {last_revived_at} UTC)"
+                        if revive_count else '0'
+                    ),
                     'location': 'local',
                     'virtualizer': runtime_virtualizer,
                     'mem_limit': bytes_to_readable(mem_limit),
@@ -426,6 +436,10 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                         'service_id': service,
                         'balance_mu': _int_or_none(balance_mu),
                         'suspended_at': suspended_at,
+                        'suspended_reason': suspended_reason,
+                        'revive_count': _int_or_none(revive_count) or 0,
+                        'last_revive_reason': last_revive_reason,
+                        'last_revived_at': last_revived_at,
                         'mem_limit_bytes': mem_limit,
                         'disk_space_bytes': disk_space,
                         'uris': get_uris(si) if si else [],
@@ -540,6 +554,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
             ("Parent Type", "parent_type"),
             ("Balance", "balance"),
             ("State", "state"),
+            ("Revives", "revives"),
             ("Location", "location"),
             ("Virtualizer", "virtualizer"),
             ("Memory limit", "mem_limit"),
@@ -557,6 +572,9 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
             )
         output_lines = []
         for label, key in fields:
+            # Only a local instance is ever revived here.
+            if key == "revives" and key not in inst:
+                continue
             output_lines.extend(format_line(label, inst.get(key, 'N/A')))
 
         for line in output_lines:

@@ -197,7 +197,10 @@ TABLES = {
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL,
             suspended_at DATETIME DEFAULT NULL,
-            suspended_reason TEXT DEFAULT NULL
+            suspended_reason TEXT DEFAULT NULL,
+            revive_count INTEGER NOT NULL DEFAULT 0,
+            last_revive_reason TEXT DEFAULT NULL,
+            last_revived_at DATETIME DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -931,6 +934,12 @@ def create_tables(cursor):
         # Why it is suspended: `out_of_balance`, or the internal failure that took its
         # VM down (`process_lost`, `guest_panic`). It decides what brings it back.
         "suspended_reason": "TEXT DEFAULT NULL",
+        # How many times its VM was started again on its own disk, why the last time
+        # (the reason it had been suspended for) and when. What lets an operator see a
+        # crash loop, and what a restart of the daemon does not reset.
+        "revive_count": "INTEGER NOT NULL DEFAULT 0",
+        "last_revive_reason": "TEXT DEFAULT NULL",
+        "last_revived_at": "DATETIME DEFAULT NULL",
     })
     ensure_columns(cursor, "delegated_instances", {
         "launched_at": "DATETIME DEFAULT NULL",

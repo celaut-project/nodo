@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sqlite3
 import tempfile
@@ -160,6 +161,45 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
         self.assertIn("Virtualizer: ch", rendered)
         self.assertIn("Virtualizer: docker", rendered)
         self.assertNotIn("VM PID:", rendered)
+
+    def test_instances_show_the_suspension_and_the_revives(self):
+        # A crash loop has to be visible (F6 of the review of #595).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "instances.sqlite")
+            self._build_db(db_path)
+            conn = sqlite3.connect(db_path)
+            for column in ("suspended_at DATETIME", "suspended_reason TEXT",
+                           "revive_count INTEGER NOT NULL DEFAULT 0", "last_revive_reason TEXT",
+                           "last_revived_at DATETIME"):
+                conn.execute(f"ALTER TABLE local_instances ADD COLUMN {column}")
+            conn.execute("ALTER TABLE delegated_instances ADD COLUMN balance_mu TEXT")
+            conn.execute(
+                "UPDATE local_instances SET suspended_at = '2026-10-30 10:00:00', "
+                "suspended_reason = 'process_lost', revive_count = 3, "
+                "last_revive_reason = 'guest_panic', last_revived_at = '2026-10-30 09:59:00' "
+                "WHERE id = 'vm-ch'")
+            conn.commit()
+            conn.close()
+            with patch.object(instances_cmd, "DATABASE_FILE", db_path), patch.object(
+                instances_cmd, "METADATA", tmpdir
+            ), patch.object(instances_cmd, "_prune_stale_instances", return_value=None), \
+                    patch.object(instances_cmd, "get_vm_runtime_snapshot", return_value={}):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    instances_cmd.list_instances(groupable=False)
+                as_json = io.StringIO()
+                with redirect_stdout(as_json):
+                    instances_cmd.list_instances(as_json=True)
+
+        rendered = out.getvalue()
+        self.assertIn("State: suspended (process_lost)", rendered)
+        self.assertIn("Revives: 3 (last: guest_panic, 2026-10-30 09:59:00 UTC)", rendered)
+        self.assertIn("Revives: 0", rendered)
+        document = json.loads(as_json.getvalue())
+        self.assertNotIn("error", document)
+        row = next(r for r in document["instances"] if r["id"] == "vm-ch")
+        self.assertEqual((row["revive_count"], row["last_revive_reason"], row["suspended_reason"]),
+                         (3, "guest_panic", "process_lost"))
 
     def test_instances_groupable_shows_runtime_for_every_microvm_backend(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1134,7 +1134,11 @@ nodo tunnel_close <tunnel id> --json       # and close one
   page reads them. These are counters, not rates: the TUI's CPU% is the
   `cpu_usage_usec` delta between two reads divided by the elapsed microseconds
   (not normalised by vCPUs). Delegated instances have no local counters (`null`).
-  Use `parent_id` to rebuild the `--grouped` tree.
+  Use `parent_id` to rebuild the `--grouped` tree. A local instance also carries its
+  suspension and its revives (issue #594): `suspended_at` and `suspended_reason` (null
+  while it runs), `revive_count`, and the `last_revive_reason` and `last_revived_at`
+  of the last time its VM was started again on its own disk. The printed list shows
+  them as `State: suspended (<reason>)` and `Revives: <n> (last: <reason>, <time>)`.
 
 - **earnings `[--json]`**
   The EARNINGS page's money half: what each payment network brought in over the

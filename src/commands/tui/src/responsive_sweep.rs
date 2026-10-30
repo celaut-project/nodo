@@ -49,6 +49,7 @@ fn instance(id: &str, father: &str) -> Instance {
         consumption_age_secs: None,
         energy_watts: Some(12.0),
         energy_share: Some(0.25),
+        revive: crate::app::InstanceRevive::default(),
         age_secs: Some(3600.0),
         client: InstanceClient::Client("client-🦀-東京".to_string()),
     }

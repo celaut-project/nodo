@@ -109,7 +109,9 @@ class SuspensionRowTests(unittest.TestCase):
         from src.database import sql_connection
         self.assertEqual(
             sql_connection.TRACEABILITY_COLUMNS["local_instances"],
-            {"suspended_at": "DATETIME DEFAULT NULL", "suspended_reason": "TEXT DEFAULT NULL"})
+            {"suspended_at": "DATETIME DEFAULT NULL", "suspended_reason": "TEXT DEFAULT NULL",
+             "revive_count": "INTEGER NOT NULL DEFAULT 0", "last_revive_reason": "TEXT DEFAULT NULL",
+             "last_revived_at": "DATETIME DEFAULT NULL"})
 
     def test_an_old_database_gets_the_column(self):
         connection = sqlite3.connect(":memory:")

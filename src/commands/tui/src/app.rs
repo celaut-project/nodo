@@ -1594,6 +1594,26 @@ pub struct Instance {
     /// reading after a sample; missing is unknown.
     pub energy_watts: Option<f64>,
     pub energy_share: Option<f64>,
+    /// Whether its VM is stopped while it stays alive, and how often it was started
+    /// again on its own disk (issue #594). Default for a delegated instance.
+    pub revive: InstanceRevive,
+}
+
+/// What the node did to keep a local instance afloat, from its `local_instances` row.
+///
+/// A crash loop is invisible in the rest of the page: between two turns the instance
+/// is suspended for seconds, and then it is back with the same id and address. The
+/// count is the part that grows.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InstanceRevive {
+    /// `Some` while its VM is stopped and its disk kept: the reason it was suspended
+    /// for (`out_of_balance`, `process_lost`, `guest_panic`), empty when the row has none.
+    pub suspended: Option<String>,
+    /// How many times its VM was started again on its own disk.
+    pub count: u64,
+    /// Why it was suspended before the last of them, and how long ago that was.
+    pub last_reason: Option<String>,
+    pub last_age_secs: Option<i64>,
 }
 
 /// Latest node-level energy sample. Cost is derived from watts * price, never stored.
@@ -7891,10 +7911,32 @@ fn get_instances(
     } else {
         ""
     };
+    // The suspension and the revives (issue #594), with the same guard: each column
+    // that is not there yet reads as an instance that runs and was never revived.
+    let optional = |column: &str, missing: &str| -> String {
+        if column_exists(&connection, "local_instances", column) {
+            format!("li.{column}")
+        } else {
+            missing.to_string()
+        }
+    };
+    let revived_ago = if column_exists(&connection, "local_instances", "last_revived_at") {
+        "CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', li.last_revived_at) AS INTEGER)"
+            .to_string()
+    } else {
+        "NULL".to_string()
+    };
+    let revive_columns = format!(
+        "{}, {}, {}, {}, {revived_ago}",
+        optional("suspended_at", "NULL"),
+        optional("suspended_reason", "NULL"),
+        optional("revive_count", "0"),
+        optional("last_revive_reason", "NULL"),
+    );
     let base = format!(
         "SELECT li.id, li.name, li.ip, li.balance_mu, li.service_id, li.mem_limit,
                 li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota,
-                {age}"
+                {age}, {revive_columns}"
     );
     let sql = if has_consumption {
         format!(
@@ -7928,9 +7970,17 @@ fn get_instances(
             // Burn-rate columns are only present when the join ran; a per-second
             // average scales to per-minute / per-hour, and all four fields stay `None`
             // when the instance has no consumption row yet.
-            let mu_per_second: Option<f64> = if has_consumption { row.get(12)? } else { None };
-            let consumption_samples: Option<i64> = if has_consumption { row.get(13)? } else { None };
-            let consumption_age_secs: Option<i64> = if has_consumption { row.get(14)? } else { None };
+            let mu_per_second: Option<f64> = if has_consumption { row.get(17)? } else { None };
+            let consumption_samples: Option<i64> = if has_consumption { row.get(18)? } else { None };
+            let consumption_age_secs: Option<i64> = if has_consumption { row.get(19)? } else { None };
+            let suspended_at: Option<String> = row.get(12)?;
+            let revive = InstanceRevive {
+                suspended: suspended_at
+                    .map(|_| row.get::<_, Option<String>>(13).ok().flatten().unwrap_or_default()),
+                count: row.get::<_, Option<i64>>(14)?.unwrap_or(0).max(0) as u64,
+                last_reason: row.get(15)?,
+                last_age_secs: row.get::<_, Option<i64>>(16)?.filter(|secs| *secs >= 0),
+            };
             // Negative when the row's clock is ahead of ours (a database copied off
             // another machine); dropped rather than shown, since "started in the
             // future" is not an age.
@@ -7959,6 +8009,7 @@ fn get_instances(
                 consumption_age_secs: consumption_age_secs.map(|secs| secs as f64),
                 energy_watts: None,
                 energy_share: None,
+                revive,
             })
         })?
         .collect::<SqlResult<Vec<_>>>()?;
@@ -8103,6 +8154,7 @@ fn get_delegated_instances(
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                revive: crate::app::InstanceRevive::default(),
             })
         })?
         .collect();
@@ -10412,6 +10464,7 @@ mod tests {
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                revive: crate::app::InstanceRevive::default(),
                 age_secs: None,
                 client: crate::app::InstanceClient::None,
             }
@@ -12596,6 +12649,7 @@ ergo: Cold Wallet: 9cold\n";
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                revive: crate::app::InstanceRevive::default(),
                 age_secs: None,
                 client: InstanceClient::None,
             }

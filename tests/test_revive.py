@@ -366,6 +366,18 @@ class ResumeRowTests(unittest.TestCase):
         self.assertFalse(self.sc.is_local_instance_suspended("a"))
         self.assertEqual(self.sc.get_running_internal_containers_ids(), ["a"])
 
+    def test_each_revive_is_counted_with_the_reason_it_had(self):
+        # Kept in the row, so a restart of the daemon does not reset it (F6 of the
+        # review of #595).
+        for reason in (dead_instances.PROCESS_LOST, dead_instances.GUEST_PANIC):
+            self.sc.suspend_local_instance("a", reason)
+            self.sc.resume_local_instance("a")
+        row = SQLConnection._connection.execute(
+            "SELECT revive_count, last_revive_reason, last_revived_at FROM local_instances "
+            "WHERE id = 'a'").fetchone()
+        self.assertEqual((row[0], row[1]), (2, dead_instances.GUEST_PANIC))
+        self.assertIsNotNone(row[2])
+
     def test_resuming_a_running_or_dead_instance_does_nothing(self):
         self.assertFalse(self.sc.resume_local_instance("a"))
         self.sc.suspend_local_instance("a")

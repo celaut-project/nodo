@@ -95,6 +95,10 @@ TRACEABILITY_COLUMNS = {
     "local_instances": {
         "suspended_at": "DATETIME DEFAULT NULL",
         "suspended_reason": "TEXT DEFAULT NULL",
+        # Written by every revive.
+        "revive_count": "INTEGER NOT NULL DEFAULT 0",
+        "last_revive_reason": "TEXT DEFAULT NULL",
+        "last_revived_at": "DATETIME DEFAULT NULL",
     },
     # `peer` is a base table every install already has, so unlike a wholly new table
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
@@ -1280,10 +1284,16 @@ class SQLConnection(metaclass=Singleton):
     def resume_local_instance(self, id: str) -> bool:
         """Mark a suspended local instance running again, once its VM is up.
 
-        True if this call resumed it. The inverse of `suspend_local_instance`.
+        True if this call resumed it. The inverse of `suspend_local_instance`. The revive
+        is counted, and the reason it had been suspended for is kept as the reason of
+        the last revive: `nodo instances` and the TUI show both, so a crash loop is seen.
         """
         cursor = self._execute('''
-            UPDATE local_instances SET suspended_at = NULL, suspended_reason = NULL
+            UPDATE local_instances
+            SET revive_count = COALESCE(revive_count, 0) + 1,
+                last_revive_reason = suspended_reason,
+                last_revived_at = CURRENT_TIMESTAMP,
+                suspended_at = NULL, suspended_reason = NULL
             WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
         ''', (id,))
         resumed = cursor.rowcount > 0
