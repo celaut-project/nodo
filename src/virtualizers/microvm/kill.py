@@ -104,7 +104,9 @@ def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False,
     instance is started again from that disk). Its state file goes, since it
     describes a process that no longer exists: left behind it would read as a dead
     guest to the janitor. Only an instance with a row, suspended, may ask for this:
-    the directory is then not an orphan, and ``nodo prune`` knows to leave it.
+    the directory is then not an orphan, and ``nodo prune`` knows to leave it. The logs
+    of the run that ended are moved to ``<log>.1``, so that the next boot does not
+    write over what made it fail; they are archived with the rest when it dies.
     """
     state = load_runtime_state(vmachine_id) or {}
     pid = int(state.get("pid") or 0)
@@ -143,9 +145,15 @@ def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False,
         log.LOGGER(hypervisor.log(vmachine_id, f"failed removing control socket {socket_path}: {e}"))
 
     # The guest process is dead here, so its logs are complete. Save them before the
-    # runtime directory goes: it holds the only copy.
+    # runtime directory goes: it holds the only copy. A suspended instance has no state
+    # file any more, and its logs are found by their names in the directory it kept.
     if archive and not keep_disk:
-        dead_instances.archive_runtime(vmachine_id, state)
+        archived = state
+        if not archived and runtime_dir and runtime_dir.exists():
+            archived = dead_instances.logs_left_in(runtime_dir)
+        dead_instances.archive_runtime(vmachine_id, archived)
+    if keep_disk:
+        dead_instances.keep_previous_logs(state)
 
     try:
         if runtime_dir and runtime_dir.exists() and not keep_disk:

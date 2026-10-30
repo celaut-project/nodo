@@ -255,6 +255,57 @@ class KeepDiskTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class LogsOfTheRunThatFailedTests(unittest.TestCase):
+    """A revive used to truncate the logs of the run that caused it, and the kill that
+    ended the instance later archived nothing (F5 of the review of #595)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.runtime_dir = self.root / "vm"
+        self.runtime_dir.mkdir()
+        self.serial = self.runtime_dir / "cloud-hypervisor.serial.log"
+        self.stdout = self.runtime_dir / "cloud-hypervisor.stdout.log"
+        self.state = {"pid": 4242, "serial_log": str(self.serial), "stdout_log": str(self.stdout)}
+        self.hypervisor = mock.MagicMock()
+        self.hypervisor.log.side_effect = lambda _id, message: message
+        self.hypervisor.control_socket.return_value = self.root / "sock"
+        for patch in (
+            mock.patch.object(microvm_kill, "_runtime_dir", return_value=self.runtime_dir),
+            mock.patch.object(microvm_kill, "_kill_pid"),
+            mock.patch.object(microvm_kill, "_cleanup_vm_firewall_rules"),
+            mock.patch.object(microvm_kill, "_cleanup_tap"),
+            mock.patch.object(microvm_kill, "remove_vm_cgroup"),
+            mock.patch.object(microvm_kill.network, "replay_legacy_cleanup_rules"),
+            mock.patch.object(microvm_kill, "delete_runtime_state"),
+            mock.patch.object(dead_instances, "dead_root", return_value=self.root / "dead"),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def _kill(self, state, keep_disk):
+        with mock.patch.object(microvm_kill, "load_runtime_state", return_value=state):
+            microvm_kill.kill(self.hypervisor, "vm", archive=not keep_disk, keep_disk=keep_disk)
+
+    def test_a_suspension_keeps_the_logs_of_the_run_that_ended(self):
+        self.serial.write_text("Kernel panic - not syncing\n")
+        self._kill(self.state, keep_disk=True)
+        self.assertEqual(Path(str(self.serial) + ".1").read_text(), "Kernel panic - not syncing\n")
+        self.assertFalse(self.serial.exists())
+
+    def test_the_death_after_a_suspension_archives_both_runs(self):
+        self.serial.write_text("first run panicked\n")
+        self._kill(self.state, keep_disk=True)
+        self.serial.write_text("second run\n")     # the revive
+        self._kill({}, keep_disk=False)              # its state file went with the suspension
+        logs = dead_instances.list_logs("vm")
+        self.assertEqual(logs["serial"].read_text(), "second run\n")
+        self.assertEqual(logs["serial.previous"].read_text(), "first run panicked\n")
+        self.assertFalse(self.runtime_dir.exists())
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PruneLeavesSuspendedDisksTests(unittest.TestCase):
     def test_a_suspended_instances_runtime_dir_is_not_reclaimable(self):
         tmp = tempfile.TemporaryDirectory()

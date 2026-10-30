@@ -507,7 +507,9 @@ These are the most commonly used commands for daily tasks:
 - **logs `<instance> [--stream stdout|stderr|serial] [-n <lines>] [--grep <regex> [-i] [--invert]] [--json]`**  
   Shows the logs that the node saved when a local instance died. The instance
   can be an id or a name. If two dead instances have the same name, the newest
-  one is used. A live instance has no saved logs.  
+  one is used. A live instance has no saved logs. An instance that was revived
+  (issue #594) also has `stdout.previous`, `stderr.previous` and `serial.previous`:
+  the logs of the last run that failed before the one it died in.  
   **Example:**  
   `nodo logs web --stream serial -n 100`
 
