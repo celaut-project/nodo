@@ -345,7 +345,7 @@ class OrphanStartTests(_Node):
         with patch.object(maintain.orphan_starts, "ask_again", side_effect=ask_again), \
                 patch.object(maintain.orphan_starts, "peer_channel"), \
                 patch.object(maintain.orphan_starts.BeeClient, "stop_service",
-                             side_effect=lambda channel, token: self.stopped.append(token)):
+                             side_effect=lambda channel, token, client_id="": self.stopped.append(token)):
             self.check()
 
     def test_the_orphan_is_asked_for_by_its_reference_and_stopped(self):

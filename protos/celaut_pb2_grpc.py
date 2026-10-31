@@ -16,8 +16,12 @@ class GatewayStub(object):
     * client: a Client in the request, at the index that the layer gives, in any
     sequence. A local instance of the node is exempt. All these RPCs share one rate
     limit for each client_id.
-    * token: a token in the payload (an instance token; GetMetrics also takes a
-    client_id).
+    * token: a token in the payload (an instance token).
+    * token+client: an instance token in the payload, and a Client at the index that
+    the layer gives. The Client is necessary when the parent of the instance is a
+    client. Then the Client must be that parent. If the parent is another instance or
+    a node, the token is the only credential and the Client is not read. The Client
+    shares the rate limit of the client RPCs.
     * client-in-message: Chat, with the client_id in the ChatMessage.
     * local-address: ModifyServiceSystemResources, only for a local instance.
     * none: GenerateClient, which can answer with a PoWRequired.
@@ -114,6 +118,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.GetClientMetrics = channel.stream_stream(
+                '/celaut.Gateway/GetClientMetrics',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
         self.GetBalanceStatement = channel.stream_stream(
                 '/celaut.Gateway/GetBalanceStatement',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -147,8 +156,12 @@ class GatewayServicer(object):
     * client: a Client in the request, at the index that the layer gives, in any
     sequence. A local instance of the node is exempt. All these RPCs share one rate
     limit for each client_id.
-    * token: a token in the payload (an instance token; GetMetrics also takes a
-    client_id).
+    * token: a token in the payload (an instance token).
+    * token+client: an instance token in the payload, and a Client at the index that
+    the layer gives. The Client is necessary when the parent of the instance is a
+    client. Then the Client must be that parent. If the parent is another instance or
+    a node, the token is the only credential and the Client is not read. The Client
+    shares the rate limit of the client RPCs.
     * client-in-message: Chat, with the client_id in the ChatMessage.
     * local-address: ModifyServiceSystemResources, only for a local instance.
     * none: GenerateClient, which can answer with a PoWRequired.
@@ -168,8 +181,9 @@ class GatewayServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def StopService(self, request_iterator, context):
-        """Stops an instance. The TokenMessage gives the instance token. The node gives the
-        balance that the instance did not use back to its parent, and returns a Refund
+        """Stops an instance. The TokenMessage gives the instance token. If the parent of
+        the instance is a client, the request must also have that Client. The node gives
+        the balance that the instance did not use back to its parent, and returns a Refund
         with that amount. If the node does not know the token, the Refund is 0.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -178,7 +192,8 @@ class GatewayServicer(object):
 
     def ModifyDeposit(self, request_iterator, context):
         """Changes the balance of an instance. The service_token gives the instance. The
-        parent of the instance pays or gets the difference.
+        parent of the instance pays or gets the difference. If the parent is a client, the
+        request must also have that Client, for a positive and for a negative difference.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -315,8 +330,15 @@ class GatewayServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetMetrics(self, request_iterator, context):
-        """Takes a token. For an instance token, returns the balance of the instance. For a
-        client_id, returns the balance of the client.
+        """Takes an instance token. Returns the balance of the instance.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetClientMetrics(self, request_iterator, context):
+        """Takes a Client. Returns the balance of the client. The node does not charge for
+        the answer. The balance of a client is not available with an instance token.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -455,6 +477,11 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
+            'GetClientMetrics': grpc.stream_stream_rpc_method_handler(
+                    servicer.GetClientMetrics,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
             'GetBalanceStatement': grpc.stream_stream_rpc_method_handler(
                     servicer.GetBalanceStatement,
                     request_deserializer=buffer__pb2.Buffer.FromString,
@@ -493,8 +520,12 @@ class Gateway(object):
     * client: a Client in the request, at the index that the layer gives, in any
     sequence. A local instance of the node is exempt. All these RPCs share one rate
     limit for each client_id.
-    * token: a token in the payload (an instance token; GetMetrics also takes a
-    client_id).
+    * token: a token in the payload (an instance token).
+    * token+client: an instance token in the payload, and a Client at the index that
+    the layer gives. The Client is necessary when the parent of the instance is a
+    client. Then the Client must be that parent. If the parent is another instance or
+    a node, the token is the only credential and the Client is not read. The Client
+    shares the rate limit of the client RPCs.
     * client-in-message: Chat, with the client_id in the ChatMessage.
     * local-address: ModifyServiceSystemResources, only for a local instance.
     * none: GenerateClient, which can answer with a PoWRequired.
@@ -784,6 +815,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetMetrics',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetClientMetrics(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetClientMetrics',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

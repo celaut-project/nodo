@@ -1548,7 +1548,9 @@ def _stop_instance(token: str, credit: bool, reason: str) -> Optional[int]:
 
             peer_refund = utils.from_amount(
                 BeeClient.stop_service(
-                    node_channel(peer_uri, expected_peer_id=peer_id), token=external_token
+                    node_channel(peer_uri, expected_peer_id=peer_id), token=external_token,
+                    # The father of the child on the peer is this node's client there.
+                    client_id=sc.get_peer_client(peer_id=peer_id) or "",
                 ).amount
             )
             # The peer's figure, in the peer's MU, and it settles on the peer: it is
@@ -1795,6 +1797,7 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
             ),
             service_token=external_token,
             timeout=peer_call_timeout(),
+            client_id=sc.get_peer_client(peer_id=peer_id) or "",
         )
         if _output is None:
             # The peer closed the call with no answer: like a lost answer.

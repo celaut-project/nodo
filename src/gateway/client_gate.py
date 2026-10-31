@@ -193,6 +193,34 @@ def require_caller(context, client_id: str = "") -> str:
     return client_id
 
 
+def require_father(context, token: str, client_id: str = "") -> None:
+    """Refuse a call on the instance ``token`` unless its father is the caller, when the
+    father is a client (issue #597).
+
+    ``StopService`` and ``ModifyDeposit`` end or move the money of an instance. While the
+    father is a client, that client is who may ask: the token alone is no longer enough,
+    and the ``client_id`` sent has to be the father's, not merely a valid one -- a client
+    holding another client's token must not stop its instance. The ``client_id`` goes
+    through ``require_caller``, so it also pays the shared rate limit.
+
+    When the father is not a client -- another instance, or a node that delegated the
+    child here (``RecursionGuard``, delegated aliases) -- no ``client_id`` stands behind
+    the instance, the token is the only credential this node can check, and the call
+    passes as it did before. So does a token this node does not know: the call itself
+    answers that.
+
+    ``token`` is the id the father holds: a local instance's token, or the alias of a
+    delegated one (``SQLConnection.father_of``).
+    """
+    father_id = sc.father_of(token)
+    if not father_id or not sc.client_exists(client_id=father_id):
+        return
+    if require_caller(context, client_id) != father_id:
+        raise ClientRequired(
+            "The father of this instance is a client, and this call must come from it."
+        )
+
+
 def parse_with_client(
         request_iterator,
         method: str,

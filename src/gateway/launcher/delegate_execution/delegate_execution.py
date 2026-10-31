@@ -76,16 +76,17 @@ def _mu(amount) -> int:
     return int(amount.n or 0)
 
 
-def _stop_on_peer(peer: str, external_token: str) -> None:
+def _stop_on_peer(peer: str, external_token: str, client_id: str) -> None:
     """Stop a child that ``peer`` started and that this node will not keep.
 
     The father got his MU back and an error, so nobody holds this instance. Left alone it
     would run on the MU that this node sent until they ran out. The peer writes what it
-    leaves in our account as a ``refund`` of the ``child_start``. Never raises: the
-    start has failed already, and this is only the cleanup of it.
+    leaves in our account as a ``refund`` of the ``child_start``. ``client_id`` is ours on
+    that peer, the father of the child there. Never raises: the start has failed already,
+    and this is only the cleanup of it.
     """
     try:
-        BeeClient.stop_service(peer_channel(peer), token=external_token)
+        BeeClient.stop_service(peer_channel(peer), token=external_token, client_id=client_id)
     except Exception as e:
         log.LOGGER(f"Could not stop the child {external_token[:8]} that {peer} started: {e}")
 
@@ -354,7 +355,7 @@ def delegate_execution(
     except Exception as e:
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
         if external_token:
-            _stop_on_peer(peer, external_token)
+            _stop_on_peer(peer, external_token, client_id)
         elif attempted and statement_check.unreachable(e):
             # No answer: the peer may have the start still, or have finished it.
             orphan_starts.stop_orphan(peer, client_id, reference_hex,

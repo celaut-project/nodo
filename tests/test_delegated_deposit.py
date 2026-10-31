@@ -55,6 +55,7 @@ OUR_ALIAS = "hashed-external-token"
 PEER_TOKEN = "token-as-the-peer-knows-it"
 PEER_ID = "peer-a"
 FATHER_CLIENT = "client-a"
+OUR_CLIENT_ON_PEER = "this-node-on-the-peer"
 LEFTOVER = 400_000
 
 
@@ -238,6 +239,8 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         self.assertEqual(r.refunds, [True])
         r.stop_service.assert_called_once()
         self.assertEqual(r.stop_service.call_args.kwargs["token"], PEER_TOKEN)
+        # The father of the child there is our client on that peer (#597).
+        self.assertEqual(r.stop_service.call_args.kwargs["client_id"], "client-on-peer")
 
     def test_a_cleanup_that_fails_does_not_hide_the_error_or_the_refund(self):
         r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
@@ -1230,6 +1233,7 @@ class _StopHarness:
         )
         self.sc.get_delegated_token_by_id.return_value = PEER_TOKEN
         self.sc.get_peer_id_by_external_service.return_value = PEER_ID
+        self.sc.get_peer_client.return_value = OUR_CLIENT_ON_PEER
         self.sc.get_external_father_id.return_value = father_id
         self.sc.get_delegated_instance.return_value = None
         self.sc.get_instance_balance.return_value = 0
@@ -1246,6 +1250,7 @@ class _StopHarness:
         return self.leftover
 
     def _stop_service(self, **kwargs):
+        self.sent = kwargs["input"]
         self.calls.append(("stop_service_on_peer", PEER_TOKEN))
         if self.peer_raises:
             raise RuntimeError("peer is unreachable")
@@ -1266,6 +1271,15 @@ class _StopHarness:
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DelegatedStopReturnsTheDepositTests(unittest.TestCase):
+
+    def test_the_stop_on_the_peer_carries_our_client_there(self):
+        """The father of the child on the peer is this node's client on it (#597)."""
+        harness = _StopHarness()
+        harness.run()
+
+        token, client = harness.sent
+        self.assertEqual(token.token, PEER_TOKEN)
+        self.assertEqual(client.client_id, OUR_CLIENT_ON_PEER)
 
     def test_the_father_gets_back_what_is_left_of_the_deposit_he_paid(self):
         harness = _StopHarness()
@@ -1345,6 +1359,7 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         sc.get_delegated_token_by_id.return_value = PEER_TOKEN
         sc.get_external_father_id.return_value = FATHER_CLIENT
         sc.get_peer_id_by_external_service.return_value = PEER_ID
+        sc.get_peer_client.return_value = OUR_CLIENT_ON_PEER
         sc.get_delegated_balance.return_value = balance
         sc.move_balance.return_value = 7
         payment_system = SimpleNamespace(
@@ -1353,7 +1368,9 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         sent = []
 
         def client_grpc(**kwargs):
-            sent.append(kwargs["input"])
+            message, client = kwargs["input"]
+            self.assertEqual(client.client_id, OUR_CLIENT_ON_PEER)
+            sent.append(message)
             return celaut.ModifyDepositOutput(
                 success=peer_accepts, message="ok" if peer_accepts else "refused"
             )

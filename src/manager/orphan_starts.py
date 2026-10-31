@@ -37,7 +37,7 @@ def stop_orphan(peer_id: str, client_id: str, reference: str, timeout: float,
         instance = ask_again(peer_id, client_id, reference, timeout)
         if instance is None or not instance.token:
             return False
-        BeeClient.stop_service(peer_channel(peer_id), token=instance.token)
+        BeeClient.stop_service(peer_channel(peer_id), token=instance.token, client_id=client_id)
     except Exception as e:
         log.LOGGER(f"The child of the start {reference[:16]} on {peer_id} is not stopped: {e}")
         return False

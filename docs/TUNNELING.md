@@ -125,8 +125,10 @@ the service never meant to expose.
 
 ## Authorization
 
-Possession of the instance token is the credential, the same rule `GetMetrics`
-applies. Note what this does and does not mean:
+Possession of the instance token is the credential for the tunnel, the same rule
+`GetMetrics` and `Observe` apply. Stopping the instance and moving its balance
+(`StopService`, `ModifyDeposit`) ask for more when the instance was started by a client:
+the request must also carry that client (#597). Note what this does and does not mean:
 
 * The token identifies **one instance**, and validation limits the reach to that
   instance's **declared slots**.
