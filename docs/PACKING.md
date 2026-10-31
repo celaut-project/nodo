@@ -26,6 +26,20 @@
 > way you author the `Dockerfile`/`service.json` exactly as described below — the
 > `docker buildx` mechanics in *Service Preparation Process* run inside the
 > packer-service microVM (default) or the isolated local toolchain (`packer.local`).
+>
+> **Local packer only:** `nodo pack <dir> --fast` inlines the whole image into a
+> single filesystem block instead of splitting large files into their own
+> content-addressed blocks — faster to pack, but no memory savings or
+> deduplication across services. `--optimize` forces the normal per-file-block
+> behaviour back on for one invocation. `packer.fast: true` makes fast mode the
+> node's default; see `packer.fast` and `packer.MIN_BUFFER_BLOCK_SIZE` in
+> `config.example.yaml`. Both modes produce the identical service id.
+>
+> A fast-packed service costs its whole image in memory at every build of it, not
+> just once at pack time, until it is re-packed with `--optimize`: that replaces
+> the stored single filesystem block with the per-file-block form under the same
+> id. A fast pack falls back to per-file blocks (and says so) when the image is
+> over `packer.FAST_MAX_BYTES` or the node lacks the RAM fast mode would reserve.
 
 ## Table of Contents
 1. [Directory Structure](#directory-structure)
