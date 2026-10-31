@@ -52,6 +52,11 @@ PackOutput_indices = {
 #   client             a Client at index 2 next to the payload at 1 (client_gate)
 #   client-in-message  a client_id inside the payload itself (Chat)
 #   token              a bearer token inside the payload (an instance token)
+#   token+client       an instance token in the payload and a Client at index 2. The
+#                      Client is read only when the instance's father is a client: then
+#                      it must be that father (client_gate.require_father). Any other
+#                      father -- an instance, a node -- leaves the token as the only
+#                      credential
 #   local-address      the caller's address must be a local instance of the node
 #   none               nobody is identified (GenerateClient, which mints the Client)
 # ---------------------------------------------------------------------------------
@@ -62,7 +67,7 @@ class GatewayRpc(NamedTuple):
     auth: str
 
 
-AUTH_KINDS: Final = ("client", "client-in-message", "token", "local-address", "none")
+AUTH_KINDS: Final = ("client", "client-in-message", "token", "token+client", "local-address", "none")
 
 GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
     "StartService": GatewayRpc(
@@ -71,14 +76,14 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         auth="client",
     ),
     "StopService": GatewayRpc(
-        input={1: celaut_pb2.TokenMessage},
+        input={1: celaut_pb2.TokenMessage, 2: celaut_pb2.Client},
         output={1: celaut_pb2.Refund},
-        auth="token",
+        auth="token+client",
     ),
     "ModifyDeposit": GatewayRpc(
-        input={1: celaut_pb2.ModifyDepositInput},
+        input={1: celaut_pb2.ModifyDepositInput, 2: celaut_pb2.Client},
         output={1: celaut_pb2.ModifyDepositOutput},
-        auth="token",
+        auth="token+client",
     ),
     "GetPeerInfo": GatewayRpc(
         input={1: celaut_pb2.Client},
@@ -155,6 +160,11 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         input={1: celaut_pb2.TokenMessage},
         output={1: celaut_pb2.Metrics},
         auth="token",
+    ),
+    "GetClientMetrics": GatewayRpc(
+        input={1: celaut_pb2.Client},
+        output={1: celaut_pb2.Metrics},
+        auth="client",
     ),
     "GetBalanceStatement": GatewayRpc(
         input={1: celaut_pb2.BalanceStatementRequest, 2: celaut_pb2.Client},

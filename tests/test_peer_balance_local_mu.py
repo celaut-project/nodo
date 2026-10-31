@@ -43,14 +43,17 @@ class BalanceOnOtherPeerTests(unittest.TestCase):
             metrics_mod.sc, "get_peer_by_id", return_value=None
         ), patch.object(
             metrics_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
-        ), patch.object(
-            metrics_mod, "__get_metrics_external", lambda peer_id, token: metrics
-        ), patch.object(
+        ), patch.object(metrics_mod, "peer_channel"), patch.object(
+            metrics_mod.BeeClient, "get_client_metrics", return_value=metrics
+        ) as read, patch.object(
             metrics_mod.sc, "refresh_balance_for_peer", return_value=True
         ) as refresh:
             result = metrics_mod.balance_on_other_peer(peer_id="peer-a")
 
         self.assertEqual(result, 1_000_000)
+        # Our balance is read with GetClientMetrics, as the client: no instance token
+        # stands in for it (#597).
+        self.assertEqual(read.call_args.kwargs["client_id"], "client-on-peer")
         # Cached verbatim: the peer's own accounting, not a figure with our rate
         # baked into it that goes stale the moment either node rescales its MU.
         refresh.assert_called_once_with(peer_id="peer-a", balance_mu=2_000_000)

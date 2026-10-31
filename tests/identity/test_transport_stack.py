@@ -73,7 +73,7 @@ class DeclarationTests(unittest.TestCase):
         # What every caller sends (bee_client) and what client_gate.parse_with_client
         # reads from this same table.
         for name, rpc in GATEWAY_RPCS.items():
-            if rpc.auth == "client" and len(rpc.input) == 2:
+            if rpc.auth in ("client", "token+client") and len(rpc.input) == 2:
                 self.assertIs(rpc.input[2], celaut_pb2.Client, name)
 
     def test_the_whole_schema_travels(self):

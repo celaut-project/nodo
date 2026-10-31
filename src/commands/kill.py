@@ -7,11 +7,14 @@ the same close ``nodo tunnel_close`` does (``src/utils/tunnel_registry.py``).
 Stopping an instance deletes its tap and its firewall rules, which needs root or
 ``CAP_NET_ADMIN``. A CLI that has neither -- an operator on a node whose daemon
 runs as a service user -- asks the local daemon to stop it instead, over the same
-``StopService`` RPC a peer uses.
+``StopService`` RPC a peer uses. That RPC wants the client that started the instance
+when it is a client's (issue #597): the operator reads the father off the node's own
+database, as it reads the token, and sends it.
 """
 
 from typing import Any, Dict, List
 
+from src.database.sql_connection import SQLConnection
 from src.manager.manager import resolve_instance_token, stop_instance
 from src.utils import tunnel_registry
 from src.utils.privileges import can_admin_network
@@ -32,7 +35,8 @@ def stop_through_daemon(token: str) -> bool:
 
     channel = local_channel()
     try:
-        return BeeClient.stop_service(channel, token) is not None
+        father_id = SQLConnection().father_of(token) or ""
+        return BeeClient.stop_service(channel, token, client_id=father_id) is not None
     finally:
         channel.close()
 

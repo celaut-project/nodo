@@ -153,7 +153,7 @@ def refresh_balance_on_peer(peer_id: str) -> int:
 
 
 def _fetch_balance_on_peer(peer_id: str, raise_on_error: bool = False) -> int:
-    """Read our balance from the peer's ``Metrics`` and store it, in the peer's MU."""
+    """Read our balance from the peer's ``GetClientMetrics`` and store it, in the peer's MU."""
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
     if not client_id:
         logger(f'No client_id for peer {peer_id}; cannot get balance.')
@@ -162,9 +162,11 @@ def _fetch_balance_on_peer(peer_id: str, raise_on_error: bool = False) -> int:
         return 0
 
     try:
-        metrics = __get_metrics_external(
-                        peer_id=peer_id,
-                        token=client_id
+        # With a limit, as for the instances: this is read on the maintenance tick.
+        from src.manager.statement_check import peer_call_timeout
+        metrics = BeeClient.get_client_metrics(
+                        peer_channel(peer_id=peer_id), client_id=client_id,
+                        timeout=peer_call_timeout(),
                     )
     except Exception as e:
         logger('Error getting our balance from ' + peer_id + '.')
@@ -187,24 +189,28 @@ def _fetch_balance_on_peer(peer_id: str, raise_on_error: bool = False) -> int:
 
 
 
+def get_client_metrics(client_id: str) -> celaut_pb2.Metrics:
+    """The metrics of a client: its balance. ``GetClientMetrics`` calls this after
+    ``require_caller`` has identified the client; an instance token is never read here
+    (issue #597)."""
+    return __get_metrics_client(client_id=client_id)
+
+
 def get_metrics(token: str) -> celaut_pb2.Metrics:
     """
-    Retrieve metrics based on the provided token.
+    Retrieve metrics based on the provided instance token.
 
-    This function retrieves metrics associated with a given token. The token can be either a client ID
-    or a specialized token with specific formatting.
+    The token is the one of a local instance, or the alias of a delegated one. A
+    ``client_id`` is not a token: it is answered by ``get_client_metrics``, and here it
+    is an invalid token (issue #597).
 
-    :param token: The token used to identify the source of metrics.
+    :param token: The instance token used to identify the source of metrics.
     :type token: str
     :return: A protobuf object containing the metrics retrieved.
     :rtype: celaut_pb2.Metrics
-    :raises InvalidTokenException: If the token format is invalid.
-    :raises Exception: If an error occurs during the metric retrieval process.
+    :raises Exception: If the token is not the one of an instance.
     """
-    if sc.client_exists(client_id=token):
-        return __get_metrics_client(client_id=token)
-
-    elif sc.internal_instance_exists(id=token):
+    if sc.internal_instance_exists(id=token):
         return __get_metrics_internal(id=token)
 
     else:
@@ -215,7 +221,7 @@ def get_metrics(token: str) -> celaut_pb2.Metrics:
         # token", and the father took that for the child being gone (#442).
         delegated_token = sc.get_delegated_token_by_id(id=token)
         if not delegated_token:
-            raise Exception(f'Invalid token, it should be a client_id or an instance token.  token: {token}')
+            raise Exception(f'Invalid token, it should be an instance token.  token: {token}')
         token = delegated_token
 
         # Our own books, not the peer's. A delegated instance's deposit is held

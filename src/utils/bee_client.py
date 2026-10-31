@@ -46,6 +46,14 @@ Buffer = buffer_pb2.Buffer
 Dir = bee.Dir
 
 
+def _with_client(message, client_id: str):
+    """``message`` as the input of a ``token+client`` RPC: with the ``Client`` at its
+    index when there is a ``client_id``, alone when there is none."""
+    if not client_id:
+        return message
+    return [message, celaut_pb2.Client(client_id=client_id)]
+
+
 class BeeClient:
     """Stateless: every method is a thin wrapper around one bee_rpc shape."""
 
@@ -342,6 +350,17 @@ class BeeClient:
         )
 
     @staticmethod
+    def get_client_metrics(channel, client_id: str, timeout: Optional[float] = None) -> celaut_pb2.Metrics:
+        """``Client -> Metrics``: the balance of the client on the node at ``channel``."""
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetClientMetrics,
+            input=celaut_pb2.Client(client_id=client_id),
+            indices_serializer=rpc_input("GetClientMetrics"),
+            indices_parser=rpc_output("GetClientMetrics"),
+            timeout=timeout,
+        )
+
+    @staticmethod
     def get_balance_statement(channel, client_id: str, token: str = "",
                               from_seq: int = 0, to_seq: int = 0,
                               timeout: Optional[float] = None) -> Optional[celaut_pb2.BalanceStatement]:
@@ -436,10 +455,14 @@ class BeeClient:
         ))
 
     @staticmethod
-    def stop_service(channel, token: str) -> Optional[celaut_pb2.Refund]:
+    def stop_service(channel, token: str, client_id: str = "") -> Optional[celaut_pb2.Refund]:
+        """``TokenMessage & Client -> Refund``. ``client_id`` is who started the instance
+        when that is a client of the node at ``channel`` -- for a child that this node
+        delegated there, this node's own client_id on that peer. Empty sends only the
+        token, which is enough for an instance whose father is not a client (#597)."""
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).StopService,
-            input=celaut_pb2.TokenMessage(token=token),
+            input=_with_client(celaut_pb2.TokenMessage(token=token), client_id),
             indices_serializer=rpc_input("StopService"),
             indices_parser=rpc_output("StopService"),
         )
@@ -447,11 +470,16 @@ class BeeClient:
     @staticmethod
     def modify_deposit(
             channel, difference: celaut_pb2.Amount, service_token: str,
-            timeout: Optional[float] = None,
+            timeout: Optional[float] = None, client_id: str = "",
     ) -> Optional[celaut_pb2.ModifyDepositOutput]:
+        """``ModifyDepositInput & Client -> ModifyDepositOutput``. ``client_id`` as in
+        ``stop_service``: both signs of ``difference`` need it when the father is a client."""
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).ModifyDeposit,
-            input=celaut_pb2.ModifyDepositInput(difference=difference, service_token=service_token),
+            input=_with_client(
+                celaut_pb2.ModifyDepositInput(difference=difference, service_token=service_token),
+                client_id,
+            ),
             indices_serializer=rpc_input("ModifyDeposit"),
             indices_parser=rpc_output("ModifyDeposit"),
             timeout=timeout,

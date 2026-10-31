@@ -570,9 +570,8 @@ message Sysresources {
 
 // A token, and a slot for some methods.
 message TokenMessage {
-    // The token. In StopService and ServiceTunnel: an instance token. In GetMetrics: an
-    // instance token or a client_id. In the response of GenerateDepositToken: a new
-    // deposit token.
+    // The token. In StopService, GetMetrics and ServiceTunnel: an instance token. In the
+    // response of GenerateDepositToken: a new deposit token.
     string token = 1;
     // In ServiceTunnel: the internal port, as a decimal number. It must be one of the
     // Instance.uri_slot.internal_port values. Other methods do not use it.
@@ -671,10 +670,10 @@ message Payment {
     Amount amount = 3;
 }
 
-// The answer of GetMetrics.
+// The answer of GetMetrics and of GetClientMetrics.
 message Metrics {
-    // The balance, in MU. For an instance token, the balance of the instance. For a
-    // client_id, the balance of the client.
+    // The balance, in MU. In the answer of GetMetrics, the balance of the instance. In
+    // the answer of GetClientMetrics, the balance of the client.
     Amount balance = 1;
     // True if the instance is suspended: its virtual machine is stopped and the node
     // keeps its disk, its address and its balance. The node does not charge an instance
@@ -1312,8 +1311,12 @@ message ObserveEvent {
 //   * client: a Client in the request, at the index that the layer gives, in any
 //     sequence. A local instance of the node is exempt. All these RPCs share one rate
 //     limit for each client_id.
-//   * token: a token in the payload (an instance token; GetMetrics also takes a
-//     client_id).
+//   * token: a token in the payload (an instance token).
+//   * token+client: an instance token in the payload, and a Client at the index that
+//     the layer gives. The Client is necessary when the parent of the instance is a
+//     client. Then the Client must be that parent. If the parent is another instance or
+//     a node, the token is the only credential and the Client is not read. The Client
+//     shares the rate limit of the client RPCs.
 //   * client-in-message: Chat, with the client_id in the ChatMessage.
 //   * local-address: ModifyServiceSystemResources, only for a local instance.
 //   * none: GenerateClient, which can answer with a PoWRequired.
@@ -1326,12 +1329,14 @@ service Gateway {
     // addresses of that instance. If the node does not have the service and the caller
     // does not send it, the node refuses with an error.
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Stops an instance. The TokenMessage gives the instance token. The node gives the
-    // balance that the instance did not use back to its parent, and returns a Refund
+    // Stops an instance. The TokenMessage gives the instance token. If the parent of
+    // the instance is a client, the request must also have that Client. The node gives
+    // the balance that the instance did not use back to its parent, and returns a Refund
     // with that amount. If the node does not know the token, the Refund is 0.
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Changes the balance of an instance. The service_token gives the instance. The
-    // parent of the instance pays or gets the difference.
+    // parent of the instance pays or gets the difference. If the parent is a client, the
+    // request must also have that Client, for a positive and for a negative difference.
     rpc ModifyDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Returns the Peer of the node. The Peer gives all the addresses of the node, the
     // payment contracts, the rates and the reputation proofs. The signature of the
@@ -1399,9 +1404,11 @@ service Gateway {
     // the Service at index 6. These are the StartService indices, so the caller can send
     // them to StartService without a change.
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Takes a token. For an instance token, returns the balance of the instance. For a
-    // client_id, returns the balance of the client.
+    // Takes an instance token. Returns the balance of the instance.
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {}
+    // Takes a Client. Returns the balance of the client. The node does not charge for
+    // the answer. The balance of a client is not available with an instance token.
+    rpc GetClientMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes a BalanceStatementRequest and returns a BalanceStatement: the movements of
     // the balance of the caller, or of a child of the caller, signed by the node. The
     // caller pays for it: a fixed part and a part for each movement returned (the

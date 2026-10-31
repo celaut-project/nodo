@@ -12,12 +12,12 @@ from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
-from src.gateway.client_gate import parse_with_client, require_caller, simple_rpc_timeout_seconds
+from src.gateway.client_gate import ClientRequired, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
 from src.manager import balance_statement
 from src.manager.manager import ALLOW_DEBT, add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
 from src.manager.chat import ChatError, receive_chat_message
-from src.manager.metrics import get_metrics
+from src.manager.metrics import get_client_metrics, get_metrics
 from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
@@ -44,11 +44,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def StopService(self, request_iterator, context, **kwargs):
         try:
             log.LOGGER('Stopping instance.')
-            token = BeeClient.parse_one(
-                request_iterator, indices=rpc_input("StopService"), default=celaut_pb2.TokenMessage(),
-                timeout=simple_rpc_timeout_seconds(),
-            ).token
+            request, client_id = parse_with_client(request_iterator, method="StopService")
+            token = (request or celaut_pb2.TokenMessage()).token
             log.LOGGER(f'    with id {token}')
+            require_father(context, token, client_id)
             refunded_amount = stop_instance(token=token)
             if not refunded_amount: refunded_amount = 0
 
@@ -58,6 +57,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
                         amount=to_amount(refunded_amount)
                     )
             )
+        except ClientRequired:
+            raise
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
 
@@ -65,11 +66,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         try:
             log.LOGGER('Modifying deposit on service.')
 
-            _input = BeeClient.parse_one(
-                request_iterator, indices=rpc_input("ModifyDeposit"),
-                default=celaut_pb2.ModifyDepositInput(),
-                timeout=simple_rpc_timeout_seconds(),
-            )
+            _input, client_id = parse_with_client(request_iterator, method="ModifyDeposit")
+            _input = _input or celaut_pb2.ModifyDepositInput()
+            require_father(context, _input.service_token, client_id)
 
             success, message = modify_deposit(
                         amount_mu=from_amount(_input.difference),
@@ -84,6 +83,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
                         message=message
                     )
             )
+        except ClientRequired:
+            raise
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
 
@@ -361,6 +362,28 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     ).token
                 ),
                 indices=rpc_output("GetMetrics"),
+        )
+
+    def GetClientMetrics(self, request_iterator, context, **kwargs):
+        """The balance of the caller, which is the client that it sends (issue #597).
+
+        Not ``GetMetrics``: that one takes an instance token, a credential for one
+        instance, and gave the balance of a client to anyone who sent a ``client_id``
+        where the token goes. Free, unlike ``GetBalanceStatement``, because a client
+        reads it on every tick, and one with no balance left must still be able to
+        learn that.
+        """
+        client = BeeClient.parse_one(
+            request_iterator, indices=rpc_input("GetClientMetrics"),
+            default=celaut_pb2.Client(), timeout=simple_rpc_timeout_seconds(),
+        )
+        # A local instance passes ``require_caller`` without a client_id, and is not a
+        # client: it has no balance to read here, and no other client's to read.
+        if require_caller(context, client.client_id) != client.client_id:
+            raise ClientRequired("GetClientMetrics reads the balance of a client.")
+        yield from BeeClient.respond(
+                message_iterator=get_client_metrics(client_id=client.client_id),
+                indices=rpc_output("GetClientMetrics"),
         )
 
     def GetBalanceStatement(self, request_iterator, context, **kwargs):

@@ -419,6 +419,9 @@ def gateway_component() -> Layer:
         "auth.kinds": ",".join(AUTH_KINDS),
         "auth.client": "Client at index 2 beside the payload at 1, any order; "
                        "a local instance of the node needs none",
+        "auth.token+client": "instance token in the payload at 1; Client at index 2, "
+                             "needed only when the parent of the instance is a client, "
+                             "and then it must be that parent",
         "client_id": "32 lowercase hex characters",
         "amount": "Amount.n: signed decimal integer string, in the MU of the receiving "
                   "node",
@@ -517,7 +520,10 @@ def gateway_component() -> Layer:
         "AUTHENTICATION. Most methods need a Client. The caller sends the payload at "
         "index 1 and the Client at index 2, in any sequence. To get a client_id, call "
         "GenerateClient. A local instance of the node does not need a Client. Some "
-        "methods use a token in the payload. ModifyServiceSystemResources uses the "
+        "methods use a token in the payload. StopService and ModifyDeposit use a token "
+        "and also a Client at index 2. If the parent of the instance is a client, the "
+        "Client is necessary, and it must be that parent. If the parent is an instance "
+        "or a node, the token is enough. ModifyServiceSystemResources uses the "
         "address of the caller. The formal field gives the kind for each method.\n"
         "\n"
         "FORMATS. A client_id is 32 lowercase hexadecimal characters. An Amount is a "
