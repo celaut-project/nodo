@@ -7,9 +7,10 @@ changed. Three things qualify (the third is two entries, the database and ``stor
   ``buffer.proto`` are not part of it.
 * ``config_keys``: the key paths of ``config.example.yaml``. Values and comments change
   freely; a key added or removed means the operator's ``config.yaml`` may need a migration.
-* ``database``: a hash of the schema, built from ``TABLES`` and the ``TRACEABILITY_*``
-  definitions in an in-memory database, so it reads what SQLite will hold and not how the
-  Python happens to spell it.
+* ``database``: a hash of the schema (the columns of every table, plus the SQL of every
+  index and trigger), built from ``TABLES`` and the ``TRACEABILITY_*`` definitions in an
+  in-memory database, so it reads what SQLite will hold and not how the Python happens
+  to spell it.
 * ``storage_format``: ``STORAGE_FORMAT``, the layout of ``storage/``.
 
 CI writes the result to ``compat.json`` (``python -m src.utils.compat --write``) and fails
@@ -76,7 +77,7 @@ def config_keys_from_text(text: str) -> List[str]:
 
 
 def database_hash() -> str:
-    """Hash ``PRAGMA table_info`` of every table of a database made from the definitions."""
+    """Hash the tables (``PRAGMA table_info``), indexes and triggers of a database made from the definitions."""
     from src.database.migrate import create_tables, ensure_columns, ensure_tables
     from src.database.sql_connection import TRACEABILITY_COLUMNS, TRACEABILITY_TABLES
 
@@ -95,6 +96,13 @@ def database_hash() -> str:
         for (table,) in cursor.fetchall():
             cursor.execute(f"PRAGMA table_info({table})")
             schema[table] = [list(column) for column in cursor.fetchall()]
+        # An index (a unique one can reject rows the old code wrote) or a trigger changes
+        # what the database does without touching a column.
+        cursor.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master "
+            "WHERE type IN ('index', 'trigger') AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        )
+        schema["__indexes_and_triggers__"] = [list(row) for row in cursor.fetchall()]
     finally:
         connection.close()
     return _sha256(json.dumps(schema, sort_keys=True).encode())
