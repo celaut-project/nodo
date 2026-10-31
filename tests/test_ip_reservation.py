@@ -14,7 +14,17 @@ def _preferred(vmachine_id: str) -> str:
     with patch.object(network, "used_ips", return_value=set()), \
             patch.object(network, "_probe_held_ips", return_value=set()), \
             patch.object(network, "reserved_ip", return_value=None):
-        return network.deterministic_ip_and_mac(vmachine_id)[0]
+        try:
+            return network.deterministic_ip_and_mac(vmachine_id)[0]
+        finally:
+            network.release_ip(vmachine_id)
+
+
+class _Isolated(unittest.TestCase):
+    """Each test allocates for ids of its own: no reservation outlives it."""
+
+    def setUp(self):
+        self.addCleanup(network._reservations.clear)
 
 
 class UsedIpsTests(unittest.TestCase):
@@ -25,7 +35,7 @@ class UsedIpsTests(unittest.TestCase):
             self.assertIn("192.168.200.42", network.used_ips())
 
 
-class OwnReservationTests(unittest.TestCase):
+class OwnReservationTests(_Isolated):
     def test_an_instance_comes_back_on_the_address_it_held(self):
         # Not the address its id hashes to: the one it was given, then.
         held = "192.168.200.201"
@@ -56,7 +66,7 @@ class OwnReservationTests(unittest.TestCase):
         self.assertNotEqual(_mac("vm-594"), _mac("vm-595"))
 
 
-class NoOneElseGetsItTests(unittest.TestCase):
+class NoOneElseGetsItTests(_Isolated):
     def test_a_new_instance_never_gets_a_reserved_address_even_on_a_hash_collision(self):
         # The address that "newcomer" hashes to is the one the suspended instance
         # holds, as if their ids had collided.
@@ -84,7 +94,10 @@ def _mac(vmachine_id: str) -> str:
     with patch.object(network, "used_ips", return_value=set()), \
             patch.object(network, "_probe_held_ips", return_value=set()), \
             patch.object(network, "reserved_ip", return_value=None):
-        return network.deterministic_ip_and_mac(vmachine_id)[1]
+        try:
+            return network.deterministic_ip_and_mac(vmachine_id)[1]
+        finally:
+            network.release_ip(vmachine_id)
 
 
 if __name__ == "__main__":

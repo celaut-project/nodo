@@ -22,9 +22,10 @@ import hashlib
 import ipaddress
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
@@ -66,15 +67,36 @@ def ip_network() -> ipaddress.IPv4Network:
     return network
 
 
+# Allocation and registration are far apart: a launch picks its address, then spends
+# seconds copying the rootfs and writing the firewall before any runtime state or
+# row records it. Without something spanning that gap two concurrent launches see
+# the same free slot (#607). The lock makes pick-and-reserve atomic; the reservation
+# is what the next pick sees, until the launch has recorded the address or failed.
+_allocation_lock = threading.RLock()
+_reservations: Dict[str, str] = {}
+
+
+def release_ip(vmachine_id: str) -> None:
+    """Drop this id's in-memory reservation, a no-op if it holds none.
+
+    Called when the launch is over: by then the runtime state records the address, or
+    the launch failed and the address has to be free again.
+    """
+    with _allocation_lock:
+        _reservations.pop(vmachine_id, None)
+
+
 def used_ips() -> set[str]:
     """Every guest address this node has already committed.
 
     Both sources are needed and neither subsumes the other: the runtime states
     cover VMs the node has launched (including a foreign-backend one, and one
     still booting with no database row yet), and the database covers rows whose
-    state file a teardown already removed.
+    state file a teardown already removed. A third, in-memory one covers a launch
+    that has picked its address and not recorded it yet.
     """
-    used: set[str] = set()
+    with _allocation_lock:
+        used: set[str] = set(_reservations.values())
 
     for state in list_runtime_states().values():
         ip = state.get("ip")
@@ -115,6 +137,10 @@ def reserved_ip(vmachine_id: str) -> Optional[str]:
     and this is how the owner gets it back, so a revived instance comes up on exactly
     the address it had instead of probing past its own reservation.
     """
+    with _allocation_lock:
+        pending = _reservations.get(vmachine_id)
+    if pending:
+        return pending
     state = list_runtime_states().get(vmachine_id) or {}
     ip = state.get("ip")
     if isinstance(ip, str) and ip:
@@ -136,7 +162,16 @@ def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
 
     The MAC, like the tap name (:func:`create_tap`), is a pure function of the id, so
     nothing needs reserving for them: two ids only share one by a hash collision.
+
+    The address is reserved in memory before this returns, under a process-wide lock,
+    so a concurrent launch cannot be handed it (#607). The caller must call
+    :func:`release_ip` once the launch has recorded it or has failed.
     """
+    with _allocation_lock:
+        return _allocate_ip_and_mac(vmachine_id)
+
+
+def _allocate_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     network = ip_network()
     gateway_ip = ipaddress.ip_address(NETWORK_GATEWAY_IP)
     if gateway_ip not in network:
@@ -158,6 +193,7 @@ def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
         except ValueError:
             held_address = None
         if held_address is not None and held_address in network and held_address != gateway_ip:
+            _reservations[vmachine_id] = held
             return held, mac
 
     used = used_ips() | _probe_held_ips()
@@ -178,6 +214,7 @@ def deterministic_ip_and_mac(vmachine_id: str) -> Tuple[str, str]:
     if not selected_ip:
         raise MicroVMError(f"No available IPs in subnet {NETWORK_SUBNET}")
 
+    _reservations[vmachine_id] = selected_ip
     return selected_ip, mac
 
 

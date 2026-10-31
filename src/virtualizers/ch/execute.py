@@ -789,3 +789,6 @@ def execute(
         if isinstance(e, MicroVMError):
             raise
         raise MicroVMError(str(e)) from e
+    finally:
+        # Recorded by now (runtime state) or failed: the reservation has done its job.
+        network.release_ip(vmachine_id)
