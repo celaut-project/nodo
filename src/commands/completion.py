@@ -138,6 +138,7 @@ COMMANDS = sorted(
         "serve",
         "envs",
         "migrate",
+        "db:reset",
         "storage:prune_blocks",
         "test",
         "pack",

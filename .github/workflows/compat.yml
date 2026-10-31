@@ -1,0 +1,28 @@
+name: compat
+
+# compat.json is what `nodo update` compares the installed and the incoming version by
+# (protocol, config keys, database schema, storage layout). It must be regenerated in the
+# commit that changes any of them: `python -m src.utils.compat --write`.
+
+on:
+  pull_request:
+    paths:
+      - 'compat.json'
+      - 'protos/celaut.proto'
+      - 'config.example.yaml'
+      - 'src/database/**'
+      - 'src/utils/compat.py'
+      - 'bash/requirements.txt'
+  push:
+    branches: [dev, stable]
+
+jobs:
+  compat-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r bash/requirements.txt
+      - run: python -m src.utils.compat --check

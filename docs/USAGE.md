@@ -677,9 +677,19 @@ internal checks as runtime cost estimation:
 
 These are intended for development or advanced maintenance environments:
 
-- **update**  
-  Updates Nodo (requires superuser privileges).  
+- **update `[--check]` `[--force]`**  
+  Updates Nodo from git (requires superuser privileges), only when the incoming version
+  is compatible with the installed one. It fetches, then compares `compat.json` at `HEAD`
+  with the one at `origin/<branch>`: `protos/celaut.proto`, the keys of
+  `config.example.yaml`, the database schema and the layout of `storage/` must all be
+  unchanged. If one differs it prints which and exits non-zero with nothing changed; you
+  then update by hand (migrate the configuration, tell your peers about protocol changes).
+  If all are equal it pulls, refreshes the install and restarts the daemon, going back to
+  the previous commit if the node does not start. Tracked files with local changes stop
+  the command, and are discarded only with `--force`. `--check` prints the verdict and
+  changes nothing.  
   **Example:**  
+  `sudo nodo update --check`  
   `sudo nodo update`
 
 - **serve**  
@@ -730,9 +740,17 @@ These are intended for development or advanced maintenance environments:
   `nodo nat-guide`
 
 - **migrate**  
-  Updates the database schema.  
+  Creates the missing tables and columns. It never deletes anything: every row is kept,
+  and it is safe to run twice.  
   **Example:**  
   `nodo migrate`
+
+- **db:reset `[--yes]`**  
+  Deletes the database (peers, clients, balances, reputation, donation debts), after
+  asking you to type `reset`. Refuses while a node is serving. No setup or update script
+  calls it.  
+  **Example:**  
+  `nodo db:reset`
 
 - **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]` `[--no-input]`**  
   Asks for missing env vars, one by one, the same way as `execute`.  
@@ -1286,7 +1304,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `nat-guide` | the router steps to be reachable from the Internet |
 | `firewall-compat status\|apply\|remove` | rules a coexisting firewall must keep |
 | `completion bash\|zsh\|install` | shell tab-completion |
-| `update` | update nodo itself (root) |
+| `update` | update nodo itself if compatible (root) |
 | `uninstall [--yes] [--no-input] [--delete-wallets]` | remove this install; asks first, keeps the wallet mnemonics |
 | `pack <dir\|git url>` | package a project into a service |
 | `download <url> [-o <dir>]` | fetch a published service from its manifest |
@@ -1330,7 +1348,8 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `pay <peer> <amount> [--payment-method l:a] [--ledger] [--asset]` | pay a peer on-chain |
 | `tx_history [--json]` | payments made and received |
 | `serve` | run the node in the foreground (development) |
-| `migrate` | recreate the database from scratch |
+| `migrate` | create missing tables and columns, keeping every row |
+| `db:reset` | delete the database (asks first) |
 | `test <name>` | run one test from `tests/` |
 | `ggconf <dir> [-e k v]` | gateway config for a local project |
 | `force_execution <peer> <service>` | delegate to one peer, no balancer (testing) |
