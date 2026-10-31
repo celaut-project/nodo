@@ -4825,7 +4825,9 @@ class SQLConnection(metaclass=Singleton):
             raise ValueError("No values to update.")
 
         params.append(token_id)
-        query = f"UPDATE deposit_tokens SET {', '.join(updates)} WHERE id = ?"
+        # Only a pending token moves: a payed one must not be rejected, nor a rejected
+        # one payed, by a late write from another call.
+        query = f"UPDATE deposit_tokens SET {', '.join(updates)} WHERE id = ? AND status = 'pending'"
         self._execute(query, tuple(params))
 
     def deposit_token_exists(self, token_id: str, status: Optional[str] = None) -> bool:
