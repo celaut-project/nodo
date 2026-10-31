@@ -23,6 +23,8 @@ def db_reset_command(database_file: str, assume_yes: bool = False) -> bool:
         if input("Type 'reset' to continue: ").strip() != "reset":
             print("Cancelled.", flush=True)
             return False
-    os.remove(database_file)
+    for path in (database_file, f"{database_file}-wal", f"{database_file}-shm", f"{database_file}-journal"):
+        if os.path.exists(path):  # A leftover journal would be replayed onto the next database.
+            os.remove(path)
     print("Database deleted. `nodo migrate` makes an empty one.", flush=True)
     return True
