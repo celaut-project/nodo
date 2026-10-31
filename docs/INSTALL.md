@@ -100,7 +100,7 @@ curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.44.3/${YQ_ASSET
 chmod +x "$TARGET_DIR/bin/yq"
 ```
 
-Align `main.*` paths with your installation root:
+Align `main.*` paths with your installation root (this is what `install.sh` does for a fresh `config.yaml`; it keeps a `STORAGE`, `DATABASE_FILE` or other path you relocated, so skip those lines if you did):
 
 ```bash
 "$TARGET_DIR/bin/yq" -i \
