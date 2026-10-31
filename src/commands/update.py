@@ -160,11 +160,17 @@ def apply_update(repo: str, verdict: Verdict, install_command: Optional[List[str
     def roll_back(reason: str) -> bool:
         print(f"{reason} Going back to {previous[:12]}.", flush=True)
         _git(repo, "reset", "--hard", previous)
+        # The new install may have changed the dependencies the old code runs on.
+        if subprocess.run(install_command, cwd=repo).returncode != 0:
+            print("Reinstalling the previous version failed: its dependencies may not match.", flush=True)
         if was_serving and not daemon_command("restart", None):
             print("The previous version did not restart either. Check `nodo daemon status`.", flush=True)
         return False
 
     try:
+        if verdict.dirty:  # Only --force gets here; discard right before the pull, not before the checks.
+            print("Discarding local changes:", *verdict.dirty, sep="\n  ", flush=True)
+            restore_local_changes(repo)
         _git(repo, "pull", "--ff-only", "origin", verdict.branch)
     except GitError as error:
         print(f"{error}\nNothing was changed.", flush=True)
@@ -189,8 +195,6 @@ def update_command(repo: str, check_only: bool = False, force: bool = False) -> 
             return verdict.status in (UP_TO_DATE, COMPATIBLE)
         if verdict.status != COMPATIBLE:
             return False
-        if verdict.dirty:
-            restore_local_changes(repo)
         return apply_update(repo, verdict)
     except GitError as error:
         print(f"Error: {error}", flush=True)
