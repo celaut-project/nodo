@@ -294,9 +294,12 @@ class GatewayServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def ModifyServiceSystemResources(self, request_iterator, context):
-        """Changes the resource limits of an instance. Only a local instance of the node can
-        call it. The node identifies the instance by its address. The node takes a fee
-        from the balance of the instance. It returns the new resources and the balance.
+        """Changes the resource limits of an instance. A local instance of the node can call
+        it for itself: the node identifies it by its address. Anyone can call it for another
+        instance with its service_token (and the Client of its parent, if the parent is a
+        client). Resources of 0 hibernate the instance, and resources above 0 wake it (see
+        ModifyServiceSystemResourcesInput). The node takes a fee from the balance of the
+        instance that changes. It returns the new resources and the balance.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

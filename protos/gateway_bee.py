@@ -58,6 +58,8 @@ PackOutput_indices = {
 #                      father -- an instance, a node -- leaves the token as the only
 #                      credential
 #   local-address      the caller's address must be a local instance of the node
+#                      (no RPC uses it alone now; ModifyServiceSystemResources falls back
+#                      to it when the payload has no token)
 #   none               nobody is identified (GenerateClient, which mints the Client)
 # ---------------------------------------------------------------------------------
 
@@ -131,9 +133,9 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         auth="client",
     ),
     "ModifyServiceSystemResources": GatewayRpc(
-        input={1: celaut_pb2.ModifyServiceSystemResourcesInput},
+        input={1: celaut_pb2.ModifyServiceSystemResourcesInput, 2: celaut_pb2.Client},
         output={1: celaut_pb2.ModifyServiceSystemResourcesOutput},
-        auth="local-address",
+        auth="token+client",
     ),
     "GetServiceEstimatedCost": GatewayRpc(
         input=StartService_input_indices,

@@ -437,16 +437,45 @@ Cloud Hypervisor applies `mem_limit` and the CFS pair, through the instance's cg
 declines `disk_space`: a live rootfs image cannot be resized, so the disk an instance
 holds is fixed when it is created.
 
-It also declines the two unbounded forms, `mem_limit=0` and `cpu_quota=0`, which ask for
-`memory.max=max` and `cpu.max="max <period>"`. The row stores an amount, and `0` reads as
-*no memory* and *no CPU* rather than "unlimited", so a node that granted them would hand
-out an unbounded cgroup and charge nothing for it: a resource this model cannot price is
-one it cannot promise. `hotplug` fails the call, and the gateway refunds
-`MODIFY_RESOURCES_MU` — as it does for any resize that fails.
+It also declines the two unbounded forms, `mem_limit=0` and `cpu_quota=0`, which would
+write `memory.max=max` and `cpu.max="max <period>"`. The row stores an amount, and `0`
+reads as *no memory* and *no CPU* rather than "unlimited", so a node that granted them
+would hand out an unbounded cgroup and charge nothing for it. The gateway never passes
+them to `hotplug`: `0` is the request to hibernate (next section).
 
 A shrink is applied as asked, with no floor of the node's own. Booting needs
 `MIN_MEM_MIB`, but a running service asking for less memory than that is making a
 decision about its own guest, and the row records what it holds either way.
+
+### Hibernating an instance
+
+A resize that leaves an instance with no CPU (`cpu_quota=0`) or no RAM (`mem_limit=0`)
+hibernates it (#498): the node stops the VM and keeps the disk, the row, the address and
+the token. It is the state of a suspended instance (#594) with `suspended_reason`
+`hibernated`, and it differs from the others in three ways. Nothing but a resize brings it
+back: a top-up does not revive it, and no suspension grace ends it. It is charged for its
+disk and nothing else, the same `compute_maintenance_cost` with `0` CPU and RAM. One that
+cannot pay it keeps its disk for `instances.SUSPENDED_GRACE_SECONDS`, counted from the tick
+that found it unable (`hibernated_out_of_balance`): a top-up that lets it pay makes it
+`hibernated` again, and when the grace ends unpaid it is stopped, disk included. With no
+grace configured it is stopped at once.
+
+A field the request leaves out keeps the value of the row, and a hibernated row holds `0`
+for both, so a request that sets only the CPU or only the RAM of a hibernated instance
+leaves it hibernated. A request that leaves both above `0` wakes it: the same admission as
+any growth (the service pool and the host limits), then the VM starts again on its own
+disk, address and ports. The entrypoint runs again and the process state is lost. A wake
+that does not fit leaves it hibernated and refunds the call.
+
+The request may carry `service_token`. The node then changes that instance, whoever sends
+it, and the instance pays `MODIFY_RESOURCES_MU`, not the caller. While the father of the
+instance is a client, that client must send its `Client` too, as for `StopService`
+(#597). Without a token the instance that sends the request, found by its address,
+changes itself; a hibernating instance is answered before its VM stops.
+
+The node refuses to hibernate an instance that exports or mounts a shared filesystem, or
+that cannot be started again from its own disk, and refunds the call. Wake on incoming
+connection and saving the RAM are not part of it.
 
 ### An instance that runs on a peer
 

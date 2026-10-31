@@ -474,6 +474,9 @@ def revive_suspended_instances(now: Optional[float] = None) -> int:
         if revived >= REVIVES_PER_PASS:
             break
         token = row["id"]
+        # Hibernated on purpose (#498): only a resize wakes it, not a balance.
+        if row.get("suspended_reason") in dead_instances.HIBERNATED_REASONS:
+            continue
         try:
             balance = int(row.get("balance_mu") or 0)
         except (TypeError, ValueError):
@@ -560,7 +563,13 @@ def maintain_vmachines(debug_mode: bool=False):
             )
     # A suspended or dead instance is not charged; when it runs again, its first charge
     # is one interval.
-    for token in [token for token in _local_charged_at if token not in set(live_instances)]:
+    try:
+        hibernated = sc.get_hibernated_local_instances()
+    except Exception as e:
+        log.LOGGER(f"Error reading the hibernated instances: {e}")
+        hibernated = []
+    charged_ids = set(live_instances) | {row["id"] for row in hibernated}
+    for token in [token for token in _local_charged_at if token not in charged_ids]:
         _local_charged_at.pop(token, None)
 
     # Summed as the sweep goes, so the hourly history costs one addition rather than a
@@ -683,6 +692,8 @@ def maintain_vmachines(debug_mode: bool=False):
             charged_this_tick += int(charge_mu or 0)
             if debug_mode: log.LOGGER(f"Charged {vmachine_id} for the interval it just held.")
 
+    charged_this_tick += _charge_hibernated(hibernated, scarcity, debug_mode)
+
     # What this hour looked like (issue #337). Both figures were computed above and
     # were being dropped: the operator choosing the hours this node works in has
     # nothing else to read that choice against.
@@ -695,6 +706,54 @@ def maintain_vmachines(debug_mode: bool=False):
     # is what had the janitor judge QEMU guests with CH's liveness test (#295), and
     # `interface` is the only place that knows which backends this node has.
     vm_janitor_cleanup_orphans(debug_mode=debug_mode)
+
+
+def _charge_hibernated(hibernated: List[dict], scarcity, debug_mode: bool = False) -> int:
+    """Charge the disk of each hibernated instance (issue #498) and return what was charged.
+
+    Its row holds 0 CPU and RAM, so it is priced by `compute_maintenance_cost` like any
+    other and the figure is the same one its father checks. One that cannot pay is
+    marked: its grace period (`instances.SUSPENDED_GRACE_SECONDS`) runs from that tick, it
+    keeps its disk meanwhile, and a top-up that lets it pay clears the mark
+    (`reap_expired_suspensions` deletes it when the grace ends). With no grace it is stopped.
+    """
+    charged = 0
+    for row in hibernated:
+        token = row["id"]
+        charged_at = time.monotonic()
+        seconds = _seconds_to_charge(token, charged_at)
+        charge_mu = compute_maintenance_cost(
+            system_resources=celaut.Sysresources(
+                mem_limit=0, disk_space=row['disk_space'] or 0, cpu_period=0, cpu_quota=0,
+            ),
+            seconds=seconds,
+            scarcity=scarcity,
+            arch=_row_arch(row),
+            launch_bp=_row_launch_bp(row),
+        )
+        if debug_mode:
+            log.LOGGER(f"Charging hibernated {token}: {format_mu(charge_mu)} for {seconds}s")
+        if spend_mu(id=token, amount_mu=charge_mu, debug_mode=debug_mode,
+                    kind=ledger.MAINTENANCE,
+                    detail=statement_check.tick_detail(row, seconds)):
+            _local_charged_at[token] = charged_at
+            sc.record_instance_consumption(id=token, charge_mu=charge_mu, seconds=seconds)
+            charged += int(charge_mu or 0)
+            if row.get("suspended_reason") == dead_instances.HIBERNATED_OUT_OF_BALANCE:
+                sc.clear_hibernated_unpaid(token)
+            continue
+        _local_charged_at.pop(token, None)
+        try:
+            if dead_instances.suspended_grace_seconds() > 0:
+                if sc.mark_hibernated_unpaid(token):
+                    log.LOGGER(f"Hibernated instance {token} cannot pay its disk; "
+                               f"its grace period starts.")
+            else:
+                log.LOGGER(f"Hibernated instance {token} cannot pay its disk; stopping it.")
+                stop_instance(token=token, reason=dead_instances.OUT_OF_BALANCE)
+        except Exception as e:
+            log.LOGGER(f"Error handling hibernated {token} out of balance: {e}")
+    return charged
 
 
 def _peer_rates(peer_id: str, refresh: bool = False) -> dict:
@@ -1854,6 +1913,12 @@ def reap_expired_suspensions() -> int:
         failing_grace = dead_instances.revive_failure_grace_seconds()
         scarcity = None
         for row in sc.get_suspended_local_instances():
+            # A hibernated instance (#498) pays for its disk, so it has no grace to end.
+            # One that could not pay has: it goes the way of any instance out of balance.
+            if row.get("suspended_reason") == dead_instances.HIBERNATED:
+                continue
+            if row.get("suspended_reason") == dead_instances.HIBERNATED_OUT_OF_BALANCE:
+                row = dict(row, suspended_reason=dead_instances.OUT_OF_BALANCE)
             failing_for = row.get("revive_failing_for_s")
             if failing_for is not None and int(failing_for) >= failing_grace:
                 reason = row.get("suspended_reason") or dead_instances.PROCESS_LOST

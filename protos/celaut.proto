@@ -1144,8 +1144,20 @@ message ModifyServiceSystemResourcesOutput {
 message ModifyServiceSystemResourcesInput {
     // The minimum resources. Not used now.
     Sysresources min_sysreq = 1;
-    // The resources that the instance asks for.
+    // The resources that the instance asks for. A field that is not set keeps the value
+    // of the instance. If the CPU (cpu_quota) or the memory (mem_limit) ends at 0, the
+    // node hibernates the instance: it stops the virtual machine and keeps the disk, and
+    // charges only for the disk. If the instance is hibernated and the CPU and the memory
+    // both end above 0, the node starts it again from its entrypoint, on the same disk,
+    // address and ports. A request that sets only one of them does not wake it. The node
+    // refuses to hibernate an instance with a shared filesystem.
     Sysresources max_sysreq = 2;
+    // The instance token. Optional. If it is set, the node changes that instance, whoever
+    // sends the request, and the instance that the token names pays for the call. If the
+    // parent of the instance is a client, the request must also have that Client. If it
+    // is not set, the node changes the local instance that sends the request, which it
+    // finds by the address of the caller.
+    string service_token = 3;
 }
 
 // The request of ModifyDeposit.
@@ -1388,9 +1400,12 @@ service Gateway {
     // and the amount. The node examines the ledger. Then it adds the amount to the
     // client that got that deposit token. The node accepts each deposit token one time.
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Changes the resource limits of an instance. Only a local instance of the node can
-    // call it. The node identifies the instance by its address. The node takes a fee
-    // from the balance of the instance. It returns the new resources and the balance.
+    // Changes the resource limits of an instance. A local instance of the node can call
+    // it for itself: the node identifies it by its address. Anyone can call it for another
+    // instance with its service_token (and the Client of its parent, if the parent is a
+    // client). Resources of 0 hibernate the instance, and resources above 0 wake it (see
+    // ModifyServiceSystemResourcesInput). The node takes a fee from the balance of the
+    // instance that changes. It returns the new resources and the balance.
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes the same objects as StartService. Returns the cost to run the service on
     // this node, and starts nothing. A node that cannot run the service now refuses
