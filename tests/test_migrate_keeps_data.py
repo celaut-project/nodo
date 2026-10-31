@@ -3,6 +3,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
 IMPORT_ERROR = None
 try:
@@ -59,7 +60,6 @@ class MigrateKeepsDataTests(unittest.TestCase):
 
     def test_db_reset_asks_and_deletes(self):
         migrate_module.migrate()
-        from unittest import mock
         with mock.patch("src.commands.daemon.is_serving", return_value=False):
             with mock.patch("builtins.input", return_value="no"):
                 self.assertFalse(db_reset_command(self.database))
@@ -68,9 +68,17 @@ class MigrateKeepsDataTests(unittest.TestCase):
                 self.assertTrue(db_reset_command(self.database))
             self.assertFalse(os.path.exists(self.database))
 
+    def test_db_reset_removes_leftover_journals(self):
+        migrate_module.migrate()
+        for suffix in ("-wal", "-shm", "-journal"):
+            open(self.database + suffix, "w").close()
+        with mock.patch("src.commands.daemon.is_serving", return_value=False):
+            self.assertTrue(db_reset_command(self.database, assume_yes=True))
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            self.assertFalse(os.path.exists(self.database + suffix))
+
     def test_db_reset_refuses_while_serving(self):
         migrate_module.migrate()
-        from unittest import mock
         with mock.patch("src.commands.daemon.is_serving", return_value=True):
             self.assertFalse(db_reset_command(self.database, assume_yes=True))
         self.assertTrue(os.path.exists(self.database))

@@ -10,6 +10,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 IMPORT_ERROR = None
 try:
@@ -158,6 +159,24 @@ class UpdateCompatTests(unittest.TestCase):
         self.assertEqual(git_head(self.clone), verdict.installed)
         self.assertEqual(read(self.clone, "code.py"), "v1\n")
 
+    def test_rollback_reinstalls_the_previous_version(self):
+        self.publish()
+        verdict = update.check_update(self.clone)
+        log = os.path.join(self.clone, "..", "install.log")
+        install = ["/bin/sh", "-c", f"cat code.py >> {log}; exit 1"]
+        self.assertFalse(update.apply_update(self.clone, verdict, install_command=install))
+        # The install ran on the new code (which failed), then again on the restored v1.
+        self.assertEqual(read(os.path.dirname(log), "install.log").count("v1"), 1)
+        self.assertEqual(git_head(self.clone), verdict.installed)
+
+    def test_forced_update_keeps_local_changes_until_the_pull(self):
+        write(self.clone, "code.py", "mine\n")
+        self.publish()
+        verdict = update.check_update(self.clone, force=True)
+        self.assertEqual(read(self.clone, "code.py"), "mine\n")
+        self.assertTrue(update.apply_update(self.clone, verdict, install_command=["true"]))
+        self.assertEqual(update.local_changes(self.clone), [])
+
 
 def git_head(repo):
     return subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
@@ -168,6 +187,15 @@ class ManifestTests(unittest.TestCase):
     def test_committed_manifest_matches_the_sources(self):
         with open(os.path.join(compat.ROOT, compat.MANIFEST_FILE)) as f:
             self.assertEqual(json.load(f), compat.compute_manifest())
+
+    def test_database_hash_sees_indexes_and_triggers(self):
+        from src.database import migrate
+        base = compat.database_hash()
+        with mock.patch.object(migrate, "INDEXES", migrate.INDEXES + ("CREATE INDEX IF NOT EXISTS idx_compat_probe ON uri (ip)",)):
+            self.assertNotEqual(compat.database_hash(), base)
+        with mock.patch.object(migrate, "TRIGGERS", migrate.TRIGGERS + (
+                "CREATE TRIGGER IF NOT EXISTS trg_compat_probe AFTER DELETE ON uri BEGIN SELECT 1; END",)):
+            self.assertNotEqual(compat.database_hash(), base)
 
     def test_flatten_keys(self):
         self.assertEqual(compat.flatten_keys({"a": {"b": 1, "c": {"d": 2}}, "e": []}), ["a.b", "a.c.d", "e"])
