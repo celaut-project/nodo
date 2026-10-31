@@ -89,7 +89,9 @@ reader can tell an injected variable from a requested one.
 An instance's id doubles as a bearer credential: possession of the token is what
 authorises a tunnel to it and what its balance is spent against (`TrafficMeter`,
 `Gateway.GetMetrics`). Publishing a receipt that contains it would hand every reader
-tunnel access to the instance and the ability to drain its balance. A receipt names
+tunnel access to the instance and the ability to drain its balance. Since #597, a token
+alone no longer stops an instance that a client started, or moves its balance: that also
+needs the client. The token is still the whole credential for the tunnel and the reads. A receipt names
 the execution by a digest of that token together with the node's key, so the name is
 stable, unlinkable to the credential, and still recognisable to both parties, who each
 hold the token.

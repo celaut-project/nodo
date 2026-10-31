@@ -241,6 +241,8 @@ reads its own account on each peer, and the statement of each child, every
 checking this node. A read asks for no more rows than the balance of the reader pays for,
 and the peer may charge the account only for the statements that it asked for.
 
+The balance of a client alone is not a statement. `GetClientMetrics` (#597) answers it, takes a `Client`, and is free: a node reads its balance on a peer on each tick, and a node whose balance is zero must still be able to read that it is zero.
+
 `SCARCITY_CURVE` is the exponent applied to the missing supply, so raising it holds the
 surcharge back: at `2.0`, a tenth of a resource gone costs 1.09x rather than the 1.90x
 linear would charge. Raising `lack` to the *reciprocal* of the curve does the opposite,
@@ -586,7 +588,8 @@ the balance says is taken for what was spent, never below zero, and the mark goe
 head. A fault of the peer is scored; a gap that its retention explains is not.
 
 The stop reads the child's statement one last time before `StopService`, because its
-account on the peer ends there, and closes the charge with it.
+account on the peer ends there, and closes the charge with it. `StopService` carries this
+node's client on the peer, which is the father of the child there (#597).
 
 An instance that consumed more than its deposit holds is stopped, and its row is
 emptied first rather than refunded: every MU on it is already owed to the peer for
@@ -608,7 +611,8 @@ Top-ups move both halves. `ModifyDeposit` charges the father here, converts the 
 to the peer's MU (`mu_conversion.convert_mu`, rounding the direction that cannot pay
 the client's costs out of the node's pocket) and forwards it — and only writes the
 local rows once the peer has confirmed its side, together with the net that it has sent
-(`father_net_peer_mu`), in one transaction. The peer writes the change in the statement of
+(`father_net_peer_mu`), in one transaction. The call to the peer carries this node's
+client there, for a top-up and for a withdrawal (#597). The peer writes the change in the statement of
 the child, and the tick leaves it out of the consumption.
 
 ### Worked example
