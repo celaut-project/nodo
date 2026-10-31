@@ -1954,15 +1954,20 @@ def reap_expired_suspensions() -> int:
 def _reclaimable_suspensions(father_id: Optional[str] = None) -> List[dict]:
     """The suspended instances whose disk and address may go before their grace ends.
 
-    Only the ones out of balance that still cannot pay a tick: they hold a disk and an
-    address that nobody pays for (F4 of the review of #595). One suspended for an
+    Only the ones out of balance (hibernated or not) that still cannot pay a tick: they
+    hold a disk and an address that nobody pays for (F4 of the review of #595). One suspended for an
     internal failure has MU and is entitled to its revives, and one that was topped up
     is waiting to start. Oldest suspension first. ``father_id`` keeps one father's.
     """
     rows = []
     scarcity = None
     for row in sc.get_suspended_local_instances():
-        if (row.get("suspended_reason") or dead_instances.OUT_OF_BALANCE) != dead_instances.OUT_OF_BALANCE:
+        reason = row.get("suspended_reason") or dead_instances.OUT_OF_BALANCE
+        # A hibernated instance that could not pay its disk is out of balance too; one that
+        # pays for it (`hibernated`) holds nothing for free.
+        if reason == dead_instances.HIBERNATED_OUT_OF_BALANCE:
+            reason = dead_instances.OUT_OF_BALANCE
+        if reason != dead_instances.OUT_OF_BALANCE:
             continue
         if father_id is not None and row.get("father_id") != father_id:
             continue

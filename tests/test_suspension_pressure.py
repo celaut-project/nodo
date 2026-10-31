@@ -56,6 +56,27 @@ class CapsPerFatherTests(unittest.TestCase):
         deleted, stopped = self._enforce(rows, count=0, disk_gib=20)
         self.assertEqual([token for token, _ in stopped], ["big"])
 
+    def test_hibernated_out_of_balance_counts_toward_the_count_cap(self):
+        rows = [_row("h0", reason=dead_instances.HIBERNATED_OUT_OF_BALANCE),
+                _row("h1", reason=dead_instances.HIBERNATED_OUT_OF_BALANCE),
+                _row("o2")]
+        deleted, stopped = self._enforce(rows, count=1, disk_gib=0)
+        self.assertEqual(deleted, 2)
+        self.assertEqual(stopped, [("h0", dead_instances.OUT_OF_BALANCE),
+                                   ("h1", dead_instances.OUT_OF_BALANCE)])
+
+    def test_hibernated_out_of_balance_counts_toward_the_disk_cap(self):
+        rows = [_row("h", disk=15 * GIB, reason=dead_instances.HIBERNATED_OUT_OF_BALANCE),
+                _row("o", disk=6 * GIB)]
+        self.assertEqual(self._enforce(rows, count=0, disk_gib=20)[1],
+                         [("h", dead_instances.OUT_OF_BALANCE)])
+
+    def test_a_hibernated_one_that_pays_for_its_disk_is_not_counted(self):
+        rows = [_row(f"h{n}", reason=dead_instances.HIBERNATED, balance=10 ** 9) for n in range(5)]
+        self.assertEqual(self._enforce(rows, count=1, disk_gib=1, can_pay=True), (0, []))
+        # Plain hibernated is never reclaimable, whatever its balance says.
+        self.assertEqual(self._enforce(rows, count=1, disk_gib=1, can_pay=False), (0, []))
+
     def test_under_both_nothing_goes(self):
         self.assertEqual(self._enforce([_row("a"), _row("b")]), (0, []))
 
@@ -110,6 +131,30 @@ class PressureTests(unittest.TestCase):
             availability = resource_availability.availability_reclaiming_disk(resources=None)
         self.assertTrue(availability["can_execute"])
         self.assertEqual(stopped, ["a", "b"])
+
+    def test_disk_reclaim_takes_hibernated_out_of_balance_but_not_hibernated(self):
+        rows = [_row("paid", reason=dead_instances.HIBERNATED),
+                _row("h", reason=dead_instances.HIBERNATED_OUT_OF_BALANCE),
+                _row("o")]
+        stopped = []
+        with mock.patch.object(maintain.sc, "get_suspended_local_instances", return_value=rows), \
+                mock.patch.object(maintain, "stop_instance",
+                                  side_effect=lambda token, reason: stopped.append(token) or 0):
+            self.assertEqual(maintain.reclaim_suspended_disk(lambda: True), 2)
+        self.assertEqual(stopped, ["h", "o"])
+
+    def test_address_reclaim_takes_hibernated_out_of_balance_but_not_hibernated(self):
+        stopped = []
+        for rows, expected in (
+                ([_row("paid", reason=dead_instances.HIBERNATED),
+                  _row("h", reason=dead_instances.HIBERNATED_OUT_OF_BALANCE)], ["h"]),
+                ([_row("paid", reason=dead_instances.HIBERNATED)], [])):
+            stopped.clear()
+            with mock.patch.object(maintain.sc, "get_suspended_local_instances", return_value=rows), \
+                    mock.patch.object(maintain, "stop_instance",
+                                      side_effect=lambda token, reason: stopped.append(token) or 0):
+                self.assertEqual(maintain.reclaim_suspended_address(), bool(expected))
+            self.assertEqual(stopped, expected)
 
     def test_a_launch_short_of_something_else_too_deletes_nothing(self):
         refused = {"can_execute": False,
