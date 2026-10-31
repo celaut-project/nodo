@@ -50,8 +50,11 @@ def __get_metrics_internal(id: str) -> celaut_pb2.Metrics:
     return celaut_pb2.Metrics(
         balance=to_amount(sc.get_instance_balance(id=id)),
         # Its father, when it delegated it here, stops charging while it is (F1 of the
-        # review of #595): nothing runs, and this node charges it nothing either.
-        suspended=sc.is_local_instance_suspended(id=id),
+        # review of #595): nothing runs, and this node charges it nothing either. Not
+        # for a hibernated one (#603): it is charged for its disk, so its father keeps
+        # charging it, and no suspension grace ends it.
+        suspended=sc.is_local_instance_suspended(id=id)
+                  and not sc.is_local_instance_hibernated(id=id),
     )
 
 

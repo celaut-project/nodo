@@ -119,6 +119,64 @@ class PeerSaysSoTests(_Database):
         self.assertTrue(answer.suspended)
         self.assertEqual(answer.balance.n, "10")
 
+    def _local(self, id):
+        self.sc.add_local_instance(
+            father_id="father", container_ip=f"192.168.200.{len(id) + ord(id[0])}",
+            container_id=id, name=f"web-{id}", balance_mu=10, serialized_instance="x",
+            service_id="svc", virtualizer="ch", disk_space=0, envs="{}")
+
+    def test_a_hibernated_instance_is_not_reported_suspended(self):
+        # #603: it is charged for its disk, and no grace ends it.
+        self._local("h")
+        self._local("hu")
+        self._local("oob")
+        self._local("run")
+        self.sc.hibernate_local_instance("h")
+        self.sc.hibernate_local_instance("hu")
+        self.sc.mark_hibernated_unpaid("hu")
+        self.sc.suspend_local_instance("oob", dead_instances.OUT_OF_BALANCE)
+        with patch.object(metrics, "sc", self.sc):
+            says = {i: metrics.get_metrics(i).suspended for i in ("h", "hu", "oob", "run")}
+        self.assertEqual(says, {"h": False, "hu": False, "oob": True, "run": False})
+
+    def test_a_delegated_child_that_the_peer_hibernated_is_charged_and_not_stopped(self):
+        self.sc.add_client(FATHER, 5000, None)
+        self.sc.add_delegated_instance(
+            father_id=FATHER, alias=ALIAS, external_token=PEER_TOKEN,
+            peer_id="peer", serialized_instance=b"", service_id="s", balance_mu=850,
+            peer_balance_mu=900, movements=(ledger.Movement(ledger.START, 850),),
+            sent_peer_mu=900,
+        )
+        self._local("h")
+        self.sc.hibernate_local_instance("h")
+        stopped = []
+
+        def read(row, debug_mode=False):
+            # What the peer says of the child, through its own `GetMetrics`.
+            with patch.object(metrics, "sc", self.sc):
+                said = metrics.get_metrics("h").suspended
+            return 0, {**maintain._unmoved_state(row), "peer_suspended": said}
+
+        def tick():
+            with patch.object(maintain, "sc", self.sc), \
+                    patch.object(maintain, "_read_child", side_effect=read), \
+                    patch.object(maintain, "_check_our_account"), \
+                    patch.object(maintain, "charge_at_launch_price", return_value=40), \
+                    patch.object(maintain, "system_scarcity", return_value={}), \
+                    patch.object(dead_instances, "suspended_grace_seconds", return_value=0), \
+                    patch.object(maintain, "stop_instance",
+                                 side_effect=lambda token, reason: stopped.append((token, reason))):
+                maintain.maintain_delegated_instances()
+
+        tick()  # the first charge sets charged_until
+        before = self.sc.get_delegated_instances()[0]["balance_mu"]
+        self.sc._execute("UPDATE delegated_instances SET charged_until = charged_until - 10")
+        tick()
+        row = self.sc.get_delegated_instances()[0]
+        self.assertLess(row["balance_mu"], before)
+        self.assertIsNone(row["suspended_at"])
+        self.assertEqual(stopped, [])
+
     def test_the_field_is_on_the_wire(self):
         wire = celaut_pb2.Metrics(suspended=True).SerializeToString()
         self.assertTrue(celaut_pb2.Metrics.FromString(wire).suspended)
