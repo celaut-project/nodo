@@ -48,6 +48,17 @@ PEER_STOPPED = "peer_stopped"
 LAUNCH_FAILED = "launch_failed"
 BURNALL = "burnall"
 
+# Not a death: the `suspended_reason` of an instance whose resources were set to 0 on
+# purpose (issue #498). Its VM is stopped and its disk kept, like any suspended one, but
+# nothing brings it back except a resize that gives it CPU and RAM again: no top-up
+# revives it, and no grace period ends it. It is charged for its disk meanwhile.
+HIBERNATED = "hibernated"
+# A hibernated instance that could not pay its disk. Its grace period (see
+# `suspended_grace_seconds`) counts from the tick that found it unable to pay: it keeps its
+# disk until then, and a top-up that lets it pay a tick makes it `hibernated` again.
+HIBERNATED_OUT_OF_BALANCE = "hibernated_out_of_balance"
+HIBERNATED_REASONS = (HIBERNATED, HIBERNATED_OUT_OF_BALANCE)
+
 # An instance id is a hash, so it holds hex digits only. Other text is refused to
 # make sure an id can never name a path outside the dead-instance directory.
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")

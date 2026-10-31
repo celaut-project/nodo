@@ -3,6 +3,7 @@ import grpc
 from protos import celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import rpc_input, rpc_output
 from src.database import ledger
+from src.database.sql_connection import SQLConnection
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
@@ -13,7 +14,7 @@ from src.utils.contract_xattrs import get_script, get_contract_type, get_token_i
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
 from src.gateway.client_gate import ClientRequired, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
-from src.manager import balance_statement
+from src.manager import balance_statement, hibernation
 from src.manager.manager import ALLOW_DEBT, add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
 from src.manager.chat import ChatError, receive_chat_message
@@ -28,6 +29,9 @@ from src.utils.network_policy import NetworkPolicyRejection
 from src.utils.monetary import prices
 
 env_manager = ConfigManager()
+
+
+sc = SQLConnection()
 
 
 class Gateway(celaut_pb2_grpc.Gateway):
@@ -271,24 +275,37 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for modify service system resources.')
-        caller_ip = get_only_the_ip_from_context(context_peer=context.peer())
-        token = get_internal_service_id_by_uri(uri=caller_ip)
-        # Two different failures used to share one message. Charging an unknown
-        # caller fails because there is nobody to charge, and reporting that as
-        # "Error charging" pointed at the price of the call instead of at the fact
-        # that the node did not recognise the address it came from -- which is what
-        # the caller and the operator need to know, and what they were told for a
-        # guest that called in before its instance was registered.
-        if not token and not caller_ip:
-            raise Exception(
-                'This node cannot tell which instance is asking to change its resources: '
-                f'the caller has no IP address ({context.peer()}).'
-            )
-        if not token:
-            raise Exception(
-                f'No local instance is registered at {caller_ip}, so this node cannot tell '
-                f'which instance is asking to change its resources ({context.peer()}).'
-            )
+        request, client_id = parse_with_client(request_iterator, method="ModifyServiceSystemResources")
+        request = request or celaut_pb2.ModifyServiceSystemResourcesInput()
+        if request.service_token:
+            # The token names the instance, whoever sends it (issue #498). While the
+            # father is a client, only that client may use it, as for StopService.
+            token = request.service_token
+            require_father(context, token, client_id)
+            if not sc.internal_instance_exists(id=token):
+                raise Exception('This node has no local instance with that token.')
+        else:
+            caller_ip = get_only_the_ip_from_context(context_peer=context.peer())
+            token = get_internal_service_id_by_uri(uri=caller_ip)
+            # Two different failures used to share one message. Charging an unknown
+            # caller fails because there is nobody to charge, and reporting that as
+            # "Error charging" pointed at the price of the call instead of at the fact
+            # that the node did not recognise the address it came from -- which is what
+            # the caller and the operator need to know, and what they were told for a
+            # guest that called in before its instance was registered.
+            if not token and not caller_ip:
+                raise Exception(
+                    'This node cannot tell which instance is asking to change its resources: '
+                    f'the caller has no IP address ({context.peer()}).'
+                )
+            if not token:
+                raise Exception(
+                    f'No local instance is registered at {caller_ip}, so this node cannot tell '
+                    f'which instance is asking to change its resources ({context.peer()}).'
+                )
+        # The instance that changes pays, not the caller: the holder of a token may be a
+        # client with no instance of its own, and the cost of waking stays with the
+        # instance that gets it.
         refund_container = []
         if not spend_mu(
                 id=token,
@@ -296,18 +313,38 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 refund_function_container=refund_container,
                 kind=ledger.RESOURCE_CHANGE,
         ): raise Exception('Error charging for the resource change of ' + context.peer())
-        if not hotplug(
-                vmachine_id=token,
-                system_requeriments_range=BeeClient.parse_one(
-                    request_iterator, indices=rpc_input("ModifyServiceSystemResources"),
-                    timeout=simple_rpc_timeout_seconds(),
-                )
-        ):
+
+        def refuse(message: str):
             try:
                 refund_container.pop()()
             except IndexError:
                 pass
-            raise Exception('Exception on service modify method.')
+            raise Exception(message)
+
+        sysreq = request.max_sysreq
+        action = hibernation.plan(token, sysreq)
+        if action == hibernation.HIBERNATE:
+            try:
+                hibernation.check_can_hibernate(token)
+            except hibernation.HibernationRefused as e:
+                refuse(str(e))
+            # Answered first: an instance that hibernates itself has to get its reply
+            # before the node stops it.
+            try:
+                yield from BeeClient.respond(message_iterator=hibernation.hibernated_view(token))
+            finally:
+                try:
+                    hibernation.hibernate_instance(token)
+                except Exception as e:
+                    log.LOGGER(f'Could not hibernate {token}: {e}')
+            return
+        if action == hibernation.WAKE:
+            if not hibernation.wake_instance(token, sysreq):
+                refuse('The instance could not be woken: it stays hibernated.')
+        elif action == hibernation.STAY:
+            log.LOGGER(f'{token} is hibernated and the request leaves it without CPU or RAM.')
+        elif not hotplug(vmachine_id=token, system_requeriments_range=request):
+            refuse('Exception on service modify method.')
 
         yield from BeeClient.respond(
                 message_iterator=get_sysresources(id=token)

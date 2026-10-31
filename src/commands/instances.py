@@ -415,7 +415,9 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'balance': balance_value,
-                    'state': (f"suspended ({suspended_reason})" if suspended_reason else 'suspended')
+                    'state': ('hibernated' if suspended_reason == 'hibernated' else
+                              'hibernated (out of balance)' if suspended_reason == 'hibernated_out_of_balance' else
+                              f"suspended ({suspended_reason})" if suspended_reason else 'suspended')
                     if suspended_at else 'running',
                     # A crash loop shows here (issue #594): how many times the VM was
                     # started again on its own disk, and the last time why and when.

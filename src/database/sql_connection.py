@@ -16,6 +16,7 @@ from src.database import ledger
 from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
+from src.utils.dead_instances import HIBERNATED, HIBERNATED_OUT_OF_BALANCE
 from src.utils.singleton import Singleton
 from src.identity.transport_stack import carries_prose, share_prose_on_ledger
 from src.utils.utils import from_amount, generate_uris_by_peer_id
@@ -1339,6 +1340,68 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
         ''', (id,)).fetchone()
         return row is not None
+
+    def hibernate_local_instance(self, id: str) -> bool:
+        """Mark a live local instance hibernated (issue #498): suspended on purpose, with
+        its row zeroed to the disk it keeps.
+
+        One statement, so a reader never sees it suspended with the resources it had.
+        An instance already suspended for another reason becomes hibernated: it was
+        asked to stay down, and a top-up must not start it. True if the row changed,
+        False if it already was hibernated or is not alive.
+        """
+        cursor = self._execute('''
+            UPDATE local_instances
+            SET suspended_at = COALESCE(suspended_at, CURRENT_TIMESTAMP),
+                suspended_reason = ?, mem_limit = 0, cpu_period = 0, cpu_quota = 0
+            WHERE id = ? AND killed_at IS NULL
+              AND (suspended_at IS NULL
+                   OR COALESCE(suspended_reason, '') NOT IN (?, ?))
+        ''', (HIBERNATED, id, HIBERNATED, HIBERNATED_OUT_OF_BALANCE))
+        changed = cursor.rowcount > 0
+        if changed:
+            _local_capacity_changed()
+        return changed
+
+    def is_local_instance_hibernated(self, id: str) -> bool:
+        row = self._execute('''
+            SELECT 1 FROM local_instances
+            WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
+              AND suspended_reason IN (?, ?)
+        ''', (id, HIBERNATED, HIBERNATED_OUT_OF_BALANCE)).fetchone()
+        return row is not None
+
+    def mark_hibernated_unpaid(self, id: str) -> bool:
+        """A hibernated instance could not pay its disk: its grace period starts now.
+
+        True if this call started it, False if it already had or is not hibernated.
+        """
+        cursor = self._execute('''
+            UPDATE local_instances
+            SET suspended_reason = ?, suspended_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND killed_at IS NULL AND suspended_reason = ?
+        ''', (HIBERNATED_OUT_OF_BALANCE, id, HIBERNATED))
+        return cursor.rowcount > 0
+
+    def clear_hibernated_unpaid(self, id: str) -> bool:
+        """A hibernated instance paid its disk again (it was topped up): no grace runs."""
+        cursor = self._execute('''
+            UPDATE local_instances SET suspended_reason = ?
+            WHERE id = ? AND killed_at IS NULL AND suspended_reason = ?
+        ''', (HIBERNATED, id, HIBERNATED_OUT_OF_BALANCE))
+        return cursor.rowcount > 0
+
+    def get_hibernated_local_instances(self) -> List[dict]:
+        """The hibernated local instances with what a tick of disk costs them: id,
+        balance and the rows of resources (all zero but the disk)."""
+        result = self._execute('''
+            SELECT id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, arch,
+                   launch_cpu_bp, launch_mem_bp, launch_disk_bp, suspended_reason
+            FROM local_instances
+            WHERE killed_at IS NULL AND suspended_at IS NOT NULL AND suspended_reason IN (?, ?)
+            ORDER BY id
+        ''', (HIBERNATED, HIBERNATED_OUT_OF_BALANCE))
+        return [dict(row) for row in result.fetchall()]
 
     def get_committed_resources(self) -> List[dict]:
         """The resource grant of every instance on this node, one row each.
