@@ -503,6 +503,9 @@ as the invoking user, nodo can always stop it — no privileged signal involved.
 "$PY_VENV_BIN" "$TARGET_DIR/nodo.py" migrate
 ```
 
+It only adds what is missing and keeps every row, so running it again on an existing node
+is safe. (`nodo db:reset` is the explicit way to start from an empty database.)
+
 The daemon runs the same migrations on start, so an upgrade in place needs no step of
 its own. Some of them cannot be undone: once they ran, the database no longer works with
 an older checkout. Back up `storage/database.sqlite` before an upgrade if you may need to

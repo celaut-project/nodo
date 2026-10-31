@@ -43,9 +43,8 @@ CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER
 
 # Tables this node writes that a database created before them will not have.
 #
-# `migrate` runs from the setup scripts, and `nodo migrate` *deletes* the database
-# before recreating it -- so an operator who pulls new code and restarts the service
-# has no upgrade path at all. Without these, a peer's reputation update would fail and
+# `migrate` runs from the setup scripts, and an operator who pulls new code and restarts
+# the service never reruns it. Without these, a peer's reputation update would fail and
 # roll its score back with the missing event, which is a worse outcome than the feature
 # simply not being there. Everything created here is `IF NOT EXISTS`.
 TRACEABILITY_TABLES = (

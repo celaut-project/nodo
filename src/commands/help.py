@@ -39,7 +39,7 @@ GROUPS: List[Group] = [
             ("nat-guide", "reach this node from the Internet"),
             ("firewall-compat status|apply|remove", "rules a coexisting firewall must keep"),
             ("completion bash|zsh|install", "tab-completion for commands and ids"),
-            ("update", "update nodo itself"),
+            ("update [--check] [--force]", "update nodo itself, only if the node stays compatible"),
             ("uninstall [--yes]", "remove this install (keeps the wallets)"),
             ("help", "this list"),
         ],
@@ -129,7 +129,8 @@ GROUPS: List[Group] = [
         None,
         [
             ("serve", "run the node in the foreground"),
-            ("migrate", "recreate the database from scratch"),
+            ("migrate", "create missing tables and columns; keeps every row"),
+            ("db:reset [--yes]", "delete the database (asks first)"),
             ("test <test name>", "run one test from tests/"),
             ("ggconf <repository path>", "gateway config for a local project"),
             ("force_execution <peer> <service>", "no balancer, no fallback: it must run there"),

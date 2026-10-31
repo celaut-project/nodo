@@ -631,8 +631,6 @@ if __name__ == '__main__':
                 # same way: install.sh then asks for the root steps it needs. The
                 # directory is passed on, or install.sh would update its default.
                 import getpass
-                import shlex
-
                 from src.utils.privileges import installed_service_user
 
                 try:
@@ -643,9 +641,13 @@ if __name__ == '__main__':
                 if os.geteuid() != 0 and service_user != getpass.getuser():
                     print(f"This script requires superuser privileges. Please run: {sudo_rerun()}")
                 else:
-                    main_dir = shlex.quote(INSTALL_DIR)
-                    os.system(f"/bin/bash {main_dir}/bash/restore_source.sh {main_dir}")
-                    os.system(f"/bin/bash {main_dir}/install.sh --target-dir {main_dir}")
+                    args = sys.argv[2:]
+                    if any(a not in ("--check", "--force") for a in args):
+                        print("Usage: nodo update [--check] [--force]", flush=True)
+                        _exit(1)
+                    from src.commands.update import update_command
+                    _exit(0 if update_command(INSTALL_DIR, check_only="--check" in args,
+                                              force="--force" in args) else 1)
 
             case "uninstall":
                 # uninstall.sh does both modes itself: with sudo it removes all, and
@@ -974,10 +976,17 @@ if __name__ == '__main__':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
 
             case 'migrate':
-                import os
+                # Additive only: it never deletes the database (#518). `db:reset` does.
                 from src.database.migrate import migrate
-                os.system(f"rm {DATABASE_FILE}")
                 migrate()
+
+            case 'db:reset':
+                args = sys.argv[2:]
+                if any(a not in ("--yes", "-y") for a in args):
+                    print("Usage: nodo db:reset [--yes]", flush=True)
+                    _exit(1)
+                from src.commands.db_reset import db_reset_command
+                _exit(0 if db_reset_command(DATABASE_FILE, assume_yes=bool(args)) else 1)
 
             case 'storage:prune_blocks':
                 from src.commands.storage import prune_blocks
