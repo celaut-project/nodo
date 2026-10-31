@@ -46,7 +46,8 @@ keeps it, and says so in the list it prints.
 
 **Wallets.** `config.yaml` holds the identity mnemonic and every
 `ledgers.*.WALLET_MNEMONIC`, and its backups (`config-<time>.yaml`) are beside
-it. The script keeps them: before it removes the root, it moves them to
+it, with the temporary copies a crashed write can leave (`.config-<random>.yaml`,
+`.config-root.*`). The script keeps them all: before it removes the root, it moves them to
 `<root>.wallets-<time>` (mode 0700) and prints that path. With
 `--delete-wallets` it deletes them with the root. That option asks for a second
 answer at a terminal, the words `delete wallets`, even with `--yes`. Without a
@@ -184,12 +185,13 @@ sudo rm -f /etc/bash_completion.d/nodo /usr/local/share/zsh/site-functions/_nodo
 
 ### 2.5 Remove installation directory
 
-`config.yaml` and its backups hold the wallet mnemonics. Move them out first,
+`config.yaml`, its backups and any `.config-*.yaml` temporary copy hold the
+wallet mnemonics. Move them out first,
 unless you have a copy:
 
 ```bash
 sudo install -d -m 0700 "$TARGET_DIR.wallets"
-sudo mv "$TARGET_DIR"/config.yaml "$TARGET_DIR"/config-*.yaml "$TARGET_DIR.wallets/"
+sudo mv "$TARGET_DIR"/config.yaml "$TARGET_DIR"/config-*.yaml "$TARGET_DIR"/.config-*.yaml "$TARGET_DIR.wallets/"
 sudo rm -rf "$TARGET_DIR"
 ```
 
