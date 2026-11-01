@@ -326,14 +326,31 @@ def _addresses_in_use(run: Runner, bridge: str) -> Set[str]:
             except ValueError:
                 continue
             in_use.add(token)
+    in_use |= _guest_ips()
     return in_use
+
+
+def _guest_ips() -> Set[str]:
+    """Addresses the node has committed to guests, booting, suspended or hibernated.
+
+    Guest addresses are hashed across the whole subnet, so the probe can land on one
+    whatever end it draws from. Best-effort: a probe must not fail because the node's
+    records could not be read.
+    """
+    try:
+        from src.virtualizers.microvm.network import used_ips
+
+        return set(used_ips())
+    except Exception:
+        return set()
 
 
 def _pick_source_ips(subnet: str, gateway_ip: str, in_use: Set[str], count: int = 1) -> tuple:
     """``count`` free addresses in ``subnet``, plus the prefix length they share.
 
-    From the top of the range down: the node hands guests addresses from the
-    bottom, so the high end is where a transient probe collides least. That
+    From the top of the range down, skipping ``in_use`` (which includes the guest
+    addresses the node has committed): a guest address is hashed from its id and
+    can be anywhere, so the high end is only where a probe collides least. That
     matters more than it looks -- a probe that lands on the address of a VM whose
     per-VM drop rules are still in the ruleset would measure nodo's own isolation
     policy and report it as a broken host.
