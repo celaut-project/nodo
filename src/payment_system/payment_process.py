@@ -883,6 +883,16 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
         return False
 
 
+# Deposit tokens a ``validate_payment_process`` call is working on right now. The
+# gateway serves ``Payable`` from many threads, and the validators only look for the
+# payment, they do not spend it: without a claim, N calls with one token all see it
+# pending, all find the same box and all credit the client (issue #601). The status
+# cannot carry the claim -- the column only holds pending/payed/rejected, and the
+# sweep waits on 'pending' until the validation ends -- so it is held here.
+_deposit_claims = set()
+_deposit_claims_lock = Lock()
+
+
 def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, contract: bytes,
                              script: bytes, token: str, asset: str = "") -> bool:
     """Prove and credit one incoming payment.
@@ -895,6 +905,19 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
     """
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
+    with _deposit_claims_lock:
+        if token in _deposit_claims:
+            raise Exception(f"Deposit token {token} is already being validated.")
+        _deposit_claims.add(token)
+    try:
+        return _validate_claimed_payment(amount, ledger, contract, script, token, asset)
+    finally:
+        with _deposit_claims_lock:
+            _deposit_claims.discard(token)
+
+
+def _validate_claimed_payment(amount: int, ledger: celaut_pb2.Contract.Ledger, contract: bytes,
+                              script: bytes, token: str, asset: str = "") -> bool:
     # The wire carries the whole `Contract.Ledger` a peer advertises. It is checked
     # against this node's own declaration of that ledger and reduced to its tag here,
     # once; everything below this line works in tags.
