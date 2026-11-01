@@ -678,7 +678,9 @@ message Metrics {
     // True if the instance is suspended: its virtual machine is stopped and the node
     // keeps its disk, its address and its balance. The node does not charge an instance
     // while it is suspended. A deposit that pays one maintenance period starts it again.
-    // False for a client_id, and for an instance that runs.
+    // False for a client_id, and for an instance that runs. Also false for a hibernated
+    // instance: the node charges it for its disk and a deposit does not start it, so
+    // whoever delegated it goes on charging for it.
     bool suspended = 2;
 }
 
