@@ -267,6 +267,66 @@ class LedgerChainTests(_Database):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ClientExpiryTests(_Database):
+    """A client that fathers live instances is not deleted when it expires (#604)."""
+
+    def setUp(self):
+        super().setUp()
+        self.sc.add_client("c1", 0, time.time() - 10 * 3600)
+
+    def maintain(self):
+        from src.manager.maintain import maintain_clients
+        maintain_clients()
+
+    def test_a_client_without_children_is_deleted(self):
+        self.maintain()
+
+        self.assertFalse(self.sc.client_exists("c1"))
+
+    def test_a_client_with_a_live_local_child_is_kept(self):
+        self.add_instance("i1", "c1", 400)
+
+        self.maintain()
+
+        self.assertTrue(self.sc.client_exists("c1"))
+
+    def test_a_client_with_only_killed_children_is_deleted(self):
+        self.add_instance("i1", "c1", 0)
+        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+
+        self.maintain()
+
+        self.assertFalse(self.sc.client_exists("c1"))
+
+    def test_a_client_with_a_live_delegated_child_is_kept(self):
+        self.sc.add_delegated_instance(
+            father_id="c1", alias="alias", external_token="peer-token",
+            peer_id="p", serialized_instance=b"", service_id="s", balance_mu=0,
+        )
+
+        self.maintain()
+
+        self.assertTrue(self.sc.client_exists("c1"))
+
+    def test_a_client_with_a_running_start_is_kept(self):
+        self.sc._execute(
+            "INSERT INTO start_refs (caller_id, start_ref, ts, state)"
+            " VALUES ('c1', 'r', 1, 'running')")
+
+        self.maintain()
+
+        self.assertTrue(self.sc.client_exists("c1"))
+
+    def test_the_refund_of_a_child_that_stops_later_goes_to_its_father(self):
+        self.add_instance("i1", "c1", 400, movements=(ledger.Movement(ledger.START, 400),))
+
+        self.maintain()
+        self.assertEqual(self.sc.settle_stop("i1", "manual_kill", father_id="c1"), 400)
+
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 400)
+        self.assertNotEqual(self.rows("i1")[-1]["detail"], '{"lost":"father_gone"}')
+
+
 class SettleStopTests(_Database):
 
     def setUp(self):

@@ -906,7 +906,28 @@ class SQLConnection(metaclass=Singleton):
             bool: True if the client has expired, False otherwise.
         """
         _gas, _last_usage, _ = self.get_client_balance(client_id)
-        return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
+        return (
+            _last_usage is not None
+            and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
+            and not self.client_has_live_children(client_id)
+        )
+
+    def client_has_live_children(self, client_id: str) -> bool:
+        """
+        Is this client the father of a live local or delegated instance, or the caller
+        of a StartService that is still running?
+
+        Such a client is not deleted when it expires: the refunds of its children go to
+        it, and it is the father that stop, withdraw and hibernate check (#604).
+        """
+        return any(
+            self._execute(query, (client_id,)).fetchone() is not None
+            for query in (
+                'SELECT 1 FROM local_instances WHERE father_id = ? AND killed_at IS NULL',
+                'SELECT 1 FROM delegated_instances WHERE father_id = ? AND killed_at IS NULL',
+                "SELECT 1 FROM start_refs WHERE caller_id = ? AND state = 'running'",
+            )
+        )
 
     def get_balance_by_client_id(self, id: str) -> int:
         """
