@@ -213,33 +213,58 @@ escape_for_sed() {
   printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
 
+# The value of a main.* key as config.yaml spells it, without quotes or comment.
+read_main_key() {
+  sed -n "s|^[[:space:]]*$1:[[:space:]]*\(.*\)\$|\1|p" "$2" | head -n 1 \
+    | sed -e 's/[[:space:]]\{1,\}#.*$//' -e 's/[[:space:]]*$//' \
+          -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+
+# Point main.<key> at its default unless the operator moved it. Only a value that is
+# empty, still the example's /nodo..., or a ${main.*} placeholder is rewritten: a
+# relocated STORAGE or DATABASE_FILE must survive `nodo update` (it re-runs install.sh),
+# or the node starts on a new, empty database. Reads $main_storage from the caller.
+sync_main_key() {
+  local key="$1" default="$2" config_file="$3"
+  local current value escaped
+  local storage_ph='${main.STORAGE}' main_ph='${main.MAIN_DIR}'
+
+  grep -q "^[[:space:]]*$key:" "$config_file" || return 0
+  current="$(read_main_key "$key" "$config_file")"
+  case "$current" in
+    ""|"~"|null|/nodo|/nodo/*) value="$default" ;;
+    *'${main.'*)
+      value="${current//"$storage_ph"/$main_storage}"
+      value="${value//"$main_ph"/$TARGET_DIR}"
+      ;;
+    *)
+      value="$current"
+      if [ "$current" != "$default" ]; then
+        printf "Keeping main.%s: %s (not changed to %s).\n" "$key" "$current" "$default"
+      fi
+      ;;
+  esac
+  escaped="$(escape_for_sed "$value")"
+  sed -i "s|^\([[:space:]]*$key:[[:space:]]*\).*|\1\"$escaped\"|" "$config_file"
+}
+
 sync_config_main_paths() {
   local config_file="$TARGET_DIR/config.yaml"
-  local escaped_main
-  local escaped_storage
-  local escaped_cache
-  local escaped_registry
-  local escaped_metadata
-  local escaped_blockdir
-  local escaped_db
+  local main_storage escaped_main
 
+  # MAIN_DIR is the install itself (`nodo update` runs $MAIN_DIR/install.sh and the
+  # dependencies.* paths hang off it), not a data location: it always follows TARGET_DIR.
   escaped_main="$(escape_for_sed "$TARGET_DIR")"
-  escaped_storage="$(escape_for_sed "$TARGET_DIR/storage")"
-  escaped_cache="$(escape_for_sed "$TARGET_DIR/storage/__cache__/")"
-  escaped_registry="$(escape_for_sed "$TARGET_DIR/storage/__registry__/")"
-  escaped_metadata="$(escape_for_sed "$TARGET_DIR/storage/__metadata__/")"
-  escaped_blockdir="$(escape_for_sed "$TARGET_DIR/storage/__block__/")"
-  escaped_db="$(escape_for_sed "$TARGET_DIR/storage/database.sqlite")"
+  sed -i "s|^\([[:space:]]*MAIN_DIR:[[:space:]]*\).*|\1\"$escaped_main\"|" "$config_file"
 
-  sed -i \
-    -e "s|^\([[:space:]]*MAIN_DIR:[[:space:]]*\).*|\1\"$escaped_main\"|" \
-    -e "s|^\([[:space:]]*STORAGE:[[:space:]]*\).*|\1\"$escaped_storage\"|" \
-    -e "s|^\([[:space:]]*CACHE:[[:space:]]*\).*|\1\"$escaped_cache\"|" \
-    -e "s|^\([[:space:]]*REGISTRY:[[:space:]]*\).*|\1\"$escaped_registry\"|" \
-    -e "s|^\([[:space:]]*METADATA_REGISTRY:[[:space:]]*\).*|\1\"$escaped_metadata\"|" \
-    -e "s|^\([[:space:]]*BLOCKDIR:[[:space:]]*\).*|\1\"$escaped_blockdir\"|" \
-    -e "s|^\([[:space:]]*DATABASE_FILE:[[:space:]]*\).*|\1\"$escaped_db\"|" \
-    "$config_file"
+  sync_main_key STORAGE "$TARGET_DIR/storage" "$config_file"
+  main_storage="$(read_main_key STORAGE "$config_file")"
+  [ -n "$main_storage" ] || main_storage="$TARGET_DIR/storage"
+  sync_main_key CACHE "$main_storage/__cache__/" "$config_file"
+  sync_main_key REGISTRY "$main_storage/__registry__/" "$config_file"
+  sync_main_key METADATA_REGISTRY "$main_storage/__metadata__/" "$config_file"
+  sync_main_key BLOCKDIR "$main_storage/__block__/" "$config_file"
+  sync_main_key DATABASE_FILE "$main_storage/database.sqlite" "$config_file"
 }
 
 if [ "$USE_LOCAL_SOURCE" = true ]; then

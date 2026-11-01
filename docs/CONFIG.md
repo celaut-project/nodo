@@ -94,8 +94,13 @@ Values below are the shipped defaults.
 
 > Interpolation only expands the **fully-qualified**, dot-flattened form
 > `${main.STORAGE}` — a bare `${STORAGE}` is left literal. `install.sh`
-> (`sync_config_main_paths`) rewrites these `main.*` keys to absolute paths at
-> install time, so an installed `config.yaml` contains no placeholders.
+> (`sync_config_main_paths`, re-run by `nodo update`) always sets `main.MAIN_DIR`
+> to the install directory. It rewrites the other `main.*` keys to absolute paths
+> only while they are empty, still the example's `/nodo...`, or a `${main.*}`
+> placeholder (resolved against the effective `STORAGE`). Any other value is a
+> relocation by the operator and is kept, with a one-line `Keeping main.<KEY>`
+> notice when it differs from the install-dir default, so `nodo update` never
+> points the node at a new, empty database.
 
 The KyA acceptance marker is `${main.MAIN_DIR}/storage/.acceptedkya` — it derives
 from `MAIN_DIR`, **not** from `main.STORAGE`, so relocating `STORAGE` does not move
