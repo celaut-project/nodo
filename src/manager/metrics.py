@@ -152,6 +152,25 @@ def refresh_balance_on_peer(peer_id: str) -> int:
     return _fetch_balance_on_peer(peer_id, raise_on_error=True)
 
 
+# What ``require_caller`` raises for a client_id that the peer never minted. ``ClientRequired``
+# reaches us as a generic gRPC error with no status code of its own, so the message is
+# the only thing that tells it from the quarantine, which is the same exception.
+UNKNOWN_CLIENT_MARKER = 'requires a client_id minted by GenerateClient'
+
+
+def _is_unknown_client_answer(error: Exception) -> bool:
+    import grpc
+    from src.manager.statement_check import _code_of
+    if _code_of(error) != grpc.StatusCode.UNKNOWN:
+        return False
+    return UNKNOWN_CLIENT_MARKER in (error.details() or '')
+
+
+def _fathers_live_delegated(peer_id: str) -> bool:
+    """Our client on the peer is the father of the children delegated there."""
+    return any(row['peer_id'] == peer_id for row in sc.get_delegated_instances())
+
+
 def _fetch_balance_on_peer(peer_id: str, raise_on_error: bool = False) -> int:
     """Read our balance from the peer's ``GetClientMetrics`` and store it, in the peer's MU."""
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
@@ -170,10 +189,13 @@ def _fetch_balance_on_peer(peer_id: str, raise_on_error: bool = False) -> int:
                     )
     except Exception as e:
         logger('Error getting our balance from ' + peer_id + '.')
-        # A call that timed out says nothing about the client (#570).
-        from src.manager.statement_check import unreachable
-        if not unreachable(e) and is_peer_available(peer_id=peer_id):
-            logger('It is assumed that the client was invalid on peer ' + peer_id)
+        # Only the peer saying it does not know this client forgets it (#602). A timeout
+        # (#570), an UNIMPLEMENTED from a peer that predates GetClientMetrics, the peer's
+        # rate-limit quarantine or a server fault say nothing about the client, and the id
+        # is the only credential for the deposit and the children delegated there.
+        if _is_unknown_client_answer(e) and is_peer_available(peer_id=peer_id) \
+                and not _fathers_live_delegated(peer_id):
+            logger('The client is unknown on peer ' + peer_id)
             sc.delete_external_client(peer_id=peer_id)
         if raise_on_error:
             raise
