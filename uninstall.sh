@@ -100,6 +100,9 @@ fi
 NODO_SERVICE_USER_RECORD="${NODO_SERVICE_USER_RECORD:-/etc/nodo/service-user}"
 NODO_VIRTIOFSD_SYSTEM_PATH="${NODO_VIRTIOFSD_SYSTEM_PATH:-/usr/local/libexec/nodo/virtiofsd}"
 NODO_VIRTIOFSD_APPARMOR_PROFILE="${NODO_VIRTIOFSD_APPARMOR_PROFILE:-/etc/apparmor.d/nodo-virtiofsd}"
+# bash/install_buildkit.sh writes this one, for the rootlesskit that it installs in
+# the install directory, whether or not the node has a unit.
+NODO_ROOTLESSKIT_APPARMOR_PROFILE="${NODO_ROOTLESSKIT_APPARMOR_PROFILE:-/etc/apparmor.d/nodo-rootlesskit}"
 
 # The target is removed with rm -rf, and it can be any path now.
 case "$TARGET_DIR" in
@@ -211,6 +214,7 @@ mountpoints_under_target_dir() {
 UNITS=()            # the service units that run from TARGET_DIR
 OWN_UNIT=false      # SERVICE_FILE runs TARGET_DIR
 OWN_ROOT_FILES=false
+OWN_ROOTLESSKIT_PROFILE=false  # the AppArmor profile of the rootlesskit in TARGET_DIR
 OWN_WRAPPER=false
 WALLET_FILES=()     # config.yaml, its backups, and a copy root left in the tree
 WALLET_DIR="$TARGET_DIR.wallets-$(date -u +%Y%m%d%H%M%S)"
@@ -253,6 +257,17 @@ plan_uninstall() {
             PLAN_KEEP+=("$path: $reason")
         fi
     done
+
+    # The rootlesskit profile names a path in TARGET_DIR. Another install's names
+    # another directory, and stays.
+    if [ -e "$NODO_ROOTLESSKIT_APPARMOR_PROFILE" ]; then
+        if [ -f "$NODO_ROOTLESSKIT_APPARMOR_PROFILE" ] && names_target_dir < "$NODO_ROOTLESSKIT_APPARMOR_PROFILE"; then
+            OWN_ROOTLESSKIT_PROFILE=true
+            PLAN_REMOVE+=("$NODO_ROOTLESSKIT_APPARMOR_PROFILE")
+        else
+            PLAN_KEEP+=("$NODO_ROOTLESSKIT_APPARMOR_PROFILE: it does not name $TARGET_DIR")
+        fi
+    fi
 
     if [ -f "$WRAPPER_SCRIPT" ]; then
         if grep -Fq "\"$TARGET_DIR/nodo.py\"" "$WRAPPER_SCRIPT"; then
@@ -381,6 +396,14 @@ remove_root_files() {
     fi
 }
 
+remove_rootlesskit_profile() {
+    if [ "$OWN_ROOTLESSKIT_PROFILE" = true ] && [ -e "$NODO_ROOTLESSKIT_APPARMOR_PROFILE" ]; then
+        log "Removing the AppArmor profile $NODO_ROOTLESSKIT_APPARMOR_PROFILE..."
+        apparmor_parser -R "$NODO_ROOTLESSKIT_APPARMOR_PROFILE" 2>/dev/null || true
+        rm -f "$NODO_ROOTLESSKIT_APPARMOR_PROFILE"
+    fi
+}
+
 remove_user_completion() {
     # The two files that completion.py installs without root.
     local path
@@ -442,6 +465,11 @@ uninstall_unprivileged() {
     if [ "$OWN_ROOT_FILES" = true ] && [ -e "$NODO_VIRTIOFSD_SYSTEM_PATH" ]; then
         priv_record "Remove the root-owned copy of virtiofsd" \
             "sudo rm -f $(printf '%q' "$NODO_VIRTIOFSD_SYSTEM_PATH") && sudo rmdir --ignore-fail-on-non-empty $(printf '%q' "$(dirname "$NODO_VIRTIOFSD_SYSTEM_PATH")")"
+    fi
+
+    if [ "$OWN_ROOTLESSKIT_PROFILE" = true ] && [ -e "$NODO_ROOTLESSKIT_APPARMOR_PROFILE" ]; then
+        priv_record "Unload and remove the AppArmor profile for rootlesskit" \
+            "{ sudo apparmor_parser -R $(printf '%q' "$NODO_ROOTLESSKIT_APPARMOR_PROFILE") || true; } && sudo rm -f $(printf '%q' "$NODO_ROOTLESSKIT_APPARMOR_PROFILE")"
     fi
 
     # Only root can unmount. rm -rf must never run on a tree with a mount in it.
@@ -512,6 +540,7 @@ uninstall_privileged() {
     if [ "$OWN_ROOT_FILES" = true ]; then
         remove_root_files
     fi
+    remove_rootlesskit_profile
     remove_wrapper
 
     # Remove installation directory

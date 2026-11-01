@@ -39,6 +39,9 @@ It removes only what belongs to the installation root:
 - `/etc/nodo/service-user`, `/usr/local/libexec/nodo/virtiofsd` and the AppArmor
   profile `/etc/apparmor.d/nodo-virtiofsd` only with the unit: they are the files
   of the node that the unit runs.
+- The AppArmor profile `/etc/apparmor.d/nodo-rootlesskit` (the userns exemption
+  for the rootlesskit in the root) only when the profile names the root, with or
+  without a unit.
 - Only processes that run from the root, and only mounts under it.
 
 Anything that names another directory belongs to another install. The script
@@ -72,6 +75,7 @@ What it does (best effort), for what belongs to the root (see above):
 - Removes the files that a node with a service user or without sudo adds:
   `/etc/nodo/service-user`, `/usr/local/libexec/nodo/virtiofsd` and the AppArmor
   profile `/etc/apparmor.d/nodo-virtiofsd`. It does not delete the service user.
+- Unloads and removes `/etc/apparmor.d/nodo-rootlesskit` when it names `/nodo`.
 - Moves the wallet mnemonics to `/nodo.wallets-<time>`, then removes `/nodo`.
 
 ### 1.2) Without sudo
@@ -99,6 +103,8 @@ belongs to the installation root (see above):
 - Remove the unit `/etc/systemd/system/nodo.service`.
 - Remove `/etc/nodo/service-user`, `/usr/local/libexec/nodo/virtiofsd` and the
   AppArmor profile `/etc/apparmor.d/nodo-virtiofsd`.
+- Unload and remove `/etc/apparmor.d/nodo-rootlesskit`, when it names the
+  installation root.
 - Unmount a mount point under the installation root.
 - Remove a file in the installation root that belongs to root, for example a
   `.pyc` file that `sudo nodo doctor` wrote.
