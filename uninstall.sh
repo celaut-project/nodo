@@ -216,7 +216,7 @@ OWN_UNIT=false      # SERVICE_FILE runs TARGET_DIR
 OWN_ROOT_FILES=false
 OWN_ROOTLESSKIT_PROFILE=false  # the AppArmor profile of the rootlesskit in TARGET_DIR
 OWN_WRAPPER=false
-WALLET_FILES=()     # config.yaml, its backups, and a copy root left in the tree
+WALLET_FILES=()     # config.yaml, its backups, and the copies left in the tree
 WALLET_DIR="$TARGET_DIR.wallets-$(date -u +%Y%m%d%H%M%S)"
 PLAN_REMOVE=()
 PLAN_KEEP=()
@@ -281,7 +281,7 @@ plan_uninstall() {
     if [ -d "$TARGET_DIR" ]; then
         PLAN_REMOVE+=("The processes and mounts of $TARGET_DIR, then $TARGET_DIR")
         shopt -s nullglob dotglob
-        for path in "$TARGET_DIR/config.yaml" "$TARGET_DIR"/config-*.yaml "$TARGET_DIR"/.config-root.*; do
+        for path in "$TARGET_DIR/config.yaml" "$TARGET_DIR"/config-*.yaml "$TARGET_DIR"/.config-root.* "$TARGET_DIR"/.config-*.yaml; do
             [ -f "$path" ] && WALLET_FILES+=("$path")
         done
         shopt -u nullglob dotglob
