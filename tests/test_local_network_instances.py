@@ -34,10 +34,11 @@ def _protocol(*tags, formal=b""):
     return celaut.Service.Api.Protocol(tags=list(tags), formal=formal)
 
 
-def _network(tags=("postgres",), protocol_stack=()):
+def _network(tags=("postgres",), protocol_stack=(), formal=b""):
     return celaut.Service.Network(
         tags=list(tags),
         protocol_stack=list(protocol_stack),
+        formal=formal,
     )
 
 
@@ -79,6 +80,10 @@ class _Registry:
     def get_internal_instance(self, id):
         return self.instances[id].get("stored")
 
+    def get_local_instance_envs(self, id):
+        """The JSON text of the launch environment, or None (the column is NULL)."""
+        return self.instances[id].get("envs")
+
     def get_local_instance_id_by_uri(self, uri):
         for instance_id, row in self.instances.items():
             if row.get("ip") == uri:
@@ -97,8 +102,8 @@ PG = _protocol("postgres-wire", "pgwire")
 HTTP = _protocol("http")
 
 
-def _member(spec, stored=None, ip=None):
-    return {"spec": spec, "stored": stored, "ip": ip}
+def _member(spec, stored=None, ip=None, envs=None):
+    return {"spec": spec, "stored": stored, "ip": ip, "envs": envs}
 
 
 @unittest.skipIf(IMPORT_ERROR, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -124,6 +129,54 @@ class LocalNetworkInstancesTests(unittest.TestCase):
         )
         self.assertEqual(instance.uri_slot[0].internal_port, 5432)
         self.assertEqual(list(instance.api.slot[0].protocol_stack[0].tags), list(PG.tags))
+
+    def _templated_member(self, envs):
+        declared = _network(
+            ("postgres",), [PG], formal=b"db.cluster=${CLUSTER}\ndb.engine=postgresql"
+        )
+        return _Registry({
+            "pg-1": _member(
+                _spec(networks=[declared], slots=[(5432, [PG])]),
+                stored=_stored((5432, [("10.0.0.5", 31000)])),
+                envs=envs,
+            ),
+        })
+
+    def test_a_templated_formal_is_filled_from_the_launch_environment(self):
+        """#621: the spec keeps ``${CLUSTER}``; the request carries the completed ask."""
+        registry = self._templated_member('{"CLUSTER": "abc"}')
+        requested = _network(
+            ("postgres",), [PG], formal=b"db.cluster=abc\ndb.engine=postgresql"
+        )
+        self.assertEqual([i for i, _ in self._members(registry, requested)], ["pg-1"])
+
+    def test_another_value_of_the_selection_key_is_another_domain(self):
+        registry = self._templated_member('{"CLUSTER": "abc"}')
+        requested = _network(
+            ("postgres",), [PG], formal=b"db.cluster=xyz\ndb.engine=postgresql"
+        )
+        self.assertEqual(self._members(registry, requested), [])
+
+    def test_a_variable_the_instance_was_not_launched_with_matches_nothing(self):
+        requested = _network(
+            ("postgres",), [PG], formal=b"db.cluster=abc\ndb.engine=postgresql"
+        )
+        for envs in (None, "", "{}", '{"OTHER": "abc"}', "not json"):
+            with self.subTest(envs=envs):
+                self.assertEqual(self._members(self._templated_member(envs), requested), [])
+
+    def test_a_formal_with_no_template_is_compared_as_it_was(self):
+        declared = _network(("postgres",), [PG], formal=b"db.engine=postgresql")
+        registry = _Registry({
+            "pg-1": _member(
+                _spec(networks=[declared], slots=[(5432, [PG])]),
+                stored=_stored((5432, [("10.0.0.5", 31000)])),
+            ),
+        })
+        same = _network(("postgres",), [PG], formal=b"db.engine=postgresql")
+        other = _network(("postgres",), [PG], formal=b"db.engine=mysql")
+        self.assertEqual([i for i, _ in self._members(registry, same)], ["pg-1"])
+        self.assertEqual(self._members(registry, other), [])
 
     def test_declaring_the_network_without_exposing_its_protocols_is_consumer_only(self):
         """Condition 2 of the documented rule: wanting peers is not being one."""

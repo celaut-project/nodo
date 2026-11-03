@@ -1,3 +1,4 @@
+import json
 import socket
 from typing import Dict, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
@@ -11,7 +12,7 @@ from src.identity.node_identity import (
     same_component,
     same_component_stack,
 )
-from src.manager.network_templates import find_placeholders
+from src.manager.network_templates import Missing, find_placeholders, has_placeholders, substitute
 from src.utils.logger import LOGGER
 from src.routing.policy import hidden_mode
 from src.utils.network_policy import enforce_hidden_resolution, enforce_network_policy
@@ -166,6 +167,59 @@ def _slot_exposes(slot: celaut.Service.Api.Slot, network: celaut.Service.Network
     return same_component_stack(slot.protocol_stack, network.protocol_stack)
 
 
+def _launch_envs(instance_id: str) -> Dict[str, bytes]:
+    """The environment a local instance was launched with, from the node's records.
+
+    Empty when there is none, it cannot be read, or the registry does not keep it. A
+    value the node redacted when it recorded it (secret-looking names) comes back as
+    the redaction marker and is, as an answer to a template, simply not the value the
+    requester has: nothing matches it.
+    """
+    try:
+        raw = sc.get_local_instance_envs(id=instance_id)
+        stored = json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+    return {
+        str(key): value.encode("utf-8") if isinstance(value, str) else bytes(value)
+        for key, value in (stored or {}).items()
+    }
+
+
+def _declared_for_member(instance_id: str, spec: celaut.Service) -> List[celaut.Service.Network]:
+    """The networks ``spec`` declares, with each ``${VAR}`` of a ``formal`` filled in
+    from the environment this instance was launched with (#621).
+
+    ``match_networks`` compares a ``formal`` byte for byte, and a request carries the
+    *completed* ask (``check_network_request`` refuses an unfilled one). The spec of an
+    instance launched with ``CLUSTER=abc`` still says ``db.cluster=${CLUSTER}``, so
+    without this such an instance could never be indexed as a member of the very
+    network it was started for. It is the substitution ``build_network_resolution``
+    makes at launch, applied where a declaration is read for membership.
+
+    A network with no template is returned as it is. A variable the instance was not
+    launched with leaves the declaration unfilled: it matches no completed request,
+    which is the answer it had before.
+    """
+    envs: Optional[Dict[str, bytes]] = None
+    declared: List[celaut.Service.Network] = []
+    for network in spec.network:
+        if not has_placeholders(network.formal):
+            declared.append(network)
+            continue
+        if envs is None:
+            envs = _launch_envs(instance_id)
+        filled = substitute(network.formal, envs)
+        if isinstance(filled, Missing):
+            declared.append(network)
+            continue
+        completed = celaut.Service.Network()
+        completed.CopyFrom(network)
+        completed.formal = filled
+        declared.append(completed)
+    return declared
+
+
 def local_network_instances(
     network: celaut.Service.Network,
     requester_id: Optional[str] = None,
@@ -220,7 +274,10 @@ def local_network_instances(
             )
             continue
 
-        if not any(match_networks(network, declared) for declared in spec.network):
+        if not any(
+            match_networks(network, declared)
+            for declared in _declared_for_member(instance_id, spec)
+        ):
             continue
 
         exposing = [slot for slot in spec.api.slot if _slot_exposes(slot, network)]

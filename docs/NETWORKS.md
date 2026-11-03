@@ -190,6 +190,13 @@ otherwise); condition 2 by pairing the slot's `protocol_stack` with the network'
 the way any protocol stack on this node is compared. A network that states no
 `protocol_stack` is satisfied by any slot.
 
+A `${VAR}` in the instance's declared `formal` is filled from the environment the instance
+was launched with before condition 1 is judged (#621): a service launched with
+`PG_CLUSTER=abc` that declares `cluster=${PG_CLUSTER}` is a member of the domain
+`cluster=abc`, which is the domain a request carries once it is completed. A variable
+the instance was not launched with leaves the declaration unfilled, and it matches no
+completed request.
+
 What is offered per member is only the slot(s) that satisfied condition 2, with
 their published addresses -- the consumer writes a firewall rule per address it is
 handed, and an unrelated admin port on the same instance is not opened for it. A
