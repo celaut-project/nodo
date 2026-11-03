@@ -207,6 +207,40 @@ candidate list as every other endpoint.
 
 With `ask_peers` (launch, and `Gateway.ResolveNetwork` completing a `${VAR}` only for the *calling* node's own question), known peers are asked over `Gateway.ResolveNetwork` and their answers are pooled after local members and operator seeds, de-duplicated by `(ip, port)`. The RPC itself never relays. A peer's address is offered to a guest only if it is a public IP literal (no DNS names, loopback, link-local, or this node's guest subnet; private ranges only with `service_networks.ALLOW_PRIVATE_PEER_ADDRESSES`) **and** accepts a TCP connection, so a lying peer costs a failed connect, not a firewall rule. Operators bound it with `service_networks.ASK_PEERS` (default 4, `0` = off). A hidden node never asks. The `formal` sent is the filled one, so different `db.cluster` values stay in different domains. Implementation: `networks._peer_members`.
 
+## What declaring a network means: the trust model
+
+Declaring a `Network` is declaring that the data the service sends **through that
+network is exposed to every member of it**. The guarantee nodo gives is about
+*reach*, not about what happens afterwards:
+
+* **Given:** the instance can open connections to the addresses its declared
+  networks resolved to, and to nothing else (`block_all` plus one allow per
+  address, see [`FIREWALL.md`](FIREWALL.md)).
+* **Not given:** anything about what a member does with what it receives. Nodo
+  does not follow data past the first hop.
+
+Membership is self-declared. An instance is a member of a network when its service
+declares it and exposes a slot speaking the network's `protocol_stack`
+(`networks.local_network_instances`). Nothing checks what else that member declares,
+so a member may also hold `*` (open egress) or other networks, and may pass on
+whatever it receives. A service that declares only one network is not thereby
+guaranteed that its data stays inside it.
+
+How to narrow who is "the network", from weakest to strongest:
+
+| Mechanism | What it gives |
+|---|---|
+| A `${VAR}` selection key in `formal` (e.g. `db.cluster`) | Partitions the domain: only instances declaring the same filled `formal` are members. It limits the audience to whoever shares the value; it does not prove who they are. |
+| A narrow `protocol_stack` | The members are the ones speaking that protocol. If the protocol only carries a fixed structure, the service can only *send* that structure, so nothing else leaves **by that path**. Nodo does not inspect traffic to enforce it: it is the guest speaking the protocol that keeps to it, and a member may still re-expose what it was legitimately sent. |
+| Operator `service_networks` whitelist | Refuses services whose tags are not all vetted, which also keeps a `*` service off the node. Both lists empty (the default) restricts nothing. |
+| TLS or other authentication in the guest | Identity of the other end. Left to the guest by design. |
+
+So: **treat the members of a network as trusted with the data you send into it.** If
+that is not acceptable, narrow the network (a selection key, a stricter protocol)
+rather than expecting the declaration to confine downstream use.
+
+---
+
 ## Authorization: the Ancestor Chain
 
 Declaring a `Network` is a request, not a grant. An instance launched by another
