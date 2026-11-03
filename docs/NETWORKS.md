@@ -203,6 +203,10 @@ candidate list as every other endpoint.
 
 ---
 
+### Members offered by peers (non-`pow:` domains)
+
+With `ask_peers` (launch, and `Gateway.ResolveNetwork` completing a `${VAR}` only for the *calling* node's own question), known peers are asked over `Gateway.ResolveNetwork` and their answers are pooled after local members and operator seeds, de-duplicated by `(ip, port)`. The RPC itself never relays. A peer's address is offered to a guest only if it is a public IP literal (no DNS names, loopback, link-local, or this node's guest subnet; private ranges only with `service_networks.ALLOW_PRIVATE_PEER_ADDRESSES`) **and** accepts a TCP connection, so a lying peer costs a failed connect, not a firewall rule. Operators bound it with `service_networks.ASK_PEERS` (default 4, `0` = off). A hidden node never asks. The `formal` sent is the filled one, so different `db.cluster` values stay in different domains. Implementation: `networks._peer_members`.
+
 ## Authorization: the Ancestor Chain
 
 Declaring a `Network` is a request, not a grant. An instance launched by another

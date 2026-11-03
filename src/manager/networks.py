@@ -272,6 +272,118 @@ def _local_peers(
     ]
 
 
+#: ``service_networks`` keys for the peer source of a non-``pow:`` domain (#619).
+PEER_ASK_KEY = "service_networks.ASK_PEERS"
+PEER_ALLOW_PRIVATE_KEY = "service_networks.ALLOW_PRIVATE_PEER_ADDRESSES"
+DEFAULT_PEER_ASK = 4
+PEER_CONNECT_TIMEOUT = 2.0
+
+
+def _peer_ask_limit() -> int:
+    """How many peers to ask for a generic domain. Zero or less switches it off."""
+    try:
+        return int(env_manager.get(PEER_ASK_KEY, DEFAULT_PEER_ASK))
+    except (TypeError, ValueError):
+        return DEFAULT_PEER_ASK
+
+
+def _acceptable_peer_address(ip: str, allow_private: bool) -> bool:
+    """Whether an address a peer offered may become a firewall rule for a guest.
+
+    ``configure_guest_firewall_policy`` writes one allow rule per address returned, so
+    this is held to the same scrutiny as a seed: only IP literals (a name would be
+    resolved by whoever reads it), never loopback, link-local, multicast, unspecified
+    or this node's own guest subnet, and private ranges only when the operator opted
+    in (``service_networks.ALLOW_PRIVATE_PEER_ADDRESSES``, for LAN deployments).
+    """
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(str(ip).strip())
+    except ValueError:
+        return False
+    if (address.is_loopback or address.is_link_local or address.is_multicast
+            or address.is_unspecified or address.is_reserved):
+        return False
+    try:
+        subnet = ipaddress.ip_network(
+            str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")),
+            strict=False,
+        )
+        if address.version == subnet.version and address in subnet:
+            return False
+    except ValueError:
+        pass
+    return address.is_global or allow_private
+
+
+def _reachable(ip: str, port: int) -> bool:
+    try:
+        with socket.create_connection((ip, port), timeout=PEER_CONNECT_TIMEOUT):
+            return True
+    except OSError:
+        return False
+
+
+def _peer_members(
+    network: celaut.Service.Network,
+    already: set,
+) -> List[celaut.Instance]:
+    """Members of ``network`` that known peers offer (#619), verified by a TCP connect.
+
+    Nothing a peer says is trusted: an address is dropped unless it is an acceptable
+    literal (:func:`_acceptable_peer_address`) and accepts a TCP connection, so a lying
+    peer costs one failed connect and never a firewall rule. The peer has already
+    matched ``formal`` byte for byte and checked the ``protocol_stack``; the slot tags
+    it sent are not carried over, the stack is the one this caller declared.
+
+    A hidden node asks nobody: connecting to a candidate from the host would show its
+    address to whoever the peer named. ``already`` holds ``(ip, port)`` pairs the other
+    sources produced, which are not offered twice.
+    """
+    limit = _peer_ask_limit()
+    if limit <= 0 or hidden_mode():
+        return []
+    try:
+        from src.manager.network_discovery import ask_peers
+
+        suggested = ask_peers(network, limit=limit)
+    except Exception as e:
+        LOGGER(f"[NETWORKS] peers could not be asked for {list(network.tags)}: "
+               f"{type(e).__name__}: {e}")
+        return []
+
+    allow_private = env_manager.get(PEER_ALLOW_PRIVATE_KEY, False) is True
+    uris = []
+    for ip, port, _tags in suggested:
+        if (ip, port) in already:
+            continue
+        if not _acceptable_peer_address(ip, allow_private):
+            LOGGER(f"[NETWORKS] ignoring unacceptable peer address {ip}:{port}.")
+            continue
+        if not _reachable(ip, port):
+            LOGGER(f"[NETWORKS] peer address {ip}:{port} did not accept a connection.")
+            continue
+        uris.append(celaut.Instance.Uri(ip=ip, port=port))
+    if not uris:
+        return []
+    return [celaut.Instance(
+        api=celaut.Service.Api(slot=[celaut.Service.Api.Slot(
+            port=1, transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+            protocol_stack=network.protocol_stack)]),
+        uri_slot=[celaut.Instance.Uri_Slot(internal_port=1, uri=uris)],
+    )]
+
+
+def _addresses_of(instances: List[celaut.Instance]) -> set:
+    return {
+        (uri.ip, uri.port)
+        for instance in instances
+        for uri_slot in instance.uri_slot
+        for uri in uri_slot.uri
+    }
+
+
 def resolve_network(
     network: celaut.Service.Network,
     ask_peers: bool = True,
@@ -303,6 +415,12 @@ def resolve_network(
     reach both the ``postgres`` this node runs and the one the operator wrote down,
     and neither source knows about the other.
 
+    With ``ask_peers=True`` the answers of known peers are pooled after those two
+    (#619): :func:`_peer_members`, bounded by ``service_networks.ASK_PEERS`` (0 turns it
+    off) and verified before anything is offered. ``Gateway.ResolveNetwork`` passes
+    ``ask_peers=False`` when another node is asking, so the question is never relayed;
+    a local guest's own question (a deferred ``${VAR}``) is asked of the peers.
+
     Local members are **not** offered for a ``pow:`` network. Membership there is
     decided by verifying each candidate's chain state, not by what its spec declares,
     and ``resolve_pow_network`` owns that verification; a local instance that wants
@@ -314,6 +432,13 @@ def resolve_network(
     uris: List[celaut.Instance.Uri] = []
     is_pow = any(tag.startswith(POW_TAG_PREFIX) for tag in network.tags)
     local = [] if is_pow else _local_peers(network, requester_id)
+
+    def pooled(found: List[celaut.Instance]) -> List[celaut.Instance]:
+        """``found`` plus what verified peers add, for a non-pow, non-wildcard domain."""
+        if is_pow or not ask_peers or "*" in network.tags:
+            return found
+        return found + _peer_members(network, _addresses_of(found))
+
     for tag in network.tags:
         # A `pow:<chain>` tag names a PoW communication domain, whose actual ask
         # lives in `Network.formal` (issue #78,
@@ -338,7 +463,7 @@ def resolve_network(
                 uri_slot=[celaut.Instance.Uri_Slot(internal_port=1,
                     uri=[celaut.Instance.Uri(ip=ip, port=port)])],
             ) for ip, port in addresses]
-            return local + peers
+            return pooled(local + peers)
 
         if tag in LEDGERS_WITHOUT_URIS:
             continue
@@ -389,7 +514,7 @@ def resolve_network(
         # No concrete peer URIs (e.g. wildcard "*"): the tag is honoured at the
         # firewall layer (allow-all egress); there is no external peer instance to
         # advertise. Local members, if any, are still the answer.
-        return local
+        return pooled(local)
 
     client_protocol_stack = network.protocol_stack
     i_slot = 1  # Default slot id (because internal port usage is irrelevant here)
@@ -409,7 +534,7 @@ def resolve_network(
         )]
     )
 
-    return local + [instance]
+    return pooled(local + [instance])
 
 def _formal_pairs(formal: bytes, whose: str) -> Dict[str, str]:
     """``formal`` as pairs for the subset check, or a rejection saying whose is bad.
@@ -639,7 +764,8 @@ def resolve_network_for_peer(
       argument that puts the check before the balancer in ``launch_service`` rather
       than after it. The rejection propagates as a rejection, so the caller can tell
       "not from this node" from "nobody is there".
-    * **The question is never relayed** (``ask_peers=False``). Answering it by asking
+    * **The question is never relayed** (``ask_peers=False`` for a remote node; a local
+      guest's own question is asked of the peers, see below). Answering it by asking
       our own peers, who ask theirs, is a walk over a graph nobody has a view of -- and
       two nodes that know each other are already a cycle. Each node answers from what
       it knows, and a caller wanting more breadth asks more nodes itself, which keeps
@@ -687,9 +813,15 @@ def resolve_network_for_peer(
     # possibly exposing its protocols, would qualify as its own peer (#387).
     requester_id = sc.get_local_instance_id_by_uri(uri=caller_ip) if caller_ip else None
 
+    # A local guest completing its own deferred network (#619) is asked on behalf of
+    # this node, so this node asks its peers -- the same as at launch. Only another
+    # node asking as a peer (``declared is None`` or no local requester) is answered
+    # from local knowledge alone, which is what keeps a question from being relayed.
+    local_guest = declared is not None and requester_id is not None
+
     peer_instances = resolve_network(
         network,
-        ask_peers=False,
+        ask_peers=local_guest,
         requester_id=requester_id,
     )
 

@@ -676,6 +676,12 @@ network:
 # this node's own ports and addresses; the two would be one letter apart, and a
 # typo between them would leave the node with no policy while looking configured.
 service_networks:
+  # Other nodes asked (Gateway.ResolveNetwork) for members of a non-`pow:` network, after
+  # this node's own instances and the seeds below. Each offered address must be a public IP
+  # literal that accepts a TCP connection before a guest is given it. 0 switches it off.
+  ASK_PEERS: 4
+  # Also accept private (LAN) addresses from peers, for all-on-one-LAN deployments.
+  ALLOW_PRIVATE_PEER_ADDRESSES: false
   # Operator seeds for ANY network tag, before discovery/DNS fallback.
   # PoW seeds still undergo the same chain verification as all other candidates.
   default_instances: {}
