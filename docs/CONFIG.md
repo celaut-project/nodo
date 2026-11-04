@@ -890,7 +890,7 @@ maintenance-loop timing and client slot/expiration policy.
 
 A service is asked for by its id: a service that starts it as a dependency (`StartService`
 by hash), a delegated execution, `nodo get`. When no known peer has it, the node only asks
-its peers again later. With `service_sources.AUTO_ACQUIRE` on it also asks the
+its peers again later. With `service_sources.AUTO_ACQUIRE` on (the default) and a `source-application` core service configured, it also asks the
 `source-application` core service (`core_services`) for the sources of that id, downloads the
 first one that works and imports it. The sources are the ones that `nodo publish` registers:
 the id is the key, and the value is a plain URL, either a `.celaut.bee` file or a UTF-8
@@ -916,7 +916,7 @@ for any command that uses it.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `service_sources.AUTO_ACQUIRE` | `false` | Try the sources of a service that no peer holds, for a request that is not the operator's. |
+| `service_sources.AUTO_ACQUIRE` | `true` | Try the sources of a service that no peer holds, for a request that is not the operator's. It does nothing if the node has no `source-application` core service. `false` turns it off. |
 | `service_sources.MAX_DOWNLOAD_MB` | `2048` | The most that one download may take, all its parts together. `0` is no limit. |
 | `service_sources.RETRY_AFTER_SECONDS` | `3600` | Seconds before the sources of the same service are tried again. Kept in memory: a restart forgets it. |
 | `service_sources.TIMEOUT_SECONDS` | `60` | Seconds that a request to a source may wait to connect and for each read. |

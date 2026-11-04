@@ -68,15 +68,42 @@ class CheckWantedServiceTests(unittest.TestCase):
 class AcquireIfEnabledTests(unittest.TestCase):
     def setUp(self):
         sa._last_attempt.clear()
+        # The node has a source-application unless a test says it has not.
+        patcher = patch.object(sa, "get_core_service_id", return_value="aa" * 32)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _with_config(self, **values):
         patcher = patch.object(sa._env_manager, "get", side_effect=_config(**values))
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_it_is_off_by_default_and_does_nothing(self):
+    def test_it_is_on_by_default_when_the_node_has_a_source_application(self):
         self._with_config()  # no service_sources keys at all
-        with patch.object(sa, "acquire_from_sources") as acquire:
+        with patch.object(sa, "get_core_service_id", return_value="aa" * 32), patch.object(
+            sa, "acquire_from_sources", return_value=True
+        ) as acquire:
+            self.assertTrue(sa.acquire_from_sources_if_enabled(WANTED))
+
+        acquire.assert_called_once_with(WANTED, 2048 * MIB)
+
+    def test_without_a_source_application_it_does_nothing_and_says_nothing(self):
+        self._with_config()
+        out = io.StringIO()
+        with patch.object(sa, "get_core_service_id", return_value=""), patch.object(
+            sa, "acquire_from_sources"
+        ) as acquire, redirect_stdout(out):
+            self.assertFalse(sa.acquire_from_sources_if_enabled(WANTED))
+
+        acquire.assert_not_called()
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(sa._last_attempt, {})
+
+    def test_it_can_be_turned_off(self):
+        self._with_config(**{"service_sources.AUTO_ACQUIRE": False})
+        with patch.object(sa, "get_core_service_id", return_value="aa" * 32), patch.object(
+            sa, "acquire_from_sources"
+        ) as acquire:
             self.assertFalse(sa.acquire_from_sources_if_enabled(WANTED))
 
         acquire.assert_not_called()

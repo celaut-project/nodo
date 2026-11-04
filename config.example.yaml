@@ -1145,8 +1145,10 @@ timing:
   GET_SERVICE_TIMEOUT: 1800
 
 # What this node does when a service is asked for by its id (a service that starts it as a
-# dependency, `nodo get`, a delegated execution) and no known peer has it. Off by default:
-# the node then only asks its peers, as it always did.
+# dependency, `nodo get`, a delegated execution) and no known peer has it. On by default, but it
+# does something only if the node has a `source-application` core service (see
+# `core_services`): without one the node only asks its peers, as it always did. `false`
+# turns it off.
 #
 # On, it asks the `source-application` core service (see `core_services`) for the sources of
 # that id, downloads the first that works and imports it. `nodo execute` and the other
@@ -1156,7 +1158,7 @@ timing:
 # or link-local), it sends no credentials, and what is imported is kept only if it is the id
 # that was asked for. It needs `misc.VALIDATE_ON_IMPORT` on, or it does nothing.
 service_sources:
-  AUTO_ACQUIRE: false
+  AUTO_ACQUIRE: true
   # The most that one download may take, all its parts together. 0: no limit.
   MAX_DOWNLOAD_MB: 2048
   # A service that no source gave is not looked up again for this many seconds.

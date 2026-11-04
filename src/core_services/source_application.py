@@ -282,11 +282,16 @@ def acquire_from_sources_if_enabled(service_id: str) -> bool:
     """The automatic path of ``maintain.check_wanted_service``: the sources, if the node
     allows it (``service_sources.AUTO_ACQUIRE``), with its limit and its cooldown.
 
-    False when it is off, when ``service_id`` was tried less than ``RETRY_AFTER_SECONDS``
-    ago, or when the service was not acquired. Never raises.
+    False when it is off, when the node has no ``source-application`` core service, when
+    ``service_id`` was tried less than ``RETRY_AFTER_SECONDS`` ago, or when the service was
+    not acquired. Never raises.
     """
     try:
-        if not bool(_env_manager.get("service_sources.AUTO_ACQUIRE", False)):
+        if not bool(_env_manager.get("service_sources.AUTO_ACQUIRE", True)):
+            return False
+        if not get_core_service_id(SOURCE_APPLICATION):
+            # On by default, and most nodes have no source-application: nothing to say about it
+            # each time that somebody asks for a service that nobody holds.
             return False
         retry_after = float(_env_manager.get("service_sources.RETRY_AFTER_SECONDS", 3600) or 0)
         max_bytes = int(_env_manager.get("service_sources.MAX_DOWNLOAD_MB", 2048) or 0) * 1024 * 1024
