@@ -155,8 +155,15 @@ def drain_wanted_inbox():
 def check_wanted_service(wanted: str):
     log.LOGGER(f"Check wanted service {wanted}")
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
-    if not fetch_service_from_peers(wanted):
-        wanted_services_retry.add(wanted)
+    if fetch_service_from_peers(wanted):
+        return
+    # Nobody holds it. With `service_sources.AUTO_ACQUIRE` the node tries the sources that
+    # the source-application lists for it, within `MAX_DOWNLOAD_MB`.
+    from src.core_services.source_application import acquire_from_sources_if_enabled
+
+    if acquire_from_sources_if_enabled(wanted):
+        return
+    wanted_services_retry.add(wanted)
 
 
 # How long a peer's `GetService` may send nothing before it is given up on, in seconds

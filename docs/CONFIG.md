@@ -886,6 +886,41 @@ maintenance-loop timing and client slot/expiration policy.
 | `client.UNLIMITED_TARGET_BALANCE_MU` | `100000000000` | The balance, in MU, that the maintenance thread keeps an unlimited client at (`nodo clients unlimited <id> on`; the node's own `dev-*` clients are unlimited by default). The top-up is an ordinary `credit` in the ledger: nobody has infinite MU. Turning the flag off stops the top-ups and takes nothing back. The default is 100 ERG at one MU per nanoERG. `0` turns the top-up off. |
 | `client.ACCEPT_NEW_DEPOSITS` | `true` | Set `false` to stop `GenerateDepositToken` for every client (local or peer): no one can open a new deposit, so no one can acquire MU beyond what they already hold. Existing balances keep spending normally -- this only closes the door on new top-ups. Use to stop onboarding new demand, or to cap growth even while demand exists. |
 
+## `service_sources` — a service that nobody holds, from its published sources
+
+A service is asked for by its id: a service that starts it as a dependency (`StartService`
+by hash), a delegated execution, `nodo get`. When no known peer has it, the node only asks
+its peers again later. With `service_sources.AUTO_ACQUIRE` on it also asks the
+`source-application` core service (`core_services`) for the sources of that id, downloads the
+first one that works and imports it. The sources are the ones that `nodo publish` registers:
+the id is the key, and the value is a plain URL, either a `.celaut.bee` file or a UTF-8
+manifest with one part URL for each line. It does not matter which host serves it.
+
+`nodo execute`, `nodo service_envs` and the other commands of the operator already do this,
+with no limit, as `nodo download` does. This is the same for a request that somebody else
+makes, so it is off by default and it has these limits:
+
+- the download is streamed to a file, and stops at `MAX_DOWNLOAD_MB` in all (the
+  `Content-Length` of each response is read first, then the bytes that arrive, over all parts);
+- only `http` and `https`, and only to a host whose addresses are all public: the URL and
+  every redirect (five at most) are checked, and loopback, private and link-local addresses are
+  refused. The check is made when the name is resolved, and the connection resolves it again,
+  so it is not a defence against a name that changes its answer in between;
+- no credentials are sent (the publisher token is not for a host that a registry lists);
+- it needs `misc.VALIDATE_ON_IMPORT` on, so what is imported is hashed and kept only if it is
+  the id that was asked for. Any other service that the import added is removed;
+- a service that no source gave is not looked up again for `RETRY_AFTER_SECONDS`.
+
+The node needs a `source-application` core service in `core_services`, and starts it as it does
+for any command that uses it.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `service_sources.AUTO_ACQUIRE` | `false` | Try the sources of a service that no peer holds, for a request that is not the operator's. |
+| `service_sources.MAX_DOWNLOAD_MB` | `2048` | The most that one download may take, all its parts together. `0` is no limit. |
+| `service_sources.RETRY_AFTER_SECONDS` | `3600` | Seconds before the sources of the same service are tried again. Kept in memory: a restart forgets it. |
+| `service_sources.TIMEOUT_SECONDS` | `60` | Seconds that a request to a source may wait to connect and for each read. |
+
 ## `host_limits` — how much of this machine nodo may take
 
 For a node sharing a PC with the person using it. Nothing else in the config refuses a

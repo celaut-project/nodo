@@ -485,6 +485,13 @@ sources), and `low-demand-fallback` (an opportunistic service run only when the 
 idle). A node's own machinery being celaut services means it is replaceable, and
 replaceable by id.
 
+The `source-application` also lets a node get a service that no peer has. `nodo execute`
+asks the peers first and then the sources that the `source-application` lists for the id.
+With `service_sources.AUTO_ACQUIRE` on, a service that starts a dependency by hash gets the
+same fallback: the node downloads it from a listed URL within `service_sources.MAX_DOWNLOAD_MB`,
+only from public hosts, and keeps it only if it hashes to the id that was asked for (see
+[CONFIG.md](CONFIG.md#service_sources--a-service-that-nobody-holds-from-its-published-sources)).
+
 ## Reputation proof
 
 An on-chain record (in the ledger implemented here, a token held in "reputation boxes")

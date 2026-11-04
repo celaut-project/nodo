@@ -1144,6 +1144,26 @@ timing:
   GET_SERVICE_IDLE_TIMEOUT: 30
   GET_SERVICE_TIMEOUT: 1800
 
+# What this node does when a service is asked for by its id (a service that starts it as a
+# dependency, `nodo get`, a delegated execution) and no known peer has it. Off by default:
+# the node then only asks its peers, as it always did.
+#
+# On, it asks the `source-application` core service (see `core_services`) for the sources of
+# that id, downloads the first that works and imports it. `nodo execute` and the other
+# commands of the operator do this already, with no limit and no guard; this is the same for
+# a request that somebody else makes, so the download is capped, it goes only to public
+# http(s) hosts (the address of the URL and of every redirect must not be loopback, private
+# or link-local), it sends no credentials, and what is imported is kept only if it is the id
+# that was asked for. It needs `misc.VALIDATE_ON_IMPORT` on, or it does nothing.
+service_sources:
+  AUTO_ACQUIRE: false
+  # The most that one download may take, all its parts together. 0: no limit.
+  MAX_DOWNLOAD_MB: 2048
+  # A service that no source gave is not looked up again for this many seconds.
+  RETRY_AFTER_SECONDS: 3600
+  # Seconds that a request to a source may wait (to connect, and for each read).
+  TIMEOUT_SECONDS: 60
+
 communication:
   # The most components a Peer.signature_scheme may declare before this node refuses
   # to compare it (node_identity.same_signature_scheme). Comparing two schemes is a
