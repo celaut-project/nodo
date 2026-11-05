@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "6802645be502c180fbcfa6503ac474e72ba925f19ed17222c20d07c72df2788a",
+  "celaut_proto": "a4d5dae9891c23187d25302669fa580796c601776329205e1f8d6dc4a4f27f62",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.ON_CLOSE",
@@ -267,6 +267,8 @@
     "routing.tor.ENABLED",
     "routing.tor.LEDGER_VIA_TOR",
     "routing.tor.SERVICE_EGRESS",
+    "service_networks.ALLOW_PRIVATE_PEER_ADDRESSES",
+    "service_networks.ASK_PEERS",
     "service_networks.blacklist",
     "service_networks.default_instances",
     "service_networks.whitelist",
