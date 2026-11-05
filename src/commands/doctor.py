@@ -1218,6 +1218,12 @@ def _doctor_guest_to_guest_forwarding():
 
     if probe.reachable is True:
         print(f"[OK] A guest on {bridge} can reach another guest through the host.", flush=True)
+        # The packet got through, so a pending "guests cannot reach each other"
+        # notice (written at daemon start from a heuristic) is stale.
+        try:
+            env_manager.clear_forward_notice()
+        except Exception:
+            pass
         # Worth one line even on success: these are the rules nodo put in a table it
         # does not own, and an operator who does not know they are there cannot
         # decide whether to keep them.
@@ -1280,10 +1286,26 @@ def _doctor_guest_to_guest_forwarding():
             f"  {compat.detail} Since that is in place and this still fails, the drop "
             "is in a table iptables does not write to -- firewalld's own inet firewalld "
             "is the usual answer, and its filter_FORWARD rejects by zone. Allow "
-            f"forwarding for {bridge} in firewalld itself "
-            f"('firewall-cmd --permanent --zone=trusted --change-interface={bridge}').",
+            f"forwarding for {bridge} in firewalld itself, in a zone of its own "
+            "rather than 'trusted' (which would expose every port this host listens "
+            "on to every guest):",
             flush=True
         )
+        try:
+            from src.utils.firewall import firewalld_bridge as fwd
+
+            ports = []
+            for read in (env_manager.gateway_port_or_none, env_manager.get_plaintext_gateway_port):
+                try:
+                    port = read()
+                except Exception:
+                    continue
+                if isinstance(port, int) and port > 0 and port not in ports:
+                    ports.append(port)
+            for command in fwd.zone_commands(bridge, ports):
+                print(f"    {command}", flush=True)
+        except Exception as e:
+            print(f"    (could not build the commands: {e})", flush=True)
     else:
         print(
             f"  {compat.detail} Run 'nodo firewall-compat apply' as root, or start the "

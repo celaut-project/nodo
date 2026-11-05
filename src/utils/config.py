@@ -80,6 +80,14 @@ GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE = ".gateway_plaintext_notice.cmd"
 # which is reported as before.
 GATEWAY_PLAINTEXT_NOTICE_PORT_FILE = ".gateway_plaintext_notice.port"
 
+# Guests cannot reach each other because firewalld has the guest bridge in no
+# zone. Same shape as the gateway notices (free text, plus a one-line command
+# beside it) so `nodo info`, the TUI and install.sh read it the same way. Written
+# by the daemon's network setup, which is the only place that knows the bridge
+# exists; cleared by that same setup once the bridge has a zone, and by `nodo
+# doctor` when a real guest-to-guest packet gets through.
+FORWARD_NOTICE_FILE = ".forward_notice"
+
 
 def _command_file_for(notice_file: str) -> str:
     """The companion file holding ``notice_file``'s one-line fix, if it has one."""
@@ -609,6 +617,20 @@ class ConfigManager(metaclass=Singleton):
                 command=command,
                 port=port,
             )
+
+    def emit_forward_notice(self, title: str, body: str, command: Optional[str] = None) -> None:
+        """Record that guests cannot reach each other, for `nodo info`, the TUI and the installer."""
+        with self._lock:
+            self.ensure_loaded()
+            self._gateway_notice_unlocked(
+                title, body, notice_file=FORWARD_NOTICE_FILE, command=command
+            )
+
+    def clear_forward_notice(self) -> None:
+        """Remove the guest-forwarding notice, if any. Idempotent."""
+        with self._lock:
+            self.ensure_loaded()
+            self._clear_notice_unlocked(FORWARD_NOTICE_FILE)
 
     def assign_gateway_port_if_unset(self) -> Optional[int]:
         """Assign the gateway port if there is none. Returns the port in force, or None.

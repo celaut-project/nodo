@@ -283,6 +283,57 @@ def plaintext_gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]
     )
 
 
+def guest_forwarding_alert(config_manager=None) -> Optional[OperatorAlert]:
+    """Guests cannot reach each other, because firewalld has no zone for the bridge.
+
+    Worth an alert of its own because of *how* it fails: nothing on the node looks
+    wrong. The gateway answers, the VMs boot, and a service that launches a
+    dependency reports the child as dead -- the packet to it was rejected by the
+    host's default firewalld zone. Until this existed, the daemon noticed and wrote
+    one line to ``storage/app.log``.
+
+    A ``.forward_notice`` on disk is the whole signal, written by
+    ``_report_firewalld_zone`` in ``src/virtualizers/microvm/network.py`` at daemon
+    start and removed when the bridge has a zone or when ``nodo doctor`` gets a real
+    guest-to-guest packet through. Same cheapness contract as the gateway alerts: a
+    config read and two ``stat``s, no subprocess, no socket.
+
+    It is a stored verdict from the last start, not a live probe, so it can outlive
+    a fix applied since; ``sudo nodo doctor`` re-tests and clears it.
+    """
+    from src.utils.config import (
+        FORWARD_NOTICE_FILE,
+        ConfigManager,
+        _command_file_for,
+    )
+
+    manager = config_manager or ConfigManager()
+    try:
+        notice_dir = os.path.dirname(os.path.realpath(manager.config_path)) or "."
+        notice_path = os.path.join(notice_dir, FORWARD_NOTICE_FILE)
+        pending = _read_text(notice_path)
+        command = _read_text(os.path.join(notice_dir, _command_file_for(FORWARD_NOTICE_FILE)))
+    except Exception:
+        return None
+    if not pending:
+        return None
+
+    lead = (
+        "Guests cannot reach each other: firewalld has no zone for the guest bridge, "
+        "so services this node launches as dependencies will look like dead children."
+    )
+    summary = (
+        f"{lead} Fix it, then run `{sudo_nodo('doctor')}`:{_command_block(command)}"
+        if command
+        else f"{lead} Fix it: see {notice_path} for the exact commands."
+    )
+    return OperatorAlert(
+        key="guest_forwarding_firewalld",
+        summary=summary,
+        detail=pending,
+    )
+
+
 def _unreachable_lead(serving: Optional[bool]) -> str:
     """The first words of the firewall alert: what is wrong, before why.
 
@@ -363,7 +414,9 @@ def collect(config_manager=None, serving: Optional[bool] = None) -> List[Operato
     entirely: a node that cannot serve has no use for a payment system. Its
     plaintext counterpart comes next, ahead of Java, for the same reason one rung
     down: it does not stop the node, but it does stop every service the node
-    launches from being able to call back into it.
+    launches from being able to call back into it. Guests that cannot reach each
+    other follow, for the same reason: the node runs, but its dependency chains
+    do not.
 
     ``serving`` is threaded through rather than asked for here, so the one caller
     that already knows it (`nodo info`, which prints it on the line above) does not
@@ -373,6 +426,7 @@ def collect(config_manager=None, serving: Optional[bool] = None) -> List[Operato
     for alert in (
         gateway_port_alert(config_manager, serving),
         plaintext_gateway_port_alert(config_manager),
+        guest_forwarding_alert(config_manager),
         java_alert(),
     ):
         if alert is not None:

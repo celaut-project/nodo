@@ -296,7 +296,16 @@ class CoverageHonestyTests(unittest.TestCase):
 
         source = inspect.getsource(doctor._doctor_guest_to_guest_forwarding)
         self.assertIn("firewalld", source)
-        self.assertIn("firewall-cmd", source)
+        # The commands come from firewalld_bridge.zone_commands, which only ever
+        # writes firewall-cmd and never suggests the over-broad 'trusted' zone.
+        self.assertIn("zone_commands", source)
+        self.assertNotIn("--zone=trusted", source)
+
+        from src.utils.firewall import firewalld_bridge
+
+        commands = firewalld_bridge.zone_commands("nodo-br-ch", [52285])
+        self.assertTrue(all("firewall-cmd" in command for command in commands))
+        self.assertFalse(any("trusted" in command for command in commands))
 
 
 if __name__ == "__main__":
