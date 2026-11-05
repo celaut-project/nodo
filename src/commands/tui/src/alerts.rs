@@ -49,6 +49,9 @@ impl Alerts {
         if let Some(alert) = plaintext_gateway_port_alert(config, config_document) {
             found.push(alert);
         }
+        if let Some(alert) = guest_forwarding_alert(config) {
+            found.push(alert);
+        }
         if let Some(alert) = java_alert(config_document) {
             found.push(alert);
         }
@@ -92,6 +95,10 @@ pub const GATEWAY_NOTICE_FILE: &str = ".gateway_notice";
 /// `GATEWAY_PLAINTEXT_NOTICE_FILE` in `src/utils/config.py`, so an unreachable TLS
 /// port and an unreachable plaintext port never answer for each other.
 pub const GATEWAY_PLAINTEXT_NOTICE_FILE: &str = ".gateway_plaintext_notice";
+
+/// Guests cannot reach each other because firewalld has no zone for the bridge,
+/// matching `FORWARD_NOTICE_FILE` in `src/utils/config.py`.
+pub const FORWARD_NOTICE_FILE: &str = ".forward_notice";
 
 /// The port a pending plaintext notice is about, matching
 /// `GATEWAY_PLAINTEXT_NOTICE_PORT_FILE` in `src/utils/config.py` (issue #438).
@@ -318,6 +325,29 @@ fn plaintext_gateway_port_alert(
              subnet, so services this node launches cannot call back into it. Fix \
              it: {}",
             notice_instruction(config, GATEWAY_PLAINTEXT_NOTICE_FILE, &pending)
+        ),
+    })
+}
+
+/// Guests cannot reach each other: firewalld has no zone for the guest bridge.
+///
+/// Nothing on the node looks wrong -- the gateway answers and the VMs boot -- but a
+/// service that launches a dependency sees it as a dead child. The whole signal is
+/// the `.forward_notice` the daemon wrote at start; mirrors
+/// `guest_forwarding_alert` in `src/utils/operator_alerts.py`.
+fn guest_forwarding_alert(config: &Path) -> Option<OperatorAlert> {
+    let pending = fs::read_to_string(notice_files(config, FORWARD_NOTICE_FILE)[0].clone())
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())?;
+
+    Some(OperatorAlert {
+        key: "guest_forwarding_firewalld",
+        summary: format!(
+            "Guests cannot reach each other: firewalld has no zone for the guest \
+             bridge, so services this node launches as dependencies will look like \
+             dead children. Fix it, then run `sudo nodo doctor`: {}",
+            notice_instruction(config, FORWARD_NOTICE_FILE, &pending)
         ),
     })
 }
@@ -691,6 +721,7 @@ mod tests {
             "gateway_port_firewall",
             "gateway_port_closed",
             "gateway_plaintext_port_unreachable",
+            "guest_forwarding_firewalld",
             "java_missing",
         ] {
             assert!(
@@ -733,6 +764,43 @@ mod tests {
             "the TUI looks for {GATEWAY_PLAINTEXT_NOTICE_FILE}, which src/utils/config.py \
              does not write"
         );
+        assert!(
+            python.contains(&format!("FORWARD_NOTICE_FILE = \"{FORWARD_NOTICE_FILE}\"")),
+            "the TUI looks for {FORWARD_NOTICE_FILE}, which src/utils/config.py does not write"
+        );
+    }
+
+    #[test]
+    fn no_forward_notice_raises_nothing() {
+        let dir = scratch("forward-clean");
+        assert_eq!(guest_forwarding_alert(&dir.join("config.yaml")), None);
+    }
+
+    #[test]
+    fn a_forward_notice_raises_an_alert_with_its_command() {
+        let dir = scratch("forward-pending");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(FORWARD_NOTICE_FILE), "no zone for nodo-br-ch").unwrap();
+        fs::write(
+            dir.join(format!("{FORWARD_NOTICE_FILE}.cmd")),
+            "sudo firewall-cmd --reload",
+        )
+        .unwrap();
+
+        let alert = guest_forwarding_alert(&config).expect("an alert");
+
+        assert_eq!(alert.key, "guest_forwarding_firewalld");
+        assert!(alert.summary.contains("sudo firewall-cmd --reload"), "{}", alert.summary);
+    }
+
+    #[test]
+    fn the_forward_alert_clears_when_its_notice_is_removed() {
+        let dir = scratch("forward-clears");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(FORWARD_NOTICE_FILE), "x").unwrap();
+        assert!(guest_forwarding_alert(&config).is_some());
+        fs::remove_file(dir.join(FORWARD_NOTICE_FILE)).unwrap();
+        assert_eq!(guest_forwarding_alert(&config), None);
     }
 
     #[test]
