@@ -83,6 +83,14 @@ class GetServiceCommandTests(unittest.TestCase):
 
         self.assertTrue(any("Could not get" in line for line in printed))
 
+    def test_an_id_in_capitals_is_asked_for_in_lowercase(self):
+        with patch.object(get_service_cmd, "get_id", return_value=""), patch.object(
+            get_service_cmd, "resolve_service_hash", return_value=""
+        ), patch.object(get_service_cmd, "check_wanted_service") as mock_check:
+            get_service_cmd.get_service(self.HASH.upper(), now=True)
+
+        mock_check.assert_called_once_with(self.HASH, wait=True)
+
     def test_a_tag_the_local_registry_already_names_is_resolved_before_fetching(self):
         with patch.object(
             get_service_cmd, "get_id", return_value=self.HASH

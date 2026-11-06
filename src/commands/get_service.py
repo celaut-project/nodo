@@ -23,7 +23,8 @@ from src.manager.maintain import WANTED_INBOX_DIR, check_wanted_service
 
 def _hash_to_fetch(service: str) -> str:
     resolved = get_id(service)
-    return resolved if resolved else service
+    # The registry names a service in lowercase hex.
+    return (resolved if resolved else service).lower()
 
 
 def get_service(service: str, now: bool = False) -> None:

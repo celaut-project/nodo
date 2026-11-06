@@ -84,6 +84,15 @@ class CheckWantedServiceTests(unittest.TestCase):
 
         self.assertEqual(maintain.wanted_services_retry, {WANTED})
 
+    def test_an_id_in_capitals_is_asked_for_in_lowercase(self):
+        with patch.object(maintain, "fetch_service_from_peers", return_value=False) as peers, patch.object(
+            sa, "acquire_from_sources_if_enabled", return_value=True
+        ) as inline:
+            maintain.check_wanted_service(WANTED.upper(), wait=True)
+
+        peers.assert_called_once_with(WANTED)
+        inline.assert_called_once_with(WANTED)
+
     def test_wait_asks_the_sources_in_this_thread(self):
         # `nodo get --now` runs in its own process and waits for the answer.
         for acquired, retry in ((True, set()), (False, {WANTED})):
@@ -462,6 +471,23 @@ class AcquireFromSourcesTests(unittest.TestCase):
             self.assertTrue(sa.acquire_from_sources(WANTED, 5 * MIB))
 
         self.assertEqual(os.listdir(os.path.join(self.cache, "source_downloads")), [])
+
+    def test_an_id_in_capitals_is_the_same_service(self):
+        # Audit N8: `nodo get --now ABAB...` imported the right service, then removed it as
+        # "another service" because "abab..." != "ABAB...".
+        removed = []
+        with patch.object(sa, "__lookup_sources", return_value=["https://h/a"]) as lookup, patch.object(
+            sa, "download_to_file", side_effect=self._download_writing()
+        ), patch.object(
+            self.import_module, "import_bee", side_effect=self._import_as(WANTED)
+        ), patch(
+            "src.commands.remove.remove", side_effect=lambda sid: removed.append(sid)
+        ), redirect_stdout(io.StringIO()):
+            self.assertTrue(sa.acquire_from_sources(WANTED.upper(), 5 * MIB))
+
+        self.assertEqual(lookup.call_args.args[0], WANTED)
+        self.assertEqual(removed, [])
+        self.assertTrue(os.path.exists(os.path.join(self.registry, WANTED)))
 
     def test_a_file_that_does_not_import_is_not_a_service(self):
         with patch.object(sa, "__lookup_sources", return_value=["https://h/a"]), patch.object(

@@ -190,6 +190,7 @@ def check_wanted_service(wanted: str, wait: bool = False):
     time, and this runs in the manager thread. With ``wait`` (``nodo get --now``, in its own
     process) they are asked here, and this returns when they answered.
     """
+    wanted = normalized_service_id(wanted) or wanted  # `nodo get --now ABAB...` (audit N8)
     log.LOGGER(f"Check wanted service {wanted}")
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
     if fetch_service_from_peers(wanted):

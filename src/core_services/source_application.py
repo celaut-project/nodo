@@ -213,6 +213,9 @@ def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None,
 
     True only when the service is in the registry afterwards. Never raises.
     """
+    # The registry names a service in lowercase: an id in capitals is the same service, and
+    # the check of what was imported must not take it for another one (audit N8).
+    service_id = service_id.strip().lower()
     source_application_id = get_core_service_id(SOURCE_APPLICATION)
     if not source_application_id:
         print(
