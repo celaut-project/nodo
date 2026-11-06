@@ -383,7 +383,7 @@ class AcquireFromSourcesTests(unittest.TestCase):
     def _import_as(self, service_id):
         """An `import_bee` of a file that is `service_id`, as the real one does: with an
         integrity hash that is another id, it writes nothing and gives None."""
-        def fake(path, integrity_hash=None):
+        def fake(path, integrity_hash=None, keep_metadata=False):
             self.assertTrue(os.path.exists(path))
             if integrity_hash is not None and integrity_hash != service_id:
                 return None
@@ -442,7 +442,9 @@ class AcquireFromSourcesTests(unittest.TestCase):
         ), redirect_stdout(io.StringIO()):
             self.assertTrue(sa.acquire_from_sources(WANTED, 5 * MIB))
 
-        self.assertEqual([c.kwargs for c in import_bee.call_args_list], [{"integrity_hash": WANTED}] * 2)
+        self.assertEqual(
+            [c.kwargs for c in import_bee.call_args_list], [{"integrity_hash": WANTED, "keep_metadata": True}] * 2
+        )
         self.assertEqual(sorted(os.listdir(self.registry)), [WANTED])
         self.assertEqual(removed, [])
 
@@ -493,6 +495,15 @@ class AcquireFromSourcesTests(unittest.TestCase):
         self.assertEqual(lookup.call_args.args[0], WANTED)
         self.assertEqual(removed, [])
         self.assertTrue(os.path.exists(os.path.join(self.registry, WANTED)))
+
+    def test_a_service_that_the_node_has_already_is_not_downloaded(self):
+        open(os.path.join(self.registry, WANTED), "w").close()  # a peer gave it while it waited
+        with patch.object(sa, "__lookup_sources", return_value=["https://h/a"]), patch.object(
+            sa, "download_to_file"
+        ) as download, redirect_stdout(io.StringIO()):
+            self.assertTrue(sa.acquire_from_sources(WANTED, 5 * MIB))
+
+        download.assert_not_called()
 
     def test_only_the_first_sources_are_tried(self):
         # Audit N4: the number of sources of one id had no limit.

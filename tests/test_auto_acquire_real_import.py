@@ -151,6 +151,52 @@ class RealImportTests(unittest.TestCase):
         self.assertIn(block, os.listdir(self.blocks))
         self.assertEqual(os.listdir(os.path.join(self.cache, "source_downloads")), [])
 
+    # --- audit N3
+
+    def test_a_source_that_serves_a_service_that_the_node_holds_does_not_change_its_tags(self):
+        held, _ = self._make_service("other", b"O")
+        self._write_metadata(held, "evil")
+        url = self._export(held, "evil.celaut.bee")
+        self._write_metadata(held, "other")  # what the node has
+
+        self.assertFalse(self._download_checked(url, WANTED))
+
+        self.assertEqual(self._tags(held), ["other"])
+        self.assertEqual(os.listdir(self.registry), [held])
+        self.assertEqual(os.listdir(self.metadata), [held])
+
+    def test_the_wanted_service_that_arrived_meanwhile_keeps_its_tags(self):
+        wanted, _ = self._make_service("evil", b"W")
+        url = self._export(wanted, "wanted.celaut.bee")
+        self._write_metadata(wanted, "mine")  # a peer gave it with these tags in the meantime
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(
+                import_module.import_bee(
+                    os.path.join(self.served, "wanted.celaut.bee"), integrity_hash=wanted, keep_metadata=True
+                ),
+                wanted,
+            )
+            self.assertTrue(self._download_checked(url, wanted))
+        self.assertEqual(self._tags(wanted), ["mine"])
+
+    def test_metadata_that_names_a_held_service_does_not_keep_the_content_out_of_the_registry(self):
+        # The file says it is `held` (that the node has), and its content is `wanted`. Whether
+        # the registry holds the service was read from the id that the metadata says, so the
+        # content was thrown away and the import still said `wanted`.
+        held, _ = self._make_service("held", b"H")
+        wanted, block = self._make_service("wanted", b"W")
+        with open(os.path.join(self.metadata, wanted), "wb") as f:
+            f.write(celaut.Metadata(hashtag=celaut.Metadata.HashTag(
+                hash=[celaut.Metadata.HashTag.Hash(type=self.spec.id_bytes, value=bytes.fromhex(held))],
+            )).SerializeToString())
+        url = self._export(wanted, "lies.celaut.bee")
+        self._forget(wanted, block)
+
+        self.assertTrue(self._download_checked(url, wanted))
+
+        self.assertTrue(os.path.isdir(os.path.join(self.registry, wanted)))
+        self.assertEqual(self._tags(held), ["held"])
+
     # --- audit N2
 
     def test_a_service_that_another_thread_saves_during_the_import_is_kept(self):

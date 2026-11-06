@@ -44,7 +44,14 @@ def _remove_path(path: str):
         os.remove(path)
 
 
-def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]:
+def import_bee(path: str, integrity_hash: Optional[str] = None, keep_metadata: bool = False) -> Optional[str]:
+    """Import the ``.celaut.bee`` at ``path``; the id of the service, or None.
+
+    ``integrity_hash``: the id that the service must have; another one is not imported.
+    ``keep_metadata``: the metadata (the tags) of a service that the node has already are not
+    replaced by the ones of the file. A source that anybody can register must not rename a
+    service that the node holds (audit N3).
+    """
     # Get the current directory (where the "nodo" command is executed from)
     current_directory = os.getcwd()
     
@@ -82,11 +89,9 @@ def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]
         
         # Find the configured service hash in metadata first.
         service_hash = None
-        service_saved = False
         for _hash in metadata.hashtag.hash:
             if _hash.type == hash_spec.id_bytes:
                 service_hash = _hash.value.hex()
-                service_saved = os.path.exists(os.path.join(REGISTRY, service_hash))
                 break
 
         if VALIDATE_ON_IMPORT:
@@ -109,10 +114,15 @@ def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]
                 )
                 return
         
+        # Only now is the id known: the one that the metadata says may not be the one of the
+        # content (VALIDATE_ON_IMPORT replaced it above).
+        service_saved = os.path.exists(os.path.join(REGISTRY, service_hash))
+
         # Move metadata to the metadata registry
         metadata_destination = os.path.join(METADATA_REGISTRY, service_hash)
-        with open(metadata_destination, "wb") as metadata_file:
-            metadata_file.write(metadata.SerializeToString())
+        if not (keep_metadata and os.path.exists(metadata_destination)):
+            with open(metadata_destination, "wb") as metadata_file:
+                metadata_file.write(metadata.SerializeToString())
         _remove_path(metadata_dir)
         
         # Move or remove the service file based on whether it's already saved

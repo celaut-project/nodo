@@ -242,6 +242,11 @@ def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None,
         print("⚠️  source-application returned no sources for this service.")
         return False
 
+    if max_bytes is not None and _holds(service_id):
+        # A peer gave it while it waited: nothing to download, and its metadata stays.
+        print(f"ℹ️  The node has {service_id} already.")
+        return True
+
     if limits is not None and limits.max_sources and len(sources) > limits.max_sources:
         print(f"ℹ️  {len(sources)} sources; only the first {limits.max_sources} are tried.")
         sources = sources[:limits.max_sources]
@@ -267,6 +272,12 @@ def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None,
 
     print("⚠️  All source-application sources failed to provide the service.")
     return False
+
+
+def _holds(service_id: str) -> bool:
+    from src.commands import import_bee as import_module
+
+    return os.path.exists(os.path.join(import_module.REGISTRY, service_id))
 
 
 def _validates_on_import() -> bool:
@@ -296,7 +307,7 @@ def _download_checked(manifest_url: str, service_id: str, max_bytes: int,
     try:
         size = download_to_file(manifest_url, path, max_bytes, timeout_s, limits=limits)
         print(f"Downloaded {size} bytes.")
-        imported = import_module.import_bee(path, integrity_hash=service_id)
+        imported = import_module.import_bee(path, integrity_hash=service_id, keep_metadata=True)
         if imported == service_id:
             return True
         print(f"⚠️  The source did not give {service_id}; nothing of it is kept.")
