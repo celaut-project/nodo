@@ -342,6 +342,19 @@ class AcquireIfEnabledTests(unittest.TestCase):
             sa.acquire_from_sources_if_enabled(OTHER)
             self.assertEqual(acquire.call_count, 3)
 
+    def test_only_the_ids_in_their_cooldown_are_kept(self):
+        # Audit N11: one entry for each id that was ever asked for, never removed.
+        self._with_config(**{"service_sources.RETRY_AFTER_SECONDS": 100})
+        clock = [1000.0]
+        with patch.object(sa.time, "monotonic", side_effect=lambda: clock[0]), patch.object(
+            sa, "acquire_from_sources", return_value=False
+        ):
+            sa.acquire_from_sources_if_enabled(WANTED)
+            clock[0] += 150
+            sa.acquire_from_sources_if_enabled(OTHER)
+
+        self.assertEqual(list(sa._last_attempt), [OTHER])
+
     def test_a_failure_never_reaches_the_manager(self):
         self._with_config(**{"service_sources.AUTO_ACQUIRE": True})
         out = io.StringIO()

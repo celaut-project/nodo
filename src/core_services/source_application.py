@@ -378,6 +378,9 @@ def _due(service_id: str, retry_after: float) -> bool:
     """True, and the time is kept, unless ``service_id`` was tried less than ``retry_after`` ago."""
     now = time.monotonic()
     with _last_attempt_lock:
+        # Only the ids that are still in their cooldown are kept (audit N11).
+        for old in [key for key, at in _last_attempt.items() if now - at >= retry_after]:
+            del _last_attempt[old]
         last = _last_attempt.get(service_id)
         if last is not None and now - last < retry_after:
             return False

@@ -48,12 +48,13 @@ def get_service(service: str, now: bool = False) -> None:
         )
         return
 
-    print(f"Asking known peers for {service_hash}...")
+    print(f"Asking known peers (and its sources, with service_sources.AUTO_ACQUIRE) for {service_hash}...")
     check_wanted_service(service_hash, wait=True)
 
     if resolve_service_hash(service_hash):
         print(f"Service {service_hash} retrieved and stored in the local registry.")
     else:
         print(
-            f"Could not get {service_hash} from any known peer (or none are reachable)."
+            f"Could not get {service_hash} from any known peer (or none are reachable), "
+            "nor from its sources."
         )

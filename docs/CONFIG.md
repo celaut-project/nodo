@@ -890,36 +890,61 @@ maintenance-loop timing and client slot/expiration policy.
 
 A service is asked for by its id: a service that starts it as a dependency (`StartService`
 by hash), a delegated execution, `nodo get`. When no known peer has it, the node only asks
-its peers again later. With `service_sources.AUTO_ACQUIRE` on (the default) and a `source-application` core service configured, it also asks the
-`source-application` core service (`core_services`) for the sources of that id, downloads the
-first one that works and imports it. The sources are the ones that `nodo publish` registers:
-the id is the key, and the value is a plain URL, either a `.celaut.bee` file or a UTF-8
-manifest with one part URL for each line. It does not matter which host serves it.
+its peers again later. With `service_sources.AUTO_ACQUIRE` on (the default) and a
+`source-application` core service configured, it also asks the `source-application` core
+service (`core_services`) for the sources of that id, downloads the first one that works and
+imports it. The sources are the ones that `nodo publish` registers: the id is the key, and the
+value is a plain URL, either a `.celaut.bee` file or a UTF-8 manifest with one part URL for
+each line. It does not matter which host serves it.
 
 `nodo execute`, `nodo service_envs` and the other commands of the operator already do this,
-with no limit, as `nodo download` does. This is the same for a request that somebody else
-makes, so it is off by default and it has these limits:
+with no limit, as `nodo download` does. The automatic path is the same for a request that
+somebody else makes, so it has these limits:
 
-- the download is streamed to a file, and stops at `MAX_DOWNLOAD_MB` in all (the
-  `Content-Length` of each response is read first, then the bytes that arrive, over all parts);
-- only `http` and `https`, and only to a host whose addresses are all public: the URL and
-  every redirect (five at most) are checked, and loopback, private and link-local addresses are
-  refused. The check is made when the name is resolved, and the connection resolves it again,
-  so it is not a defence against a name that changes its answer in between;
-- no credentials are sent (the publisher token is not for a host that a registry lists);
-- it needs `misc.VALIDATE_ON_IMPORT` on, so what is imported is hashed and kept only if it is
-  the id that was asked for. Any other service that the import added is removed;
-- a service that no source gave is not looked up again for `RETRY_AFTER_SECONDS`.
+- **Who.** Only a caller that the node knows starts it: the operator (`nodo get`), a local
+  instance, or a caller with a `client_id` that this node minted (`require_caller`). Each
+  caller may make `WANTS_PER_CALLER_PER_HOUR` such wants. For any other request the node only
+  asks its peers. The id must be 64 hex characters.
+- **Where.** Only `http` and `https`. The URL, and each redirect (five at most), is read
+  with one parser (urllib3's), and a URL that another parser could read in another way is
+  refused: a `\`, a space or a control character, a user or a password before the host.
+  The host is resolved once, every address must be public (not loopback, private,
+  link-local, multicast, or such an IPv4 address inside an IPv6 one, NAT64 included), and the
+  connection goes to that address. So a name that changes its answer after the check (DNS
+  rebinding) does not move the request. No credentials are sent, and no proxy or `.netrc`
+  of the environment is used.
+- **How much.** The download is streamed to a file, and stops at `MAX_DOWNLOAD_MB` in all
+  (the `Content-Length` of each response is read first, then the bytes that arrive, over all
+  parts). A body in a `Content-Encoding` other than identity is refused. The disk must have
+  twice that room. At most `MAX_SOURCES` sources, `MAX_PARTS` parts in a manifest,
+  `MAX_HOSTS` hosts and `MAX_REQUESTS_PER_HOST` requests to each host, for one service.
+- **How long.** All the downloads of one service take `DEADLINE_SECONDS` at most (a request
+  that is still open then is cut), and a body slower than `MIN_KIB_PER_SECOND` is given up.
+  The automatic path runs on a thread of its own, one service at a time, so the manager
+  thread (billing, deposits, instances) never waits for it. `nodo get --now` waits for it in
+  its own process.
+- **What is kept.** It needs `misc.VALIDATE_ON_IMPORT` on, and the import is given the id that
+  was asked for: a file that hashes to another id is not written to the registry, and the
+  blocks that it added are removed. The tags of a service that the node holds are not
+  changed by a source.
+- A service that no source gave is not looked up again for `RETRY_AFTER_SECONDS`.
 
 The node needs a `source-application` core service in `core_services`, and starts it as it does
-for any command that uses it.
+for any command that uses it (on the thread of the automatic path).
 
 | Key | Default | Meaning |
 |---|---|---|
 | `service_sources.AUTO_ACQUIRE` | `true` | Try the sources of a service that no peer holds, for a request that is not the operator's. It does nothing if the node has no `source-application` core service. `false` turns it off. |
+| `service_sources.WANTS_PER_CALLER_PER_HOUR` | `10` | The wants for the sources that one caller (a `client_id`, or a local instance) may make in one hour. `0` is no limit. |
 | `service_sources.MAX_DOWNLOAD_MB` | `2048` | The most that one download may take, all its parts together. `0` is no limit. |
 | `service_sources.RETRY_AFTER_SECONDS` | `3600` | Seconds before the sources of the same service are tried again. Kept in memory: a restart forgets it. |
 | `service_sources.TIMEOUT_SECONDS` | `60` | Seconds that a request to a source may wait to connect and for each read. |
+| `service_sources.DEADLINE_SECONDS` | `1800` | The most time for all the downloads of one service together. `0` is no limit. |
+| `service_sources.MIN_KIB_PER_SECOND` | `16` | A body that arrives more slowly than this (on average, after its first `TIMEOUT_SECONDS`) is given up. `0` is no minimum. |
+| `service_sources.MAX_PARTS` | `64` | The most parts of one manifest (`nodo publish` makes parts of 1000 MB). `0` is no limit. |
+| `service_sources.MAX_SOURCES` | `3` | The most sources of one service that are tried. `0` is no limit. |
+| `service_sources.MAX_HOSTS` | `8` | The most hosts that are asked for one service. `0` is no limit. |
+| `service_sources.MAX_REQUESTS_PER_HOST` | `80` | The most requests to one host for one service, redirects included. `0` is no limit. |
 
 ## `host_limits` — how much of this machine nodo may take
 
