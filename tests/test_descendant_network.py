@@ -234,5 +234,49 @@ class RelayedReadChargeTests(_Network):
         self.assertTrue(self.charge_problems_of_b())
 
 
+class BoundStatementTests(_Network):
+    """The node signs the instance_ref that was asked for with the statement, so a peer
+    cannot give the statement of another account for it and say so later."""
+
+    def test_the_statement_names_the_ref_that_the_caller_asked_for(self):
+        ref = ledger.instance_ref("d_alias")
+
+        statement = self.read(ref)
+
+        self.assertEqual(statement.instance_ref, ref)
+        self.assertTrue(balance_statement.verify(statement, self.a.peer_id))
+        changed = type(statement)()
+        changed.CopyFrom(statement)
+        changed.instance_ref = ledger.instance_ref("c_alias")
+        self.assertFalse(balance_statement.verify(changed, self.a.peer_id))
+
+    def test_a_statement_of_another_account_is_refused_and_scored(self):
+        with self.on(self.b):
+            self.add_instance("x_onB", "a_at_B", 777)
+        self.lie["B"] = lambda client_id, token, f, t, ref: balance_statement._answer_account(
+            client_id, "x_onB", f, t, False, with_dead=True)
+
+        with self.assertRaises(balance_statement.StatementUnavailable):
+            self.read(ledger.instance_ref("c_alias"))
+
+        self.assertIn(("A", "B", "statement_inconsistent"), self.faults)
+
+    def test_a_statement_signed_for_another_ref_is_refused(self):
+        def other_ref(client_id, token, f, t, ref):
+            return balance_statement._answer_account(
+                client_id, token, f, t, False, with_dead=True,
+                instance_ref=ledger.instance_ref("x_onB"))
+        self.lie["B"] = other_ref
+
+        with self.assertRaises(balance_statement.StatementUnavailable):
+            self.read(ledger.instance_ref("c_alias"))
+
+    def test_a_read_without_ref_has_no_ref(self):
+        with self.on(self.a):
+            statement = balance_statement.answer("g", token="p", from_seq=1)
+
+        self.assertEqual(statement.instance_ref, "")
+
+
 if __name__ == "__main__":
     unittest.main()

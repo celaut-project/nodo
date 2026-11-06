@@ -460,8 +460,12 @@ def gateway_component() -> Layer:
         "statement.digest.movements": "'/'.join(hash of each movement in seq order)",
         "statement.digest.service_id": "'|service_id:'+hex(service_id) after movements "
                                        "when service_id is not empty; nothing when empty",
-        "statement.digest.relayed": "'|relayed' after movements and service_id when "
-                                    "relayed is true; nothing when it is false",
+        "statement.digest.instance_ref": "'|instance_ref:'+hex(instance_ref) after "
+                                         "service_id when instance_ref is not empty; "
+                                         "nothing when empty",
+        "statement.digest.relayed": "'|relayed' after movements, service_id and "
+                                    "instance_ref when relayed is true; nothing when it "
+                                    "is false",
         "statement.movement.hash": "blake2b-256 hex of UTF-8 of "
                                    "celaut-balance-movement:prev_hash|seq~ts~hex(amount.n)~"
                                    "hex(balance_after.n)~hex(kind)~instance_ref~hex(detail)",

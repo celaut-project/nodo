@@ -353,6 +353,13 @@ empty when the node does not know the service, and in the answer to a read witho
 `instance_ref`. The digest covers `service_id` only when it is not empty
 (`|service_id:` and the hex of its UTF-8, after the movements and before `|relayed`).
 
+The statement of a descendant also gives the `instance_ref` of the request. The node signs
+that the statement is the account of that descendant, so it cannot say later that it was
+the statement of another account. A reader refuses an answer to a read with
+`instance_ref` that does not have the same `instance_ref`. The digest covers it only when
+it is not empty (`|instance_ref:` and the hex of its UTF-8, after `service_id` and
+before `|relayed`).
+
 ### Delegated children
 
 The node has no chain below an instance that it delegated. The peer has it. The node
@@ -366,8 +373,9 @@ instance, one hop at a time. The service never sees a peer id or a peer token.
 - When the peer gives no `service_id` for the delegated instance, the node sets the
   service that it asked the peer to run, before it signs the statement.
 
-The node checks the signature of the peer with the key of the peer. Then it sets
-`relayed` on the statement and signs it with its own key. The digest covers `relayed`
+The node checks the signature of the peer with the key of the peer, and that the peer
+signed the `instance_ref` that the node sent. Then it sets `relayed` and the
+`instance_ref` that its own caller sent on the statement, and signs it with its own key. The digest covers `relayed`
 only when it is true (`|relayed` at the end of the text), so the digest of a statement
 that a node wrote itself does not change. A node above checks the statement with the
 key of the node that it asked, so a read across two or more delegations works. The rows

@@ -1370,8 +1370,9 @@ class DescendantReadTests(_Database):
         # A read across two delegations: the near node checks the key of the node that
         # it asked, not the key of the far node (#631 review).
         far = balance_statement.celaut_pb2.BalanceStatement(head_seq=7, signature="ab")
-        relayed = balance_statement._relay(far)
+        relayed = balance_statement._relay(far, "ab" * 32)
         self.assertTrue(relayed.relayed)
+        self.assertEqual(relayed.instance_ref, "ab" * 32)
         self.assertTrue(balance_statement.verify(relayed, self.peer_id))
         self.assertFalse(far.relayed, "the statement of the peer does not change")
         stripped = balance_statement.celaut_pb2.BalanceStatement()

@@ -61,9 +61,10 @@ def statement_digest(statement: celaut_pb2.BalanceStatement) -> str:
     """Blake2b-256 hex of the canonical text of every field but the signature.
 
     ``service_id`` is in the text only when it is not empty (``|service_id:`` and its
-    hex, after the movements). ``relayed`` is in the text only when it is true
-    (``|relayed`` at the end). So the digest of a statement without them does not
-    change (#631).
+    hex, after the movements). ``instance_ref`` is in the text only when it is not empty
+    (``|instance_ref:`` and its hex, after ``service_id``). ``relayed`` is in the text
+    only when it is true (``|relayed`` at the end). So the digest of a statement without
+    them does not change (#631).
     """
     text = "|".join((
         statement.account_ref, str(statement.from_seq), str(statement.to_seq),
@@ -73,6 +74,8 @@ def statement_digest(statement: celaut_pb2.BalanceStatement) -> str:
     ))
     if statement.service_id:
         text += "|service_id:" + _hex(statement.service_id)
+    if statement.instance_ref:
+        text += "|instance_ref:" + _hex(statement.instance_ref)
     if statement.relayed:
         text += "|relayed"
     return hashlib.blake2b(text.encode("utf-8"), digest_size=32).hexdigest()
@@ -160,10 +163,11 @@ def _hops(remaining_hops: Optional[int]) -> int:
 
 def _answer_account(caller: str, account: str, from_seq: int, to_seq: int,
                     allow_debt: bool, with_dead: bool = False,
-                    service_id: str = "") -> celaut_pb2.BalanceStatement:
+                    service_id: str = "", instance_ref: str = "") -> celaut_pb2.BalanceStatement:
     """Charge ``caller``, read the rows of ``account`` and sign them.
 
-    ``service_id`` (hex) goes in the statement only for a read with ``instance_ref``.
+    ``service_id`` (hex) and ``instance_ref`` go in the statement only for a read with
+    ``instance_ref``: the node signs that the account is the one of that descendant.
     """
     read = sc.balance_statement(
         account, caller, from_seq=from_seq, to_seq=to_seq,
@@ -194,6 +198,7 @@ def _answer_account(caller: str, account: str, from_seq: int, to_seq: int,
         retention_days=ledger.retention_days(),
         ts=read["ts"],
         service_id=_service_hex(service_id),
+        instance_ref=instance_ref,
     )
     return _sign(statement)
 
@@ -299,7 +304,8 @@ def _answer_descendant(caller: str, root: str, instance_ref: str, from_seq: int,
     if found is not None and found["kind"] == "local":
         try:
             return _answer_account(caller, found["id"], from_seq, to_seq, allow_debt,
-                                   with_dead=True, service_id=found.get("service_id"))
+                                   with_dead=True, service_id=found.get("service_id"),
+                                   instance_ref=instance_ref)
         except ledger.NoSuchAccount:
             # The retention deleted the account after the walk. The exception names the
             # account by its id, which is a token: it must not reach the caller.
@@ -348,7 +354,7 @@ def _answer_descendant(caller: str, root: str, instance_ref: str, from_seq: int,
         # A peer that does not give it: the node gives the service that it asked the
         # peer to run.
         statement.service_id = _service_hex(found.get("service_id"))
-    return _relay(statement)
+    return _relay(statement, instance_ref)
 
 
 def _must_answer(row: dict, ask_ref: str, found: Optional[dict]) -> bool:
@@ -526,17 +532,21 @@ def _judge_no_statement(peer_id: str, instance_ref: str, error: Exception,
                    f"{instance_ref[:12]}: {e}")
 
 
-def _relay(statement: celaut_pb2.BalanceStatement) -> celaut_pb2.BalanceStatement:
+def _relay(statement: celaut_pb2.BalanceStatement,
+           instance_ref: str) -> celaut_pb2.BalanceStatement:
     """The statement of a peer, as this node gives it to its caller.
 
-    This node checked the signature of the peer. It marks the statement ``relayed`` and
-    signs it with its own key: the caller knows only this node, and a node above checks
-    the statement with the key of the node that it asked. The rows and their hashes do
-    not change, so the chain still shows any change that the peer made.
+    This node checked the signature of the peer, and that the peer signed the
+    ``instance_ref`` that this node asked for. It marks the statement ``relayed``, sets
+    the ``instance_ref`` that its own caller asked for (``instance_ref``), and signs it
+    with its own key: the caller knows only this node, and a node above checks the
+    statement with the key of the node that it asked. The rows and their hashes do not
+    change, so the chain still shows any change that the peer made.
     """
     relayed = celaut_pb2.BalanceStatement()
     relayed.CopyFrom(statement)
     relayed.relayed = True
+    relayed.instance_ref = instance_ref
     return _sign(relayed)
 
 
@@ -723,10 +733,12 @@ def fetch(peer_id: str, client_id: str, token: str = "", from_seq: int = 0,
     )
     if statement is None:
         raise StatementInvalid(f"{peer_id} answered no statement.")
-    # A descendant has an account that this node does not know by id: only its range is
-    # checked, and the signature.
+    # A descendant has an account that this node does not know by id: the peer signs the
+    # instance_ref that was asked for in its place (#631). Without it, the peer could say
+    # later that the statement was of another account.
     if (not instance_ref
             and statement.account_ref != ledger.account_ref(token or client_id)) \
+            or statement.instance_ref != instance_ref \
             or statement.from_seq != from_seq or statement.to_seq != to_seq:
         raise StatementInvalid(f"{peer_id} answered a statement that was not asked for.")
     if not verify(statement, peer_id):

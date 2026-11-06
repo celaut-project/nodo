@@ -842,6 +842,13 @@ message BalanceStatement {
     // know it, and in the answer to a read without instance_ref. The digest covers it
     // only when it is not empty.
     string service_id = 13;
+    // In the answer to a read with instance_ref: the instance_ref of the request. The
+    // node signs that the statement is the account of that descendant, so it cannot say
+    // later that the statement was of another account. A reader refuses an answer to a
+    // read with instance_ref that does not have the same instance_ref. A node that
+    // relays sets the instance_ref that its own caller asked for. Empty in the answer to
+    // a read without instance_ref. The digest covers it only when it is not empty.
+    string instance_ref = 14;
 }
 
 // An execution receipt (docs/EXECUTION_RECEIPTS.md): a statement that the node signs
