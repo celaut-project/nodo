@@ -376,6 +376,32 @@ def _must_answer(row: dict, ask_ref: str, found: Optional[dict]) -> bool:
     return sc.descendant_linked(row["peer_id"], ask_ref, since=now - retention)
 
 
+def head_conflict(peer_id: str, ask_ref: str,
+                  statement: celaut_pb2.BalanceStatement) -> Optional[str]:
+    """Why ``statement`` does not agree with the head of the descendant ``ask_ref`` that
+    ``peer_id`` signed before and that this node kept (``SQLConnection.descendant_head``),
+    or None when it agrees, or when there is no kept head (#631).
+
+    A chain only grows: its head never goes back, a seq keeps its hash, and the row after
+    the kept head hangs from it. A statement with no rows at all (``head_seq`` 0) is an
+    account whose rows the retention deleted, not a conflict.
+    """
+    kept = sc.descendant_head(peer_id, ask_ref)
+    if kept is None or not statement.head_seq:
+        return None
+    seq, hash_ = int(kept["head_seq"]), kept["head_hash"]
+    if statement.head_seq < seq:
+        return f"head {statement.head_seq} is below the head {seq} that it signed before"
+    if statement.head_seq == seq and statement.head_hash != hash_:
+        return f"head {seq} has another hash"
+    for movement in statement.movements:
+        if movement.seq == seq and movement_hash(movement) != hash_:
+            return f"row {seq} has another hash"
+        if movement.seq == seq + 1 and movement.prev_hash != hash_:
+            return f"row {seq + 1} does not follow the head {seq}"
+    return None
+
+
 def _keep_head(peer_id: str, ask_ref: str, statement: celaut_pb2.BalanceStatement) -> None:
     """Keep the head of a statement that ``peer_id`` gave of a descendant. A failure to
     write is logged, and the read goes on."""
@@ -464,6 +490,19 @@ def _ask_peer(row: dict, client_id: str, ask_ref: str, from_seq: int, to_seq: in
             _judge_no_statement(peer_id, ask_ref, e, rows or 0)
         if _is_not_found(e):
             raise StatementRefused(_NOT_LINKED)
+        raise StatementUnavailable(_BELOW_FAILED)
+    conflict = head_conflict(peer_id, ask_ref, statement)
+    if conflict is not None:
+        # Two signed chains of one descendant: a proof that the peer lied in one of them.
+        # The kept head stays, and the caller gets no statement of this peer.
+        log.LOGGER(f"{peer_id} signed another chain for descendant {ask_ref[:12]}: {conflict}")
+        try:
+            statement_check.penalise_once(
+                peer_id, ask_ref, Reason.STATEMENT_INCONSISTENT,
+                f"a statement of a descendant that does not agree with the one it signed "
+                f"before: {conflict}", window=statement_check.FAULT_WINDOW_SECONDS)
+        except Exception as e:
+            log.LOGGER(f"Cannot score {peer_id} for descendant {ask_ref[:12]}: {e}")
         raise StatementUnavailable(_BELOW_FAILED)
     try:
         if must_answer:

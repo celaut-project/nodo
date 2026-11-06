@@ -278,5 +278,86 @@ class BoundStatementTests(_Network):
         self.assertEqual(statement.instance_ref, "")
 
 
+class KeptHeadTests(_Network):
+    """A chain only grows. A peer that signs another chain for a descendant that it showed
+    before is scored, and the node keeps the first head."""
+
+    def setUp(self):
+        super().setUp()
+        self.ref = ledger.instance_ref("c_alias")
+        self.ref_on_b = ledger.instance_ref("c_onB")
+        with self.on(self.b):
+            self.maintenance("c_onB", 3)
+        self.first = self.read(self.ref)
+
+    def kept(self):
+        with self.on(self.a):
+            return self.sc.descendant_head(self.b.peer_id, self.ref_on_b)
+
+    def other_history(self, rows, mu):
+        """B signs a new history of c_onB: the same key, another database."""
+        # The same name too: for every other node it is B.
+        forged = self.node("B", mnemonic=self.b.mnemonic)
+        forged.clients = self.b.clients
+        self.nodes[self.b.peer_id] = forged
+        with self.on(forged):
+            self.sc.add_client("a_at_B", 10 ** 7, None)
+            self.add_instance("c_onB", "a_at_B", 5000)
+            self.maintenance("c_onB", rows, mu=mu)
+
+    def test_a_chain_that_grows_is_read(self):
+        with self.on(self.b):
+            self.maintenance("c_onB", 2)
+
+        second = self.read(self.ref)
+
+        self.assertEqual(second.head_seq, self.first.head_seq + 2)
+        self.assertEqual(self.kept()["head_seq"], second.head_seq)
+        self.assertEqual(self.faults, [])
+
+    def test_a_head_that_goes_back_is_scored(self):
+        self.other_history(rows=1, mu=1)
+
+        with self.assertRaises(balance_statement.StatementUnavailable):
+            self.read(self.ref)
+
+        self.assertIn(("A", "B", "statement_inconsistent"), self.faults)
+        self.assertEqual(self.kept()["head_hash"], self.first.head_hash)
+
+    def test_the_same_seqs_with_other_rows_are_scored(self):
+        self.other_history(rows=5, mu=1)
+
+        with self.assertRaises(balance_statement.StatementUnavailable):
+            self.read(self.ref)
+
+        self.assertIn(("A", "B", "statement_inconsistent"), self.faults)
+
+    def test_a_longer_chain_that_does_not_follow_the_head_is_scored(self):
+        self.other_history(rows=6, mu=1)
+
+        with self.assertRaises(balance_statement.StatementUnavailable):
+            self.read(self.ref)
+
+        self.assertIn(("A", "B", "statement_inconsistent"), self.faults)
+
+    def test_the_head_read_after_a_tunnel_keeps_the_first_head(self):
+        from src.tunneling import rpc_tunnel
+
+        self.other_history(rows=1, mu=1)
+        with self.on(self.a):
+            row = self.sc.get_delegated_instance_by_alias("c_alias")
+            with patch.object(rpc_tunnel, "HEAD_REFRESH_S", 0):
+                rpc_tunnel._refresh_head(row, self.ref_on_b, 5, None)
+
+        self.assertIn(("A", "B", "statement_inconsistent"), self.faults)
+        self.assertEqual(self.kept()["head_hash"], self.first.head_hash)
+
+    def test_an_account_with_no_rows_left_is_no_conflict(self):
+        empty = type(self.first)(head_seq=0, head_hash="")
+        with self.on(self.a):
+            self.assertIsNone(balance_statement.head_conflict(
+                self.b.peer_id, self.ref_on_b, empty))
+
+
 if __name__ == "__main__":
     unittest.main()

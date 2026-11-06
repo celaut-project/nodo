@@ -1319,7 +1319,14 @@ class DescendantReadTests(_Database):
         return statement
 
     def scored(self, statement, ref="far"):
-        """The reasons that one read of ``statement`` through the peer scores."""
+        """The reasons that one read of ``statement`` through the peer scores.
+
+        Each ``statement`` here is made up for one judgement, and two of them can show
+        other rows at the same seqs. The node keeps the head of the last read and refuses
+        a chain that does not agree with it (``head_conflict``), so the kept head is
+        forgotten before each read."""
+        SQLConnection._connection.execute(
+            "UPDATE descendant_peers SET head_seq = NULL, head_hash = NULL, head_ts = NULL")
         with patch("src.manager.statement_check.read", return_value=statement), \
                 patch("src.manager.manager.get_client_id_on_other_peer", return_value="x"), \
                 patch("src.reputation_system.interface.update_peer_reputation") as score:

@@ -1193,6 +1193,17 @@ def _refresh_head(row: dict, ask_ref: str, budget: int, payer: Optional[str]) ->
         statement = statement_check.read(peer_id, client_id, token=row["token_delegation"],
                                          from_seq=0, instance_ref=ask_ref,
                                          remaining_hops=budget)
+        conflict = balance_statement.head_conflict(peer_id, ask_ref, statement)
+        if conflict is not None:
+            # The kept head stays: the two heads are the proof.
+            logger(f"{LOG_PREFIX} {peer_id} signed another head for descendant "
+                   f"{ask_ref[:12]}: {conflict}")
+            from src.reputation_system.reasons import Reason
+            statement_check.penalise_once(
+                peer_id, ask_ref, Reason.STATEMENT_INCONSISTENT,
+                f"a head of a descendant that does not agree with the one it signed "
+                f"before: {conflict}", window=statement_check.FAULT_WINDOW_SECONDS)
+            return
         sc.record_descendant_head(peer_id, ask_ref, statement.head_seq, statement.head_hash,
                                   ts=statement.ts or None)
     except Exception as e:
