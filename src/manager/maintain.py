@@ -1,6 +1,7 @@
 from fractions import Fraction
 from time import sleep
 import os
+import re
 import shutil
 import threading
 import time
@@ -106,6 +107,22 @@ def _row_arch(sys_req) -> str:
 wanted_services = set()
 wanted_services_retry = set()
 
+# The wanted ids that the node may also get from their published sources
+# (`service_sources.AUTO_ACQUIRE`), because a caller that the node knows asked for them: the
+# operator (`nodo get`), a local instance, or a client_id that this node minted (audit N5).
+# For any other want, the node only asks its peers, as it always did.
+wanted_from_sources = set()
+
+# A service id as the registry names it: the 32-byte digest of every hash this node can use
+# (`src.utils.hashing.HASH_SPECS`), in lowercase hex.
+_SERVICE_ID = re.compile(r"[0-9a-f]{64}")
+
+
+def normalized_service_id(value) -> Optional[str]:
+    """``value`` as the registry names a service, or ``None`` if it is not a service id."""
+    value = str(value or "").strip().lower()
+    return value if _SERVICE_ID.fullmatch(value) else None
+
 # Where `nodo get <service_id>` (no `--now`) drops a marker file for this process to
 # pick up. `wanted_services` above is in-memory and lives only inside whichever
 # process runs this module's manager loop (`nodo serve` / the `nodo.service` daemon);
@@ -126,10 +143,18 @@ def _reputation_interface():
     from src.reputation_system import interface
     return interface
 
-def add_wanted(service_id: str):
-    if service_id not in wanted_services and service_id not in wanted_services_retry:
-        log.LOGGER(f"Store the service hash on the wanted services set {service_id}")
-        wanted_services.add(service_id)
+def add_wanted(service_id: str, from_sources: bool = False):
+    """Want ``service_id``: the manager asks the peers for it. With ``from_sources``, it may
+    also ask its published sources. A value that is not a service id is not wanted."""
+    normalized = normalized_service_id(service_id)
+    if normalized is None:
+        log.LOGGER(f"Not a service id, so it is not wanted: {str(service_id)[:80]!r}")
+        return
+    if from_sources:
+        wanted_from_sources.add(normalized)
+    if normalized not in wanted_services and normalized not in wanted_services_retry:
+        log.LOGGER(f"Store the service hash on the wanted services set {normalized}")
+        wanted_services.add(normalized)
 
 
 def drain_wanted_inbox():
@@ -146,17 +171,43 @@ def drain_wanted_inbox():
         return
 
     for service_id in queued:
-        add_wanted(service_id)
+        add_wanted(service_id, from_sources=True)  # the operator's own `nodo get`
         try:
             os.remove(os.path.join(WANTED_INBOX_DIR, service_id))
         except OSError:
             pass
 
-def check_wanted_service(wanted: str):
+def _retry_later(wanted: str):
+    wanted_services_retry.add(wanted)
+
+
+def check_wanted_service(wanted: str, wait: bool = False):
+    """Ask the peers for ``wanted``, then (with ``service_sources.AUTO_ACQUIRE``) its sources.
+
+    The sources are asked only for an id in ``wanted_from_sources``, or with ``wait``. They
+    are asked on the thread of the automatic path
+    (``source_application.acquire_in_background``): a lookup and a download can take a long
+    time, and this runs in the manager thread. With ``wait`` (``nodo get --now``, in its own
+    process) they are asked here, and this returns when they answered.
+    """
+    wanted = normalized_service_id(wanted) or wanted  # `nodo get --now ABAB...` (audit N8)
     log.LOGGER(f"Check wanted service {wanted}")
     # Each execution of the function attempts to retrieve one of the services from the set. If the timeout is high or a large number of pairs are being processed, multiple calls might overlap if the function's execution time exceeds MANAGER_ITERATION_TIME; this is not an issue.
-    if not fetch_service_from_peers(wanted):
-        wanted_services_retry.add(wanted)
+    if fetch_service_from_peers(wanted):
+        return
+    # Nobody holds it. With `service_sources.AUTO_ACQUIRE` the node tries the sources that
+    # the source-application lists for it, within the limits of `service_sources`.
+    from src.core_services import source_application
+
+    if not wait and wanted not in wanted_from_sources:
+        _retry_later(wanted)  # a caller that this node does not know: the peers only
+        return
+    if wait:
+        if source_application.acquire_from_sources_if_enabled(wanted):
+            return
+    elif source_application.acquire_in_background(wanted, on_failure=_retry_later):
+        return
+    _retry_later(wanted)
 
 
 # How long a peer's `GetService` may send nothing before it is given up on, in seconds

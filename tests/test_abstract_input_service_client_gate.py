@@ -114,13 +114,17 @@ class ClientOrderIndependenceTests(unittest.TestCase):
 class MissingServiceTests(unittest.TestCase):
     """Neither side has the service: the node refuses with an error, never with silence."""
 
-    def _run(self, messages, found):
+    def _run(self, messages, found, may_want=True):
+        from src.core_services import source_application
+
         iterable = _RecordingIterable(_request(messages), _Context())
         with patch.object(aisi, "find_service_hash", return_value=found), \
                 patch.object(aisi, "add_wanted") as wanted, \
-                patch.object(aisi, "require_caller", _fake_require_caller):
+                patch.object(aisi, "require_caller", _fake_require_caller), \
+                patch.object(source_application, "caller_may_want", return_value=may_want) as counted:
             with self.assertRaises(Exception) as caught:
                 list(iterable)
+        self.counted = counted
         return str(caught.exception), wanted, iterable
 
     def test_a_hash_the_node_does_not_hold_is_refused_and_wanted(self):
@@ -129,8 +133,26 @@ class MissingServiceTests(unittest.TestCase):
             [hash_message, celaut_pb2.Client(client_id="known")], ("missing-hash", False)
         )
         self.assertIn("does not have the service missing-hash", reason)
-        wanted.assert_called_once_with("missing-hash")
+        wanted.assert_called_once_with("missing-hash", from_sources=True)
+        self.counted.assert_called_once_with("known")
         self.assertEqual(iterable.generate_calls, 0)
+
+    # Audit N5: a hash-only request reached add_wanted, and so the download from the published
+    # sources, with no check of the caller.
+
+    def test_a_caller_that_the_node_does_not_know_makes_it_ask_its_peers_only(self):
+        hash_message = celaut_pb2.Metadata.HashTag.Hash(type=b"t", value=b"v")
+        for messages in ([hash_message], [hash_message, celaut_pb2.Client(client_id="not-known")]):
+            reason, wanted, _ = self._run(messages, ("missing-hash", False))
+            wanted.assert_called_once_with("missing-hash", from_sources=False)
+            self.counted.assert_not_called()
+
+    def test_a_known_caller_over_its_limit_of_wants_makes_it_ask_its_peers_only(self):
+        hash_message = celaut_pb2.Metadata.HashTag.Hash(type=b"t", value=b"v")
+        reason, wanted, _ = self._run(
+            [hash_message, celaut_pb2.Client(client_id="known")], ("missing-hash", False), may_want=False
+        )
+        wanted.assert_called_once_with("missing-hash", from_sources=False)
 
     def test_a_request_with_no_usable_hash_is_refused(self):
         hash_message = celaut_pb2.Metadata.HashTag.Hash(type=b"other", value=b"v")
