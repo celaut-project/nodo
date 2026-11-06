@@ -53,8 +53,10 @@ class _Harness:
         self.sc.get_internal_instance.return_value = None
         self.sc.settle_stop.side_effect = self._settle
 
-    def _settle(self, account_id, reason, delegated=False, father_id=None, credit=True):
+    def _settle(self, account_id, reason, delegated=False, father_id=None, credit=True,
+                tick_mu=None):
         self.calls.append(("settle", account_id, delegated, father_id, credit))
+        self.tick_mu = tick_mu
         if self.settle_raises:
             raise RuntimeError("database is locked")
         return self.leftover
@@ -63,13 +65,13 @@ class _Harness:
         self.calls.append(("kill", kwargs["vmachine_id"]))
         return True
 
-    def run(self, credit=True):
+    def run(self, credit=True, **kwargs):
         with patch.object(manager, "sc", self.sc), \
                 patch.object(manager, "kill", side_effect=self._kill), \
                 patch.object(manager.dead_instances, "write_death_record"), \
                 patch.object(manager, "resolve_instance_token", return_value=None), \
                 patch.object(manager.IOBigData, "log_snapshot", lambda *a, **k: None):
-            return manager.stop_instance(token=CHILD, credit=credit)
+            return manager.stop_instance(token=CHILD, credit=credit, **kwargs)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -143,6 +145,21 @@ class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
         harness.run()
 
         self.assertIn(("settle", CHILD, False, "", True), harness.calls)
+
+
+    def test_a_stop_out_of_balance_gives_the_price_of_the_tick_that_it_could_not_pay(self):
+        # The stop row holds it, so an ancestor can judge the leftover (#631).
+        harness = _Harness(FATHER_INSTANCE, father_is_instance=True)
+        with patch("src.manager.maintain.tick_price_mu", return_value=1234):
+            harness.run(reason=manager.dead_instances.OUT_OF_BALANCE)
+
+        self.assertEqual(harness.tick_mu, 1234)
+
+    def test_another_stop_gives_no_tick(self):
+        harness = _Harness(FATHER_INSTANCE, father_is_instance=True)
+        harness.run()
+
+        self.assertIsNone(harness.tick_mu)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
