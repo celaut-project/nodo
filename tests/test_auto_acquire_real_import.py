@@ -88,7 +88,7 @@ class RealImportTests(unittest.TestCase):
 
     # --- helpers
 
-    def _make_service(self, tag: str, seed: bytes):
+    def _make_service(self, tag: str, seed: bytes, entry: str = "/bin/true"):
         """A service in the registry with one block of its own; its id and its block id."""
         big = os.path.join(self.root, "big.bin")
         with open(big, "wb") as f:
@@ -97,7 +97,7 @@ class RealImportTests(unittest.TestCase):
         os.remove(big)
         service = celaut.Service()
         service.container.filesystem = block_pointer(block_id=block).SerializeToString()
-        service.container.init.entry_path.append("/bin/true")
+        service.container.init.entry_path.append(entry)
         _, built = block_builder.build_multiblock(pf_object_with_block_pointers=service, blocks=[block])
         service_id = import_module._compute_service_hash(built, self.spec)
         shutil.move(built, os.path.join(self.registry, service_id))
@@ -150,6 +150,45 @@ class RealImportTests(unittest.TestCase):
         self.assertEqual(self._tags(wanted), ["wanted"])
         self.assertIn(block, os.listdir(self.blocks))
         self.assertEqual(os.listdir(os.path.join(self.cache, "source_downloads")), [])
+
+    # --- audit F3
+
+    def _cache_files(self):
+        return sorted(os.path.relpath(os.path.join(d, f), self.cache) for d, _, fs in os.walk(self.cache) for f in fs)
+
+    def test_the_blocks_of_a_service_that_is_refused_are_removed(self):
+        other, block = self._make_service("other", b"O")
+        url = self._export(other, "other.celaut.bee")
+        self._forget(other, block)
+        blocks_before, cache_before = sorted(os.listdir(self.blocks)), self._cache_files()
+
+        self.assertFalse(self._download_checked(url, WANTED))
+
+        self.assertEqual(sorted(os.listdir(self.blocks)), blocks_before)
+        self.assertNotIn(block, os.listdir(self.blocks))
+        self.assertEqual(self._cache_files(), cache_before)
+        self.assertEqual(os.listdir(self.registry), [])
+
+    def test_a_block_that_a_service_of_the_registry_needs_stays(self):
+        held, block = self._make_service("held", b"S", entry="/bin/true")
+        other, same_block = self._make_service("other", b"S", entry="/bin/false")
+        self.assertEqual(block, same_block)
+        url = self._export(other, "other.celaut.bee")
+        self._forget(other)  # its block is the block of `held`
+
+        self.assertFalse(self._download_checked(url, WANTED))
+
+        self.assertIn(block, os.listdir(self.blocks))
+        self.assertEqual(os.listdir(self.registry), [held])
+
+    def test_a_block_that_was_there_before_stays(self):
+        other, block = self._make_service("other", b"O")
+        url = self._export(other, "other.celaut.bee")
+        self._forget(other)  # an orphan block, but not one that this import added
+
+        self.assertFalse(self._download_checked(url, WANTED))
+
+        self.assertIn(block, os.listdir(self.blocks))
 
     # --- audit N3
 
