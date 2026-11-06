@@ -32,7 +32,9 @@ What reaches the registry is only what hashes to the id that was asked for
 
 import http.client
 import ipaddress
+import os
 import re
+import shutil
 import socket
 import ssl
 import threading
@@ -53,6 +55,9 @@ MANIFEST_MAX_BYTES = 1 << 20
 MAX_PARTS = 64
 # What one read of a body asks for.
 CHUNK_BYTES = 1 << 20
+# The free disk that a download leaves, at least, beyond twice what it may still take (the
+# file, and the service that the import extracts from it).
+FREE_DISK_RESERVE_BYTES = 64 << 20
 
 
 class SourceDownloadError(Exception):
@@ -109,19 +114,30 @@ address_is_allowed = is_public_address
 
 
 class _Budget:
-    """The bytes that one download may take; ``limit`` 0 is no limit."""
+    """The bytes that one download may take; ``limit`` 0 is no limit. ``directory`` is where
+    they go: its disk must have room for them (audit N10)."""
 
-    def __init__(self, limit: int):
+    def __init__(self, limit: int, directory: Optional[str] = None):
         self.limit = limit
         self.used = 0
+        self.directory = directory
 
-    def expect(self, length: int):
-        """A response that says how long it is: refuse it before reading any of it."""
-        if self.limit and self.used + length > self.limit:
+    def expect(self, length: Optional[int]):
+        """Before a body is read: refuse it if it says that it is too long, or if the disk has
+        no room for it (for what the limit allows still, when it does not say its length)."""
+        if length is not None and self.limit and self.used + length > self.limit:
             raise SourceDownloadError(
                 f"the source is larger than the limit of {self.limit} bytes "
                 f"(it says {length} bytes more, {self.used} were taken)"
             )
+        need = length if length is not None else (self.limit - self.used if self.limit else 0)
+        if self.directory and need:
+            free = shutil.disk_usage(self.directory).free
+            if free < 2 * need + FREE_DISK_RESERVE_BYTES:
+                raise SourceDownloadError(
+                    f"not enough free disk: {need} bytes to download and import, "
+                    f"{free} bytes free in {self.directory}"
+                )
 
     def take(self, length: int):
         self.used += length
@@ -414,11 +430,16 @@ def _open(url: str, timeout_s: float, limits: Limits) -> _Response:
             connection.close()
             url = urljoin(url, location)
             continue
-        if response.status != 200:
+        encoding = (response.headers.get("Content-Encoding") or "identity").strip().lower()
+        if response.status != 200 or encoding != "identity":
             watchdog.cancel()
             response.close()
             connection.close()
-            raise SourceDownloadError(f"HTTP {response.status} from {url}")
+            if response.status != 200:
+                raise SourceDownloadError(f"HTTP {response.status} from {url}")
+            # The request asks for identity. A body in another encoding is not the file, and
+            # it is not decoded here: a small gzip body can be a very large file.
+            raise SourceDownloadError(f"refused: the source sends Content-Encoding {encoding!r}")
         return _Response(connection, response, watchdog, limits, timeout_s)
     raise SourceDownloadError(f"more than {MAX_REDIRECTS} redirects")
 
@@ -459,13 +480,12 @@ def download_to_file(url: str, destination: str, max_bytes: int, timeout_s: floa
     owns ``destination``, which may hold a part of the download when this raises.
     """
     limits = limits or Limits()
-    budget = _Budget(max_bytes)
+    budget = _Budget(max_bytes, os.path.dirname(os.path.abspath(destination)))
     with open(destination, "wb") as out:
         with closing(_open(url, timeout_s, limits)) as response:
             length = _declared_length(response)
             if _is_direct_bee_url(url):
-                if length is not None:
-                    budget.expect(length)
+                budget.expect(length)
                 _write(response.iter_content(CHUNK_BYTES), out, budget)
                 return budget.used
 
@@ -479,8 +499,7 @@ def download_to_file(url: str, destination: str, max_bytes: int, timeout_s: floa
                     break
             urls = _manifest_urls(head) if len(head) <= MANIFEST_MAX_BYTES else None
             if urls is None:
-                if length is not None:
-                    budget.expect(length)
+                budget.expect(length)
                 budget.take(len(head))
                 out.write(head)
                 _write(chunks, out, budget)
@@ -490,8 +509,6 @@ def download_to_file(url: str, destination: str, max_bytes: int, timeout_s: floa
             raise SourceDownloadError(f"the manifest lists more than {limits.max_parts} parts")
         for part_url in urls:
             with closing(_open(part_url, timeout_s, limits)) as part:
-                part_length = _declared_length(part)
-                if part_length is not None:
-                    budget.expect(part_length)
+                budget.expect(_declared_length(part))
                 _write(part.iter_content(CHUNK_BYTES), out, budget)
     return budget.used

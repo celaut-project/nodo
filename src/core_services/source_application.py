@@ -65,6 +65,11 @@ _queued: Set[str] = set()
 _queue_lock = threading.Lock()
 _worker: Optional[threading.Thread] = None
 
+# The temporary files of a download that a crash or a kill left (audit N10) are removed once
+# in each process, before its first download: the ones that nobody wrote for this long.
+STALE_DOWNLOAD_SECONDS = 24 * 3600
+_swept = False
+
 # The wants for the sources of each caller in the last hour (audit N5): a want can cost a
 # download of MAX_DOWNLOAD_MB, so a caller may make only `WANTS_PER_CALLER_PER_HOUR`. In
 # memory; the callers that asked least recently are forgotten after _MAX_CALLERS.
@@ -303,6 +308,7 @@ def _download_checked(manifest_url: str, service_id: str, max_bytes: int,
     timeout_s = float(_env_manager.get("service_sources.TIMEOUT_SECONDS", 60) or 60)
     directory = os.path.join(str(_env_manager.get("CACHE")), "source_downloads")
     os.makedirs(directory, exist_ok=True)
+    _sweep(directory)
     path = os.path.join(directory, f"{uuid4().hex}.celaut.bee")
     try:
         size = download_to_file(manifest_url, path, max_bytes, timeout_s, limits=limits)
@@ -389,6 +395,24 @@ def _acquire_automatically(service_id: str, settings: Dict[str, float]) -> bool:
         max_requests_per_host=int(settings["max_requests_per_host"]),
     )
     return acquire_from_sources(service_id, int(settings["max_bytes"]), limits=limits)
+
+
+def _sweep(directory: str):
+    """Remove the temporary files in ``directory`` that nobody wrote for STALE_DOWNLOAD_SECONDS
+    (a download writes its file while it runs). Once in each process."""
+    global _swept
+    if _swept:
+        return
+    _swept = True
+    now = time.time()
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        try:
+            if os.path.isfile(path) and now - os.path.getmtime(path) > STALE_DOWNLOAD_SECONDS:
+                os.remove(path)
+                print(f"Removed {name}, a download that did not end.")
+        except OSError:
+            pass
 
 
 def acquire_from_sources_if_enabled(service_id: str) -> bool:

@@ -400,6 +400,23 @@ class AcquireFromSourcesTests(unittest.TestCase):
 
         return fake
 
+    def test_a_temporary_file_that_a_crash_left_is_removed(self):
+        # Audit N10: a kill during a download left a file of up to MAX_DOWNLOAD_MB.
+        directory = os.path.join(self.cache, "source_downloads")
+        os.makedirs(directory)
+        stale, fresh = os.path.join(directory, "old.celaut.bee"), os.path.join(directory, "running.celaut.bee")
+        for path in (stale, fresh):
+            open(path, "w").close()
+        old = time.time() - sa.STALE_DOWNLOAD_SECONDS - 60
+        os.utime(stale, (old, old))
+        with patch.object(sa, "_swept", False), patch.object(
+            sa, "download_to_file", side_effect=sd.SourceDownloadError("refused")
+        ), redirect_stdout(io.StringIO()):
+            with self.assertRaises(sd.SourceDownloadError):
+                sa._download_checked("https://h/a", WANTED, 5 * MIB)
+
+        self.assertEqual(sorted(os.listdir(directory)), ["running.celaut.bee"])
+
     def test_it_needs_the_source_application(self):
         out = io.StringIO()
         with patch.object(sa, "get_core_service_id", return_value=None), redirect_stdout(out):

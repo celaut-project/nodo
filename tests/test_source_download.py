@@ -181,6 +181,34 @@ class DownloadToFileTests(unittest.TestCase):
         with self.assertRaises(sd.SourceDownloadError):
             sd.download_to_file("http://127.0.0.1:1/s.celaut.bee", self.dest, max_bytes=0, timeout_s=2)
 
+    # N10 of the audit.
+
+    def test_a_body_in_another_encoding_is_refused(self):
+        # It asks for identity; a gzip body of 1 MiB was a file of 1 GiB on the disk.
+        self.server.routes["/s.celaut.bee"] = (200, {"Content-Encoding": "gzip"}, b"\x1f\x8b" + b"x" * 100)
+        with self.assertRaises(sd.SourceDownloadError) as caught:
+            sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=0)
+        self.assertIn("Content-Encoding 'gzip'", str(caught.exception))
+        self.assertEqual(self._read(), b"")
+
+    def test_a_download_needs_room_on_the_disk(self):
+        self.server.routes["/s.celaut.bee"] = (200, {}, b"x" * 1000)
+        usage = sd.shutil.disk_usage(self._tmp.name)
+        full = usage._replace(free=sd.FREE_DISK_RESERVE_BYTES + 1500)
+        with patch.object(sd.shutil, "disk_usage", return_value=full):
+            with self.assertRaises(sd.SourceDownloadError) as caught:
+                sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=0)
+        self.assertIn("not enough free disk", str(caught.exception))
+        self.assertEqual(self._read(), b"")
+
+    def test_a_body_with_no_length_needs_room_for_what_the_limit_allows(self):
+        self.server.routes["/s.celaut.bee"] = (200, {}, [b"x" * 1000])  # a list: no Content-Length, and it can be served twice
+        usage = sd.shutil.disk_usage(self._tmp.name)
+        with patch.object(sd.shutil, "disk_usage", return_value=usage._replace(free=sd.FREE_DISK_RESERVE_BYTES + 5 * MIB)):
+            with self.assertRaises(sd.SourceDownloadError):
+                sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=10 * MIB)
+            self.assertEqual(sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=2 * MIB), 1000)
+
     # N1 of the audit: two URL parsers that do not agree on the host.
 
     def _refused_with_no_request(self, url):
