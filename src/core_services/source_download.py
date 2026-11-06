@@ -8,6 +8,9 @@ comes from a public registry that anybody can write to, so this module does what
 command does not:
 
 * it streams to a file and never holds the service in memory;
+* with :class:`Limits`, it stops when the time for the service is over, and it gives up a
+  source that sends its body more slowly than a minimum (the timeout of a request is for
+  each read only, so a source that sends one byte before each timeout never ends without it);
 * it stops at ``max_bytes`` in all (the ``Content-Length`` of each response first, then
   the bytes actually read, over every part of a manifest);
 * it only follows ``http`` and ``https``, and refuses a host that resolves to an address
@@ -32,6 +35,8 @@ import ipaddress
 import re
 import socket
 import ssl
+import threading
+import time
 from contextlib import closing
 from typing import Iterator, List, NamedTuple, Optional
 from urllib.parse import urljoin, urlsplit
@@ -104,6 +109,36 @@ class _Budget:
         self.used += length
         if self.limit and self.used > self.limit:
             raise SourceDownloadError(f"the source is larger than the limit of {self.limit} bytes")
+
+
+class Limits:
+    """What the downloads of one service may take together, on the automatic path.
+
+    ``deadline_s``: the most time, in seconds from now, for all of them (every source, every
+    part, every redirect). A request that is still open then is cut. 0 is no limit.
+
+    ``min_bytes_per_s``: a body that arrives more slowly than this, on average, after the
+    first ``timeout_s`` seconds of it, is given up. 0 is no limit.
+    """
+
+    def __init__(self, deadline_s: float = 0, min_bytes_per_s: int = 0):
+        self.deadline_s = deadline_s
+        self.deadline = time.monotonic() + deadline_s if deadline_s > 0 else None
+        self.min_bytes_per_s = min_bytes_per_s
+
+    def left(self) -> Optional[float]:
+        """The seconds that are left, or ``None`` for no limit. Raises when none are left."""
+        if self.deadline is None:
+            return None
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            raise self.over()
+        return left
+
+    def over(self) -> "SourceDownloadError":
+        return SourceDownloadError(
+            f"the download took more than the limit of {self.deadline_s:g} seconds"
+        )
 
 
 class SourceURL(NamedTuple):
@@ -192,9 +227,11 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
     def __init__(self, host: str, port: int, address: str, timeout: float):
         super().__init__(host, port, timeout=timeout)
         self.address = address
+        self.cut = False
 
     def connect(self):
         self.sock = socket.create_connection((self.address, self.port), self.timeout)
+        _stop_if_cut(self)
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
@@ -203,32 +240,96 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, port: int, address: str, timeout: float):
         super().__init__(host, port, timeout=timeout, context=_tls())
         self.address = address
+        self.cut = False
 
     def connect(self):
         sock = socket.create_connection((self.address, self.port), self.timeout)
-        self.sock = sock
+        self.sock = sock  # so that _Watchdog can cut a slow TLS handshake too
+        _stop_if_cut(self)
         self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def _stop_if_cut(connection):
+    if connection.cut:
+        connection.sock.close()
+        raise OSError("the time for the download is over")
+
+
+class _Watchdog:
+    """Cuts the socket of ``connection`` after ``seconds`` (``None``: never).
+
+    A timeout of a socket is for one read. A source that sends one byte before each timeout
+    (in the headers or in the body) holds a read loop for as long as it wants, so the end of
+    the time is put on the socket from another thread: a shutdown wakes the read that waits.
+    """
+
+    def __init__(self, connection, seconds: Optional[float]):
+        self.connection = connection
+        self._timer = None
+        if seconds is not None:
+            self._timer = threading.Timer(seconds, self._cut)
+            self._timer.daemon = True
+            self._timer.start()
+
+    @property
+    def fired(self) -> bool:
+        return self.connection.cut
+
+    def _cut(self):
+        self.connection.cut = True
+        sock = self.connection.sock
+        if sock is not None:
+            try:
+                # socket.socket's own shutdown, also for an SSLSocket: only the TCP side.
+                socket.socket.shutdown(sock, socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def cancel(self):
+        if self._timer is not None:
+            self._timer.cancel()
 
 
 class _Response:
     """A response of a 200, with its body still unread, and its connection."""
 
-    def __init__(self, connection: http.client.HTTPConnection, response: http.client.HTTPResponse):
+    def __init__(self, connection, response: http.client.HTTPResponse, watchdog: _Watchdog,
+                 limits: Limits, timeout_s: float):
         self.connection = connection
         self.response = response
         self.headers = response.headers
+        self.watchdog = watchdog
+        self.limits = limits
+        self.timeout_s = timeout_s
 
     def iter_content(self, size: int) -> Iterator[bytes]:
-        try:
-            while True:
+        """The body, as it arrives. Raises when the time is over or the body is too slow."""
+        start = time.monotonic()
+        received = 0
+        while True:
+            try:
                 chunk = self.response.read1(size)
-                if not chunk:
-                    return
-                yield chunk
-        except (OSError, http.client.HTTPException) as exc:
-            raise SourceDownloadError(f"the source failed while it was read: {exc}") from exc
+            except (OSError, http.client.HTTPException) as exc:
+                if self.watchdog.fired:
+                    raise self.limits.over() from exc
+                raise SourceDownloadError(f"the source failed while it was read: {exc}") from exc
+            if self.watchdog.fired:
+                raise self.limits.over()  # what the cut ended is not the whole body
+            if not chunk:
+                return
+            self.limits.left()
+            received += len(chunk)
+            elapsed = time.monotonic() - start
+            minimum = self.limits.min_bytes_per_s
+            if minimum and elapsed > self.timeout_s and received < minimum * elapsed:
+                raise SourceDownloadError(
+                    f"the source is too slow: {received} bytes in {elapsed:.0f} seconds, "
+                    f"less than {minimum} bytes each second"
+                )
+            yield chunk
 
     def close(self):
+        self.watchdog.cancel()
         self.response.close()
         self.connection.close()
 
@@ -237,7 +338,7 @@ _REDIRECTS = (301, 302, 303, 307, 308)
 _HEADERS = {"Accept-Encoding": "identity", "User-Agent": "nodo", "Connection": "close"}
 
 
-def _open(url: str, timeout_s: float) -> _Response:
+def _open(url: str, timeout_s: float, limits: Limits) -> _Response:
     """GET ``url`` and give the response of a 200, with the body still unread.
 
     The redirects are followed here, one at a time, so that each URL is parsed and each
@@ -247,25 +348,34 @@ def _open(url: str, timeout_s: float) -> _Response:
     for _ in range(MAX_REDIRECTS + 1):
         source = parse_source_url(url)
         address = _resolve(source.host, source.port)
+        left = limits.left()
         kind = _PinnedHTTPSConnection if source.scheme == "https" else _PinnedHTTPConnection
-        connection = kind(source.host, source.port, address, timeout_s)
+        connection = kind(
+            source.host, source.port, address, timeout_s if left is None else min(timeout_s, left)
+        )
+        watchdog = _Watchdog(connection, left)
         try:
             connection.request("GET", source.target, headers=_HEADERS)
             response = connection.getresponse()
         except (OSError, http.client.HTTPException) as exc:
+            watchdog.cancel()
             connection.close()
+            if watchdog.fired:
+                raise limits.over() from exc
             raise SourceDownloadError(f"request failed: {exc}") from exc
         location = response.headers.get("Location")
         if response.status in _REDIRECTS and location:
+            watchdog.cancel()
             response.close()
             connection.close()
             url = urljoin(url, location)
             continue
         if response.status != 200:
+            watchdog.cancel()
             response.close()
             connection.close()
             raise SourceDownloadError(f"HTTP {response.status} from {url}")
-        return _Response(connection, response)
+        return _Response(connection, response, watchdog, limits, timeout_s)
     raise SourceDownloadError(f"more than {MAX_REDIRECTS} redirects")
 
 
@@ -296,15 +406,18 @@ def _write(chunks: Iterator[bytes], out, budget: _Budget):
         out.write(chunk)
 
 
-def download_to_file(url: str, destination: str, max_bytes: int, timeout_s: float = 60) -> int:
+def download_to_file(url: str, destination: str, max_bytes: int, timeout_s: float = 60,
+                     limits: Optional[Limits] = None) -> int:
     """Download the file (or the parts) that ``url`` names into ``destination``.
 
-    ``max_bytes`` is for all of it (0: no limit). Returns the bytes written. The caller
+    ``max_bytes`` is for all of it (0: no limit). ``limits`` is shared by all the downloads of
+    one service (none: no limit of time or of pace). Returns the bytes written. The caller
     owns ``destination``, which may hold a part of the download when this raises.
     """
+    limits = limits or Limits()
     budget = _Budget(max_bytes)
     with open(destination, "wb") as out:
-        with closing(_open(url, timeout_s)) as response:
+        with closing(_open(url, timeout_s, limits)) as response:
             length = _declared_length(response)
             if _is_direct_bee_url(url):
                 if length is not None:
@@ -332,7 +445,7 @@ def download_to_file(url: str, destination: str, max_bytes: int, timeout_s: floa
         if len(urls) > MAX_PARTS:
             raise SourceDownloadError(f"the manifest lists more than {MAX_PARTS} parts")
         for part_url in urls:
-            with closing(_open(part_url, timeout_s)) as part:
+            with closing(_open(part_url, timeout_s, limits)) as part:
                 part_length = _declared_length(part)
                 if part_length is not None:
                     budget.expect(part_length)

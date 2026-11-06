@@ -6,8 +6,10 @@ refuses, so they patch `address_is_allowed` and test the guard on its own.
 """
 import http.server
 import os
+import socket
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -250,6 +252,109 @@ class DownloadToFileTests(unittest.TestCase):
 
         self.assertEqual(self._read(), b"x")
         self.assertNotIn("authorization", {k.lower() for k in self.server.requests[0][1]})
+
+
+def _drip(byte_every_s: float, count: int):
+    for _ in range(count):
+        yield b"x"
+        time.sleep(byte_every_s)
+
+
+class _RawServer:
+    """A TCP server on 127.0.0.1 that sends ``data`` one byte every ``every_s`` seconds,
+    whatever the request is (a source that is slow in its headers)."""
+
+    def __init__(self, data: bytes, every_s: float):
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(1)
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._serve, args=(data, every_s), daemon=True).start()
+
+    def _serve(self, data, every_s):
+        try:
+            conn, _ = self.sock.accept()
+            conn.recv(65536)
+            for i in range(len(data)):
+                conn.sendall(data[i:i + 1])
+                time.sleep(every_s)
+        except OSError:
+            pass
+
+    def close(self):
+        self.sock.close()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class LimitsTests(unittest.TestCase):
+    """Audit F2: the timeout is for each read, so a source that sends a byte before each
+    timeout held the download (and the manager thread) for as long as it wanted."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="nodo-source-limits-")
+        self.addCleanup(self._tmp.cleanup)
+        self.dest = os.path.join(self._tmp.name, "out.bee")
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        self.server.daemon_threads = True
+        self.server.routes = {}
+        self.server.requests = []
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+        patcher = patch.object(sd, "address_is_allowed", lambda address: address == "127.0.0.1")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _timed(self, url, limits, timeout_s=3):
+        start = time.monotonic()
+        with self.assertRaises(sd.SourceDownloadError) as caught:
+            sd.download_to_file(url, self.dest, max_bytes=0, timeout_s=timeout_s, limits=limits)
+        return str(caught.exception), time.monotonic() - start
+
+    def test_a_body_that_drips_ends_at_the_deadline(self):
+        # One byte every 0.2 s, for 60 s; the timeout of each read (3 s) is never reached.
+        self.server.routes["/s.celaut.bee"] = (200, {}, _drip(0.2, 300))
+        message, took = self._timed(f"{self.base}/s.celaut.bee", sd.Limits(deadline_s=1.5))
+        self.assertIn("1.5 seconds", message)
+        self.assertLess(took, 4)
+
+    def test_headers_that_drip_end_at_the_deadline(self):
+        raw = _RawServer(b"HTTP/1.1 200 OK\r\n" + b"X-Slow: " + b"y" * 4000, every_s=0.05)
+        self.addCleanup(raw.close)
+        message, took = self._timed(f"http://127.0.0.1:{raw.port}/s.celaut.bee", sd.Limits(deadline_s=1.5))
+        self.assertIn("1.5 seconds", message)
+        self.assertLess(took, 4)
+
+    def test_the_deadline_is_for_all_the_parts_together(self):
+        self.server.routes["/m"] = (200, {}, f"{self.base}/p1\n{self.base}/p2\n".encode())
+        self.server.routes["/p1"] = (200, {}, _drip(0.1, 8))  # about 0.8 s
+        self.server.routes["/p2"] = (200, {}, _drip(0.1, 8))
+        message, took = self._timed(f"{self.base}/m", sd.Limits(deadline_s=1.2))
+        self.assertIn("seconds", message)
+        self.assertLess(took, 3)
+
+    def test_a_body_that_is_too_slow_is_given_up_after_the_timeout(self):
+        # 5 bytes each second against a minimum of 1 KiB each second; the timeout is 1 s.
+        self.server.routes["/s.celaut.bee"] = (200, {}, _drip(0.2, 300))
+        message, took = self._timed(
+            f"{self.base}/s.celaut.bee", sd.Limits(min_bytes_per_s=1024), timeout_s=1
+        )
+        self.assertIn("too slow", message)
+        self.assertLess(took, 4)
+
+    def test_a_download_within_the_limits_is_whole(self):
+        self.server.routes["/s.celaut.bee"] = (200, {}, b"z" * (3 * MIB))
+        sd.download_to_file(
+            f"{self.base}/s.celaut.bee", self.dest, max_bytes=0, timeout_s=5,
+            limits=sd.Limits(deadline_s=30, min_bytes_per_s=1024),
+        )
+        with open(self.dest, "rb") as f:
+            self.assertEqual(len(f.read()), 3 * MIB)
+
+    def test_no_limits_is_the_old_behaviour(self):
+        self.server.routes["/s.celaut.bee"] = (200, {}, _drip(0.01, 20))
+        self.assertEqual(sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=0), 20)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

@@ -69,7 +69,8 @@ class GetServiceCommandTests(unittest.TestCase):
         ), patch.object(get_service_cmd, "check_wanted_service") as mock_check:
             get_service_cmd.get_service(self.HASH, now=True)
 
-        mock_check.assert_called_once_with(self.HASH)
+        # wait: in its own process, the command waits for the sources too.
+        mock_check.assert_called_once_with(self.HASH, wait=True)
 
     def test_now_reports_failure_when_no_peer_had_it(self):
         printed = []
@@ -90,7 +91,7 @@ class GetServiceCommandTests(unittest.TestCase):
         ), patch.object(get_service_cmd, "check_wanted_service") as mock_check:
             get_service_cmd.get_service("my-tag", now=True)
 
-        mock_check.assert_called_once_with(self.HASH)
+        mock_check.assert_called_once_with(self.HASH, wait=True)
 
 
 if __name__ == "__main__":

@@ -1165,6 +1165,12 @@ service_sources:
   RETRY_AFTER_SECONDS: 3600
   # Seconds that a request to a source may wait (to connect, and for each read).
   TIMEOUT_SECONDS: 60
+  # The most time, in seconds, that all the downloads of one service may take together. A
+  # request that is still open then is cut. 0: no limit.
+  DEADLINE_SECONDS: 1800
+  # A source that sends its body more slowly than this (KiB each second, on average, after the
+  # first TIMEOUT_SECONDS of it) is given up. 0: no minimum.
+  MIN_KIB_PER_SECOND: 16
 
 communication:
   # The most components a Peer.signature_scheme may declare before this node refuses

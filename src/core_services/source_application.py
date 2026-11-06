@@ -24,18 +24,21 @@ download`` does. :func:`acquire_from_sources` with a limit is the same lookup fo
 paths that a service or a peer can trigger (``maintain.check_wanted_service``, when
 ``service_sources.AUTO_ACQUIRE`` is on): the download is capped and guarded
 (:mod:`src.core_services.source_download`) and what is imported must be the id that was asked.
+That path runs on a thread of its own (:func:`acquire_in_background`), one service at a time,
+so that the manager thread never waits for a lookup or a download.
 """
 
 import json
 import os
+import queue
 import threading
 import time
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 from urllib.parse import quote
 
 from src.core_services import SOURCE_APPLICATION, get_core_service_id
 from src.core_services.runtime import ensure_core_service_running
-from src.core_services.source_download import SourceDownloadError, download_to_file
+from src.core_services.source_download import Limits, SourceDownloadError, download_to_file
 from src.commands.publisher.publisher import (
     PublisherError,
     _fetch_bytes,
@@ -45,9 +48,21 @@ from src.utils.config import ConfigManager
 
 _env_manager = ConfigManager()
 
-# When each service id was last looked up by `acquire_from_sources_if_enabled`, so that a
-# service that no source has is not asked for again at every pass of the manager.
+# When each service id was last looked up by the automatic path, so that a service that no
+# source has is not asked for again at every pass of the manager.
 _last_attempt: Dict[str, float] = {}
+_last_attempt_lock = threading.Lock()
+
+# The automatic path runs on one thread of its own, one service at a time (audit F2 and N6).
+# A download may take up to `service_sources.DEADLINE_SECONDS`, and the lookup may start the
+# source-application (a VM). The manager thread bills, takes deposits and reaps instances, so
+# it only puts the id in this queue. At most MAX_QUEUED ids wait; more are refused, and the
+# manager tries them again later as it does for a service that no peer gave.
+MAX_QUEUED = 16
+_queue: "queue.Queue" = queue.Queue()
+_queued: Set[str] = set()
+_queue_lock = threading.Lock()
+_worker: Optional[threading.Thread] = None
 
 # Set while the source-application itself is being made available: it cannot be asked for
 # its own sources, so a lookup that starts in that state ends at once.
@@ -175,7 +190,8 @@ def acquire_service(service_id: str) -> bool:
     return acquire_from_sources(service_id)
 
 
-def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None) -> bool:
+def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None,
+                         limits: Optional[Limits] = None) -> bool:
     """Get ``service_id`` from the sources that the source-application lists for it.
 
     ``max_bytes`` ``None`` is the operator's path (``nodo execute`` and the like): the
@@ -183,7 +199,8 @@ def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None) -> bo
     of a caller that is not the operator: the download is capped and guarded
     (:mod:`src.core_services.source_download`), ``0`` meaning no cap, and it is refused
     unless ``VALIDATE_ON_IMPORT`` is on, because otherwise the id of what is imported would
-    be the one that the file says and not the one that was asked for.
+    be the one that the file says and not the one that was asked for. ``limits`` (time and
+    pace) is for all the sources together, on that path only.
 
     True only when the service is in the registry afterwards. Never raises.
     """
@@ -220,7 +237,7 @@ def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None) -> bo
                 result = download_from_manifest_url(manifest_url)
                 acquired = bool(result.get("service_id"))
             else:
-                acquired = _download_checked(manifest_url, service_id, max_bytes)
+                acquired = _download_checked(manifest_url, service_id, max_bytes, limits)
         except (PublisherError, SourceDownloadError) as exc:
             print(f"⚠️  Source failed ({manifest_url}): {exc}")
             continue
@@ -242,7 +259,8 @@ def _validates_on_import() -> bool:
     return bool(import_module.VALIDATE_ON_IMPORT)
 
 
-def _download_checked(manifest_url: str, service_id: str, max_bytes: int) -> bool:
+def _download_checked(manifest_url: str, service_id: str, max_bytes: int,
+                      limits: Optional[Limits] = None) -> bool:
     """Download, import and check one source. True when ``service_id`` is imported.
 
     The file goes to a temporary file under the cache and is always removed. Whatever the
@@ -259,7 +277,7 @@ def _download_checked(manifest_url: str, service_id: str, max_bytes: int) -> boo
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, f"{uuid4().hex}.celaut.bee")
     try:
-        size = download_to_file(manifest_url, path, max_bytes, timeout_s)
+        size = download_to_file(manifest_url, path, max_bytes, timeout_s, limits=limits)
         print(f"Downloaded {size} bytes.")
         before = set(os.listdir(import_module.REGISTRY))
         imported = import_module.import_bee(path)
@@ -278,32 +296,108 @@ def _download_checked(manifest_url: str, service_id: str, max_bytes: int) -> boo
             pass
 
 
+def _auto_settings() -> Optional[Dict[str, float]]:
+    """The values of ``service_sources`` for the automatic path, or None when it is off,
+    when the node has no ``source-application`` core service, or when a value is not valid."""
+    if not bool(_env_manager.get("service_sources.AUTO_ACQUIRE", True)):
+        return None
+    if not get_core_service_id(SOURCE_APPLICATION):
+        # On by default, and most nodes have no source-application: nothing to say about it
+        # each time that somebody asks for a service that nobody holds.
+        return None
+    settings = {
+        "retry_after": float(_env_manager.get("service_sources.RETRY_AFTER_SECONDS", 3600) or 0),
+        "max_bytes": int(_env_manager.get("service_sources.MAX_DOWNLOAD_MB", 2048) or 0) * 1024 * 1024,
+        "deadline_s": float(_env_manager.get("service_sources.DEADLINE_SECONDS", 1800) or 0),
+        "min_bytes_per_s": int(float(_env_manager.get("service_sources.MIN_KIB_PER_SECOND", 16) or 0) * 1024),
+    }
+    if any(value < 0 for value in settings.values()):
+        print("⚠️  service_sources: a negative value is not valid; the sources are not asked.")
+        return None
+    return settings
+
+
+def _due(service_id: str, retry_after: float) -> bool:
+    """True, and the time is kept, unless ``service_id`` was tried less than ``retry_after`` ago."""
+    now = time.monotonic()
+    with _last_attempt_lock:
+        last = _last_attempt.get(service_id)
+        if last is not None and now - last < retry_after:
+            return False
+        _last_attempt[service_id] = now
+        return True
+
+
+def _acquire_automatically(service_id: str, settings: Dict[str, float]) -> bool:
+    limits = Limits(settings["deadline_s"], int(settings["min_bytes_per_s"]))
+    return acquire_from_sources(service_id, int(settings["max_bytes"]), limits=limits)
+
+
 def acquire_from_sources_if_enabled(service_id: str) -> bool:
-    """The automatic path of ``maintain.check_wanted_service``: the sources, if the node
-    allows it (``service_sources.AUTO_ACQUIRE``), with its limit and its cooldown.
+    """The automatic path, in the thread of the caller (``nodo get --now``): the sources, if
+    the node allows it (``service_sources.AUTO_ACQUIRE``), with its limits and its cooldown.
 
     False when it is off, when the node has no ``source-application`` core service, when
     ``service_id`` was tried less than ``RETRY_AFTER_SECONDS`` ago, or when the service was
     not acquired. Never raises.
     """
     try:
-        if not bool(_env_manager.get("service_sources.AUTO_ACQUIRE", True)):
+        settings = _auto_settings()
+        if settings is None or not _due(service_id, settings["retry_after"]):
             return False
-        if not get_core_service_id(SOURCE_APPLICATION):
-            # On by default, and most nodes have no source-application: nothing to say about it
-            # each time that somebody asks for a service that nobody holds.
-            return False
-        retry_after = float(_env_manager.get("service_sources.RETRY_AFTER_SECONDS", 3600) or 0)
-        max_bytes = int(_env_manager.get("service_sources.MAX_DOWNLOAD_MB", 2048) or 0) * 1024 * 1024
-        if max_bytes < 0 or retry_after < 0:
-            print("⚠️  service_sources: a negative value is not valid; the sources are not asked.")
-            return False
-        now = time.monotonic()
-        last = _last_attempt.get(service_id)
-        if last is not None and now - last < retry_after:
-            return False
-        _last_attempt[service_id] = now
-        return acquire_from_sources(service_id, max_bytes)
+        return _acquire_automatically(service_id, settings)
     except Exception as exc:  # the manager loop must go on
         print(f"⚠️  Auto-acquire of {service_id} failed: {exc}")
         return False
+
+
+def acquire_in_background(service_id: str, on_failure: Callable[[str], None]) -> bool:
+    """The automatic path of ``maintain.check_wanted_service``, on its own thread.
+
+    Puts ``service_id`` in the queue of that thread and returns at once. True when it is in
+    the queue (now, or already). False when the path is off, when the node has no
+    ``source-application`` core service, when ``service_id`` was tried less than
+    ``RETRY_AFTER_SECONDS`` ago, or when ``MAX_QUEUED`` ids wait already. When the sources do
+    not give the service, the thread calls ``on_failure(service_id)``. Never raises.
+    """
+    global _worker
+    try:
+        settings = _auto_settings()
+        if settings is None:
+            return False
+        with _queue_lock:
+            if service_id in _queued:
+                return True
+            if len(_queued) >= MAX_QUEUED:
+                print(f"ℹ️  {MAX_QUEUED} services wait for their sources already; {service_id} waits for a later pass.")
+                return False
+            if not _due(service_id, settings["retry_after"]):
+                return False
+            _queued.add(service_id)
+            _queue.put((service_id, settings, on_failure))
+            if _worker is None or not _worker.is_alive():
+                # A daemon: a download that is open does not keep the node from stopping.
+                _worker = threading.Thread(target=_work, name="source-acquire", daemon=True)
+                _worker.start()
+        return True
+    except Exception as exc:  # the manager loop must go on
+        print(f"⚠️  Auto-acquire of {service_id} failed: {exc}")
+        return False
+
+
+def _work():
+    while True:
+        service_id, settings, on_failure = _queue.get()
+        acquired = False
+        try:
+            acquired = _acquire_automatically(service_id, settings)
+        except Exception as exc:  # the thread must go on
+            print(f"⚠️  Auto-acquire of {service_id} failed: {exc}")
+        finally:
+            with _queue_lock:
+                _queued.discard(service_id)
+        if not acquired:
+            try:
+                on_failure(service_id)
+            except Exception as exc:
+                print(f"⚠️  Auto-acquire of {service_id}: {exc}")

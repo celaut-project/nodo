@@ -8,6 +8,8 @@ the source-application lists, with a limit, and what is kept is only the id that
 import io
 import os
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
@@ -39,29 +41,133 @@ class CheckWantedServiceTests(unittest.TestCase):
 
     def test_a_peer_that_has_it_ends_it_and_the_sources_are_not_asked(self):
         with patch.object(maintain, "fetch_service_from_peers", return_value=True), patch.object(
-            sa, "acquire_from_sources_if_enabled"
+            sa, "acquire_in_background"
         ) as sources:
             maintain.check_wanted_service(WANTED)
 
         sources.assert_not_called()
         self.assertEqual(maintain.wanted_services_retry, set())
 
-    def test_the_sources_are_asked_when_no_peer_has_it(self):
+    def test_the_sources_are_asked_on_their_thread_when_no_peer_has_it(self):
         with patch.object(maintain, "fetch_service_from_peers", return_value=False), patch.object(
-            sa, "acquire_from_sources_if_enabled", return_value=True
-        ) as sources:
+            sa, "acquire_in_background", return_value=True
+        ) as sources, patch.object(sa, "acquire_from_sources_if_enabled") as inline:
             maintain.check_wanted_service(WANTED)
 
-        sources.assert_called_once_with(WANTED)
+        self.assertEqual(sources.call_args.args, (WANTED,))
+        inline.assert_not_called()
+        # In the queue: it is not retried until the thread says that the sources failed.
         self.assertEqual(maintain.wanted_services_retry, set())
+        sources.call_args.kwargs["on_failure"](WANTED)
+        self.assertEqual(maintain.wanted_services_retry, {WANTED})
 
     def test_a_service_that_nothing_gave_is_retried_later(self):
         with patch.object(maintain, "fetch_service_from_peers", return_value=False), patch.object(
-            sa, "acquire_from_sources_if_enabled", return_value=False
+            sa, "acquire_in_background", return_value=False
         ):
             maintain.check_wanted_service(WANTED)
 
         self.assertEqual(maintain.wanted_services_retry, {WANTED})
+
+    def test_wait_asks_the_sources_in_this_thread(self):
+        # `nodo get --now` runs in its own process and waits for the answer.
+        for acquired, retry in ((True, set()), (False, {WANTED})):
+            maintain.wanted_services_retry.clear()
+            with patch.object(maintain, "fetch_service_from_peers", return_value=False), patch.object(
+                sa, "acquire_from_sources_if_enabled", return_value=acquired
+            ) as inline, patch.object(sa, "acquire_in_background") as background:
+                maintain.check_wanted_service(WANTED, wait=True)
+
+            inline.assert_called_once_with(WANTED)
+            background.assert_not_called()
+            self.assertEqual(maintain.wanted_services_retry, retry)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class BackgroundTests(unittest.TestCase):
+    """Audit F2 and N6: the manager thread never waits for a lookup or a download."""
+
+    def setUp(self):
+        sa._last_attempt.clear()
+        maintain.wanted_services_retry.clear()
+        for patcher in (
+            patch.object(sa, "get_core_service_id", return_value="5a" * 32),
+            patch.object(sa._env_manager, "get", side_effect=_config()),
+            patch.object(maintain, "fetch_service_from_peers", return_value=False),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _wait_until(self, condition, seconds=10.0):
+        end = time.monotonic() + seconds
+        while not condition():
+            self.assertLess(time.monotonic(), end, "the thread of the automatic path did not end")
+            time.sleep(0.01)
+
+    def test_the_manager_does_not_wait_for_a_download_that_does_not_end(self):
+        release = threading.Event()
+        threads = []
+
+        def slow_download(service_id, max_bytes, limits=None):
+            threads.append(threading.current_thread().name)
+            release.wait(30)
+            return False
+
+        with patch.object(sa, "acquire_from_sources", side_effect=slow_download):
+            start = time.monotonic()
+            maintain.check_wanted_service(WANTED)
+            self.assertLess(time.monotonic() - start, 2)
+            self._wait_until(lambda: threads)
+            self.assertEqual(maintain.wanted_services_retry, set())
+            release.set()
+            self._wait_until(lambda: WANTED in maintain.wanted_services_retry)
+
+        self.assertEqual(threads, ["source-acquire"])
+        self.assertNotIn(WANTED, sa._queued)
+
+    def test_the_lookup_and_the_start_of_the_source_application_are_not_on_the_manager_thread(self):
+        # N6: the lookup makes the source-application available (it may start its VM).
+        seen = []
+
+        def ensure(core_id):
+            seen.append((core_id, threading.current_thread().name))
+            return None
+
+        with patch.object(sa, "ensure_core_service_running", side_effect=ensure), patch.object(
+            sa, "_validates_on_import", return_value=True
+        ), redirect_stdout(io.StringIO()):
+            maintain.check_wanted_service(WANTED)
+            self._wait_until(lambda: WANTED in maintain.wanted_services_retry)
+
+        self.assertEqual(seen, [("5a" * 32, "source-acquire")])
+
+    def test_the_same_id_is_queued_once_and_the_queue_has_a_limit(self):
+        release = threading.Event()
+        with patch.object(sa, "acquire_from_sources", side_effect=lambda *a, **k: release.wait(30) and False), \
+                patch.object(sa, "MAX_QUEUED", 2), redirect_stdout(io.StringIO()):
+            self.assertTrue(sa.acquire_in_background(WANTED, on_failure=lambda sid: None))
+            self.assertTrue(sa.acquire_in_background(WANTED, on_failure=lambda sid: None))
+            self.assertTrue(sa.acquire_in_background(OTHER, on_failure=lambda sid: None))
+            self.assertFalse(sa.acquire_in_background("ef" * 32, on_failure=lambda sid: None))
+            release.set()
+            self._wait_until(lambda: not sa._queued)
+
+    def test_it_does_nothing_when_it_is_off(self):
+        with patch.object(sa._env_manager, "get", side_effect=_config(**{"service_sources.AUTO_ACQUIRE": False})), \
+                patch.object(sa, "acquire_from_sources") as acquire:
+            self.assertFalse(sa.acquire_in_background(WANTED, on_failure=lambda sid: None))
+
+        acquire.assert_not_called()
+
+    def test_the_limits_of_time_and_pace_come_from_the_config(self):
+        got = []
+        with patch.object(sa._env_manager, "get", side_effect=_config(**{
+            "service_sources.DEADLINE_SECONDS": 90, "service_sources.MIN_KIB_PER_SECOND": 4,
+        })), patch.object(sa, "acquire_from_sources", side_effect=lambda sid, mb, limits=None: got.append(limits)):
+            sa.acquire_from_sources_if_enabled(WANTED)
+
+        self.assertEqual(got[0].deadline_s, 90)
+        self.assertEqual(got[0].min_bytes_per_s, 4 * 1024)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -85,7 +191,7 @@ class AcquireIfEnabledTests(unittest.TestCase):
         ) as acquire:
             self.assertTrue(sa.acquire_from_sources_if_enabled(WANTED))
 
-        acquire.assert_called_once_with(WANTED, 2048 * MIB)
+        self.assertEqual(acquire.call_args.args, (WANTED, 2048 * MIB))
 
     def test_without_a_source_application_it_does_nothing_and_says_nothing(self):
         self._with_config()
@@ -114,7 +220,7 @@ class AcquireIfEnabledTests(unittest.TestCase):
         with patch.object(sa, "acquire_from_sources", return_value=True) as acquire:
             self.assertTrue(sa.acquire_from_sources_if_enabled(WANTED))
 
-        acquire.assert_called_once_with(WANTED, 3 * MIB)
+        self.assertEqual(acquire.call_args.args, (WANTED, 3 * MIB))
 
     def test_a_limit_of_zero_is_no_limit_and_not_the_operator_path(self):
         self._with_config(**{"service_sources.AUTO_ACQUIRE": True, "service_sources.MAX_DOWNLOAD_MB": 0})
@@ -122,7 +228,7 @@ class AcquireIfEnabledTests(unittest.TestCase):
             sa.acquire_from_sources_if_enabled(WANTED)
 
         # 0 and not None: the download is still guarded.
-        acquire.assert_called_once_with(WANTED, 0)
+        self.assertEqual(acquire.call_args.args, (WANTED, 0))
 
     def test_the_same_service_is_not_looked_up_again_before_the_cooldown(self):
         self._with_config(
@@ -191,7 +297,7 @@ class AcquireFromSourcesTests(unittest.TestCase):
         return fake
 
     def _download_writing(self, data=b"bee"):
-        def fake(url, destination, max_bytes, timeout_s=60):
+        def fake(url, destination, max_bytes, timeout_s=60, limits=None):
             with open(destination, "wb") as f:
                 f.write(data)
             return len(data)
@@ -257,7 +363,7 @@ class AcquireFromSourcesTests(unittest.TestCase):
         self.assertEqual(removed, [])
 
     def test_a_download_that_is_refused_goes_on_to_the_next_source(self):
-        def download(url, destination, max_bytes, timeout_s=60):
+        def download(url, destination, max_bytes, timeout_s=60, limits=None):
             if url == "https://h/big":
                 with open(destination, "wb") as f:
                     f.write(b"part")  # a part was written before the limit

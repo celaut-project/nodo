@@ -48,7 +48,7 @@ def get_service(service: str, now: bool = False) -> None:
         return
 
     print(f"Asking known peers for {service_hash}...")
-    check_wanted_service(service_hash)
+    check_wanted_service(service_hash, wait=True)
 
     if resolve_service_hash(service_hash):
         print(f"Service {service_hash} retrieved and stored in the local registry.")
