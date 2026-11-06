@@ -59,18 +59,35 @@ class SourceDownloadError(Exception):
     """The source cannot be used: refused, too large, or it failed."""
 
 
+# IPv6 forms that carry an IPv4 address in their last 32 bits: NAT64 (RFC 6052), which a
+# NAT64 network sends to that IPv4 address, and the old IPv4-compatible form.
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_IPV4_COMPATIBLE = ipaddress.ip_network("::/96")
+# NAT64 for local use (RFC 8215): its IPv4 addresses are not known from the address.
+_LOCAL_NAT64 = ipaddress.ip_network("64:ff9b:1::/48")
+
+
 def is_public_address(address: str) -> bool:
     """True when ``address`` (an IP address, as ``getaddrinfo`` gives it) is a public one.
 
-    An IPv4 address inside an IPv6 one (``::ffff:127.0.0.1``) is judged as the IPv4 address.
+    An IPv4 address inside an IPv6 one (``::ffff:127.0.0.1``, NAT64 ``64:ff9b::7f00:1``,
+    ``::127.0.0.1``, 6to4 ``2002:7f00:1::``) is judged as the IPv4 address. A multicast
+    address is not public.
     """
     try:
         ip = ipaddress.ip_address(address.split("%")[0])
     except ValueError:
         return False
-    if ip.version == 6 and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
-    return ip.is_global
+    if ip.version == 6:
+        if ip in _LOCAL_NAT64:
+            return False
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64 or ip in _IPV4_COMPATIBLE:
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        elif ip.sixtofour is not None and not is_public_address(str(ip.sixtofour)):
+            return False
+    return ip.is_global and not ip.is_multicast
 
 
 def is_public_host(host: str) -> bool:

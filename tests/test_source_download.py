@@ -433,6 +433,20 @@ class PublicHostTests(unittest.TestCase):
     def test_a_public_address_is_allowed(self):
         self.assertTrue(sd.is_public_host("8.8.8.8"))
         self.assertTrue(sd.is_public_host("2606:4700:4700::1111"))
+        self.assertTrue(sd.is_public_address("64:ff9b::808:808"))  # NAT64 of 8.8.8.8
+
+    def test_an_ipv4_address_inside_an_ipv6_one_is_judged_as_the_ipv4_address(self):
+        # Audit N9: on a NAT64 network, 64:ff9b::a9fe:a9fe is 169.254.169.254.
+        for address in (
+            "64:ff9b::a9fe:a9fe", "64:ff9b::7f00:1", "64:ff9b::a00:1", "64:ff9b::c0a8:101",
+            "64:ff9b:1::808:808", "::127.0.0.1", "::a9fe:a9fe", "::", "2002:7f00:1::1",
+            "2002:a9fe:a9fe::1",
+        ):
+            self.assertFalse(sd.is_public_address(address), address)
+
+    def test_a_multicast_address_is_refused(self):
+        for address in ("224.0.0.1", "239.255.255.250", "233.252.0.1", "ff02::1", "ff0e::1"):
+            self.assertFalse(sd.is_public_address(address), address)
 
     def test_a_name_that_does_not_resolve_is_refused(self):
         self.assertFalse(sd.is_public_host("name.that.does.not.exist.invalid"))
