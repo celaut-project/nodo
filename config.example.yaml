@@ -1175,6 +1175,14 @@ service_sources:
   # A source that sends its body more slowly than this (KiB each second, on average, after the
   # first TIMEOUT_SECONDS of it) is given up. 0: no minimum.
   MIN_KIB_PER_SECOND: 16
+  # The most parts that one manifest may list (`nodo publish` makes parts of 1000 MB). 0: no limit.
+  MAX_PARTS: 64
+  # The most sources of one service that are tried. 0: no limit.
+  MAX_SOURCES: 3
+  # For all the sources of one service together: the most hosts that are asked, and the most
+  # requests to each host (redirects included). 0: no limit.
+  MAX_HOSTS: 8
+  MAX_REQUESTS_PER_HOST: 80
 
 communication:
   # The most components a Peer.signature_scheme may declare before this node refuses

@@ -38,7 +38,7 @@ import ssl
 import threading
 import time
 from contextlib import closing
-from typing import Iterator, List, NamedTuple, Optional
+from typing import Dict, Iterator, List, NamedTuple, Optional
 from urllib.parse import urljoin, urlsplit
 
 from urllib3.exceptions import LocationParseError
@@ -48,8 +48,9 @@ from urllib3.util import parse_url
 MAX_REDIRECTS = 5
 # The most that a manifest, or the start of a file that may be one, is read as text.
 MANIFEST_MAX_BYTES = 1 << 20
-# The most parts that a manifest may list.
-MAX_PARTS = 4096
+# The most parts that a manifest may list, unless ``Limits`` says otherwise. ``nodo publish``
+# makes parts of PART_SIZE_MB (1000 by default), so a service of 2 GiB has 3.
+MAX_PARTS = 64
 # What one read of a body asks for.
 CHUNK_BYTES = 1 << 20
 
@@ -119,12 +120,37 @@ class Limits:
 
     ``min_bytes_per_s``: a body that arrives more slowly than this, on average, after the
     first ``timeout_s`` seconds of it, is given up. 0 is no limit.
+
+    ``max_parts``: the most parts that one manifest may list. ``max_sources``: the most
+    sources of the service that are tried. ``max_hosts``: the most hosts that may be asked,
+    and ``max_requests_per_host`` the most requests to each one, redirects included (audit N4:
+    a manifest of a made-up id made one node send 4096 GETs to a site that is not a source).
+    0 is no limit.
     """
 
-    def __init__(self, deadline_s: float = 0, min_bytes_per_s: int = 0):
+    def __init__(self, deadline_s: float = 0, min_bytes_per_s: int = 0, max_parts: int = MAX_PARTS,
+                 max_sources: int = 0, max_hosts: int = 0, max_requests_per_host: int = 0):
         self.deadline_s = deadline_s
         self.deadline = time.monotonic() + deadline_s if deadline_s > 0 else None
         self.min_bytes_per_s = min_bytes_per_s
+        self.max_parts = max_parts
+        self.max_sources = max_sources
+        self.max_hosts = max_hosts
+        self.max_requests_per_host = max_requests_per_host
+        self.requests: Dict[str, int] = {}
+
+    def request(self, host: str):
+        """Count a request to ``host``, or refuse it if it is over a limit."""
+        if host not in self.requests and self.max_hosts and len(self.requests) >= self.max_hosts:
+            raise SourceDownloadError(
+                f"refused: the sources of this service ask for more than {self.max_hosts} hosts"
+            )
+        count = self.requests.get(host, 0) + 1
+        if self.max_requests_per_host and count > self.max_requests_per_host:
+            raise SourceDownloadError(
+                f"refused: more than {self.max_requests_per_host} requests to {host} for this service"
+            )
+        self.requests[host] = count
 
     def left(self) -> Optional[float]:
         """The seconds that are left, or ``None`` for no limit. Raises when none are left."""
@@ -347,6 +373,7 @@ def _open(url: str, timeout_s: float, limits: Limits) -> _Response:
     """
     for _ in range(MAX_REDIRECTS + 1):
         source = parse_source_url(url)
+        limits.request(source.host)
         address = _resolve(source.host, source.port)
         left = limits.left()
         kind = _PinnedHTTPSConnection if source.scheme == "https" else _PinnedHTTPConnection
@@ -442,8 +469,8 @@ def download_to_file(url: str, destination: str, max_bytes: int, timeout_s: floa
                 _write(chunks, out, budget)
                 return budget.used
 
-        if len(urls) > MAX_PARTS:
-            raise SourceDownloadError(f"the manifest lists more than {MAX_PARTS} parts")
+        if limits.max_parts and len(urls) > limits.max_parts:
+            raise SourceDownloadError(f"the manifest lists more than {limits.max_parts} parts")
         for part_url in urls:
             with closing(_open(part_url, timeout_s, limits)) as part:
                 part_length = _declared_length(part)

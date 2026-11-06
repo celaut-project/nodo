@@ -489,6 +489,35 @@ class AcquireFromSourcesTests(unittest.TestCase):
         self.assertEqual(removed, [])
         self.assertTrue(os.path.exists(os.path.join(self.registry, WANTED)))
 
+    def test_only_the_first_sources_are_tried(self):
+        # Audit N4: the number of sources of one id had no limit.
+        tried = []
+
+        def failing(url, destination, max_bytes, timeout_s=60, limits=None):
+            tried.append(url)
+            raise sd.SourceDownloadError("refused")
+
+        urls = [f"https://h/{i}" for i in range(10)]
+        with patch.object(sa, "__lookup_sources", return_value=urls), patch.object(
+            sa, "download_to_file", side_effect=failing
+        ), redirect_stdout(io.StringIO()):
+            self.assertFalse(sa.acquire_from_sources(WANTED, 5 * MIB, limits=sd.Limits(max_sources=3)))
+
+        self.assertEqual(tried, urls[:3])
+
+    def test_the_limits_of_the_automatic_path_come_from_the_config(self):
+        got = []
+        with patch.object(sa._env_manager, "get", side_effect=_config(**{
+            "service_sources.MAX_PARTS": 5, "service_sources.MAX_SOURCES": 2,
+            "service_sources.MAX_HOSTS": 4, "service_sources.MAX_REQUESTS_PER_HOST": 7,
+        })), patch.object(sa, "acquire_from_sources", side_effect=lambda sid, mb, limits=None: got.append(limits)):
+            sa._last_attempt.clear()
+            sa.acquire_from_sources_if_enabled(WANTED)
+
+        self.assertEqual(
+            (got[0].max_parts, got[0].max_sources, got[0].max_hosts, got[0].max_requests_per_host), (5, 2, 4, 7)
+        )
+
     def test_a_file_that_does_not_import_is_not_a_service(self):
         with patch.object(sa, "__lookup_sources", return_value=["https://h/a"]), patch.object(
             sa, "download_to_file", side_effect=self._download_writing(b"junk")

@@ -352,6 +352,39 @@ class LimitsTests(unittest.TestCase):
         with open(self.dest, "rb") as f:
             self.assertEqual(len(f.read()), 3 * MIB)
 
+    # Audit N4: one manifest of a made-up id made 4096 GETs to a site that is not a source.
+
+    def test_a_manifest_with_more_parts_than_the_limit_is_refused_before_any_part(self):
+        self.server.routes["/m"] = (200, {}, "".join(f"{self.base}/p{i}\n" for i in range(4096)).encode())
+        message, _ = self._timed(f"{self.base}/m", sd.Limits())
+        self.assertIn(f"more than {sd.MAX_PARTS} parts", message)
+        self.assertEqual([path for path, _ in self.server.requests], ["/m"])
+
+    def test_the_requests_to_one_host_have_a_limit(self):
+        self.server.routes["/m"] = (200, {}, "".join(f"{self.base}/p{i}\n" for i in range(10)).encode())
+        for i in range(10):
+            self.server.routes[f"/p{i}"] = (200, {}, b"x")
+        message, _ = self._timed(f"{self.base}/m", sd.Limits(max_requests_per_host=5))
+        self.assertIn("more than 5 requests to 127.0.0.1", message)
+        self.assertEqual(len(self.server.requests), 5)
+
+    def test_redirects_count_against_the_limit_of_the_host(self):
+        self.server.routes["/a.celaut.bee"] = (302, {"Location": "/b.celaut.bee"}, b"")
+        self.server.routes["/b.celaut.bee"] = (302, {"Location": "/c.celaut.bee"}, b"")
+        self.server.routes["/c.celaut.bee"] = (200, {}, b"x")
+        message, _ = self._timed(f"{self.base}/a.celaut.bee", sd.Limits(max_requests_per_host=2))
+        self.assertIn("more than 2 requests", message)
+
+    def test_the_hosts_of_one_service_have_a_limit(self):
+        limits = sd.Limits(max_hosts=2)
+        limits.request("a.example")
+        limits.request("b.example")
+        limits.request("a.example")
+        with self.assertRaises(sd.SourceDownloadError) as caught:
+            limits.request("c.example")
+        self.assertIn("more than 2 hosts", str(caught.exception))
+        self.assertEqual(limits.requests, {"a.example": 2, "b.example": 1})
+
     def test_no_limits_is_the_old_behaviour(self):
         self.server.routes["/s.celaut.bee"] = (200, {}, _drip(0.01, 20))
         self.assertEqual(sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=0), 20)

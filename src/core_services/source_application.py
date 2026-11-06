@@ -242,6 +242,10 @@ def acquire_from_sources(service_id: str, max_bytes: Optional[int] = None,
         print("⚠️  source-application returned no sources for this service.")
         return False
 
+    if limits is not None and limits.max_sources and len(sources) > limits.max_sources:
+        print(f"ℹ️  {len(sources)} sources; only the first {limits.max_sources} are tried.")
+        sources = sources[:limits.max_sources]
+
     for manifest_url in sources:
         try:
             print(f"⬇️  Downloading service from source: {manifest_url}")
@@ -346,6 +350,10 @@ def _auto_settings() -> Optional[Dict[str, float]]:
         "max_bytes": int(_env_manager.get("service_sources.MAX_DOWNLOAD_MB", 2048) or 0) * 1024 * 1024,
         "deadline_s": float(_env_manager.get("service_sources.DEADLINE_SECONDS", 1800) or 0),
         "min_bytes_per_s": int(float(_env_manager.get("service_sources.MIN_KIB_PER_SECOND", 16) or 0) * 1024),
+        "max_parts": int(_env_manager.get("service_sources.MAX_PARTS", 64) or 0),
+        "max_sources": int(_env_manager.get("service_sources.MAX_SOURCES", 3) or 0),
+        "max_hosts": int(_env_manager.get("service_sources.MAX_HOSTS", 8) or 0),
+        "max_requests_per_host": int(_env_manager.get("service_sources.MAX_REQUESTS_PER_HOST", 80) or 0),
     }
     if any(value < 0 for value in settings.values()):
         print("⚠️  service_sources: a negative value is not valid; the sources are not asked.")
@@ -365,7 +373,14 @@ def _due(service_id: str, retry_after: float) -> bool:
 
 
 def _acquire_automatically(service_id: str, settings: Dict[str, float]) -> bool:
-    limits = Limits(settings["deadline_s"], int(settings["min_bytes_per_s"]))
+    limits = Limits(
+        settings["deadline_s"],
+        int(settings["min_bytes_per_s"]),
+        max_parts=int(settings["max_parts"]),
+        max_sources=int(settings["max_sources"]),
+        max_hosts=int(settings["max_hosts"]),
+        max_requests_per_host=int(settings["max_requests_per_host"]),
+    )
     return acquire_from_sources(service_id, int(settings["max_bytes"]), limits=limits)
 
 
