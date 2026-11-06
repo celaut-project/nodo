@@ -2,7 +2,7 @@
 
 The paths that a service or a peer can trigger (`maintain.check_wanted_service`) download
 from a URL that a public registry gave. The tests serve from 127.0.0.1, which the guard
-refuses, so they patch `host_is_allowed` and test the guard on its own.
+refuses, so they patch `address_is_allowed` and test the guard on its own.
 """
 import http.server
 import os
@@ -58,7 +58,7 @@ class DownloadToFileTests(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
-        patcher = patch.object(sd, "host_is_allowed", lambda host: host == "127.0.0.1")
+        patcher = patch.object(sd, "address_is_allowed", lambda address: address == "127.0.0.1")
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -131,7 +131,7 @@ class DownloadToFileTests(unittest.TestCase):
 
     def test_a_redirect_to_a_host_that_is_not_allowed_is_refused(self):
         self.server.routes["/s.celaut.bee"] = (
-            302, {"Location": f"http://localhost:{self.server.server_address[1]}/x"}, b""
+            302, {"Location": f"http://127.0.0.2:{self.server.server_address[1]}/x"}, b""
         )
 
         with self.assertRaises(sd.SourceDownloadError) as caught:
@@ -178,6 +178,108 @@ class DownloadToFileTests(unittest.TestCase):
     def test_an_unreachable_source_is_an_error_and_not_an_exception_of_requests(self):
         with self.assertRaises(sd.SourceDownloadError):
             sd.download_to_file("http://127.0.0.1:1/s.celaut.bee", self.dest, max_bytes=0, timeout_s=2)
+
+    # N1 of the audit: two URL parsers that do not agree on the host.
+
+    def _refused_with_no_request(self, url):
+        with self.assertRaises(sd.SourceDownloadError) as caught:
+            sd.download_to_file(url, self.dest, max_bytes=0)
+        self.assertIn("refused", str(caught.exception))
+        return caught.exception
+
+    def test_a_backslash_before_an_at_sign_does_not_reach_the_host_before_it(self):
+        # urlsplit reads the host example.com here; urllib3 and requests read 127.0.0.1.
+        self.server.routes["/%5C@example.com/x.celaut.bee"] = (200, {}, b"INTERNAL")
+        with patch.object(sd, "address_is_allowed", lambda address: True):
+            self._refused_with_no_request(
+                f"http://127.0.0.1:{self.server.server_address[1]}\\@example.com/x.celaut.bee"
+            )
+        self.assertEqual(self.server.requests, [])
+
+    def test_the_same_url_in_a_redirect_is_refused(self):
+        port = self.server.server_address[1]
+        self.server.routes["/s.celaut.bee"] = (
+            302, {"Location": f"http://127.0.0.2:{port}\\@example.com/x.celaut.bee"}, b""
+        )
+        self._refused_with_no_request(f"{self.base}/s.celaut.bee")
+        self.assertEqual([path for path, _ in self.server.requests], ["/s.celaut.bee"])
+
+    def test_a_user_or_a_password_in_the_url_is_refused(self):
+        for url in (
+            f"http://user@127.0.0.1:{self.server.server_address[1]}/s.celaut.bee",
+            f"http://user:pw@127.0.0.1:{self.server.server_address[1]}/s.celaut.bee",
+            f"http://example.com@127.0.0.1:{self.server.server_address[1]}/s.celaut.bee",
+        ):
+            self._refused_with_no_request(url)
+        self.assertEqual(self.server.requests, [])
+
+    def test_the_name_is_resolved_once_and_the_checked_address_is_used(self):
+        # A name that answers 127.0.0.1 (allowed in these tests) and then another address:
+        # the request goes to the address that was checked, and the name is not asked again.
+        self.server.routes["/s.celaut.bee"] = (200, {}, b"payload")
+        real = sd.socket.getaddrinfo
+        lookups = []
+
+        def rebinding(host, *args, **kwargs):
+            if host == "rebind.example":
+                lookups.append(host)
+                return real("127.0.0.1" if len(lookups) == 1 else "10.255.255.1", *args, **kwargs)
+            return real(host, *args, **kwargs)
+
+        with patch.object(sd.socket, "getaddrinfo", side_effect=rebinding):
+            sd.download_to_file(
+                f"http://rebind.example:{self.server.server_address[1]}/s.celaut.bee",
+                self.dest, max_bytes=0, timeout_s=5,
+            )
+
+        self.assertEqual(self._read(), b"payload")
+        self.assertEqual(lookups, ["rebind.example"])
+        self.assertEqual(self.server.requests[0][1].get("Host"), f"rebind.example:{self.server.server_address[1]}")
+
+    def test_no_netrc_and_no_proxy_of_the_environment_are_used(self):
+        # N7 of the audit: requests read ~/.netrc and the *_PROXY variables.
+        self.server.routes["/s.celaut.bee"] = (200, {}, b"x")
+        home = os.path.join(self._tmp.name, "home")
+        os.makedirs(home)
+        with open(os.path.join(home, ".netrc"), "w") as f:
+            f.write("default login op password s3cret\n")
+        os.chmod(os.path.join(home, ".netrc"), 0o600)
+        proxy = "http://10.255.255.1:3128"
+        with patch.dict(os.environ, {"HOME": home, "HTTP_PROXY": proxy, "http_proxy": proxy, "ALL_PROXY": proxy}):
+            sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=0, timeout_s=5)
+
+        self.assertEqual(self._read(), b"x")
+        self.assertNotIn("authorization", {k.lower() for k in self.server.requests[0][1]})
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ParseSourceURLTests(unittest.TestCase):
+    def test_a_plain_url(self):
+        self.assertEqual(
+            sd.parse_source_url("https://Example.COM/a/b.celaut.bee?x=1#frag"),
+            ("https", "example.com", 443, "/a/b.celaut.bee?x=1"),
+        )
+        self.assertEqual(sd.parse_source_url("http://[2606:4700::1]:8080/m"), ("http", "2606:4700::1", 8080, "/m"))
+        self.assertEqual(sd.parse_source_url("http://h"), ("http", "h", 80, "/"))
+
+    def test_urls_that_two_parsers_could_read_in_two_ways_are_refused(self):
+        for url in (
+            "http://127.0.0.1:9053\\@example.com/x.celaut.bee",
+            "http://example.com\\.127.0.0.1/x",
+            "http://u@example.com/x",
+            "http://:@example.com/x",
+            "http://example.com /x",
+            "http://example.com/a\tb",
+            "http://ex\u00e4mple.com/x",
+            "http://example.com:99999/x",
+            "http://example.com:80:80/x",
+            "http://[::1%25eth0]/x",
+            "http://exa%6dple.com/x",
+            "ftp://example.com/x",
+            "//example.com/x",
+        ):
+            with self.assertRaises(sd.SourceDownloadError, msg=url):
+                sd.parse_source_url(url)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

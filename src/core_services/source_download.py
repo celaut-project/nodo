@@ -11,26 +11,33 @@ command does not:
 * it stops at ``max_bytes`` in all (the ``Content-Length`` of each response first, then
   the bytes actually read, over every part of a manifest);
 * it only follows ``http`` and ``https``, and refuses a host that resolves to an address
-  that is not public (:func:`is_public_host`) at the URL and at every redirect;
-* it sends no credentials (a source is any host, and the publisher's token is not for it).
+  that is not public (:func:`is_public_address`) at the URL and at every redirect;
+* it reads each URL with one parser (urllib3's ``parse_url``), refuses a URL that another
+  parser could read in another way (:func:`parse_source_url`), resolves the host once and
+  connects to the address that it checked, so that a name that changes its answer, or a URL
+  such as ``http://127.0.0.1:9053\\@example.com/``, cannot send the request elsewhere;
+* it sends no credentials (a source is any host, and the publisher's token is not for it),
+  and it uses no proxy and no ``.netrc`` from the environment.
 
 The manifest rule is the one of :func:`src.commands.publisher.publisher.download_from_manifest_url`:
 a URL whose path ends in ``.celaut.bee`` is the file; otherwise a UTF-8 text with one
 ``http(s)`` URL for each line is a manifest of parts, and anything else is the file.
 
-What this does not do: the check of the address is made when the name is resolved, and the
-connection resolves it again, so a name that answers with another address in between is not
-stopped here. What reaches the registry is still only what hashes to the id that was asked
-for (``VALIDATE_ON_IMPORT``, checked by the caller).
+What reaches the registry is only what hashes to the id that was asked for
+(``VALIDATE_ON_IMPORT``, checked by the caller).
 """
 
+import http.client
 import ipaddress
+import re
 import socket
+import ssl
 from contextlib import closing
-from typing import Iterator, List, Optional
+from typing import Iterator, List, NamedTuple, Optional
 from urllib.parse import urljoin, urlsplit
 
-import requests
+from urllib3.exceptions import LocationParseError
+from urllib3.util import parse_url
 
 # The redirects that one URL may go through (a GitHub release asset goes through one).
 MAX_REDIRECTS = 5
@@ -46,33 +53,36 @@ class SourceDownloadError(Exception):
     """The source cannot be used: refused, too large, or it failed."""
 
 
+def is_public_address(address: str) -> bool:
+    """True when ``address`` (an IP address, as ``getaddrinfo`` gives it) is a public one.
+
+    An IPv4 address inside an IPv6 one (``::ffff:127.0.0.1``) is judged as the IPv4 address.
+    """
+    try:
+        ip = ipaddress.ip_address(address.split("%")[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global
+
+
 def is_public_host(host: str) -> bool:
     """True when every address that ``host`` resolves to is a public one.
 
-    A name that does not resolve is not public. An IPv4 address inside an IPv6 one
-    (``::ffff:127.0.0.1``) is judged as the IPv4 address.
+    A name that does not resolve is not public.
     """
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
         return False
     addresses = {info[4][0] for info in infos}
-    if not addresses:
-        return False
-    for address in addresses:
-        try:
-            ip = ipaddress.ip_address(address.split("%")[0])
-        except ValueError:
-            return False
-        if ip.version == 6 and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
-        if not ip.is_global:
-            return False
-    return True
+    return bool(addresses) and all(is_public_address(address) for address in addresses)
 
 
-# The check that every request goes through. A test that serves from 127.0.0.1 patches it.
-host_is_allowed = is_public_host
+# The check of each address that a request may connect to. A test that serves from
+# 127.0.0.1 patches it.
+address_is_allowed = is_public_address
 
 
 class _Budget:
@@ -96,40 +106,170 @@ class _Budget:
             raise SourceDownloadError(f"the source is larger than the limit of {self.limit} bytes")
 
 
-def _open(url: str, timeout_s: float) -> requests.Response:
+class SourceURL(NamedTuple):
+    """Where a request for a URL goes: what :func:`parse_source_url` gives."""
+
+    scheme: str
+    host: str  # a name, an IPv4 address, or an IPv6 address without brackets
+    port: int
+    target: str  # the path and the query, as sent in the request line
+
+
+# A host as this module accepts it: a name, an IPv4 address, or an IPv6 address in brackets
+# (with no zone). Anything else is not a host that a published source needs.
+_HOST = re.compile(r"[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?|\[[0-9a-f:.]+\]")
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def parse_source_url(url: str) -> SourceURL:
+    """Where a GET of ``url`` goes, or ``SourceDownloadError`` if the URL is refused.
+
+    The URL is read with urllib3's ``parse_url``, and the request goes to what it gives.
+    ``urllib.parse`` (which ``urljoin`` uses to follow a redirect) must read the same scheme,
+    host and port. A URL that the two parsers could read in two ways is refused before it is
+    read: one with a ``\\``, a space, a control character or a character that is not ASCII,
+    and one with a user or a password before the host. For example, in
+    ``http://127.0.0.1:9053\\@example.com/x`` ``urlsplit`` reads the host ``example.com`` and
+    urllib3 the host ``127.0.0.1``.
+    """
+    if not url.isascii() or "\\" in url or any(ord(c) <= 0x20 or ord(c) == 0x7F for c in url):
+        raise SourceDownloadError(f"refused: the URL has a character that is not allowed: {url!r}")
+    try:
+        parsed = parse_url(url)
+        split = urlsplit(url)
+        split_port = split.port
+    except (LocationParseError, ValueError) as exc:
+        raise SourceDownloadError(f"refused: not a valid URL: {url!r}") from exc
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _DEFAULT_PORTS or split.scheme.lower() != scheme:
+        raise SourceDownloadError(f"not an http(s) URL: {url}")
+    if parsed.auth is not None or "@" in split.netloc:
+        raise SourceDownloadError(f"refused: a source URL has no user or password: {url!r}")
+    host = (parsed.host or "").lower()
+    if not _HOST.fullmatch(host) or host.strip("[]") != (split.hostname or ""):
+        raise SourceDownloadError(f"refused: the host of the URL is not clear: {url!r}")
+    if parsed.port != split_port:
+        raise SourceDownloadError(f"refused: the port of the URL is not clear: {url!r}")
+    port = parsed.port or _DEFAULT_PORTS[scheme]
+    return SourceURL(scheme, host.strip("[]"), port, parsed.request_uri or "/")
+
+
+def _resolve(host: str, port: int) -> str:
+    """The address to connect to for ``host``. Every address of ``host`` must be allowed."""
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise SourceDownloadError(f"refused: {host} is not a public host ({exc})") from exc
+    addresses = [info[4][0] for info in infos]
+    if not addresses:
+        raise SourceDownloadError(f"refused: {host} is not a public host (no address)")
+    for address in addresses:
+        if not address_is_allowed(address):
+            raise SourceDownloadError(f"refused: {host} is not a public host ({address})")
+    return addresses[0]
+
+
+_tls_context: Optional[ssl.SSLContext] = None
+
+
+def _tls() -> ssl.SSLContext:
+    """The certificates that ``requests`` uses (certifi), else the ones of the system."""
+    global _tls_context
+    if _tls_context is None:
+        try:
+            import certifi
+
+            _tls_context = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:  # pragma: no cover - certifi comes with requests
+            _tls_context = ssl.create_default_context()
+    return _tls_context
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """A connection to ``address``, the address that was checked. ``host`` is what the
+    ``Host`` header says; it is not resolved again."""
+
+    def __init__(self, host: str, port: int, address: str, timeout: float):
+        super().__init__(host, port, timeout=timeout)
+        self.address = address
+
+    def connect(self):
+        self.sock = socket.create_connection((self.address, self.port), self.timeout)
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """The same over TLS: the certificate and the SNI are for ``host``."""
+
+    def __init__(self, host: str, port: int, address: str, timeout: float):
+        super().__init__(host, port, timeout=timeout, context=_tls())
+        self.address = address
+
+    def connect(self):
+        sock = socket.create_connection((self.address, self.port), self.timeout)
+        self.sock = sock
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _Response:
+    """A response of a 200, with its body still unread, and its connection."""
+
+    def __init__(self, connection: http.client.HTTPConnection, response: http.client.HTTPResponse):
+        self.connection = connection
+        self.response = response
+        self.headers = response.headers
+
+    def iter_content(self, size: int) -> Iterator[bytes]:
+        try:
+            while True:
+                chunk = self.response.read1(size)
+                if not chunk:
+                    return
+                yield chunk
+        except (OSError, http.client.HTTPException) as exc:
+            raise SourceDownloadError(f"the source failed while it was read: {exc}") from exc
+
+    def close(self):
+        self.response.close()
+        self.connection.close()
+
+
+_REDIRECTS = (301, 302, 303, 307, 308)
+_HEADERS = {"Accept-Encoding": "identity", "User-Agent": "nodo", "Connection": "close"}
+
+
+def _open(url: str, timeout_s: float) -> _Response:
     """GET ``url`` and give the response of a 200, with the body still unread.
 
-    The redirects are followed here, one at a time, so that each address is checked.
+    The redirects are followed here, one at a time, so that each URL is parsed and each
+    address is checked in the same way. The connection goes to the address that was
+    checked, so the name is not resolved a second time.
     """
     for _ in range(MAX_REDIRECTS + 1):
-        parts = urlsplit(url)
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            raise SourceDownloadError(f"not an http(s) URL: {url}")
-        if not host_is_allowed(parts.hostname):
-            raise SourceDownloadError(f"refused: {parts.hostname} is not a public host")
+        source = parse_source_url(url)
+        address = _resolve(source.host, source.port)
+        kind = _PinnedHTTPSConnection if source.scheme == "https" else _PinnedHTTPConnection
+        connection = kind(source.host, source.port, address, timeout_s)
         try:
-            response = requests.get(
-                url,
-                stream=True,
-                allow_redirects=False,
-                timeout=timeout_s,
-                headers={"Accept-Encoding": "identity"},
-            )
-        except requests.exceptions.RequestException as exc:
+            connection.request("GET", source.target, headers=_HEADERS)
+            response = connection.getresponse()
+        except (OSError, http.client.HTTPException) as exc:
+            connection.close()
             raise SourceDownloadError(f"request failed: {exc}") from exc
-        if response.status_code in (301, 302, 303, 307, 308) and response.headers.get("Location"):
-            url = urljoin(url, response.headers["Location"])
+        location = response.headers.get("Location")
+        if response.status in _REDIRECTS and location:
             response.close()
+            connection.close()
+            url = urljoin(url, location)
             continue
-        if response.status_code != 200:
-            status = response.status_code
+        if response.status != 200:
             response.close()
-            raise SourceDownloadError(f"HTTP {status} from {url}")
-        return response
+            connection.close()
+            raise SourceDownloadError(f"HTTP {response.status} from {url}")
+        return _Response(connection, response)
     raise SourceDownloadError(f"more than {MAX_REDIRECTS} redirects")
 
 
-def _declared_length(response: requests.Response) -> Optional[int]:
+def _declared_length(response: _Response) -> Optional[int]:
     value = response.headers.get("Content-Length", "")
     return int(value) if value.isdigit() else None
 
