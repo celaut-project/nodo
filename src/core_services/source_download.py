@@ -375,6 +375,11 @@ class _Response:
             if self.watchdog.fired:
                 raise self.limits.over()  # what the cut ended is not the whole body
             if not chunk:
+                if self.response.length:  # what the Content-Length still promises
+                    raise SourceDownloadError(
+                        f"the source closed the connection {self.response.length} bytes "
+                        "before the end that its Content-Length says"
+                    )
                 return
             self.limits.left()
             received += len(chunk)

@@ -181,6 +181,12 @@ class DownloadToFileTests(unittest.TestCase):
         with self.assertRaises(sd.SourceDownloadError):
             sd.download_to_file("http://127.0.0.1:1/s.celaut.bee", self.dest, max_bytes=0, timeout_s=2)
 
+    def test_a_body_that_ends_before_its_content_length_is_an_error(self):
+        self.server.routes["/s.celaut.bee"] = (200, {"Content-Length": "100"}, [b"x" * 12])
+        with self.assertRaises(sd.SourceDownloadError) as caught:
+            sd.download_to_file(f"{self.base}/s.celaut.bee", self.dest, max_bytes=0)
+        self.assertIn("88 bytes before the end", str(caught.exception))
+
     # N10 of the audit.
 
     def test_a_body_in_another_encoding_is_refused(self):
