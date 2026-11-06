@@ -458,6 +458,10 @@ def gateway_component() -> Layer:
                             "retention_days|oldest_seq|head_seq|head_hash|hex(balance.n)|"
                             "movements",
         "statement.digest.movements": "'/'.join(hash of each movement in seq order)",
+        "statement.digest.service_id": "'|service_id:'+hex(service_id) after movements "
+                                       "when service_id is not empty; nothing when empty",
+        "statement.digest.relayed": "'|relayed' after movements and service_id when "
+                                    "relayed is true; nothing when it is false",
         "statement.movement.hash": "blake2b-256 hex of UTF-8 of "
                                    "celaut-balance-movement:prev_hash|seq~ts~hex(amount.n)~"
                                    "hex(balance_after.n)~hex(kind)~instance_ref~hex(detail)",
@@ -480,6 +484,9 @@ def gateway_component() -> Layer:
                                  "signature_scheme",
         "receipt.execution_name": "blake2b-256 hex of UTF-8(instance token) || the 32 raw "
                                   "bytes of the public key",
+        "receipt.execution_name.ref": "in a DescendantTunnel stream: blake2b-256 hex of "
+                                      "UTF-8(celaut-execution-ref:instance_ref) || the 32 "
+                                      "raw bytes of the public key",
         "receipt.envs_digest": "blake2b-256 hex of envs_salt || UTF-8 of '/'.join(origin~"
                                "hex(name)~hex(value) sorted by UTF-8 of name); origin "
                                "client or node; envs_salt exactly 16 bytes",
@@ -556,7 +563,9 @@ def gateway_component() -> Layer:
         "before it, so the head commits to all of them. A node that signed a statement "
         "cannot show other movements for the same seq later. A statement names no "
         "credential: the account and the instances are hashes of their tokens. A "
-        "statement with no valid signature is not valid.\n"
+        "statement with no valid signature is not valid. A node that gives the "
+        "statement of a descendant that another node wrote sets relayed and signs it "
+        "with its own key.\n"
         "\n"
         "EXECUTION RECEIPTS. A receipt is a statement that the node signs about one "
         "execution that it runs. The answer of StartService contains a start receipt. "
@@ -568,7 +577,8 @@ def gateway_component() -> Layer:
         "receipt digest is a BLAKE2b-256 hash of a text that the formal field "
         "specifies. This text contains all the fields of the receipt, but not "
         "envs_salt and not the signature. A receipt names its execution by a hash of "
-        "the instance token and the public key. It never contains the token. The "
+        "the instance token and the public key, or, in a DescendantTunnel stream, of "
+        "the instance_ref and the public key. It never contains the token. The "
         "envs digest is a hash of a random salt and of the environment variables of "
         "the service, so the holder can show the receipt and keep the values secret. "
         "Each stream has two hash chains: one for the events into the instance, and "

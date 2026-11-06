@@ -11,7 +11,13 @@ from src.gateway.iterables.list_peers_iterable import ListPeersIterable
 from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
-from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
+from src.tunneling.rpc_tunnel import (
+    TunnelError,
+    TunnelExhausted,
+    TunnelRefused,
+    TunnelUnavailable,
+    service_tunnel,
+)
 from src.gateway.utils import generate_full_node_peer_info
 from src.gateway.client_gate import ClientRequired, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
 from src.manager import balance_statement, hibernation
@@ -32,6 +38,17 @@ env_manager = ConfigManager()
 
 
 sc = SQLConnection()
+
+
+def _tunnel_status(error: TunnelError) -> grpc.StatusCode:
+    """The status of a refused tunnel: each class of ``TunnelError`` has its own."""
+    if isinstance(error, TunnelRefused):
+        return grpc.StatusCode.PERMISSION_DENIED
+    if isinstance(error, TunnelExhausted):
+        return grpc.StatusCode.RESOURCE_EXHAUSTED
+    if isinstance(error, TunnelUnavailable):
+        return grpc.StatusCode.UNAVAILABLE
+    return grpc.StatusCode.INVALID_ARGUMENT
 
 
 class Gateway(celaut_pb2_grpc.Gateway):
@@ -426,6 +443,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def GetBalanceStatement(self, request_iterator, context, **kwargs):
         """The movements of the caller's account, or of a child of the caller (#570).
 
+        With ``instance_ref``, the movements of a descendant of that account (#631): the
+        node finds it through the links in the chains, and the caller needs no token
+        of the descendant.
+
         The caller is identified as for every gated RPC: a local instance by its
         address, anyone else by its client_id. It pays for the answer, and the charge is
         written before the node answers.
@@ -443,6 +464,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 from_seq=request.from_seq,
                 to_seq=request.to_seq,
                 allow_debt=ALLOW_DEBT,
+                instance_ref=request.instance_ref,
+                remaining_hops=(request.remaining_hops
+                                if request.HasField("remaining_hops") else None),
             )
         except ledger.InsufficientBalance as e:
             context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, f"No balance statement. {e}")
@@ -450,8 +474,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
         except balance_statement.StatementRefused as e:
             context.abort(grpc.StatusCode.PERMISSION_DENIED, f"No balance statement. {e}")
             return
-        except ledger.NoSuchAccount as e:
-            context.abort(grpc.StatusCode.NOT_FOUND, f"No balance statement. {e}")
+        except ledger.NoSuchAccount:
+            # The exception names the account by its id, which can be a token.
+            context.abort(grpc.StatusCode.NOT_FOUND,
+                          "No balance statement. The account does not exist.")
             return
         except balance_statement.StatementUnavailable as e:
             context.abort(grpc.StatusCode.UNIMPLEMENTED, f"No balance statement. {e}")
@@ -464,22 +490,23 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):
         try:
-            # The stream carries two message types: the leading TokenMessage
-            # handshake (index 1) and the raw payload (index 0). Both are parsed
-            # in memory — `partitions_message_mode=False` would spill every
-            # payload chunk to a temporary file, which no byte pipe can afford.
+            # The stream carries three message types: the leading handshake, a
+            # TokenMessage (index 1) or a DescendantTunnel (index 2, #631), and the raw
+            # payload (index 0). All are parsed in memory — `partitions_message_mode=False`
+            # would spill every payload chunk to a temporary file, which no byte pipe
+            # can afford.
             conn, relay = service_tunnel(
                 iterator=BeeClient.parse(
                     request_iterator,
                     indices=rpc_input("ServiceTunnel"),
-                    partitions_message_mode={1: True, 0: True},
+                    partitions_message_mode={1: True, 2: True, 0: True},
                 ),
                 is_active=context.is_active,
                 caller=context.peer(),
             )
         except TunnelError as e:
             log.LOGGER(f'Tunnel refused: {e}')
-            context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+            context.abort(_tunnel_status(e), str(e))
             return
 
         try:
@@ -487,6 +514,11 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     message_iterator=relay,
                     indices=rpc_output("ServiceTunnel"),
             )
+        except TunnelError as e:
+            # A relay to a peer learns the refusal of the next node only when the
+            # stream runs (#631). The text is of this node and names no peer.
+            log.LOGGER(f'Tunnel stopped by a node below: {e}')
+            context.abort(_tunnel_status(e), str(e))
         finally:
             # The socket is opened eagerly inside service_tunnel; guarantee it is
             # released even if serialize_to_buffer bails before the relay

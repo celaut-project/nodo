@@ -388,6 +388,12 @@ class AccountRuleTests(unittest.TestCase):
         self.assertEqual(result.faults, [])
         self.assertEqual(result.top_ups_taken, {1: 50})
 
+    def test_a_stop_row_is_no_charge_and_no_consumption(self):
+        row = Row(8, 0, 0, 0, ledger.STOP, "", {"reason": "manual_kill", "leftover": "0"})
+
+        self.assertEqual(_check_account([row], ours=lambda reference: False).faults, [])
+        self.assertEqual(check.consumption([row]), 0)
+
     def test_a_start_above_what_was_sent_is_an_overcharge(self):
         rows = [Row(3, 0, -101, 0, ledger.CHILD_START, "", {"start_ref": "ab" * 32}),
                 self.bound(4)]

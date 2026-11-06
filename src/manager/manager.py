@@ -849,11 +849,15 @@ def spend_mu(
         return False
 
 
-def bind_child_token(movement: List[Tuple[str, int]], token: str) -> None:
-    """Name the child on the ``child_start`` that paid for it, with a ``child_bound`` row."""
+def bind_child_token(movement: List[Tuple[str, int]], token: str,
+                     service_id: Optional[str] = None) -> None:
+    """Name the child on the ``child_start`` that paid for it, with a ``child_bound`` row.
+
+    ``service_id`` (hex) goes in the row too: an ancestor that reads the statement knows
+    which API the child has (#631)."""
     for account_id, seq in movement:
         try:
-            sc.bind_child(account_id, seq, token)
+            sc.bind_child(account_id, seq, token, service_id=service_id)
         except Exception as e:
             log.LOGGER(f"Could not bind the child to row {seq} of {account_id}: {e}")
 
@@ -1474,6 +1478,20 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
         return refund
 
 
+def _tick_of_a_stop(token: str, reason: str) -> Optional[int]:
+    """The price of the tick that a local instance that stops ``out_of_balance`` could
+    not pay, for its ``stop`` row (#631). None for any other reason, or when the node
+    cannot price it."""
+    if reason not in (dead_instances.OUT_OF_BALANCE, dead_instances.HIBERNATED_OUT_OF_BALANCE):
+        return None
+    try:
+        from src.manager.maintain import tick_price_mu
+        return tick_price_mu(token)
+    except Exception as e:
+        log.LOGGER(f"Could not price the last tick of {token}: {e}")
+        return None
+
+
 def _stop_instance(token: str, credit: bool, reason: str) -> Optional[int]:
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
@@ -1488,7 +1506,8 @@ def _stop_instance(token: str, credit: bool, reason: str) -> Optional[int]:
         IOBigData().log_snapshot(
             context=f"stop-instance:before-kill token={token} reserved_mem_limit={reserved_mem_limit}"
         )
-        
+        tick_mu = _tick_of_a_stop(token, reason)
+
         kill(vmachine_id=token, archive=True)
         
         father_id = sc.get_internal_father_id(id=token)
@@ -1507,7 +1526,8 @@ def _stop_instance(token: str, credit: bool, reason: str) -> Optional[int]:
             # tunnel has already lowered. A stop that fails before this moves nothing,
             # and the next maintenance tick stops the instance again: the settlement
             # happens once.
-            refund = sc.settle_stop(token, reason, father_id=father_id, credit=credit)
+            refund = sc.settle_stop(token, reason, father_id=father_id, credit=credit,
+                                    tick_mu=tick_mu)
             if refund is None:
                 # Another stop already killed it and settled the leftover.
                 log.LOGGER(f"Instance {token} is already dead.")

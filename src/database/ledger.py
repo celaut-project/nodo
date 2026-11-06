@@ -75,9 +75,15 @@ CHILD_BOUND = "child_bound"
 """The child of a ``child_start`` exists. Moves nothing: ``instance_ref`` is the child
 and ``detail.starts_seq`` the seq of the ``child_start`` that it completes."""
 
+STOP = "stop"
+"""The account stops: its last row. Moves nothing. ``balance_after_mu`` is what stays on
+the account after the ``refund``. ``detail.reason`` is the death reason of the instance
+(``dead_instances``), and ``detail.leftover`` is the MU that the ``refund`` took, 0 if
+none. A stopped account takes no more rows."""
+
 KINDS = (
     DEPOSIT, CREDIT, DEBIT, START, BUILD, MAINTENANCE, CHILD_START,
-    CHILD_BOUND, TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY,
+    CHILD_BOUND, TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY, STOP,
 )
 
 _MOVEMENT_PREFIX = "celaut-balance-movement:"
@@ -141,6 +147,8 @@ DEFAULT_MIN_PEER_RETENTION_DAYS = 7
 DEFAULT_MAX_STATEMENT_PAGES_PER_TICK = 4
 DEFAULT_STATEMENT_READ_EVERY_TICKS = 30
 DEFAULT_MAX_STATEMENT_ROWS = 1000
+DEFAULT_MAX_DESCENDANT_DEPTH = 8
+DEFAULT_MAX_DESCENDANT_ACCOUNTS = 200
 
 
 class NoSuchAccount(Exception):
@@ -215,3 +223,13 @@ def statement_read_every_ticks(tick_seconds: float) -> int:
 def max_statement_rows() -> int:
     """``ledger.MAX_STATEMENT_ROWS``: the most rows that one statement returns."""
     return _positive_int("ledger.MAX_STATEMENT_ROWS", DEFAULT_MAX_STATEMENT_ROWS)
+
+
+def max_descendant_depth() -> int:
+    """``ledger.MAX_DESCENDANT_DEPTH``: how many levels below an account a read looks."""
+    return _positive_int("ledger.MAX_DESCENDANT_DEPTH", DEFAULT_MAX_DESCENDANT_DEPTH)
+
+
+def max_descendant_accounts() -> int:
+    """``ledger.MAX_DESCENDANT_ACCOUNTS``: how many accounts one read looks at."""
+    return _positive_int("ledger.MAX_DESCENDANT_ACCOUNTS", DEFAULT_MAX_DESCENDANT_ACCOUNTS)

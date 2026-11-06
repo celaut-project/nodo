@@ -73,6 +73,14 @@ class GetBalanceStatementGatewayTests(unittest.TestCase):
             ("client-1", "child", 3, 9),
         )
 
+    def test_the_descendant_that_the_request_names_reaches_the_answer(self):
+        self.request.instance_ref = "ref-1"
+        with patch.object(gateway_module.BeeClient, "respond",
+                          side_effect=lambda message: iter([message])):
+            _, mocked = self.call(return_value=celaut_pb2.BalanceStatement())
+
+        self.assertEqual(mocked.call_args.kwargs["instance_ref"], "ref-1")
+
     def test_a_caller_that_cannot_pay_gets_resource_exhausted(self):
         error, _ = self.call(side_effect=ledger.InsufficientBalance("holds 1, needed 5"))
 

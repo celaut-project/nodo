@@ -102,12 +102,67 @@ Code that depends on UDP being lossy will not see loss here.
 
 ### Failure reporting
 
-A tunnel that cannot be established fails with gRPC `INVALID_ARGUMENT` and a
-message saying why (unknown token, undeclared slot, no host-supported transport,
-unreachable TCP service, not enough balance to open it). Establishment is *eager*:
-the handshake, validation, charge and connect all happen before the first byte is
-serialized, so a broken tunnel never looks like a service that simply had nothing
-to say.
+A tunnel that cannot be established fails with a gRPC status and a message that says
+why. Establishment is *eager*: the handshake, validation, charge and connect all happen
+before the first byte is serialized, so a broken tunnel never looks like a service that
+simply had nothing to say.
+
+| Status | Cause |
+|---|---|
+| `INVALID_ARGUMENT` | Unknown token, undeclared slot, no host-supported transport, a request that is not correct. |
+| `RESOURCE_EXHAUSTED` | Not enough balance to open it, or no daily traffic allowance left. |
+| `UNAVAILABLE` | The TCP service does not accept the connection, the descendant is not alive, or a node below failed. |
+| `PERMISSION_DENIED` | No chain below the token links the descendant (`DescendantTunnel` only). |
+
+No message names a token, a peer or an internal address. These stay in the log of the
+node: the caller can be a service, and a service does not know nodes.
+
+---
+
+## Descendants
+
+An ancestor can open a tunnel to a descendant without its token (#631). It is the
+witness that the descendant is alive after the parent died: see
+[`REPUTATION.md`](REPUTATION.md#liveness-the-ancestor-tunnel).
+
+The first message is a `DescendantTunnel` at index 2, in place of the `TokenMessage`:
+
+| Field | Meaning |
+|---|---|
+| `token` | The token of an instance that the caller holds: the ancestor. It can be an instance that stopped, while the node keeps its row. |
+| `instance_ref` | The descendant: `blake2b("celaut-ledger-instance:" + token)` of its token on the node that links it. The caller reads it in the `child_bound` rows of the statements. The `instance_ref` of the instance of `token` itself is also accepted. |
+| `slot` | The internal port of the descendant. |
+| `receipts` | As in `TokenMessage`. |
+| `remaining_hops` | The hop budget, as for the read of a statement. |
+
+The node finds the descendant through the `child_bound` rows, as `GetBalanceStatement`
+with `instance_ref` does (`balance_statement.locate`):
+
+1. A local descendant that is alive: the node opens the tunnel as for its own token.
+   The descendant pays (the orphan pays its traffic). A stopped one: `UNAVAILABLE`.
+2. A delegated descendant: the node relays to the peer with a `DescendantTunnel` of its
+   own: the token that the peer gave it, the `instance_ref` of that token, and one hop
+   less. Its own leg is charged to the alias of the descendant.
+3. A descendant below a delegated instance: the node relays to that peer with the same
+   `instance_ref`. No account of the descendant is on this node, so only the ceilings of
+   the operator apply to this leg. When more than one delegated instance can hold the
+   descendant, the node first reads the head of the statement of the descendant from
+   each peer (`from_seq` 0) and relays to the first that has it. The node pays these
+   reads. The hop budget is shared between these peers, as for the read.
+
+An older node does not know index 2 and refuses the stream. It never opens the wrong
+instance.
+
+The token of a descendant never leaves its node. Each node uses only the token that it
+holds. Each node meters its own leg and signs its own receipts. Those name the execution
+by the `instance_ref` (`execution_receipt.execution_name_by_ref`). A node does not pass
+on the receipts of the next node: they name a node that the caller does not know.
+
+The next node can refuse only when the stream runs. The relay then stops the stream with
+the status of the refusal and a text of this node. The node writes each hop that relays
+a byte, and each hop that fails with the descendant unavailable, in `descendant_tunnels`.
+A hop budget that is used up is `RESOURCE_EXHAUSTED`, not `UNAVAILABLE`. The caller
+sets the budget, so a node above does not write it as a failure of the peer.
 
 ---
 
@@ -146,7 +201,7 @@ authorises the tunnel in the first place.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel stream — with `nodo tunnel`, each TCP connection or UDP flow through the local port. `nodo tunnel` prints it (`open_fee_mu` in `--json`) and the TUI asks y/N with the amount before opening one. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
+| `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel stream — with `nodo tunnel`, each TCP connection or UDP flow through the local port. `nodo tunnel` prints it (`open_fee_mu` in `--json`) and the TUI asks y/N with the amount before opening one. An instance that cannot pay it is refused up front with `RESOURCE_EXHAUSTED`, before any socket is opened. |
 | `pricing.NET_MU_PER_GIB` | `2000000` | Charged per GiB relayed, counting **both** directions. |
 | `costs.TUNNEL_CHARGE_INTERVAL_KB` | `65536` | How much traffic accumulates before it is billed. Each charge is a ledger commit during which the relay reads nothing, so a small interval limits throughput on a slow disk (see below). |
 

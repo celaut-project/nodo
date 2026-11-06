@@ -186,3 +186,12 @@ states, errors not cached, TTL, the size bound, one computation under concurrent
 its wait, invalidation on local starts/stops, canonical keys, an A → B → A chain refused at
 A, both RPCs through their iterables (including closed hours and a quote whose room went
 away), and the asking side.
+
+## Read of a descendant (#631)
+
+`GetBalanceStatement` with `instance_ref` and `ServiceTunnel` with a `DescendantTunnel`
+use the hop budget but no token. Their field `remaining_hops` works as in
+`RecursionGuard`, with one difference: a node that asks more than one peer shares the
+budget between them (`balance_statement.split_hops`), so one request never reaches more
+nodes than its budget. See [`REPUTATION.md`](REPUTATION.md#hop-budget) and
+[`TUNNELING.md`](TUNNELING.md#descendants).

@@ -230,6 +230,8 @@ so it absorbs the excess (#577).
 | A statement that does not continue the chain, is not signed by it, or does not come at all from a peer that answers | `statement_inconsistent` | -1000 |
 | A charge to our account that this node did not cause | `statement_overcharged` | -1000 |
 | More maintenance on a child than the quote that it gave for it | `maintenance_overcharged` | -1000 |
+| A signed `stop` row of a descendant with MU left, and the father gone ([#631](#who-records-the-fault)) | `killed_with_mu` | -1000 |
+| Maintenance of a descendant after a tunnel to it failed ([#631](#liveness-the-ancestor-tunnel)) | `maintenance_while_unreachable` | -1000 |
 
 The same scale as a service that does not hash to its id (`get_service_wrong_hash`): in
 every case the peer signed or reported something false about money. A fault is scored
@@ -244,7 +246,8 @@ different: the clock that is wrong can be ours. It is scored at most once in 24 
 and the mark stays where it is. A price above the quote shows at every period, for as
 long as the peer keeps it. So `maintenance_overcharged` is scored at most once in 24
 hours for each child, at the first movement of the interval, and a movement is never
-scored twice.
+scored twice. `maintenance_while_unreachable` is scored once for each peer and
+descendant, at any movement: one dead VM costs the peer one fault.
 
 A statement that does not continue the chain is any of these: the head is behind the
 mark, or is dated far from the clock of this node; a movement does not hang from the one
@@ -310,6 +313,248 @@ is a fault.
 
 The reason `instance_out_of_balance` is retired. The node does not write it. Old rows of
 `reputation_events` can still hold it. Each instance is scored once for each reason.
+
+## Read the statements of descendants
+
+A node can kill an instance that still has MU and keep the MU. While the instance has a
+parent, the parent can judge the node with the signed statements (#570). If the parent
+is dead, the instance has no judge. This section closes that gap (#631).
+
+### The link, the stop and the read
+
+- **Link.** A `child_start` pays for a child before the child exists. The `child_bound`
+  row that follows names the child by its `instance_ref`:
+  `blake2b("celaut-ledger-instance:" + token)`. The `instance_ref` is a one-way hash. It
+  names the account and gives no access to the instance. A statement never holds a token.
+  For a delegated child, the hash is of the alias that this node gave, not of the peer
+  token. `detail.service_id` of the row is the service of the child (the hex of its
+  content hash), so a reader knows which API each descendant has. Old rows do not have
+  it.
+- **Stop.** The chain of an instance ends with a `stop` row. The row moves nothing.
+  `detail.reason` is the death reason. `detail.leftover` is the MU that the `refund`
+  took out of the account. If the node kills an instance that has MU, the last row of
+  its signed chain shows it.
+- **Read.** `GetBalanceStatement` has a request field `instance_ref`. The caller shows
+  a token that it already holds, or none for its own account. The node looks for the
+  `instance_ref` below that account, one level at a time, through the `child_bound` rows
+  of each chain. It never accepts an `instance_ref` that no chain links. The caller does
+  not need the token of the descendant. The node answers with the statement of the
+  descendant, signed by the node. The statement can be of an instance that stopped.
+
+A grandparent reads a child with `token` = the parent and `instance_ref` = the child.
+The parent can be dead: its row and its chain stay until the retention ends. The
+`instance_ref` of the instance of `token` itself is also accepted: it reads that account,
+also when it stopped.
+
+The statement of a descendant also gives `service_id`: the service that the descendant
+runs, as the lowercase hexadecimal of its content hash. The node takes it from its row of
+the instance. Each `child_bound` row also holds it in `detail.service_id`. The field is
+empty when the node does not know the service, and in the answer to a read without
+`instance_ref`. The digest covers `service_id` only when it is not empty
+(`|service_id:` and the hex of its UTF-8, after the movements and before `|relayed`).
+
+### Delegated children
+
+The node has no chain below an instance that it delegated. The peer has it. The node
+asks the peer with its own client_id and with the token that the peer gave it for that
+instance, one hop at a time. The service never sees a peer id or a peer token.
+
+- For a descendant that is itself the delegated instance, the node sends the
+  `instance_ref` of the token of the peer. The peer reads its own account, also when the
+  instance stopped.
+- For a descendant below a delegated instance, the node sends the same `instance_ref`.
+- When the peer gives no `service_id` for the delegated instance, the node sets the
+  service that it asked the peer to run, before it signs the statement.
+
+The node checks the signature of the peer with the key of the peer. Then it sets
+`relayed` on the statement and signs it with its own key. The digest covers `relayed`
+only when it is true (`|relayed` at the end of the text), so the digest of a statement
+that a node wrote itself does not change. A node above checks the statement with the
+key of the node that it asked, so a read across two or more delegations works. The rows
+and their hashes do not change. The reader trusts its own node, as it does for every
+other answer.
+
+No error that goes to the caller names a peer, an address or a token. The details stay
+in the log of the node.
+
+### Cost and limits
+
+- The caller pays as for any statement: a fixed part and a part for each row, as a
+  `statement_query` row that names the descendant by its `instance_ref`. For a local
+  descendant, the node writes the charge in the same transaction as the read.
+- For a read that goes to peers, the node charges the caller once, before the first
+  call to a peer. The charge is the fixed part and the part for the most rows that the
+  read can return. The node never pays a peer for rows that it did not charge. The
+  caller pays the most rows even when the peer returns fewer. A caller that asks
+  `from_seq` and `to_seq` pays only for that range. The node charges nothing when it has
+  no account on the peer. Each peer charges the account of this node on the peer. When
+  the node asks more than one peer, it pays the other calls itself. The hop budget
+  limits them (see below).
+- The walk goes at most `ledger.MAX_DESCENDANT_DEPTH` levels (8) and looks at
+  `ledger.MAX_DESCENDANT_ACCOUNTS` accounts (200). It looks at each account once, so a
+  loop ends it. These limits apply to the chains of one node.
+- One answer holds at most `ledger.MAX_STATEMENT_ROWS` rows.
+
+### Hop budget
+
+The limits of the walk do not count the hops between nodes. The read uses the hop budget
+of the `RecursionGuard` ([`RECURSION_GUARD.md`](RECURSION_GUARD.md)) for them.
+`BalanceStatementRequest` has the field `remaining_hops`.
+
+- A node that gets no `remaining_hops` uses `network.RECURSION_MAX_HOPS`. A value above
+  that maximum becomes the maximum.
+- A node that asks one peer sends `remaining_hops` minus 1.
+- A node that asks more than one peer shares `remaining_hops` minus 1 between them: it
+  asks at most that number of peers, and each one gets an equal part
+  (`balance_statement.split_hops`). So one read never reaches more nodes than its
+  budget, also when each node has many delegated descendants. Without this, the work
+  grows as the number of peers to the power of the hops.
+- A node that gets 0 refuses. A node that gets 1 answers from its own chains and asks no
+  peer. In both cases the caller gets UNIMPLEMENTED, and the read does not continue.
+- The read has no token. A loop through peers ends with the budget. Each hop is paid by
+  the caller before the hop, so the total cost is bounded as well.
+
+### Threat model
+
+A malicious node A runs an instance C. The parent P of C is dead. C has MU.
+
+- A kills C and keeps the MU. A signs the `stop` row, or A refuses to show the
+  statement. The `stop` row shows the reason and the MU that stayed. A refusal is
+  `statement_inconsistent`.
+- A live ancestor G of P asks its own node for the descendants of P. G needs no token
+  of C and no peer id.
+
+Cases that this does **not** cover:
+
+- Every ancestor up to the root client is dead. Nobody asks.
+- The ancestors ask after the retention ended. The node deletes the chain of a stopped
+  instance after `ledger.RETENTION_DAYS` (30 days).
+- The node that links P to C deleted the `child_bound` row with the retention, or P is
+  gone from that node. The link is lost.
+- A peer that writes a false reason in the `stop` row: a fault of the machine
+  (`process_lost`, for example) is not scored. The ancestor tunnel covers a part of this
+  case (see below).
+- A peer that writes that the father got the refund. The statement of the father shows
+  whether it did: an ancestor can read it.
+- A node that signs a false `stop` row. The row is signed, so it proves the node lied
+  only if another signed source disagrees.
+- The node of the reader and the malicious node are the same node.
+
+### Who records the fault
+
+The node of the reader records the fault by itself. The service that reads sees only the
+statement and never a peer id. The service does not decide and does not report.
+
+Only the node that read the statement from the peer that wrote it judges that peer. A
+`relayed` statement is not judged: the node below judged its own peer.
+
+When the node asks a peer for a descendant, it reads the `stop` rows of the signed
+statement. The node scores the peer with the reason `killed_with_mu` (-1000, once for each
+descendant and row) if all these conditions are true:
+
+- `detail.leftover` of the `stop` row is more than 0.
+- The row before the `stop` row is the `refund` of the leftover with
+  `detail.lost = father_gone`. The father of the descendant was gone, nobody could judge
+  the peer, and the MU stayed with it. A father that stops its child gets the leftover:
+  that stop is not scored.
+- `detail.reason` is not a fault of the machine: `process_lost`, `guest_panic`,
+  `launch_failed`, `peer_stopped` or `activity_window`.
+- For `out_of_balance`: the leftover is at least the largest maintenance period that the
+  statement shows. Less than one period is the normal end of an instance that cannot pay.
+  With no maintenance row in the statement, the node does not judge.
+
+A statement that does not show the `refund` row is not judged. A local descendant is not
+scored: this node ran it.
+
+Open points:
+
+- The fault needs a stop row that this node reads. If nobody reads, the node does not
+  score. The read of a descendant is the trigger.
+- Old chains have no `stop` row. Only new stops have one.
+
+### Liveness: the ancestor tunnel
+
+A statement shows money, not life. A node can kill the VM and sign a tail of maintenance
+that agrees with the quote. Only a user of the API of the instance can see that it is
+alive. So any ancestor can open a tunnel to a descendant and use its API: to fake an
+answer, the node must run the service.
+
+`ServiceTunnel` takes a `DescendantTunnel` at index 2 in place of the `TokenMessage`:
+the token of the ancestor, the `instance_ref` of the descendant, the slot, `receipts` and
+`remaining_hops`. The node finds the descendant as the read does
+([`TUNNELING.md`](TUNNELING.md#descendants)).
+
+| Case | Path of the tunnel |
+|---|---|
+| G, P and C on the same node A | G to A with (token of P, ref of C). A checks the link and opens the tunnel to C. |
+| G on X; X delegated P to A; C local on A | G to X with the alias of P. X to A with its own token of P and the ref of C. X relays. |
+| P local on A; A delegated C to B | G to A. A to B with its own token of C. A relays. |
+| A chain of delegations | Relay hop by hop. `remaining_hops` limits it. |
+
+G always got the token of P from its own gateway. So G never holds a token that its node
+does not know.
+
+- A local descendant that is alive: the node opens the tunnel. The descendant pays the
+  traffic.
+- A descendant on a peer: the node relays the bytes, one hop at a time, each hop with the
+  token that it holds there. Each node meters its own leg: against the alias of the
+  descendant when it holds it, else only against the ceilings of the operator.
+- The receipts name the execution by the `instance_ref`
+  ([`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md#the-execution-name)). Each node signs its
+  own leg. A node does not pass on the receipts of the next node.
+- The ancestor gets only the tunnel. To stop the instance or to change its deposit
+  still needs the client (#597).
+
+The node writes the result of each hop to a peer, for the peer and the `instance_ref`
+that the hop sent (`descendant_tunnels`): the time of the last hop that relayed a byte,
+and the time of the last hop that failed with the descendant unavailable (`UNAVAILABLE`,
+no answer, or no connection). A refusal (`PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`,
+`INVALID_ARGUMENT`) is not a failure.
+
+When the node later reads a statement of that descendant from that peer, and the
+statement is not `relayed`, it scores the peer with `maintenance_while_unreachable`
+(-1000, once for each peer and descendant) for a `maintenance` row that:
+
+- charges a period that starts more than `CLOCK_SKEW_SECONDS` after the failure, with no
+  hop that worked after the failure. The period of a row starts `detail.seconds` before
+  the date of the row. An honest node can charge the period in which the VM stopped, and
+  write the `stop` row at the next tick: that row is not scored;
+- is not after a `stop` row;
+- charges memory (`detail.mem_limit` is not 0). A row of the disk of a hibernated
+  instance has no VM to answer.
+
+If the statement shows a `stop` row with MU left instead, `killed_with_mu` applies.
+
+What the node of the ancestor can see:
+
+| The tunnel | The statement | Result |
+|---|---|---|
+| Works | Any | The instance is alive. The hop that worked cancels an earlier failure. |
+| Fails, descendant unavailable | `maintenance` of a period after the failure | `maintenance_while_unreachable` |
+| Fails, descendant unavailable | `stop` row with MU left, father gone | `killed_with_mu` |
+| Fails, descendant unavailable | Only rows before the failure, or a `stop` row | No fault |
+| Refused (no link, bad slot, no balance, no hop budget) | Any | No fault: the hop is not recorded |
+
+This judgement is local to the node of the ancestor. A failed tunnel is not a signed,
+portable proof. An invented tail of maintenance can only start after the last tunnel
+that worked, and the node never knows when the next one comes.
+
+Cases that the tunnel does **not** cover:
+
+- Nobody opens a tunnel. The fault needs a failed hop and a later read of the statement.
+- The peer refuses the hop with a refusal code (`PERMISSION_DENIED`,
+  `RESOURCE_EXHAUSTED`, `INVALID_ARGUMENT`) in place of `UNAVAILABLE`. A refusal is not
+  recorded, so a peer that lies about the code is not scored. The ancestor still gets no
+  answer from the API, and can stop to trust that peer.
+- A service that does not listen on its slot. The VM runs, but the tunnel fails as
+  `UNAVAILABLE`. The node cannot tell this from a VM that is not there, so it can score
+  a peer that charges for a VM that runs a broken service.
+- A node below the peer fails. The peer passes `UNAVAILABLE` up, and the node scores the
+  peer that it asked: that peer is answerable to it for the hops below.
+- The node of the ancestor reads the statement after the retention ended, or it deletes
+  its hop records (`descendant_tunnels`) with the retention.
+- A `relayed` statement. Only the node that read the statement from the peer that wrote
+  it judges that peer.
 
 ## See also
 

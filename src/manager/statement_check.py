@@ -765,7 +765,8 @@ def floor_on(peer_id: str, books) -> int:
 
 
 def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
-         rows: Optional[int] = None) -> celaut_pb2.BalanceStatement:
+         rows: Optional[int] = None, instance_ref: str = "",
+         remaining_hops: Optional[int] = None) -> celaut_pb2.BalanceStatement:
     """``balance_statement.fetch``, with the books of what the peer may charge for it.
 
     ``rows`` is how many movements the read asks for (None: the node decides). Our
@@ -775,6 +776,10 @@ def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
     charge, and then those of the answer. A read that fails is written down with its
     range and time, and ``settle_failed_reads`` prices it later. ``from_seq`` 0 asks for
     the head only: no movement. The read waits ``peer_call_timeout`` at most.
+
+    ``instance_ref`` reads a descendant of ``token`` (or of our account). The peer
+    charges it as any read. A read of this kind that fails has no failed-read record: the
+    node does not know the account that the peer charged.
     """
     from src.database.sql_connection import SQLConnection
     from src.manager import balance_statement
@@ -786,9 +791,10 @@ def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
     try:
         statement = balance_statement.fetch(
             peer_id, client_id, token=token, from_seq=from_seq, to_seq=to_seq,
-            timeout=peer_call_timeout())
+            timeout=peer_call_timeout(), instance_ref=instance_ref,
+            remaining_hops=remaining_hops)
     except Exception:
-        if from_seq > 0:
+        if from_seq > 0 and not instance_ref:
             sc.add_failed_statement_read(
                 peer_id, ledger.account_ref(token or client_id), from_seq,
                 from_seq + asked - 1, asked, own=not token)

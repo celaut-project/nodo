@@ -777,6 +777,35 @@ TABLES = {
             rows_seen INTEGER NOT NULL DEFAULT 0
         )
     ''',
+    # What this node knows of each descendant that it reaches through a peer (#631), by
+    # the peer and the instance_ref that this node sends to it. No token: the descendant
+    # is a hash.
+    # - `last_ok_ts`: the last DescendantTunnel hop that relayed a byte of it.
+    # - `failed_at`, `last_failed_at`: the first and the last hop that failed with the
+    #   descendant unavailable, after `last_ok_ts`.
+    # - `head_seq`, `head_hash`, `head_ts`: the head of the last statement of it that the
+    #   peer signed, and its date.
+    # - `receipt`, `receipt_ts`: the last receipt that the peer signed for a hop.
+    # - `linked_ts`: when a statement that the peer signed last linked it (child_bound).
+    # - `read_failed_at`: the first read of it that failed in transport, after the last
+    #   read that worked.
+    "descendant_peers": '''
+        CREATE TABLE IF NOT EXISTS descendant_peers (
+            peer_id TEXT NOT NULL,
+            instance_ref TEXT NOT NULL,
+            last_ok_ts INTEGER DEFAULT NULL,
+            failed_at INTEGER DEFAULT NULL,
+            last_failed_at INTEGER DEFAULT NULL,
+            head_seq INTEGER DEFAULT NULL,
+            head_hash TEXT DEFAULT NULL,
+            head_ts INTEGER DEFAULT NULL,
+            receipt BLOB DEFAULT NULL,
+            receipt_ts INTEGER DEFAULT NULL,
+            linked_ts INTEGER DEFAULT NULL,
+            read_failed_at INTEGER DEFAULT NULL,
+            PRIMARY KEY (peer_id, instance_ref)
+        )
+    ''',
     "balance_movements": '''
         CREATE TABLE IF NOT EXISTS balance_movements (
             account_id TEXT NOT NULL,

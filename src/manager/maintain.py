@@ -407,9 +407,23 @@ def _can_pay_a_tick(token: str, balance_mu: int, scarcity=None) -> bool:
     """
     if ALLOW_DEBT:
         return True
+    charge_mu = tick_price_mu(token, scarcity)
+    if charge_mu is None:
+        return False
+    return int(balance_mu) >= int(charge_mu)
+
+
+def tick_price_mu(token: str, scarcity=None) -> Optional[int]:
+    """The price of the next maintenance tick of ``token``, at ``scarcity`` (None: the
+    scarcity now). None when the node cannot price it.
+
+    ``_can_pay_a_tick`` compares the balance with it. The ``stop`` row of an instance
+    that stops ``out_of_balance`` gives it (``detail.tick``), so an ancestor that reads
+    the statement knows that the leftover could not pay the tick (#631).
+    """
     try:
         sys_req = sc.get_sys_req(id=token)
-        charge_mu = compute_maintenance_cost(
+        return int(compute_maintenance_cost(
             system_resources=celaut.Sysresources(
                 mem_limit=sys_req['mem_limit'] or 0,
                 disk_space=sys_req['disk_space'] or 0,
@@ -420,11 +434,10 @@ def _can_pay_a_tick(token: str, balance_mu: int, scarcity=None) -> bool:
             scarcity=scarcity,
             arch=_row_arch(sys_req),
             launch_bp=_row_launch_bp(sys_req),
-        )
+        ))
     except Exception as e:
         log.LOGGER(f"Could not price a tick for {token}: {e}")
-        return False
-    return int(balance_mu) >= int(charge_mu)
+        return None
 
 
 def revive_backoff_seconds(failures: int) -> float:
@@ -2107,6 +2120,7 @@ def sweep_balance_movements(force: bool = False) -> int:
     try:
         deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
         sc.prune_statement_faults(max_age_days=ledger.retention_days())
+        sc.prune_descendant_tunnels(max_age_days=ledger.retention_days())
         sc.prune_start_attempts(max_age_days=ledger.retention_days())
         sc.prune_start_refs(max_age_days=ledger.retention_days())
         sc.prune_top_up_reservations(max_age_seconds=ledger.retention_days() * 86400)
