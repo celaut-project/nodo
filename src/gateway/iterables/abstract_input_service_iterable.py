@@ -291,6 +291,25 @@ class AbstractInputServiceIterable:
             f"({CONFIGURED_HASH_ID.hex()}), and no service."
         )
 
+    def _caller_may_want_sources(self) -> bool:
+        """Whether this request may make the node get the missing service from its published
+        sources (``service_sources.AUTO_ACQUIRE``), and not only ask its peers (audit N5).
+
+        The caller must be one that the node knows (``require_caller``: a local instance, or
+        a client_id that this node minted, within the rate limit of the gateway), and within
+        ``service_sources.WANTS_PER_CALLER_PER_HOUR``.
+        """
+        try:
+            caller = require_caller(self.context, self.client_id or "")
+        except ClientRequired:
+            return False
+        except Exception as exc:
+            log.LOGGER(f"Could not identify the caller that wants {self.service_hash}: {exc}")
+            return False
+        from src.core_services.source_application import caller_may_want
+
+        return caller_may_want(caller)
+
     def start(self):
         pass
 
@@ -304,7 +323,7 @@ class AbstractInputServiceIterable:
 
     def final(self):
         if self.service_hash and not self.service_saved:
-            add_wanted(self.service_hash)
+            add_wanted(self.service_hash, from_sources=self._caller_may_want_sources())
         elif self.service_saved and not self._caller_checked:
             # The stream ended with the service ready to serve but no client_id ever
             # arrived to confirm a caller -- what looked like "might still be coming"

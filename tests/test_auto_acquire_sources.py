@@ -38,6 +38,21 @@ class CheckWantedServiceTests(unittest.TestCase):
     def setUp(self):
         maintain.wanted_services.clear()
         maintain.wanted_services_retry.clear()
+        maintain.wanted_from_sources.clear()
+        maintain.wanted_from_sources.add(WANTED)
+        self.addCleanup(maintain.wanted_from_sources.clear)
+
+    def test_a_want_of_a_caller_that_the_node_does_not_know_asks_the_peers_only(self):
+        # Audit N5.
+        maintain.wanted_from_sources.clear()
+        with patch.object(maintain, "fetch_service_from_peers", return_value=False) as peers, patch.object(
+            sa, "acquire_in_background"
+        ) as sources:
+            maintain.check_wanted_service(WANTED)
+
+        peers.assert_called_once_with(WANTED)
+        sources.assert_not_called()
+        self.assertEqual(maintain.wanted_services_retry, {WANTED})
 
     def test_a_peer_that_has_it_ends_it_and_the_sources_are_not_asked(self):
         with patch.object(maintain, "fetch_service_from_peers", return_value=True), patch.object(
@@ -90,6 +105,8 @@ class BackgroundTests(unittest.TestCase):
     def setUp(self):
         sa._last_attempt.clear()
         maintain.wanted_services_retry.clear()
+        maintain.wanted_from_sources.add(WANTED)
+        self.addCleanup(maintain.wanted_from_sources.clear)
         for patcher in (
             patch.object(sa, "get_core_service_id", return_value="5a" * 32),
             patch.object(sa._env_manager, "get", side_effect=_config()),
@@ -168,6 +185,73 @@ class BackgroundTests(unittest.TestCase):
 
         self.assertEqual(got[0].deadline_s, 90)
         self.assertEqual(got[0].min_bytes_per_s, 4 * 1024)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class AddWantedTests(unittest.TestCase):
+    """Audit N5: who may make the node ask the sources, and what an id is."""
+
+    def setUp(self):
+        for collection in (maintain.wanted_services, maintain.wanted_services_retry, maintain.wanted_from_sources):
+            collection.clear()
+            self.addCleanup(collection.clear)
+
+    def test_a_value_that_is_not_a_service_id_is_not_wanted(self):
+        for value in ("", "ab", "ab" * 31, "ab" * 33, "zz" * 32, "ab" * 32 + "\n" + "cd" * 32, None):
+            maintain.add_wanted(value, from_sources=True)
+        self.assertEqual(maintain.wanted_services, set())
+        self.assertEqual(maintain.wanted_from_sources, set())
+
+    def test_by_default_a_want_is_for_the_peers_only(self):
+        maintain.add_wanted(WANTED)
+        self.assertEqual(maintain.wanted_services, {WANTED})
+        self.assertEqual(maintain.wanted_from_sources, set())
+
+    def test_a_known_caller_may_want_the_sources_too(self):
+        maintain.add_wanted(WANTED)  # a stranger first: the peers only
+        maintain.add_wanted(WANTED, from_sources=True)
+        self.assertEqual(maintain.wanted_services, {WANTED})
+        self.assertEqual(maintain.wanted_from_sources, {WANTED})
+
+    def test_nodo_get_is_the_operator_and_may_want_the_sources(self):
+        with tempfile.TemporaryDirectory() as inbox:
+            open(os.path.join(inbox, WANTED), "w").close()
+            with patch.object(maintain, "WANTED_INBOX_DIR", inbox + os.sep):
+                maintain.drain_wanted_inbox()
+        self.assertEqual(maintain.wanted_from_sources, {WANTED})
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CallerMayWantTests(unittest.TestCase):
+    def setUp(self):
+        sa._wants_by_caller.clear()
+        self.addCleanup(sa._wants_by_caller.clear)
+
+    def _with_limit(self, limit):
+        patcher = patch.object(sa._env_manager, "get", side_effect=_config(**{"service_sources.WANTS_PER_CALLER_PER_HOUR": limit}))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_each_caller_has_its_own_limit_in_one_hour(self):
+        self._with_limit(2)
+        clock = [1000.0]
+        with patch.object(sa.time, "monotonic", side_effect=lambda: clock[0]):
+            self.assertTrue(sa.caller_may_want("client-a"))
+            self.assertTrue(sa.caller_may_want("client-a"))
+            self.assertFalse(sa.caller_may_want("client-a"))
+            self.assertTrue(sa.caller_may_want("client-b"))
+            clock[0] += sa.WANTS_WINDOW_SECONDS
+            self.assertTrue(sa.caller_may_want("client-a"))
+
+    def test_zero_is_no_limit_and_a_negative_value_refuses(self):
+        self._with_limit(0)
+        self.assertTrue(all(sa.caller_may_want("client-a") for _ in range(50)))
+        self._with_limit(-1)
+        self.assertFalse(sa.caller_may_want("client-a"))
+
+    def test_no_caller_is_refused(self):
+        self._with_limit(10)
+        self.assertFalse(sa.caller_may_want(""))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

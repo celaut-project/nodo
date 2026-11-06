@@ -33,7 +33,8 @@ import os
 import queue
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Set
+from collections import OrderedDict, deque
+from typing import Callable, Deque, Dict, List, Optional, Set
 from urllib.parse import quote
 
 from src.core_services import SOURCE_APPLICATION, get_core_service_id
@@ -63,6 +64,14 @@ _queue: "queue.Queue" = queue.Queue()
 _queued: Set[str] = set()
 _queue_lock = threading.Lock()
 _worker: Optional[threading.Thread] = None
+
+# The wants for the sources of each caller in the last hour (audit N5): a want can cost a
+# download of MAX_DOWNLOAD_MB, so a caller may make only `WANTS_PER_CALLER_PER_HOUR`. In
+# memory; the callers that asked least recently are forgotten after _MAX_CALLERS.
+WANTS_WINDOW_SECONDS = 3600
+_MAX_CALLERS = 10_000
+_wants_by_caller: "OrderedDict[str, Deque[float]]" = OrderedDict()
+_wants_lock = threading.Lock()
 
 # Set while the source-application itself is being made available: it cannot be asked for
 # its own sources, so a lookup that starts in that state ends at once.
@@ -294,6 +303,30 @@ def _download_checked(manifest_url: str, service_id: str, max_bytes: int,
             os.remove(path)
         except OSError:
             pass
+
+
+def caller_may_want(caller: str) -> bool:
+    """True, and the want is counted, if ``caller`` (a client_id, or the token of a local
+    instance) made fewer than ``service_sources.WANTS_PER_CALLER_PER_HOUR`` wants for the
+    sources in the last hour. 0 is no limit."""
+    try:
+        limit = int(_env_manager.get("service_sources.WANTS_PER_CALLER_PER_HOUR", 10))
+    except (TypeError, ValueError):
+        return False
+    if limit < 0 or not caller:
+        return False
+    now = time.monotonic()
+    with _wants_lock:
+        wants = _wants_by_caller.setdefault(caller, deque())
+        _wants_by_caller.move_to_end(caller)
+        while wants and now - wants[0] >= WANTS_WINDOW_SECONDS:
+            wants.popleft()
+        if limit and len(wants) >= limit:
+            return False
+        wants.append(now)
+        while len(_wants_by_caller) > _MAX_CALLERS:
+            _wants_by_caller.popitem(last=False)
+        return True
 
 
 def _auto_settings() -> Optional[Dict[str, float]]:
