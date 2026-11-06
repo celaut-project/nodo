@@ -381,9 +381,12 @@ class AcquireFromSourcesTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def _import_as(self, service_id):
-        """An `import_bee` that puts `service_id` in the registry, as a real import does."""
-        def fake(path):
+        """An `import_bee` of a file that is `service_id`, as the real one does: with an
+        integrity hash that is another id, it writes nothing and gives None."""
+        def fake(path, integrity_hash=None):
             self.assertTrue(os.path.exists(path))
+            if integrity_hash is not None and integrity_hash != service_id:
+                return None
             open(os.path.join(self.registry, service_id), "w").close()
             return service_id
 
@@ -427,19 +430,21 @@ class AcquireFromSourcesTests(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.registry, WANTED)))
         self.assertEqual(os.listdir(os.path.join(self.cache, "source_downloads")), [])
 
-    def test_another_service_is_removed_and_the_next_source_is_tried(self):
+    def test_another_service_is_not_imported_and_the_next_source_is_tried(self):
         imports = [self._import_as(OTHER), self._import_as(WANTED)]
         removed = []
         with patch.object(sa, "__lookup_sources", return_value=["https://h/a", "https://h/b"]), patch.object(
             sa, "download_to_file", side_effect=self._download_writing()
         ), patch.object(
-            self.import_module, "import_bee", side_effect=lambda path: imports.pop(0)(path)
-        ), patch(
+            self.import_module, "import_bee", side_effect=lambda path, **kw: imports.pop(0)(path, **kw)
+        ) as import_bee, patch(
             "src.commands.remove.remove", side_effect=lambda sid: removed.append(sid)
         ), redirect_stdout(io.StringIO()):
             self.assertTrue(sa.acquire_from_sources(WANTED, 5 * MIB))
 
-        self.assertEqual(removed, [OTHER])
+        self.assertEqual([c.kwargs for c in import_bee.call_args_list], [{"integrity_hash": WANTED}] * 2)
+        self.assertEqual(sorted(os.listdir(self.registry)), [WANTED])
+        self.assertEqual(removed, [])
 
     def test_a_service_that_was_already_there_is_not_removed(self):
         open(os.path.join(self.registry, OTHER), "w").close()  # held before the import

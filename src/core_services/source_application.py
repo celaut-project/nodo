@@ -279,14 +279,15 @@ def _download_checked(manifest_url: str, service_id: str, max_bytes: int,
                       limits: Optional[Limits] = None) -> bool:
     """Download, import and check one source. True when ``service_id`` is imported.
 
-    The file goes to a temporary file under the cache and is always removed. Whatever the
-    import added to the registry that is not ``service_id`` is removed again: the source
-    gave another service, which nobody asked for.
+    The file goes to a temporary file under the cache and is always removed. The import is
+    given ``service_id`` as its integrity hash: a file that is another service is not
+    written to the registry at all, so nothing has to be removed afterwards. (A diff of the
+    registry before and after the import also took the services that another thread saved
+    in the meantime, and removed them: audit N2.)
     """
     from uuid import uuid4
 
     from src.commands import import_bee as import_module
-    from src.commands.remove import remove
 
     timeout_s = float(_env_manager.get("service_sources.TIMEOUT_SECONDS", 60) or 60)
     directory = os.path.join(str(_env_manager.get("CACHE")), "source_downloads")
@@ -295,15 +296,10 @@ def _download_checked(manifest_url: str, service_id: str, max_bytes: int,
     try:
         size = download_to_file(manifest_url, path, max_bytes, timeout_s, limits=limits)
         print(f"Downloaded {size} bytes.")
-        before = set(os.listdir(import_module.REGISTRY))
-        imported = import_module.import_bee(path)
+        imported = import_module.import_bee(path, integrity_hash=service_id)
         if imported == service_id:
             return True
-        # Another service, or none: take away what this import added.
-        for added in set(os.listdir(import_module.REGISTRY)) - before:
-            if added != service_id:
-                print(f"⚠️  The source gave {added}, not {service_id}: removing it.")
-                remove(added)
+        print(f"⚠️  The source did not give {service_id}; nothing of it is kept.")
         return False
     finally:
         try:
