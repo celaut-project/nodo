@@ -469,7 +469,11 @@ class Gateway(celaut_pb2_grpc.Gateway):
                                 if request.HasField("remaining_hops") else None),
             )
         except ledger.InsufficientBalance as e:
-            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, f"No balance statement. {e}")
+            # The exception names the account that pays by its id. For a local instance
+            # that is its own token, which the instance does not get from its father.
+            log.LOGGER(f"No balance statement: {e}")
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,
+                          "No balance statement. The caller cannot pay for it.")
             return
         except balance_statement.StatementRefused as e:
             context.abort(grpc.StatusCode.PERMISSION_DENIED, f"No balance statement. {e}")

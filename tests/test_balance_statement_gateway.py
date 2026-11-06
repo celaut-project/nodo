@@ -86,6 +86,14 @@ class GetBalanceStatementGatewayTests(unittest.TestCase):
 
         self.assertEqual(error.code, grpc.StatusCode.RESOURCE_EXHAUSTED)
 
+    def test_the_refusal_of_a_caller_that_cannot_pay_does_not_name_its_account(self):
+        # The ledger names the account by its id: the token of an instance that calls.
+        error, _ = self.call(side_effect=ledger.InsufficientBalance(
+            "token-of-the-instance holds 0 MU, needed 1.1K MU."))
+
+        self.assertEqual(error.code, grpc.StatusCode.RESOURCE_EXHAUSTED)
+        self.assertNotIn("token-of-the-instance", error.details)
+
     def test_an_account_that_is_not_the_callers_gets_permission_denied(self):
         error, _ = self.call(side_effect=balance_statement.StatementRefused("not yours"))
 
