@@ -777,16 +777,24 @@ def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
     range and time, and ``settle_failed_reads`` prices it later. ``from_seq`` 0 asks for
     the head only: no movement. The read waits ``peer_call_timeout`` at most.
 
-    ``instance_ref`` reads a descendant of ``token`` (or of our account). The peer
-    charges it as any read. A read of this kind that fails has no failed-read record: the
-    node does not know the account that the peer charged.
+    ``instance_ref`` reads a descendant of ``token`` (or of our account). A read of this
+    kind that fails has no failed-read record: the node does not know the account that
+    the peer charged. The peer does not charge it as any read: it can ask its own peers
+    for the descendant, and then it charges one read of the full range for each peer
+    that it asks (``balance_statement._charge_read``). So the read is counted, before
+    the call, for all that the peer may charge (``descendant_read_counts``), and the
+    rows of the answer are not counted again.
     """
     from src.database.sql_connection import SQLConnection
     from src.manager import balance_statement
 
     sc = SQLConnection()
-    sc.add_statement_read(peer_id, rows_priced=1)
     asked = rows or ledger.max_statement_rows()
+    if instance_ref:
+        reads, rows_priced = descendant_read_counts(from_seq, asked, remaining_hops)
+        sc.add_statement_read(peer_id, rows_priced=rows_priced, count=reads)
+    else:
+        sc.add_statement_read(peer_id, rows_priced=1)
     to_seq = from_seq + rows - 1 if rows else 0
     try:
         statement = balance_statement.fetch(
@@ -799,8 +807,28 @@ def read(peer_id: str, client_id: str, *, token: str = "", from_seq: int,
                 peer_id, ledger.account_ref(token or client_id), from_seq,
                 from_seq + asked - 1, asked, own=not token)
         raise
-    sc.add_statement_read(peer_id, rows_priced=len(statement.movements), count=0)
+    if not instance_ref:
+        sc.add_statement_read(peer_id, rows_priced=len(statement.movements), count=0)
     return statement
+
+
+def descendant_read_counts(from_seq: int, asked: int,
+                           remaining_hops: Optional[int]) -> tuple:
+    """``(reads, rows_priced)``: the most that a peer may charge our account for one read
+    of a descendant (#631), as the counters of ``query_charge_problems`` count it.
+
+    A peer that holds the descendant charges one read and the rows that it returns. A
+    peer that asks its own peers charges ``read_price_mu`` for each of them: the fixed
+    part and the full range (no rows for a read of the head only, ``from_seq`` 0). It
+    asks at most ``remaining_hops - 1`` peers (``balance_statement.split_hops``). With no
+    ``remaining_hops`` the peer uses its own maximum: this node counts with its own.
+    """
+    from src.utils.tools.recursion_guard import max_hops
+
+    hops = max_hops() if remaining_hops is None else int(remaining_hops)
+    reads = max(1, hops - 1)
+    rows = int(asked) if int(from_seq) > 0 else 0
+    return reads, reads * rows
 
 
 def _detail_int(detail: Mapping, key: str) -> Optional[int]:
