@@ -391,13 +391,14 @@ in the log of the node.
   `statement_query` row that names the descendant by its `instance_ref`. For a local
   descendant, the node writes the charge in the same transaction as the read.
 - For a read that goes to peers, the node charges the caller once, before the first
-  call to a peer. The charge is the fixed part and the part for the most rows that the
-  read can return. The node never pays a peer for rows that it did not charge. The
-  caller pays the most rows even when the peer returns fewer. A caller that asks
-  `from_seq` and `to_seq` pays only for that range. The node charges nothing when it has
-  no account on the peer. Each peer charges the account of this node on the peer. When
-  the node asks more than one peer, it pays the other calls itself. The hop budget
-  limits them (see below).
+  call to a peer: one read for each peer that it asks. A read is the fixed part and the
+  part for the most rows that the read can return. The caller pays the most rows even
+  when the peer returns fewer. A caller that asks `from_seq` and `to_seq` pays only for
+  that range. Each peer charges the account of this node on the peer in the same way:
+  one read for each of its own peers that it asks. The caller does not pay for those.
+  This node pays them, and the hop budget limits them (see below). This node counts
+  that most for its check of the charges on the peer
+  (`statement_check.descendant_read_counts`).
 - The walk goes at most `ledger.MAX_DESCENDANT_DEPTH` levels (8) and looks at
   `ledger.MAX_DESCENDANT_ACCOUNTS` accounts (200). It looks at each account once, so a
   loop ends it. These limits apply to the chains of one node.
@@ -419,8 +420,9 @@ of the `RecursionGuard` ([`RECURSION_GUARD.md`](RECURSION_GUARD.md)) for them.
   grows as the number of peers to the power of the hops.
 - A node that gets 0 refuses. A node that gets 1 answers from its own chains and asks no
   peer. In both cases the caller gets UNIMPLEMENTED, and the read does not continue.
-- The read has no token. A loop through peers ends with the budget. Each hop is paid by
-  the caller before the hop, so the total cost is bounded as well.
+- The read has no token. A loop through peers ends with the budget. Each node pays the
+  peers that it asks before it asks them, so the total cost is bounded as well. The
+  caller pays only the peers of the first node.
 
 ### Threat model
 
@@ -453,8 +455,8 @@ Cases that this does **not** cover:
 The node of the reader records the fault by itself. The service that reads sees only the
 statement and never a peer id. The service does not decide and does not report.
 
-Only the node that read the statement from the peer that wrote it judges that peer. A
-`relayed` statement is not judged: the node below judged its own peer.
+The node judges each statement that a peer gives, also a `relayed` one: the peer answers
+for the nodes that it delegates to. The node below the peer judges its own peer too.
 
 When the node asks a peer for a descendant, it reads the `stop` rows of the signed
 statement. The node scores the peer with the reason `killed_with_mu` (-1000, once for each
@@ -467,9 +469,11 @@ descendant and row) if all these conditions are true:
   that stop is not scored.
 - `detail.reason` is not a fault of the machine: `process_lost`, `guest_panic`,
   `launch_failed`, `peer_stopped` or `activity_window`.
-- For `out_of_balance`: the leftover is at least the largest maintenance period that the
-  statement shows. Less than one period is the normal end of an instance that cannot pay.
-  With no maintenance row in the statement, the node does not judge.
+- For `out_of_balance`: the leftover is at least the price of the tick that the instance
+  could not pay. The `stop` row gives it (`detail.tick`). A `tick` above 10 times the
+  largest maintenance row of the statement is not believed: that limit is used. With no
+  `tick`, the largest maintenance row is used. Less than one tick is the normal end of an
+  instance that cannot pay. With neither, the node does not judge.
 
 A statement that does not show the `refund` row is not judged. A local descendant is not
 scored: this node ran it.
@@ -514,22 +518,26 @@ does not know.
   still needs the client (#597).
 
 The node writes the result of each hop to a peer, for the peer and the `instance_ref`
-that the hop sent (`descendant_tunnels`): the time of the last hop that relayed a byte,
-and the time of the last hop that failed with the descendant unavailable (`UNAVAILABLE`,
+that the hop sent (`descendant_peers`): the time of the last hop that relayed a byte,
+and the times of the first and of the last hop after it that failed with the descendant
+unavailable (`UNAVAILABLE`,
 no answer, or no connection). A refusal (`PERMISSION_DENIED`, `RESOURCE_EXHAUSTED`,
 `INVALID_ARGUMENT`) is not a failure.
 
-When the node later reads a statement of that descendant from that peer, and the
-statement is not `relayed`, it scores the peer with `maintenance_while_unreachable`
-(-1000, once for each peer and descendant) for a `maintenance` row that:
+When the node later reads a statement of that descendant from that peer, also a
+`relayed` one, it scores the peer with `maintenance_while_unreachable` (-1000, once for
+each peer and descendant) for a `maintenance` row that:
 
-- charges a period that starts more than `CLOCK_SKEW_SECONDS` after the failure, with no
-  hop that worked after the failure. The period of a row starts `detail.seconds` before
-  the date of the row. An honest node can charge the period in which the VM stopped, and
-  write the `stop` row at the next tick: that row is not scored;
+- charges a period between two failures, with no hop that worked after the first: the
+  period starts more than `CLOCK_SKEW_SECONDS` after the first failure, and the row is
+  dated more than `CLOCK_SKEW_SECONDS` before the last one. The period of a row starts
+  `detail.seconds` before the date of the row. One failure is not enough: the instance
+  can answer again after it. An honest node can charge the period in which the VM
+  stopped, and write the `stop` row at the next tick: that row is not scored;
 - is not after a `stop` row;
 - charges memory (`detail.mem_limit` is not 0). A row of the disk of a hibernated
-  instance has no VM to answer.
+  instance has no VM to answer. When a row with no memory charges a period between the
+  two failures, no row is scored: the failures can be of the hibernation.
 
 If the statement shows a `stop` row with MU left instead, `killed_with_mu` applies.
 
@@ -538,7 +546,7 @@ What the node of the ancestor can see:
 | The tunnel | The statement | Result |
 |---|---|---|
 | Works | Any | The instance is alive. The hop that worked cancels an earlier failure. |
-| Fails, descendant unavailable | `maintenance` of a period after the failure | `maintenance_while_unreachable` |
+| Fails twice, descendant unavailable | `maintenance` of a period between the failures | `maintenance_while_unreachable` |
 | Fails, descendant unavailable | `stop` row with MU left, father gone | `killed_with_mu` |
 | Fails, descendant unavailable | Only rows before the failure, or a `stop` row | No fault |
 | Refused (no link, bad slot, no balance, no hop budget) | Any | No fault: the hop is not recorded |
@@ -560,9 +568,7 @@ Cases that the tunnel does **not** cover:
 - A node below the peer fails. The peer passes `UNAVAILABLE` up, and the node scores the
   peer that it asked: that peer is answerable to it for the hops below.
 - The node of the ancestor reads the statement after the retention ended, or it deletes
-  its hop records (`descendant_tunnels`) with the retention.
-- A `relayed` statement. Only the node that read the statement from the peer that wrote
-  it judges that peer.
+  its hop records (`descendant_peers`) with the retention.
 
 ## See also
 

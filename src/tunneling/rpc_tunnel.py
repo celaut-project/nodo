@@ -104,9 +104,9 @@ slot, ``receipts`` and ``remaining_hops``. The node finds the descendant through
 * Receipts of this kind of stream name the execution by the ``instance_ref``
   (``execution_receipt.execution_name_by_ref``).
 * A hop that fails with the descendant unavailable is written down for the peer and
-  the ``instance_ref`` (``descendant_tunnels``), and so is a hop that relays a byte.
-  A statement of the descendant that still charges maintenance after the failure is
-  a fault of the peer (``balance_statement._judge_unreachable``).
+  the ``instance_ref`` (``descendant_peers``), and so is a hop that relays a byte.
+  A statement of the descendant that charges maintenance for a period between two
+  such failures is a fault of the peer (``balance_statement._judge_unreachable``).
 
 No error that goes to the caller names a token, a peer or an address: the caller can
 be a service, and a service does not know nodes.

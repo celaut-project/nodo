@@ -160,7 +160,7 @@ on the receipts of the next node: they name a node that the caller does not know
 
 The next node can refuse only when the stream runs. The relay then stops the stream with
 the status of the refusal and a text of this node. The node writes each hop that relays
-a byte, and each hop that fails with the descendant unavailable, in `descendant_tunnels`.
+a byte, and each hop that fails with the descendant unavailable, in `descendant_peers`.
 A hop budget that is used up is `RESOURCE_EXHAUSTED`, not `UNAVAILABLE`. The caller
 sets the budget, so a node above does not write it as a failure of the peer.
 
