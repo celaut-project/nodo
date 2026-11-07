@@ -1228,11 +1228,11 @@ class DescendantReadTests(_Database):
             with self.assertRaises(balance_statement.StatementRefused):
                 self.read(ref=ledger.instance_ref("far"), to_seq=5)
 
-    def delegate(self, mu=10, alias="alias", father="p"):
+    def delegate(self, mu=10, alias="alias", father="p", peer="peer-1"):
         self.sc.add_delegated_instance(
             father_id=father, alias=alias,
             external_token="peer-token" if alias == "alias" else f"peer-token-{alias}",
-            peer_id="peer-1", serialized_instance=b"", service_id="s", balance_mu=mu,
+            peer_id=peer, serialized_instance=b"", service_id="s", balance_mu=mu,
             peer_balance_mu=1, movements=(ledger.Movement(ledger.START, mu),),
             sent_peer_mu=0, mark=None,
         )
@@ -1538,6 +1538,37 @@ class DescendantReadTests(_Database):
                 self.read(ref=ledger.instance_ref("far"), to_seq=5, remaining_hops=8)
         self.assertEqual(read.call_count, 3)
         self.assertEqual(len(self.rows("g")) - before, 1)
+
+    def two_peers_give_a_statement(self, first_at, second_at):
+        """Peers 1 and 2 both linked the ref ``target`` (at the dates given) and both answer."""
+        self.delegate(alias="a1", peer="peer-1")
+        self.delegate(alias="a2", peer="peer-2")
+        ref = ledger.instance_ref("target")
+        self.sc.record_descendant_links("peer-1", [ref], ts=first_at)
+        self.sc.record_descendant_links("peer-2", [ref], ts=second_at)
+        answer = balance_statement.celaut_pb2.BalanceStatement(head_seq=3)
+        with patch("src.manager.statement_check.read", return_value=answer), \
+                patch("src.manager.manager.get_client_id_on_other_peer", return_value="x"):
+            return self.read(ref=ref, to_seq=5, remaining_hops=8)
+
+    def test_a_peer_that_links_a_ref_later_cannot_hide_the_peer_that_holds_it(self):
+        now = int(time.time())
+        statement = self.two_peers_give_a_statement(now - 100, now - 10)
+        self.assertEqual(statement.head_seq, 3)
+        self.assertEqual(self.sc.descendant_head("peer-1", ledger.instance_ref("target"))["head_seq"], 3)
+        self.assertIsNone(self.sc.descendant_head("peer-2", ledger.instance_ref("target")))
+
+    def test_two_peers_that_linked_a_ref_at_the_same_time_give_no_statement(self):
+        now = int(time.time())
+        with self.assertRaises(balance_statement.StatementUnavailable):
+            self.two_peers_give_a_statement(now - 10, now - 10)
+
+    def test_a_later_link_does_not_move_the_first_date(self):
+        ref = ledger.instance_ref("target")
+        self.sc.record_descendant_links("peer-1", [ref], ts=100)
+        self.sc.record_descendant_links("peer-1", [ref], ts=900)
+        self.assertEqual(self.sc.descendant_first_linked("peer-1", ref), 100)
+        self.assertTrue(self.sc.descendant_linked("peer-1", ref, since=900))
 
     def test_the_hop_budget_is_shared_between_the_peers(self):
         # A read never reaches more nodes than its budget (#631 review: fan-out).

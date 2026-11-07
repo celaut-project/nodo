@@ -802,6 +802,7 @@ TABLES = {
             receipt BLOB DEFAULT NULL,
             receipt_ts INTEGER DEFAULT NULL,
             linked_ts INTEGER DEFAULT NULL,
+            first_linked_ts INTEGER DEFAULT NULL,
             read_failed_at INTEGER DEFAULT NULL,
             PRIMARY KEY (peer_id, instance_ref)
         )
@@ -952,6 +953,11 @@ def create_tables(cursor):
     # that worked on a fresh database would silently be NULL on a migrated one -- and
     # the two schemas would disagree about every instance started after the upgrade.
     # The inserts write the timestamp themselves instead, which is the same on both.
+    # The first date that a peer linked a descendant: a tie between peers that both
+    # give a statement of it goes to the one that linked it first (#631).
+    ensure_columns(cursor, "descendant_peers", {
+        "first_linked_ts": "INTEGER DEFAULT NULL",
+    })
     ensure_columns(cursor, "local_instances", {
         "envs": "TEXT DEFAULT NULL",
         "arch": "TEXT DEFAULT NULL",

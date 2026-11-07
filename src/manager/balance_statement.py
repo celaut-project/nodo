@@ -345,9 +345,15 @@ def _answer_descendant(caller: str, root: str, instance_ref: str, from_seq: int,
             continue
         answers.append((row, ask_ref, statement))
     if len(answers) > 1:
-        log.LOGGER(f"Peers {', '.join(row['peer_id'] for row, _, _ in answers)} all gave a "
-                   f"statement of descendant {instance_ref[:12]}. No statement is given.")
-        raise StatementUnavailable(_MANY_BELOW)
+        # A peer can sign a statement for a ref that it does not hold, once it linked
+        # that ref. The honest chain showed the ref first, and a ref cannot be known
+        # before it is shown, so the peer that linked it first is the one that holds it.
+        first = first_linked([(row, ask_ref) for row, ask_ref, _ in answers])
+        if first is None:
+            log.LOGGER(f"Peers {', '.join(row['peer_id'] for row, _, _ in answers)} all gave "
+                       f"a statement of descendant {instance_ref[:12]}. No statement is given.")
+            raise StatementUnavailable(_MANY_BELOW)
+        answers = [answers[first]]
     if not answers:
         if failed:
             raise StatementUnavailable(_BELOW_FAILED)
@@ -406,6 +412,22 @@ def _pay_peer_reads(caller: str, root: str, instance_ref: str, from_seq: int, to
             unpaid += 1
     if unpaid:
         _charge_read(caller, root, instance_ref, from_seq, to_seq, allow_debt, peers=unpaid)
+
+
+def first_linked(candidates: list) -> Optional[int]:
+    """The index in ``candidates`` (pairs of a row and the ref asked) of the one peer that
+    linked its ref before all the others, or None when no peer is first (#631).
+
+    A peer that has no recorded link, or that linked at the same second as another, is not
+    first. The read and the tunnel use it to choose between peers that all give a
+    statement of the same descendant: a peer cannot link a ref before the chain that
+    holds it has shown the ref.
+    """
+    dates = [sc.descendant_first_linked(row["peer_id"], ask_ref) for row, ask_ref in candidates]
+    if any(date is None for date in dates):
+        return None
+    best = min(dates)
+    return dates.index(best) if dates.count(best) == 1 else None
 
 
 def _must_answer(row: dict, ask_ref: str, found: Optional[dict]) -> bool:

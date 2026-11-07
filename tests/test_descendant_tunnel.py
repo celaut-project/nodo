@@ -434,6 +434,18 @@ class DescendantTunnelTests(_Tree):
         with self.assertRaises(rpc_tunnel.TunnelUnavailable):
             self.open(ref="far", hops=5)
 
+    def test_with_two_heads_the_peer_that_linked_the_ref_first_gets_the_tunnel(self):
+        ref = self._many()
+        self.sc.record_descendant_head("peer-1", ref, 3, "h")
+        self.sc.record_descendant_head("peer-2", ref, 3, "h")
+        self.sc.record_descendant_links("peer-1", [ref], ts=100)
+        self.sc.record_descendant_links("peer-2", [ref], ts=200)
+        sent, replies, error, _ = self.hop([b"pong"], ref="far", hops=5)
+
+        self.assertIsNone(error)
+        self.dial.assert_called_once_with("peer-1")
+        self.assertEqual(sent[0].token, "t1")
+
 
 _STATUS_OF = {}
 

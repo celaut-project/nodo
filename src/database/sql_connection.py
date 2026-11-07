@@ -4259,7 +4259,17 @@ class SQLConnection(metaclass=Singleton):
         now = int(time.time()) if ts is None else int(ts)
         for ref in set(instance_refs):
             if ref:
-                self._upsert_descendant(peer_id, ref, {'linked_ts': now})
+                self._upsert_descendant(
+                    peer_id, ref, {'linked_ts': now, 'first_linked_ts': now},
+                    updates={'first_linked_ts':
+                             'COALESCE(descendant_peers.first_linked_ts, excluded.first_linked_ts)'})
+
+    def descendant_first_linked(self, peer_id: str, instance_ref: str) -> Optional[int]:
+        """The first date that ``peer_id`` linked ``instance_ref`` in a statement, or None."""
+        row = self._execute(
+            'SELECT first_linked_ts FROM descendant_peers WHERE peer_id = ? AND instance_ref = ?',
+            (peer_id, instance_ref)).fetchone()
+        return None if row is None or row['first_linked_ts'] is None else int(row['first_linked_ts'])
 
     def descendant_linked(self, peer_id: str, instance_ref: str, since: int = 0) -> bool:
         """Whether a statement that ``peer_id`` signed linked ``instance_ref`` at

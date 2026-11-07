@@ -1046,14 +1046,20 @@ def _choose_peer(candidates: List) -> Tuple[dict, str, int]:
     and the node does not send the bytes of the caller to a peer that can be the wrong
     one.
     """
+    from src.manager import balance_statement
+
     known = [((row, ask_ref), budget) for (row, ask_ref), budget in candidates
              if sc.descendant_head(row["peer_id"], ask_ref) is not None]
     if not known:
         raise TunnelRefused(_READ_FIRST)
     if len(known) > 1:
-        logger(f"{LOG_PREFIX} {len(known)} peers gave a statement of descendant "
-               f"{known[0][0][1][:12]}; no tunnel.")
-        raise TunnelUnavailable(_MANY_BELOW)
+        # The peer that linked the ref first holds it (``balance_statement.first_linked``).
+        first = balance_statement.first_linked([pair for pair, _ in known])
+        if first is None:
+            logger(f"{LOG_PREFIX} {len(known)} peers gave a statement of descendant "
+                   f"{known[0][0][1][:12]}; no tunnel.")
+            raise TunnelUnavailable(_MANY_BELOW)
+        known = [known[first]]
     (row, ask_ref), budget = known[0]
     return row, ask_ref, budget
 
