@@ -298,7 +298,7 @@ def _force_delegate(
         service=service,
         peer_quote=peer_quotes.signed(forced_peer, estimated_cost),
     )
-    bind_child_token(start_charge, instance.token)
+    bind_child_token(start_charge, instance.token, service_id=service_id)
 
     # Mirrors the same post-delegation firewall step the balancer-driven loop
     # below runs for a delegated instance (see launch_service).
@@ -665,7 +665,7 @@ def launch_service(
                         metadata=metadata, service=service, service_id=service_id,
                         refund_container=refund_container
                     )
-                bind_child_token(start_charge, instance.token)
+                bind_child_token(start_charge, instance.token, service_id=service_id)
 
                 #  If the service was from an internal instance, allow it to connect to it's new dependency.
                 #   There is an exception for instances with the "rundev" refix. In such cases there is no container.

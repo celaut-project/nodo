@@ -349,7 +349,8 @@ class GatewayServicer(object):
 
     def GetBalanceStatement(self, request_iterator, context):
         """Takes a BalanceStatementRequest and returns a BalanceStatement: the movements of
-        the balance of the caller, or of a child of the caller, signed by the node. The
+        the balance of the caller, or of a child of the caller, or, with instance_ref, of
+        a descendant of one of them, signed by the node. The
         caller pays for it: a fixed part and a part for each movement returned (the
         rates "statement_query_mu" and "statement_row_mu"). The node writes the charge
         as a "statement_query" movement before it answers. The node refuses with a status
@@ -370,7 +371,15 @@ class GatewayServicer(object):
         For a UDP slot, each message is one datagram. The node takes the traffic cost
         from the balance of the instance. If the TokenMessage has receipts, the node also
         sends signed checkpoints of the execution receipt at index 2, and a "close"
-        checkpoint when the stream stops normally.
+        checkpoint when the stream stops normally. A caller that holds the token of an
+        ancestor sends a DescendantTunnel at index 2 in place of the TokenMessage. The
+        node then opens the stream to the descendant, or relays it to the next node.
+        The node refuses with a status code: PERMISSION_DENIED when no chain below the
+        token links the descendant, RESOURCE_EXHAUSTED when the instance cannot pay or
+        the node has no traffic allowance left, UNAVAILABLE when the descendant does not
+        answer or is not alive, and INVALID_ARGUMENT for a request that is not correct.
+        When a node below refuses after the stream started, the stream stops with no
+        more bytes.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

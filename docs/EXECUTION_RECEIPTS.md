@@ -269,9 +269,12 @@ gives to the client (the `start` movement of the alias), not the balance of the 
 on B. A does not pass on B's receipt: it names B's token, which the client never gets.
 A is answerable for what it signed, and B is answerable to A.
 
-A delegated instance gets no `checkpoint` and no `close`: `ServiceTunnel` refuses a
-delegated token (`_resolve_target`), and the caller tunnels to the addresses that A
-published. This is a limit of the current code.
+A delegated instance gets no `checkpoint` and no `close` for its own token:
+`ServiceTunnel` refuses a delegated token (`_resolve_target`), and the caller tunnels to
+the addresses that A published. This is a limit of the current code. A
+`DescendantTunnel` (#631) does reach a delegated instance: A relays it to B, and A signs
+the receipts of its own leg, named by the `instance_ref`. A does not pass on the receipts
+of B.
 
 ## What receipts do not give
 
@@ -381,6 +384,23 @@ is the 32 bytes of the public key, **not** its hex text. Thus the spelling of th
 does not change the name. This is the decision in #419. The receipt never contains
 the token.
 
+A stream of a `DescendantTunnel` (#631) has a different name, because its caller holds
+the `instance_ref` of the descendant and not its token:
+
+    execution_name = blake2b_256(UTF-8("celaut-execution-ref:" + instance_ref) || peer_id_raw)
+
+The prefix keeps the two kinds of name apart. So one instance can have two names: one
+for the streams of the holder of its token, one for the streams of its ancestors. Each
+stream has one name, and a reader checks the receipts of each name apart
+(`check_sequence`). `problems(receipt, instance_ref=...)` checks the second kind. The
+`tunnel` rows of the ledger carry the same name in `detail.execution_name`.
+
+On a relay hop by hop, each node signs only its own leg, with the `instance_ref` that it
+got. The first node uses the `instance_ref` of the caller, so the caller can check those
+receipts. The next node gets the `instance_ref` that the first node sends, and its
+receipts do not go to the caller. Thus the caller gets receipts of the node that it
+asked only.
+
 ### The envs digest
 
     envs_digest = blake2b_256(envs_salt || UTF-8(canonical_envs))
@@ -451,10 +471,24 @@ for the same execution. They must agree, and a reader can check it:
   the sum is **at least** the `mu_charged` of the last checkpoint: the node still bills
   the traffic after that checkpoint and the last partial block.
 
-The ledger names an account by `blake2b("celaut-ledger-instance:" + token)`, and a
-receipt names the execution by `blake2b(token || peer_id_raw)`. The `execution_name` in
+The ledger names an instance in a movement by its `instance_ref`, which is
+`blake2b("celaut-ledger-instance:" + token)`. A `child_start` of a father pays for a
+child before the child exists. The `child_bound` row that follows names the child by its
+`instance_ref` and the `child_start` by `detail.starts_seq`. The `instance_ref` of a
+delegated child is the hash of the alias that this node gave, never of the peer token.
+A receipt names the execution by `blake2b(token || peer_id_raw)`. The `execution_name` in
 the detail lets a reader that has only the two documents link them. Neither name
 opens the instance.
+
+The last row of the chain of a stopped instance is a `stop` row. It moves nothing.
+`detail.reason` is the death reason, and `detail.leftover` is the MU that the `refund`
+took out of the account.
+
+A reader reads the statement of a descendant with `GetBalanceStatement`: the request
+gives `token` (an instance that the reader holds, or empty for its own account) and
+`instance_ref` (the descendant). The node finds the account through the `child_bound`
+rows of the chains, one level at a time, and never through a token of the descendant.
+See "Read the statements of descendants" in [`REPUTATION.md`](REPUTATION.md).
 
 ### When the node signs a checkpoint
 

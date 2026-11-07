@@ -138,6 +138,27 @@ def execution_name(token: str, peer_id: str) -> str:
     return _blake2b_256(str(token).encode("utf-8") + bytes.fromhex(key)).hex()
 
 
+EXECUTION_REF_PREFIX = "celaut-execution-ref:"
+
+
+def execution_name_by_ref(instance_ref: str, peer_id: str) -> str:
+    """``blake2b_256("celaut-execution-ref:" + instance_ref || peer_id)``, lowercase hex.
+
+    The name of an execution in the receipts of a ``DescendantTunnel`` (#631). The
+    caller holds the token of an ancestor and the ``instance_ref`` of the descendant,
+    never the token of the descendant, so the name comes from the ``instance_ref``. The
+    prefix keeps it apart from a name of a token: a token with the same text as an
+    ``instance_ref`` does not give the same name. ``peer_id`` is the 32 raw bytes of the
+    key, as in :func:`execution_name`.
+    """
+    key = normalize_public_key_hex(peer_id)
+    if key is None:
+        raise ValueError(f"Not an identity public key: {peer_id!r}")
+    return _blake2b_256(
+        (EXECUTION_REF_PREFIX + str(instance_ref)).encode("utf-8") + bytes.fromhex(key)
+    ).hex()
+
+
 def canonical_envs(envs: Mapping[str, bytes], origins: Optional[Mapping[str, str]] = None) -> str:
     """The canonical text of an environment-variable map.
 
@@ -462,8 +483,12 @@ class ReceiptChain:
             clock: Callable[[], float] = time.time,
             monotonic: Callable[[], float] = time.monotonic,
             session: Optional[str] = None,
+            instance_ref: Optional[str] = None,
     ) -> None:
-        self.name = execution_name(token, peer_id)
+        # A stream of a DescendantTunnel names the execution by the instance_ref that the
+        # caller gave, and ``token`` is not used for the name (#631).
+        self.name = (execution_name_by_ref(instance_ref, peer_id) if instance_ref
+                     else execution_name(token, peer_id))
         self.plane = plane
         self.coverage = coverage
         self.slot = slot
@@ -599,11 +624,14 @@ def _is_set(receipt: celaut_pb2.ExecutionReceipt, field: str) -> bool:
 
 
 def problems(receipt: celaut_pb2.ExecutionReceipt, *, peer_id: Optional[str] = None,
-             token: Optional[str] = None) -> List[str]:
+             token: Optional[str] = None,
+             instance_ref: Optional[str] = None) -> List[str]:
     """Why ``receipt`` is not a valid receipt; an empty list when it is.
 
     ``peer_id``, if given, is the node the receipt must be from. ``token``, if given,
-    is the token the client holds: the name must be the one it gives. The shape checks
+    is the token the client holds: the name must be the one it gives. ``instance_ref``,
+    if given, is the descendant of a ``DescendantTunnel``: the name must be the one
+    that :func:`execution_name_by_ref` gives (#631). The shape checks
     are what make the canonical text have one reading, so they come before the
     signature.
     """
@@ -667,6 +695,9 @@ def problems(receipt: celaut_pb2.ExecutionReceipt, *, peer_id: Optional[str] = N
     if token is not None and not found:
         if r.execution_name != execution_name(token, r.peer_id):
             found.append("execution_name is not the name of this token on this node")
+    if instance_ref is not None and not found:
+        if r.execution_name != execution_name_by_ref(instance_ref, r.peer_id):
+            found.append("execution_name is not the name of this instance_ref on this node")
 
     if not found:
         try:
