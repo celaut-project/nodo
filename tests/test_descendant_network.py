@@ -122,6 +122,8 @@ class _Network(unittest.TestCase):
             self.sc.add_client("g", 10 ** 7, None)
             self.add_instance("p", "g", 50000)
             self.delegated_child("p", "c_alias", "c_onB", self.b, 5000)
+            # A read of c, which relays the child_bound rows of c, linked d on B (#631).
+            self.sc.record_descendant_links(self.b.peer_id, [ledger.instance_ref("d_alias")])
 
     def node(self, name, mnemonic=None):
         node = _Node(self, name, mnemonic)
@@ -217,6 +219,11 @@ class RelayedReadChargeTests(_Network):
         with self.on(self.b):
             for i in range(3):
                 self.delegated_child("c_onB", f"e{i}_alias", f"e{i}_onD", self.d, 10)
+        # The peers signed a link to that ref, so each of them is asked.
+        with self.on(self.a):
+            self.sc.record_descendant_links(self.b.peer_id, ["00" * 32])
+        with self.on(self.b):
+            self.sc.record_descendant_links(self.d.peer_id, ["00" * 32])
         with self.assertRaises(balance_statement.StatementRefused):
             self.read("00" * 32)
 

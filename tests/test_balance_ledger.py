@@ -1087,6 +1087,8 @@ class DescendantReadTests(_Database):
         self.add_instance("p", "g", 500, movements=(ledger.Movement(ledger.START, 500),))
         self.child("p", "c", 200)
         self.child("c", "d", 50)
+        # A ref below a delegated instance is asked only to a peer that linked it before.
+        self.sc.record_descendant_links("peer-1", [ledger.instance_ref("far")])
 
     def child(self, father, token, mu):
         seq = self.sc.move_balance(father, -mu, ledger.CHILD_START)
@@ -1253,6 +1255,40 @@ class DescendantReadTests(_Database):
         self.assertEqual(asked, [])
         self.assertEqual(self.sc.get_balance_by_client_id("poor"),
                          balance_statement.statement_price_mu(0))
+
+    def test_a_ref_that_no_peer_linked_asks_no_peer_and_nobody_pays(self):
+        self.delegate(mu=10_000)
+        before = self.sc.get_balance_by_client_id("g")
+        with patch("src.manager.statement_check.read") as read, \
+                patch("src.manager.manager.get_client_id_on_other_peer", return_value="x"):
+            with self.assertRaises(balance_statement.StatementRefused):
+                self.read(ref=ledger.instance_ref("made-up"), to_seq=5)
+        read.assert_not_called()
+        self.assertEqual(self.sc.get_balance_by_client_id("g"), before)
+        self.assertNotIn(ledger.STATEMENT_QUERY, [r["kind"] for r in self.rows("alias")])
+
+    def test_the_delegated_instance_that_is_called_pays_the_read_and_the_caller_does_not(self):
+        self.delegate(mu=10_000)
+        answer = balance_statement.celaut_pb2.BalanceStatement(head_seq=3)
+        caller_before = self.sc.get_balance_by_client_id("g")
+        with patch("src.manager.statement_check.read", return_value=answer), \
+                patch("src.manager.manager.get_client_id_on_other_peer", return_value="x"):
+            self.read(ref=ledger.instance_ref("far"), to_seq=5)
+        paid = self.rows("alias")[-1]
+        self.assertEqual(paid["kind"], ledger.STATEMENT_QUERY)
+        self.assertEqual(-int(paid["amount_mu"]), balance_statement.read_price_mu(1, 5))
+        self.assertEqual(self.sc.get_balance_by_client_id("g"), caller_before)
+
+    def test_a_delegated_instance_that_cannot_pay_leaves_the_read_to_the_caller(self):
+        self.delegate(mu=10)
+        answer = balance_statement.celaut_pb2.BalanceStatement(head_seq=3)
+        caller_before = self.sc.get_balance_by_client_id("g")
+        with patch("src.manager.statement_check.read", return_value=answer), \
+                patch("src.manager.manager.get_client_id_on_other_peer", return_value="x"):
+            self.read(ref=ledger.instance_ref("far"), to_seq=5)
+        self.assertEqual(self.sc.get_balance_by_client_id("g"),
+                         caller_before - balance_statement.read_price_mu(1, 5))
+        self.assertNotIn(ledger.STATEMENT_QUERY, [r["kind"] for r in self.rows("alias")])
 
     def test_the_error_of_a_peer_does_not_reach_the_caller(self):
         self.delegate()

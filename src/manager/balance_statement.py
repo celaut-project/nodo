@@ -290,8 +290,10 @@ def _answer_descendant(caller: str, root: str, instance_ref: str, from_seq: int,
     not hold, so the first answer is not proof. When more than one peer gives a
     statement, the node gives none (``_MANY_BELOW``): it cannot know which peer tells
     the truth. Each statement is still judged (``_ask_peer``), so a peer that lies does
-    not hide the faults of the other one. The caller pays one read for each peer that
-    the node asks, before the first peer is asked.
+    not hide the faults of the other one. A peer is asked only for the delegated
+    descendant itself, or when it signed a link to the ref (``_linked_hops``). The
+    instance that is called pays the reads to the peers (``_pay_peer_reads``), before
+    the first peer is asked; the caller pays only for a peer whose instance cannot.
 
     The node keeps the head of the statement that it gives, for the peer that gave it
     (``SQLConnection.record_descendant_head``). A tunnel to the descendant uses that
@@ -310,8 +312,9 @@ def _answer_descendant(caller: str, root: str, instance_ref: str, from_seq: int,
             # The retention deleted the account after the walk. The exception names the
             # account by its id, which is a token: it must not reach the caller.
             raise StatementRefused(_NOT_LINKED)
-    hops_to_ask = where["hops"]
+    hops_to_ask = _linked_hops(where["hops"], found)
     if not hops_to_ask:
+        # No chain that this node knows links the ref: it asks no peer, and nobody pays.
         raise StatementRefused(_NOT_LINKED)
     budgets = split_hops(hops, len(hops_to_ask))
     if not budgets:
@@ -326,8 +329,9 @@ def _answer_descendant(caller: str, root: str, instance_ref: str, from_seq: int,
             failed = True
     if not ready:
         raise StatementUnavailable(_BELOW_FAILED)
-    # One charge for all the peers, before the first call to a peer.
-    _charge_read(caller, root, instance_ref, from_seq, to_seq, allow_debt, peers=len(ready))
+    # The instance that is called pays its own reads. One charge for all the peers, before
+    # the first call to a peer.
+    _pay_peer_reads(caller, root, instance_ref, from_seq, to_seq, allow_debt, ready)
     answers = []
     for row, ask_ref, budget, client_id in ready:
         try:
@@ -355,6 +359,53 @@ def _answer_descendant(caller: str, root: str, instance_ref: str, from_seq: int,
         # peer to run.
         statement.service_id = _service_hex(found.get("service_id"))
     return _relay(statement, instance_ref)
+
+
+def _linked_hops(hops: list, found: Optional[dict]) -> list:
+    """The peers that this node may ask for a descendant (#631).
+
+    The delegated descendant itself (``found``) is always asked: this node started it
+    there. A descendant below a delegated instance is asked only to a peer that signed a
+    ``child_bound`` row of that ``instance_ref`` in a statement that it gave in the
+    retention (``SQLConnection.descendant_linked``). A ref that no peer linked is
+    refused with no call: a caller cannot make this node ask its peers for a ref that it
+    made up, and nobody pays for a call that was not needed.
+    """
+    since = int(time.time()) - ledger.min_peer_retention_days() * 86400
+    return [(row, ask_ref) for row, ask_ref in hops
+            if (found is not None and row is found)
+            or sc.descendant_linked(row["peer_id"], ask_ref, since=since)]
+
+
+def _pay_peer_reads(caller: str, root: str, instance_ref: str, from_seq: int, to_seq: int,
+                    allow_debt: bool, ready: list) -> None:
+    """Charge the reads that this node makes of its peers (#631).
+
+    The instance that is called pays: for each peer, the delegated instance that this
+    node holds the account of (``row["id"]``, the alias) pays one ``read_price_mu`` with a
+    ``statement_query`` row that names the descendant. That is the descendant itself when
+    it is the delegated one, else the delegated instance that leads to it. The caller
+    pays nothing for these. The fan-out below each peer is paid by that peer, from the
+    accounts that it holds, in the same way.
+
+    A delegated instance that cannot pay (it stopped, or has no balance) leaves its read
+    to the caller: one ``read_price_mu`` for each such peer, as for a stopped orphan whose
+    statement is the reason for the read. Only a ref that a peer linked gets here
+    (``_linked_hops``), so a made-up ref costs nobody anything.
+    """
+    unpaid = 0
+    detail = {"descendant": instance_ref, "from_seq": str(from_seq), "to_seq": str(to_seq)}
+    price = read_price_mu(from_seq, to_seq)
+    for row, _, _, _ in ready:
+        try:
+            if not row["alive"]:
+                raise ledger.NoSuchAccount(row["id"])
+            sc.move_balance(row["id"], -price, ledger.STATEMENT_QUERY, allow_debt=False,
+                            detail={**detail, "paid_by": "descendant"})
+        except (ledger.NoSuchAccount, ledger.InsufficientBalance):
+            unpaid += 1
+    if unpaid:
+        _charge_read(caller, root, instance_ref, from_seq, to_seq, allow_debt, peers=unpaid)
 
 
 def _must_answer(row: dict, ask_ref: str, found: Optional[dict]) -> bool:
