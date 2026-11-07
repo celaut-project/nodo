@@ -193,5 +193,6 @@ away), and the asking side.
 use the hop budget but no token. Their field `remaining_hops` works as in
 `RecursionGuard`, with one difference: a node that asks more than one peer shares the
 budget between them (`balance_statement.split_hops`), so one request never reaches more
-nodes than its budget. See [`REPUTATION.md`](REPUTATION.md#hop-budget) and
+nodes than its budget. The instance that is called pays the reads to the peers, and a ref
+that no peer linked asks no peer. See [`REPUTATION.md`](REPUTATION.md#hop-budget) and
 [`TUNNELING.md`](TUNNELING.md#descendants).

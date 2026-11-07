@@ -387,18 +387,30 @@ in the log of the node.
 
 ### Cost and limits
 
-- The caller pays as for any statement: a fixed part and a part for each row, as a
-  `statement_query` row that names the descendant by its `instance_ref`. For a local
-  descendant, the node writes the charge in the same transaction as the read.
-- For a read that goes to peers, the node charges the caller once, before the first
-  call to a peer: one read for each peer that it asks. A read is the fixed part and the
-  part for the most rows that the read can return. The caller pays the most rows even
-  when the peer returns fewer. A caller that asks `from_seq` and `to_seq` pays only for
-  that range. Each peer charges the account of this node on the peer in the same way:
-  one read for each of its own peers that it asks. The caller does not pay for those.
-  This node pays them, and the hop budget limits them (see below). This node counts
-  that most for its check of the charges on the peer
-  (`statement_check.descendant_read_counts`).
+- For a local descendant, the caller pays as for any statement: a fixed part and a part
+  for each row, as a `statement_query` row that names the descendant by its
+  `instance_ref`. The node writes the charge in the same transaction as the read.
+- For a read that goes to peers, **the instance that is called pays**. For each peer that
+  the node asks, the delegated instance that this node holds the account of (the alias:
+  the descendant itself when it is the delegated one, else the delegated instance that
+  leads to it) pays one read, with a `statement_query` row that names the descendant,
+  before the first call to a peer. A read is the fixed part and the part for the most rows
+  that the read can return (`balance_statement.read_price_mu`). The caller pays nothing
+  for these. The fan-out below each peer is paid by that peer in the same way, from the
+  accounts that it holds.
+- A delegated instance that cannot pay (it stopped, or it has no balance) leaves its read
+  to the caller: one read for each such peer, charged once, before the first call. This
+  is the case of a stopped orphan, whose last statement is the reason for the read.
+- A node asks a peer only for the delegated descendant itself, or when that peer signed a
+  `child_bound` row of the `instance_ref` in a statement that it gave in the retention
+  (`SQLConnection.descendant_linked`). A ref that no peer linked is refused with no
+  call, and nobody pays. A caller that asks for refs that it made up costs the node
+  nothing. To reach a descendant below a delegated instance, read the statement of the
+  instance above it first: its `child_bound` rows name the ref and the node keeps them as
+  links.
+- This node counts the most that a peer may charge it for a read
+  (`statement_check.descendant_read_counts`) for its check of the charges on the peer. The
+  peer charges at most that.
 - The walk goes at most `ledger.MAX_DESCENDANT_DEPTH` levels (8) and looks at
   `ledger.MAX_DESCENDANT_ACCOUNTS` accounts (200). It looks at each account once, so a
   loop ends it. These limits apply to the chains of one node.
@@ -420,9 +432,19 @@ of the `RecursionGuard` ([`RECURSION_GUARD.md`](RECURSION_GUARD.md)) for them.
   grows as the number of peers to the power of the hops.
 - A node that gets 0 refuses. A node that gets 1 answers from its own chains and asks no
   peer. In both cases the caller gets UNIMPLEMENTED, and the read does not continue.
-- The read has no token. A loop through peers ends with the budget. Each node pays the
-  peers that it asks before it asks them, so the total cost is bounded as well. The
-  caller pays only the peers of the first node.
+- The read has no token. A loop through peers ends with the budget. Each node charges
+  the instance that is called for the peers that it asks before it asks them, so the
+  total cost is bounded as well.
+
+### Two peers for one descendant
+
+A peer can sign a statement for a ref that it does not hold, once it linked that ref. When
+more than one peer gives a statement of the same descendant, the node chooses the peer
+that linked the ref first (`descendant_peers.first_linked_ts`,
+`balance_statement.first_linked`): a ref cannot be linked before the chain that holds it
+has shown it. The tunnel does the same. If the dates are the same, or one peer has none,
+the node gives no statement (`More than one node below gave a statement of that
+descendant`) and no tunnel.
 
 ### Threat model
 
@@ -569,6 +591,30 @@ Cases that the tunnel does **not** cover:
   peer that it asked: that peer is answerable to it for the hops below.
 - The node of the ancestor reads the statement after the retention ended, or it deletes
   its hop records (`descendant_peers`) with the retention.
+
+## Known limits of this version
+
+These are decisions for the alpha. Each one is a known limit, not a defect that is hidden.
+
+- **`killed_with_mu` depends on the reason that the peer writes.** A peer that writes
+  `process_lost` is not scored, and the MU of the orphan stay with it. A later change
+  should judge by the MU: give the leftover of an orphan to the nearest live ancestor on
+  the node (or to the root client), and score any `stop` with leftover above 0 and
+  `lost = father_gone`.
+- **A relayed statement keeps only the last signature.** The signature of the node that
+  wrote the rows is not kept, so an ancestor can show a lie only against the first node
+  that it asked. Each node answers for the peers that it asks.
+- **The orphan pays each probe.** A `DescendantTunnel` costs the descendant
+  `TUNNEL_OPEN_MU` on each leg that holds its account. Frequent probes make the life of
+  the orphan shorter. Reads are paid by the called instance in the same way.
+- **A relay leg with no account is free.** A descendant below a peer has no account on a
+  node above that peer, so only the limits of the operator apply to that leg.
+- **A broken service looks like a missing one.** `maintenance_while_unreachable` is a local
+  judgement that cannot tell a VM that runs a service that does not listen from a VM that
+  is not there.
+- **Mixed versions.** A peer that does not know `instance_ref` in the statement (field 14)
+  cannot give the statement of a descendant. When that peer must answer, it is
+  `statement_inconsistent`.
 
 ## See also
 

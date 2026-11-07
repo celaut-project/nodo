@@ -115,7 +115,9 @@ simply had nothing to say.
 | `PERMISSION_DENIED` | No chain below the token links the descendant (`DescendantTunnel` only). |
 
 No message names a token, a peer or an internal address. These stay in the log of the
-node: the caller can be a service, and a service does not know nodes.
+node: the caller can be a service, and a service does not know nodes. The log of the
+node still shows the target of a direct tunnel as `label@ip:port` (`label` is the start of
+the `instance_ref`, never the token): the log is for the operator.
 
 ---
 
