@@ -272,11 +272,27 @@ apply. Give the bridge a zone of its own with just the gateway port:
 firewall-cmd --permanent --new-zone=nodo
 firewall-cmd --permanent --zone=nodo --add-interface=nodo-br-ch
 firewall-cmd --permanent --zone=nodo --add-port=<GATEWAY_PORT>/tcp
+firewall-cmd --permanent --zone=nodo --add-port=<PLAINTEXT_GATEWAY_PORT>/tcp
+firewall-cmd --permanent --zone=nodo --add-forward
 firewall-cmd --reload
 ```
 
+`--add-forward` (firewalld 1.0 or later) is what lets one guest reach another
+through the host: traffic between two interfaces of one zone is only forwarded when
+the zone says so.
+
 Prefer this over `trusted`, which would expose every port the host listens on to
 every guest.
+
+**You are told.** When the daemon starts and firewalld is running with no zone for
+the bridge, it writes `.forward_notice` beside `config.yaml` (with the commands
+above, ports filled in, in `.forward_notice.cmd`). That raises a
+`guest_forwarding_firewalld` alert in `nodo info` and the TUI, and `install.sh`
+prints the notice last. It is a heuristic read from `firewall-cmd`, not a probe: it
+says nothing when firewalld is stopped or its answer cannot be read, it is cleared
+by the next start once the bridge has a zone, and `sudo nodo doctor` clears it the
+moment a real guest-to-guest packet gets through. `nodo doctor` remains the
+authority, since a bridge in a zone can still be rejected by that zone's policy.
 
 Forwarded traffic that has been DNAT'd is accepted by firewalld regardless of
 zone, unless `StrictForwardPorts=yes` is set in `firewalld.conf`.

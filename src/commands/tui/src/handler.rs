@@ -454,6 +454,12 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         {
             app.docs_escape()
         }
+        // LEDGER likewise: Esc goes back from an open account to the list first.
+        (KeyModifiers::NONE, KeyCode::Esc)
+            if app.page() == Page::Ledger && app.ledger.open.is_some() =>
+        {
+            app.ledger_close();
+        }
         (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (KeyModifiers::NONE, KeyCode::Esc)
         | (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
@@ -497,6 +503,23 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 app.page(),
                 Page::Instances | Page::Tunnels | Page::Dead | Page::Packs | Page::Clients | Page::Energy | Page::Logs
             ) => {}
+        // LEDGER: Enter opens an account, `f` cycles the kind of movement, `d` expands
+        // the selected row's detail, `m` loads the next page. Esc closes an open
+        // account before it quits (see the arm above `quit`); `r` re-reads via the
+        // generic arm below.
+        (_, KeyCode::Enter) if app.page() == Page::Ledger => app.ledger_open(),
+        (KeyModifiers::NONE, KeyCode::Char('f')) if app.page() == Page::Ledger => {
+            app.ledger_cycle_kind()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Ledger => {
+            app.ledger_toggle_detail()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('m')) if app.page() == Page::Ledger => {
+            app.ledger_more()
+        }
+        (_, KeyCode::Backspace) if app.page() == Page::Ledger => {
+            app.ledger_close();
+        }
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
             app.toggle_instances_grouped()

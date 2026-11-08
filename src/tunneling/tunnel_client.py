@@ -48,11 +48,20 @@ def open_stream(
     outbound: Generator,
     channel: Optional[grpc.Channel] = None,
     expected_peer_id: Optional[str] = None,
+    instance_ref: str = "",
 ):
-    """Open a ServiceTunnel stream: handshake first, then ``outbound``'s payload."""
+    """Open a ServiceTunnel stream: handshake first, then ``outbound``'s payload.
+
+    With ``instance_ref``, ``token`` is the token of an ancestor, and the stream goes to
+    the descendant that ``instance_ref`` names (a ``DescendantTunnel``, #631).
+    """
 
     def with_handshake() -> Generator:
-        yield celaut_pb2.TokenMessage(token=token, slot=str(slot))
+        if instance_ref:
+            yield celaut_pb2.DescendantTunnel(
+                token=token, instance_ref=instance_ref, slot=str(slot))
+        else:
+            yield celaut_pb2.TokenMessage(token=token, slot=str(slot))
         yield from outbound
 
     return BeeClient.service_tunnel(

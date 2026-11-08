@@ -363,16 +363,25 @@ class BeeClient:
     @staticmethod
     def get_balance_statement(channel, client_id: str, token: str = "",
                               from_seq: int = 0, to_seq: int = 0,
-                              timeout: Optional[float] = None) -> Optional[celaut_pb2.BalanceStatement]:
+                              timeout: Optional[float] = None,
+                              instance_ref: str = "",
+                              remaining_hops: Optional[int] = None
+                              ) -> Optional[celaut_pb2.BalanceStatement]:
         """``Client & BalanceStatementRequest -> BalanceStatement`` (#570). ``token``
         names a child of the client; empty reads the account of the client. The range
-        is by seq: ``from_seq`` 0 asks only for the head, ``to_seq`` 0 for up to it."""
+        is by seq: ``from_seq`` 0 asks only for the head, ``to_seq`` 0 for up to it.
+        ``instance_ref`` asks for a descendant of that account instead (#631), with the
+        hop budget ``remaining_hops`` (None: the budget of the receiver)."""
+        request = celaut_pb2.BalanceStatementRequest(
+            token=token, from_seq=int(from_seq), to_seq=int(to_seq),
+            instance_ref=instance_ref,
+        )
+        if remaining_hops is not None:
+            request.remaining_hops = int(remaining_hops)
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetBalanceStatement,
             input=[
-                celaut_pb2.BalanceStatementRequest(
-                    token=token, from_seq=int(from_seq), to_seq=int(to_seq),
-                ),
+                request,
                 celaut_pb2.Client(client_id=client_id),
             ],
             indices_serializer=rpc_input("GetBalanceStatement"),

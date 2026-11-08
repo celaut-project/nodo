@@ -11,17 +11,31 @@
 
         --token  the instance token: each receipt must name this execution.
         --peer   the node: each receipt must be signed by this peer_id.
+        --statement <account>
+                 also check the receipts against the rows of that account of this node
+                 (a client_id, the name of an instance, or the start of its reference): the
+                 amounts must agree, and the digest of a ``close`` must be the one that a
+                 row holds. This is the check that the node uses on its peers
+                 (``src/identity/receipt_statement.py``).
 
-Read-only, and it needs nothing of the node: no database, no daemon, no network. A
-client checks receipts of a node that it does not run, so the check uses only the
-receipt and the public key in it (``execution_receipt.check_sequence``).
+    nodo receipt hops [--limit N] [--json]
+        The receipts that this node keeps of its peers, one for each descendant that it
+        reached through a ``DescendantTunnel``, and whether each one is valid.
+
+Without ``--statement``, ``verify`` is read-only and needs nothing of the node: no database,
+no daemon, no network. A client checks receipts of a node that it does not run, so the check
+uses only the receipt and the public key in it (``execution_receipt.check_sequence``).
 """
 import json
 from typing import Dict, List, Optional
 
 from src.commands import _catalogue as catalogue
 
-USAGE = "Usage: nodo receipt verify <file> [--token <instance token>] [--peer <peer_id>] [--json]"
+USAGE = (
+    "Usage: nodo receipt verify <file> [--token <instance token>] [--peer <peer_id>] "
+    "[--statement <account>] [--json]\n"
+    "       nodo receipt hops [--limit N] [--json]"
+)
 
 
 def _take(argv: List[str], flag: str) -> Optional[str]:
@@ -114,6 +128,7 @@ def verify_command(argv: List[str]) -> bool:
     try:
         token = _take(argv, "--token")
         peer_id = _take(argv, "--peer")
+        account = _take(argv, "--statement")
     except ValueError as e:
         return catalogue.emit_error(as_json, f"{e}. {USAGE}")
     if len(argv) != 1:
@@ -126,15 +141,56 @@ def verify_command(argv: List[str]) -> bool:
         return catalogue.emit_error(as_json, f"No receipt in {argv[0]}.")
 
     report = check_sequence(receipts, peer_id=peer_id, token=token)
+    if account is not None:
+        from src.commands import statement
+        against = _against_statement(statement, account, receipts, peer_id)
+        if isinstance(against, str):
+            return catalogue.emit_error(as_json, against)
+        report["statement"] = against
+        report["valid"] = bool(report["valid"] and against["valid"])
     if as_json:
         catalogue.emit_json(report)
     else:
         _print_report(report)
+        if "statement" in report:
+            statement.print_check(report["statement"])
     return report["valid"]
+
+
+def _against_statement(statement, account: str, receipts, peer_id):
+    """The check of ``receipts`` against the rows of ``account``, or a text that says why
+    it cannot be made."""
+    connection = statement._open()
+    try:
+        try:
+            found = statement.resolve(connection, account)
+        except statement.Ambiguous as e:
+            return str(e)
+        if found is None:
+            return f"No account {account!r} on this node."
+        return statement.check_receipts(connection, found["_id"], receipts, peer_id=peer_id)
+    finally:
+        connection.close()
+
+
+def hops_command(argv: List[str]) -> bool:
+    from src.commands import statement
+
+    argv = list(argv)
+    as_json = "--json" in argv and not argv.remove("--json")
+    try:
+        limit = catalogue.take_limit(argv, statement.DEFAULT_ACCOUNTS)
+    except ValueError as e:
+        return catalogue.emit_error(as_json, f"{e} {USAGE}")
+    if catalogue.positionals(argv):
+        return catalogue.emit_error(as_json, USAGE)
+    return statement._hops(limit, as_json)
 
 
 def receipt_command(argv: List[str]) -> bool:
     if argv and argv[0] == "verify":
         return verify_command(argv[1:])
+    if argv and argv[0] == "hops":
+        return hops_command(argv[1:])
     as_json = "--json" in argv
     return catalogue.emit_error(as_json, USAGE)

@@ -118,9 +118,17 @@ def _scan_dead_instances(dry_run: bool, prune_all: bool) -> Tuple[List[str], Lis
         sc = SQLConnection()
         days = dead_instances.retention_days()
         rows = dead_instances.retention_max_rows()
+        # The saved logs go by the policy of the dead instances. The row of an instance
+        # stays while its account has movements: it is how an ancestor reaches the
+        # statement (the sweep of the node does the same). ``--all`` deletes every row.
         local = sc.prune_dead_local_instances(
-            max_age_days=days, max_rows=rows, dry_run=dry_run, delete_all=prune_all
+            max_age_days=days, max_rows=rows, dry_run=True, delete_all=prune_all,
+            keep_statements=False,
         )
+        if not dry_run:
+            sc.prune_dead_local_instances(
+                max_age_days=days, max_rows=rows, delete_all=prune_all
+            )
         delegated = sc.prune_dead_delegated_instances(
             max_age_days=days, max_rows=rows, dry_run=dry_run, delete_all=prune_all
         )
@@ -198,7 +206,7 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
         )
         _print_entries("Kept:", kept_failures, verb="kept")
         if dead_count:
-            print(f"\nDead instances ({dead_count} would be deleted with their saved logs).")
+            print(f"\nDead instances ({dead_count} would have their saved logs removed).")
         print(f"\nDry run: {format_size(total)} would be freed. Nothing was removed.")
         return
 
@@ -217,7 +225,8 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
         from src.utils import dead_instances
 
         dead_instances.remove_dirs(dead_local)
-        print(f"\nDead instances: deleted {dead_count} with their saved logs.")
+        print(f"\nDead instances: removed the saved logs of {dead_count}. A row stays while "
+              "its account has movements in the ledger, unless --all.")
 
     freed_runtimes = _print_entries("Orphaned runtime directories:", runtimes, verb="removed")
     freed_failures = _print_entries("Preserved launch failures:", failures, verb="removed")

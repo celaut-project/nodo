@@ -458,9 +458,23 @@ def _can_pay_a_tick(token: str, balance_mu: int, scarcity=None) -> bool:
     """
     if ALLOW_DEBT:
         return True
+    charge_mu = tick_price_mu(token, scarcity)
+    if charge_mu is None:
+        return False
+    return int(balance_mu) >= int(charge_mu)
+
+
+def tick_price_mu(token: str, scarcity=None) -> Optional[int]:
+    """The price of the next maintenance tick of ``token``, at ``scarcity`` (None: the
+    scarcity now). None when the node cannot price it.
+
+    ``_can_pay_a_tick`` compares the balance with it. The ``stop`` row of an instance
+    that stops ``out_of_balance`` gives it (``detail.tick``), so an ancestor that reads
+    the statement knows that the leftover could not pay the tick (#631).
+    """
     try:
         sys_req = sc.get_sys_req(id=token)
-        charge_mu = compute_maintenance_cost(
+        return int(compute_maintenance_cost(
             system_resources=celaut.Sysresources(
                 mem_limit=sys_req['mem_limit'] or 0,
                 disk_space=sys_req['disk_space'] or 0,
@@ -471,11 +485,10 @@ def _can_pay_a_tick(token: str, balance_mu: int, scarcity=None) -> bool:
             scarcity=scarcity,
             arch=_row_arch(sys_req),
             launch_bp=_row_launch_bp(sys_req),
-        )
+        ))
     except Exception as e:
         log.LOGGER(f"Could not price a tick for {token}: {e}")
-        return False
-    return int(balance_mu) >= int(charge_mu)
+        return None
 
 
 def revive_backoff_seconds(failures: int) -> float:
@@ -2126,9 +2139,12 @@ def sweep_dead_instances(force: bool = False) -> int:
     try:
         days = dead_instances.retention_days()
         max_rows = dead_instances.retention_max_rows()
+        # The archive directory goes by the policy of the dead instances. The row stays
+        # while its account has movements: it is how an ancestor reaches the statement.
+        dead_instances.remove_dirs(sc.prune_dead_local_instances(
+            max_age_days=days, max_rows=max_rows, dry_run=True, keep_statements=False))
         local_ids = sc.prune_dead_local_instances(max_age_days=days, max_rows=max_rows)
         delegated_tokens = sc.prune_dead_delegated_instances(max_age_days=days, max_rows=max_rows)
-        dead_instances.remove_dirs(local_ids)
         # Keep the directories of the dead rows that remain. The rest have no row.
         kept = {row['id'] for row in sc.get_dead_local_instances()}
         dead_instances.sweep_orphan_dirs(kept)
@@ -2157,11 +2173,16 @@ def sweep_balance_movements(force: bool = False) -> int:
     _last_ledger_sweep = now
     try:
         deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
-        sc.prune_statement_faults(max_age_days=ledger.retention_days())
-        sc.prune_start_attempts(max_age_days=ledger.retention_days())
-        sc.prune_start_refs(max_age_days=ledger.retention_days())
-        sc.prune_top_up_reservations(max_age_seconds=ledger.retention_days() * 86400)
-        sc.sweep_failed_statement_reads(max_age_days=ledger.retention_days())
+        # What is tied to a statement (the faults that it showed, the links and heads of
+        # its descendants) goes with the statement: with a retention of 0 nothing goes,
+        # or the same fault would be scored again when the statement is read again.
+        if ledger.retention_days():
+            sc.prune_statement_faults(max_age_days=ledger.retention_days())
+            sc.prune_descendant_tunnels(max_age_days=ledger.retention_days())
+        sc.prune_start_attempts(max_age_days=ledger.housekeeping_days())
+        sc.prune_start_refs(max_age_days=ledger.housekeeping_days())
+        sc.prune_top_up_reservations(max_age_seconds=ledger.housekeeping_days() * 86400)
+        sc.sweep_failed_statement_reads(max_age_days=ledger.housekeeping_days())
         if deleted:
             log.LOGGER(f"Retention sweep deleted {deleted} balance movement(s).")
         return deleted

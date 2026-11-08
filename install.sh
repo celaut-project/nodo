@@ -813,3 +813,12 @@ GATEWAY_NOTICE="$TARGET_DIR/.gateway_notice"
 if [ -s "$GATEWAY_NOTICE" ]; then
   cat "$GATEWAY_NOTICE"
 fi
+
+# Same reasoning for guests that cannot reach each other: firewalld rejects the
+# guest bridge's traffic, nothing on the node looks wrong, and the only symptom is
+# a service whose dependencies look dead. The daemon writes this at start, so it
+# is only here if the restart above got that far; 'nodo info' shows it otherwise.
+FORWARD_NOTICE="$TARGET_DIR/.forward_notice"
+if [ -s "$FORWARD_NOTICE" ]; then
+  cat "$FORWARD_NOTICE"
+fi

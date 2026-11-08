@@ -360,6 +360,10 @@ def local_execution(
     # call -- so what it needs to remember is "was it called, and with which id",
     # not a collection.
     registered_id: Optional[str] = None
+    # The start receipt of each id that was registered. It is signed before the row of the
+    # start is written, so that the row holds its digest (#419), and it is the one that the
+    # answer gives.
+    start_receipts: dict = {}
 
     def _register_instance(
             vmachine_id: str,
@@ -367,6 +371,9 @@ def local_execution(
             resolved_resources: celaut_pb2.Sysresources,
     ) -> None:
         nonlocal registered_id
+        start_receipts[vmachine_id] = _start_receipt(
+            token=vmachine_id, service_id=service_id, config=config, initial_mu=initial_mu,
+        )
         # Disk follows the resolved figure: the manifest has to declare it, but what
         # gets persisted is the size of the image the virtualizer actually handed the
         # instance, which is >= the declared one once the build's floors and mkfs
@@ -404,7 +411,8 @@ def local_execution(
             # names the execution as its receipt does (#419).
             movements=(
                 ledger.Movement(ledger.START, initial_mu,
-                                detail=execution_cause(vmachine_id)),
+                                detail=execution_cause(vmachine_id,
+                                                       start_receipts[vmachine_id])),
                 ledger.Movement(ledger.BUILD, -build_mu),
             ),
         )
@@ -536,20 +544,25 @@ def local_execution(
         token=vmachine_id,
         instance=instance
     )
-    receipt = _start_receipt(
-        token=vmachine_id, service_id=service_id, config=config, initial_mu=initial_mu,
-    )
+    receipt = start_receipts.get(vmachine_id)
     if receipt is not None:
         service_instance.receipt.CopyFrom(receipt)
     return service_instance
 
 
-def execution_cause(token: str) -> Optional[dict]:
+def execution_cause(token: str, receipt=None) -> Optional[dict]:
     """The cause of the ``start`` movement of ``token``: its execution name (#419), the
-    name that its receipts carry. None if this node has no identity key."""
+    name that its receipts carry, and with ``receipt`` the digest of the signed ``start``
+    receipt, so that the signed chain commits to the signed receipt. None if this node has
+    no identity key."""
     from src.identity import execution_receipt
     name = execution_receipt.node_execution_name(token)
-    return {"execution_name": name} if name else None
+    if not name:
+        return None
+    cause = {"execution_name": name}
+    if receipt is not None:
+        cause["receipt_digest"] = execution_receipt.receipt_digest(receipt)
+    return cause
 
 
 def _start_receipt(token: str, service_id: Optional[str],

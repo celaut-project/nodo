@@ -274,10 +274,54 @@ def preflight() -> ipaddress.IPv4Network:
     # a node that still boots guests. What must not happen is booting them while
     # claiming the network is fine: 'nodo doctor' settles that with a real packet.
     _ensure_forward_compat()
+    _report_firewalld_zone()
     ensure_masquerade(network)
     ensure_guest_ipv6_drop()
 
     return network
+
+
+def _report_firewalld_zone() -> None:
+    """Tell the operator when firewalld has no zone for the guest bridge.
+
+    ``_ensure_forward_compat`` cannot help here and used to stop at a line in
+    ``app.log``: firewalld's own table rejects forwarded traffic by zone, and an
+    interface in no zone falls to the default one. The result is guests that cannot
+    reach each other, reported by their parents as dead children. This raises the
+    same operator notice the gateway port does, so it reaches ``nodo info``, the
+    TUI and the installer. It is a heuristic (``nodo doctor`` sends the real packet
+    and is the authority); see ``src/utils/firewall/firewalld_bridge.py``.
+
+    Never raises and never fatal: it is advice about the host, not a requirement.
+    """
+    try:
+        from src.utils.firewall import firewalld_bridge as fwd
+
+        manager = ConfigManager()
+        zone = fwd.bridge_zone(NETWORK_BRIDGE_NAME)
+        if not zone.unzoned:
+            # Fixed, not running, or unreadable: nothing to say. A stale notice goes
+            # only when the answer is conclusive -- an unreadable one proves nothing.
+            if not zone.running or zone.readable:
+                manager.clear_forward_notice()
+            return
+
+        ports = []
+        for read in (manager.gateway_port_or_none, manager.get_plaintext_gateway_port):
+            try:
+                port = read()
+            except Exception:
+                continue
+            if isinstance(port, int) and port > 0 and port not in ports:
+                ports.append(port)
+        commands = fwd.zone_commands(NETWORK_BRIDGE_NAME, ports)
+        manager.emit_forward_notice(
+            fwd.notice_title(NETWORK_BRIDGE_NAME),
+            fwd.notice_body(NETWORK_BRIDGE_NAME, commands),
+            command=fwd.one_line(commands),
+        )
+    except Exception as e:
+        log.LOGGER(f"[FW] Could not evaluate the firewalld zone of the guest bridge: {e}")
 
 
 def _ensure_forward_compat() -> None:

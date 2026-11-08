@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "6802645be502c180fbcfa6503ac474e72ba925f19ed17222c20d07c72df2788a",
+  "celaut_proto": "73f05c42df56690871cb653221bac9ff965c44c46a2e91de494d722300e625ee",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.ON_CLOSE",
@@ -112,6 +112,8 @@
     "instances.MAX_SUSPENDED_PER_FATHER",
     "instances.REVIVE_FAILURE_GRACE_SECONDS",
     "instances.SUSPENDED_GRACE_SECONDS",
+    "ledger.MAX_DESCENDANT_ACCOUNTS",
+    "ledger.MAX_DESCENDANT_DEPTH",
     "ledger.MAX_STATEMENT_PAGES_PER_TICK",
     "ledger.MAX_STATEMENT_ROWS",
     "ledger.MIN_PEER_RETENTION_DAYS",
@@ -267,6 +269,8 @@
     "routing.tor.ENABLED",
     "routing.tor.LEDGER_VIA_TOR",
     "routing.tor.SERVICE_EGRESS",
+    "service_networks.ALLOW_PRIVATE_PEER_ADDRESSES",
+    "service_networks.ASK_PEERS",
     "service_networks.blacklist",
     "service_networks.default_instances",
     "service_networks.whitelist",
@@ -326,6 +330,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "204afe472abc77bc3239fa6ff52d49b0b7a8a07fa06c85486cccd7621cf7fcbd",
+  "database": "efc20eb3fd184b638aed16265438731215ed7c43be7143802b8fbc6c4d2a7678",
   "storage_format": 1
 }

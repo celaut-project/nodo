@@ -521,7 +521,9 @@ class DelegatedStartReceiptTests(unittest.TestCase):
         movements = sql_connection.return_value.add_delegated_instance.call_args.kwargs["movements"]
         start = [m for m in movements if m.kind == "start"][0]
         self.assertEqual(start.amount_mu, 1_000_000)
-        self.assertEqual(start.detail, {"execution_name": receipt.execution_name})
+        # The row holds the digest of the receipt that the client got (#419).
+        self.assertEqual(start.detail, {"execution_name": receipt.execution_name,
+                                        "receipt_digest": er.receipt_digest(receipt)})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -568,6 +570,11 @@ class StartReceiptTests(unittest.TestCase):
         with _node_identity():
             self.assertEqual(le.execution_cause(TOKEN),
                              {"execution_name": er.execution_name(TOKEN, _peer_id())})
+            receipt = le._start_receipt(token=TOKEN, service_id="ab" * 32,
+                                        config=celaut_pb2.Configuration(), initial_mu=5)
+            self.assertEqual(le.execution_cause(TOKEN, receipt), {
+                "execution_name": er.execution_name(TOKEN, _peer_id()),
+                "receipt_digest": er.receipt_digest(receipt)})
         with mock.patch.object(er, "node_peer_id", return_value=None):
             self.assertIsNone(le.execution_cause(TOKEN))
 

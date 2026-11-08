@@ -190,6 +190,15 @@ _ACCOUNT_TABLES = (
 )
 
 
+# The same, with the dead ones: a stopped instance keeps its account and its chain until
+# the retention ends, and a reader of its statement may need them.
+_ACCOUNT_TABLES_WITH_DEAD = (
+    ("clients", "id = ?"),
+    ("local_instances", "id = ?"),
+    ("delegated_instances", "id = ?"),
+)
+
+
 # What a payment row was *for*. NULL means an ordinary payment: a deposit a client
 # paid us, or one we paid a peer. `status` is orthogonal and still says how far it got.
 PAYMENT_PURPOSE_DONATION = "donation"
@@ -448,11 +457,11 @@ class SQLConnection(metaclass=Singleton):
 
     def _move(self, cursor, account_id: str, amount_mu: int, kind: str, *,
               allow_debt: bool = True, instance_token: Optional[str] = None,
-              detail: Optional[Mapping] = None) -> Optional[int]:
+              detail: Optional[Mapping] = None, write_zero: bool = False) -> Optional[int]:
         """Add ``amount_mu`` (signed) to the balance of ``account_id``, with its row.
 
         Returns the seq of the row, or None for an amount of 0: nothing moved, so
-        nothing is written. Raises ``NoSuchAccount``, or ``InsufficientBalance`` for a
+        nothing is written, unless ``write_zero`` asks for a row that only says something. Raises ``NoSuchAccount``, or ``InsufficientBalance`` for a
         charge that leaves the balance below 0 when ``allow_debt`` is off.
         """
         amount_mu = int(amount_mu)
@@ -465,7 +474,7 @@ class SQLConnection(metaclass=Singleton):
                 break
         else:
             raise ledger.NoSuchAccount(account_id)
-        if amount_mu == 0:
+        if amount_mu == 0 and not write_zero:
             return None
         balance_mu = _balance_of(row['balance_mu']) + amount_mu
         if amount_mu < 0 and balance_mu < 0 and not allow_debt:
@@ -507,6 +516,19 @@ class SQLConnection(metaclass=Singleton):
             instance_token=instance_token, detail=detail,
         ))
 
+    def record_tunnel_close(self, account_id: str, detail: Mapping) -> Optional[int]:
+        """Write the row that anchors the ``close`` receipt of a tunnel stream (#419).
+
+        The row moves nothing: its ``detail`` holds the digest of the receipt. Returns its
+        seq, or None when there is no live account of that id (the stream is paid by
+        none, or the account stopped).
+        """
+        try:
+            return self._transaction(lambda cursor: self._move(
+                cursor, account_id, 0, ledger.TUNNEL, detail=detail, write_zero=True))
+        except ledger.NoSuchAccount:
+            return None
+
     def transfer(self, source_id: str, target_id: str, amount_mu: int, kind: str, *,
                  child: str, allow_debt: bool = False) -> None:
         """Move ``amount_mu`` from one account to another: two rows, one transaction.
@@ -533,14 +555,21 @@ class SQLConnection(metaclass=Singleton):
             self._append_movement(cursor, account_id, int(movement.amount_mu), balance_mu,
                                   movement.kind, movement.instance_token, movement.detail)
 
-    def bind_child(self, account_id: str, starts_seq: int, instance_token: str) -> int:
+    def bind_child(self, account_id: str, starts_seq: int, instance_token: str,
+                   service_id: Optional[str] = None) -> int:
         """Say that the child of a ``child_start`` exists: write a ``child_bound`` row.
 
         A start charges the father before the child exists, and a row is never
         changed, so the child comes in a row of its own: it moves nothing, names the
         child by ``instance_ref`` and the ``child_start`` by ``detail.starts_seq``.
+        ``service_id`` (hex) goes in ``detail.service_id``: a reader of the statement of
+        an ancestor knows which API each descendant has (#631).
         Returns the seq of the new row.
         """
+        detail = {"starts_seq": str(int(starts_seq))}
+        if service_id:
+            detail["service_id"] = str(service_id)
+
         def work(cursor):
             row = cursor.execute(
                 'SELECT balance_after_mu FROM balance_movements WHERE account_id = ? '
@@ -550,19 +579,26 @@ class SQLConnection(metaclass=Singleton):
                 raise ledger.NoSuchAccount(account_id)
             return self._append_movement(
                 cursor, account_id, 0, _balance_of(row['balance_after_mu']), ledger.CHILD_BOUND,
-                instance_token=instance_token, detail={"starts_seq": str(int(starts_seq))},
+                instance_token=instance_token, detail=detail,
             )
 
         return self._transaction(work)
 
     def settle_stop(self, account_id: str, reason: str, *, delegated: bool = False,
-                    father_id: Optional[str] = None, credit: bool = True) -> Optional[int]:
+                    father_id: Optional[str] = None, credit: bool = True,
+                    tick_mu: Optional[int] = None) -> Optional[int]:
         """Settle a stopped instance in one transaction: refund, then mark it dead.
 
         What the instance has left goes back to its father, and the instance dies, as
         one fact. The balance is read inside the transaction, so a charge of a tick or a
         tunnel that lands meanwhile is either before it (and the father gets less) or
         after the death (and is refused): no MU are made out of a stale read.
+
+        The chain of the instance ends with a ``stop`` row (amount 0): its
+        ``detail.reason`` is ``reason``, and ``detail.leftover`` is the leftover.
+        ``tick_mu`` (an instance stopped ``out_of_balance``) goes in ``detail.tick``: the
+        price of the maintenance tick that the instance could not pay. A reader then
+        knows that a leftover below it is not a fault (#631).
 
         Two rows when the father gets the leftover: a negative ``refund`` on the
         instance, a positive one on the father, who names the instance. The instance
@@ -600,6 +636,15 @@ class SQLConnection(metaclass=Singleton):
                 if father_exists:
                     self._move(cursor, father_id, leftover, ledger.REFUND,
                                instance_token=account_id)
+            # The last row of the chain: the cause and the balance that stays. It moves
+            # nothing, so no reader counts it as a charge.
+            stop_detail = {"reason": str(reason), "leftover": str(leftover)}
+            if tick_mu is not None:
+                stop_detail["tick"] = str(int(tick_mu))
+            self._append_movement(
+                cursor, account_id, 0, _balance_of(row['balance_mu']) - leftover,
+                ledger.STOP, detail=stop_detail,
+            )
             cursor.execute(
                 f'UPDATE {table} SET killed_at = CURRENT_TIMESTAMP, death_reason = ? WHERE {where}',
                 (reason, account_id),
@@ -618,8 +663,8 @@ class SQLConnection(metaclass=Singleton):
         return self._transaction(lambda cursor: self._account_exists(cursor, account_id))
 
     @staticmethod
-    def _account_exists(cursor, account_id: str) -> bool:
-        for table, where in _ACCOUNT_TABLES:
+    def _account_exists(cursor, account_id: str, with_dead: bool = False) -> bool:
+        for table, where in (_ACCOUNT_TABLES_WITH_DEAD if with_dead else _ACCOUNT_TABLES):
             if cursor.execute(f'SELECT 1 FROM {table} WHERE {where}', (account_id,)).fetchone():
                 return True
         return False
@@ -639,8 +684,11 @@ class SQLConnection(metaclass=Singleton):
     def balance_statement(self, account_id: str, payer_id: str, *, from_seq: int = 0,
                           to_seq: int = 0, max_rows: int = 0,
                           price: Callable[[int], int] = lambda rows: 0,
-                          allow_debt: bool = True) -> dict:
+                          allow_debt: bool = True, with_dead: bool = False) -> dict:
         """Charge ``payer_id`` for a statement of ``account_id`` and read it, in one go.
+
+        ``with_dead`` lets the read reach an instance that has stopped. Its chain ends
+        with the ``stop`` row, and its balance is the one that stays after the refund.
 
         The rows are those with a seq from ``from_seq`` (0: none, only the head of the
         account) to ``to_seq`` (0: up to the head), in ascending order, and never more
@@ -661,7 +709,7 @@ class SQLConnection(metaclass=Singleton):
         """
         def work(cursor):
             now = int(time.time())
-            if not self._account_exists(cursor, account_id):
+            if not self._account_exists(cursor, account_id, with_dead):
                 raise ledger.NoSuchAccount(account_id)
             columns = ('seq, ts, amount_mu, balance_after_mu, kind, instance_ref, detail, '
                        'prev_hash, hash')
@@ -702,7 +750,8 @@ class SQLConnection(metaclass=Singleton):
             oldest = cursor.execute(
                 'SELECT MIN(seq) FROM balance_movements WHERE account_id = ?', (account_id,)
             ).fetchone()[0] or 0
-            for table, where_account in _ACCOUNT_TABLES:
+            for table, where_account in (
+                    _ACCOUNT_TABLES_WITH_DEAD if with_dead else _ACCOUNT_TABLES):
                 balance_row = cursor.execute(
                     f'SELECT balance_mu FROM {table} WHERE {where_account}', (account_id,)
                 ).fetchone()
@@ -715,34 +764,144 @@ class SQLConnection(metaclass=Singleton):
 
         return self._transaction(work)
 
+    def find_descendant(self, root_id: str, wanted_ref: str, max_depth: int,
+                        max_accounts: int) -> dict:
+        """Look for the account that ``wanted_ref`` names below ``root_id``.
+
+        ``wanted_ref`` is an ``instance_ref``. The walk goes down only through the
+        ``child_bound`` rows of the chain of each account: a child that its father never
+        bound is not a descendant. It goes one level at a time, and it looks at an
+        account once, so a loop in the data ends it. It stops at ``max_depth`` levels
+        and at ``max_accounts`` accounts. Stopped instances are part of the walk.
+
+        Returns ``{"found": row or None, "asked": [rows]}``. A row has ``id``,
+        ``kind`` ("local" or "delegated"), ``alive``, ``killed_at``, ``service_id``,
+        ``token_delegation`` and ``peer_id`` (the last two for a delegated instance
+        only). ``asked`` holds the
+        delegated instances, live or stopped, met on the way, when ``found`` is None: the node has
+        no chain below them, and their peers may.
+        """
+        seen = {root_id}
+        level = [root_id]
+        asked: List[dict] = []
+        for _ in range(int(max_depth)):
+            next_level: List[str] = []
+            for account in level:
+                children = self._children_by_ref(account)
+                for (ref,) in self._execute(
+                    'SELECT DISTINCT instance_ref FROM balance_movements '
+                    'WHERE account_id = ? AND kind = ? AND instance_ref IS NOT NULL',
+                    (account, ledger.CHILD_BOUND),
+                ).fetchall():
+                    child = children.get(ref)
+                    if child is None or child["id"] in seen:
+                        continue
+                    if ref == wanted_ref:
+                        return {"found": child, "asked": []}
+                    if len(seen) >= int(max_accounts):
+                        return {"found": None, "asked": asked}
+                    seen.add(child["id"])
+                    if child["kind"] == "delegated":
+                        # A stopped delegated child can still hold descendants on its peer.
+                        asked.append(child)
+                    else:
+                        next_level.append(child["id"])
+            level = next_level
+            if not level:
+                break
+        return {"found": None, "asked": asked}
+
+    @staticmethod
+    def _local_row(row) -> dict:
+        return {"id": row['id'], "kind": "local", "alive": row['killed_at'] is None,
+                "killed_at": row['killed_at'], "service_id": row['service_id']}
+
+    @staticmethod
+    def _delegated_row(row) -> dict:
+        return {"id": row['id'], "kind": "delegated", "alive": row['killed_at'] is None,
+                "killed_at": row['killed_at'], "service_id": row['service_id'],
+                "token_delegation": row['token_delegation'], "peer_id": row['peer_id']}
+
+    def _children_by_ref(self, father_id: str) -> Dict[str, dict]:
+        """The instances of ``father_id``, live or stopped, by their ``instance_ref``."""
+        children: Dict[str, dict] = {}
+        for row in self._execute(
+                'SELECT id, killed_at, service_id FROM local_instances WHERE father_id = ?',
+                (father_id,)):
+            children[ledger.instance_ref(row['id'])] = self._local_row(row)
+        for row in self._execute(
+                'SELECT id, killed_at, service_id, token_delegation, peer_id '
+                'FROM delegated_instances WHERE father_id = ?', (father_id,)):
+            children[ledger.instance_ref(row['id'])] = self._delegated_row(row)
+        return children
+
+    def get_delegated_instance_by_alias(self, alias: str,
+                                        with_dead: bool = False) -> Optional[dict]:
+        """A delegated instance by the alias its father holds: ``id``, ``kind``,
+        ``alive``, ``killed_at``, ``service_id``, ``token_delegation`` and ``peer_id``.
+        It answers for a live instance, and with ``with_dead`` also for one that
+        stopped. None when there is none."""
+        row = self._execute(
+            'SELECT id, killed_at, service_id, token_delegation, peer_id '
+            'FROM delegated_instances WHERE id = ?'
+            + ('' if with_dead else ' AND killed_at IS NULL'), (alias,)).fetchone()
+        return None if row is None else self._delegated_row(row)
+
+    def get_instance_row(self, instance_id: str) -> Optional[dict]:
+        """A local or a delegated instance of this node, live or stopped, by the token
+        that its father holds, as ``find_descendant`` gives a row. None for any other id."""
+        row = self._execute(
+            'SELECT id, killed_at, service_id FROM local_instances WHERE id = ?',
+            (instance_id,)).fetchone()
+        if row is not None:
+            return self._local_row(row)
+        return self.get_delegated_instance_by_alias(instance_id, with_dead=True)
+
     def delegated_account_exists(self, account_id: str) -> bool:
         """Whether ``account_id`` is a live instance that this node delegated to a peer."""
         return self._execute(
             'SELECT 1 FROM delegated_instances WHERE id = ? AND killed_at IS NULL', (account_id,)
         ).fetchone() is not None
 
-    def prune_balance_movements(self, max_age_days: int) -> int:
-        """Delete the rows older than ``max_age_days``. Returns how many.
+    # The accounts whose rows are never deleted: a client, an instance that lives, and every
+    # father, at any depth, of an instance that lives. A father that is dead stays while
+    # anything below it lives, because an ancestor can ask for the statement of a
+    # descendant at any time (#631). ``UNION`` ends a loop in the data.
+    _PROTECTED_ACCOUNTS = '''
+        WITH RECURSIVE instances (id, father_id, alive) AS (
+            SELECT id, father_id, killed_at IS NULL FROM local_instances
+            UNION ALL
+            SELECT id, father_id, killed_at IS NULL FROM delegated_instances
+        ), protected (id) AS (
+            SELECT id FROM clients
+            UNION
+            SELECT id FROM instances WHERE alive
+            UNION
+            SELECT instances.father_id FROM instances
+            JOIN protected ON instances.id = protected.id
+            WHERE instances.father_id IS NOT NULL
+        )
+    '''
 
-        The last row of a live account stays, whatever its age: the next row counts its
-        seq from it and hangs from its hash, and a seq that went back to 1 would read as
-        a ledger that lost its history.
+    def prune_balance_movements(self, max_age_days: int) -> int:
+        """Delete the rows of the dead accounts that stopped more than ``max_age_days`` ago.
+        Returns how many. 0 or less deletes nothing: the statements are kept for ever.
+
+        An account is deleted whole, never in part, so a statement that is kept always
+        starts at its first row. It goes only when it is dead, nothing that lives hangs
+        below it at any depth, and its last row is older than the limit.
         """
+        if int(max_age_days) <= 0:
+            return 0
         cutoff = int(time.time()) - int(max_age_days) * 86400
-        cursor = self._execute('''
+        cursor = self._execute(self._PROTECTED_ACCOUNTS + '''
             DELETE FROM balance_movements
-            WHERE ts < ?
-              AND NOT (
-                seq = (SELECT MAX(m.seq) FROM balance_movements m
-                       WHERE m.account_id = balance_movements.account_id)
-                AND (
-                  account_id IN (SELECT id FROM clients)
-                  OR account_id IN (SELECT id FROM local_instances WHERE killed_at IS NULL)
-                  OR account_id IN (SELECT id FROM delegated_instances WHERE killed_at IS NULL)
-                )
-              )
+            WHERE account_id NOT IN (SELECT id FROM protected)
+              AND account_id IN (SELECT account_id FROM balance_movements
+                                 GROUP BY account_id HAVING MAX(ts) < ?)
         ''', (cutoff,))
-        return cursor.rowcount
+        # ``rowcount`` is -1 for a statement that starts with WITH.
+        return int(self._execute('SELECT changes()').fetchone()[0])
 
     # Client Methods
 
@@ -1586,7 +1745,8 @@ class SQLConnection(metaclass=Singleton):
         return dict(row) if row else None
 
     def prune_dead_local_instances(
-        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False,
+        keep_statements: bool = True,
     ) -> List[str]:
         """Delete the old dead local instances. Return the ids that were deleted.
 
@@ -1594,9 +1754,13 @@ class SQLConnection(metaclass=Singleton):
         ``max_rows`` dead rows exist (the oldest go first). A value of 0 or less
         turns that limit off. With ``delete_all``, every dead row goes. With
         ``dry_run``, nothing is deleted and the ids that would go are returned.
+
+        A row whose account still has movements stays (``keep_statements``), except with
+        ``delete_all``: the row is how an ancestor reaches the statement (#631).
         """
         return self._prune_dead_rows(
-            'local_instances', 'id', max_age_days, max_rows, dry_run, delete_all
+            'local_instances', 'id', max_age_days, max_rows, dry_run, delete_all,
+            account_key='id', keep_statements=keep_statements
         )
 
     def purge_internal(self, id: str):
@@ -2769,12 +2933,14 @@ class SQLConnection(metaclass=Singleton):
     # remote peer knows it); `id` holds our hashed alias of it. There is no
     # `token` column, and the payload column is `serialized_instance`.
 
-    def father_of(self, account_id: str) -> Optional[str]:
+    def father_of(self, account_id: str, with_dead: bool = False) -> Optional[str]:
         """The father of a live instance of this node, by the token its father holds:
-        a local instance, or the alias of a delegated one. None for any other id."""
+        a local instance, or the alias of a delegated one. None for any other id.
+        ``with_dead`` also answers for an instance that stopped, while its row stays."""
         for table in ("local_instances", "delegated_instances"):
             row = self._execute(
-                f'SELECT father_id FROM {table} WHERE id = ? AND killed_at IS NULL',
+                f'SELECT father_id FROM {table} WHERE id = ?'
+                + ('' if with_dead else ' AND killed_at IS NULL'),
                 (account_id,),
             ).fetchone()
             if row is not None:
@@ -3032,18 +3198,27 @@ class SQLConnection(metaclass=Singleton):
         return [dict(row) for row in result.fetchall()]
 
     def prune_dead_delegated_instances(
-        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False,
+        keep_statements: bool = True,
     ) -> List[str]:
-        """Delete the old dead delegated instances. Return the tokens deleted."""
+        """Delete the old dead delegated instances. Return the tokens deleted. A row whose
+        account (the alias) still has movements stays, as for a local instance."""
         return self._prune_dead_rows(
-            'delegated_instances', 'token_delegation', max_age_days, max_rows, dry_run, delete_all
+            'delegated_instances', 'token_delegation', max_age_days, max_rows, dry_run, delete_all,
+            account_key='id', keep_statements=keep_statements
         )
 
     def _prune_dead_rows(
         self, table: str, key: str, max_age_days: int, max_rows: int,
         dry_run: bool = False, delete_all: bool = False,
+        account_key: str = 'id', keep_statements: bool = False,
     ) -> List[str]:
-        """Delete dead rows of ``table`` by age and by count. Return the deleted keys."""
+        """Delete dead rows of ``table`` by age and by count. Return the deleted keys.
+
+        With ``keep_statements``, a row whose ``account_key`` still has movements in the
+        ledger is not deleted by age or by count."""
+        kept = (f" AND {account_key} NOT IN (SELECT DISTINCT account_id FROM balance_movements)"
+                if keep_statements else "")
         doomed: List[str] = []
         if delete_all:
             result = self._execute(f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL")
@@ -3054,13 +3229,13 @@ class SQLConnection(metaclass=Singleton):
         if max_age_days and max_age_days > 0:
             result = self._execute(
                 f"SELECT {key} FROM {table} "
-                f"WHERE killed_at IS NOT NULL AND killed_at < datetime('now', ?)",
+                f"WHERE killed_at IS NOT NULL AND killed_at < datetime('now', ?){kept}",
                 (f"-{int(max_age_days)} days",),
             )
             doomed.extend(row[0] for row in result.fetchall())
         if max_rows and max_rows > 0:
             result = self._execute(
-                f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL "
+                f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL{kept} "
                 f"ORDER BY killed_at DESC, {key} LIMIT -1 OFFSET ?",
                 (int(max_rows),),
             )
@@ -4021,6 +4196,161 @@ class SQLConnection(metaclass=Singleton):
         cutoff = int(time.time()) - int(max_age_days) * 86400
         return self._execute(
             'DELETE FROM statement_faults WHERE ts < ?', (cutoff,)
+        ).rowcount
+
+    # The columns of `descendant_peers` that hold a date: a row with none of them in the
+    # retention is deleted.
+    _DESCENDANT_DATES = ('last_ok_ts', 'failed_at', 'last_failed_at', 'head_ts',
+                         'receipt_ts', 'linked_ts', 'read_failed_at')
+
+    def _upsert_descendant(self, peer_id: str, instance_ref: str, values: Mapping,
+                           updates: Optional[Mapping] = None) -> None:
+        """Write ``values`` in the row of ``peer_id`` and ``instance_ref``.
+
+        ``updates`` gives, for some columns, the SQL expression that sets the column
+        when the row exists (``excluded.<column>`` is the new value). The other columns
+        of ``values`` take the new value.
+        """
+        updates = dict(updates or {})
+        columns = list(values)
+        sets = ', '.join(f'{c} = {updates.get(c, "excluded." + c)}' for c in columns)
+        self._execute(
+            f'INSERT INTO descendant_peers (peer_id, instance_ref, {", ".join(columns)}) '
+            f'VALUES (?, ?, {", ".join("?" for _ in columns)}) '
+            f'ON CONFLICT (peer_id, instance_ref) DO UPDATE SET {sets}',
+            (peer_id, instance_ref, *values.values()),
+        )
+
+    def record_descendant_tunnel(self, peer_id: str, instance_ref: str, ok: bool,
+                                 ts: Optional[int] = None) -> None:
+        """Write the result of a ``DescendantTunnel`` hop to ``peer_id`` (#631).
+
+        ``ok`` True: the peer relayed bytes of the descendant (``last_ok_ts``). ``ok``
+        False: the hop failed and the descendant was not available. ``failed_at`` is the
+        first failure after the last hop that worked, and ``last_failed_at`` the last
+        failure. A hop that works ends the failures: the next failure starts them again.
+        """
+        now = int(time.time()) if ts is None else int(ts)
+        if ok:
+            self._upsert_descendant(peer_id, instance_ref, {'last_ok_ts': now})
+            return
+        self._upsert_descendant(
+            peer_id, instance_ref, {'failed_at': now, 'last_failed_at': now},
+            updates={'failed_at': (
+                'CASE WHEN failed_at IS NULL OR (last_ok_ts IS NOT NULL AND '
+                'last_ok_ts >= failed_at) THEN excluded.failed_at ELSE failed_at END')},
+        )
+
+    def descendant_tunnel_failure(self, peer_id: str, instance_ref: str
+                                  ) -> Optional[Tuple[int, int]]:
+        """The first and the last failed ``DescendantTunnel`` hop to ``peer_id`` for
+        ``instance_ref`` after the last hop that worked: ``(failed_at,
+        last_failed_at)``. None when there is no such failure."""
+        row = self._execute(
+            'SELECT last_ok_ts, failed_at, last_failed_at FROM descendant_peers '
+            'WHERE peer_id = ? AND instance_ref = ?', (peer_id, instance_ref),
+        ).fetchone()
+        if row is None or row['failed_at'] is None:
+            return None
+        if row['last_ok_ts'] is not None and int(row['last_ok_ts']) >= int(row['failed_at']):
+            return None
+        last = row['last_failed_at']
+        first = int(row['failed_at'])
+        return first, max(first, int(last) if last is not None else first)
+
+    def record_descendant_head(self, peer_id: str, instance_ref: str, head_seq: int,
+                               head_hash: str, ts: Optional[int] = None) -> None:
+        """Keep the head of the last statement of the descendant that ``peer_id`` gave,
+        signed and checked (#631). ``ts`` is the date of the statement."""
+        self._upsert_descendant(peer_id, instance_ref, {
+            'head_seq': int(head_seq), 'head_hash': str(head_hash or ''),
+            'head_ts': int(time.time()) if ts is None else int(ts),
+        })
+
+    def descendant_head(self, peer_id: str, instance_ref: str) -> Optional[dict]:
+        """``{"head_seq", "head_hash", "head_ts"}`` of the last statement that
+        ``peer_id`` gave of the descendant, or None."""
+        row = self._execute(
+            'SELECT head_seq, head_hash, head_ts FROM descendant_peers '
+            'WHERE peer_id = ? AND instance_ref = ? AND head_ts IS NOT NULL',
+            (peer_id, instance_ref),
+        ).fetchone()
+        return None if row is None else {
+            "head_seq": int(row['head_seq']), "head_hash": row['head_hash'],
+            "head_ts": int(row['head_ts'])}
+
+    def record_descendant_receipt(self, peer_id: str, instance_ref: str, receipt: bytes,
+                                  ts: Optional[int] = None) -> None:
+        """Keep the last receipt that ``peer_id`` signed for a ``DescendantTunnel`` hop
+        of this node to the descendant (#631). A receipt names the execution by a hash:
+        it holds no token."""
+        self._upsert_descendant(peer_id, instance_ref, {
+            'receipt': bytes(receipt), 'receipt_ts': int(time.time()) if ts is None else int(ts),
+        })
+
+    def descendant_receipt(self, peer_id: str, instance_ref: str) -> Optional[bytes]:
+        """The last receipt that ``peer_id`` signed for a hop to the descendant, or None."""
+        row = self._execute(
+            'SELECT receipt FROM descendant_peers WHERE peer_id = ? AND instance_ref = ?',
+            (peer_id, instance_ref),
+        ).fetchone()
+        return None if row is None or row['receipt'] is None else bytes(row['receipt'])
+
+    def record_descendant_links(self, peer_id: str, instance_refs: Iterable[str],
+                                ts: Optional[int] = None) -> None:
+        """A statement that ``peer_id`` signed links each of ``instance_refs`` with a
+        ``child_bound`` row: the peer holds those descendants, or knows where they are."""
+        now = int(time.time()) if ts is None else int(ts)
+        for ref in set(instance_refs):
+            if ref:
+                self._upsert_descendant(
+                    peer_id, ref, {'linked_ts': now, 'first_linked_ts': now},
+                    updates={'first_linked_ts':
+                             'COALESCE(descendant_peers.first_linked_ts, excluded.first_linked_ts)'})
+
+    def descendant_first_linked(self, peer_id: str, instance_ref: str) -> Optional[int]:
+        """The first date that ``peer_id`` linked ``instance_ref`` in a statement, or None."""
+        row = self._execute(
+            'SELECT first_linked_ts FROM descendant_peers WHERE peer_id = ? AND instance_ref = ?',
+            (peer_id, instance_ref)).fetchone()
+        return None if row is None or row['first_linked_ts'] is None else int(row['first_linked_ts'])
+
+    def descendant_linked(self, peer_id: str, instance_ref: str, since: int = 0) -> bool:
+        """Whether a statement that ``peer_id`` signed linked ``instance_ref`` at
+        ``since`` or later."""
+        return self._execute(
+            'SELECT 1 FROM descendant_peers WHERE peer_id = ? AND instance_ref = ? '
+            'AND linked_ts IS NOT NULL AND linked_ts >= ?', (peer_id, instance_ref, int(since)),
+        ).fetchone() is not None
+
+    def record_descendant_read(self, peer_id: str, instance_ref: str, ok: bool,
+                               ts: Optional[int] = None) -> Optional[int]:
+        """Write the result of a read of the descendant from ``peer_id``.
+
+        ``ok`` False is a transport failure. Returns the date of the first transport
+        failure after the last read that worked (``read_failed_at``), or None after a
+        read that worked.
+        """
+        if ok:
+            self._execute(
+                'UPDATE descendant_peers SET read_failed_at = NULL '
+                'WHERE peer_id = ? AND instance_ref = ?', (peer_id, instance_ref))
+            return None
+        now = int(time.time()) if ts is None else int(ts)
+        self._upsert_descendant(peer_id, instance_ref, {'read_failed_at': now},
+                                updates={'read_failed_at': 'COALESCE(read_failed_at, '
+                                                           'excluded.read_failed_at)'})
+        row = self._execute(
+            'SELECT read_failed_at FROM descendant_peers WHERE peer_id = ? AND instance_ref = ?',
+            (peer_id, instance_ref)).fetchone()
+        return int(row['read_failed_at'])
+
+    def prune_descendant_tunnels(self, max_age_days: int) -> int:
+        """Delete the records of descendants with no event in the last ``max_age_days``."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        latest = ', '.join(f'COALESCE({c}, 0)' for c in self._DESCENDANT_DATES)
+        return self._execute(
+            f'DELETE FROM descendant_peers WHERE MAX({latest}) < ?', (cutoff,)
         ).rowcount
 
     def delegated_starts_on_peer(self, peer_id: str) -> Dict[str, int]:

@@ -992,3 +992,34 @@ fn print_small_renders() {
         println!("{page:?} {width}x{height}\n{}\n", text(&buffer));
     }
 }
+
+/// LEDGER (an open account with a broken chain and a close anchor) and RECEIPTS (an
+/// invalid receipt and a statement fault) drawn full of data at every size: the empty
+/// pages are already in `every_page_draws_at_every_size`.
+#[test]
+fn the_ledger_and_receipts_pages_draw_with_data_at_every_size() {
+    let account = r#"{"kind":"client","ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","label":"web-東京","alive":true,"balance_mu":"123456789012345678901234567890","head_seq":3,"rows":3}"#;
+    let statement = format!(
+        r#"{{"account":{account},"chain":{{"ok":false,"problem":"row 2 does not follow row 1: the stored hash differs from the one computed","seq":2,"checked":2,"partial":true}},"movements":[{{"seq":1,"ts":1794136198,"kind":"tunnel","amount_mu":"-7","balance_after_mu":"493","detail":{{"open":true,"session":"ab"}}}},{{"seq":2,"ts":1794136199,"kind":"tunnel","amount_mu":"0","balance_after_mu":"493","detail":{{"close":true,"receipt_digest":"0123456789abcdef0123","mu_charged":"15"}}}}],"has_more":true}}"#
+    );
+    let ledger_build = move || {
+        let mut app = on_page(Page::Ledger);
+        let parsed = crate::ledger::parse_statement(&statement).unwrap();
+        app.ledger.accounts = vec![parsed.account.clone()];
+        app.ledger.table.select(Some(0));
+        app.ledger_open_for_test(parsed);
+        app
+    };
+    let hops = r#"{"hops":[{"peer_id":"aabbccddeeff00112233","instance_ref":"1122","last_ok_ts":1794136198,"receipt":{"kind":"close","plane":"tunnel","session":"abcdabcdabcd","mu_charged":"15","valid":false,"problems":["a very long problem text that has to wrap or be cut and never panic anywhere"]}}]}"#;
+    let faults = r#"{"faults":[{"ts":1,"peer_id":"aabbccddeeff00112233","reason":"statement_contradicts_receipt","seq":3}]}"#;
+    let receipts_build = move || {
+        let mut app = on_page(Page::Receipts);
+        app.receipts.hops = crate::receipts::parse_hops(hops).unwrap();
+        app.receipts.faults = crate::receipts::parse_faults(faults).unwrap();
+        app.receipts.table.select(Some(0));
+        app
+    };
+    let mut failures = sweep("Ledger (open)", &ledger_build, &|_, _| Ok(()));
+    failures.extend(sweep("Receipts", &receipts_build, &|_, _| Ok(())));
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n\n"));
+}

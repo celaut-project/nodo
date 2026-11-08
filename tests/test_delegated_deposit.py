@@ -194,7 +194,8 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         self.assertEqual([m.amount_mu for m in movements], [1_000_000, -100_000])
         # Nothing of the peer: the child is one more instance of this node. The start
         # names the execution as its receipt does (#419), and nothing else.
-        self.assertLessEqual(set(movements[0].detail or {}), {"execution_name"})
+        self.assertLessEqual(set(movements[0].detail or {}),
+                             {"execution_name", "receipt_digest"})
         self.assertFalse(movements[1].detail)
         self.assertEqual(r.written["sent_peer_mu"], 1_800_000)
 

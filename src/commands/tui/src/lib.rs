@@ -17,6 +17,13 @@ pub mod schedule;
 /// from (issue #395).
 pub mod energy;
 
+/// The LEDGER page: balance statements of the node's accounts (`nodo statement`).
+pub mod ledger;
+
+/// The RECEIPTS page: execution receipts of delegated instances and the faults of
+/// statements (`nodo receipt hops`, `nodo statement faults`).
+pub mod receipts;
+
 /// The PEERS page: other nodes this one has introduced itself to or heard from.
 pub mod peers;
 

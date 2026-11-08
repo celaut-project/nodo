@@ -176,8 +176,9 @@ The hash of the last movement commits to all the history.
 - A statement holds no credential. The account and the instances in it are named by a
   hash of their tokens, because a token is a key that can stop an instance or move its
   deposit. A statement can be shown to others.
-- An instance that this node delegated to another node has no statement here: to the
-  service nothing is delegated, and its movements would say otherwise.
+- An instance that this node delegated to another node has no statement of its own here:
+  to the service nothing is delegated, and its movements would say otherwise. A read of it
+  with `instance_ref` (see below) goes to the node that runs it.
 
 The caller pays for it, a fixed part and a part for each movement
 ([`PRICING.md`](PRICING.md)). A node that delegates work reads the statements of its own
@@ -185,7 +186,52 @@ account on its peers, and a peer whose statement does not continue the chain, or
 charges the account what the node did not cause, loses reputation
 ([`REPUTATION.md`](REPUTATION.md#what-a-peer-charges-from-its-statements)).
 
-The node deletes movements older than `ledger.RETENTION_DAYS`. What it deleted before a
+### Descendants and orphans
+
+An instance stays alive while its father can judge it: the father holds the token, and only
+the father can stop it or move its deposit. When the father dies, nobody holds that token.
+The instance is an *orphan*. It runs on until its MU end, and the node that runs it cannot
+say that someone asked for its end. So that a node cannot kill an orphan and keep its MU,
+every ancestor can read and reach its descendants:
+
+- **Read.** `GetBalanceStatement` takes an `instance_ref` (the hash of the token of the
+  descendant, never the token). The caller shows a token that it already holds, or none for
+  its own account, and the node finds the descendant below that account through the
+  `child_bound` rows of each chain, up to `ledger.MAX_DESCENDANT_DEPTH` levels. The
+  ancestor can be several levels above the descendant, and a father that is dead still
+  serves as the root. A `child_bound` row shows the children of an instance, not their
+  children: to go further down, read level by level. A statement of a descendant that runs
+  on another node goes from node to node, and each one signs it again.
+- **Who pays.** The instance that is called pays the reads that a node makes to its peers,
+  from its own account. A ref that no peer linked is refused with no call and no cost. The
+  caller pays only for a local read, or for a stopped instance that cannot pay.
+- **Receipts.** The signed receipts of a tunnel and the signed rows of the account that
+  pays for it must agree: the amounts, and the digest of the `close` that the last row of a
+  session holds. One check (`receipt_statement.check`) does it for the node, for the CLI
+  (`nodo statement check-receipts`, `nodo receipt verify --statement`) and for the TUI. A
+  peer whose statement contradicts its own receipt is scored `statement_contradicts_receipt`.
+- **Read it.** `nodo statement` lists the accounts of this node and their movements, checks
+  each chain, and shows the faults and the receipts kept of peers; the TUI has the same in
+  its LEDGER and RECEIPTS pages.
+- **Liveness.** A statement shows money, not life. An ancestor opens a `DescendantTunnel`
+  to the API of the descendant: to fake an answer, the node must run the service.
+- **Stop.** The chain of an instance ends with a `stop` row (`reason`, `leftover`). An
+  orphan ends only when its MU end. Any `stop` of an orphan with MU left is the fault of
+  the node that ran it, whatever the reason: a VM that went down is started again for as
+  long as there are MU, and a machine that failed is the fault of its operator. The node of
+  the reader scores that peer `killed_with_mu`, and a node that charges for a VM that does
+  not answer, `maintenance_while_unreachable`.
+- **Kept for ever.** A statement of a descendant can be asked for at any time, so the
+  node never deletes the rows of an account that lives, nor of a dead account with
+  anything alive below it, at any depth.
+
+A stop with the father alive cannot be told from a stop of the operator: no MU are lost,
+but the father loses the service. See the known limits in
+[`REPUTATION.md`](REPUTATION.md#known-limits-of-this-version).
+
+By default the node never deletes movements (`ledger.RETENTION_DAYS` is 0). With a positive
+`ledger.RETENTION_DAYS` it deletes only a dead account with no live descendant, whole,
+that many days after its last row. What a node deleted before a
 caller read it cannot be checked, so a caller that wants to check everything stays up to
 date, and keeps what it reads: a signed statement is evidence that it can show, as a
 receipt is ([`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md)).

@@ -269,9 +269,12 @@ gives to the client (the `start` movement of the alias), not the balance of the 
 on B. A does not pass on B's receipt: it names B's token, which the client never gets.
 A is answerable for what it signed, and B is answerable to A.
 
-A delegated instance gets no `checkpoint` and no `close`: `ServiceTunnel` refuses a
-delegated token (`_resolve_target`), and the caller tunnels to the addresses that A
-published. This is a limit of the current code.
+A delegated instance gets no `checkpoint` and no `close` for its own token:
+`ServiceTunnel` refuses a delegated token (`_resolve_target`), and the caller tunnels to
+the addresses that A published. This is a limit of the current code. A
+`DescendantTunnel` (#631) does reach a delegated instance: A relays it to B, and A signs
+the receipts of its own leg, named by the `instance_ref`. A does not pass on the receipts
+of B.
 
 ## What receipts do not give
 
@@ -381,6 +384,23 @@ is the 32 bytes of the public key, **not** its hex text. Thus the spelling of th
 does not change the name. This is the decision in #419. The receipt never contains
 the token.
 
+A stream of a `DescendantTunnel` (#631) has a different name, because its caller holds
+the `instance_ref` of the descendant and not its token:
+
+    execution_name = blake2b_256(UTF-8("celaut-execution-ref:" + instance_ref) || peer_id_raw)
+
+The prefix keeps the two kinds of name apart. So one instance can have two names: one
+for the streams of the holder of its token, one for the streams of its ancestors. Each
+stream has one name, and a reader checks the receipts of each name apart
+(`check_sequence`). `problems(receipt, instance_ref=...)` checks the second kind. The
+`tunnel` rows of the ledger carry the same name in `detail.execution_name`.
+
+On a relay hop by hop, each node signs only its own leg, with the `instance_ref` that it
+got. The first node uses the `instance_ref` of the caller, so the caller can check those
+receipts. The next node gets the `instance_ref` that the first node sends, and its
+receipts do not go to the caller. Thus the caller gets receipts of the node that it
+asked only.
+
 ### The envs digest
 
     envs_digest = blake2b_256(envs_salt || UTF-8(canonical_envs))
@@ -444,17 +464,67 @@ The balance statement (`GetBalanceStatement`) and the receipts are two signed so
 for the same execution. They must agree, and a reader can check it:
 
 - The `start` movement of the instance has `detail.execution_name`, the name of its
-  receipts. Its amount is the `initial_mu` of the `start` receipt.
+  receipts. Its amount is the `initial_mu` of the `start` receipt. It also holds
+  `detail.receipt_digest`, the digest of that receipt: the node signs the `start` receipt
+  just before it writes the row, so the signed chain commits to the signed receipt from its
+  first row. A node with no identity key writes neither. A row of an instance that started
+  before this has no digest and is not judged on it.
 - Each `tunnel` movement has `detail.execution_name` and, when the caller asked for
   receipts, `detail.session`. The sum of the `tunnel` movements of one session is the
   `mu_charged` of the `close` of that stream. After a cancel there is no close, and
   the sum is **at least** the `mu_charged` of the last checkpoint: the node still bills
   the traffic after that checkpoint and the last partial block.
 
-The ledger names an account by `blake2b("celaut-ledger-instance:" + token)`, and a
-receipt names the execution by `blake2b(token || peer_id_raw)`. The `execution_name` in
+- The last row of a session is an **anchor**: a `tunnel` row that moves nothing, with
+  `detail.close` set, `detail.receipt_digest` (the digest of the signed `close`) and
+  `detail.mu_charged`. The node writes it just after it signs the `close`, in the chain of
+  the account that pays for the stream. So the signed chain commits to the signed receipt,
+  and neither can be changed without the other showing it. A stream with no `close`
+  (cancelled) has no anchor. No row is written when nobody pays on that node (a relay leg
+  of a descendant whose account is on another node).
+
+One function checks all of this, `receipt_statement.check` (`src/identity/receipt_statement.py`),
+and everything that checks it uses that one: the node, on each peer that it reaches through
+a `DescendantTunnel`; `nodo receipt verify --statement <account>`; and `nodo statement
+check-receipts`. It reads the rows of an account and the receipts of a node, and finds:
+
+| Finding | What does not agree |
+|---|---|
+| `start_amount` | the `initial_mu` of the `start` receipt, and the amount of the `start` row of the same name |
+| `start_digest` | the digest that the `start` row holds, and the digest of the `start` receipt |
+| `session_total` | the `mu_charged` of the `close`, and the sum of the `tunnel` rows of its session |
+| `session_below_checkpoint` | a cancelled stream: the rows add up to less than its last checkpoint |
+| `anchor_digest` | the digest that the anchor row holds, and the digest of the `close` |
+| `anchor_total` | the `mu_charged` that the anchor row holds, and that of the `close` |
+| `anchor_missing` | the account went on, more than 60 seconds after the `close`, with no anchor |
+| `invalid_receipt` | the receipt is not valid, or is not of the node that is judged |
+
+A session whose opening row is not among the rows (the range of a statement can start after
+it) is not judged. It is listed as skipped, with the reason. Two signatures of one node
+that disagree prove that it lied in one of them, and anybody can check that. When the node
+of a reader finds a finding in a statement that a peer gave, it scores the peer
+`statement_contradicts_receipt` (-1000, once for each peer, descendant and row). The node
+keeps the last valid receipt of each hop (`descendant_peers.receipt`, `nodo receipt hops`),
+and it checks it when it reads the statement of that descendant.
+
+The ledger names an instance in a movement by its `instance_ref`, which is
+`blake2b("celaut-ledger-instance:" + token)`. A `child_start` of a father pays for a
+child before the child exists. The `child_bound` row that follows names the child by its
+`instance_ref` and the `child_start` by `detail.starts_seq`. The `instance_ref` of a
+delegated child is the hash of the alias that this node gave, never of the peer token.
+A receipt names the execution by `blake2b(token || peer_id_raw)`. The `execution_name` in
 the detail lets a reader that has only the two documents link them. Neither name
 opens the instance.
+
+The last row of the chain of a stopped instance is a `stop` row. It moves nothing.
+`detail.reason` is the death reason, and `detail.leftover` is the MU that the `refund`
+took out of the account.
+
+A reader reads the statement of a descendant with `GetBalanceStatement`: the request
+gives `token` (an instance that the reader holds, or empty for its own account) and
+`instance_ref` (the descendant). The node finds the account through the `child_bound`
+rows of the chains, one level at a time, and never through a token of the descendant.
+See "Read the statements of descendants" in [`REPUTATION.md`](REPUTATION.md).
 
 ### When the node signs a checkpoint
 
@@ -514,11 +584,14 @@ not proof that the instance sent nothing else.
 
 ### Checking receipts
 
-`nodo receipt verify <file> [--token <token>] [--peer <peer_id>] [--json]` reads a
+`nodo receipt verify <file> [--token <token>] [--peer <peer_id>] [--statement <account>]
+[--json]` reads a
 JSON file (one receipt, a list, or one per line, in the proto3 JSON form) and checks
 each receipt, then the set: one node and one name, counters and charge that do not
 go down, nothing after a close, and **contradictions** (two valid receipts for the
-same start, or for the same `seq` of the same stream, with different content). A gap
+same start, or for the same `seq` of the same stream, with different content). With
+`--statement <account>` it also checks the receipts against the rows of that account of
+this node (see "Receipts and the balance statement"). A gap
 in `seq` is reported but is not an error. `nodo execute --receipt <file>` keeps the
 start receipt in that form. The check needs no database, no daemon and no network. A
 file that is not receipts gives "Cannot read receipts" (with `--json`, a JSON error),

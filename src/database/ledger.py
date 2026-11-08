@@ -25,6 +25,7 @@ a prefix of its own), and a statement names its account by ``account_ref``.
 """
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
@@ -44,7 +45,8 @@ DEBIT = "debit"
 START = "start"
 """The ``initial_mu`` that a new instance received from its father.
 ``detail.execution_name`` is the name that the execution receipts of the instance carry
-(#419), when the node has an identity key."""
+(#419), when the node has an identity key, and ``detail.receipt_digest`` the digest of its
+signed ``start`` receipt. The node signs the receipt before it writes this row."""
 BUILD = "build"
 """The build of the service, taken from the ``initial_mu`` of a new instance."""
 MAINTENANCE = "maintenance"
@@ -66,7 +68,12 @@ TUNNEL = "tunnel"
 """A ``ServiceTunnel``: the opening (``detail.open``), or the traffic (``detail.bytes``).
 ``detail.execution_name`` names the execution as its receipts do (#419), and
 ``detail.session`` is the receipt stream of the tunnel when the caller asked for
-receipts: the sum of the rows of one session is the ``mu_charged`` of its ``close``."""
+receipts: the sum of the rows of one session is the ``mu_charged`` of its ``close``.
+
+The close of a session is anchored by one last ``tunnel`` row that moves nothing
+(``detail.close``): it holds ``detail.receipt_digest``, the digest of the signed ``close``
+receipt, and ``detail.mu_charged``, so the signed chain commits to the signed receipt
+(``src/identity/receipt_statement.py`` checks that the two agree)."""
 RESOURCE_CHANGE = "resource_change"
 """``ModifyServiceSystemResources``."""
 STATEMENT_QUERY = "statement_query"
@@ -75,9 +82,15 @@ CHILD_BOUND = "child_bound"
 """The child of a ``child_start`` exists. Moves nothing: ``instance_ref`` is the child
 and ``detail.starts_seq`` the seq of the ``child_start`` that it completes."""
 
+STOP = "stop"
+"""The account stops: its last row. Moves nothing. ``balance_after_mu`` is what stays on
+the account after the ``refund``. ``detail.reason`` is the death reason of the instance
+(``dead_instances``), and ``detail.leftover`` is the MU that the ``refund`` took, 0 if
+none. A stopped account takes no more rows."""
+
 KINDS = (
     DEPOSIT, CREDIT, DEBIT, START, BUILD, MAINTENANCE, CHILD_START,
-    CHILD_BOUND, TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY,
+    CHILD_BOUND, TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY, STOP,
 )
 
 _MOVEMENT_PREFIX = "celaut-balance-movement:"
@@ -136,11 +149,18 @@ def movement_hash(prev_hash: str, seq: int, ts: int, amount_mu, balance_after_mu
         f"{_hex(kind)}~{instance_ref_ or ''}~{_hex(detail or '')}"
     )
 
-DEFAULT_RETENTION_DAYS = 30
+# 0 keeps the statements for ever. A statement of a descendant can be asked for at any
+# time, for as long as the instance lives or anything below it lives (#631).
+DEFAULT_RETENTION_DAYS = 0
+# The age for the records that are not statements (start attempts, top-up reservations,
+# failed reads), when ``RETENTION_DAYS`` is 0.
+DEFAULT_HOUSEKEEPING_DAYS = 30
 DEFAULT_MIN_PEER_RETENTION_DAYS = 7
 DEFAULT_MAX_STATEMENT_PAGES_PER_TICK = 4
 DEFAULT_STATEMENT_READ_EVERY_TICKS = 30
 DEFAULT_MAX_STATEMENT_ROWS = 1000
+DEFAULT_MAX_DESCENDANT_DEPTH = 8
+DEFAULT_MAX_DESCENDANT_ACCOUNTS = 200
 
 
 class NoSuchAccount(Exception):
@@ -180,8 +200,34 @@ def _positive_int(key: str, default: int) -> int:
 
 
 def retention_days() -> int:
-    """``ledger.RETENTION_DAYS``: rows older than this are deleted."""
-    return _positive_int("ledger.RETENTION_DAYS", DEFAULT_RETENTION_DAYS)
+    """``ledger.RETENTION_DAYS``: the days that the rows of a dead account are kept after
+    its last row. 0 (the default) keeps them for ever.
+
+    The rows of a live account, and of an account with a live descendant at any depth, are
+    never deleted, whatever this says (``SQLConnection.prune_balance_movements``).
+    """
+    try:
+        days = int(env_manager.get("ledger.RETENTION_DAYS", DEFAULT_RETENTION_DAYS))
+    except (TypeError, ValueError):
+        return DEFAULT_RETENTION_DAYS
+    return days if days > 0 else 0
+
+
+def link_horizon(now: Optional[int] = None) -> int:
+    """The oldest date at which a peer may have linked a ref for this node to ask that peer
+    about it: 0 (no limit) when the statements are kept for ever, else ``now`` less
+    ``RETENTION_DAYS``. A link is a fact of a chain that this node keeps as long as the
+    chain, so it does not run out sooner."""
+    days = retention_days()
+    if not days:
+        return 0
+    return int(time.time() if now is None else now) - days * 86400
+
+
+def housekeeping_days() -> int:
+    """The age after which a record that is not a statement is deleted: the retention, or
+    ``DEFAULT_HOUSEKEEPING_DAYS`` when the statements are kept for ever."""
+    return retention_days() or DEFAULT_HOUSEKEEPING_DAYS
 
 
 def min_peer_retention_days() -> int:
@@ -215,3 +261,13 @@ def statement_read_every_ticks(tick_seconds: float) -> int:
 def max_statement_rows() -> int:
     """``ledger.MAX_STATEMENT_ROWS``: the most rows that one statement returns."""
     return _positive_int("ledger.MAX_STATEMENT_ROWS", DEFAULT_MAX_STATEMENT_ROWS)
+
+
+def max_descendant_depth() -> int:
+    """``ledger.MAX_DESCENDANT_DEPTH``: how many levels below an account a read looks."""
+    return _positive_int("ledger.MAX_DESCENDANT_DEPTH", DEFAULT_MAX_DESCENDANT_DEPTH)
+
+
+def max_descendant_accounts() -> int:
+    """``ledger.MAX_DESCENDANT_ACCOUNTS``: how many accounts one read looks at."""
+    return _positive_int("ledger.MAX_DESCENDANT_ACCOUNTS", DEFAULT_MAX_DESCENDANT_ACCOUNTS)

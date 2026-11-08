@@ -154,6 +154,7 @@ COMMANDS = sorted(
         "increase_peer_deposit",
         "verify_reputation",
         "receipt",
+        "statement",
         "pay",
         "credit_client",
         "debit_client",
