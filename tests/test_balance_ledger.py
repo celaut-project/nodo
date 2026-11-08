@@ -216,16 +216,110 @@ class LedgerWriteTests(_Database):
             self.sc.delegated_starts_on_peer("p"), {ledger.instance_ref("peer-token"): 9}
         )
 
-    def test_the_sweep_keeps_the_last_row_of_a_live_account(self):
+    def test_the_sweep_keeps_every_row_of_a_live_account(self):
         self.sc.add_client("c1", 100, None)
         self.sc.move_balance("c1", 5, ledger.DEPOSIT)
-        SQLConnection._connection.execute("UPDATE balance_movements SET ts = 0")
-        SQLConnection._connection.commit()
+        self.age_every_row()
 
-        self.assertEqual(self.sc.prune_balance_movements(max_age_days=30), 1)
+        self.assertEqual(self.sc.prune_balance_movements(max_age_days=30), 0)
         self.sc.move_balance("c1", 5, ledger.DEPOSIT)
 
-        self.assertEqual([r["seq"] for r in self.rows("c1")], [2, 3])
+        self.assertEqual([r["seq"] for r in self.rows("c1")], [1, 2, 3])
+
+    def age_every_row(self, ts=0):
+        SQLConnection._connection.execute("UPDATE balance_movements SET ts = ?", (ts,))
+        SQLConnection._connection.commit()
+
+    def test_with_no_retention_nothing_is_ever_deleted(self):
+        self.tree()
+        for token, father in (("d", "c"), ("c", "p"), ("p", "c1")):
+            self.stop(token, father)
+        self.age_every_row()
+
+        self.assertEqual(self.sc.prune_balance_movements(max_age_days=0), 0)
+        for account in ("p", "c", "d"):
+            self.assertTrue(self.rows(account), account)
+
+    def test_the_default_retention_keeps_the_statements_for_ever(self):
+        with patch.object(ledger.env_manager, "get", side_effect=lambda key, default=None: default):
+            self.assertEqual(ledger.retention_days(), 0)
+            self.assertEqual(ledger.housekeeping_days(), ledger.DEFAULT_HOUSEKEEPING_DAYS)
+        with patch.object(ledger.env_manager, "get", return_value=7):
+            self.assertEqual(ledger.retention_days(), 7)
+            self.assertEqual(ledger.housekeeping_days(), 7)
+        for value in (-3, "x", None):
+            with patch.object(ledger.env_manager, "get", return_value=value):
+                self.assertEqual(ledger.retention_days(), 0)
+
+    def tree(self):
+        """Client c1, its instance p, the child c of p, and the child d of c."""
+        self.sc.add_client("c1", 1000, None)
+        self.add_instance("p", "c1", 500, movements=(ledger.Movement(ledger.START, 500),))
+        for father, token, mu in (("p", "c", 200), ("c", "d", 50)):
+            seq = self.sc.move_balance(father, -mu, ledger.CHILD_START)
+            self.add_instance(token, father, mu, movements=(ledger.Movement(ledger.START, mu),))
+            self.sc.bind_child(father, seq, token)
+
+    def stop(self, token, father):
+        self.sc.settle_stop(token, "out_of_balance", father_id=father)
+
+    def test_a_dead_account_goes_whole_when_its_last_row_is_older_than_the_limit(self):
+        self.tree()
+        self.stop("d", "c")
+        self.stop("c", "p")
+        self.stop("p", "c1")
+        self.age_every_row()
+
+        self.assertGreater(self.sc.prune_balance_movements(max_age_days=30), 0)
+        for account in ("p", "c", "d"):
+            self.assertEqual(self.rows(account), [], account)
+        self.assertTrue(self.rows("c1"))
+
+    def test_a_dead_account_is_kept_for_a_time_after_its_stop(self):
+        self.tree()
+        self.stop("d", "c")
+        # Its first rows are old, but its last row (the stop) is recent.
+        SQLConnection._connection.execute(
+            "UPDATE balance_movements SET ts = 0 WHERE NOT (account_id = 'd' AND kind = ?)",
+            (ledger.STOP,))
+        SQLConnection._connection.commit()
+
+        self.sc.prune_balance_movements(max_age_days=30)
+
+        self.assertTrue(self.rows("d"))
+
+    def test_a_dead_father_stays_while_anything_below_it_lives_at_any_depth(self):
+        self.tree()
+        self.stop("p", "c1")
+        self.stop("c", "p")
+        self.age_every_row()
+
+        # p and c are dead and old, but d lives below them.
+        self.sc.prune_balance_movements(max_age_days=30)
+        self.assertTrue(self.rows("p"))
+        self.assertTrue(self.rows("c"))
+        self.assertTrue(self.rows("d"))
+
+        self.stop("d", "c")
+        self.age_every_row()
+        self.sc.prune_balance_movements(max_age_days=30)
+        for account in ("p", "c", "d"):
+            self.assertEqual(self.rows(account), [], account)
+
+    def test_the_row_of_a_dead_instance_stays_while_its_statement_does(self):
+        self.tree()
+        self.stop("d", "c")
+        self.stop("c", "p")
+
+        # Two dead rows and a limit of one: the oldest one is over the limit.
+        self.assertEqual(self.sc.prune_dead_local_instances(max_age_days=0, max_rows=1), [])
+        # The directory of the archive can still go, by the policy of the dead instances.
+        self.assertEqual(
+            len(self.sc.prune_dead_local_instances(max_age_days=0, max_rows=1, dry_run=True,
+                                                   keep_statements=False)), 1)
+        # An operator that purges everything is obeyed.
+        self.assertEqual(sorted(self.sc.prune_dead_local_instances(
+            max_age_days=0, max_rows=0, delete_all=True)), ["c", "d"])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -261,8 +355,8 @@ class LedgerChainTests(_Database):
         self.sc.move_balance("c1", 5, ledger.DEPOSIT)
 
         rows = self.rows("c1")
-        self.assertEqual([r["seq"] for r in rows], [2, 3])
-        self.assertEqual(rows[1]["prev_hash"], kept)
+        self.assertEqual([r["seq"] for r in rows], [1, 2, 3])
+        self.assertEqual(rows[2]["prev_hash"], kept)
 
     def test_a_row_is_the_same_hash_for_any_implementation(self):
         """A fixed vector: another implementation of the chain can check itself with it."""
@@ -944,16 +1038,15 @@ class StatementReadTests(_Database):
         self.assertEqual([m["seq"] for m in read["movements"]], [7])
         self.assertEqual(read["movements"][0]["kind"], ledger.STATEMENT_QUERY)
 
-    def test_what_the_sweep_deleted_is_where_the_answer_starts(self):
+    def test_the_sweep_leaves_the_answer_starting_at_the_first_row(self):
         SQLConnection._connection.execute("UPDATE balance_movements SET ts = 0")
         SQLConnection._connection.commit()
         self.sc.prune_balance_movements(max_age_days=30)
 
         read = self.read(from_seq=1)
 
-        self.assertEqual(read["oldest_seq"], 6)
-        self.assertEqual([m["seq"] for m in read["movements"]], [6, 7])
-        self.assertEqual(read["movements"][0]["prev_hash"], self.rows("c1")[0]["prev_hash"])
+        self.assertEqual(read["oldest_seq"], 1)
+        self.assertEqual([m["seq"] for m in read["movements"]][:2], [1, 2])
 
     def test_a_father_reads_its_child_and_pays_for_it(self):
         self.add_instance("i1", "c1", 70, movements=(ledger.Movement(ledger.START, 70),))
@@ -1384,12 +1477,18 @@ class DescendantReadTests(_Database):
         self.delegate()
         self.assertEqual(self.scored(self.stop_statement(0, int(time.time()))), [])
 
-    def test_a_stop_for_a_fault_of_the_machine_is_not_scored(self):
+    def test_a_stop_for_any_reason_with_mu_left_and_the_father_gone_is_scored(self):
+        # An orphan ends only when its MU end. A machine that failed is the fault of its
+        # operator, and a VM that went down is to be started again.
         self.delegate()
-        for reason in ("process_lost", "guest_panic", "activity_window"):
+        for reason in ("process_lost", "guest_panic", "activity_window", "launch_failed",
+                       "peer_stopped", "manual_kill"):
             with self.subTest(reason=reason):
+                self.sc.record_descendant_links("peer-1", [ledger.instance_ref(reason)])
                 self.assertEqual(
-                    self.scored(self.stop_statement(40, int(time.time()), reason=reason)), [])
+                    self.scored(self.stop_statement(40, int(time.time()), reason=reason),
+                                ref=reason),
+                    [("peer-1", "killed_with_mu")])
 
     def test_out_of_balance_is_scored_only_with_a_full_period_left(self):
         self.delegate()

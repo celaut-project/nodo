@@ -142,7 +142,12 @@ def movement_hash(prev_hash: str, seq: int, ts: int, amount_mu, balance_after_mu
         f"{_hex(kind)}~{instance_ref_ or ''}~{_hex(detail or '')}"
     )
 
-DEFAULT_RETENTION_DAYS = 30
+# 0 keeps the statements for ever. A statement of a descendant can be asked for at any
+# time, for as long as the instance lives or anything below it lives (#631).
+DEFAULT_RETENTION_DAYS = 0
+# The age for the records that are not statements (start attempts, top-up reservations,
+# failed reads), when ``RETENTION_DAYS`` is 0.
+DEFAULT_HOUSEKEEPING_DAYS = 30
 DEFAULT_MIN_PEER_RETENTION_DAYS = 7
 DEFAULT_MAX_STATEMENT_PAGES_PER_TICK = 4
 DEFAULT_STATEMENT_READ_EVERY_TICKS = 30
@@ -188,8 +193,23 @@ def _positive_int(key: str, default: int) -> int:
 
 
 def retention_days() -> int:
-    """``ledger.RETENTION_DAYS``: rows older than this are deleted."""
-    return _positive_int("ledger.RETENTION_DAYS", DEFAULT_RETENTION_DAYS)
+    """``ledger.RETENTION_DAYS``: the days that the rows of a dead account are kept after
+    its last row. 0 (the default) keeps them for ever.
+
+    The rows of a live account, and of an account with a live descendant at any depth, are
+    never deleted, whatever this says (``SQLConnection.prune_balance_movements``).
+    """
+    try:
+        days = int(env_manager.get("ledger.RETENTION_DAYS", DEFAULT_RETENTION_DAYS))
+    except (TypeError, ValueError):
+        return DEFAULT_RETENTION_DAYS
+    return days if days > 0 else 0
+
+
+def housekeeping_days() -> int:
+    """The age after which a record that is not a statement is deleted: the retention, or
+    ``DEFAULT_HOUSEKEEPING_DAYS`` when the statements are kept for ever."""
+    return retention_days() or DEFAULT_HOUSEKEEPING_DAYS
 
 
 def min_peer_retention_days() -> int:

@@ -226,7 +226,7 @@ write to from their own process.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `ledger.RETENTION_DAYS` | `30` | Delete movements older than this. The last movement of a live account stays, whatever its age. |
+| `ledger.RETENTION_DAYS` | `0` | The days that the movements of a dead account are kept after its last movement. `0` keeps them for ever. The movements of an account that lives, and of an account with a live descendant at any depth, are never deleted. A dead account is deleted whole. The row of a dead instance stays while its account has movements. Records that are not statements (start attempts, top-up reservations, failed reads) use 30 days when this is `0`. |
 | `ledger.MAX_STATEMENT_ROWS` | `1000` | The most movements that one statement returns. The statement holds the first ones of the range, and the caller asks again from the last seq that it got. |
 | `ledger.MIN_PEER_RETENTION_DAYS` | `7` | The shortest retention that a peer is held to. A gap in its statement after the last movement that this node checked is excused by the retention that the peer announces, and never by less than this. Where there is no child, our account is read again when its mark is older than a tenth of this. |
 | `ledger.MAX_STATEMENT_PAGES_PER_TICK` | `4` | The most pages that one read of our account on a peer takes. A reader that is behind goes on at the next read. |

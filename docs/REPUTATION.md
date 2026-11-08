@@ -342,7 +342,8 @@ is dead, the instance has no judge. This section closes that gap (#631).
   descendant, signed by the node. The statement can be of an instance that stopped.
 
 A grandparent reads a child with `token` = the parent and `instance_ref` = the child.
-The parent can be dead: its row and its chain stay until the retention ends. The
+The parent can be dead: its row and its chain stay while anything below it lives, at any
+depth, and after that for `ledger.RETENTION_DAYS` (0 is for ever, the default). The
 `instance_ref` of the instance of `token` itself is also accepted: it reads that account,
 also when it stopped.
 
@@ -459,13 +460,14 @@ A malicious node A runs an instance C. The parent P of C is dead. C has MU.
 Cases that this does **not** cover:
 
 - Every ancestor up to the root client is dead. Nobody asks.
-- The ancestors ask after the retention ended. The node deletes the chain of a stopped
-  instance after `ledger.RETENTION_DAYS` (30 days).
+- The ancestors ask after the retention ended. With `ledger.RETENTION_DAYS` above 0, the
+  node deletes the chain of a dead instance with nothing alive below it that many days
+  after its stop. The default (0) never deletes it.
 - The node that links P to C deleted the `child_bound` row with the retention, or P is
   gone from that node. The link is lost.
-- A peer that writes a false reason in the `stop` row: a fault of the machine
-  (`process_lost`, for example) is not scored. The ancestor tunnel covers a part of this
-  case (see below).
+- A peer that writes a false `stop` row with no leftover. The ancestor tunnel covers a
+  part of this case (see below). The reason of the row does not matter for
+  `killed_with_mu`: see "Known limits".
 - A peer that writes that the father got the refund. The statement of the father shows
   whether it did: an ancestor can read it.
 - A node that signs a false `stop` row. The row is signed, so it proves the node lied
@@ -489,8 +491,9 @@ descendant and row) if all these conditions are true:
   `detail.lost = father_gone`. The father of the descendant was gone, nobody could judge
   the peer, and the MU stayed with it. A father that stops its child gets the leftover:
   that stop is not scored.
-- `detail.reason` is not a fault of the machine: `process_lost`, `guest_panic`,
-  `launch_failed`, `peer_stopped` or `activity_window`.
+- The reason does not matter. An orphan ends only when its MU end, so a stop with MU left
+  is the fault of the node that ran it, also a machine that failed (`process_lost`,
+  `guest_panic`) or a launch that failed.
 - For `out_of_balance`: the leftover is at least the price of the tick that the instance
   could not pay. The `stop` row gives it (`detail.tick`). A `tick` above 10 times the
   largest maintenance row of the statement is not believed: that limit is used. With no
@@ -590,17 +593,20 @@ Cases that the tunnel does **not** cover:
 - A node below the peer fails. The peer passes `UNAVAILABLE` up, and the node scores the
   peer that it asked: that peer is answerable to it for the hops below.
 - The node of the ancestor reads the statement after the retention ended, or it deletes
-  its hop records (`descendant_peers`) with the retention.
+  its hop records (`descendant_peers`) with the retention. With the default retention (0)
+  the node deletes neither.
 
 ## Known limits of this version
 
 These are decisions for the alpha. Each one is a known limit, not a defect that is hidden.
 
-- **`killed_with_mu` depends on the reason that the peer writes.** A peer that writes
-  `process_lost` is not scored, and the MU of the orphan stay with it. A later change
-  should judge by the MU: give the leftover of an orphan to the nearest live ancestor on
-  the node (or to the root client), and score any `stop` with leftover above 0 and
-  `lost = father_gone`.
+- **An orphan ends only when its MU end.** Nobody can stop it by the API: `StopService`
+  needs the token, and only the father holds it. The node can always stop it by itself
+  (`nodo kill`, or an internal stop), and that is the fault: any `stop` with leftover above
+  0 and `lost = father_gone` is scored as `killed_with_mu`, whatever reason the row gives.
+  A VM that went down is started again, for as long as the instance has MU. A failure of
+  the machine that ends it with MU left is the fault of its operator. Only an
+  `out_of_balance` with less MU than the price of one tick is not scored.
 - **A relayed statement keeps only the last signature.** The signature of the node that
   wrote the rows is not kept, so an ancestor can show a lie only against the first node
   that it asked. Each node answers for the peers that it asks.

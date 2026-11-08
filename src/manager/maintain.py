@@ -2088,9 +2088,12 @@ def sweep_dead_instances(force: bool = False) -> int:
     try:
         days = dead_instances.retention_days()
         max_rows = dead_instances.retention_max_rows()
+        # The archive directory goes by the policy of the dead instances. The row stays
+        # while its account has movements: it is how an ancestor reaches the statement.
+        dead_instances.remove_dirs(sc.prune_dead_local_instances(
+            max_age_days=days, max_rows=max_rows, dry_run=True, keep_statements=False))
         local_ids = sc.prune_dead_local_instances(max_age_days=days, max_rows=max_rows)
         delegated_tokens = sc.prune_dead_delegated_instances(max_age_days=days, max_rows=max_rows)
-        dead_instances.remove_dirs(local_ids)
         # Keep the directories of the dead rows that remain. The rest have no row.
         kept = {row['id'] for row in sc.get_dead_local_instances()}
         dead_instances.sweep_orphan_dirs(kept)
@@ -2119,12 +2122,16 @@ def sweep_balance_movements(force: bool = False) -> int:
     _last_ledger_sweep = now
     try:
         deleted = sc.prune_balance_movements(max_age_days=ledger.retention_days())
-        sc.prune_statement_faults(max_age_days=ledger.retention_days())
-        sc.prune_descendant_tunnels(max_age_days=ledger.retention_days())
-        sc.prune_start_attempts(max_age_days=ledger.retention_days())
-        sc.prune_start_refs(max_age_days=ledger.retention_days())
-        sc.prune_top_up_reservations(max_age_seconds=ledger.retention_days() * 86400)
-        sc.sweep_failed_statement_reads(max_age_days=ledger.retention_days())
+        # What is tied to a statement (the faults that it showed, the links and heads of
+        # its descendants) goes with the statement: with a retention of 0 nothing goes,
+        # or the same fault would be scored again when the statement is read again.
+        if ledger.retention_days():
+            sc.prune_statement_faults(max_age_days=ledger.retention_days())
+            sc.prune_descendant_tunnels(max_age_days=ledger.retention_days())
+        sc.prune_start_attempts(max_age_days=ledger.housekeeping_days())
+        sc.prune_start_refs(max_age_days=ledger.housekeeping_days())
+        sc.prune_top_up_reservations(max_age_seconds=ledger.housekeeping_days() * 86400)
+        sc.sweep_failed_statement_reads(max_age_days=ledger.housekeeping_days())
         if deleted:
             log.LOGGER(f"Retention sweep deleted {deleted} balance movement(s).")
         return deleted

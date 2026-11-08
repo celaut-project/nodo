@@ -220,11 +220,6 @@ _BELOW_FAILED = "A node below gave no statement."
 _NO_BUDGET = "The hop budget of this read is used up."
 _MANY_BELOW = "More than one node below gave a statement of that descendant."
 
-# Death reasons that tell of a fault of the machine and not of a choice of the node. A
-# stop for one of them is not scored as killed_with_mu (src/utils/dead_instances.py).
-_NOT_CHOSEN_STOPS = frozenset((
-    "process_lost", "guest_panic", "launch_failed", "peer_stopped", "activity_window",
-))
 _OUT_OF_BALANCE = frozenset(("out_of_balance", "hibernated_out_of_balance"))
 
 
@@ -676,10 +671,13 @@ def _judge_stop(peer_id: str, statement: celaut_pb2.BalanceStatement,
     statement. The fault is a signed ``stop`` row with ``detail.leftover`` above 0 whose
     ``refund`` row (the row before it) says ``detail.lost = father_gone``: the father of
     the descendant was gone, nobody could judge the peer, and the MU stayed with it. A
-    father that stopped its child got the MU, so that stop is not a fault. These stops
-    are not scored either:
+    father that stopped its child got the MU, so that stop is not a fault.
 
-    - a stop for a fault of the machine (``_NOT_CHOSEN_STOPS``);
+    An orphan stops only when its MU end. Nobody can stop it by the API: only its father
+    holds the token, and the father is gone. So the reason that the peer writes does not
+    matter: a VM that went down is the peer's to start again, and a machine that failed
+    is the fault of its operator. Only this stop is not scored:
+
     - ``out_of_balance`` with less MU left than the price of the tick that the
       instance could not pay. The stop row gives that price (``detail.tick``), at the
       scarcity of the node at that time. A ``tick`` above ``_MAX_TICK_FACTOR`` times the
@@ -703,7 +701,7 @@ def _judge_stop(peer_id: str, statement: celaut_pb2.BalanceStatement,
             continue
         leftover = _int_of(row.detail.get("leftover"))
         reason = str(row.detail.get("reason", ""))
-        if leftover <= 0 or reason in _NOT_CHOSEN_STOPS:
+        if leftover <= 0:
             continue
         if reason in _OUT_OF_BALANCE:
             tick = _int_of(row.detail.get("tick")) if "tick" in row.detail else None

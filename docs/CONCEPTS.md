@@ -185,7 +185,10 @@ account on its peers, and a peer whose statement does not continue the chain, or
 charges the account what the node did not cause, loses reputation
 ([`REPUTATION.md`](REPUTATION.md#what-a-peer-charges-from-its-statements)).
 
-The node deletes movements older than `ledger.RETENTION_DAYS`. What it deleted before a
+By default the node never deletes movements (`ledger.RETENTION_DAYS` is 0), and it never
+deletes the rows of an account that lives, or of an account with a descendant that lives at
+any depth. With a positive `ledger.RETENTION_DAYS` it deletes only a dead account with no
+live descendant, whole, that many days after its last row. What a node deleted before a
 caller read it cannot be checked, so a caller that wants to check everything stays up to
 date, and keeps what it reads: a signed statement is evidence that it can show, as a
 receipt is ([`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md)).

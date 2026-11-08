@@ -102,7 +102,10 @@ class DeadInstanceTests(unittest.TestCase):
             self._add_local(f"id{index}", name=f"n{index}")
             self.sc.mark_local_killed(f"id{index}", "manual_kill")
             self._date_death(f"id{index}", f"2026-01-0{index + 1} 00:00:00")
-        deleted = self.sc.prune_dead_local_instances(max_age_days=0, max_rows=2)
+        # The policy by count. The default keeps a row whose account has movements.
+        self.assertEqual(self.sc.prune_dead_local_instances(max_age_days=0, max_rows=2), [])
+        deleted = self.sc.prune_dead_local_instances(
+            max_age_days=0, max_rows=2, keep_statements=False)
         self.assertEqual(sorted(deleted), ["id0", "id1"])
         self.assertEqual(
             sorted(row["id"] for row in self.sc.get_dead_local_instances()), ["id2", "id3"]
@@ -113,7 +116,8 @@ class DeadInstanceTests(unittest.TestCase):
         self._add_local("old", name="old")
         self.sc.mark_local_killed("old", "manual_kill")
         self._date_death("old", "2000-01-01 00:00:00")
-        self.assertEqual(self.sc.prune_dead_local_instances(max_age_days=14, max_rows=0), ["old"])
+        self.assertEqual(self.sc.prune_dead_local_instances(
+            max_age_days=14, max_rows=0, keep_statements=False), ["old"])
         self.assertTrue(self.sc.internal_instance_exists("live"))
 
     def test_prune_dry_run_deletes_nothing(self):

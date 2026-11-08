@@ -363,10 +363,13 @@ instances:
 # The ledger of balance movements (issue #570): one row for each change of the balance
 # of a client or an instance, which its owner reads with GetBalanceStatement.
 ledger:
-  # Rows older than this are deleted. A peer reads the statements of its account, and of
-  # the work it delegated here, every STATEMENT_READ_EVERY_TICKS ticks; the rest is margin
-  # to dispute a charge or to show a signed statement as evidence.
-  RETENTION_DAYS: 30
+  # The days that the rows of a dead account are kept after its last row. 0 keeps them for
+  # ever (the default). The rows of an account that lives, and of any account with a
+  # descendant that lives at any depth, are never deleted, whatever this says: an ancestor
+  # can ask for the statement of a descendant at any time (issue #631), also when the
+  # father is dead. A peer reads the statements of its account, and of the work it
+  # delegated here, every STATEMENT_READ_EVERY_TICKS ticks.
+  RETENTION_DAYS: 0
   # The most movements that one statement returns. The statement holds the first ones
   # of the range, and the caller asks again from the last seq that it got.
   MAX_STATEMENT_ROWS: 1000

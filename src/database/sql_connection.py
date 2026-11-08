@@ -850,28 +850,45 @@ class SQLConnection(metaclass=Singleton):
             'SELECT 1 FROM delegated_instances WHERE id = ? AND killed_at IS NULL', (account_id,)
         ).fetchone() is not None
 
-    def prune_balance_movements(self, max_age_days: int) -> int:
-        """Delete the rows older than ``max_age_days``. Returns how many.
+    # The accounts whose rows are never deleted: a client, an instance that lives, and every
+    # father, at any depth, of an instance that lives. A father that is dead stays while
+    # anything below it lives, because an ancestor can ask for the statement of a
+    # descendant at any time (#631). ``UNION`` ends a loop in the data.
+    _PROTECTED_ACCOUNTS = '''
+        WITH RECURSIVE instances (id, father_id, alive) AS (
+            SELECT id, father_id, killed_at IS NULL FROM local_instances
+            UNION ALL
+            SELECT id, father_id, killed_at IS NULL FROM delegated_instances
+        ), protected (id) AS (
+            SELECT id FROM clients
+            UNION
+            SELECT id FROM instances WHERE alive
+            UNION
+            SELECT instances.father_id FROM instances
+            JOIN protected ON instances.id = protected.id
+            WHERE instances.father_id IS NOT NULL
+        )
+    '''
 
-        The last row of a live account stays, whatever its age: the next row counts its
-        seq from it and hangs from its hash, and a seq that went back to 1 would read as
-        a ledger that lost its history.
+    def prune_balance_movements(self, max_age_days: int) -> int:
+        """Delete the rows of the dead accounts that stopped more than ``max_age_days`` ago.
+        Returns how many. 0 or less deletes nothing: the statements are kept for ever.
+
+        An account is deleted whole, never in part, so a statement that is kept always
+        starts at its first row. It goes only when it is dead, nothing that lives hangs
+        below it at any depth, and its last row is older than the limit.
         """
+        if int(max_age_days) <= 0:
+            return 0
         cutoff = int(time.time()) - int(max_age_days) * 86400
-        cursor = self._execute('''
+        cursor = self._execute(self._PROTECTED_ACCOUNTS + '''
             DELETE FROM balance_movements
-            WHERE ts < ?
-              AND NOT (
-                seq = (SELECT MAX(m.seq) FROM balance_movements m
-                       WHERE m.account_id = balance_movements.account_id)
-                AND (
-                  account_id IN (SELECT id FROM clients)
-                  OR account_id IN (SELECT id FROM local_instances WHERE killed_at IS NULL)
-                  OR account_id IN (SELECT id FROM delegated_instances WHERE killed_at IS NULL)
-                )
-              )
+            WHERE account_id NOT IN (SELECT id FROM protected)
+              AND account_id IN (SELECT account_id FROM balance_movements
+                                 GROUP BY account_id HAVING MAX(ts) < ?)
         ''', (cutoff,))
-        return cursor.rowcount
+        # ``rowcount`` is -1 for a statement that starts with WITH.
+        return int(self._execute('SELECT changes()').fetchone()[0])
 
     # Client Methods
 
@@ -1715,7 +1732,8 @@ class SQLConnection(metaclass=Singleton):
         return dict(row) if row else None
 
     def prune_dead_local_instances(
-        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False,
+        keep_statements: bool = True,
     ) -> List[str]:
         """Delete the old dead local instances. Return the ids that were deleted.
 
@@ -1723,9 +1741,13 @@ class SQLConnection(metaclass=Singleton):
         ``max_rows`` dead rows exist (the oldest go first). A value of 0 or less
         turns that limit off. With ``delete_all``, every dead row goes. With
         ``dry_run``, nothing is deleted and the ids that would go are returned.
+
+        A row whose account still has movements stays (``keep_statements``), except with
+        ``delete_all``: the row is how an ancestor reaches the statement (#631).
         """
         return self._prune_dead_rows(
-            'local_instances', 'id', max_age_days, max_rows, dry_run, delete_all
+            'local_instances', 'id', max_age_days, max_rows, dry_run, delete_all,
+            account_key='id', keep_statements=keep_statements
         )
 
     def purge_internal(self, id: str):
@@ -3163,18 +3185,27 @@ class SQLConnection(metaclass=Singleton):
         return [dict(row) for row in result.fetchall()]
 
     def prune_dead_delegated_instances(
-        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False
+        self, max_age_days: int, max_rows: int, dry_run: bool = False, delete_all: bool = False,
+        keep_statements: bool = True,
     ) -> List[str]:
-        """Delete the old dead delegated instances. Return the tokens deleted."""
+        """Delete the old dead delegated instances. Return the tokens deleted. A row whose
+        account (the alias) still has movements stays, as for a local instance."""
         return self._prune_dead_rows(
-            'delegated_instances', 'token_delegation', max_age_days, max_rows, dry_run, delete_all
+            'delegated_instances', 'token_delegation', max_age_days, max_rows, dry_run, delete_all,
+            account_key='id', keep_statements=keep_statements
         )
 
     def _prune_dead_rows(
         self, table: str, key: str, max_age_days: int, max_rows: int,
         dry_run: bool = False, delete_all: bool = False,
+        account_key: str = 'id', keep_statements: bool = False,
     ) -> List[str]:
-        """Delete dead rows of ``table`` by age and by count. Return the deleted keys."""
+        """Delete dead rows of ``table`` by age and by count. Return the deleted keys.
+
+        With ``keep_statements``, a row whose ``account_key`` still has movements in the
+        ledger is not deleted by age or by count."""
+        kept = (f" AND {account_key} NOT IN (SELECT DISTINCT account_id FROM balance_movements)"
+                if keep_statements else "")
         doomed: List[str] = []
         if delete_all:
             result = self._execute(f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL")
@@ -3185,13 +3216,13 @@ class SQLConnection(metaclass=Singleton):
         if max_age_days and max_age_days > 0:
             result = self._execute(
                 f"SELECT {key} FROM {table} "
-                f"WHERE killed_at IS NOT NULL AND killed_at < datetime('now', ?)",
+                f"WHERE killed_at IS NOT NULL AND killed_at < datetime('now', ?){kept}",
                 (f"-{int(max_age_days)} days",),
             )
             doomed.extend(row[0] for row in result.fetchall())
         if max_rows and max_rows > 0:
             result = self._execute(
-                f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL "
+                f"SELECT {key} FROM {table} WHERE killed_at IS NOT NULL{kept} "
                 f"ORDER BY killed_at DESC, {key} LIMIT -1 OFFSET ?",
                 (int(max_rows),),
             )
