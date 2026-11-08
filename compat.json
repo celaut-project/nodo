@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "73f05c42df56690871cb653221bac9ff965c44c46a2e91de494d722300e625ee",
+  "celaut_proto": "7c22a1d431bf623548f66aed787446bb458b11e999428e546244188d4da674b9",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.ON_CLOSE",
@@ -341,6 +341,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "efc20eb3fd184b638aed16265438731215ed7c43be7143802b8fbc6c4d2a7678",
+  "database": "899355a1af4cc0937b6ab97632cf7e3968ae41d03c8b3fe601e950c62019eb4b",
   "storage_format": 1
 }

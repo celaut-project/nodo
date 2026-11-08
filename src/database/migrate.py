@@ -702,6 +702,24 @@ TABLES = {
             FOREIGN KEY (conversation_id) REFERENCES peer_chat_conversations (id)
         )
     ''',
+    # The support thread between a client and the operator of this node. Only a
+    # client that has no peer bound to it writes here (a peer's messages go to
+    # `peer_chat_messages`). `sequence` is the position in the thread of one client: it
+    # starts at 1 and grows by 1, and it is never reused or renumbered, so a client
+    # that read up to a sequence can ask for what comes after it. The prune on insert
+    # (`add_client_chat_message`) removes the oldest rows only, so the thread is never
+    # empty after its first message and the next sequence is always max + 1. A row is
+    # bounded like a peer message is: the body is capped in code before the insert.
+    "client_chat_messages": '''
+        CREATE TABLE IF NOT EXISTS client_chat_messages (
+            client_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            from_operator INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            PRIMARY KEY (client_id, sequence)
+        )
+    ''',
     # One row per conversation (issue #431), keyed by the `conversation_id` its
     # messages carry. `opened_by_us` is what tells the two TUI pages apart: this
     # node picked the id (a thread we started) versus a peer picked it and this

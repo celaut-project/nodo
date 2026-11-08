@@ -1305,6 +1305,29 @@ if __name__ == '__main__':
                 ok = reopen_thread(conversation_id=sys.argv[2])
                 _exit(0 if ok else 1)
 
+            case "chat_clients":
+                # Clients with a support thread (a client that wrote with only its
+                # client_id, no peer). `chat_client` reads one; `chat_client_reply` answers.
+                from src.commands.chat import list_client_chats
+                ok = list_client_chats(as_json="--json" in sys.argv[2:])
+                _exit(0 if ok else 1)
+
+            case "chat_client":
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_client <client_id> [--json]", flush=True)
+                    _exit(1)
+                from src.commands.chat import show_client_chat
+                ok = show_client_chat(client_id=sys.argv[2], as_json="--json" in sys.argv[3:])
+                _exit(0 if ok else 1)
+
+            case "chat_client_reply":
+                if len(sys.argv) < 4:
+                    print("Usage: nodo chat_client_reply <client_id> <message...>", flush=True)
+                    _exit(1)
+                from src.commands.chat import reply_to_client_chat
+                ok = reply_to_client_chat(client_id=sys.argv[2], body=" ".join(sys.argv[3:]))
+                _exit(0 if ok else 1)
+
             case "local_builder":
                 # Run buildctl against nodo's rootless builder (the optional local
                 # packer's toolchain). Import lazily so this never loads on CH-only

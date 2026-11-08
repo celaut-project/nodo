@@ -1130,8 +1130,9 @@ message PoWRequired {
 // A text message from the operator of one node to the operator of another node, for
 // example to tell that a problem occurred.
 message ChatMessage {
-    // The client_id of the sender on the node that receives the message. The node must
-    // have a binding of this client to a peer. That peer is the sender.
+    // The client_id of the sender on the node that receives the message. If the client
+    // has a binding to a peer, that peer is the sender. If not, the sender is the client
+    // itself and the node keeps the message in the thread of the client (GetChatThread).
     string client_id = 1;
     // The text of the message.
     string body = 2;
@@ -1143,6 +1144,35 @@ message ChatMessage {
     // The Metadata of a service that the sender shares. Optional. The body also names
     // the service, for a reader that does not know this field.
     optional Metadata service = 4;
+}
+
+// One message of the thread between a client and the operator of a node.
+message ChatEntry {
+    // The position in the thread. The first message has sequence 1. The node gives
+    // the sequence; it never changes and it grows by 1.
+    uint64 sequence = 1;
+    // The time that the node stored the message, in Unix seconds.
+    int64 ts = 2;
+    // True if the operator wrote the message, false if the client did.
+    bool from_operator = 3;
+    // The text of the message.
+    string body = 4;
+}
+
+// The request of GetChatThread.
+message ChatThreadRequest {
+    // Send only the messages with a sequence more than this. 0 sends the whole thread
+    // (up to the limit of the node).
+    uint64 after_sequence = 1;
+}
+
+// The answer of GetChatThread.
+message ChatThread {
+    // The messages in order of sequence.
+    repeated ChatEntry entries = 1;
+    // The sequence of the last message of the thread, also if entries is empty or the
+    // node cut it. 0 if the thread is empty.
+    uint64 latest = 2;
 }
 
 // The answer of Chat.
@@ -1534,6 +1564,11 @@ service Gateway {
     // starts, the first event is a session event. If not, the stream has only one
     // notice that tells why. The stream stops when the instance stops.
     rpc Observe(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Sends a ChatMessage to the operator of the node. The node returns a ChatAck.
+    // Sends a ChatMessage to the operator of the node. The node returns a ChatAck. The
+    // client_id is enough; a binding to a peer is optional (see ChatMessage).
     rpc Chat(stream buffer.Buffer) returns (stream buffer.Buffer) {}
+    // Takes a Client (index 2) and a ChatThreadRequest (index 1). Returns the ChatThread
+    // of that client: the messages that it sent with Chat and the answers of the
+    // operator. It is free. A node gives only the thread of the client in the request.
+    rpc GetChatThread(stream buffer.Buffer) returns (stream buffer.Buffer) {}
 }

@@ -192,6 +192,11 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         output={1: celaut_pb2.ChatAck},
         auth="client-in-message",
     ),
+    "GetChatThread": GatewayRpc(
+        input={1: celaut_pb2.ChatThreadRequest, 2: celaut_pb2.Client},
+        output={1: celaut_pb2.ChatThread},
+        auth="client",
+    ),
 }
 
 

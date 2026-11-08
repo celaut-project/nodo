@@ -1215,6 +1215,28 @@ nodo tunnel_close <tunnel id> --json       # and close one
   "conversation_id", "service"}]}`; `chat_open --json` returns the new
   `{"conversation_id", "peer_id", "topic"}` so the next `chat_reply` can use it.
 
+- **chat_clients / chat_client `<client>` `--json`**
+  The support threads of clients (see "Support chat" below):
+  `{"threads": [{"client_id", "messages", "latest", "last_ts", "last_from_operator"}]}` and
+  `{"client_id", "messages": [{"sequence", "from_operator", "body", "ts"}]}`.
+
+- **Support chat (client and operator)**
+  A client needs only its `client_id` to write to the operator of a node: `Chat` with a
+  `client_id` that has no peer bound to it stores the message in the thread of that
+  client (the same body limit and the same cap of stored messages as a peer, here per
+  client). The client reads the thread, with the answers of the operator, with the free
+  RPC `GetChatThread` (a `ChatThreadRequest` at index 1 and the `Client` at index 2;
+  the answer is a `ChatThread`). Each entry has a `sequence` (1, 2, 3, ... per client;
+  it never changes), so the client sends `after_sequence` = the last one it has and gets
+  only what is new. One answer holds at most 200 entries, the first ones after the
+  cursor; `latest` is the last sequence of the thread. A client reads only its own
+  thread. The operator lists the threads with `nodo chat_clients`, reads one with
+  `nodo chat_client <client>` and answers with `nodo chat_client_reply <client> <msg...>`.
+  A plain client cannot send a service or a `conversation_id` (the message is refused
+  with a reason). A client bound to a peer keeps the peer chat (`nodo chat <peer>`); it
+  has no support thread, and the operator cannot answer it with `chat_client_reply`.
+  The TUI has no page for support threads yet.
+
 ### TUI ↔ CLI mapping
 
 | TUI page / action | Key | CLI equivalent |
@@ -1347,6 +1369,9 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `chat_reply <id> <message...> [--service s]` | reply in a conversation |
 | `chat_threads [<peer>] [--json]` / `chat_thread <id> [--json]` | list conversations / read one |
 | `chat_close <id>` / `chat_reopen <id>` | close / reopen (local only) |
+| `chat_clients [--json]` | clients with a support thread (`waiting` = the client wrote last) |
+| `chat_client <client> [--json]` | read the support thread of one client |
+| `chat_client_reply <client> <message...>` | answer a client in its support thread |
 | `clients [<client>] [--json] [--limit N]` | clients, or one with its history |
 | `reputation [<peer>] [--json]` | what the network stakes on us (or on a peer) |
 | `verify_reputation <peer>` | validate a peer's reputation proof and ownership |
@@ -1453,7 +1478,7 @@ commands that take one, the identifier of the relevant object:
 - **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
 - **Peer id** — `disconnect`, `increase_peer_deposit`, `peers`, `peer_reputation`, `reputation`,
   `verify_reputation`, `pay`, `chat`, `chat_open`, `chat_threads`, `force_execution`
-- **Client id** — `credit_client`, `debit_client`, `clients`
+- **Client id** — `credit_client`, `debit_client`, `clients`, `chat_client`, `chat_client_reply`
 - **Tunnel id** — `tunnels`, `tunnel_close`
 - **Subcommands** — `daemon start|status|stop|restart`
 

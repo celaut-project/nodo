@@ -143,6 +143,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.GetChatThread = channel.stream_stream(
+                '/celaut.Gateway/GetChatThread',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
 
 
 class GatewayServicer(object):
@@ -395,7 +400,17 @@ class GatewayServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def Chat(self, request_iterator, context):
-        """Sends a ChatMessage to the operator of the node. The node returns a ChatAck.
+        """Sends a ChatMessage to the operator of the node. The node returns a ChatAck. The
+        client_id is enough; a binding to a peer is optional (see ChatMessage).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetChatThread(self, request_iterator, context):
+        """Takes a Client (index 2) and a ChatThreadRequest (index 1). Returns the ChatThread
+        of that client: the messages that it sent with Chat and the answers of the
+        operator. It is free. A node gives only the thread of the client in the request.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -511,6 +526,11 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'Chat': grpc.stream_stream_rpc_method_handler(
                     servicer.Chat,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'GetChatThread': grpc.stream_stream_rpc_method_handler(
+                    servicer.GetChatThread,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -912,6 +932,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Chat',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetChatThread(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetChatThread',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

@@ -361,6 +361,19 @@ class BeeClient:
         )
 
     @staticmethod
+    def get_chat_thread(channel, client_id: str, after_sequence: int = 0,
+                        timeout: Optional[float] = None) -> celaut_pb2.ChatThread:
+        """``Client & ChatThreadRequest -> ChatThread``: the support thread of the client."""
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetChatThread,
+            input=[celaut_pb2.ChatThreadRequest(after_sequence=after_sequence),
+                   celaut_pb2.Client(client_id=client_id)],
+            indices_serializer=rpc_input("GetChatThread"),
+            indices_parser=rpc_output("GetChatThread"),
+            timeout=timeout,
+        )
+
+    @staticmethod
     def get_balance_statement(channel, client_id: str, token: str = "",
                               from_seq: int = 0, to_seq: int = 0,
                               timeout: Optional[float] = None,

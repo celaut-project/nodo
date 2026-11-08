@@ -179,3 +179,60 @@ def reopen_thread(conversation_id: str) -> bool:
         return False
     print(f"Reopened {conversation_id}.", flush=True)
     return True
+
+
+def _when(ts: int) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def list_client_chats(as_json: bool = False) -> bool:
+    """Print the clients that have a support thread, the most recently active first.
+
+    ``waiting`` marks the threads whose last message is the client's, so that the
+    operator sees which ones need an answer.
+    """
+    from src.manager.chat import list_client_threads
+
+    threads = list_client_threads()
+    if as_json:
+        return _emit({"threads": threads})
+    if not threads:
+        print("No client support threads.", flush=True)
+        return True
+    for entry in threads:
+        state = "answered" if entry["last_from_operator"] else "waiting"
+        print(
+            f"{entry['client_id']} [{state}] {entry['messages']} message(s),"
+            f" last {_when(entry['last_ts'])}",
+            flush=True,
+        )
+    return True
+
+
+def show_client_chat(client_id: str, limit: int = 200, as_json: bool = False) -> bool:
+    """Print the support thread of one client, oldest first."""
+    from src.manager.chat import get_client_thread_history
+
+    history = get_client_thread_history(client_id=client_id, limit=limit)
+    if as_json:
+        return _emit({"client_id": client_id, "messages": history})
+    if not history:
+        print(f"No support messages from {client_id}.", flush=True)
+        return True
+    for entry in history:
+        who = "us" if entry["from_operator"] else "client"
+        print(f"[{_when(entry['ts'])}] #{entry['sequence']} {who}: {entry['body']}", flush=True)
+    return True
+
+
+def reply_to_client_chat(client_id: str, body: str) -> bool:
+    """Answer a client in its support thread. The client reads it with GetChatThread."""
+    from src.manager.chat import ChatError, reply_to_client
+
+    try:
+        sequence = reply_to_client(client_id=client_id, body=body)
+    except ChatError as e:
+        print(f"STOP: {e}", flush=True)
+        return False
+    print(f"Answered {client_id} (message {sequence}).", flush=True)
+    return True

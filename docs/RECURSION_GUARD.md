@@ -93,6 +93,7 @@ answering, this node sends a request to another node: the same RPC or a differen
 | ServiceTunnel | No: `_resolve_target` only reaches local instances. A delegated token has to be tunnelled through the node that runs it | – | n/a | Unchanged |
 | Observe | No (local instance only) | – | n/a | Unchanged |
 | Chat | No: `receive_chat_message` stores the message. Sending (`send_chat_message`) is operator-initiated and never triggered by a received message | – | n/a | Unchanged |
+| GetChatThread | No: it reads the thread of the client in the request from this node's own database | – | n/a | New. Free, takes a `Client` like `GetClientMetrics` |
 
 Background work that calls peers but is not an RPC answer: `maintain.py`'s wanted-service
 fetch (GetService), peer refresh (GetPeerInfo) and delegated-instance billing.

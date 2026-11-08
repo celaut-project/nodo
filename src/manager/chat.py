@@ -33,6 +33,15 @@ does not fit the motivating case ("tell the other operator something is wrong")
 -- the recipient is very often not watching their node right then. A message
 naming no `conversation_id` is exactly the flat, un-threaded history this had
 before conversations existed, and still works unchanged.
+
+**Support chat between a client and the operator.** A ``client_id`` with no peer bound
+to it can chat too: the sender is then the client itself, not a peer. Its messages go
+to the thread of that client (``client_chat_messages``), where each one has a
+``sequence`` (1, 2, 3, ... per client; it never changes). The client reads the thread
+with ``GetChatThread`` (:func:`get_client_thread`) and the operator answers with
+:func:`reply_to_client`. Only the client_id is needed, so a plain client can ask its
+operator for help without any peer identity. A client bound to a peer keeps the peer
+behaviour above and does not use this thread.
 """
 # Deferred: `celaut_pb2.ChatMessage` only exists once `bash/generate_protos.sh` has
 # been rerun against the new RPC (see that script's docstring); this keeps a plain
@@ -161,12 +170,20 @@ def local_service_metadata(service: str) -> celaut_pb2.Metadata:
     return _validated_service(metadata)
 
 
-def receive_chat_message(message: celaut_pb2.ChatMessage) -> str:
-    """Verify, store and return the peer_id of an incoming Chat message.
+def receive_chat_message(message: celaut_pb2.ChatMessage) -> Optional[str]:
+    """Verify and store an incoming Chat message. Return the peer_id, or None.
 
-    Raises :class:`ChatError` when ``client_id`` is not a client of this node, or
-    is one this node never associated with a peer (see the module docstring for
-    where that association is made), or the body is empty/oversize.
+    Raises :class:`ChatError` when ``client_id`` is not a client of this node, or the
+    body is empty/oversize.
+
+    A ``client_id`` bound to a peer (see the module docstring for where that
+    association is made) is a peer: the message is stored under that peer and its
+    peer_id is returned. A ``client_id`` with no peer is a plain client: the message
+    is stored in the support thread of that client and the return value is None.
+    ``MAX_STORED_MESSAGES_PER_PEER`` is the cap in both cases (per peer, or per
+    client). A plain client cannot share a service or name a conversation: those
+    fields belong to the peer chat, and a message that carries one is refused with a
+    reason, not stored with the field dropped.
 
     A ``conversation_id`` this node has not seen before opens the thread on this
     side too (``opened_by_us=False``): the peer picked the id, so from here it
@@ -179,10 +196,7 @@ def receive_chat_message(message: celaut_pb2.ChatMessage) -> str:
 
     peer_id = sc.get_peer_id_by_local_client(client_id=client_id)
     if not peer_id:
-        raise ChatError(
-            f"client_id {client_id} is not associated with any peer; call "
-            "GenerateClient asserting your peer identity first."
-        )
+        return _receive_from_client(client_id, message)
 
     body = _validated_body(message.body)
 
@@ -204,6 +218,22 @@ def receive_chat_message(message: celaut_pb2.ChatMessage) -> str:
     )
     log.LOGGER(f"Chat message stored from peer {peer_id} (client {client_id}).")
     return peer_id
+
+
+def _receive_from_client(client_id: str, message: celaut_pb2.ChatMessage) -> None:
+    """Store a message of a client that has no peer, in the thread of that client."""
+    body = _validated_body(message.body)
+    if message.HasField("service") or message.HasField("conversation_id"):
+        raise ChatError(
+            "A client without a peer cannot send a service or a conversation_id; "
+            "send the text only."
+        )
+    sequence = sc.add_client_chat_message(
+        client_id=client_id, from_operator=False, body=body, ts=int(time.time()),
+        keep_per_client=MAX_STORED_MESSAGES_PER_PEER,
+    )
+    log.LOGGER(f"Chat message {sequence} stored from client {client_id}.")
+    return None
 
 
 def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = None,
@@ -337,3 +367,63 @@ def get_conversation_history(conversation_id: str, limit: int = 200) -> List[dic
 def get_chat_history(peer_id: str, limit: int = 100) -> List[dict]:
     """The stored conversation with ``peer_id``, oldest first."""
     return sc.get_chat_messages(peer_id=peer_id, limit=limit)
+
+
+# The most entries one GetChatThread answer holds.
+MAX_THREAD_ENTRIES_PER_ANSWER = 200
+
+
+def get_client_thread(client_id: str, after_sequence: int = 0) -> celaut_pb2.ChatThread:
+    """The ChatThread of ``client_id`` for ``GetChatThread``.
+
+    The entries with a sequence over ``after_sequence``, in order. At most
+    ``MAX_THREAD_ENTRIES_PER_ANSWER``: if there are more, these are the first ones
+    after the cursor (not the newest), so a client that moves its cursor to the last
+    sequence that it got reads the whole thread. ``latest`` is the last sequence of the
+    thread whatever the cut, 0 if it is empty. A client bound to a peer has no thread
+    here (its messages are in the peer chat), so it gets an empty one.
+    """
+    thread = celaut_pb2.ChatThread(latest=sc.get_client_chat_latest(client_id=client_id))
+    for entry in sc.get_client_chat_messages(
+        client_id=client_id, after_sequence=after_sequence,
+        limit=MAX_THREAD_ENTRIES_PER_ANSWER,
+    ):
+        thread.entries.add(
+            sequence=entry["sequence"], ts=entry["ts"],
+            from_operator=entry["from_operator"], body=entry["body"],
+        )
+    return thread
+
+
+def reply_to_client(client_id: str, body: str) -> int:
+    """Store the answer of the operator in the thread of ``client_id``; return its sequence.
+
+    Nothing is sent: the client reads it with ``GetChatThread``. Refused when the
+    client does not exist, or is bound to a peer (use the peer chat for that one).
+    """
+    if not client_id or not sc.client_exists(client_id=client_id):
+        raise ChatError("Unknown client_id.")
+    if sc.get_peer_id_by_local_client(client_id=client_id):
+        raise ChatError(
+            f"client_id {client_id} is bound to a peer; talk to that peer with the peer chat."
+        )
+    body = _validated_body(body)
+    sequence = sc.add_client_chat_message(
+        client_id=client_id, from_operator=True, body=body, ts=int(time.time()),
+        keep_per_client=MAX_STORED_MESSAGES_PER_PEER,
+    )
+    log.LOGGER(f"Chat answer {sequence} stored for client {client_id}.")
+    return sequence
+
+
+def list_client_threads() -> List[dict]:
+    """The clients with a support thread, the most recently active first."""
+    return sc.list_client_chat_threads()
+
+
+def get_client_thread_history(client_id: str, limit: int = 200) -> List[dict]:
+    """The newest ``limit`` messages of one client's thread, oldest first."""
+    latest = sc.get_client_chat_latest(client_id=client_id)
+    return sc.get_client_chat_messages(
+        client_id=client_id, after_sequence=max(0, latest - max(0, int(limit))), limit=limit,
+    )

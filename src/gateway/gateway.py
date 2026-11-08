@@ -23,7 +23,7 @@ from src.gateway.client_gate import ClientRequired, parse_with_client, require_c
 from src.manager import balance_statement, hibernation
 from src.manager.manager import ALLOW_DEBT, add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
-from src.manager.chat import ChatError, receive_chat_message
+from src.manager.chat import ChatError, get_client_thread, receive_chat_message
 from src.manager.metrics import get_client_metrics, get_metrics
 from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
@@ -555,5 +555,25 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 celaut_pb2.ChatAck(stored=False, reason=str(e))
             )
             return
-        log.LOGGER(f"Chat message accepted from peer {peer_id}.")
+        if peer_id:
+            log.LOGGER(f"Chat message accepted from peer {peer_id}.")
         yield from BeeClient.respond(celaut_pb2.ChatAck(stored=True))
+
+    def GetChatThread(self, request_iterator, context, **kwargs):
+        """The support thread of the caller, which is the client that it sends.
+
+        Free, and gated like ``GetClientMetrics``: the client_id must exist and is
+        rate-limited. It returns only the thread of that client, never another one's.
+        """
+        request, client_id = parse_with_client(request_iterator, method="GetChatThread")
+        # A local instance passes ``require_caller`` without a client_id, and is not a
+        # client: it has no thread.
+        if require_caller(context, client_id) != client_id:
+            raise ClientRequired("GetChatThread reads the thread of a client.")
+        request = request or celaut_pb2.ChatThreadRequest()
+        yield from BeeClient.respond(
+            message_iterator=get_client_thread(
+                client_id=client_id, after_sequence=request.after_sequence,
+            ),
+            indices=rpc_output("GetChatThread"),
+        )

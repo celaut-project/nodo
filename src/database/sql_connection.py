@@ -78,6 +78,9 @@ TRACEABILITY_TABLES = (
     # not enforced by default -- but `chat.list_conversations` would have nothing
     # to read, and neither TUI page (ours / our clients') could show it.
     "peer_chat_conversations",
+    # The support thread of a client with the operator (no peer needed). Without it,
+    # `Chat` from such a client would fail on the insert, and `GetChatThread` on the read.
+    "client_chat_messages",
 )
 
 # Columns on an existing table that a database created before them will not have.
@@ -3408,6 +3411,97 @@ class SQLConnection(metaclass=Singleton):
                 LIMIT ?
             )
         ''', (peer_id, peer_id, max(0, int(keep_per_peer))))
+
+    def add_client_chat_message(self, client_id: str, from_operator: bool, body: str,
+                                ts: int, keep_per_client: int) -> int:
+        """Store one message in the support thread of ``client_id``; return its sequence.
+
+        The sequence is the last one of the thread plus 1 (1 for the first message). It
+        is read and written in one transaction, so two messages of one client never get
+        the same sequence. Then the thread is cut down to its ``keep_per_client`` newest
+        messages. The cut removes the oldest rows only, so a sequence never changes and
+        is never given twice.
+        """
+        def work(cursor):
+            row = cursor.execute(
+                'SELECT MAX(sequence) FROM client_chat_messages WHERE client_id = ?',
+                (client_id,),
+            ).fetchone()
+            sequence = (row[0] or 0) + 1
+            cursor.execute(
+                '''INSERT INTO client_chat_messages
+                       (client_id, sequence, from_operator, body, ts)
+                   VALUES (?, ?, ?, ?, ?)''',
+                (client_id, sequence, int(bool(from_operator)), body, int(ts)),
+            )
+            cursor.execute(
+                'DELETE FROM client_chat_messages WHERE client_id = ? AND sequence <= ?',
+                (client_id, sequence - max(0, int(keep_per_client))),
+            )
+            return sequence
+        return self._transaction(work)
+
+    def get_client_chat_messages(self, client_id: str, after_sequence: int = 0,
+                                 limit: int = 200) -> List[dict]:
+        """The messages of one client's thread with a sequence over ``after_sequence``.
+
+        In order of sequence, at most ``limit``. With more than ``limit`` after the
+        cursor, these are the *first* ones after it, so a reader that moves its cursor
+        to the last sequence it got reads the whole thread, page by page.
+        """
+        result = self._execute('''
+            SELECT sequence, from_operator, body, ts
+            FROM client_chat_messages
+            WHERE client_id = ? AND sequence > ?
+            ORDER BY sequence ASC
+            LIMIT ?
+        ''', (client_id, max(0, int(after_sequence)), max(0, int(limit))))
+        return [
+            {
+                'sequence': int(row['sequence']),
+                'from_operator': bool(row['from_operator']),
+                'body': row['body'],
+                'ts': int(row['ts']),
+            }
+            for row in result.fetchall()
+        ]
+
+    def get_client_chat_latest(self, client_id: str) -> int:
+        """The last sequence of the thread of ``client_id``; 0 if it has no message."""
+        row = self._execute(
+            'SELECT MAX(sequence) FROM client_chat_messages WHERE client_id = ?',
+            (client_id,),
+        ).fetchone()
+        return int(row[0] or 0)
+
+    def list_client_chat_threads(self) -> List[dict]:
+        """One row per client with a thread, the most recently active first.
+
+        ``client_id``, ``messages`` (how many are stored), ``latest`` (last sequence),
+        ``last_ts``, and ``last_from_operator`` (False means the client wrote last, so
+        the thread waits for an answer).
+        """
+        result = self._execute('''
+            SELECT m.client_id AS client_id,
+                   (SELECT COUNT(*) FROM client_chat_messages c
+                    WHERE c.client_id = m.client_id) AS messages,
+                   m.sequence AS latest, m.ts AS last_ts,
+                   m.from_operator AS last_from_operator
+            FROM client_chat_messages m
+            WHERE m.sequence = (SELECT MAX(sequence) FROM client_chat_messages
+                                WHERE client_id = m.client_id)
+            ORDER BY m.ts DESC, m.client_id
+        ''')
+        return [
+            {
+                'client_id': row['client_id'],
+                'messages': int(row['messages']),
+                'latest': int(row['latest']),
+                'last_ts': int(row['last_ts']),
+                'last_from_operator': bool(row['last_from_operator']),
+            }
+            for row in result.fetchall()
+        ]
 
     def get_chat_messages(self, peer_id: str, limit: int = 100) -> List[dict]:
         """The stored conversation with ``peer_id``, oldest first, capped at ``limit``.

@@ -65,7 +65,7 @@ PEER_COMMANDS = [
 ]
 
 # Commands whose first positional argument is a client id.
-CLIENT_COMMANDS = ["credit_client", "debit_client", "clients"]
+CLIENT_COMMANDS = ["credit_client", "debit_client", "clients", "chat_client", "chat_client_reply"]
 
 # Commands whose first positional argument is a running tunnel's id.
 TUNNEL_COMMANDS = ["tunnels", "tunnel_close"]
@@ -169,6 +169,9 @@ COMMANDS = sorted(
         "chat_thread",
         "chat_close",
         "chat_reopen",
+        "chat_clients",
+        "chat_client",
+        "chat_client_reply",
     }
 )
 

@@ -159,12 +159,14 @@ class PeerChatTests(unittest.TestCase):
         with self.assertRaises(chat.ChatError):
             chat.receive_chat_message(message)
 
-    def test_a_client_id_never_associated_with_a_peer_is_rejected(self):
+    def test_a_client_id_never_associated_with_a_peer_is_a_plain_client(self):
+        """It is not refused any more: its message goes to the thread of the client
+        (see tests/test_client_support_chat.py), and no peer history is written."""
         lonely_client_id = uuid4().hex
         self.sc.add_client(client_id=lonely_client_id, balance_mu=0, last_usage=None)
         message = celaut_pb2.ChatMessage(client_id=lonely_client_id, body="hi")
-        with self.assertRaises(chat.ChatError):
-            chat.receive_chat_message(message)
+        self.assertIsNone(chat.receive_chat_message(message))
+        self.assertEqual(self.sc.get_chat_messages(peer_id=self.peer_id), [])
 
     def test_an_empty_message_is_rejected(self):
         message = celaut_pb2.ChatMessage(client_id=self.client_id, body="")
