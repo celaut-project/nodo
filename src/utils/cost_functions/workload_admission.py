@@ -168,7 +168,7 @@ def check_resource_availability_on_peer(
         return None
 
 
-def group_request(workload: celaut.Service.PossibleEnvironmentWorkload.Workload) -> celaut.ArchitectureResources:
+def group_request(workload: celaut.Service.Workload) -> celaut.ArchitectureResources:
     """What one descendant workload group asks of whoever would run it.
 
     The group's ``resources`` already is the shape asked about: its limits are what each

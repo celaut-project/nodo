@@ -56,7 +56,7 @@ def start_build_mu(metadata: celaut.Metadata, scarcity: Optional[Dict[str, float
     return int(build_charge_mu(metadata=metadata))
 
 
-def _group_hash(group: "celaut.Service.PossibleEnvironmentWorkload.Workload") -> Optional[str]:
+def _group_hash(group: "celaut.Service.Workload") -> Optional[str]:
     """The SHA3-256 of the service of a workload group, in hex, if the group names one."""
     if not group.HasField("dependency"):
         return None
