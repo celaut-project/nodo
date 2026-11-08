@@ -229,7 +229,10 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         """The balance that the quote asks for, in local MU: the one asked for, or this node's default.
 
         The cost of a quote is the build plus this balance (#563). It has to be known
-        before the peers can be asked. None if it cannot be known.
+        before the peers can be asked. None if it cannot be known. The default is the
+        balance of the service alone: the children of its
+        ``initial_environment_workload`` are in ``children_initial_cost``, not in
+        ``cost`` (#538), so the manifest is not passed.
         """
         if self.configuration.HasField("initial_mu") and self.configuration.initial_mu.n:
             return int(self.configuration.initial_mu.n)
@@ -242,7 +245,6 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 system_resources=service.container.resources.at_init,
                 service_hash=self.service_hash,
                 arch=arch,
-                service=service,
             ))
         except Exception as e:
             logger(f"No default deposit for {self.service_hash}, so no peer price is offered: {e}")
@@ -289,7 +291,9 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         del service
 
         # Needs the requested resources to price, so it happens here rather than
-        # before the service is read.
+        # before the service is read. The balance of the service alone: what it pays
+        # to start its initial children is quoted apart, as `children_initial_cost`
+        # (#538). A default start funds both (`launch_service`).
         if not self.configuration.HasField('initial_mu') or not self.configuration.initial_mu:
             try:
                 self.configuration.initial_mu.CopyFrom(
@@ -297,7 +301,6 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                         system_resources=resources.at_init,
                         service_hash=self.service_hash,
                         arch=service_arch,
-                        service=priced_service,
                     ))
                 )
             except Exception as e:

@@ -26,6 +26,7 @@ from src.utils.cost_functions.execution_cost import (
     build_charge_mu, charge_at_launch_price, launch_price_bp, system_scarcity,
 )
 from src.utils.cost_functions.generate_estimated_cost import _service_hash_or_none
+from src.utils.cost_functions.start_funding import children_initial_cost_mu
 from src.utils.monetary import prices
 from src.utils.utils import from_amount, to_amount
 from src.virtualizers.architecture import UnsupportedArchitectureException
@@ -83,7 +84,8 @@ def own_price(
     The least ``initial_mu`` (the build and the balance that ``configuration`` asks
     for), and one maintenance period at the start and at the most, at ``launch_bp``:
     the multipliers of a launch now when not given. These are the figures that the ticks
-    of a delegated instance charge (``maintain.settle_child``).
+    of a delegated instance charge (``maintain.settle_child``). With the manifest,
+    ``children_initial_cost`` too, as in the local quote.
     """
     launch_bp = launch_bp or launch_price_bp(system_scarcity())
     seconds = int(env_manager.get("MANAGER_ITERATION_TIME"))
@@ -95,6 +97,7 @@ def own_price(
         init_maintenance_cost=to_amount(charge_at_launch_price(start, seconds, launch_bp, arch)),
         max_maintenance_cost=to_amount(charge_at_launch_price(most, seconds, launch_bp, arch)),
         maintenance_seconds_loop=seconds,
+        children_initial_cost=to_amount(children_initial_cost_mu(service)),
     )
 
 

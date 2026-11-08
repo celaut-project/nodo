@@ -58,6 +58,7 @@ class MuConversionTests(unittest.TestCase):
         peer_quote.cost.n = "2000000"
         peer_quote.init_maintenance_cost.n = "400"
         peer_quote.max_maintenance_cost.n = "600"
+        peer_quote.children_initial_cost.n = "800"
         local_quote = estimated_cost_for_local(peer_quote, payment_system=payment_system)
 
         self.assertEqual(config.initial_mu.n, "1000000")
@@ -65,6 +66,7 @@ class MuConversionTests(unittest.TestCase):
         self.assertEqual(local_quote.cost.n, "1000000")
         self.assertEqual(local_quote.init_maintenance_cost.n, "200")
         self.assertEqual(local_quote.max_maintenance_cost.n, "300")
+        self.assertEqual(local_quote.children_initial_cost.n, "400")
 
     def _two_shared(self):
         connection = Mock()

@@ -31,7 +31,9 @@ from src.utils.cost_functions.execution_cost import (
     worst_case_charge_mu,
 )
 from src.utils.cost_functions.general_cost_functions import compute_worst_case_maintenance_cost
+from src.utils.arch_guard import arch_from_tags
 from src.utils.config import ConfigManager
+from src.utils.verify import get_service_hex_main_hash, get_service_list_of_hashes
 from src.virtualizers.interface import is_built, resolve_billable_resources
 
 env_manager = ConfigManager()
@@ -119,6 +121,93 @@ def descendant_funding_mu(
                 total += prices().build_mu
         best = max(best, total)
     return int(best)
+
+
+def _workload_hash(workload: celaut.Service.Workload) -> Optional[str]:
+    """The id of the service of a workload, in hex, or None if the workload names none.
+
+    From ``dependency.hash`` (the configured hash type first), or calculated from a
+    complete ``dependency.service``. A partial service names no service: its hash is
+    not the hash of the real one.
+    """
+    if not workload.HasField("dependency"):
+        return None
+    dependency = workload.dependency
+    hashes = [known for known in dependency.hash if known.value]
+    if hashes:
+        return get_service_hex_main_hash(other_hashes=hashes)
+    if dependency.is_completed and dependency.HasField("service"):
+        return get_service_hex_main_hash(
+            other_hashes=get_service_list_of_hashes(dependency.service.SerializeToString())
+        )
+    return None
+
+
+def child_start_cost_mu(
+        workload: celaut.Service.Workload,
+        scarcity: Optional[Dict[str, float]] = None,
+) -> int:
+    """What the parent pays for the ``child_start`` of the instances of one workload.
+
+    ``count`` times the least ``initial_mu`` that starts one child with the default
+    balance of this node: the build of the child plus
+    ``manager.default_initial_balance`` for the ``at_init`` of its service. These are
+    the figures of a real start (``compute_start_service_cost``), so the quote and the
+    charge come from the same price. The build is 0 when the workload names no service
+    (neither a hash nor a complete service), when the service is built here already,
+    and while the node is free. Free, the start costs nothing at all.
+
+    The resources are the ones of ``dependency.service.container.resources``. A
+    workload with no resources is priced at the floors of this node, as a real start of
+    a service that declares none. A service that declares its own
+    ``initial_environment_workload`` adds the cost of its children, as its default
+    balance does.
+    """
+    from src.manager.manager import default_initial_balance
+
+    count = int(workload.count)
+    if count <= 0 or is_free(scarcity):
+        return 0
+    service = workload.dependency.service
+    service_hash = _workload_hash(workload)
+    balance = default_initial_balance(
+        system_resources=service.container.resources.at_init,
+        service_hash=service_hash,
+        arch=arch_from_tags(service.container.architecture.tags),
+        scarcity=scarcity,
+        service=service,
+    )
+    build = prices().build_mu if service_hash and not is_built(service_hash) else 0
+    return int(count * (build + balance))
+
+
+def children_initial_cost_mu(
+        service: Optional[celaut.Service],
+        scarcity: Optional[Dict[str, float]] = None,
+) -> int:
+    """``EstimatedCost.children_initial_cost``: what a service pays to start its initial children.
+
+    ``Service.initial_environment_workload`` is an AND of clauses, a clause an OR of
+    groups, and a group an AND of workloads that run at the same time. The cost of a
+    group is the sum of its workloads (``child_start_cost_mu``). The cost of a clause
+    is the highest cost of its groups, because the parent chooses the group at run time.
+    The total is the sum of the clauses.
+
+    The quote does not probe peers: it uses all the groups of a clause, not only the
+    ones that fit now, and the price of this node. This can over-quote. An over-quote
+    is safe: the balance that the instance does not spend goes back to the parent when
+    it stops. ``possible_environment_workload`` has no cost.
+    """
+    if service is None:
+        return 0
+    total = 0
+    for clause in service.initial_environment_workload:
+        total += max(
+            (sum(child_start_cost_mu(workload, scarcity) for workload in group.workloads)
+             for group in clause.any_of),
+            default=0,
+        )
+    return int(total)
 
 
 def minimum_runtime_mu(

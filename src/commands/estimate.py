@@ -42,7 +42,8 @@ def estimate(service: str) -> None:
     # service (#563). It is the build plus the balance that the instance has after it.
     # Asking with the throwaway balance would report that balance as the cost. Left
     # unset, the node funds the quote with its own default (the requested resources for
-    # `deposits.INITIAL_RUNTIME_HOURS`), which is what a real launch pays.
+    # `deposits.INITIAL_RUNTIME_HOURS`). A real launch with no `initial_mu` also funds
+    # the initial children: it pays "To start" plus `children_initial_cost`.
     configuration = celaut_pb2.Configuration()
 
     channel = local_channel()
@@ -81,3 +82,9 @@ def estimate(service: str) -> None:
     print(f"- Maintenance, as started:  {per_hour(estimated_cost.init_maintenance_cost)} per hour")
     print(f"- Maintenance, at its most: {per_hour(estimated_cost.max_maintenance_cost)} per hour")
     print(f"- Charged every:            {estimated_cost.maintenance_seconds_loop} seconds")
+    # What the instance pays to start the children of its initial_environment_workload
+    # (#538). It is not in "To start": a client adds it to the balance of the parent.
+    children = int(estimated_cost.children_initial_cost.n or 0)
+    print(f"- Initial children:         {format_mu(children)} (children_initial_cost)")
+    if children:
+        print(f"- To start, with children:  {format_mu(from_amount(estimated_cost.cost) + children)}")
