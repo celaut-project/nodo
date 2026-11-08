@@ -205,6 +205,34 @@ class DescendantTunnelTests(_Tree):
             self.assertNotEqual(receipt.execution_name,
                                 execution_receipt.execution_name("d", self.receipt_peer))
 
+    def test_the_close_receipt_is_anchored_in_the_chain_of_the_descendant_and_agrees(self):
+        from collections import namedtuple
+        from src.identity import receipt_statement
+
+        # The charge of the open writes its row here, as ``spend_mu`` does for real.
+        self.spend.side_effect = lambda id, amount_mu, debug_mode, kind, detail: (
+            self.sc.move_balance(id, -amount_mu, kind, detail=detail) or True)
+        conn, relay = self.open(receipts=True)
+        replies = list(relay)
+        conn.close()
+        receipts = [r for r in replies if isinstance(r, celaut.ExecutionReceipt)]
+        close = next(r for r in receipts if r.kind == execution_receipt.KIND_CLOSE)
+
+        Row = namedtuple("Row", "seq ts amount kind detail")
+        rows = [Row(int(r["seq"]), int(r["ts"]), int(r["amount_mu"]), r["kind"],
+                    json.loads(r["detail"] or "{}"))
+                for r in SQLConnection._connection.execute(
+                    "SELECT * FROM balance_movements WHERE account_id = 'd' ORDER BY seq")]
+        anchors = [r for r in rows if r.detail.get("close")]
+
+        self.assertEqual(len(anchors), 1)
+        self.assertEqual(anchors[0].amount, 0)
+        self.assertEqual(anchors[0].detail["receipt_digest"],
+                         execution_receipt.receipt_digest(close))
+        report = receipt_statement.check(receipts, rows, peer_id=self.receipt_peer)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["checked"], 1)
+
     def test_a_ref_that_no_chain_links_is_refused(self):
         self.add_instance("loose", "g", 10)
         for ref in ("loose", "nobody"):
@@ -558,7 +586,8 @@ class RelayChainTests(_Tree):
         # A has no account of the instance on C: only the ceilings apply to its leg.
         self.assertEqual(self.tunnel_rows("alias"), [])
         # B charges its leg to the alias that it holds, and C to the instance.
-        self.assertEqual([int(r["amount_mu"]) for r in self.tunnel_rows("b-alias")], [-1])
+        # The second row moves nothing: it anchors the close receipt of the leg.
+        self.assertEqual([int(r["amount_mu"]) for r in self.tunnel_rows("b-alias")], [-1, 0])
         self.assertEqual({call.kwargs["id"] for call in self.spend.call_args_list}, {"t2"})
         # The rows of B name the execution by the instance_ref that B got.
         detail = json.loads(self.tunnel_rows("b-alias")[0]["detail"])

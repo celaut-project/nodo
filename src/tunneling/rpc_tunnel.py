@@ -444,6 +444,26 @@ class TrafficMeter:
         with self._idle:
             return self._idle.wait_for(lambda: self._accounting == 0, timeout)
 
+    def anchor_close(self, close) -> None:
+        """Write in the chain of the payer the digest of the ``close`` receipt (#419).
+
+        One row that moves nothing, after the last charge of the stream. The signed chain
+        then commits to the signed receipt, and a reader can see that they agree
+        (``receipt_statement``). Nothing is written when nobody pays here, or when the
+        stream has no ``close``. A failure to write is logged: the stream has ended.
+        """
+        if close is None or not self.token:
+            return
+        try:
+            sc.record_tunnel_close(self.token, {
+                **self.cause, "close": True,
+                "receipt_digest": execution_receipt.receipt_digest(close),
+                "mu_charged": str(self.billed_mu),
+            })
+        except Exception as e:
+            logger(f"{LOG_PREFIX} {self.target}: cannot anchor the close receipt: "
+                   f"{type(e).__name__}.")
+
     def settle(self) -> None:
         """Bill the partial block left over when the tunnel closes."""
         # Ahead of the `enabled` guard, and of the billing: the day's total has to reach
@@ -849,6 +869,7 @@ def _relay(
     # stopped, the balance ran out), not when it was closed from outside.
     if receipts is not None:
         close = receipts.checkpoint(mu_charged=meter.billed_mu, final=True)
+        meter.anchor_close(close)
         if close is not None:
             yield close
 
@@ -1388,5 +1409,6 @@ def _relay_peer(
         raise failure
     if receipts is not None:
         close = receipts.checkpoint(mu_charged=meter.billed_mu, final=True)
+        meter.anchor_close(close)
         if close is not None:
             yield close

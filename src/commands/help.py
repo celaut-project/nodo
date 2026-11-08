@@ -103,7 +103,7 @@ GROUPS: List[Group] = [
             ("clients [<client>]", "list clients, or one with its history (--json)"),
             ("reputation [<peer>]", "what the network stakes on us (--json)"),
             ("verify_reputation <peer>", "validate a peer's reputation proof and ownership"),
-            ("receipt verify <file>", "check signed execution receipts (--token, --json)"),
+            ("receipt verify|hops", "check receipts (--statement <acct>), or list those of peers"),
             ("submit_reputation", "publish this node's reputation proof on-chain"),
             ("sync_reputation_proof", "reconcile the proof id with what the chain holds"),
         ],
@@ -122,6 +122,7 @@ GROUPS: List[Group] = [
             ("pay <peer> <amount> [--payment-method]",
              "pay a peer in an asset it accepts"),
             ("tx_history", "payments made and received"),
+            ("statement [<account>] [--json]", "balance statements: accounts, movements, faults"),
         ],
     ),
     (

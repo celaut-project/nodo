@@ -56,6 +56,12 @@ class Reason:
     delegated to it, with MU left in it, and the father of the descendant got none of
     them: it was gone. Nobody could judge the peer, and the MU stayed with it (#631)."""
 
+    STATEMENT_CONTRADICTS_RECEIPT = "statement_contradicts_receipt"
+    """The peer signed a balance statement and an execution receipt that do not agree: the
+    start amount, the total of a tunnel session against its `close`, or the digest that a
+    row holds of the `close`. Two signatures of one node that disagree prove that it lied
+    in one of them (#419, `src/identity/receipt_statement.py`)."""
+
     MAINTENANCE_WHILE_UNREACHABLE = "maintenance_while_unreachable"
     """The peer signed maintenance of a descendant after a tunnel to that descendant
     through the peer failed, with no tunnel that worked after the failure and no

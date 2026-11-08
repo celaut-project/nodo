@@ -1146,6 +1146,11 @@ if __name__ == '__main__':
                 ok = resources(argv=sys.argv[2:])
                 _exit(0 if ok else 1)
 
+            case "statement":
+                from src.commands.statement import statement_command
+                ok = statement_command(argv=sys.argv[2:])
+                _exit(0 if ok else 1)
+
             case "receipt":
                 from src.commands.receipt import receipt_command
                 ok = receipt_command(argv=sys.argv[2:])

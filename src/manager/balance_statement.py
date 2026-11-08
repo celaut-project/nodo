@@ -580,6 +580,7 @@ def _ask_peer(row: dict, client_id: str, ask_ref: str, from_seq: int, to_seq: in
             m.instance_ref for m in statement.movements if m.kind == ledger.CHILD_BOUND))
         _judge_stop(peer_id, statement, ask_ref)
         _judge_unreachable(peer_id, statement, ask_ref)
+        _judge_receipt(peer_id, statement, ask_ref)
     except Exception as e:
         # A judgement that fails does not stop the read: the statement is valid.
         log.LOGGER(f"Cannot judge the statement of descendant {ask_ref[:12]} on {peer_id}: {e}")
@@ -781,6 +782,34 @@ def _judge_unreachable(peer_id: str, statement: celaut_pb2.BalanceStatement,
             f"maintenance row {row.seq} charges a period between tunnels that failed "
             f"at {first} and at {last}", _ONCE_FOR_EACH_DESCENDANT)
         return
+
+
+def _judge_receipt(peer_id: str, statement: celaut_pb2.BalanceStatement,
+                   instance_ref: str) -> None:
+    """Score the peer whose statement contradicts the receipt that it signed (#419).
+
+    A ``DescendantTunnel`` hop of this node to ``peer_id`` for ``instance_ref`` keeps the
+    last valid receipt of the peer (``SQLConnection.descendant_receipt``). The rows of the
+    statement are checked against it with ``receipt_statement.check``, the check that
+    ``nodo receipt verify --statement`` prints. Two signatures of one peer that disagree
+    are a proof, so the fault is scored once for each peer, descendant and row
+    (``Reason.STATEMENT_CONTRADICTS_RECEIPT``). A statement that does not hold the rows of
+    the session is not judged.
+    """
+    from src.identity import receipt_statement
+    from src.manager import statement_check
+
+    stored = sc.descendant_receipt(peer_id, instance_ref)
+    if not stored:
+        return
+    receipt = celaut_pb2.ExecutionReceipt()
+    receipt.ParseFromString(stored)
+    report = receipt_statement.check(
+        [receipt], statement_check.rows_of(statement), peer_id=peer_id)
+    for finding in report["findings"]:
+        statement_check.penalise_once(
+            peer_id, instance_ref, Reason.STATEMENT_CONTRADICTS_RECEIPT,
+            f"{finding['kind']}: {finding['detail']}", int(finding["seq"]))
 
 
 def _no_memory(row) -> bool:

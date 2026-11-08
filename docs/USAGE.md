@@ -54,7 +54,16 @@ These are the most commonly used commands for daily tasks:
   `nodo execute -e workers 8 -e timeout 20 1234567890abcdef`
   `nodo execute --no-input -e BLOCK_ID 9a3f… my_service_tag`
 
-- **receipt verify `<file>` `[--token <instance token>]` `[--peer <peer_id>]` `[--json]`**  
+- **statement `[<account>]` `[--from SEQ]` `[--limit N]` `[--kind KIND]` `[--json]`**  
+  The balance statements of this node, read from its own database (free). Without an account, it lists the clients, the instances and the instances that this node delegated, with the balance, the head of the chain and the number of rows. With one (a client_id, the name of an instance, or the start of its reference, six characters at least), it prints its movements, oldest first, and whether the chain holds together: each row hangs from the one before, its hash is the hash of its fields, and the balance adds up. Nothing it prints is a token. The exit code is 1 when a chain is broken.  
+  `nodo statement faults` lists the faults of peers that this node scored from their statements. `nodo statement hops` lists what the node keeps of each peer and descendant that it reached: the link, the head, the failures of the tunnel and the last receipt of the peer. `nodo statement check-receipts <file> <account>` checks receipts against the rows of an account.  
+  **Example:**  
+  `nodo statement web --kind tunnel --json`
+
+- **receipt hops `[--limit N]` `[--json]`**  
+  The receipts that this node keeps of its peers, one for each descendant that it reached through a `DescendantTunnel`, and whether each is valid for that peer.
+
+- **receipt verify `<file>` `[--token <instance token>]` `[--peer <peer_id>]` `[--statement <account>]` `[--json]`**  
   Checks execution receipts: the signature of each one, and across them the counters, the closes and any contradiction (two signed receipts for the same seq with different content). `<file>` is JSON: one receipt, a list, or one per line, in the proto3 JSON form of `celaut.ExecutionReceipt`, which `execute --receipt` writes. `--token` checks that each receipt names that instance. Exit code 0 only when all are valid. It needs no database and no daemon.  
   **Example:**  
   `nodo receipt verify receipts.jsonl --token 5f0c… --json`
@@ -1341,7 +1350,10 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `clients [<client>] [--json] [--limit N]` | clients, or one with its history |
 | `reputation [<peer>] [--json]` | what the network stakes on us (or on a peer) |
 | `verify_reputation <peer>` | validate a peer's reputation proof and ownership |
-| `receipt verify <file> [--token t] [--peer p] [--json]` | check signed execution receipts |
+| `receipt verify <file> [--token t] [--peer p] [--statement a] [--json]` | check signed execution receipts, and against an account |
+| `receipt hops [--json]` | the receipts kept of peers, and whether they are valid |
+| `statement [<account>] [--json]` | balance statements: accounts, movements, chain check |
+| `statement faults\|hops\|check-receipts` | faults of peers, what is kept of each hop, receipts against rows |
 | `submit_reputation` / `sync_reputation_proof` | publish / reconcile this node's proof |
 | `earnings [--json]` | money taken in, per network and window |
 | `donations [--json]` | who we fund, who we count |

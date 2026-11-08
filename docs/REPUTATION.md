@@ -232,6 +232,7 @@ so it absorbs the excess (#577).
 | More maintenance on a child than the quote that it gave for it | `maintenance_overcharged` | -1000 |
 | A signed `stop` row of a descendant with MU left, and the father gone ([#631](#who-records-the-fault)) | `killed_with_mu` | -1000 |
 | Maintenance of a descendant after a tunnel to it failed ([#631](#liveness-the-ancestor-tunnel)) | `maintenance_while_unreachable` | -1000 |
+| A statement and an execution receipt of the same peer that do not agree ([`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md#receipts-and-the-balance-statement)) | `statement_contradicts_receipt` | -1000 |
 
 The same scale as a service that does not hash to its id (`get_service_wrong_hash`): in
 every case the peer signed or reported something false about money. A fault is scored
@@ -507,6 +508,14 @@ descendant and row) if all these conditions are true:
 
 A statement that does not show the `refund` row is not judged. A local descendant is not
 scored: this node ran it.
+
+The node also checks each statement of a descendant against the last receipt that the same
+peer signed for a tunnel hop to it (`balance_statement._judge_receipt`, with
+`receipt_statement.check`). If the amounts or the digest that a row holds of the `close` do
+not agree with the receipt, it scores the peer `statement_contradicts_receipt` (-1000, once
+for each peer, descendant and row). Two signatures of one peer that disagree are a proof.
+The check needs the rows of the session in the statement: a read of another range does not
+judge it. See [`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md#receipts-and-the-balance-statement).
 
 Open points:
 

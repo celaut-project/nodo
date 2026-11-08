@@ -216,6 +216,25 @@ class LedgerWriteTests(_Database):
             self.sc.delegated_starts_on_peer("p"), {ledger.instance_ref("peer-token"): 9}
         )
 
+    def test_the_close_anchor_moves_nothing_and_hangs_in_the_chain(self):
+        self.sc.add_client("c1", 100, None)
+        self.sc.move_balance("c1", -7, ledger.TUNNEL, detail={"session": "ab"})
+
+        seq = self.sc.record_tunnel_close(
+            "c1", {"session": "ab", "close": True, "receipt_digest": "cd" * 32,
+                   "mu_charged": "7"})
+
+        rows = self.rows("c1")
+        self.assertEqual(seq, 3)
+        self.assertEqual((rows[-1]["kind"], rows[-1]["amount_mu"], rows[-1]["balance_after_mu"]),
+                         (ledger.TUNNEL, "0", "93"))
+        self.assertEqual(rows[-1]["prev_hash"], rows[-2]["hash"])
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 93)
+        self.assert_chained("c1")
+
+    def test_the_close_anchor_of_an_account_that_does_not_exist_is_nothing(self):
+        self.assertIsNone(self.sc.record_tunnel_close("nobody", {"close": True}))
+
     def test_the_sweep_keeps_every_row_of_a_live_account(self):
         self.sc.add_client("c1", 100, None)
         self.sc.move_balance("c1", 5, ledger.DEPOSIT)
@@ -1466,6 +1485,41 @@ class DescendantReadTests(_Database):
         self.delegate()
         statement = self.stop_statement(40, int(time.time()))
         self.assertEqual(self.scored(statement), [("peer-1", "killed_with_mu")])
+        self.assertEqual(self.scored(statement), [])
+
+    def receipt_statement(self, mu_in_close, session="cd" * 8):
+        """A peer with a key, a ``close`` receipt that it signed for a hop of this node, and
+        a statement of the descendant with a tunnel session of 15 MU."""
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+        from src.identity import execution_receipt as er
+        key = ed25519.Ed25519PrivateKey.generate()
+        peer_id = key.public_key().public_bytes_raw().hex()
+        self.delegate(alias="rs", peer=peer_id)
+        ref = ledger.instance_ref("far")
+        self.sc.record_descendant_links(peer_id, [ref])
+        stream = er.ReceiptChain(
+            "x", er.PLANE_TUNNEL, er.COVERAGE_CLIENT_TUNNEL, slot="80",
+            signer=lambda r: er.sign_with(r, key), peer_id=peer_id, session=session)
+        stream.record(er.DIRECTION_IN, b"ping")
+        close = stream.checkpoint(mu_charged=mu_in_close, final=True)
+        self.sc.record_descendant_receipt(peer_id, ref, close.SerializeToString())
+        name = er.execution_name("x", peer_id)
+        statement = balance_statement.celaut_pb2.BalanceStatement(head_seq=3)
+        for seq, (amount, extra) in enumerate(
+                ((-10, {"open": True}), (-5, {"bytes": "1024"})), start=1):
+            statement.movements.add(
+                seq=seq, ts=int(time.time()), kind=ledger.TUNNEL, amount={"n": str(amount)},
+                balance_after={"n": "100"},
+                detail=json.dumps({"execution_name": name, "session": session, **extra}))
+        return peer_id, statement
+
+    def test_a_peer_whose_statement_contradicts_its_receipt_is_scored_once(self):
+        peer_id, statement = self.receipt_statement(mu_in_close=99)
+        self.assertEqual(self.scored(statement), [(peer_id, "statement_contradicts_receipt")])
+        self.assertEqual(self.scored(statement), [])
+
+    def test_a_peer_whose_statement_agrees_with_its_receipt_is_not_scored(self):
+        _, statement = self.receipt_statement(mu_in_close=15)
         self.assertEqual(self.scored(statement), [])
 
     def test_a_stop_whose_father_got_the_mu_is_not_scored(self):

@@ -471,6 +471,37 @@ for the same execution. They must agree, and a reader can check it:
   the sum is **at least** the `mu_charged` of the last checkpoint: the node still bills
   the traffic after that checkpoint and the last partial block.
 
+- The last row of a session is an **anchor**: a `tunnel` row that moves nothing, with
+  `detail.close` set, `detail.receipt_digest` (the digest of the signed `close`) and
+  `detail.mu_charged`. The node writes it just after it signs the `close`, in the chain of
+  the account that pays for the stream. So the signed chain commits to the signed receipt,
+  and neither can be changed without the other showing it. A stream with no `close`
+  (cancelled) has no anchor. No row is written when nobody pays on that node (a relay leg
+  of a descendant whose account is on another node).
+
+One function checks all of this, `receipt_statement.check` (`src/identity/receipt_statement.py`),
+and everything that checks it uses that one: the node, on each peer that it reaches through
+a `DescendantTunnel`; `nodo receipt verify --statement <account>`; and `nodo statement
+check-receipts`. It reads the rows of an account and the receipts of a node, and finds:
+
+| Finding | What does not agree |
+|---|---|
+| `start_amount` | the `initial_mu` of the `start` receipt, and the amount of the `start` row of the same name |
+| `session_total` | the `mu_charged` of the `close`, and the sum of the `tunnel` rows of its session |
+| `session_below_checkpoint` | a cancelled stream: the rows add up to less than its last checkpoint |
+| `anchor_digest` | the digest that the anchor row holds, and the digest of the `close` |
+| `anchor_total` | the `mu_charged` that the anchor row holds, and that of the `close` |
+| `anchor_missing` | the account went on, more than 60 seconds after the `close`, with no anchor |
+| `invalid_receipt` | the receipt is not valid, or is not of the node that is judged |
+
+A session whose opening row is not among the rows (the range of a statement can start after
+it) is not judged. It is listed as skipped, with the reason. Two signatures of one node
+that disagree prove that it lied in one of them, and anybody can check that. When the node
+of a reader finds a finding in a statement that a peer gave, it scores the peer
+`statement_contradicts_receipt` (-1000, once for each peer, descendant and row). The node
+keeps the last valid receipt of each hop (`descendant_peers.receipt`, `nodo receipt hops`),
+and it checks it when it reads the statement of that descendant.
+
 The ledger names an instance in a movement by its `instance_ref`, which is
 `blake2b("celaut-ledger-instance:" + token)`. A `child_start` of a father pays for a
 child before the child exists. The `child_bound` row that follows names the child by its
@@ -548,11 +579,14 @@ not proof that the instance sent nothing else.
 
 ### Checking receipts
 
-`nodo receipt verify <file> [--token <token>] [--peer <peer_id>] [--json]` reads a
+`nodo receipt verify <file> [--token <token>] [--peer <peer_id>] [--statement <account>]
+[--json]` reads a
 JSON file (one receipt, a list, or one per line, in the proto3 JSON form) and checks
 each receipt, then the set: one node and one name, counters and charge that do not
 go down, nothing after a close, and **contradictions** (two valid receipts for the
-same start, or for the same `seq` of the same stream, with different content). A gap
+same start, or for the same `seq` of the same stream, with different content). With
+`--statement <account>` it also checks the receipts against the rows of that account of
+this node (see "Receipts and the balance statement"). A gap
 in `seq` is reported but is not an error. `nodo execute --receipt <file>` keeps the
 start receipt in that form. The check needs no database, no daemon and no network. A
 file that is not receipts gives "Cannot read receipts" (with `--json`, a JSON error),

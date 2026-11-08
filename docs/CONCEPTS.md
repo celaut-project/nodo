@@ -205,6 +205,14 @@ every ancestor can read and reach its descendants:
 - **Who pays.** The instance that is called pays the reads that a node makes to its peers,
   from its own account. A ref that no peer linked is refused with no call and no cost. The
   caller pays only for a local read, or for a stopped instance that cannot pay.
+- **Receipts.** The signed receipts of a tunnel and the signed rows of the account that
+  pays for it must agree: the amounts, and the digest of the `close` that the last row of a
+  session holds. One check (`receipt_statement.check`) does it for the node, for the CLI
+  (`nodo statement check-receipts`, `nodo receipt verify --statement`) and for the TUI. A
+  peer whose statement contradicts its own receipt is scored `statement_contradicts_receipt`.
+- **Read it.** `nodo statement` lists the accounts of this node and their movements, checks
+  each chain, and shows the faults and the receipts kept of peers; the TUI has the same in
+  its LEDGER and RECEIPTS pages.
 - **Liveness.** A statement shows money, not life. An ancestor opens a `DescendantTunnel`
   to the API of the descendant: to fake an answer, the node must run the service.
 - **Stop.** The chain of an instance ends with a `stop` row (`reason`, `leftover`). An

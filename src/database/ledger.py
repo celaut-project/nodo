@@ -67,7 +67,12 @@ TUNNEL = "tunnel"
 """A ``ServiceTunnel``: the opening (``detail.open``), or the traffic (``detail.bytes``).
 ``detail.execution_name`` names the execution as its receipts do (#419), and
 ``detail.session`` is the receipt stream of the tunnel when the caller asked for
-receipts: the sum of the rows of one session is the ``mu_charged`` of its ``close``."""
+receipts: the sum of the rows of one session is the ``mu_charged`` of its ``close``.
+
+The close of a session is anchored by one last ``tunnel`` row that moves nothing
+(``detail.close``): it holds ``detail.receipt_digest``, the digest of the signed ``close``
+receipt, and ``detail.mu_charged``, so the signed chain commits to the signed receipt
+(``src/identity/receipt_statement.py`` checks that the two agree)."""
 RESOURCE_CHANGE = "resource_change"
 """``ModifyServiceSystemResources``."""
 STATEMENT_QUERY = "statement_query"

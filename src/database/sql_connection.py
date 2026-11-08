@@ -457,11 +457,11 @@ class SQLConnection(metaclass=Singleton):
 
     def _move(self, cursor, account_id: str, amount_mu: int, kind: str, *,
               allow_debt: bool = True, instance_token: Optional[str] = None,
-              detail: Optional[Mapping] = None) -> Optional[int]:
+              detail: Optional[Mapping] = None, write_zero: bool = False) -> Optional[int]:
         """Add ``amount_mu`` (signed) to the balance of ``account_id``, with its row.
 
         Returns the seq of the row, or None for an amount of 0: nothing moved, so
-        nothing is written. Raises ``NoSuchAccount``, or ``InsufficientBalance`` for a
+        nothing is written, unless ``write_zero`` asks for a row that only says something. Raises ``NoSuchAccount``, or ``InsufficientBalance`` for a
         charge that leaves the balance below 0 when ``allow_debt`` is off.
         """
         amount_mu = int(amount_mu)
@@ -474,7 +474,7 @@ class SQLConnection(metaclass=Singleton):
                 break
         else:
             raise ledger.NoSuchAccount(account_id)
-        if amount_mu == 0:
+        if amount_mu == 0 and not write_zero:
             return None
         balance_mu = _balance_of(row['balance_mu']) + amount_mu
         if amount_mu < 0 and balance_mu < 0 and not allow_debt:
@@ -515,6 +515,19 @@ class SQLConnection(metaclass=Singleton):
             cursor, account_id, amount_mu, kind, allow_debt=allow_debt,
             instance_token=instance_token, detail=detail,
         ))
+
+    def record_tunnel_close(self, account_id: str, detail: Mapping) -> Optional[int]:
+        """Write the row that anchors the ``close`` receipt of a tunnel stream (#419).
+
+        The row moves nothing: its ``detail`` holds the digest of the receipt. Returns its
+        seq, or None when there is no live account of that id (the stream is paid by
+        none, or the account stopped).
+        """
+        try:
+            return self._transaction(lambda cursor: self._move(
+                cursor, account_id, 0, ledger.TUNNEL, detail=detail, write_zero=True))
+        except ledger.NoSuchAccount:
+            return None
 
     def transfer(self, source_id: str, target_id: str, amount_mu: int, kind: str, *,
                  child: str, allow_debt: bool = False) -> None:
