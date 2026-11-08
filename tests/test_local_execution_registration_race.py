@@ -156,6 +156,32 @@ class RegistrationOrderTests(unittest.TestCase):
         self.assertEqual(stored.uri_slot[0].uri[0].ip, VM_IP)
         self.assertEqual(stored.uri_slot[0].uri[0].port, 5000)
 
+    def test_the_start_row_holds_the_digest_of_the_receipt_that_the_answer_gives(self):
+        # The receipt is signed before the row is written, so the row can hold its digest,
+        # and it is that receipt that the caller gets (#419).
+        from src.identity import execution_receipt as er
+        receipt = celaut.ExecutionReceipt(kind="start", execution_name="ab" * 32, ts=1)
+        with patch.object(local_execute, "_start_receipt", return_value=receipt) as signed, \
+                patch.object(er, "node_execution_name", return_value="ab" * 32):
+            instance = self._run(self._successful_execute)
+
+        start = dict(self.events[0][1])["movements"][0]
+        self.assertEqual(start.kind, "start")
+        self.assertEqual(start.detail, {"execution_name": "ab" * 32,
+                                        "receipt_digest": er.receipt_digest(receipt)})
+        self.assertEqual(signed.call_count, 1)
+        self.assertEqual(instance.receipt, receipt)
+
+    def test_a_start_with_no_receipt_has_no_digest(self):
+        from src.identity import execution_receipt as er
+        with patch.object(local_execute, "_start_receipt", return_value=None), \
+                patch.object(er, "node_execution_name", return_value="ab" * 32):
+            instance = self._run(self._successful_execute)
+
+        start = dict(self.events[0][1])["movements"][0]
+        self.assertEqual(start.detail, {"execution_name": "ab" * 32})
+        self.assertFalse(instance.HasField("receipt"))
+
     def test_a_launch_that_fails_after_registering_purges_the_row(self):
         def _fails_after_registering(**kwargs):
             kwargs["register_instance"](VM_ID, VM_IP, self.resolved)

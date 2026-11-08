@@ -6,7 +6,11 @@ balance statement). They must agree, as ``docs/EXECUTION_RECEIPTS.md`` says
 ("Receipts and the balance statement"):
 
 * The ``start`` row has ``detail.execution_name``, the name of the receipts, and its
-  amount is the ``initial_mu`` of the ``start`` receipt.
+  amount is the ``initial_mu`` of the ``start`` receipt. It also holds
+  ``detail.receipt_digest``, the digest of that receipt: the node signs the receipt before
+  it writes the row, so the signed chain commits to the signed receipt from its first row.
+  A row with no digest (an instance that started before it, or a node with no identity
+  key) is not judged on it.
 * The ``tunnel`` rows of a session have the same name and ``detail.session``. Their sum is
   the ``mu_charged`` of the ``close`` of that stream (at least that of the last checkpoint
   when the stream was cancelled and has no ``close``).
@@ -45,6 +49,7 @@ ANCHOR_GRACE_SECONDS = 60
 
 # The kinds of ``Finding.kind``.
 START_AMOUNT = "start_amount"
+START_DIGEST = "start_digest"
 SESSION_TOTAL = "session_total"
 SESSION_BELOW_CHECKPOINT = "session_below_checkpoint"
 ANCHOR_DIGEST = "anchor_digest"
@@ -88,6 +93,13 @@ def _check_start(receipt, rows: Sequence, findings: List[Finding], skipped: List
             START_AMOUNT, int(row.seq), receipt.kind, "",
             f"the start receipt says {receipt.initial_mu.n} MU, row {row.seq} says "
             f"{int(row.amount)} MU"))
+    held = _detail(row).get("receipt_digest")
+    digest = execution_receipt.receipt_digest(receipt)
+    if held is not None and held != digest:
+        findings.append(Finding(
+            START_DIGEST, int(row.seq), receipt.kind, "",
+            f"row {row.seq} holds the digest {str(held)[:16]}, the start receipt has "
+            f"{digest[:16]}"))
 
 
 def _check_session(session: str, receipts: Sequence, rows: Sequence,

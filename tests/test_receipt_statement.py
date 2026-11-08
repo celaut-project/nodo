@@ -125,6 +125,24 @@ class ReceiptStatementTests(unittest.TestCase):
         report = rs.check([start], [row._replace(amount=400)], peer_id=self.peer_id)
         self.assertEqual(self.kinds(report), [rs.START_AMOUNT])
 
+    def test_the_start_row_holds_the_digest_of_the_start_receipt(self):
+        start = self.start_receipt(500)
+        row = Row(1, self.now, 500, "start", {
+            "execution_name": self.name, "receipt_digest": er.receipt_digest(start)})
+        report = rs.check([start], [row], peer_id=self.peer_id)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["checked"], 1)
+
+        wrong = row._replace(detail={**row.detail, "receipt_digest": "00" * 32})
+        report = rs.check([start], [wrong], peer_id=self.peer_id)
+        self.assertEqual(self.kinds(report), [rs.START_DIGEST])
+        self.assertEqual(report["findings"][0]["seq"], 1)
+
+    def test_a_start_row_with_no_digest_is_not_judged_on_it(self):
+        start = self.start_receipt(500)
+        row = Row(1, self.now, 500, "start", {"execution_name": self.name})
+        self.assertEqual(rs.check([start], [row], peer_id=self.peer_id)["findings"], [])
+
     def test_a_receipt_that_does_not_verify_is_a_finding_and_is_not_read_further(self):
         close = self.chain(15)
         close.mu_charged.n = "1"

@@ -304,6 +304,17 @@ def delegate_execution(
         from src.gateway.launcher.local_execution.local_execution import (
             _start_receipt, execution_cause,
         )
+        # The client does not know about the delegation, so this node signs a normal
+        # start receipt as the executor (#419): the alias is the token, the service and
+        # the envs are those of the request, and initial_mu is the credit that this node
+        # gives to the client (the `start` movement), not the balance of the child on
+        # the peer. It is signed before the row of the start, which holds its digest.
+        # The receipt of the peer names the peer's token and is not passed on.
+        receipt = _start_receipt(
+            token=alias, service_id=service_id,
+            config=extract_instance_name(config)[1] or celaut_pb2.Configuration(),
+            initial_mu=initial_mu,
+        )
         SQLConnection().add_delegated_instance(
             father_id=father_id,
             peer_id=peer,  # Add node_uri.
@@ -324,7 +335,8 @@ def delegate_execution(
             # taken from the amount before the child had a balance.
             peer_balance_mu=peer_balance_mu,
             movements=(
-                ledger.Movement(ledger.START, initial_mu, detail=execution_cause(alias)),
+                ledger.Movement(ledger.START, initial_mu,
+                                detail=execution_cause(alias, receipt)),
                 ledger.Movement(ledger.BUILD, -int(own_build_mu)),
             ),
             sent_peer_mu=sent_peer_mu,
@@ -337,16 +349,6 @@ def delegate_execution(
         )
         service_instance.token = alias
         service_instance.instance.CopyFrom(published_instance)
-        # The client does not know about the delegation, so this node signs a normal
-        # start receipt as the executor (#419): the alias is the token, the service and
-        # the envs are those of the request, and initial_mu is the credit that this node
-        # gives to the client (the `start` movement), not the balance of the child on
-        # the peer. The receipt of the peer names the peer's token and is not passed on.
-        receipt = _start_receipt(
-            token=alias, service_id=service_id,
-            config=extract_instance_name(config)[1] or celaut_pb2.Configuration(),
-            initial_mu=initial_mu,
-        )
         if receipt is not None:
             service_instance.receipt.CopyFrom(receipt)
         else:

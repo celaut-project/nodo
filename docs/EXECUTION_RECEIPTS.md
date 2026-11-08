@@ -464,7 +464,11 @@ The balance statement (`GetBalanceStatement`) and the receipts are two signed so
 for the same execution. They must agree, and a reader can check it:
 
 - The `start` movement of the instance has `detail.execution_name`, the name of its
-  receipts. Its amount is the `initial_mu` of the `start` receipt.
+  receipts. Its amount is the `initial_mu` of the `start` receipt. It also holds
+  `detail.receipt_digest`, the digest of that receipt: the node signs the `start` receipt
+  just before it writes the row, so the signed chain commits to the signed receipt from its
+  first row. A node with no identity key writes neither. A row of an instance that started
+  before this has no digest and is not judged on it.
 - Each `tunnel` movement has `detail.execution_name` and, when the caller asked for
   receipts, `detail.session`. The sum of the `tunnel` movements of one session is the
   `mu_charged` of the `close` of that stream. After a cancel there is no close, and
@@ -487,6 +491,7 @@ check-receipts`. It reads the rows of an account and the receipts of a node, and
 | Finding | What does not agree |
 |---|---|
 | `start_amount` | the `initial_mu` of the `start` receipt, and the amount of the `start` row of the same name |
+| `start_digest` | the digest that the `start` row holds, and the digest of the `start` receipt |
 | `session_total` | the `mu_charged` of the `close`, and the sum of the `tunnel` rows of its session |
 | `session_below_checkpoint` | a cancelled stream: the rows add up to less than its last checkpoint |
 | `anchor_digest` | the digest that the anchor row holds, and the digest of the `close` |

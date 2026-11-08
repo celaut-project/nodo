@@ -45,7 +45,8 @@ DEBIT = "debit"
 START = "start"
 """The ``initial_mu`` that a new instance received from its father.
 ``detail.execution_name`` is the name that the execution receipts of the instance carry
-(#419), when the node has an identity key."""
+(#419), when the node has an identity key, and ``detail.receipt_digest`` the digest of its
+signed ``start`` receipt. The node signs the receipt before it writes this row."""
 BUILD = "build"
 """The build of the service, taken from the ``initial_mu`` of a new instance."""
 MAINTENANCE = "maintenance"
