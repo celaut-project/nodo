@@ -79,6 +79,8 @@ These are the most commonly used commands for daily tasks:
   - execution feasibility (`YES/NO`)
   - reason when execution is not possible
   - estimated costs (to start, and maintenance per hour)
+  - the cost to start the initial children (`children_initial_cost`, for a service that
+    declares `initial_environment_workload`), and the start with them
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  
