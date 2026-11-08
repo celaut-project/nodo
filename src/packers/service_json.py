@@ -76,6 +76,12 @@ def _pop_alias(document: dict, snake_case: str, camel_case: str, path: str):
     return []
 
 
+WORKLOAD_FIELDS = (
+    ("possible_environment_workload", "possibleEnvironmentWorkload"),
+    ("initial_environment_workload", "initialEnvironmentWorkload"),
+)
+
+
 def parse_service_spec(value: Any, path: str = "service") -> celaut.Service:
     """Parse a protobuf-JSON Service, with recursive workload dependencies.
 
@@ -87,12 +93,10 @@ def parse_service_spec(value: Any, path: str = "service") -> celaut.Service:
 
     source = _require_mapping(value, path)
     document = deepcopy(dict(source))
-    workloads = _pop_alias(
-        document,
-        "possible_environment_workload",
-        "possibleEnvironmentWorkload",
-        path,
-    )
+    declarations = {
+        snake_case: _pop_alias(document, snake_case, camel_case, path)
+        for snake_case, camel_case in WORKLOAD_FIELDS
+    }
     service = celaut.Service()
     try:
         json_format.ParseDict(
@@ -103,11 +107,10 @@ def parse_service_spec(value: Any, path: str = "service") -> celaut.Service:
     except (json_format.ParseError, TypeError, ValueError) as exc:
         raise ValueError(f"service.json {path} is not a valid Service: {exc}") from exc
 
-    populate_possible_environment_workloads(
-        service,
-        workloads,
-        _path(path, "possible_environment_workload"),
-    )
+    for field, clauses in declarations.items():
+        populate_environment_workloads(
+            getattr(service, field), clauses, _path(path, field)
+        )
     return service
 
 
@@ -148,65 +151,76 @@ def _populate_dependency(target, value: Any, path: str) -> None:
         )
 
 
-def populate_possible_environment_workloads(
-    service: celaut.Service,
+def _unknown_fields(source: Mapping[str, Any], supported: set, path: str, hint: str = "") -> None:
+    unknown = sorted(set(source) - supported)
+    if unknown:
+        raise ValueError(
+            f"service.json {path} contains unknown field(s): {', '.join(unknown)}.{hint}"
+        )
+
+
+def populate_environment_workloads(
+    clauses_field,
     value: Any,
     path: str = "possible_environment_workload",
 ) -> None:
-    """Append service.json workload scenarios to ``service``."""
+    """Append the service.json clauses of a workload declaration to ``clauses_field``.
 
-    scenarios = _require_list(value, path)
-    for scenario_index, scenario_value in enumerate(scenarios):
-        scenario_path = f"{path}[{scenario_index}]"
-        scenario_source = _require_mapping(scenario_value, scenario_path)
-        unknown_scenario = sorted(set(scenario_source) - {"workloads"})
-        if unknown_scenario:
-            raise ValueError(
-                f"service.json {scenario_path} contains unknown field(s): "
-                f"{', '.join(unknown_scenario)}."
-            )
-        workloads = _require_list(
-            scenario_source.get("workloads", []), _path(scenario_path, "workloads")
+    ``clauses_field`` is ``Service.possible_environment_workload`` or
+    ``Service.initial_environment_workload``. The declaration is in conjunctive normal
+    form: a list of clauses (AND), each clause ``{"any_of": [group, ...]}`` (OR), each
+    group ``{"workloads": [workload, ...]}`` (AND, at the same time), and each workload
+    ``{"count": n, "dependency": {...}}``. The resources of a workload are in
+    ``dependency.service.container.resources``.
+    """
+
+    clauses = _require_list(value, path)
+    for clause_index, clause_value in enumerate(clauses):
+        clause_path = f"{path}[{clause_index}]"
+        clause_source = _require_mapping(clause_value, clause_path)
+        _unknown_fields(
+            clause_source, {"any_of"}, clause_path,
+            " A clause is {\"any_of\": [{\"workloads\": [...]}, ...]}."
+            if "workloads" in clause_source else "",
         )
-        scenario = service.possible_environment_workload.add()
-
-        for workload_index, workload_value in enumerate(workloads):
-            workload_path = f"{scenario_path}.workloads[{workload_index}]"
-            workload_source = _require_mapping(workload_value, workload_path)
-            unknown_workload = sorted(
-                set(workload_source) - {"count", "resources", "dependency"}
+        groups = _require_list(
+            clause_source.get("any_of", []), _path(clause_path, "any_of")
+        )
+        if not groups:
+            raise ValueError(
+                f"service.json {clause_path}.any_of must have at least one group."
             )
-            if unknown_workload:
-                raise ValueError(
-                    f"service.json {workload_path} contains unknown field(s): "
-                    f"{', '.join(unknown_workload)}."
+        clause = clauses_field.add()
+
+        for group_index, group_value in enumerate(groups):
+            group_path = f"{clause_path}.any_of[{group_index}]"
+            group_source = _require_mapping(group_value, group_path)
+            _unknown_fields(group_source, {"workloads"}, group_path)
+            workloads = _require_list(
+                group_source.get("workloads", []), _path(group_path, "workloads")
+            )
+            group = clause.any_of.add()
+
+            for workload_index, workload_value in enumerate(workloads):
+                workload_path = f"{group_path}.workloads[{workload_index}]"
+                workload_source = _require_mapping(workload_value, workload_path)
+                _unknown_fields(
+                    workload_source, {"count", "dependency"}, workload_path,
+                    " The resources of a workload are in "
+                    "dependency.service.container.resources."
+                    if "resources" in workload_source else "",
                 )
 
-            workload = scenario.workloads.add()
-            count = workload_source.get("count", 1)
-            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-                raise ValueError(
-                    f"service.json {workload_path}.count must be a non-negative integer."
-                )
-            workload.count = count
+                workload = group.workloads.add()
+                count = workload_source.get("count", 1)
+                if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                    raise ValueError(
+                        f"service.json {workload_path}.count must be a non-negative integer."
+                    )
+                workload.count = count
 
-            resources = workload_source.get("resources", {})
-            resources_path = _path(workload_path, "resources")
-            try:
-                json_format.ParseDict(
-                    keyvalue.json_objects_to_entries(
-                        resources, workload.resources.DESCRIPTOR, resources_path
-                    ),
-                    workload.resources,
-                    ignore_unknown_fields=False,
-                )
-            except (json_format.ParseError, TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"service.json {workload_path}.resources is not valid: {exc}"
-                ) from exc
-
-            dependency = workload_source.get("dependency")
-            if dependency is not None:
-                _populate_dependency(
-                    workload.dependency, dependency, _path(workload_path, "dependency")
-                )
+                dependency = workload_source.get("dependency")
+                if dependency is not None:
+                    _populate_dependency(
+                        workload.dependency, dependency, _path(workload_path, "dependency")
+                    )

@@ -35,35 +35,62 @@
       "disk_space": 4000000000
     }
   },
-  "possible_environment_workload": [
+  "initial_environment_workload": [
     {
-      "workloads": [
+      "any_of": [
         {
-          "count": 2,
-          "resources": { "mem_limit": 5000000000 },
-          "dependency": {
-            "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
-          }
-        },
-        {
-          "count": 1,
-          "resources": { "mem_limit": 40000000000 },
-          "dependency": {
-            "service": {
-              "container": {
-                "resources": {
-                  "at_init": { "mem_limit": 40000000000 },
-                  "at_most": { "mem_limit": 48000000000 }
+          "workloads": [
+            {
+              "count": 1,
+              "dependency": {
+                "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
+                "service": {
+                  "container": {
+                    "resources": {
+                      "at_init": { "mem_limit": 1000000000 },
+                      "at_most": { "mem_limit": 2000000000 }
+                    }
+                  }
                 }
               }
             }
-          }
+          ]
         }
       ]
-    },
+    }
+  ],
+  "possible_environment_workload": [
     {
-      "workloads": [
-        { "count": 4, "resources": { "mem_limit": 16000000000 } }
+      "any_of": [
+        {
+          "workloads": [
+            {
+              "count": 1,
+              "dependency": {
+                "service": {
+                  "container": {
+                    "resources": {
+                      "at_init": { "mem_limit": 40000000000 },
+                      "at_most": { "mem_limit": 48000000000 }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "workloads": [
+            {
+              "count": 4,
+              "dependency": {
+                "service": {
+                  "container": { "resources": { "at_most": { "mem_limit": 16000000000 } } }
+                }
+              }
+            }
+          ]
+        }
       ]
     }
   ],
@@ -143,33 +170,41 @@
   `mem_bandwidth_working_set_bytes`. Absent, nothing is written and the service id is
   unchanged. Admission enforces it per architecture against the node's measured scores;
   see `docs/PACKING.md`.
-- `possible_environment_workload[]` declares the **worst-case descendant workloads** the service
-  may request during its lifetime, for scheduling admission decisions. It is serialized
-  directly to `Service.possible_environment_workload`, outside `Service.Container`. Each entry is **one independent concurrent execution
-  scenario** — scenarios are *not* cumulative and imply *no* temporal ordering; a scheduler
-  only checks whether each scenario, in isolation, could be satisfied. Each scenario's
-  `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
-  (a `Sysresources`: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`;
-  bytes / microseconds; an omitted field defaults to `0` = no limit; plus an optional
-  `benchmark` object, as above). Unlike `resources`
-  (this instance's own needs), these describe its descendants. At launch (`launch_service`),
-  every group that declares `resources` is checked for existence — every limit it declares,
-  not just memory — with local admission first, then known peers via
-  `GetResourceAvailability` if `network.DELEGATE_EXECUTION` is on, and the service is refused
-  if a group has nowhere that could take it
+- `initial_environment_workload[]` and `possible_environment_workload[]` declare the
+  **descendant workloads** of the service: the instances that it starts. They are serialized
+  directly to the `Service` fields of the same names, outside `Service.Container`. Both use
+  one shape, in conjunctive normal form: a list of **clauses** (AND), each clause
+  `{"any_of": [group, ...]}` (OR: one group is enough, the service chooses at run time), each
+  group `{"workloads": [workload, ...]}` (AND: the workloads run at the same time), and each
+  workload `{"count": n, "dependency": {...}}` (`count` concurrent instances of the
+  dependency). A workload has no `resources` field: its resources are in
+  `dependency.service.container.resources` — `at_init` for the start (its `benchmark` is the
+  minimum score for each core) and `at_most` for the limit. The `service` can be partial: only
+  the resources and the architecture. A workload with no resources is always satisfiable.
+  - `initial_environment_workload` is the load that the service needs to **start**. It is in
+    the admission and in the cost: `GetServiceEstimatedCost` returns
+    `children_initial_cost`, and a start with too little `initial_mu` for it is refused
+    (`workload_admission.ON_UNDERFUNDED`).
+  - `possible_environment_workload` is the load that the service **can ask for later**. It is
+    in the admission only, with no cost.
+
+  At launch (`launch_service`), every clause of both fields must have a group whose workloads
+  all fit somewhere — every limit of `at_most` and the minimum of `at_init.benchmark` — with
+  local admission first, then known peers via `GetResourceAvailability` if
+  `network.DELEGATE_EXECUTION` is on. The service is refused if a clause has no such group
   (`src/utils/cost_functions/workload_admission.py`). This proves existence, not a capacity
-  reservation for `count` concurrent instances. How much is probed, and whether a group that
-  fits nowhere refuses the launch or only warns, are the two `workload_admission` settings in
-  `config.yaml`.
-- `workloads[].dependency` is optional (or may be `null`). It can identify the descendant
-  with `hash`, embed a full or partial protobuf-shaped `service`, and independently declare
-  whether the embedded service is complete (`is_completed`) or whether the complete artifact
-  already exists in the parent filesystem (`on_filesystem`). Hash values use hexadecimal;
+  reservation for `count` concurrent instances. How much is probed, and whether a clause that
+  fits nowhere refuses the launch or only warns, are the `workload_admission` settings in
+  `config.yaml`. See `docs/PACKING.md` and `docs/PRICING.md`.
+- `workloads[].dependency` is optional (or may be `null`); without it the workload has no
+  resources. It can identify the descendant with `hash`, embed a full or partial
+  protobuf-shaped `service`, and independently declare whether the embedded service is
+  complete (`is_completed`) or whether the complete artifact already exists in the parent filesystem (`on_filesystem`). Hash values use hexadecimal;
   hash type defaults to `sha3_256` and can be selected explicitly with
   `{ "type": "sha3_256", "value": "<hex>" }`.
 - A nested `dependency.service` uses the protobuf `Service` JSON shape. In particular,
   resources belong at `service.container.resources`, while descendant workload declarations
-  remain at `service.possible_environment_workload`.
+  remain at `service.initial_environment_workload` and `service.possible_environment_workload`.
 
 ## Filesystem Metadata Xattrs Contract
 

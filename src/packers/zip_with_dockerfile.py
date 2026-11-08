@@ -14,7 +14,7 @@ from bee_rpc.utils import Enviroment, modify_env, block_pointer, hash_types_for_
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
-from src.packers.service_json import populate_possible_environment_workloads
+from src.packers.service_json import WORKLOAD_FIELDS, populate_environment_workloads
 from src.utils import keyvalue
 from src.utils.benchmark import parse_benchmark, unrecognised_keys
 from src.utils.hashing import (
@@ -790,15 +790,19 @@ class ZipContainerPacker:
                 f"does not recognise, kept as written: {', '.join(unknown)}."
             )
 
-        # Possible descendant workloads. Each scenario is one independent
-        # worst-case concurrent execution the service may trigger through its
-        # descendants (not cumulative, no ordering). Interpreted at launch time
-        # by src.utils.cost_functions.workload_admission, not here -- this only
-        # serializes the declaration.
-        populate_possible_environment_workloads(
-            self.service,
-            self.json.get("possible_environment_workload", []),
-        )
+        # Descendant workloads, in conjunctive normal form (an AND of clauses, each an
+        # OR of groups). `initial_environment_workload` is the load the service needs to
+        # start: admission and cost. `possible_environment_workload` is what it can ask
+        # for later: admission only. Interpreted at launch time by
+        # src.utils.cost_functions.workload_admission and priced by
+        # src.utils.cost_functions.start_funding, not here -- this only serializes the
+        # declaration.
+        for field, _camel_case in WORKLOAD_FIELDS:
+            populate_environment_workloads(
+                getattr(self.service, field),
+                self.json.get(field, []),
+                field,
+            )
 
 
         # Entrypoint

@@ -25,7 +25,7 @@ load_example_config()
 from protos import celaut_pb2 as celaut, pack_pb2  # noqa: E402
 from src.packers.service_json import (  # noqa: E402
     parse_service_spec,
-    populate_possible_environment_workloads,
+    populate_environment_workloads,
 )
 from src.utils import keyvalue, benchmark  # noqa: E402
 from src.utils.cost_functions import resource_availability as ra  # noqa: E402
@@ -291,14 +291,22 @@ class PackerServiceJsonTests(unittest.TestCase):
 
 
 class NestedServiceJsonTests(unittest.TestCase):
-    """Workload groups and embedded dependency services are protobuf-JSON `Sysresources`."""
+    """Workloads and embedded dependency services are protobuf-JSON `Sysresources`.
+
+    The resources of a workload are the ones of its dependency service (#538). The
+    benchmark minimum is in `at_init`, as for the service itself.
+    """
 
     def _workloads(self, resources):
         service = pack_pb2.Service()
-        populate_possible_environment_workloads(
-            service, [{"workloads": [{"count": 1, "resources": resources}]}]
+        populate_environment_workloads(
+            service.possible_environment_workload,
+            [{"any_of": [{"workloads": [{"count": 1, "dependency": {
+                "service": {"container": {"resources": {"at_init": resources}}},
+            }}]}]}],
         )
-        return service.possible_environment_workload[0].workloads[0].resources
+        workload = service.possible_environment_workload[0].any_of[0].workloads[0]
+        return workload.dependency.service.container.resources.at_init
 
     def test_a_workload_group_carries_it(self):
         resources = self._workloads(

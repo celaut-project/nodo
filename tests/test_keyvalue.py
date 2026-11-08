@@ -15,7 +15,7 @@ from google.protobuf import json_format  # noqa: E402
 from protos import celaut_pb2 as celaut, pack_pb2  # noqa: E402
 from src.packers.service_json import (  # noqa: E402
     parse_service_spec,
-    populate_possible_environment_workloads,
+    populate_environment_workloads,
 )
 from src.utils import keyvalue  # noqa: E402
 from src.utils.benchmark import parse_benchmark  # noqa: E402
@@ -248,12 +248,19 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
                 "benchmark": {"int_ops_per_sec": "not a number"},
             }}}})
 
+    @staticmethod
+    def _workload(at_init):
+        return [{"any_of": [{"workloads": [{"count": 1, "dependency": {
+            "service": {"container": {"resources": {"at_init": at_init}}},
+        }}]}]}]
+
     def test_a_workload_group_resources_object(self):
         service = pack_pb2.Service()
-        populate_possible_environment_workloads(service, [{"workloads": [{"count": 1, "resources": {
+        populate_environment_workloads(service.possible_environment_workload, self._workload({
             "benchmark": {"z": 1, "a": 2},
-        }}]}])
-        resources = service.possible_environment_workload[0].workloads[0].resources
+        }))
+        workload = service.possible_environment_workload[0].any_of[0].workloads[0]
+        resources = workload.dependency.service.container.resources.at_init
         self.assertEqual([e.key for e in resources.benchmark], ["a", "z"])
 
     def test_a_workload_group_that_repeats_a_key_is_refused(self):
@@ -261,8 +268,8 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
             '{"benchmark": {"a": 1, "a": 2}}', object_pairs_hook=keyvalue.json_object_hook
         )
         with self.assertRaisesRegex(ValueError, "repeats key.*a"):
-            populate_possible_environment_workloads(
-                pack_pb2.Service(), [{"workloads": [{"count": 1, "resources": resources}]}]
+            populate_environment_workloads(
+                pack_pb2.Service().possible_environment_workload, self._workload(resources)
             )
 
     def test_benchmark_refuses_a_repeated_key(self):
