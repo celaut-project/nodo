@@ -165,6 +165,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Clients => crate::clients::draw(frame, app, layout[2]),
         Page::Chat => crate::chat::draw(frame, app, layout[2]),
         Page::Earnings => draw_earnings(frame, app, layout[2]),
+        Page::Ledger => crate::ledger::draw(frame, app, layout[2]),
+        Page::Receipts => crate::receipts::draw(frame, app, layout[2]),
         Page::Cell => draw_cell(frame, app, layout[2]),
         Page::Pricing => draw_pricing(frame, app, layout[2]),
         Page::Schedule => draw_schedule(frame, app, layout[2]),
@@ -5419,6 +5421,10 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
             "\u{2191}/\u{2193} select  \u{2022}  o new chat  \u{2022}  \u{23ce} reply  \u{2022}  c close  \u{2022}  R reopen  \u{2022}  q quit"
         }
         Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
+        Page::Ledger => {
+            "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} open  \u{2022}  \u{2190} back  \u{2022}  f kind  \u{2022}  d detail  \u{2022}  m more  \u{2022}  r refresh  \u{2022}  q quit"
+        }
+        Page::Receipts => "\u{2191}/\u{2193} select a hop  \u{2022}  r refresh  \u{2022}  q quit",
         Page::Cell => {
             "\u{2192}/\u{2190} section  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e edit a key behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
         }

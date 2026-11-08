@@ -101,6 +101,12 @@ pub enum Page {
     /// What this node has been paid, and what the network stakes on it — the two
     /// things it earns by being up.
     Earnings,
+    /// The balance statement of every account this node keeps, and the movements
+    /// behind each one (`nodo statement`); see `ledger.rs`.
+    Ledger,
+    /// The execution receipts of instances delegated to peers, and the faults found
+    /// when a peer's statement contradicts them; see `receipts.rs`.
+    Receipts,
     /// The policy panel: what this node lets in, sells, trusts and says, as a set
     /// of named decisions rather than as a YAML tree.
     Cell,
@@ -237,7 +243,7 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 17] = [
+    pub const ALL: [Page; 19] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
@@ -260,6 +266,10 @@ impl Page {
         // After the pages that name who we deal with, because it is the sum of
         // what dealing with them came to.
         Page::Earnings,
+        // Beside Earnings: the signed statements and receipts that money is checked
+        // against.
+        Page::Ledger,
+        Page::Receipts,
         // The last page that only reads, and the boundary of the read-only half.
         Page::Logs,
         // The editors sit together and run from the most general to the most
@@ -288,6 +298,8 @@ impl Page {
             Page::Clients => "CLIENTS",
             Page::Chat => "CHAT",
             Page::Earnings => "EARNINGS",
+            Page::Ledger => "LEDGER",
+            Page::Receipts => "RECEIPTS",
             Page::Cell => "POLICIES",
             Page::Pricing => "PRICING",
             Page::Schedule => "SCHEDULE",
@@ -312,6 +324,8 @@ impl Page {
             Page::Clients => "CLNT",
             Page::Chat => "CHAT",
             Page::Earnings => "EARN",
+            Page::Ledger => "LEDGR",
+            Page::Receipts => "RCPT",
             Page::Cell => "POLICY",
             Page::Pricing => "PRICE",
             Page::Schedule => "SCHED",
@@ -333,7 +347,7 @@ impl Page {
             | Page::Dead => PageGroup::Activity,
             Page::Services | Page::Packs => PageGroup::Catalog,
             Page::Peers | Page::Clients | Page::Chat => PageGroup::Network,
-            Page::Earnings => PageGroup::Money,
+            Page::Earnings | Page::Ledger | Page::Receipts => PageGroup::Money,
             Page::Logs => PageGroup::Record,
             Page::Cell | Page::Pricing | Page::Schedule | Page::Energy | Page::Config => {
                 PageGroup::Settings
@@ -3326,6 +3340,10 @@ pub struct App {
     pub earnings: Vec<LedgerEarnings>,
     /// What the network stakes on this node, from `nodo reputation --json`.
     pub reputation: NodeReputation,
+    /// The LEDGER page: accounts, the open chain and the reads in flight (`ledger.rs`).
+    pub ledger: crate::ledger::LedgerState,
+    /// The RECEIPTS page: hops and faults (`receipts.rs`).
+    pub receipts: crate::receipts::ReceiptsState,
     /// What this node donates and what it counts, from `nodo donations --json`.
     pub donations: NodeDonations,
     /// What this node itself announces it can run, from `nodo resources --json`
@@ -3567,6 +3585,8 @@ impl Default for App {
             guest_kernel_reserves: get_guest_kernel_reserves(&paths.config),
             earnings: Vec::new(),
             reputation: NodeReputation::default(),
+            ledger: Default::default(),
+            receipts: Default::default(),
             donations: NodeDonations::default(),
             own_resources: Default::default(),
             payment_report: serde_json::Value::Null,
@@ -3900,6 +3920,9 @@ impl App {
                 self.cell.go_to_organelle(previous);
             }
             Page::Docs => self.docs_focus(crate::docs::Focus::Index),
+            Page::Ledger => {
+                self.ledger_close();
+            }
             _ => {}
         }
     }
@@ -3934,6 +3957,8 @@ impl App {
                 self.load_selection_details();
             }
             Page::Earnings => self.opinions.previous(),
+            Page::Ledger => self.ledger_move(-1),
+            Page::Receipts => self.receipts_move(-1),
             Page::Pricing => self.prices.previous(),
             Page::Energy => self.move_energy_selection(-1),
             Page::Cell => {
@@ -3977,6 +4002,8 @@ impl App {
                 self.load_selection_details();
             }
             Page::Earnings => self.opinions.next(),
+            Page::Ledger => self.ledger_move(1),
+            Page::Receipts => self.receipts_move(1),
             Page::Pricing => self.prices.next(),
             Page::Energy => self.move_energy_selection(1),
             Page::Cell => {
@@ -6600,6 +6627,8 @@ impl App {
             self.last_wallet_refresh = Instant::now();
             self.wallet_task = Some(tokio::spawn(fetch_node_info()));
         }
+        self.refresh_ledger(force).await;
+        self.refresh_receipts(force).await;
         self.poll_reputation_task().await;
         if self.reputation_task.is_none()
             && (force || self.last_reputation_refresh.elapsed() >= REPUTATION_REFRESH_INTERVAL)
@@ -9202,6 +9231,8 @@ mod tests {
                     Page::Clients,
                     Page::Chat,
                     Page::Earnings,
+                    Page::Ledger,
+                    Page::Receipts,
                     Page::Logs,
                     Page::Cell,
                     Page::Pricing,
