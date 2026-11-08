@@ -824,7 +824,10 @@ message BalanceStatement {
     // passed its retention, and the first movement it holds hangs from the hash of a
     // movement that it no longer has.
     uint64 oldest_seq = 8;
-    // How long the node keeps movements, in days.
+    // How long the node keeps the movements of a dead account, in days, after its last
+    // movement. 0 means for ever, which is the default: the movements of an account that
+    // lives, and of a dead account with anything alive below it, are never deleted. A
+    // reader treats 0 as at least ledger.MIN_PEER_RETENTION_DAYS.
     uint32 retention_days = 9;
     // When the node answered, in unix seconds, on the clock of the node.
     int64 ts = 10;
