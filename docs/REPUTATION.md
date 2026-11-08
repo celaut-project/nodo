@@ -273,8 +273,9 @@ Some things are not faults, and score nothing:
   was asked, and the signed floor does not pay for it either: the balance fell between
   the two reads.
 - A first read, or a read after a long time, where the peer has already deleted the
-  oldest movements. It announces its retention (`retention_days`, never less than
-  `ledger.MIN_PEER_RETENTION_DAYS` for this purpose), and what it deleted after that
+  oldest movements. It announces its retention (`retention_days`; 0 is for ever, and
+  this node reads it as never less than `ledger.MIN_PEER_RETENTION_DAYS`, so a peer that
+  announces 0 and deletes after that time is not caught), and what it deleted after that
   time is not checkable. A reader that stays up to date, and keeps what it reads, can
   check all of it.
 - A `child_start` that this node asked for and gave up on (#578): the peer may have
@@ -403,8 +404,11 @@ in the log of the node.
   to the caller: one read for each such peer, charged once, before the first call. This
   is the case of a stopped orphan, whose last statement is the reason for the read.
 - A node asks a peer only for the delegated descendant itself, or when that peer signed a
-  `child_bound` row of the `instance_ref` in a statement that it gave in the retention
-  (`SQLConnection.descendant_linked`). A ref that no peer linked is refused with no
+  `child_bound` row of the `instance_ref` in a statement that it gave, since
+  `ledger.link_horizon` (no limit by default, else `ledger.RETENTION_DAYS` ago;
+  `SQLConnection.descendant_linked`). The duty of a peer to answer for a descendant that it
+  must show is held to `ledger.MIN_PEER_RETENTION_DAYS`, the retention that this node can
+  ask of every peer. A ref that no peer linked is refused with no
   call, and nobody pays. A caller that asks for refs that it made up costs the node
   nothing. To reach a descendant below a delegated instance, read the statement of the
   instance above it first: its `child_bound` rows name the ref and the node keeps them as
@@ -463,8 +467,9 @@ Cases that this does **not** cover:
 - The ancestors ask after the retention ended. With `ledger.RETENTION_DAYS` above 0, the
   node deletes the chain of a dead instance with nothing alive below it that many days
   after its stop. The default (0) never deletes it.
-- The node that links P to C deleted the `child_bound` row with the retention, or P is
-  gone from that node. The link is lost.
+- The node that links P to C deleted the `child_bound` row (only with a
+  `ledger.RETENTION_DAYS` above 0, and only when P and everything below it are dead), or P
+  is gone from that node. The link is lost.
 - A peer that writes a false `stop` row with no leftover. The ancestor tunnel covers a
   part of this case (see below). The reason of the row does not matter for
   `killed_with_mu`: see "Known limits".

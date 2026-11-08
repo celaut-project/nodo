@@ -1669,6 +1669,23 @@ class DescendantReadTests(_Database):
         self.assertEqual(self.sc.descendant_first_linked("peer-1", ref), 100)
         self.assertTrue(self.sc.descendant_linked("peer-1", ref, since=900))
 
+    def test_a_link_does_not_run_out_while_the_statements_are_kept(self):
+        self.delegate(mu=10_000)
+        ref = ledger.instance_ref("old-link")
+        self.sc.record_descendant_links("peer-1", [ref], ts=100)
+        answer = balance_statement.celaut_pb2.BalanceStatement(head_seq=3)
+        with patch("src.manager.statement_check.read", return_value=answer) as read, \
+                patch("src.manager.manager.get_client_id_on_other_peer", return_value="x"):
+            self.read(ref=ref, to_seq=5)
+        self.assertEqual(read.call_count, 1)
+
+        # With a retention in days, a link that is older than it is not enough.
+        with patch.object(ledger.env_manager, "get", return_value=30), \
+                patch("src.manager.statement_check.read") as read:
+            with self.assertRaises(balance_statement.StatementRefused):
+                self.read(ref=ref, to_seq=5)
+        read.assert_not_called()
+
     def test_the_hop_budget_is_shared_between_the_peers(self):
         # A read never reaches more nodes than its budget (#631 review: fan-out).
         for alias in ("a1", "a2", "a3"):

@@ -25,6 +25,7 @@ a prefix of its own), and a statement names its account by ``account_ref``.
 """
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
@@ -204,6 +205,17 @@ def retention_days() -> int:
     except (TypeError, ValueError):
         return DEFAULT_RETENTION_DAYS
     return days if days > 0 else 0
+
+
+def link_horizon(now: Optional[int] = None) -> int:
+    """The oldest date at which a peer may have linked a ref for this node to ask that peer
+    about it: 0 (no limit) when the statements are kept for ever, else ``now`` less
+    ``RETENTION_DAYS``. A link is a fact of a chain that this node keeps as long as the
+    chain, so it does not run out sooner."""
+    days = retention_days()
+    if not days:
+        return 0
+    return int(time.time() if now is None else now) - days * 86400
 
 
 def housekeeping_days() -> int:

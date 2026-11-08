@@ -368,11 +368,12 @@ def _linked_hops(hops: list, found: Optional[dict]) -> list:
     The delegated descendant itself (``found``) is always asked: this node started it
     there. A descendant below a delegated instance is asked only to a peer that signed a
     ``child_bound`` row of that ``instance_ref`` in a statement that it gave in the
-    retention (``SQLConnection.descendant_linked``). A ref that no peer linked is
+    retention of this node (``ledger.link_horizon``, no limit by default), with
+    ``SQLConnection.descendant_linked``. A ref that no peer linked is
     refused with no call: a caller cannot make this node ask its peers for a ref that it
     made up, and nobody pays for a call that was not needed.
     """
-    since = int(time.time()) - ledger.min_peer_retention_days() * 86400
+    since = ledger.link_horizon()
     return [(row, ask_ref) for row, ask_ref in hops
             if (found is not None and row is found)
             or sc.descendant_linked(row["peer_id"], ask_ref, since=since)]
