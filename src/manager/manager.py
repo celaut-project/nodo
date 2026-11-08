@@ -1182,6 +1182,7 @@ def default_initial_balance(
     service_hash: Optional[str] = None,
     arch: Optional[str] = None,
     scarcity: Optional[Dict[str, float]] = None,
+    service: Optional[celaut_pb2.Service] = None,
 ) -> int:
     """MU to fund a new instance with when nobody asked for a specific amount.
 
@@ -1205,18 +1206,29 @@ def default_initial_balance(
     stopped for a rise that its funding did not cover. With it off, the price is the
     one at the current load, as it was before the bound existed. `scarcity` is the load
     sample the launch is priced against; omitted, it is read here.
+
+    `service`, when it is known, adds what the service declares in
+    `possible_environment_workload`: it pays for its descendants out of this balance, so
+    the balance covers the dearest scenario that it declares, for the same hours, and the
+    build of each group (`start_funding.descendant_funding_mu`). Without the manifest
+    there is nothing to add. The quote, the funding of the instance and the quote that is
+    asked of a peer all pass it, so the three give the same figure.
     """
     hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
     if hours <= 0 or system_resources is None:
         return 0
     from src.utils.cost_functions.execution_cost import worst_case_charge_mu
+    from src.utils.cost_functions.start_funding import descendant_funding_mu
 
-    return worst_case_charge_mu(
+    own = worst_case_charge_mu(
         system_resources=resolve_billable_resources(system_resources, service_hash),
         seconds=hours * 3600,
         scarcity=scarcity,
         arch=arch,
     )
+    if service is None:
+        return own
+    return own + descendant_funding_mu(service, arch=arch, scarcity=scarcity)
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     """What an instance holds and what it has left to spend.

@@ -24,10 +24,15 @@ and the check before a delegation use it, so they cannot disagree.
 from typing import Dict, Optional
 
 from protos import celaut_pb2 as celaut
-from src.utils.cost_functions.execution_cost import build_charge_mu, is_free
+from src.utils.cost_functions.execution_cost import (
+    build_charge_mu,
+    is_free,
+    prices,
+    worst_case_charge_mu,
+)
 from src.utils.cost_functions.general_cost_functions import compute_worst_case_maintenance_cost
 from src.utils.config import ConfigManager
-from src.virtualizers.interface import resolve_billable_resources
+from src.virtualizers.interface import is_built, resolve_billable_resources
 
 env_manager = ConfigManager()
 
@@ -49,6 +54,71 @@ def start_build_mu(metadata: celaut.Metadata, scarcity: Optional[Dict[str, float
     if is_free(scarcity):
         return 0
     return int(build_charge_mu(metadata=metadata))
+
+
+def _group_hash(group: "celaut.Service.PossibleEnvironmentWorkload.Workload") -> Optional[str]:
+    """The SHA3-256 of the service of a workload group, in hex, if the group names one."""
+    if not group.HasField("dependency"):
+        return None
+    for known in group.dependency.hash:
+        if known.value:
+            return known.value.hex()
+    return None
+
+
+def descendant_funding_mu(
+        service: celaut.Service,
+        arch: Optional[str] = None,
+        scarcity: Optional[Dict[str, float]] = None,
+) -> int:
+    """The MU that a service asks to be funded with for the descendants that it declares.
+
+    ``Service.possible_environment_workload`` lists scenarios of descendants that the
+    service can start at the same time. A service pays for them out of its own balance
+    (each start takes its ``initial_mu`` from the father), so the balance that a start
+    funds it with has to cover the most that one scenario can need. The scenarios do not
+    add up, so the figure is the dearest one.
+
+    A scenario costs, for each group of identical instances:
+
+    * the runtime of ``count`` instances with the resources of the group, for the same
+      ``deposits.INITIAL_RUNTIME_HOURS`` as the service itself and at the same worst
+      case of the price (``worst_case_charge_mu``), and
+    * one build (``pricing.BUILD_MU``) for the group, whatever its ``count``: identical
+      instances are built once. The build is left out when the group names a service
+      (``dependency.hash``) that is built on this node already, and while the node is
+      free. A group that gives only resources names no service, so its build is counted.
+
+    A service that declares no workload costs 0 here, and a group with ``count`` 0 too.
+    The figure is the same one for the quote, the funding of the instance and the quote
+    that is asked of a peer: ``manager.default_initial_balance`` adds it in the three.
+    """
+    if not service.possible_environment_workload:
+        return 0
+    hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
+    if hours <= 0:
+        return 0
+
+    free = is_free(scarcity)
+    best = 0
+    for scenario in service.possible_environment_workload:
+        total = 0
+        for group in scenario.workloads:
+            count = int(group.count)
+            if count <= 0:
+                continue
+            service_hash = _group_hash(group)
+            runtime = worst_case_charge_mu(
+                system_resources=resolve_billable_resources(group.resources, service_hash),
+                seconds=hours * 3600,
+                scarcity=scarcity,
+                arch=arch,
+            )
+            total += count * runtime
+            if not free and not (service_hash and is_built(service_hash)):
+                total += prices().build_mu
+        best = max(best, total)
+    return int(best)
 
 
 def minimum_runtime_mu(

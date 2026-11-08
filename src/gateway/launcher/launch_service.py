@@ -390,6 +390,7 @@ def launch_service(
                     system_resources=service.container.resources.at_init,
                     service_hash=service_id,
                     arch=get_arch_tag(service=service, metadata=metadata),
+                    service=service,
                 )
             ))
 

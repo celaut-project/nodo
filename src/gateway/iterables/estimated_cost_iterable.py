@@ -242,6 +242,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 system_resources=service.container.resources.at_init,
                 service_hash=self.service_hash,
                 arch=arch,
+                service=service,
             ))
         except Exception as e:
             logger(f"No default deposit for {self.service_hash}, so no peer price is offered: {e}")
@@ -296,6 +297,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                         system_resources=resources.at_init,
                         service_hash=self.service_hash,
                         arch=service_arch,
+                        service=priced_service,
                     ))
                 )
             except Exception as e:
