@@ -1,42 +1,58 @@
-"""Admission check for ``Service.possible_environment_workload``.
+"""Admission check for the descendant workloads that a service declares.
 
-`service.json` declares the worst-case descendant workloads a service may spawn
-during its lifetime (issue #163); the packer serializes that declaration
-without interpreting it. This module is where it is interpreted, at launch.
+`service.json` declares the descendant workloads a service may spawn (issues #163 and
+#538); the packer serializes that declaration without interpreting it. This module is
+where it is interpreted, at launch.
 
-For each declared scenario, every workload group inside it must be satisfiable
-*somewhere* -- locally, or by at least one known peer -- or the service is
-refused admission. This generalizes the exact same boolean admission gate
-`resource_availability.get_resource_availability` already runs for a
-service's own `at_most` resources, applied instead to each descendant group's
-`resources`.
+The declaration is in conjunctive normal form, in two fields with one shape:
 
-Every limit a group declares is checked, not only `mem_limit`: memory and disk
-against what is free right now, a CPU quota against the number of cores the
-host has at all (a quota is a share of time, so refusing on instantaneous load
-would make admission flap), and `blkio_weight` against the range cgroups
-accept. See `resource_availability._sysreq_shortfalls`.
+* ``Service.initial_environment_workload`` -- the load the service needs to start. It
+  is checked here and priced by ``start_funding.children_initial_cost_mu``.
+* ``Service.possible_environment_workload`` -- the load it can ask for later. It is
+  checked here only.
 
-Two policies govern the rest, both in `config.yaml` under `workload_admission`
-and both read per call:
+Each field is an AND of clauses, a clause is an OR of groups, and a group is an AND of
+workloads that run at the same time:
 
-* `POLICY` -- how much to probe. `fail_fast` (default) stops at the first group
-  that fits nowhere; `full` probes every group so the message names all of them.
-  This never changes *what* is admitted: every group must fit either way.
-* `ON_UNSATISFIABLE` -- what a group that fits nowhere means. `reject` (default)
-  refuses the launch; `warn` logs and lets it through, for an operator who would
-  rather risk it than lose a launch to a momentary reading.
+* A workload fits if its shape can run *somewhere* -- locally, or on at least one known
+  peer. The shape is the one of its dependency service: the limits of
+  ``container.resources.at_most`` (``at_init``'s when there is no ``at_most``), the
+  minimum benchmark of ``at_init.benchmark`` and the architecture of
+  ``container.architecture``. ``at_most.benchmark`` has no meaning and is ignored. A
+  workload with no resources, or with ``count`` 0, always fits.
+* A group fits if all its workloads fit.
+* A clause fits if at least one of its groups fits. The check stops at the first group
+  that fits. A clause with no group declares nothing and fits.
+* The service is admitted if every clause of both fields fits.
 
-What this does NOT do, and should not be read as doing: it does not reserve
-capacity, and it does not prove that `count` concurrent instances of a group
-could all run at once (locally, or spread across peers) -- there is no
-capacity ledger anywhere in this codebase that tracks that, for real services
-or for these hypothetical ones. It only proves existence: that a shape this
-big fits *somewhere* right now, exactly as confident as the single-service
-admission check it reuses and no more. Scenarios are independent and
-non-cumulative (see the proto comment on PossibleEnvironmentWorkload), so
-this is a per-scenario, per-workload-group check, not a sum across the whole
-service.
+This generalizes the exact same boolean admission gate
+`resource_availability.get_resource_availability` already runs for a service's own
+`at_most` resources, applied instead to each descendant workload.
+
+Every limit a workload declares is checked, not only `mem_limit`: memory and disk
+against what is free right now, a CPU quota against the number of cores the host has
+at all (a quota is a share of time, so refusing on instantaneous load would make
+admission flap), and `blkio_weight` against the range cgroups accept. See
+`resource_availability._sysreq_shortfalls`.
+
+Two policies govern the rest, both in `config.yaml` under `workload_admission` and both
+read per call:
+
+* `POLICY` -- how much to probe. `fail_fast` (default) stops at the first clause that
+  fits nowhere, and inside a group at the first workload that fits nowhere; `full`
+  probes every workload so the message names all of them. This never changes *what* is
+  admitted.
+* `ON_UNSATISFIABLE` -- what a clause that fits nowhere means. `reject` (default)
+  refuses the launch; `warn` logs and lets it through, for an operator who would rather
+  risk it than lose a launch to a momentary reading.
+
+What this does NOT do, and should not be read as doing: it does not reserve capacity,
+and it does not prove that `count` concurrent instances of a workload, or the workloads
+of one group, could all run at once (locally, or spread across peers) -- there is no
+capacity ledger anywhere in this codebase that tracks that, for real services or for
+these hypothetical ones. It only proves existence: that a shape this big fits
+*somewhere* right now, exactly as confident as the single-service admission check it
+reuses and no more.
 """
 from typing import Final, List, Optional, Tuple
 
@@ -50,22 +66,23 @@ env_manager = ConfigManager()
 EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
 
 # How much of the declaration to probe before answering. This is *only* about how much
-# is probed, never about what is admitted: every declared group must fit, under both
+# is probed, never about what is admitted: every declared clause must fit, under both
 # policies. What differs is whether the node keeps asking once the answer is settled.
 #
-#   fail_fast -- stop at the first group that fits nowhere. The service is refused the
-#                moment one group fails, so every probe after that one buys nothing but
+#   fail_fast -- stop at the first clause that fits nowhere (and, inside a group, at the
+#                first workload that fits nowhere). The service is refused the
+#                moment one clause fails, so every probe after that one buys nothing but
 #                a longer error message, and each of them is a gRPC round-trip to every
 #                known peer. The default: the rejection path must not be the expensive
 #                one.
-#   full      -- probe every group and report all of them. Worth its cost when a
-#                declaration is being debugged and "which of my groups do not fit?" is
+#   full      -- probe every workload and report all of them. Worth its cost when a
+#                declaration is being debugged and "which of my workloads do not fit?" is
 #                the actual question, not "may this launch proceed?".
 PROBE_ALL_GROUPS: Final[str] = "full"
 PROBE_UNTIL_FIRST_FAILURE: Final[str] = "fail_fast"
 _DEFAULT_PROBE_POLICY: Final[str] = PROBE_UNTIL_FIRST_FAILURE
 
-# What a group that fits nowhere means for the launch.
+# What a clause that fits nowhere means for the launch.
 #
 #   reject -- refuse it (the default). The declaration says these descendants may be
 #             spawned; if there is nowhere to spawn them, starting the parent only
@@ -168,19 +185,32 @@ def check_resource_availability_on_peer(
         return None
 
 
-def group_request(workload: celaut.Service.Workload) -> celaut.ArchitectureResources:
-    """What one descendant workload group asks of whoever would run it.
+WORKLOAD_FIELDS: Final[Tuple[str, ...]] = (
+    "initial_environment_workload",
+    "possible_environment_workload",
+)
 
-    The group's ``resources`` already is the shape asked about: its limits are what each
-    descendant may grow to, and its ``benchmark`` is a minimum (see
-    Sysresources.benchmark). The architecture is the embedded dependency service's when
-    there is one, and otherwise left empty -- "whatever you natively run" -- because a
-    resource-only group does not say.
+
+def group_request(workload: celaut.Service.Workload) -> celaut.ArchitectureResources:
+    """What one descendant workload asks of whoever would run it.
+
+    The shape is the one of the dependency service (#538): the limits of
+    ``container.resources.at_most`` -- what each descendant may grow to -- and the
+    minimum benchmark of ``at_init.benchmark`` (see Sysresources.benchmark).
+    ``at_most.benchmark`` has no meaning and is dropped. A service that gives no
+    ``at_most`` is limited by its ``at_init``. The architecture is the dependency
+    service's, or left empty -- "whatever you natively run" -- when it does not say.
     """
     request = celaut.ArchitectureResources()
-    if workload.HasField("dependency") and workload.dependency.HasField("service"):
-        request.architecture.CopyFrom(workload.dependency.service.container.architecture)
-    request.resources.CopyFrom(workload.resources)
+    if not (workload.HasField("dependency") and workload.dependency.HasField("service")):
+        return request
+    container = workload.dependency.service.container
+    request.architecture.CopyFrom(container.architecture)
+    resources = container.resources
+    limits = resources.at_most if resources.HasField("at_most") else resources.at_init
+    request.resources.CopyFrom(limits)
+    del request.resources.benchmark[:]
+    request.resources.benchmark.extend(resources.at_init.benchmark)
     return request
 
 
@@ -241,32 +271,68 @@ def _declared_limits(resources: celaut.Sysresources) -> str:
     return declared or "no declared limits"
 
 
-def _unsatisfiable_groups(
+def _unsatisfiable_workloads(
+        group: celaut.Service.Group,
+        path: str,
+        ignore_network: Optional[str],
+        *,
+        stop_at_first: bool,
+) -> List[str]:
+    """Every workload of ``group`` that fits nowhere, described one per entry."""
+    failures: List[str] = []
+    for workload_index, workload in enumerate(group.workloads):
+        request = group_request(workload)
+        if workload.count == 0 or not request.resources.ListFields():
+            continue  # No resource requirement declared; trivially satisfiable.
+
+        if _workload_group_is_satisfiable(request, ignore_network):
+            continue
+
+        failures.append(
+            f"{path}.workloads[{workload_index}] "
+            f"(count={workload.count}, {_declared_limits(request.resources)})"
+        )
+        if stop_at_first:
+            break
+    return failures
+
+
+def _unsatisfiable_clauses(
         service: celaut.Service,
         ignore_network: Optional[str],
         *,
         stop_at_first: bool,
 ) -> List[str]:
-    """Every declared workload group that fits nowhere, described one per entry.
+    """Every declared clause that has no group that fits, described one per entry.
 
-    ``stop_at_first`` returns as soon as one is found. It changes nothing about which
-    services are admitted -- every group still has to fit -- only how many peers are
-    asked once the answer is already settled.
+    A clause is an OR: the check of a clause stops at its first group that fits.
+    ``stop_at_first`` returns as soon as one clause fails, and stops a group at its
+    first workload that fits nowhere. It changes nothing about which services are
+    admitted -- every clause still has to fit -- only how many peers are asked once the
+    answer is already settled.
     """
     failures: List[str] = []
 
-    for scenario_index, scenario in enumerate(service.possible_environment_workload):
-        for workload_index, workload in enumerate(scenario.workloads):
-            if workload.count == 0 or not workload.HasField("resources"):
-                continue  # No resource requirement declared; trivially satisfiable.
-
-            if _workload_group_is_satisfiable(group_request(workload), ignore_network):
+    for field in WORKLOAD_FIELDS:
+        for clause_index, clause in enumerate(getattr(service, field)):
+            clause_path = f"{field}[{clause_index}]"
+            refused: List[str] = []
+            for group_index, group in enumerate(clause.any_of):
+                missing = _unsatisfiable_workloads(
+                    group, f"{clause_path}.any_of[{group_index}]", ignore_network,
+                    stop_at_first=stop_at_first,
+                )
+                if not missing:
+                    refused = []
+                    break
+                refused.extend(missing)
+            if not refused:
                 continue
 
             failures.append(
-                f"possible_environment_workload[{scenario_index}].workloads[{workload_index}] "
-                f"(count={workload.count}, {_declared_limits(workload.resources)}) "
-                "cannot be satisfied locally or by any known peer."
+                f"{clause_path}: no group fits; "
+                + "; ".join(refused)
+                + " cannot be satisfied locally or by any known peer."
             )
             if stop_at_first:
                 return failures
@@ -280,12 +346,14 @@ def evaluate_possible_environment_workloads(
 ) -> Optional[str]:
     """The reason to refuse this launch, or None to let it proceed.
 
-    Every declared group must fit somewhere for the launch to be admitted -- that is
-    the rule, and neither policy below changes it.
+    Every clause of ``initial_environment_workload`` and of
+    ``possible_environment_workload`` must have a group whose workloads all fit
+    somewhere for the launch to be admitted -- that is the rule, and neither policy
+    below changes it.
 
     ``workload_admission.POLICY`` decides how much is probed: ``fail_fast`` (the
-    default) stops at the first group that fits nowhere, since the launch is already
-    refused and each further group costs a gRPC round-trip to every known peer;
+    default) stops at the first clause that fits nowhere, since the launch is already
+    refused and each further workload costs a gRPC round-trip to every known peer;
     ``full`` probes all of them so the message names every one.
 
     ``workload_admission.ON_UNSATISFIABLE`` decides what that means: ``reject`` (the
@@ -293,7 +361,7 @@ def evaluate_possible_environment_workloads(
     and returns None. The second exists because this check reads capacity *right now*
     and reserves nothing, so a busy moment can refuse a service that would have run.
     """
-    failures = _unsatisfiable_groups(
+    failures = _unsatisfiable_clauses(
         service,
         ignore_network,
         stop_at_first=_probe_policy() == PROBE_UNTIL_FIRST_FAILURE,

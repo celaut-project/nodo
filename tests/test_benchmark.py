@@ -518,11 +518,12 @@ class DelegationCarryThroughTests(unittest.TestCase):
 
     def test_a_workload_group_is_put_to_a_peer_with_its_benchmark(self):
         service = celaut.Service()
-        workload = service.possible_environment_workload.add().workloads.add()
+        workload = service.possible_environment_workload.add().any_of.add().workloads.add()
         workload.count = 1
-        workload.resources.mem_limit = 111
-        keyvalue.set_value(workload.resources.benchmark, "int_ops_per_sec", 500000)
-        keyvalue.set_value(workload.resources.benchmark, "unknown_primitive", 4)
+        resources = workload.dependency.service.container.resources
+        resources.at_most.mem_limit = 111
+        keyvalue.set_value(resources.at_init.benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(resources.at_init.benchmark, "unknown_primitive", 4)
 
         asked = []
 
@@ -549,8 +550,8 @@ class DelegationCarryThroughTests(unittest.TestCase):
             self.assertEqual(list(request.architecture.tags), [])
 
     def test_a_group_with_an_embedded_dependency_asks_for_its_architecture(self):
-        workload = celaut.Service.PossibleEnvironmentWorkload.Workload(count=1)
-        workload.resources.mem_limit = 1
+        workload = celaut.Service.Workload(count=1)
+        workload.dependency.service.container.resources.at_most.mem_limit = 1
         workload.dependency.service.container.architecture.tags.append("linux/arm64")
         self.assertEqual(list(wa.group_request(workload).architecture.tags), ["linux/arm64"])
 

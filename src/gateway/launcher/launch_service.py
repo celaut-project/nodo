@@ -406,9 +406,10 @@ def launch_service(
             subject=f"service {service_id}" if service_id else "this service",
         )
 
-        # Refuse admission when a declared descendant workload scenario
-        # (service.json's `possible_environment_workload`) has no shape that
-        # fits anywhere -- neither here nor on any known peer -- right now.
+        # Refuse admission when a clause of the declared descendant workloads
+        # (`initial_environment_workload` and `possible_environment_workload`)
+        # has no group that fits anywhere -- neither here nor on any known
+        # peer -- right now.
         # Ahead of `forced_peer` on purpose: forcing which peer runs *this*
         # instance doesn't change whether its descendants could ever run.
         workload_admission_failure = evaluate_possible_environment_workloads(
