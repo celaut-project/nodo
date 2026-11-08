@@ -195,6 +195,13 @@ pub enum ChatEntryKind {
     Untopiced {
         peer_id: String,
     },
+    /// The support thread of a client that has no peer bound to it
+    /// (`client_chat_messages`). `ChatEntry::peer_id` holds its client id. `waiting`
+    /// is true while the client wrote last, so the operator sees what needs an answer.
+    Client {
+        client_id: String,
+        waiting: bool,
+    },
 }
 
 /// One row in the CHAT sidebar: a conversation and a topic-less peer bucket are the
@@ -231,6 +238,9 @@ pub enum ChatCompose {
     /// A reply to a peer's topic-less history: the flat `chat <peer> <body>`, since
     /// there is no conversation id to reply into.
     ReplyUntopiced { peer_id: String },
+    /// An answer in the support thread of a client: `chat_client_reply <client> <body>`.
+    /// Text only: that thread takes no service and no conversation id.
+    ReplyClient { client_id: String },
 }
 
 /// Threads on the CHAT page, both directions in one list -- `opened_by_us` rides
@@ -359,6 +369,83 @@ pub fn get_untopiced_messages(database: &Path, peer_id: &str) -> SqlResult<Vec<C
     messages
 }
 
+/// One client with a support thread, as `src/database/sql_connection.py::
+/// list_client_chat_threads` lists it.
+#[derive(Debug, Clone)]
+pub struct ClientThreadSummary {
+    pub client_id: String,
+    pub last_ts: i64,
+    /// True when the last message is the client's: the thread waits for an answer.
+    pub waiting: bool,
+}
+
+/// The clients with a support thread, one row each. A client that has a peer bound to
+/// it is left out: its messages are in the peer chat, and `chat_client_reply` refuses
+/// to answer it (`src/manager/chat.py::reply_to_client`). A client that wrote before
+/// it was bound to a peer keeps its old rows, but they are not shown here.
+pub fn get_client_threads(database: &Path) -> SqlResult<Vec<ClientThreadSummary>> {
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let connection = Connection::open(database)?;
+    if !crate::app::table_exists(&connection, "client_chat_messages") {
+        return Ok(Vec::new());
+    }
+    // A database whose `peer` table has no `local_client_id` yet has no bound client.
+    let unbound = if crate::app::column_exists(&connection, "peer", "local_client_id") {
+        "AND m.client_id NOT IN (SELECT local_client_id FROM peer WHERE local_client_id IS NOT NULL)"
+    } else {
+        ""
+    };
+    let mut statement = connection.prepare(&format!(
+        "SELECT m.client_id, m.ts, m.from_operator
+         FROM client_chat_messages m
+         WHERE m.sequence = (SELECT MAX(sequence) FROM client_chat_messages
+                             WHERE client_id = m.client_id)
+           {unbound}
+         ORDER BY m.ts DESC, m.client_id"
+    ))?;
+    let threads = statement
+        .query_map([], |row| {
+            Ok(ClientThreadSummary {
+                client_id: row.get(0)?,
+                last_ts: row.get(1)?,
+                waiting: !row.get::<_, bool>(2)?,
+            })
+        })?
+        .collect();
+    threads
+}
+
+/// One client's support thread, oldest first. `from_us` is the operator's side.
+pub fn get_client_messages(database: &Path, client_id: &str) -> SqlResult<Vec<ChatMessageRow>> {
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let connection = Connection::open(database)?;
+    if !crate::app::table_exists(&connection, "client_chat_messages") {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection.prepare(
+        "SELECT from_operator, body, ts
+         FROM client_chat_messages
+         WHERE client_id = ?1
+         ORDER BY sequence ASC",
+    )?;
+    let messages = statement
+        .query_map([client_id], |row| {
+            let ts: i64 = row.get(2)?;
+            Ok(ChatMessageRow {
+                from_us: row.get(0)?,
+                body: row.get(1)?,
+                ts: crate::app::format_unix_timestamp(ts),
+                service: None,
+            })
+        })?
+        .collect();
+    messages
+}
+
 /// Every topic this peer has already used, most recently opened first -- what the
 /// "pick a topic" wizard step offers alongside "+ New topic…". Never enforced (a
 /// topic is a label, not a key), so this is convenience only: reusing one does not
@@ -390,6 +477,7 @@ pub fn get_conversation_topics(database: &Path, peer_id: &str) -> SqlResult<Vec<
 pub fn load_entries(database: &Path) -> Result<Vec<ChatEntry>, String> {
     let conversations = get_conversations(database).map_err(|error| error.to_string())?;
     let untopiced = get_untopiced_summaries(database).map_err(|error| error.to_string())?;
+    let clients = get_client_threads(database).map_err(|error| error.to_string())?;
 
     let mut entries: Vec<ChatEntry> = conversations
         .into_iter()
@@ -412,6 +500,16 @@ pub fn load_entries(database: &Path) -> Result<Vec<ChatEntry>, String> {
         last_ts: summary.last_ts,
         kind: ChatEntryKind::Untopiced {
             peer_id: summary.peer_id,
+        },
+    }));
+    entries.extend(clients.into_iter().map(|thread| ChatEntry {
+        key: format!("client:{}", thread.client_id),
+        peer_id: thread.client_id.clone(),
+        topic: String::new(),
+        last_ts: thread.last_ts,
+        kind: ChatEntryKind::Client {
+            client_id: thread.client_id,
+            waiting: thread.waiting,
         },
     }));
     entries.sort_by(|a, b| b.last_ts.cmp(&a.last_ts));
@@ -552,6 +650,9 @@ impl App {
             ChatCompose::ReplyUntopiced { peer_id } => {
                 format!("Message to {} (no topic)", shorten(peer_id, 18))
             }
+            ChatCompose::ReplyClient { client_id } => {
+                format!("Answer client {}", shorten(client_id, 18))
+            }
         };
         self.chat_compose = Some(target);
         self.input.clear();
@@ -593,6 +694,9 @@ impl App {
             ChatEntryKind::Untopiced { peer_id } => {
                 self.open_chat_compose(ChatCompose::ReplyUntopiced { peer_id });
             }
+            ChatEntryKind::Client { client_id, .. } => {
+                self.open_chat_compose(ChatCompose::ReplyClient { client_id });
+            }
         }
     }
 
@@ -606,6 +710,8 @@ impl App {
         let body = self.input.trim_end_matches('\n').to_string();
         // An attached service is a message on its own (issue #438).
         let attachment = self.chat_attachment.clone();
+        // The support thread of a client takes text only (`reply_to_client`).
+        let attachment = attachment.filter(|_| !matches!(target, ChatCompose::ReplyClient { .. }));
         if body.trim().is_empty() && attachment.is_none() {
             self.status = "Type a message first".to_string();
             return;
@@ -618,6 +724,10 @@ impl App {
     /// `Ctrl+A` or the Attach button: pick one of this node's services to share.
     pub fn open_chat_service_picker(&mut self) {
         if self.input_mode != InputMode::ComposeChatMessage {
+            return;
+        }
+        if matches!(self.chat_compose, Some(ChatCompose::ReplyClient { .. })) {
+            self.status = "A support answer is text only: no service can be attached".to_string();
             return;
         }
         // Row 0 is "no attachment"; start on whatever is attached now.
@@ -705,7 +815,8 @@ impl App {
             ..
         } = entry.kind
         else {
-            self.status = "Topic-less messages have no conversation to close".to_string();
+            self.status = "Topic-less messages and client support threads have no conversation to close"
+                .to_string();
             return;
         };
         if closed_at.is_some() {
@@ -738,7 +849,8 @@ impl App {
             ..
         } = entry.kind
         else {
-            self.status = "Topic-less messages have no conversation to reopen".to_string();
+            self.status = "Topic-less messages and client support threads have no conversation to reopen"
+                .to_string();
             return;
         };
         if closed_at.is_none() {
@@ -778,6 +890,14 @@ pub(crate) fn chat_compose_command(
             "Message".to_string(),
             ["chat".to_string(), peer_id].into_iter().chain(text).collect(),
         ),
+        // No `--service`: `attachment` is dropped for this target, and the command
+        // takes only the text.
+        ChatCompose::ReplyClient { client_id } => {
+            return (
+                format!("Answer client {}", shorten(&client_id, 18)),
+                ["chat_client_reply".to_string(), client_id].into_iter().chain(text).collect(),
+            );
+        }
     };
     if let Some(service) = attachment {
         args.extend(["--service".to_string(), service.id.clone()]);
@@ -862,10 +982,15 @@ fn draw_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
                     (glyph, color)
                 }
                 ChatEntryKind::Untopiced { .. } => ("•", muted()),
+                // A client that waits for an answer stands out from one that has it.
+                ChatEntryKind::Client { waiting: true, .. } => ("◆", warn()),
+                ChatEntryKind::Client { waiting: false, .. } => ("◇", muted()),
             };
             let cells: Vec<TextCell> = vec![
                 format!("{glyph} {}", short_peer_name(&entry.peer_id)).into(),
-                if entry.topic.is_empty() {
+                if let ChatEntryKind::Client { waiting, .. } = &entry.kind {
+                    if *waiting { "waiting" } else { "answered" }.to_string()
+                } else if entry.topic.is_empty() {
                     "(no topic)".to_string()
                 } else {
                     entry.topic.clone()
@@ -926,8 +1051,14 @@ fn draw_conversation(frame: &mut Frame, app: &mut App, area: Rect) {
             }
         }
         ChatEntryKind::Untopiced { .. } => "no topic",
+        ChatEntryKind::Client { waiting: true, .. } => "waiting for an answer",
+        ChatEntryKind::Client { waiting: false, .. } => "answered",
     };
-    let topic_display = if entry.topic.is_empty() { "(no topic)" } else { &entry.topic };
+    let topic_display = match &entry.kind {
+        ChatEntryKind::Client { .. } => "client support",
+        _ if entry.topic.is_empty() => "(no topic)",
+        _ => &entry.topic,
+    };
     let title = format!(
         " {}  •  {}  •  {} ",
         short_peer_name(&entry.peer_id),
@@ -1193,14 +1324,22 @@ fn draw_compose_box(frame: &mut Frame, app: &mut App, area: Rect) {
     // Buttons to the right of the input, aligned with its first row of text.
     let buttons = split[1];
     let button = Style::default().fg(accent()).add_modifier(Modifier::BOLD);
-    app.chat_attach_area = Rect::new(
-        buttons.x + 1,
-        buttons.y + 1,
-        ATTACH_BUTTON.len() as u16,
-        1,
-    )
-    .intersection(buttons);
-    frame.render_widget(Paragraph::new(Span::styled(ATTACH_BUTTON, button)), app.chat_attach_area);
+    // A support answer is text only, so it has no Attach button (and no click area).
+    if matches!(app.chat_compose, Some(ChatCompose::ReplyClient { .. })) {
+        app.chat_attach_area = Rect::ZERO;
+    } else {
+        app.chat_attach_area = Rect::new(
+            buttons.x + 1,
+            buttons.y + 1,
+            ATTACH_BUTTON.len() as u16,
+            1,
+        )
+        .intersection(buttons);
+        frame.render_widget(
+            Paragraph::new(Span::styled(ATTACH_BUTTON, button)),
+            app.chat_attach_area,
+        );
+    }
     // Sending with the mouse (issue #438): the chord that sends is the one key in
     // this interface a terminal may not be able to deliver -- see handler.rs.
     app.chat_send_area =
@@ -1740,6 +1879,133 @@ mod tests {
         app.conversations.next();
         app.close_selected_conversation();
         assert!(app.status.contains("no conversation to close"), "{}", app.status);
+    }
+
+    /// A database with the support table and two clients that wrote: `plain` (a client,
+    /// the client wrote last) and `bound` (bound to `peer-1`, so it is not a support
+    /// client here).
+    fn support_database(dir: &Path) -> PathBuf {
+        let database = chat_database(dir);
+        let connection = Connection::open(&database).unwrap();
+        connection.execute_batch(&migration_table("client_chat_messages")).unwrap();
+        connection
+            .execute_batch(
+                "UPDATE peer SET local_client_id = 'bound' WHERE id = 'peer-1';
+                 INSERT INTO client_chat_messages VALUES ('plain', 1, 0, 'hola', 1000);
+                 INSERT INTO client_chat_messages VALUES ('plain', 2, 1, 'que tal', 1001);
+                 INSERT INTO client_chat_messages VALUES ('plain', 3, 0, 'ayuda', 1002);
+                 INSERT INTO client_chat_messages VALUES ('answered', 1, 0, 'x', 900);
+                 INSERT INTO client_chat_messages VALUES ('answered', 2, 1, 'y', 901);
+                 INSERT INTO client_chat_messages VALUES ('bound', 1, 0, 'old', 2000);",
+            )
+            .unwrap();
+        database
+    }
+
+    #[test]
+    fn support_threads_list_only_clients_without_a_peer() {
+        let dir = temp_dir("support-list");
+        let database = support_database(&dir);
+
+        let threads = get_client_threads(&database).unwrap();
+        let ids: Vec<&str> = threads.iter().map(|thread| thread.client_id.as_str()).collect();
+        assert_eq!(ids, ["plain", "answered"], "recent first, and the bound client is left out");
+        assert!(threads[0].waiting, "the client wrote last");
+        assert!(!threads[1].waiting, "the operator wrote last");
+
+        let entries = load_entries(&database).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].key, "client:plain");
+        assert!(matches!(
+            &entries[0].kind,
+            ChatEntryKind::Client { client_id, waiting: true } if client_id == "plain"
+        ));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_support_thread_is_read_oldest_first_with_the_operator_as_us() {
+        let dir = temp_dir("support-read");
+        let database = support_database(&dir);
+
+        let messages = get_client_messages(&database, "plain").unwrap();
+        let read: Vec<(bool, &str)> =
+            messages.iter().map(|m| (m.from_us, m.body.as_str())).collect();
+        assert_eq!(read, [(false, "hola"), (true, "que tal"), (false, "ayuda")]);
+        assert!(get_client_messages(&database, "nobody").unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_database_without_the_support_table_still_reads() {
+        let dir = temp_dir("support-missing");
+        let database = chat_database(&dir);
+        assert!(get_client_threads(&database).unwrap().is_empty());
+        assert!(get_client_messages(&database, "plain").unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn support_entry(waiting: bool) -> ChatEntry {
+        ChatEntry {
+            key: "client:plain".to_string(),
+            peer_id: "plain".to_string(),
+            topic: String::new(),
+            last_ts: 0,
+            kind: ChatEntryKind::Client { client_id: "plain".to_string(), waiting },
+        }
+    }
+
+    #[test]
+    fn answering_a_client_sends_chat_client_reply_without_a_service() {
+        let mut app = on_chat_page(Vec::new());
+        app.conversations = StatefulList::with_items(vec![support_entry(true)]);
+        app.conversations.next();
+
+        app.open_reply_prompt();
+        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
+        assert!(matches!(
+            &app.chat_compose,
+            Some(ChatCompose::ReplyClient { client_id }) if client_id == "plain"
+        ));
+
+        // A support answer is text only: Ctrl+A does not open the picker.
+        app.open_chat_service_picker();
+        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
+        assert!(app.status.contains("text only"), "{}", app.status);
+
+        let service = ChatService { id: "abc".to_string(), tags: Vec::new() };
+        let (label, args) = chat_compose_command(
+            ChatCompose::ReplyClient { client_id: "plain".to_string() },
+            "hola cliente".to_string(),
+            Some(&service),
+        );
+        assert!(label.contains("plain"), "{label}");
+        assert_eq!(args, ["chat_client_reply", "plain", "hola cliente"]);
+
+        // `c`/`R` have no conversation to act on.
+        app.close_input();
+        app.close_selected_conversation();
+        assert!(app.status.contains("no conversation to close"), "{}", app.status);
+        app.reopen_selected_conversation();
+        assert!(app.status.contains("no conversation to reopen"), "{}", app.status);
+    }
+
+    #[test]
+    fn the_sidebar_marks_a_client_that_waits_for_an_answer() {
+        let mut app = on_chat_page(Vec::new());
+        app.conversations = StatefulList::with_items(vec![support_entry(true)]);
+        app.conversations.next();
+        app.conversation_messages = vec![ChatMessageRow {
+            from_us: false,
+            body: "ayuda".to_string(),
+            ts: "2026-11-08 18:29:44 UTC".to_string(),
+            service: None,
+        }];
+        let screen = render(&mut app, 120, 20);
+        assert!(screen.contains("◆ plain"), "{screen}");
+        assert!(screen.contains("waiting"), "{screen}");
+        assert!(screen.contains("waiting for an answer"), "{screen}");
+        assert!(screen.contains("ayuda"), "{screen}");
     }
 
     #[test]

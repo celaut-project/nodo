@@ -1,6 +1,6 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
 use crate::chat::{
-    get_conversation_messages, get_untopiced_messages, ChatCardAction, ChatCompose, ChatEntry,
+    get_client_messages, get_conversation_messages, get_untopiced_messages, ChatCardAction, ChatCompose, ChatEntry,
     ChatEntryKind, ChatService,
     ChatMessageRow,
 };
@@ -4367,6 +4367,9 @@ impl App {
                 }
                 ChatEntryKind::Untopiced { peer_id } => {
                     get_untopiced_messages(&database, &peer_id).unwrap_or_default()
+                }
+                ChatEntryKind::Client { client_id, .. } => {
+                    get_client_messages(&database, &client_id).unwrap_or_default()
                 }
             })
             .unwrap_or_default();
