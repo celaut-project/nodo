@@ -351,6 +351,28 @@ The default balance is what buys runtime, and it is derived from the requested r
 instance and an 8 GiB one no longer start with the same funding. The maintenance ticks
 then spend that balance down.
 
+**The descendants that the service declares.** A service pays for the instances that it
+starts out of its own balance: each start takes its `initial_mu` from the father. So when
+the service declares `possible_environment_workload` (see `PACKING.md`), the default balance
+also covers them:
+
+```
+default balance = the runtime of the service itself
+                + the dearest scenario of its possible_environment_workload
+```
+
+A scenario costs, for each group of identical instances: the runtime of `count` instances
+with the resources of the group, and one build (`pricing.BUILD_MU`) for the group, whatever
+its `count`. The hours are the same `deposits.INITIAL_RUNTIME_HOURS` as for the service, at
+the same worst case of the price. The scenarios do not add up: the dearest one counts. The
+build is left out for a group that names a service (`dependency.hash`) that is built on this
+node already, and while the node is free. A group that gives only resources names no
+service, so its build is counted (`start_funding.descendant_funding_mu`).
+
+`default_initial_balance` is the one function behind the quote (`EstimatedCost.cost`), the
+funding of the instance and the amount asked of a peer, so they give the same figure. A
+request that carries its own `initial_mu` is not changed: the caller chose the amount.
+
 A tick charges a local instance for the seconds since its last charge, not for a fixed
 `MANAGER_ITERATION_TIME`: a pass of the manager lasts as long as its work does (a revive
 waits for a guest's boot), and the time over the interval used to be unbilled. It charges

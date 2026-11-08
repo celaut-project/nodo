@@ -797,6 +797,14 @@ instances of a group could all run at once, locally or spread across peers, and 
 hold the capacity it found for later — by the time the service actually spawns that
 descendant, the answer could have changed.
 
+The declaration also **funds** the descendants. A service pays for the instances that it
+starts out of its own balance, so the balance that a start gives it by default
+(`manager.default_initial_balance`, and so `EstimatedCost.cost`) covers the dearest scenario:
+for each group, the runtime of `count` instances for the same `deposits.INITIAL_RUNTIME_HOURS`
+as the service itself, plus one build for the group (none if `dependency.hash` names a service
+that is built on the node). Scenarios do not add up. A request with its own `initial_mu` is
+not changed. See [`PRICING.md`](PRICING.md#starting-an-instance).
+
 Two settings under `workload_admission` in `config.yaml` govern it. `POLICY` decides how much
 is probed — `fail_fast` (default) stops at the first group that fits nowhere, `full` probes
 all of them so the error names each one — and never changes *what* is admitted; every group

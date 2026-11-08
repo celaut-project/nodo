@@ -144,6 +144,7 @@ def local_execution(
                 service_hash=service_id,
                 arch=service_arch,
                 scarcity=launch_scarcity,
+                service=service,
             )
         start_balance_mu: int = balance_after_build(
             initial_mu=initial_mu,
