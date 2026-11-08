@@ -622,6 +622,24 @@ These are decisions for the alpha. Each one is a known limit, not a defect that 
     reproduced for certain, so the statements alone cannot prove it.
   - When the father and the child run on the same node, the operator controls both, and no
     other node can contradict it.
+  - Today nothing records a stop that the father asks for: `StopService` leaves a log line
+    and the `stop` row of the child, which has the reason and the leftover but not who
+    asked. There is no execution receipt for `StopService` either.
+  - `Observe` is not the tool for this. It captures the packets of the tap of a local
+    instance, and the node that captures it also signs it, so it proves nothing against
+    that node. A stop of the father would show on the tap of the father, not of the child,
+    and it would still be a claim of the node of the father. A row for each stop is
+    cheaper and exact, and needs no `CAP_NET_RAW` and no stored captures.
+  - To give `Observe` to ancestors would show the packets of a descendant, that can run on
+    another node with other owners of the data, and it would send a stream of packets
+    through the nodes with a budget of hops and a payment for each leg. If it is done, give
+    only the counters (CPU, memory, bytes of the network).
+  - Hashes of the `Observe` receipts could be written in the rows of the chain, for example
+    in the maintenance rows. The node would then be bound to one history of captures, and a
+    different one later shows as a contradiction. It does not stop a node that invents all
+    the captures from the start, which only another source (the tunnel of the ancestor)
+    can show. With a retention of 0, each point is a row for ever, so they must be few.
+    This can serve to show that the descendant is active, not to show who asked for a stop.
 - **A relayed statement keeps only the last signature.** The signature of the node that
   wrote the rows is not kept, so an ancestor can show a lie only against the first node
   that it asked. Each node answers for the peers that it asks.
