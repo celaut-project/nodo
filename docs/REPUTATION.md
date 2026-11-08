@@ -607,6 +607,21 @@ These are decisions for the alpha. Each one is a known limit, not a defect that 
   A VM that went down is started again, for as long as the instance has MU. A failure of
   the machine that ends it with MU left is the fault of its operator. Only an
   `out_of_balance` with less MU than the price of one tick is not scored.
+- **A stop with the father alive cannot be told from a stop of the operator.** `StopService`
+  and `nodo kill` both call `stop_instance` with the reason `manual_kill`. No MU are lost
+  in this case (the leftover goes to the father, and its statement shows the `refund`), but
+  the father loses the service, and only the father can say "I did not ask for this stop".
+  Ideas for later, not done:
+  - The node of the father keeps the stops that the father asked for. A `stop` of a
+    delegated child that the father did not ask for is scored locally (for example
+    `unrequested_stop`). It is a local judgement, not a portable proof.
+  - A proof that others can check: the node of the father writes a row in the chain of the
+    father each time the father asks for a stop (the `instance_ref` of the child). A `stop`
+    of the child with no such row before it shows that the father did not ask for it.
+    The statement does not record what the service does, and a run of a VM cannot be
+    reproduced for certain, so the statements alone cannot prove it.
+  - When the father and the child run on the same node, the operator controls both, and no
+    other node can contradict it.
 - **A relayed statement keeps only the last signature.** The signature of the node that
   wrote the rows is not kept, so an ancestor can show a lie only against the first node
   that it asked. Each node answers for the peers that it asks.
