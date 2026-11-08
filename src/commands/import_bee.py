@@ -1,9 +1,10 @@
 import os
 import shutil
-from typing import Optional
+from typing import Optional, Set
 from protos import celaut_pb2
 from bee_rpc.client import read_from_file
 
+from src.utils.block_tree import block_tree
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_stream
 from src.utils.service_content import read_service_content
@@ -13,6 +14,7 @@ env_manager = ConfigManager()
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 VALIDATE_ON_IMPORT = env_manager.get("VALIDATE_ON_IMPORT")
+BLOCKDIR = env_manager.get("BLOCKDIR")
 
 
 # It's on utils.service_content too, but here we have other params...
@@ -44,7 +46,51 @@ def _remove_path(path: str):
         os.remove(path)
 
 
-def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]:
+def _block_names() -> Set[str]:
+    try:
+        return set(os.listdir(BLOCKDIR))
+    except OSError:
+        return set()
+
+
+def _discard(metadata_dir: Optional[str], service_dir: Optional[str], blocks_before: Set[str]):
+    """Remove what an import that is refused wrote (audit F3).
+
+    bee-rpc writes the blocks of the file to the block directory while it reads it, so before
+    the id is checked. The blocks that the refused service needs, that were not in the block
+    directory before the import, and that no service of the registry needs, are removed. If
+    the blocks of a service of the registry cannot be read, no block is removed. The
+    directories that the file was read into are removed too.
+    """
+    try:
+        if service_dir and os.path.isdir(service_dir):
+            added = [b for b in block_tree(service_dir, BLOCKDIR) if b not in blocks_before]
+        else:
+            added = []
+        if added:
+            used: Set[str] = set()
+            for service in os.listdir(REGISTRY):
+                service_path = os.path.join(REGISTRY, service)
+                if os.path.isdir(service_path):
+                    used.update(block_tree(service_path, BLOCKDIR))
+            for block in added:
+                if block not in used:
+                    _remove_path(os.path.join(BLOCKDIR, block))
+    except Exception as e:
+        print(f"The blocks of the refused service are kept: {e}")
+    for path in (metadata_dir, service_dir):
+        if path:
+            _remove_path(path)
+
+
+def import_bee(path: str, integrity_hash: Optional[str] = None, keep_metadata: bool = False) -> Optional[str]:
+    """Import the ``.celaut.bee`` at ``path``; the id of the service, or None.
+
+    ``integrity_hash``: the id that the service must have; another one is not imported.
+    ``keep_metadata``: the metadata (the tags) of a service that the node has already are not
+    replaced by the ones of the file. A source that anybody can register must not rename a
+    service that the node holds (audit N3).
+    """
     # Get the current directory (where the "nodo" command is executed from)
     current_directory = os.getcwd()
     
@@ -65,6 +111,8 @@ def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]
         print(f"Error: The path '{path}' is not a file.")
         return
     
+    blocks_before = _block_names()
+    metadata_dir = service_dir = None
     try:
         hash_spec = get_configured_hash_spec(env_manager)
 
@@ -82,11 +130,9 @@ def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]
         
         # Find the configured service hash in metadata first.
         service_hash = None
-        service_saved = False
         for _hash in metadata.hashtag.hash:
             if _hash.type == hash_spec.id_bytes:
                 service_hash = _hash.value.hex()
-                service_saved = os.path.exists(os.path.join(REGISTRY, service_hash))
                 break
 
         if VALIDATE_ON_IMPORT:
@@ -107,12 +153,18 @@ def import_bee(path: str, integrity_hash: Optional[str] = None) -> Optional[str]
                     f"Expected: {service_hash}, received: {integrity_hash}. "
                     f"Ensure that the integrity hash uses the {hash_spec.name} algorithm."
                 )
+                _discard(metadata_dir, service_dir, blocks_before)
                 return
         
+        # Only now is the id known: the one that the metadata says may not be the one of the
+        # content (VALIDATE_ON_IMPORT replaced it above).
+        service_saved = os.path.exists(os.path.join(REGISTRY, service_hash))
+
         # Move metadata to the metadata registry
         metadata_destination = os.path.join(METADATA_REGISTRY, service_hash)
-        with open(metadata_destination, "wb") as metadata_file:
-            metadata_file.write(metadata.SerializeToString())
+        if not (keep_metadata and os.path.exists(metadata_destination)):
+            with open(metadata_destination, "wb") as metadata_file:
+                metadata_file.write(metadata.SerializeToString())
         _remove_path(metadata_dir)
         
         # Move or remove the service file based on whether it's already saved

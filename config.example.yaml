@@ -1153,6 +1153,47 @@ timing:
   GET_SERVICE_IDLE_TIMEOUT: 30
   GET_SERVICE_TIMEOUT: 1800
 
+# What this node does when a service is asked for by its id (a service that starts it as a
+# dependency, `nodo get`, a delegated execution) and no known peer has it. On by default, but it
+# does something only if the node has a `source-application` core service (see
+# `core_services`): without one the node only asks its peers, as it always did. `false`
+# turns it off.
+#
+# On, it asks the `source-application` core service (see `core_services`) for the sources of
+# that id, downloads the first that works and imports it. `nodo execute` and the other
+# commands of the operator do this already, with no limit and no guard; this is the same for
+# a request that somebody else makes, so it has limits (docs/CONFIG.md, `service_sources`):
+# only a caller that the node knows (a local instance, or a client_id that it minted) starts
+# it; it runs on a thread of its own, within the limits below; it connects only to the public
+# address that it checked, for the URL and for every redirect (not loopback, private,
+# link-local or multicast); it sends no credentials; and what is imported is kept only if it
+# is the id that was asked for. It needs `misc.VALIDATE_ON_IMPORT` on, or it does nothing.
+service_sources:
+  AUTO_ACQUIRE: true
+  # The wants for the sources that one caller (a client_id, or a local instance) may make in
+  # one hour. 0: no limit.
+  WANTS_PER_CALLER_PER_HOUR: 10
+  # The most that one download may take, all its parts together. 0: no limit.
+  MAX_DOWNLOAD_MB: 2048
+  # A service that no source gave is not looked up again for this many seconds.
+  RETRY_AFTER_SECONDS: 3600
+  # Seconds that a request to a source may wait (to connect, and for each read).
+  TIMEOUT_SECONDS: 60
+  # The most time, in seconds, that all the downloads of one service may take together. A
+  # request that is still open then is cut. 0: no limit.
+  DEADLINE_SECONDS: 1800
+  # A source that sends its body more slowly than this (KiB each second, on average, after the
+  # first TIMEOUT_SECONDS of it) is given up. 0: no minimum.
+  MIN_KIB_PER_SECOND: 16
+  # The most parts that one manifest may list (`nodo publish` makes parts of 1000 MB). 0: no limit.
+  MAX_PARTS: 64
+  # The most sources of one service that are tried. 0: no limit.
+  MAX_SOURCES: 3
+  # For all the sources of one service together: the most hosts that are asked, and the most
+  # requests to each host (redirects included). 0: no limit.
+  MAX_HOSTS: 8
+  MAX_REQUESTS_PER_HOST: 80
+
 communication:
   # The most components a Peer.signature_scheme may declare before this node refuses
   # to compare it (node_identity.same_signature_scheme). Comparing two schemes is a
