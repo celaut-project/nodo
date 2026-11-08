@@ -23,7 +23,10 @@ from src.utils.cost_functions.start_funding import (
 )
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
-from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
+from src.utils.cost_functions.workload_admission import (
+    evaluate_possible_environment_workloads,
+    evaluate_start_funding,
+)
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.utils.network_policy import enforce_network_policy, hidden_mode_rejection, tor_egress_unready_reason
 from src.manager.shares import ShareAuthorizationError, authorize_network_shares, authorize_shares
@@ -421,6 +424,27 @@ def launch_service(
             raise Exception(
                 f"Unable to launch service {service_id}: {workload_admission_failure}"
             )
+
+        # A father that sets `initial_mu` must give enough for the children of
+        # `initial_environment_workload` (#538): the service pays their `child_start`
+        # out of its balance. Refused now, the start fails at once and charges nothing,
+        # instead of a parent that retries the start of its children in a loop (#628).
+        # Without an `initial_mu`, the default balance above already includes them.
+        if initial_mu_requested:
+            try:
+                funding_arch = get_arch_tag(service=service, metadata=metadata)
+            except Exception:
+                funding_arch = None
+            underfunded = evaluate_start_funding(
+                service=service,
+                metadata=metadata,
+                initial_mu=_mu(configuration.initial_mu),
+                service_hash=service_id,
+                arch=funding_arch,
+            )
+            if underfunded:
+                log.LOGGER(f"Refusing to launch service {service_id}: {underfunded}")
+                raise Exception(f"Unable to launch service {service_id}: {underfunded}")
 
         # A `guest` directory is an execution precondition, not an option: if the
         # parent that launched this service does not export the share it asks

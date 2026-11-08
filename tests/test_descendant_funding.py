@@ -1,12 +1,16 @@
-"""A service is funded for the descendants that it declares.
+"""A service is funded for its initial children, and a start that cannot pay them is refused (#538).
 
-``Service.possible_environment_workload`` lists scenarios of descendants that the service can
-start at the same time, and the service pays for them out of its own balance: each start takes
-its ``initial_mu`` from the father. So the balance that a start funds it with
-(``manager.default_initial_balance``) covers the dearest scenario, for the same hours as the
-service itself, and one build for each group. The quote (``GetServiceEstimatedCost``), the
-funding of the instance and the amount asked of a peer all go through that function, so they
-give one figure.
+A service pays the ``child_start`` of each child of its ``initial_environment_workload`` out of
+its own balance. So:
+
+* the default balance of a start with no ``initial_mu`` (``manager.default_initial_balance``)
+  includes ``children_initial_cost``, and
+* a start that carries its own ``initial_mu`` is refused (``workload_admission.ON_UNDERFUNDED:
+  reject``) when the balance after the build cannot pay ``children_initial_cost`` and one
+  maintenance period of the service. Before this, the parent started and then retried the
+  start of its children in a loop (#628).
+
+``possible_environment_workload`` is in the admission only: it adds nothing to the balance.
 
 The imports are not guarded, for the reason given in tests/test_pricing_model.py: a test of
 money that is skipped says that the sums were checked when they were not.
@@ -20,176 +24,215 @@ from tests.config_bootstrap import load_example_config
 load_example_config()
 
 from protos import celaut_pb2 as celaut  # noqa: E402
-from src.manager.manager import default_initial_balance
-from src.utils.cost_functions import start_funding
-from src.utils.cost_functions.execution_cost import worst_case_charge_mu
-from src.utils.cost_functions.start_funding import descendant_funding_mu
-from src.virtualizers.interface import resolve_billable_resources
-from tests.test_price_volatility import GIB, IDLE, _config, _guest
-
-BUILD = 10_000_000  # pricing.BUILD_MU of the config of these tests.
-HOURS = 3600
-HASH = bytes(range(32))
+from src.manager.manager import default_initial_balance  # noqa: E402
+from src.utils.cost_functions import start_funding  # noqa: E402
+from src.utils.cost_functions import workload_admission as wa  # noqa: E402
+from src.utils.cost_functions.start_funding import (  # noqa: E402
+    children_initial_cost_mu,
+    underfunded_reason,
+)
+from tests.test_price_volatility import GIB, IDLE, _config, _guest  # noqa: E402
 
 
-def _resources(mem=GIB, disk=GIB) -> celaut.Sysresources:
-    return celaut.Sysresources(mem_limit=mem, cpu_period=100000, cpu_quota=100000, disk_space=disk)
-
-
-def _group(count=1, resources=None, hash_value=None):
-    group = celaut.Service.PossibleEnvironmentWorkload.Workload(
-        count=count, resources=resources or _resources()
+def _workload(count=1, mem=GIB) -> celaut.Service.Workload:
+    workload = celaut.Service.Workload(count=count)
+    workload.dependency.service.container.resources.at_init.CopyFrom(
+        celaut.Sysresources(mem_limit=mem, cpu_period=100000, cpu_quota=100000, disk_space=GIB)
     )
-    if hash_value:
-        group.dependency.hash.add(type=b"\x01" * 32, value=hash_value)
-    return group
+    return workload
 
 
-def _service(*scenarios) -> celaut.Service:
+def _service(*workloads, field="initial_environment_workload") -> celaut.Service:
     service = celaut.Service()
-    for groups in scenarios:
-        service.possible_environment_workload.add().workloads.extend(groups)
+    service.container.resources.at_init.CopyFrom(_guest())
+    if workloads:
+        getattr(service, field).add().any_of.add().workloads.extend(workloads)
     return service
 
 
-def _runtime(resources, hours=1.0) -> int:
-    """What one instance with `resources` costs for `hours`, at the worst case of the price."""
-    return worst_case_charge_mu(
-        system_resources=resolve_billable_resources(resources, None),
-        seconds=hours * HOURS,
-        scarcity=IDLE,
-    )
-
-
-class WhatADescendantCostsTests(unittest.TestCase):
-    def test_a_service_with_no_workload_adds_nothing(self):
-        with _config():
-            self.assertEqual(descendant_funding_mu(celaut.Service(), scarcity=IDLE), 0)
-
-    def test_a_group_costs_its_runtime_and_one_build(self):
-        with _config():
-            got = descendant_funding_mu(_service([_group()]), scarcity=IDLE)
-            self.assertEqual(got, _runtime(_resources()) + BUILD)
-            self.assertGreater(_runtime(_resources()), 0)
-
-    def test_identical_instances_pay_their_runtime_each_and_one_build(self):
-        with _config():
-            got = descendant_funding_mu(_service([_group(count=3)]), scarcity=IDLE)
-            self.assertEqual(got, 3 * _runtime(_resources()) + BUILD)
-
-    def test_a_scenario_adds_up_its_groups_and_each_group_has_its_build(self):
-        small, big = _resources(mem=GIB // 4), _resources(mem=2 * GIB)
-        with _config():
-            got = descendant_funding_mu(_service([_group(resources=small), _group(resources=big)]),
-                                        scarcity=IDLE)
-            self.assertEqual(got, _runtime(small) + _runtime(big) + 2 * BUILD)
-
-    def test_the_scenarios_do_not_add_up_the_dearest_one_counts(self):
-        cheap = [_group(resources=_resources(mem=GIB // 4))]
-        dear = [_group(count=2, resources=_resources(mem=2 * GIB))]
-        with _config():
-            one = descendant_funding_mu(_service(dear), scarcity=IDLE)
-            both = descendant_funding_mu(_service(cheap, dear), scarcity=IDLE)
-            swapped = descendant_funding_mu(_service(dear, cheap), scarcity=IDLE)
-            self.assertEqual(both, one)
-            self.assertEqual(swapped, one)
-            self.assertGreater(one, descendant_funding_mu(_service(cheap), scarcity=IDLE))
-
-    def test_a_group_with_no_instances_costs_nothing(self):
-        with _config():
-            self.assertEqual(descendant_funding_mu(_service([_group(count=0)]), scarcity=IDLE), 0)
-
-    def test_a_service_that_is_built_here_costs_no_build(self):
-        with _config(), patch.object(start_funding, "is_built", return_value=True) as built:
-            got = descendant_funding_mu(_service([_group(hash_value=HASH)]), scarcity=IDLE)
-        built.assert_called_once_with(HASH.hex())
-        self.assertEqual(got, _runtime(_resources()))
-
-    def test_a_service_that_is_not_built_pays_its_build(self):
-        with _config(), patch.object(start_funding, "is_built", return_value=False):
-            got = descendant_funding_mu(_service([_group(hash_value=HASH)]), scarcity=IDLE)
-        self.assertEqual(got, _runtime(_resources()) + BUILD)
-
-    def test_a_group_with_resources_only_always_pays_its_build(self):
-        with _config(), patch.object(start_funding, "is_built", return_value=True) as built:
-            got = descendant_funding_mu(_service([_group()]), scarcity=IDLE)
-        built.assert_not_called()
-        self.assertEqual(got, _runtime(_resources()) + BUILD)
-
-    def test_the_hours_are_the_ones_of_the_service(self):
-        with _config(deposits__INITIAL_RUNTIME_HOURS=2.0):
-            with patch.object(start_funding.env_manager, "get",
-                              side_effect=lambda k, d=None: 2.0 if k == "deposits.INITIAL_RUNTIME_HOURS" else d):
-                got = descendant_funding_mu(_service([_group()]), scarcity=IDLE)
-            self.assertEqual(got, _runtime(_resources(), hours=2.0) + BUILD)
-            self.assertGreater(got, _runtime(_resources()) + BUILD)
-
-    def test_no_hours_no_funding(self):
-        with patch.object(start_funding.env_manager, "get",
-                          side_effect=lambda k, d=None: 0 if k == "deposits.INITIAL_RUNTIME_HOURS" else d):
-            self.assertEqual(descendant_funding_mu(_service([_group()]), scarcity=IDLE), 0)
-
-    def test_a_node_that_is_free_funds_nothing(self):
-        with _config(), patch.object(start_funding, "is_free", return_value=True), \
-                patch.object(start_funding, "worst_case_charge_mu", return_value=0):
-            self.assertEqual(descendant_funding_mu(_service([_group()]), scarcity=IDLE), 0)
-
-
 class TheDefaultBalanceTests(unittest.TestCase):
-    """`default_initial_balance` is what the quote, the instance and the peer quote use."""
+    """`default_initial_balance` with the manifest is what a start with no `initial_mu` gets."""
 
     def test_without_the_manifest_it_is_the_balance_of_the_service_alone(self):
         with _config():
-            own = default_initial_balance(system_resources=_guest(), scarcity=IDLE)
-            self.assertEqual(own, _runtime(_guest()))
-
-    def test_a_service_with_no_workload_has_the_same_balance_with_or_without_the_manifest(self):
-        with _config():
             alone = default_initial_balance(system_resources=_guest(), scarcity=IDLE)
-            with_manifest = default_initial_balance(
-                system_resources=_guest(), scarcity=IDLE, service=celaut.Service()
+            self.assertGreater(alone, 0)
+            self.assertEqual(
+                default_initial_balance(system_resources=_guest(), scarcity=IDLE, service=celaut.Service()),
+                alone,
             )
-            self.assertEqual(with_manifest, alone)
 
-    def test_the_declared_workload_is_added_to_the_balance_of_the_service(self):
-        service = _service([_group(count=2)])
+    def test_the_initial_children_are_added(self):
+        service = _service(_workload(count=2))
         with _config():
             alone = default_initial_balance(system_resources=_guest(), scarcity=IDLE)
             funded = default_initial_balance(system_resources=_guest(), scarcity=IDLE, service=service)
-            self.assertEqual(funded - alone, descendant_funding_mu(service, scarcity=IDLE))
-            self.assertEqual(funded - alone, 2 * _runtime(_resources()) + BUILD)
+            children = children_initial_cost_mu(service, scarcity=IDLE)
+        self.assertGreater(children, 0)
+        self.assertEqual(funded - alone, children)
+
+    def test_possible_environment_workload_adds_nothing(self):
+        service = _service(_workload(count=2), field="possible_environment_workload")
+        with _config():
+            alone = default_initial_balance(system_resources=_guest(), scarcity=IDLE)
+            self.assertEqual(
+                default_initial_balance(system_resources=_guest(), scarcity=IDLE, service=service), alone
+            )
+
+    def test_the_initial_children_of_a_child_are_added_to_the_child(self):
+        child = _workload()
+        child.dependency.service.initial_environment_workload.add().any_of.add().workloads.append(
+            _workload(mem=2 * GIB))
+        with _config():
+            got = children_initial_cost_mu(_service(child), scarcity=IDLE)
+            alone = children_initial_cost_mu(_service(_workload()), scarcity=IDLE)
+            grandchild = children_initial_cost_mu(_service(_workload(mem=2 * GIB)), scarcity=IDLE)
+        self.assertEqual(got, alone + grandchild)
 
     def test_a_service_with_no_resources_at_the_start_is_still_not_funded(self):
         with _config():
             self.assertEqual(
-                default_initial_balance(system_resources=None, service=_service([_group()])), 0
+                default_initial_balance(system_resources=None, service=_service(_workload())), 0
             )
 
-
-class TheCallersTests(unittest.TestCase):
-    """The quote, the launch and the quote for a peer pass the manifest."""
-
-    def test_every_caller_passes_the_service(self):
+    def test_the_launch_and_the_local_execution_pass_the_manifest(self):
+        """A default start funds the children; the gateway quote does not (it quotes them apart)."""
         import inspect
 
-        from src.gateway.iterables import estimated_cost_iterable
         from src.gateway.launcher import launch_service
         from src.gateway.launcher.local_execution import local_execution
 
-        for module in (estimated_cost_iterable, launch_service, local_execution):
+        for module in (launch_service, local_execution):
             source = inspect.getsource(module)
-            calls = source.count("default_initial_balance(")
-            with_service = source.count("service=")
-            self.assertGreaterEqual(calls, 1, module.__name__)
-            # Each call in the source names its manifest: a caller that forgot it would
-            # quote less than the launch funds.
-            body = source.split("default_initial_balance(")[1:]
-            for call in body:
-                head = call.split(")\n", 1)[0]
-                if "def default_initial_balance" in call[:40]:
-                    continue
-                self.assertIn("service=", head, f"{module.__name__}: {head[:80]}")
-            self.assertGreaterEqual(with_service, calls, module.__name__)
+            calls = source.split("default_initial_balance(")[1:]
+            self.assertTrue(calls, module.__name__)
+            for call in calls:
+                self.assertIn("service=", call.split("))", 1)[0], module.__name__)
+
+
+class TheShortfallTests(unittest.TestCase):
+    """`underfunded_reason`: the build, the children and one period."""
+
+    def test_enough_is_no_reason(self):
+        self.assertIsNone(underfunded_reason(initial_mu=100, build_mu=10, minimum_mu=20, children_mu=70))
+
+    def test_too_little_names_every_figure_and_the_least_amount(self):
+        reason = underfunded_reason(initial_mu=99, build_mu=10, minimum_mu=20, children_mu=70)
+        for text in ("initial_mu 99 MU", "leaves 89 MU", "build of 10 MU", "cost 70 MU",
+                     "children_initial_cost", "costs 20 MU", "least initial_mu is 100 MU"):
+            self.assertIn(text, reason)
+
+    def test_a_service_with_no_initial_children_is_not_checked_here(self):
+        self.assertIsNone(underfunded_reason(initial_mu=0, build_mu=10, minimum_mu=20, children_mu=0))
+
+
+def _evaluate(service, initial_mu, **config):
+    with patch.object(wa.env_manager, "get", side_effect=lambda key, default=None: config.get(key, default)), \
+            patch("src.utils.cost_functions.execution_cost.system_scarcity", return_value=IDLE), \
+            patch.object(start_funding, "children_initial_cost_mu", return_value=700), \
+            patch.object(start_funding, "start_build_mu", return_value=100), \
+            patch.object(start_funding, "minimum_runtime_mu", return_value=200), \
+            patch.object(wa.log, "LOGGER") as logger:
+        return wa.evaluate_start_funding(service, celaut.Metadata(), initial_mu), logger
+
+
+class TheFundingCheckTests(unittest.TestCase):
+    """`evaluate_start_funding` and `workload_admission.ON_UNDERFUNDED`."""
+
+    def test_too_low_is_refused_by_default(self):
+        failure, _ = _evaluate(_service(_workload()), 999)
+        self.assertIn("least initial_mu is 1000 MU", failure)
+
+    def test_enough_is_admitted(self):
+        failure, _ = _evaluate(_service(_workload()), 1000)
+        self.assertIsNone(failure)
+
+    def test_warn_logs_and_admits(self):
+        failure, logger = _evaluate(_service(_workload()), 1, **{"workload_admission.ON_UNDERFUNDED": "warn"})
+        self.assertIsNone(failure)
+        logged = " ".join(str(call) for call in logger.call_args_list)
+        self.assertIn("ON_UNDERFUNDED=warn", logged)
+        self.assertIn("least initial_mu is 1000 MU", logged)
+
+    def test_an_unknown_value_is_reject(self):
+        failure, _ = _evaluate(_service(_workload()), 1, **{"workload_admission.ON_UNDERFUNDED": "maybe"})
+        self.assertIsNotNone(failure)
+
+    def test_no_children_no_check(self):
+        with patch("src.utils.cost_functions.execution_cost.system_scarcity", return_value=IDLE), \
+                patch.object(start_funding, "start_build_mu") as build:
+            self.assertIsNone(wa.evaluate_start_funding(_service(), celaut.Metadata(), 0))
+        build.assert_not_called()
+
+    def test_a_build_that_cannot_be_priced_is_counted_as_zero(self):
+        with patch("src.utils.cost_functions.execution_cost.system_scarcity", return_value=IDLE), \
+                patch.object(start_funding, "children_initial_cost_mu", return_value=700), \
+                patch.object(start_funding, "start_build_mu", side_effect=RuntimeError("not on disk")), \
+                patch.object(start_funding, "minimum_runtime_mu", return_value=200), \
+                patch.object(wa.log, "LOGGER"):
+            self.assertIsNone(wa.evaluate_start_funding(_service(_workload()), celaut.Metadata(), 900))
+            self.assertIsNotNone(wa.evaluate_start_funding(_service(_workload()), celaut.Metadata(), 899))
+
+
+class TheLaunchTests(unittest.TestCase):
+    """`launch_service` applies the check after the admission and before any charge."""
+
+    def _launch(self, configuration, funding):
+        from src.gateway.launcher import launch_service as mod
+
+        with patch.object(mod, "spend_mu") as spend, \
+                patch.object(mod, "execution_balancer") as balancer, \
+                patch.object(mod, "local_execution"), \
+                patch.object(mod, "delegate_execution"), \
+                patch.object(mod, "enforce_network_policy"), \
+                patch.object(mod, "evaluate_possible_environment_workloads", return_value=None), \
+                patch.object(mod, "evaluate_start_funding", return_value=funding) as check, \
+                patch.object(mod, "authorize_shares"), \
+                patch.object(mod, "authorize_network_shares", return_value=[]), \
+                patch.object(mod, "locate_network_shares", return_value=[]), \
+                patch.object(mod, "_detect_local_preflight_failure", return_value=None), \
+                patch.object(mod, "descends_from_dev_client", return_value=True), \
+                patch.object(mod.activity_window, "is_open", return_value=True), \
+                patch.object(mod.sc, "pop_forced_execution_peer", return_value=None), \
+                patch.object(mod, "get_arch_tag", return_value="linux/amd64"), \
+                patch.object(mod, "default_initial_balance", return_value=4321) as default:
+            balancer.return_value = iter([])
+            with self.assertRaises(Exception) as ctx:
+                mod.launch_service(
+                    service=_service(_workload()), metadata=celaut.Metadata(),
+                    configuration=configuration, father_id="vm-parent",
+                    father_ip="10.0.0.1", service_id="svc-parent",
+                )
+        return ctx.exception, spend, balancer, check, default
+
+    @staticmethod
+    def _with_initial_mu(amount):
+        configuration = celaut.Configuration()
+        configuration.initial_mu.n = str(amount)
+        return configuration
+
+    def test_an_underfunded_start_is_refused_before_the_balancer_and_any_charge(self):
+        error, spend, balancer, check, _ = self._launch(self._with_initial_mu(5), "the least initial_mu is 1000 MU.")
+        check.assert_called_once()
+        self.assertEqual(check.call_args.kwargs["initial_mu"], 5)
+        self.assertIn("svc-parent", str(error))
+        self.assertIn("least initial_mu is 1000 MU", str(error))
+        spend.assert_not_called()
+        balancer.assert_not_called()
+
+    def test_a_funded_start_goes_on(self):
+        error, _, balancer, check, _ = self._launch(self._with_initial_mu(5000), None)
+        check.assert_called_once()
+        balancer.assert_called_once()
+        self.assertNotIn("least initial_mu", str(error))
+
+    def test_a_start_with_no_initial_mu_is_not_checked_and_gets_the_default_with_children(self):
+        configuration = celaut.Configuration()
+        error, _, balancer, check, default = self._launch(configuration, "never")
+        check.assert_not_called()
+        balancer.assert_called_once()
+        self.assertIsNotNone(default.call_args.kwargs.get("service"))
+        self.assertEqual(configuration.initial_mu.n, "4321")
 
 
 if __name__ == "__main__":

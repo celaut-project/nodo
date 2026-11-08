@@ -1066,6 +1066,13 @@ workload_admission:
   #              reserves nothing, so a busy moment can refuse a service that would have
   #              run a second later.
   ON_UNSATISFIABLE: reject
+  # What a start means whose initial_mu, after the build, cannot pay the initial children
+  # of the service (children_initial_cost) and one maintenance period of the service. Only
+  # for a request that sets initial_mu: with none, the default balance includes the children.
+  #   reject     Refuse the start. The parent pays the start of each initial child from its
+  #              balance; with too little, it retries the start of its children in a loop.
+  #   warn       Log it and start anyway.
+  ON_UNDERFUNDED: reject
 
 # Hard ceilings on what this node may take from the machine it runs on. Written for a
 # node sharing a PC with the person using it: scarcity pricing (`pricing.SCARCITY_*`)

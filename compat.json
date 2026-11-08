@@ -338,6 +338,7 @@
     "virtualizers.qemu.INITRAMFS_PATHS.linux/arm64",
     "virtualizers.qemu.KERNEL_PATHS.linux/amd64",
     "virtualizers.qemu.KERNEL_PATHS.linux/arm64",
+    "workload_admission.ON_UNDERFUNDED",
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],

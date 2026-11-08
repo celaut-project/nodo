@@ -95,6 +95,19 @@ ON_UNSATISFIABLE_REJECT: Final[str] = "reject"
 ON_UNSATISFIABLE_WARN: Final[str] = "warn"
 _DEFAULT_ON_UNSATISFIABLE: Final[str] = ON_UNSATISFIABLE_REJECT
 
+# What a start whose `initial_mu` cannot pay the initial children means (#538).
+#
+#   reject -- refuse it (the default). The parent pays the `child_start` of each child
+#             of its `initial_environment_workload` out of its balance. Started with too
+#             little, it fails to start them and retries in a loop, and the application
+#             never becomes ready (#628). Refused here, it fails at once, with the
+#             figure that it needs.
+#   warn   -- log it and launch anyway, for a service that starts its children later or
+#             that is topped up by hand.
+ON_UNDERFUNDED_REJECT: Final[str] = "reject"
+ON_UNDERFUNDED_WARN: Final[str] = "warn"
+_DEFAULT_ON_UNDERFUNDED: Final[str] = ON_UNDERFUNDED_REJECT
+
 
 def _policy(key: str, valid: Tuple[str, ...], default: str) -> str:
     """One of ``valid``, read per call rather than captured at import.
@@ -129,6 +142,14 @@ def _on_unsatisfiable() -> str:
         "workload_admission.ON_UNSATISFIABLE",
         (ON_UNSATISFIABLE_REJECT, ON_UNSATISFIABLE_WARN),
         _DEFAULT_ON_UNSATISFIABLE,
+    )
+
+
+def _on_underfunded() -> str:
+    return _policy(
+        "workload_admission.ON_UNDERFUNDED",
+        (ON_UNDERFUNDED_REJECT, ON_UNDERFUNDED_WARN),
+        _DEFAULT_ON_UNDERFUNDED,
     )
 
 
@@ -379,6 +400,66 @@ def evaluate_possible_environment_workloads(
         log.LOGGER(
             f"[WORKLOAD ADMISSION] {message} Launching anyway "
             f"(workload_admission.ON_UNSATISFIABLE={ON_UNSATISFIABLE_WARN})."
+        )
+        return None
+
+    return message
+
+
+def evaluate_start_funding(
+        service: celaut.Service,
+        metadata: celaut.Metadata,
+        initial_mu: int,
+        service_hash: Optional[str] = None,
+        arch: Optional[str] = None,
+) -> Optional[str]:
+    """The reason to refuse a start whose ``initial_mu`` cannot pay the initial children.
+
+    Only for a request that carries its own ``initial_mu``: with none, the default
+    balance of the node includes ``children_initial_cost`` (``manager.default_initial_balance``).
+    The balance after the build of this node must pay ``children_initial_cost`` and one
+    maintenance period of the service (``start_funding.underfunded_reason``). A service
+    with no initial children is not checked here.
+
+    ``workload_admission.ON_UNDERFUNDED`` decides what a shortfall means: ``reject`` (the
+    default) returns the message, so the caller refuses the launch; ``warn`` logs it and
+    returns None.
+    """
+    # Imported here: start_funding pulls in the pricing modules, and this module stays
+    # importable without them (see check_resource_availability_on_peer).
+    from src.utils.cost_functions import start_funding
+    from src.utils.cost_functions.execution_cost import system_scarcity
+
+    scarcity = system_scarcity()
+    children_mu = start_funding.children_initial_cost_mu(service, scarcity=scarcity)
+    if children_mu <= 0:
+        return None
+    try:
+        build_mu = start_funding.start_build_mu(metadata=metadata, scarcity=scarcity)
+    except Exception as e:
+        # A service that this node cannot build here can still run on a peer, which
+        # applies its own build. The children and the period are still checked.
+        log.LOGGER(f"[WORKLOAD ADMISSION] Could not price the build for the funding check ({e}); using 0.")
+        build_mu = 0
+    message = start_funding.underfunded_reason(
+        initial_mu=initial_mu,
+        build_mu=build_mu,
+        minimum_mu=start_funding.minimum_runtime_mu(
+            resources=service.container.resources,
+            service_hash=service_hash,
+            arch=arch,
+            service=service,
+            scarcity=scarcity,
+        ),
+        children_mu=children_mu,
+    )
+    if message is None:
+        return None
+
+    if _on_underfunded() == ON_UNDERFUNDED_WARN:
+        log.LOGGER(
+            f"[WORKLOAD ADMISSION] {message} Launching anyway "
+            f"(workload_admission.ON_UNDERFUNDED={ON_UNDERFUNDED_WARN})."
         )
         return None
 
