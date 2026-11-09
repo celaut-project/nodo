@@ -14,7 +14,7 @@ from src.utils.cost_functions.volatility_cost_normalization import volatility_co
 from src.utils.config import ConfigManager
 from src.utils.utils import from_amount
 from src.utils.logger import LOGGER as logger
-from src.utils.monetary import HOUR_SECONDS, format_mu
+from src.utils.monetary import HOUR_SECONDS, format_mu, prices
 from src.database.sql_connection import LOCAL_PEER_ID
 
 env_manager = ConfigManager()
@@ -87,7 +87,7 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
         # gas-per-ERG factor (`1 / (peer_gas_per_erg / local_gas_per_erg)`), which only
         # existed because "gas" meant something different on every node.
         # The volatility of a bounded quote, read strictly (#636). An unbounded quote has
-        # none to weigh.
+        # none to weigh: it is ranked after every bounded one (`_is_bounded`).
         bound = price_bound.of_quote(estimated_cost, source=f" in the quote of {peer_id}")
         volatility = 0.0 if bound is None else bound.volatility
 
@@ -158,11 +158,20 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
         )
         return candidate_score
 
+    def _is_bounded(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> bool:
+        """Whether the candidate promises a price bound (#636). The local node is bounded
+        iff ``pricing.PRICE_BOUNDED`` is true; a peer, iff its quote says so."""
+        if peer_id == 'local':
+            return bool(prices().price_bounded)
+        return bool(getattr(estimated_cost, 'price_bounded', False))
+
+    # The candidates that promise a price bound go first; inside each group, the order
+    # of the score (#636, G).
     return (
         (_id, estimated_cost) for _id, estimated_cost in
         sorted(
             estimated_costs.items(),
-            key=lambda item: __compute_score(item[0], item[1]),
+            key=lambda item: (_is_bounded(item[0], item[1]), __compute_score(item[0], item[1])),
             reverse=True
         )
     )
