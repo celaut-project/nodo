@@ -1061,8 +1061,10 @@ def _check_maintenance_quote(row: dict, rows, since_ts: Optional[int]) -> None:
 
     The quote is the one that the peer gave for this instance, kept on the row in its MU
     (``quote_*``), not its rates of today: a peer that raised its prices since is held to
-    the price that it signed. It is for the most resources of the service, so a hotplug
-    up to them is not an overcharge. A row with no quote is not checked.
+    the bound that it signed (#636): the figure of the resources that the child holds
+    (``init`` at the start, ``max`` at the most) times ``(1 + v)^k`` from the launch of the
+    row. A row with no quote, or with a quote that has ``price_bounded`` false, is not
+    checked.
 
     Only the peer is scored, with ``MAINTENANCE_OVERCHARGED``: not the service and not
     the client. A price above the quote shows at every period, so it is scored at most

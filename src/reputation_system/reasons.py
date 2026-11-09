@@ -46,10 +46,14 @@ class Reason:
 
     MAINTENANCE_OVERCHARGED = "maintenance_overcharged"
     """The statement of a child that this node delegated to the peer charges more
-    maintenance per second than the peer quoted for it: more than `max_maintenance_cost`
-    per `maintenance_seconds_loop`, times `1 + variance`. The quote that the peer signed
-    for the instance is the proof, on the scale of the peer. The instance and its charge
-    to the client do not change: this node absorbs the excess (#567)."""
+    maintenance per second than the price bound that the peer quoted for it (#636): more
+    than `init_maintenance_cost` (at the start resources) or `max_maintenance_cost` (at
+    the most) per `maintenance_seconds_loop`, times `(1 + price_volatility)^k`, where `k`
+    is the volatility period since the launch of the child. Only a quote with
+    `price_bounded` true is checked: a peer that promised no bound is never scored. The
+    quote that the peer signed for the instance is the proof, on the scale of the peer.
+    The instance and its charge to the client do not change: this node absorbs the
+    excess (#567)."""
 
     KILLED_WITH_MU = "killed_with_mu"
     """The peer signed a `stop` row of a descendant of an instance that this node

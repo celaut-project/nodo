@@ -196,9 +196,11 @@ judged. See [`PRICING.md`](PRICING.md) for how the charges are found.
 
 **The maintenance against the quote.** When this node delegates a start, it keeps the
 maintenance quote of the peer on the delegated row (`quote_*`): `init_maintenance_cost`,
-`max_maintenance_cost`, `maintenance_seconds_loop` and `variance` of its
-`EstimatedCost`, in the MU of the peer, not converted. Each statement of the child that
-continues the mark is an interval:
+`max_maintenance_cost`, `maintenance_seconds_loop`, `price_bounded`, `price_volatility`
+and `volatility_period_seconds` of its `EstimatedCost` (#636), in the MU of the peer, not
+converted. Only a quote with `price_bounded` true is checked: a peer that promised no
+bound is never scored, whatever it charges. Each statement of the child that continues
+the mark is an interval:
 
 - Its cost is the sum of its `maintenance` movements. Its seconds are the sum of the
   `seconds` that each of them priced, but no more than the time from the mark to the last
@@ -206,17 +208,24 @@ continues the mark is an interval:
   clocks of the two nodes. So the time that this node could not read the peer is not in
   the interval, and a peer cannot lower its price per second with seconds that did not
   pass, beyond that 120 s margin.
-- The interval charges too much when its cost per second is more than
-  `max_maintenance_cost / maintenance_seconds_loop * (1 + variance)`, with 1 MU for each
-  movement for the rounding. The comparison is on the scale of the peer, before any
-  conversion.
-- `max_maintenance_cost` is the price of the most resources of the service, so a hotplug
-  up to them is not an overcharge.
+- Each `maintenance` movement is allowed
+  `figure * seconds / maintenance_seconds_loop * (1 + price_volatility)^k`, with 1 MU for
+  the rounding. The interval charges too much when its cost is more than the sum. The
+  comparison is on the scale of the peer, before any conversion.
+- `figure` is the one of the resources that the movement charged for: `init_maintenance_cost`
+  when they are within the start shape of the child on the peer, `max_maintenance_cost`
+  when it grew past it. So a hotplug up to the most is not an overcharge.
+- `k = floor((t - launch) / volatility_period_seconds) + 1` (1 when the period is 0), with
+  `t` the date of the movement, which is the end of the time that it charges: an interval
+  that spans a change of period has the higher `k`. `launch` is the launch of the delegated
+  row, and the 120 s of clock margin count in favour of the peer.
 - The quote is the one that the peer signed for this instance. A peer that raises its
   prices after the delegation is held to the price that it signed, not to its rates of
   today.
-- A row with no quote, or a quote with a `max_maintenance_cost` of 0 (a service with no
-  `at_most`) or no period, is not checked.
+- A row with no quote, an unbounded quote, a quote with no figure for the resources that
+  the child holds or no period, or a period with no known launch, is not checked. A
+  `price_volatility` that is NaN, infinite or negative is read as 0, and a negative period
+  as 0 (one period).
 
 A peer that charges more loses `maintenance_overcharged`. The signed quote is the proof.
 Only the peer is scored: not the service and not the client. The instance is not moved

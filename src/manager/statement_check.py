@@ -42,6 +42,7 @@ from protos import celaut_pb2
 from src.database import ledger
 from src.reputation_system.reasons import Reason
 from src.utils import logger as log, start_ref as start_refs
+from src.utils.cost_functions import price_bound
 from src.utils.config import ConfigManager
 from src.utils.utils import from_amount
 
@@ -355,36 +356,89 @@ def father_net(rows: Iterable[Row]) -> int:
     return sum(row.amount for row in rows if caused_by_father(row))
 
 
+_SHAPE_KEYS = ("mem_limit", "disk_space", "cpu_period", "cpu_quota")
+
+
+def _vcpus(shape: Mapping) -> Fraction:
+    period = int(shape.get("cpu_period") or 0) or 100_000
+    quota = int(shape.get("cpu_quota") or 0)
+    return Fraction(quota, period) if quota > 0 else Fraction(0)
+
+
+def _within(shape: Mapping, limit: Mapping) -> bool:
+    """``shape`` holds no more of any resource than ``limit``."""
+    return (int(shape.get("mem_limit") or 0) <= int(limit.get("mem_limit") or 0)
+            and int(shape.get("disk_space") or 0) <= int(limit.get("disk_space") or 0)
+            and _vcpus(shape) <= _vcpus(limit))
+
+
 @dataclass(frozen=True)
 class MaintenanceQuote:
-    """What the peer quoted for one maintenance period of a child, in its MU (#567):
-    ``max_mu`` for ``seconds`` seconds, and the ``variance`` of the quote."""
+    """The bound that the peer promised for the maintenance of a child, in its MU (#567,
+    #636): ``init_mu`` for one period of ``seconds`` seconds at the start resources and
+    ``max_mu`` at the most, times ``(1 + v)^k`` (``bound``), where ``k`` is the period
+    since ``launch_ts``. ``base_shape`` is the start shape on the peer
+    (``peer_base_*``): a charge for resources within it is held to ``init_mu``."""
     max_mu: int
     seconds: int
-    variance: float = 0.0
+    bound: price_bound.PriceBound
+    init_mu: int = 0
+    launch_ts: Optional[int] = None
+    base_shape: Optional[Mapping] = None
 
     @staticmethod
     def of_row(row: Mapping) -> Optional["MaintenanceQuote"]:
-        """The quote on a delegated row (``quote_*``), or None when the row holds none.
+        """The quote on a delegated row (``quote_*``), or None when it promises nothing.
 
-        A quote with no period, or with a ``max_maintenance_cost`` of 0, is no limit: a
-        node quotes 0 for a service that declares no ``at_most``."""
+        None for a row with no quote, and for a quote with ``price_bounded`` false: the
+        peer promised no limit, so no charge of it is an overcharge. None too for a quote
+        with no period, or with no figure at all. The volatility and the period are read
+        strictly (``price_bound.strict``)."""
         try:
+            if not row.get("quote_price_bounded"):
+                return None
             max_mu = int(row.get("quote_max_maintenance_cost") or 0)
+            init_mu = int(row.get("quote_init_maintenance_cost") or 0)
             seconds = int(row.get("quote_maintenance_seconds_loop") or 0)
-            variance = float(row.get("quote_variance") or 0.0)
+            launch_ts = row.get("launched_ts")
+            launch_ts = None if launch_ts is None else int(launch_ts)
         except (TypeError, ValueError):
             return None
-        if max_mu <= 0 or seconds <= 0:
+        if seconds <= 0 or (max_mu <= 0 and init_mu <= 0):
             return None
-        if not math.isfinite(variance) or variance < 0:
-            variance = 0.0
-        return MaintenanceQuote(max_mu, seconds, variance)
+        bound = price_bound.strict(row.get("quote_price_volatility"),
+                                   row.get("quote_volatility_period_seconds"),
+                                   source=f" in the quote of {row.get('peer_id')}")
+        base = {key: row.get(f"peer_base_{key}") for key in _SHAPE_KEYS}
+        base_shape = None if any(value is None for value in base.values()) else base
+        return MaintenanceQuote(max(max_mu, 0), seconds, bound, max(init_mu, 0), launch_ts,
+                                base_shape)
+
+    def figure_for(self, detail: Mapping) -> Optional[int]:
+        """The figure of one period for the resources of a ``maintenance`` movement:
+        ``init_mu`` when they are within the start shape, ``max_mu`` otherwise. None
+        when the quote has no figure for them."""
+        if self.init_mu > 0 and self.base_shape is not None and _within(detail, self.base_shape):
+            return self.init_mu
+        if self.max_mu > 0:
+            return self.max_mu
+        # No `at_most`: with no start shape to compare with, the start figure.
+        return self.init_mu if self.init_mu > 0 and self.base_shape is None else None
+
+    def period_index(self, ts: int) -> Optional[int]:
+        """``k`` at the time ``ts`` of the peer, with ``CLOCK_SKEW_SECONDS`` in favour of
+        the peer. None when it cannot be known: no launch time and a period."""
+        if self.bound.period_seconds <= 0:
+            return 1
+        if self.launch_ts is None:
+            return None
+        return self.bound.period_index(int(ts) - self.launch_ts + CLOCK_SKEW_SECONDS)
 
 
 def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote],
                            since_ts: Optional[int] = None) -> Optional[Tuple[int, str]]:
-    """Whether the ``maintenance`` movements in ``rows`` charge more than ``quote``.
+    """Whether the ``maintenance`` movements in ``rows`` charge more than the bound of
+    ``quote`` (#567, #636).
 
     ``rows`` are the movements of a child after its mark, checked by ``verify_chain``,
     and ``since_ts`` is the date of the mark. The cost of the interval is the sum of the
@@ -393,13 +447,15 @@ def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote
     The time that this node did not read the peer is not in the interval, so a long
     time between two reads is not an overcharge.
 
-    The interval charges too much when its cost per second is more than
-    ``max_mu / seconds * (1 + variance)`` of the quote. Each movement can round up by
-    1 MU. The seconds count up to the time from ``since_ts`` to the last movement, one
-    period, and ``CLOCK_SKEW_SECONDS`` for the difference between the clocks of the two
-    nodes: a peer cannot lower its cost per second with seconds that did not pass, beyond
-    that margin.
-    A movement with no seconds charges for no time.
+    Each movement is allowed ``figure * seconds / quote.seconds * (1 + v)^k``: the figure
+    of the resources that it charged for (``MaintenanceQuote.figure_for``), and the
+    period ``k`` at its date, which is the end of the time that it charges, so an
+    interval that spans a change of period has the higher ``k``. Each movement can round
+    up by 1 MU. The seconds count up to the time from ``since_ts`` to the last movement,
+    one period, and ``CLOCK_SKEW_SECONDS`` for the difference between the clocks of the
+    two nodes: a peer cannot lower its cost per second with seconds that did not pass,
+    beyond that margin. A movement with no seconds charges for no time. ``quote`` None
+    (no quote, or ``price_bounded`` false) is never an overcharge.
 
     Returns ``(seq, problem)``, with the seq of the first ``maintenance`` movement of
     the interval, or None.
@@ -412,18 +468,32 @@ def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote
     cost = -sum(row.amount for row in periods)
     if cost <= 0:
         return None
-    seconds = sum(max(0, _detail_int(row.detail, "seconds") or 0) for row in periods)
+    each = [max(0, _detail_int(row.detail, "seconds") or 0) for row in periods]
+    seconds = total = sum(each)
     if since_ts is not None:
         passed = int(periods[-1].ts) - int(since_ts) + quote.seconds + CLOCK_SKEW_SECONDS
-        seconds = min(seconds, max(0, passed))
-    allowed = (Fraction(quote.max_mu) * seconds * (1 + Fraction(quote.variance))
-               / quote.seconds + len(periods))
+        seconds = min(total, max(0, passed))
+    scale = Fraction(seconds, total) if total else Fraction(0)
+    allowed = Fraction(len(periods))
+    ks = []
+    for row, row_seconds in zip(periods, each):
+        figure = quote.figure_for(row.detail)
+        k = quote.period_index(row.ts)
+        factor = None if k is None else quote.bound.factor(k)
+        if figure is None or factor is None:
+            # No figure for these resources, or no limit that can be known: not checked.
+            return None
+        ks.append(k)
+        allowed += Fraction(figure) * row_seconds * scale * factor / quote.seconds
     if cost <= allowed:
         return None
+    k_text = str(ks[0]) if ks[0] == ks[-1] else f"{ks[0]} to {ks[-1]}"
     return periods[0].seq, (
         f"movements {periods[0].seq} to {periods[-1].seq} charge {cost} MU of maintenance "
-        f"for {seconds} s, and the quote allows {math.floor(allowed)} MU "
-        f"({quote.max_mu} MU per {quote.seconds} s, variance {quote.variance})")
+        f"for {seconds} s, and the bound allows {math.floor(allowed)} MU "
+        f"({quote.init_mu} MU at the start and {quote.max_mu} MU at the most per "
+        f"{quote.seconds} s, volatility {quote.bound.volatility} per "
+        f"{quote.bound.period_seconds} s, period {k_text})")
 
 
 def start_grace_seconds() -> int:
