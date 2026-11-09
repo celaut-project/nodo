@@ -118,8 +118,11 @@ them, which would rank peers on the shape of a failure.
 ## What a peer charges, from its statements
 
 This node pays `initial_mu` for a start and sends the peer that amount less its own
-build (#563, #577). The peer takes its build from the amount that it got, and must take
-nothing else from the account of this node. While the child runs, the peer charges its
+build (#563, #577). The peer takes its build from the amount that it got (the `cost` of
+its quote: its build and the builds of the initial children, with no balance, #636), and
+must take nothing else from the account of this node. The rest is the balance of the
+child, and it must pay at least one period as the peer quoted it (the funding sum of one
+period at the bound of the quote). While the child runs, the peer charges its
 maintenance to the balance of the child.
 
 A balance cannot check any of this. It is the sum of every movement on it, and two

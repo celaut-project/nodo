@@ -772,7 +772,7 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` | `false` | Whether the automatic refill also funds a peer learned only via gossip and never connected to or paid by hand. Off by default because identities are free to mint, so a relayed Sybil peer would draw a full deposit from every refill-enabled node that learns it. Only matters when `deposits.AUTOMATIC_REFILL` and `network.DELEGATE_EXECUTION` are on; it never enables refills by itself. Any value other than `true` counts as `false`. |
 | `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
 | `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
-| `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |
+| `deposits.DEFAULT_INITIAL_PERIODS` | `360` | How many maintenance periods (`MANAGER_ITERATION_TIME`) a new instance is funded for when the client sends no `initial_mu`: the node funds the start with `EstimatedCost.cost` (the builds) plus the funding sum of this many periods, `init_maintenance_cost × (1 + v)^k(i)` for the period `i` (#636). 360 periods of 10 s is one hour. A whole number, at least 1. Each child of a service gets this default in its own `StartService`, paid by its parent. `deposits.INITIAL_RUNTIME_HOURS` was removed: a config that still sets it is refused at load. See [`PRICING.md`](PRICING.md#starting-an-instance). |
 
 Prices are whole MU: there is nothing smaller to express, so a fractional one is refused
 rather than rounded. Set any price to `0` to give that resource away.

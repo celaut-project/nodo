@@ -139,7 +139,9 @@ The cost of the start is inside this limit. The client pays `initial_mu` and not
 else (#563). The node takes the cost of the build from the balance of the new instance,
 so the balance is `initial_mu` less the build. The maximum spend of the father is
 `initial_mu`, less the refund when the instance stops. The `cost` field of the quote is
-the least `initial_mu` that starts the service. See [`PRICING.md`](PRICING.md).
+what the start spends: the build and the builds of the initial children, with no balance.
+A father funds `N` maintenance periods with `cost` plus the funding sum of `N` periods.
+See [`PRICING.md`](PRICING.md).
 
 - If the build does not fit in `initial_mu`, the node rejects the start and charges
   nothing.
@@ -148,7 +150,8 @@ the least `initial_mu` that starts the service. See [`PRICING.md`](PRICING.md).
   dies at the first tick after the father paid the build.
 - A father that wants "start this service only if the start costs at most X" sets
   `initial_mu` to X plus the minimum runtime. No new field is necessary.
-- If the request has no `initial_mu`, the node uses the build plus its default balance.
+- If the request has no `initial_mu`, the node uses `cost` plus its default balance
+  (`deposits.DEFAULT_INITIAL_PERIODS` periods).
 
 ### Read where a balance went
 

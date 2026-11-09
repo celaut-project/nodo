@@ -321,8 +321,12 @@ Three more facts:
   by this node at the multipliers of its launch for its whole life (#577): a fixed price,
   which the quote of this node states as bounded with `v = 0`.
 
-The clamp is in `execution_cost.maintenance_charge_mu`, not in the maintenance loop, so
-the tick and the funding (`worst_case_charge_mu`) come from the same function.
+The clamp is in `execution_cost.maintenance_charge_mu`, not in the maintenance loop. The
+tick takes `k` from the time since the launch at the end of the interval that it charges
+(`PriceBound.period_index`), and the funding sum takes `k(i)` from the same function
+(`price_bound.tick_period_index`): the tick `i` and the period `i` of the sum are in the
+same volatility period, so a balance funded for `N` periods covers the ceilings of the first
+`N` ticks (#636, 6).
 
 **What the quote shows.** `GetServiceEstimatedCost` has these figures:
 
@@ -332,15 +336,17 @@ the tick and the funding (`worst_case_charge_mu`) come from the same function.
 | `max_maintenance_cost` | One tick for the maximum resources, at the same price. Neither figure is a limit by itself. |
 | `price_bounded` | `pricing.PRICE_BOUNDED`. True: a tick never charges more than the figure of the resources held times `(1 + price_volatility)^k`. |
 | `price_volatility`, `volatility_period_seconds` | `v` and `T` of the bound. Meaningless when `price_bounded` is false. |
-| `cost` | The least `initial_mu` that starts the service: the build, plus the balance that the instance has after it. The balance is `INITIAL_RUNTIME_HOURS` at the ceiling. |
+| `cost` | What the start spends: the build, plus the builds of the initial children. No balance (#636, 9). The client adds the balance for the periods that it chooses (the funding sum below). |
 
 A node that delegates to this one checks the charges of the child against the bound
 (`MAINTENANCE_OVERCHARGED`, docs/REPUTATION.md). A quote with `price_bounded` false is
 never checked.
 
-**Free node (#636, H).** While the node is free the maintenance figures of the quote are at
-the anchor (1x), not 0, and so are the balances: the build is free, but a start still asks
-for the balance that covers the ceiling over the anchor for `INITIAL_RUNTIME_HOURS`. The
+**Free node (#636, H and 2).** While the node is free the maintenance figures of the quote
+are at the anchor (1x), not 0. The builds are free, so `cost` is 0, and the funding sum asks
+for the balance as for any start: a start with no `initial_mu` gets the sum for
+`deposits.DEFAULT_INITIAL_PERIODS` periods over the anchor, and a start must hold at least
+one period. There is no special case for a free node in `compute_start_service_cost`. The
 ticks charge nothing while the node stays free, and the unspent balance goes back to the
 father at the stop. Before, a free start got a balance of 0, and with `costs.ALLOW_DEBT`
 off the instance was stopped at its first tick after the node left the free state (#323).
@@ -367,57 +373,60 @@ Two rules apply, and the node rejects the start and charges nothing if one fails
 
 - **The build must fit.** `initial_mu` is at least the build.
 - **Minimum runtime.** The balance after the build is at least one maintenance period
-  (`MANAGER_ITERATION_TIME`) with the resources at the start. The period is priced at the
-  launch price times `1 + v` when the quotes are bounded, and at the launch price when
-  they are not (`start_funding.minimum_runtime_mu`). Without this rule, a caller could
-  pay the build and get an instance that dies at the first tick.
+  (`MANAGER_ITERATION_TIME`) with the resources at the start: the funding sum for one
+  period, `init_maintenance_cost × (1 + v)^k(1)` when the quotes are bounded, and the
+  launch price when they are not (`start_funding.minimum_runtime_mu`). So `cost` plus the
+  sum of one period passes. Without this rule, a caller could pay the build and get an
+  instance that dies at the first tick.
 
-If the request has no `initial_mu`, the node uses the build plus the default balance:
+`EstimatedCost.cost` is what the start spends: the builds, with no balance (#636, 9). A
+caller funds the start with `cost` plus the funding sum for the `N` periods that it chooses
+(below). If the request has no `initial_mu`, the node does the same for its own `N`:
 
 ```
-initial_mu (default) = BUILD_MU (if it is not built already)
-                     + the balance the instance starts with by default
+initial_mu (default) = cost
+                     + Σ_{i=1..DEFAULT_INITIAL_PERIODS} init_maintenance_cost × (1 + v)^k(i)
 ```
 
-`EstimatedCost.cost` has this value for a request with no `initial_mu`. Its meaning is
-the least `initial_mu` that starts the service, with the starts of its initial children (see below). A caller that wants "start this service
-only if the start costs at most X" sets `initial_mu` to X plus the minimum runtime. No
-new field is necessary.
-
-The default balance is what buys runtime, and it is derived from the requested resources for
-`deposits.INITIAL_RUNTIME_HOURS` (`manager.default_initial_balance`) — so a 128 MiB
-instance and an 8 GiB one no longer start with the same funding. The maintenance ticks
-then spend that balance down.
+`deposits.DEFAULT_INITIAL_PERIODS` is 360 in `config.example.yaml`: one hour at a period of
+10 s (`start_funding.default_balance_mu`). The balance is derived from the requested
+resources, so a 128 MiB instance and an 8 GiB one do not start with the same funding. The
+maintenance ticks then spend that balance down. Until #636, `cost` already held a balance
+for `deposits.INITIAL_RUNTIME_HOURS`, and the funding sum added periods on top of it: a
+client that followed the formula paid those hours two times. `INITIAL_RUNTIME_HOURS` and
+`manager.default_initial_balance` are removed, and a config that still sets the key is
+refused at load.
 
 **The initial children of the service (#538).** A service pays for the instances that it
 starts out of its own balance: each start takes its `initial_mu` from the father (a
 `child_start` movement). The maintenance of a child is not paid by the parent: the child has
 its own account, and its `child_start` pays its first balance. So `EstimatedCost.cost`
-includes what the service pays to start the children of its `initial_environment_workload`
-(see `PACKING.md`). There is no separate field: a client has nothing to do with the split.
+includes the builds of the children of its `initial_environment_workload` (see
+`PACKING.md`). There is no separate field: a client has nothing to do with the split.
 
 ```
 cost = BUILD_MU (if it is not built already)
-     + the balance that the request asks for (or the default balance of the service alone)
      + initial children
 ```
 
 The initial children are priced so:
 
 ```
-one workload    = count × (BUILD_MU of the child (if it is not built already)
-                           + the default balance for the at_init of the child)
+one workload    = count × BUILD_MU of the child (if it is not built already)
 one group       = the sum of its workloads
 one clause      = the dearest of its groups      (the service chooses the group at run time)
 initial children = the sum of the clauses
 ```
 
-These are the functions of a real start (`compute_start_service_cost` and
-`manager.default_initial_balance`), so the quote and the charge come from the same price
-(`start_funding.initial_children_mu`). The build is 0 when the workload names no service
-(neither a `hash` nor a complete `service`), when the child is built on this node, and while
-the node is free. A child with no resources is priced at the floors of the node. A child that
-declares its own `initial_environment_workload` adds the cost of its own children.
+No balance of a child is in `cost` (#636, 9). Each child gets its balance in its own
+`StartService`: the `initial_mu` that the parent sends, or with none the default of the node
+that runs it (`cost` of the child plus the funding sum for `DEFAULT_INITIAL_PERIODS`). The
+parent pays that `child_start` out of its own balance, so a client that funds the parent for
+`N` periods funds the starts of the children from the same balance: a parent whose children
+start with the default balance needs more than one period of its own. The build is 0 when the
+workload names no service (neither a `hash` nor a complete `service`), when the child is
+built on this node, and while the node is free (`start_funding.initial_children_mu`). A child
+that declares its own `initial_environment_workload` adds the builds of its own children.
 
 - The quote does not probe peers. It uses all the groups of a clause, not only the ones that
   fit now. This can over-quote. An over-quote is safe: the balance that the instance does not
@@ -427,25 +436,30 @@ declares its own `initial_environment_workload` adds the cost of its own childre
 - `possible_environment_workload` has no cost. It is in the admission only.
 - Children that the service starts later, and that are not in `initial_environment_workload`,
   are not in the quote. The client covers them with top-ups (`nodo increase_deposit`).
-- `cost` does not include the maintenance of the children. There is no
+- `cost` does not include the balance or the maintenance of the children. There is no
   `children_maintenance_cost`.
 
 The funding formula for a client (the comment of `EstimatedCost.cost`), when the quote is
 bounded:
 
 ```
-parent_balance = cost
-               + Σ_{i=1..periods} init_maintenance_cost × (1 + price_volatility)^k(i)
-k(i)           = floor(i × maintenance_seconds_loop / volatility_period_seconds) + 1
-                 (k(i) = 1 when volatility_period_seconds = 0)
+initial_mu = cost
+           + Σ_{i=1..N} init_maintenance_cost × (1 + price_volatility)^k(i)
+k(i)       = floor(i × maintenance_seconds_loop / volatility_period_seconds) + 1
+             (k(i) = 1 when volatility_period_seconds = 0)
 ```
 
-The sum funds the resources at the start only. A rise from `at_init` to `at_most` is paid
-when the resources change (`ModifyServiceSystemResources`). `nodo estimate` prints this sum
-for 1 h and 24 h (`price_bound.funding_sum_mu`). An unbounded quote gives no limit, so no
-sum is sufficient. The parent is free to give a different
-`initial_mu` to a child in its own `StartService`: the quote is an estimate for the default
-balance of the node.
+The client chooses `N`, at least 1. The sum funds the resources at the start only. A rise
+from `at_init` to `at_most` is paid when the resources change
+(`ModifyServiceSystemResources`). `nodo estimate` prints `cost` plus this sum for 1 h, for
+24 h and for `DEFAULT_INITIAL_PERIODS` (`price_bound.funding_sum_mu`). An unbounded quote
+gives no limit, so no sum is sufficient. The parent is free to give a different
+`initial_mu` to a child in its own `StartService`.
+
+The ticks round each resource down to a whole MU, and the sum rounds its total up, so the
+two agree to within a few MU per period when the price sits at the ceiling. A tick charges
+the seconds since the last charge, so a tick that comes late charges a little more than one
+period (see below).
 
 **The funding check.** When the request has an `initial_mu`, `launch_service` refuses the
 start — after the admission and before any charge — if `initial_mu` less the build of this
@@ -461,39 +475,39 @@ and not free. A client quotes first and starts later, and the load can move betw
 Every price rises with the load, so a quote at any load, while the node charges, is at least
 the figure of the check. This is the drift rule:
 
-- A start funded with the `cost` of any earlier quote of this node, plus one maintenance
-  period of the parent, passes the check, at any load of the start. (A quote that asks for
-  no `initial_mu` has the default balance in `cost`, which pays the period already.)
-- At the base load, the check asks for exactly the children that the quote put in `cost`.
-- While the node is free at the start, the build is free and the start is not checked. A
-  quote taken while the node was free gives `cost` = the balance (the build is 0); if the
-  node charges at the start, the check can refuse it for the build.
+- A start funded with the `cost` of any earlier quote of this node, plus the funding sum of
+  at least one period of the parent, passes the check, at any load of the start.
+- At the base load, the check asks for exactly the builds of the children that the quote put
+  in `cost`. The balances of the children are not checked: the parent pays them from its
+  own periods when it starts them.
+- While the node is free at the start, the builds are free and the start is not checked. A
+  quote taken while the node was free gives `cost` = 0; if the node charges at the start,
+  the check can refuse it for the builds.
 - The check does not ask for the load surcharge. The real `child_start` is priced at the load
   of the moment that the parent starts the child, as for any start. If the load is up then,
   the parent pays more than the quote; the client covers this with top-ups.
-- With a computed volatility, the check reads `v` at the start, and the quote read it at the
-  quote. A `v` that rose in between makes the check ask for a little more than the quote.
+- **The drift of a computed `v` (#636, 7).** With `PRICE_VOLATILITY` unset, the node
+  computes `v` from its price history, and a quote and a start read it at different
+  moments. A `v` that rose in between makes the check of one period ask for a little more
+  than the quote: `init × (1 + v_start)` against `init × (1 + v_quote)`. A start funded with
+  exactly `cost` plus one period of an earlier quote can then be refused. A client that
+  funds a few more periods than the least, or quotes again just before the start, is not
+  affected. The default balance of a start with no `initial_mu` reads `v` at the start, so
+  it is not affected either. A fixed `PRICE_VOLATILITY` has no drift.
 
 Before this rule, the check priced the children at the load of the start, at the worst case
 of the volatility bound. With the CPU busy at the start, it asked for up to
 `SCARCITY_MAX_MULTIPLIER` times the base price (41.75M MU against quotes of 9.7M–27.2M on a
 test node) and refused starts funded exactly as the quote said.
 
-When the request has no `initial_mu`, the father pays the quote of the candidate:
-
-```
-initial_mu (default) = BUILD_MU (if it is not built already)
-                     + the runtime of the service itself
-                     + initial children
-```
-
-That is `cost` of a quote with no `initial_mu`, so a client that follows the formula does
-not pay the children two times. The quotes of `launch_service` ask for the balance of the
-service alone and add the children once, in `cost`. When the service runs on a peer, this
-node keeps only its build (`launch_service._delegation_terms` takes the children that its
-price put in `cost` out again) and sends the balance and the children to the peer, which
-pays the starts of the children. A local start with no amount at all (a direct call)
-passes the manifest to `default_initial_balance`, which gives the same figure.
+When the request has no `initial_mu`, the father pays the `cost` of the candidate plus the
+default balance of the service alone (`launch_service._client_charge_mu`). When the service
+runs on a peer, this node keeps only its build (`delegated_price.own_build_of` takes the
+builds of the children that its price put in `cost` out again) and sends the rest to the
+peer. The peer takes its whole `cost` (its build and the builds of the children,
+`delegated_price.peer_build_mu`), and what is left must pay one period as the peer quoted it
+(the funding sum of one period at its bound). A local start with no amount at all (a direct
+call) is funded with the same figure.
 
 A tick charges a local instance for the seconds since its last charge, not for a fixed
 `MANAGER_ITERATION_TIME`: a pass of the manager lasts as long as its work does (a revive
@@ -503,11 +517,12 @@ restart of the daemon is, and at most six (`maintain.LOCAL_TICK_MAX_INTERVALS`),
 host that stalled does not bill a span in which no guest ran. The `maintenance` movement
 carries the seconds it priced, which is what the father checks it against (#570).
 
-When the quotes are bounded, the hours are priced at the ceiling of each period that they
-cover (see [above](#bounding-the-price-of-a-running-instance)): the launch multiplier times
-`(1 + v)^k` for the seconds of the period `k`, which is just `1 + v` when `T` is at least
-`INITIAL_RUNTIME_HOURS` (1.10x at an idle node with the shipped values). No tick in those
-hours can charge more, so a price rise cannot stop the instance.
+When the quotes are bounded, the default balance prices each period at the ceiling of the
+volatility period that its tick is in (see [above](#bounding-the-price-of-a-running-instance)):
+the launch price times `(1 + v)^k(i)`, which is just `1 + v` while
+`DEFAULT_INITIAL_PERIODS × MANAGER_ITERATION_TIME` is less than `T` (1.10x at an idle node
+with the shipped values: 360 periods of 10 s in a period of 24 h). A rise of the price
+inside the bound cannot stop the instance before those periods.
 `free_tier.CREDIT_MU_PER_NEW_CLIENT` follows, or a new client is refused at its first
 launch (issue #324).
 
@@ -532,8 +547,8 @@ read the same figures:
 | `disk_space` under `MIN_ROOTFS_BYTES` | `MIN_ROOTFS_BYTES` | `limits.initial_rootfs_size_bytes` |
 | anything, once built | the rootfs image it is handed | the built bundle |
 
-An instance is therefore funded for `deposits.INITIAL_RUNTIME_HOURS` at the prices the
-ticks will charge it, and the window it pays for is the window it gets.
+An instance is therefore funded for `deposits.DEFAULT_INITIAL_PERIODS` periods at the prices
+the ticks will charge it, and the window it pays for is the window it gets.
 
 Disk is exact for a service already built here — `build.built_rootfs_size_bytes` reads
 the size of the image its instances receive — and a **lower bound** otherwise: the
