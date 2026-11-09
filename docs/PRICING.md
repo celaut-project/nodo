@@ -342,7 +342,7 @@ initial_mu (default) = BUILD_MU (if it is not built already)
 ```
 
 `EstimatedCost.cost` has this value for a request with no `initial_mu`. Its meaning is
-the least `initial_mu` that starts the service, without its initial children (see below). A caller that wants "start this service
+the least `initial_mu` that starts the service, with the starts of its initial children (see below). A caller that wants "start this service
 only if the start costs at most X" sets `initial_mu` to X plus the minimum runtime. No
 new field is necessary.
 
@@ -354,21 +354,29 @@ then spend that balance down.
 **The initial children of the service (#538).** A service pays for the instances that it
 starts out of its own balance: each start takes its `initial_mu` from the father (a
 `child_start` movement). The maintenance of a child is not paid by the parent: the child has
-its own account, and its `child_start` pays its first balance. So the quote gives what the
-service pays to start the children of its `initial_environment_workload` (see `PACKING.md`)
-in a separate field, `EstimatedCost.children_initial_cost`:
+its own account, and its `child_start` pays its first balance. So `EstimatedCost.cost`
+includes what the service pays to start the children of its `initial_environment_workload`
+(see `PACKING.md`). There is no separate field: a client has nothing to do with the split.
+
+```
+cost = BUILD_MU (if it is not built already)
+     + the balance that the request asks for (or the default balance of the service alone)
+     + initial children
+```
+
+The initial children are priced so:
 
 ```
 one workload    = count × (BUILD_MU of the child (if it is not built already)
                            + the default balance for the at_init of the child)
 one group       = the sum of its workloads
 one clause      = the dearest of its groups      (the service chooses the group at run time)
-children_initial_cost = the sum of the clauses
+initial children = the sum of the clauses
 ```
 
 These are the functions of a real start (`compute_start_service_cost` and
 `manager.default_initial_balance`), so the quote and the charge come from the same price
-(`start_funding.children_initial_cost_mu`). The build is 0 when the workload names no service
+(`start_funding.initial_children_mu`). The build is 0 when the workload names no service
 (neither a `hash` nor a complete `service`), when the child is built on this node, and while
 the node is free. A child with no resources is priced at the floors of the node. A child that
 declares its own `initial_environment_workload` adds the cost of its own children.
@@ -382,14 +390,16 @@ declares its own `initial_environment_workload` adds the cost of its own childre
 - Children that the service starts later, and that are not in `initial_environment_workload`,
   are not in the quote. The client covers them with `variance` and with top-ups
   (`nodo increase_deposit`).
-- `cost` does not include the children. There is no `children_maintenance_cost`.
+- `cost` does not include the maintenance of the children. There is no
+  `children_maintenance_cost`.
+- Until #538 was reviewed, the quote gave the children apart, in `EstimatedCost`
+  field 6 (`children_initial_cost`). The field is removed and its number is reserved.
 
 The funding formula for a client:
 
 ```
 parent_balance = cost
                + parent_maintenance × (periods + 1) × (1 + variance)
-               + children_initial_cost
 ```
 
 `parent_maintenance` is the cost of one period of the parent (`init_maintenance_cost`, or
@@ -399,24 +409,25 @@ balance of the node.
 
 **The funding check.** When the request has an `initial_mu`, `launch_service` refuses the
 start — after the admission and before any charge — if `initial_mu` less the build of this
-node is less than `children_initial_cost` plus one maintenance period of the parent
+node is less than the initial children plus one maintenance period of the parent
 (`start_funding.minimum_runtime_mu`). The message gives the least `initial_mu`. Before this,
 the parent started, failed to start its children and retried in a loop (#628). The setting
 `workload_admission.ON_UNDERFUNDED` is `reject` (default) or `warn`. A service with no initial
 children is not checked here; the two rules above apply as before.
 
-The check uses the functions of the quote (`children_initial_cost_mu`, the build and the
+The check uses the functions of the quote (`initial_children_mu`, the build and the
 period) at the **base load** (`execution_cost.base_load`): no load surcharge on any resource,
 and not free. A client quotes first and starts later, and the load can move between the two.
 Every price rises with the load, so a quote at any load, while the node charges, is at least
 the figure of the check. This is the drift rule:
 
-- A start funded with `cost + children_initial_cost` of any earlier quote of this node passes
-  the check, at any load of the start.
-- At the base load, the check asks for exactly the `children_initial_cost` of the quote.
+- A start funded with the `cost` of any earlier quote of this node, plus one maintenance
+  period of the parent, passes the check, at any load of the start. (A quote that asks for
+  no `initial_mu` has the default balance in `cost`, which pays the period already.)
+- At the base load, the check asks for exactly the children that the quote put in `cost`.
 - While the node is free at the start, the start charges nothing and is not checked. A quote
-  taken while the node was free gives `children_initial_cost = 0`; if the node charges at the
-  start, the check refuses it.
+  taken while the node was free gives `cost = 0`; if the node charges at the start, the
+  check refuses it.
 - The check does not ask for the load surcharge. The real `child_start` is priced at the load
   of the moment that the parent starts the child, as for any start. If the load is up then,
   the parent pays more than the quote; the client covers this with `variance` and top-ups.
@@ -426,18 +437,21 @@ of the volatility bound. With the CPU busy at the start, it asked for up to
 `SCARCITY_MAX_MULTIPLIER` times the base price (41.75M MU against quotes of 9.7M–27.2M on a
 test node) and refused starts funded exactly as the quote said.
 
-When the request has no `initial_mu`, the default balance includes the children:
+When the request has no `initial_mu`, the father pays the quote of the candidate:
 
 ```
-default balance = the runtime of the service itself
-                + children_initial_cost
+initial_mu (default) = BUILD_MU (if it is not built already)
+                     + the runtime of the service itself
+                     + initial children
 ```
 
-So a default start pays `cost + children_initial_cost`. The gateway quote prices `cost` with
-the balance of the service alone, and gives the children apart, so a client that follows the
-formula does not pay them two times. The funding of a local instance and the default
-`initial_mu` of `launch_service` both pass the manifest to `default_initial_balance`, so they
-give the same figure.
+That is `cost` of a quote with no `initial_mu`, so a client that follows the formula does
+not pay the children two times. The quotes of `launch_service` ask for the balance of the
+service alone and add the children once, in `cost`. When the service runs on a peer, this
+node keeps only its build (`launch_service._delegation_terms` takes the children that its
+price put in `cost` out again) and sends the balance and the children to the peer, which
+pays the starts of the children. A local start with no amount at all (a direct call)
+passes the manifest to `default_initial_balance`, which gives the same figure.
 
 A tick charges a local instance for the seconds since its last charge, not for a fixed
 `MANAGER_ITERATION_TIME`: a pass of the manager lasts as long as its work does (a revive
@@ -608,13 +622,16 @@ here. What it does not use comes back to this node when the instance stops.
 
 **This node delegates only at no loss.** The balancer compares what this node charges, by
 its advertisement, with what the peer quotes, converted to our MU, and a peer is a
-candidate only if the first covers the second: the start (the builds), and the
+candidate only if the first covers the second: the start (the builds and the initial
+children), and the
 maintenance per second at the start and at the most that the service may grow to (each
 node prices a period of its own `MANAGER_ITERATION_TIME`). `GetServiceEstimatedCost` is always the price of this node: the local price if it
 has room, and its own price, which it charges for a service that a covered peer runs,
 if it has not. The advertised rates do not yet include an estimate of what the peers
-charge: an operator that delegates a lot has to price for it. The same is true of
-`children_initial_cost`: it is the price of this node for the children.
+charge: an operator that delegates a lot has to price for it. The same is true of the
+initial children in `cost`: it is the price of this node for them. The start compares the
+totals (build and children) of both quotes, and the peer gets the children with the
+balance, so they are paid once.
 
 There is no version check and no fallback for an old peer. An old peer takes the build
 from the account of the caller, and also takes the whole amount. Its statement shows

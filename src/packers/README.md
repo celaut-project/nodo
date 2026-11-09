@@ -182,8 +182,8 @@
   minimum score for each core) and `at_most` for the limit. The `service` can be partial: only
   the resources and the architecture. A workload with no resources is always satisfiable.
   - `initial_environment_workload` is the load that the service needs to **start**. It is in
-    the admission and in the cost: `GetServiceEstimatedCost` returns
-    `children_initial_cost`, and a start with too little `initial_mu` for it is refused
+    the admission and in the cost: the `cost` of `GetServiceEstimatedCost` includes the
+    starts of these children, and a start with too little `initial_mu` for them is refused
     (`workload_admission.ON_UNDERFUNDED`).
   - `possible_environment_workload` is the load that the service **can ask for later**. It is
     in the admission only, with no cost.

@@ -230,9 +230,9 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
 
         The cost of a quote is the build plus this balance (#563). It has to be known
         before the peers can be asked. None if it cannot be known. The default is the
-        balance of the service alone: the children of its
-        ``initial_environment_workload`` are in ``children_initial_cost``, not in
-        ``cost`` (#538), so the manifest is not passed.
+        balance of the service alone: each quote adds the starts of the children of its
+        ``initial_environment_workload`` to ``cost`` on top of it (#538), so the manifest
+        is not passed.
         """
         if self.configuration.HasField("initial_mu") and self.configuration.initial_mu.n:
             return int(self.configuration.initial_mu.n)
@@ -291,9 +291,9 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         del service
 
         # Needs the requested resources to price, so it happens here rather than
-        # before the service is read. The balance of the service alone: what it pays
-        # to start its initial children is quoted apart, as `children_initial_cost`
-        # (#538). A default start funds both (`launch_service`).
+        # before the service is read. The balance of the service alone:
+        # `generate_estimated_cost` adds what it pays to start its initial children to
+        # `cost` (#538), as a default start pays it (`launch_service`).
         if not self.configuration.HasField('initial_mu') or not self.configuration.initial_mu:
             try:
                 self.configuration.initial_mu.CopyFrom(

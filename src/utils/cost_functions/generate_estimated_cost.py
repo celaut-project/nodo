@@ -1,7 +1,7 @@
 from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
-from src.utils.cost_functions.start_funding import children_initial_cost_mu
+from src.utils.cost_functions.start_funding import initial_children_mu
 from src.utils.cost_functions.general_cost_functions import (
     compute_maintenance_cost,
     compute_start_service_cost,
@@ -49,10 +49,9 @@ def generate_estimated_cost(
     per-arch rate would have the node bill above what it offered. Omitted, both sides
     use the scalar price, which is what a node with no per-arch pricing does.
 
-    ``service`` is the manifest, where the caller holds it. It gives
-    ``children_initial_cost``: what the instance pays to start the children of its
-    ``initial_environment_workload`` (``start_funding.children_initial_cost_mu``).
-    Without the manifest it is 0. Disk reads it too, only to notice a ``read_mode=ro``
+    ``service`` is the manifest, where the caller holds it. ``cost`` includes what the
+    instance pays to start the children of its ``initial_environment_workload``
+    (``start_funding.initial_children_mu``, #538). Without the manifest it is 0. Disk reads it too, only to notice a ``read_mode=ro``
     declaration: such an instance holds its image
     and no writable capacity at all, so the rootfs floors describe nothing it will
     be given and pricing it at them would quote a small immutable capsule at the
@@ -81,6 +80,11 @@ def generate_estimated_cost(
         metadata=metadata,
         initial_balance_mu=initial_mu,
     )
+    # The instance pays the `child_start` of its initial children out of its balance
+    # (#538), so the least `initial_mu` that starts it includes them. `initial_mu` is the
+    # balance of the service alone, and this is on top of it. A free node prices them
+    # at 0, as it does the build and the balance.
+    initial_cost_mu += initial_children_mu(service)
 
     # Both maintenance figures are quoted for what the instance will *hold*, not for
     # what its manifest asks for. The virtualizer raises anything below a floor when it
@@ -92,7 +96,7 @@ def generate_estimated_cost(
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(
 
-        # Initial cost.
+        # Initial cost: the build, the balance and the starts of the initial children.
         cost=to_amount(initial_cost_mu),
 
         # Maintenance cost per manager iteration, at the resources it starts with.
@@ -123,8 +127,4 @@ def generate_estimated_cost(
         
         # Variance of the three costs.
         variance=0,  # TODO compute_variance
-
-        # What the instance pays to start its initial children (#538). Not in `cost`:
-        # a client adds it to the balance of the parent.
-        children_initial_cost=to_amount(children_initial_cost_mu(service)),
     )

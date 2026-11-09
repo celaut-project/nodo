@@ -75,13 +75,10 @@ Estimated costs:
 - Maintenance, as started:  4335.48K MU per hour
 - Maintenance, at its most: 8609.4K MU per hour
 - Charged every:            10 seconds
-- Initial children:         0 MU (children_initial_cost)
 ```
 
-A service that declares `initial_environment_workload` shows its children, for example
-`- Initial children: 18609814 MU (children_initial_cost)` and
-`- To start, with children: 37219628 MU`: a start with no `initial_mu` pays that sum. A client that sets `initial_mu`
-must add `children_initial_cost` (see `docs/PRICING.md`).
+For a service that declares `initial_environment_workload`, "To start" includes the starts
+of its initial children: a start with no `initial_mu` pays it (see `docs/PRICING.md`).
 
 If it prints `Execution feasibility: NO`, the `reason` line names the failing guard
 (usually `resources.at_most.mem_limit` vs the node's memory pool). Fix the service

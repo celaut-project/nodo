@@ -1,11 +1,10 @@
 """The quote has the cost of the initial children of a service (#538, absorbs #628).
 
-``EstimatedCost.children_initial_cost`` is what the parent pays for the ``child_start`` of
-the children of its ``initial_environment_workload``. For one workload it is ``count``
-times the build of the child plus the default balance of this node for the ``at_init`` of
-the child. A group adds up its workloads, a clause takes its dearest group, and the clauses
-add up. ``possible_environment_workload`` has no cost, and ``cost`` does not include the
-children.
+``EstimatedCost.cost`` includes what the parent pays for the ``child_start`` of the
+children of its ``initial_environment_workload``. For one workload it is ``count`` times
+the build of the child plus the default balance of this node for the ``at_init`` of the
+child. A group adds up its workloads, a clause takes its dearest group, and the clauses add
+up. ``possible_environment_workload`` has no cost. There is no separate field.
 
 The imports are not guarded, for the reason given in tests/test_pricing_model.py: a test of
 money that is skipped says that the sums were checked when they were not.
@@ -23,7 +22,7 @@ from src.manager.manager import default_initial_balance  # noqa: E402
 from src.utils.cost_functions import start_funding  # noqa: E402
 from src.utils.cost_functions.start_funding import (  # noqa: E402
     child_start_cost_mu,
-    children_initial_cost_mu,
+    initial_children_mu,
 )
 from src.utils.utils import from_amount  # noqa: E402
 from src.utils.verify import get_service_hex_main_hash, get_service_list_of_hashes  # noqa: E402
@@ -108,32 +107,32 @@ class OneWorkloadTests(unittest.TestCase):
 class TheDeclarationTests(unittest.TestCase):
     def test_a_service_with_no_initial_workload_costs_nothing(self):
         with _config():
-            self.assertEqual(children_initial_cost_mu(celaut.Service(), scarcity=IDLE), 0)
-            self.assertEqual(children_initial_cost_mu(None, scarcity=IDLE), 0)
+            self.assertEqual(initial_children_mu(celaut.Service(), scarcity=IDLE), 0)
+            self.assertEqual(initial_children_mu(None, scarcity=IDLE), 0)
 
     def test_possible_environment_workload_has_no_cost(self):
         service = _service([[_workload()]], field="possible_environment_workload")
         with _config():
-            self.assertEqual(children_initial_cost_mu(service, scarcity=IDLE), 0)
+            self.assertEqual(initial_children_mu(service, scarcity=IDLE), 0)
 
     def test_a_group_adds_up_its_workloads(self):
         service = _service([[_workload(mem=GIB // 4), _workload(count=2, mem=2 * GIB)]])
         with _config():
-            got = children_initial_cost_mu(service, scarcity=IDLE)
+            got = initial_children_mu(service, scarcity=IDLE)
             self.assertEqual(got, _balance(GIB // 4) + 2 * _balance(2 * GIB))
 
     def test_a_clause_costs_its_dearest_group_in_any_order(self):
         cheap, dear = [_workload(mem=GIB // 4)], [_workload(count=2, mem=2 * GIB)]
         with _config():
-            one = children_initial_cost_mu(_service([dear]), scarcity=IDLE)
-            self.assertEqual(children_initial_cost_mu(_service([cheap, dear]), scarcity=IDLE), one)
-            self.assertEqual(children_initial_cost_mu(_service([dear, cheap]), scarcity=IDLE), one)
-            self.assertGreater(one, children_initial_cost_mu(_service([cheap]), scarcity=IDLE))
+            one = initial_children_mu(_service([dear]), scarcity=IDLE)
+            self.assertEqual(initial_children_mu(_service([cheap, dear]), scarcity=IDLE), one)
+            self.assertEqual(initial_children_mu(_service([dear, cheap]), scarcity=IDLE), one)
+            self.assertGreater(one, initial_children_mu(_service([cheap]), scarcity=IDLE))
 
     def test_the_clauses_add_up(self):
         first, second = [[_workload(mem=GIB)]], [[_workload(mem=2 * GIB)]]
         with _config():
-            got = children_initial_cost_mu(_service(first, second), scarcity=IDLE)
+            got = initial_children_mu(_service(first, second), scarcity=IDLE)
             self.assertEqual(got, _balance(GIB) + _balance(2 * GIB))
 
     def test_the_example_of_the_issue(self):
@@ -142,7 +141,7 @@ class TheDeclarationTests(unittest.TestCase):
         g2 = [_workload(count=2, mem=GIB)]
         g3 = [_workload(count=4, mem=2 * GIB)]
         with _config():
-            got = children_initial_cost_mu(_service([g1, g2], [g3]), scarcity=IDLE)
+            got = initial_children_mu(_service([g1, g2], [g3]), scarcity=IDLE)
             expected = max(_balance(3 * GIB) + _balance(4 * GIB), 2 * _balance(GIB)) \
                 + 4 * _balance(2 * GIB)
         self.assertEqual(got, expected)
@@ -161,19 +160,19 @@ class TheQuoteTests(unittest.TestCase):
         with _config(), \
                 patch.object(module, "compute_start_service_cost", side_effect=lambda metadata, initial_balance_mu: initial_balance_mu), \
                 patch.object(module, "_service_hash_or_none", return_value=None), \
-                patch.object(module, "children_initial_cost_mu", return_value=777) as children:
+                patch.object(module, "initial_children_mu", return_value=777) as children:
             quote = module.generate_estimated_cost(
                 metadata=celaut.Metadata(), config=config, resources=resources,
                 service=service, check_availability=False,
             )
         return quote, children
 
-    def test_the_quote_has_the_children_apart_from_cost(self):
+    def test_the_cost_of_the_quote_includes_the_children(self):
         service = _service([[_workload()]])
         quote, children = self._quote(service)
         children.assert_called_once_with(service)
-        self.assertEqual(from_amount(quote.children_initial_cost), 777)
-        self.assertEqual(from_amount(quote.cost), 1000)
+        self.assertEqual(from_amount(quote.cost), 1000 + 777)
+        self.assertNotIn("children_initial_cost", celaut.EstimatedCost.DESCRIPTOR.fields_by_name)
 
     def test_own_price_has_the_children_too(self):
         from src.utils.cost_functions import delegated_price
@@ -183,13 +182,32 @@ class TheQuoteTests(unittest.TestCase):
         resources.at_init.CopyFrom(_at_init())
         with _config(), patch.object(delegated_price, "own_build_mu", return_value=0), \
                 patch.object(delegated_price, "charge_at_launch_price", return_value=0), \
-                patch.object(delegated_price, "children_initial_cost_mu", return_value=555) as children:
+                patch.object(delegated_price, "initial_children_mu", return_value=555) as children:
             price = delegated_price.own_price(
                 metadata=celaut.Metadata(), configuration=celaut.Configuration(),
                 resources=resources, service=service, launch_bp={"x": 1},
             )
         children.assert_called_once_with(service)
-        self.assertEqual(from_amount(price.children_initial_cost), 555)
+        self.assertEqual(from_amount(price.cost), 555)
+
+    def test_own_price_takes_the_children_that_it_is_given(self):
+        from src.utils.cost_functions import delegated_price
+
+        service = _service([[_workload()]])
+        configuration = celaut.Configuration()
+        configuration.initial_mu.n = "1000"
+        with _config(), patch.object(delegated_price, "own_build_mu", return_value=40), \
+                patch.object(delegated_price, "charge_at_launch_price", return_value=0), \
+                patch.object(delegated_price, "initial_children_mu") as children:
+            price = delegated_price.own_price(
+                metadata=celaut.Metadata(), configuration=configuration,
+                resources=celaut.Service.Container.Resources(), service=service,
+                launch_bp={"x": 1}, children_mu=300,
+            )
+        children.assert_not_called()
+        self.assertEqual(from_amount(price.cost), 40 + 1000 + 300)
+        # The build alone, again, with the same figure (`launch_service._delegation_terms`).
+        self.assertEqual(delegated_price.peer_build_mu(price, 1000 + 300), 40)
 
     def test_the_default_balance_of_the_quote_is_the_service_alone(self):
         """The gateway quote does not pass the manifest to `default_initial_balance`."""

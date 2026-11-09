@@ -406,7 +406,8 @@ class QuoteTests(_FreshCache, unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchTests(_FreshCache, unittest.TestCase):
-    def _launch(self, candidates, initial_mu=None, build_mu=0, minimum_mu=0, own=None):
+    def _launch(self, candidates, initial_mu=None, build_mu=0, minimum_mu=0, own=None,
+                own_children=0):
         """Launch with ``candidates``. ``initial_mu`` None is a request with no amount.
 
         The default balance that the quotes ask for is 1 000 MU. ``build_mu`` and
@@ -423,6 +424,7 @@ class LaunchTests(_FreshCache, unittest.TestCase):
 
             patched(mod, "declarations_for_service", return_value=[])
             patched(mod, "_own_price", return_value=own or price(1_300))
+            patched(mod, "_own_children_mu", return_value=own_children)
             patched(mod, "service_requires_parent_colocation", return_value=False)
             patched(mod, "authorize_shares", return_value=[])
             spend = patched(mod, "spend_mu", return_value=True)
@@ -475,6 +477,21 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         self.assertEqual(int(kwargs["config"].initial_mu.n), 1_300)
         # The build of the peer is what its quote has above the default balance, 1 000.
         self.assertEqual(kwargs["peer_build_mu"], 200)
+
+    def test_the_initial_children_are_paid_once_and_go_to_the_peer(self):
+        # #538: both prices have the children in `cost`. This node advertises a build of
+        # 40 and children of 300 above the default balance of 1 000; the peer quotes a
+        # build of 20 and children of 250 (1 270, so this node covers it).
+        r = self._launch([("peer-a", price(1_270))], own=price(1_340), own_children=300)
+        self.assertIsNone(r.error)
+        # The father pays the price of this node once: no second figure for the children.
+        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_340)
+        kwargs = r.delegate.call_args.kwargs
+        self.assertEqual(int(kwargs["config"].initial_mu.n), 1_340)
+        # This node keeps its build alone; the balance and the children go to the peer,
+        # which takes its build and pays the starts of its children.
+        self.assertEqual(kwargs["own_build_mu"], 40)
+        self.assertEqual(kwargs["peer_build_mu"], 270)
 
     def test_a_client_that_sets_its_amount_is_never_charged_more_than_it_set(self):
         r = self._launch([("peer-a", price(1_800))], initial_mu=1_500)

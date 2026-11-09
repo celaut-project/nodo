@@ -1,7 +1,8 @@
 """The funding check of a start never asks for more than the quote (#538).
 
 A client quotes a service (``GetServiceEstimatedCost``), then starts it with
-``initial_mu = cost + children_initial_cost`` (plus the maintenance it wants). Before this
+``initial_mu = cost`` (plus the maintenance it wants): ``cost`` includes the starts of the
+initial children. Before this
 fix, ``workload_admission.evaluate_start_funding`` priced the children again at the load of
 the start, at the worst case that the volatility bound allows. With the load up at the
 start, it asked for up to ``SCARCITY_MAX_MULTIPLIER`` times the base price (41.75M MU
@@ -28,7 +29,7 @@ from src.utils.cost_functions import generate_estimated_cost as quote_module  # 
 from src.utils.cost_functions import start_funding  # noqa: E402
 from src.utils.cost_functions import workload_admission as wa  # noqa: E402
 from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, base_load, is_free  # noqa: E402
-from src.utils.cost_functions.start_funding import children_initial_cost_mu  # noqa: E402
+from src.utils.cost_functions.start_funding import initial_children_mu  # noqa: E402
 from src.utils.utils import from_amount  # noqa: E402
 from tests.test_price_volatility import FULL, HALF, IDLE, _config, _guest  # noqa: E402
 
@@ -48,11 +49,12 @@ def _parent() -> celaut.Service:
     return service
 
 
-def _quote(service, load):
-    """``cost`` and ``children_initial_cost`` of the gateway quote, with the node at ``load``.
+def _quote(service, load, balance=None):
+    """``cost`` of the gateway quote with the node at ``load``, and the children in it.
 
-    The default balance of the service alone, as ``EstimatedCostIterable._quote`` gives it;
-    the build of the parent is BUILD.
+    ``balance`` is the ``initial_mu`` of the request; None is the default balance of the
+    service alone, as ``EstimatedCostIterable._quote`` gives it. The build of the parent
+    is BUILD. The children are what ``cost`` has above the build and the balance.
     """
     resources = service.container.resources
     config = celaut.Configuration()
@@ -60,12 +62,15 @@ def _quote(service, load):
             patch.object(quote_module, "compute_start_service_cost",
                          side_effect=lambda metadata, initial_balance_mu: BUILD + initial_balance_mu), \
             patch.object(quote_module, "_service_hash_or_none", return_value=None):
-        config.initial_mu.n = str(default_initial_balance(system_resources=resources.at_init))
+        if balance is None:
+            balance = default_initial_balance(system_resources=resources.at_init)
+        config.initial_mu.n = str(balance)
         quote = quote_module.generate_estimated_cost(
             metadata=celaut.Metadata(), config=config, resources=resources,
             service=service, check_availability=False,
         )
-    return from_amount(quote.cost), from_amount(quote.children_initial_cost)
+    cost = from_amount(quote.cost)
+    return cost, cost - BUILD - int(balance)
 
 
 def _check(service, initial_mu, load):
@@ -95,9 +100,9 @@ class TheCheckIsTheQuoteTests(unittest.TestCase):
     def test_a_quote_at_any_load_is_at_least_the_check(self):
         for bound in (2.0, 0):
             with self.subTest(bound=bound), _config(pricing__MAX_PRICE_VOLATILITY=bound):
-                floor = children_initial_cost_mu(_parent(), scarcity=base_load())
+                floor = initial_children_mu(_parent(), scarcity=base_load())
                 for load in LOADS:
-                    self.assertGreaterEqual(children_initial_cost_mu(_parent(), scarcity=load), floor)
+                    self.assertGreaterEqual(initial_children_mu(_parent(), scarcity=load), floor)
 
 
 class TheQuoteFundedStartTests(unittest.TestCase):
@@ -105,18 +110,31 @@ class TheQuoteFundedStartTests(unittest.TestCase):
         """The quote at one load, the start at another: the drift between the two."""
         with _config():
             for quote_load in LOADS:
-                cost, children = _quote(_parent(), quote_load)
+                cost, _ = _quote(_parent(), quote_load)
                 for start_load in LOADS:
                     with self.subTest(quote=quote_load, start=start_load):
-                        failure, _ = _check(_parent(), cost + children, start_load)
+                        failure, _ = _check(_parent(), cost, start_load)
                         self.assertIsNone(failure)
+
+    def test_a_quote_for_a_balance_has_the_children_on_top_of_it(self):
+        """A client that asks for its own balance pays the quote and one period, no more."""
+        with _config():
+            for quote_load in LOADS:
+                # One period of the parent, as the quote prices it at its load.
+                period = start_funding.minimum_runtime_mu(
+                    _parent().container.resources, scarcity=quote_load)
+                cost, children = _quote(_parent(), quote_load, balance=0)
+                self.assertEqual(children, initial_children_mu(_parent(), scarcity=quote_load))
+                for start_load in LOADS:
+                    with self.subTest(quote=quote_load, start=start_load):
+                        self.assertIsNone(_check(_parent(), cost + period, start_load)[0])
 
     def test_the_e2e_case_quote_idle_start_busy_passes(self):
         """The bug: quoted at a quiet moment, started with the CPU busy."""
         with _config():
             cost, children = _quote(_parent(), IDLE)
-            failure, figures = _check(_parent(), cost + children, BUSY_CPU)
-            busy_children = children_initial_cost_mu(_parent(), scarcity=BUSY_CPU)
+            failure, figures = _check(_parent(), cost, BUSY_CPU)
+            busy_children = initial_children_mu(_parent(), scarcity=BUSY_CPU)
         self.assertIsNone(failure)
         self.assertEqual(figures["children_mu"], children)
         self.assertGreater(busy_children, 2 * children)  # What the old check asked for.
@@ -124,10 +142,11 @@ class TheQuoteFundedStartTests(unittest.TestCase):
     def test_without_the_children_the_start_is_refused_at_any_load(self):
         with _config():
             cost, children = _quote(_parent(), IDLE)
+            self.assertGreater(children, 0)
             for start_load in LOADS:
                 with self.subTest(start=start_load):
-                    failure, _ = _check(_parent(), cost, start_load)
-                    self.assertIn("children_initial_cost", failure)
+                    failure, _ = _check(_parent(), cost - children, start_load)
+                    self.assertIn("initial children", failure)
 
     def test_one_mu_below_the_least_is_refused(self):
         with _config():

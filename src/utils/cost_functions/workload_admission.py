@@ -7,7 +7,7 @@ where it is interpreted, at launch.
 The declaration is in conjunctive normal form, in two fields with one shape:
 
 * ``Service.initial_environment_workload`` -- the load the service needs to start. It
-  is checked here and priced by ``start_funding.children_initial_cost_mu``.
+  is checked here and priced by ``start_funding.initial_children_mu``.
 * ``Service.possible_environment_workload`` -- the load it can ask for later. It is
   checked here only.
 
@@ -415,9 +415,9 @@ def evaluate_start_funding(
 ) -> Optional[str]:
     """The reason to refuse a start whose ``initial_mu`` cannot pay the initial children.
 
-    Only for a request that carries its own ``initial_mu``: with none, the default
-    balance of the node includes ``children_initial_cost`` (``manager.default_initial_balance``).
-    The balance after the build of this node must pay ``children_initial_cost`` and one
+    Only for a request that carries its own ``initial_mu``: with none, the father pays the
+    quote, and ``EstimatedCost.cost`` includes the starts of the initial children.
+    The balance after the build of this node must pay those starts and one
     maintenance period of the service (``start_funding.underfunded_reason``). A service
     with no initial children is not checked here.
 
@@ -425,7 +425,7 @@ def evaluate_start_funding(
     default) returns the message, so the caller refuses the launch; ``warn`` logs it and
     returns None.
 
-    The figures are the ones of the quote (``children_initial_cost_mu`` and the same
+    The figures are the ones of the quote (``initial_children_mu`` and the same
     functions for the build and the period), at ``execution_cost.base_load``: the price
     with no load surcharge. The client funds a start from a quote that it got earlier, at
     the load of that moment, and the load moves. At the load of the start, the check
@@ -442,7 +442,7 @@ def evaluate_start_funding(
     if is_free(system_scarcity()):
         return None
     scarcity = base_load()
-    children_mu = start_funding.children_initial_cost_mu(service, scarcity=scarcity)
+    children_mu = start_funding.initial_children_mu(service, scarcity=scarcity)
     if children_mu <= 0:
         return None
     try:

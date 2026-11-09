@@ -116,11 +116,11 @@ def child_start_cost_mu(
     return int(count * (build + balance))
 
 
-def children_initial_cost_mu(
+def initial_children_mu(
         service: Optional[celaut.Service],
         scarcity: Optional[Dict[str, float]] = None,
 ) -> int:
-    """``EstimatedCost.children_initial_cost``: what a service pays to start its initial children.
+    """What a service pays to start its initial children. ``EstimatedCost.cost`` includes it.
 
     ``Service.initial_environment_workload`` is an AND of clauses, a clause an OR of
     groups, and a group an AND of workloads that run at the same time. The cost of a
@@ -175,7 +175,7 @@ def underfunded_reason(initial_mu: int, build_mu: int, minimum_mu: int, children
 
     A service pays the ``child_start`` of its initial children out of its own balance.
     So the balance after the build must pay ``children_mu``
-    (``children_initial_cost_mu``) and one maintenance period of the service
+    (``initial_children_mu``) and one maintenance period of the service
     (``minimum_mu``). If not, the parent starts and then fails to start its children in
     a loop (#628). A service with no initial children is not checked here:
     ``balance_after_build`` applies the rule of the build and the period.
@@ -190,7 +190,7 @@ def underfunded_reason(initial_mu: int, build_mu: int, minimum_mu: int, children
     return (
         f"initial_mu {initial_mu} MU leaves {max(initial_mu - build_mu, 0)} MU after the "
         f"build of {build_mu} MU. The initial children of the service cost {children_mu} MU "
-        f"(children_initial_cost) and one maintenance period costs {minimum_mu} MU. "
+        f"and one maintenance period costs {minimum_mu} MU. "
         f"The least initial_mu is {least} MU."
     )
 

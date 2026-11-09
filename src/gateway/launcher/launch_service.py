@@ -18,6 +18,7 @@ from src.utils.cost_functions.delegated_price import own_price, peer_build_mu
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
     balance_after_build,
+    initial_children_mu,
     minimum_runtime_mu,
     start_build_mu,
 )
@@ -99,15 +100,33 @@ def _mu(amount: celaut_pb2.Amount) -> int:
     return int(amount.n or 0)
 
 
+def _own_children_mu(service: celaut.Service) -> int:
+    """What the starts of the initial children of the service cost at the price of this node.
+
+    Read once per launch: ``own_price`` puts it in the cost, and ``_delegation_terms``
+    takes the same figure out again to get the build of this node alone (#538). A figure
+    that cannot be read is 0, as for a service with no initial children.
+    """
+    try:
+        return int(initial_children_mu(service))
+    except Exception as e:
+        log.LOGGER(f"Could not price the initial children of the service: {e}")
+        return 0
+
+
 def _own_price(service: celaut.Service, metadata: celaut.Metadata,
-               configuration: celaut_pb2.Configuration) -> Optional[celaut_pb2.EstimatedCost]:
+               configuration: celaut_pb2.Configuration,
+               children_mu: int = 0) -> Optional[celaut_pb2.EstimatedCost]:
     """What this node charges for the service when a peer runs it (#577), or None if it
-    cannot price it: then no peer is covered, and only the local node is a candidate."""
+    cannot price it: then no peer is covered, and only the local node is a candidate.
+
+    ``children_mu`` is ``_own_children_mu`` of the service: the cost includes it."""
     try:
         return own_price(
             metadata=metadata, configuration=configuration,
             resources=service.container.resources,
             arch=get_arch_tag(service=service, metadata=metadata), service=service,
+            children_mu=children_mu,
         )
     except Exception as e:
         log.LOGGER(f"Could not price the service for a peer: {e}")
@@ -128,7 +147,7 @@ def _client_charge_mu(peer: str, estimated_cost: celaut_pb2.EstimatedCost,
     ``configuration.initial_mu`` as it is, and a candidate that it does not fund is
     skipped (``_funding_failure``). If it did not, the node uses the least amount that
     starts the service with the default balance: its own price, which is the build plus
-    that balance (``configuration.initial_mu`` holds the balance that the quotes asked
+    that balance plus the starts of the initial children (``configuration.initial_mu`` holds the balance that the quotes asked
     for). It is the same for ``local`` and for a peer (#577): ``own`` is the price of
     this node, and the quote of a peer is not part of it.
     """
@@ -139,15 +158,20 @@ def _client_charge_mu(peer: str, estimated_cost: celaut_pb2.EstimatedCost,
 
 def _delegation_terms(estimated_cost: celaut_pb2.EstimatedCost,
                       configuration: celaut_pb2.Configuration,
-                      own: celaut_pb2.EstimatedCost) -> tuple[int, int]:
-    """The build of this node and the build of the peer, in local MU.
+                      own: celaut_pb2.EstimatedCost,
+                      own_children_mu: int = 0) -> tuple[int, int]:
+    """The build of this node, and what the peer takes before the balance, in local MU.
 
     The first comes out of what the father paid, and the second out of what this node
     sends the peer. ``configuration.initial_mu`` is the balance that the quotes asked
-    for: both prices are the build plus it, so each build is what is left above it.
+    for. Both prices are the build plus it plus the starts of the initial children
+    (#538). This node keeps only its build: ``own_children_mu`` is the figure that its
+    price put in for the children, and those MU go to the peer with the balance. The peer
+    pays the starts of the children itself, so its part is its build and those starts.
     """
     balance_asked = _mu(configuration.initial_mu)
-    return peer_build_mu(own, balance_asked), peer_build_mu(estimated_cost, balance_asked)
+    return (peer_build_mu(own, balance_asked + max(int(own_children_mu), 0)),
+            peer_build_mu(estimated_cost, balance_asked))
 
 
 def _funding_failure(
@@ -160,6 +184,7 @@ def _funding_failure(
         service_id: Optional[str],
         arch: Optional[str],
         own: Optional[celaut_pb2.EstimatedCost] = None,
+        own_children_mu: int = 0,
 ) -> Optional[str]:
     """Why ``initial_mu`` does not start the service on this candidate, or None if it does.
 
@@ -167,8 +192,9 @@ def _funding_failure(
     The build of this node must fit, and what is left must pay one maintenance period
     (``start_funding``). For a peer these are the build and the period of ``own``, the
     price of this node for a delegated instance, and what is left must also fund the
-    build and a period of the peer, as it quoted them: it sets its own build and its own
-    price at the start, and it applies the whole rule itself. A peer that rejects the
+    build, the starts of the initial children and a period of the peer, as it quoted
+    them: it sets its own build and its own price at the start, and it applies the whole
+    rule itself. A peer that rejects the
     start for a small amount is not at fault, and this node does not lower its
     reputation for that.
     """
@@ -187,7 +213,8 @@ def _funding_failure(
         else:
             if own is None:
                 return "this node could not price the service, so no peer is covered"
-            own_build, peer_build = _delegation_terms(estimated_cost, configuration, own)
+            own_build, peer_build = _delegation_terms(
+                estimated_cost, configuration, own, own_children_mu)
             # The balance is what this node sends the peer, and the peer applies its
             # own rule to it.
             balance_mu = balance_after_build(
@@ -258,7 +285,8 @@ def _force_delegate(
 
     # The father pays `initial_mu`, and the build of this node comes out of it (#563).
     # Nothing is charged for an amount that does not fit.
-    own = _own_price(service, metadata, configuration)
+    own_children_mu = _own_children_mu(service)
+    own = _own_price(service, metadata, configuration, own_children_mu)
     if own is None:
         raise Exception(f"force_execution: this node could not price service {service_id}.")
     initial_mu = _client_charge_mu(
@@ -268,11 +296,13 @@ def _force_delegate(
         peer=forced_peer, estimated_cost=estimated_cost, configuration=configuration,
         initial_mu=initial_mu, service=service, metadata=metadata, service_id=service_id,
         arch=get_arch_tag(service=service, metadata=metadata), own=own,
+        own_children_mu=own_children_mu,
     )
     if funding_failure:
         raise Exception(f"force_execution: {funding_failure}")
 
-    own_build_mu, peer_build_value = _delegation_terms(estimated_cost, configuration, own)
+    own_build_mu, peer_build_value = _delegation_terms(
+        estimated_cost, configuration, own, own_children_mu)
     refund_container = []
     start_charge = []
     if not spend_mu(
@@ -386,14 +416,14 @@ def launch_service(
         if not initial_mu_requested:
             # Funded for what it asked for, not a flat amount: a 128 MiB instance and an
             # 8 GiB one no longer start with the same balance. This is the balance that
-            # the quotes ask for. What the father pays is the quote of the candidate: the
-            # build of the candidate plus this balance (`_client_charge_mu`, #563).
+            # the quotes ask for, of the service alone. What the father pays is the quote
+            # of the candidate: the build of the candidate plus this balance plus the
+            # starts of the initial children (`_client_charge_mu`, #563, #538).
             configuration.initial_mu.CopyFrom(to_amount(
                 default_initial_balance(
                     system_resources=service.container.resources.at_init,
                     service_hash=service_id,
                     arch=get_arch_tag(service=service, metadata=metadata),
-                    service=service,
                 )
             ))
 
@@ -429,7 +459,7 @@ def launch_service(
         # `initial_environment_workload` (#538): the service pays their `child_start`
         # out of its balance. Refused now, the start fails at once and charges nothing,
         # instead of a parent that retries the start of its children in a loop (#628).
-        # Without an `initial_mu`, the default balance above already includes them.
+        # Without an `initial_mu`, the father pays the quote, which includes them.
         if initial_mu_requested:
             try:
                 funding_arch = get_arch_tag(service=service, metadata=metadata)
@@ -575,8 +605,10 @@ def launch_service(
 
         # One price of this node for the whole launch (#577): the balancer keeps the peers
         # that it covers, and a father whose service a peer runs pays it.
+        own_children_mu = 0 if pin_local or require_parent_colocation \
+            else _own_children_mu(service)
         own = None if pin_local or require_parent_colocation \
-            else _own_price(service, metadata, configuration)
+            else _own_price(service, metadata, configuration, own_children_mu)
         for peer, estimated_cost in execution_balancer(
                 resources=service.container.resources,
                 service_id=service_id,
@@ -630,6 +662,7 @@ def launch_service(
                     service_id=service_id,
                     arch=get_arch_tag(service=service, metadata=metadata),
                     own=own,
+                    own_children_mu=own_children_mu,
                 )
                 if funding_failure:
                     launch_failures.append(f"{peer}: {funding_failure}")
@@ -662,7 +695,7 @@ def launch_service(
                 # Delegate the service instance execution.
                 if peer != 'local':
                     own_build_mu, peer_build_value = _delegation_terms(
-                        estimated_cost, configuration, own)
+                        estimated_cost, configuration, own, own_children_mu)
                     instance = delegate_execution(
                         service_id=service_id,
                         peer=peer,

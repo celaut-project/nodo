@@ -1207,20 +1207,20 @@ def default_initial_balance(
     one at the current load, as it was before the bound existed. `scarcity` is the load
     sample the launch is priced against; omitted, it is read here.
 
-    `service`, when it is known, adds `children_initial_cost`: what the service pays
-    for the `child_start` of the children of its `initial_environment_workload`
-    (`start_funding.children_initial_cost_mu`, #538). It pays them out of this balance,
-    so a start that carries no `initial_mu` funds them; without them the funding check
-    of `launch_service` would refuse every default start of such a service. Without the
-    manifest there is nothing to add: the quote prices `cost` that way, and gives the
-    children apart, so `cost + children_initial_cost` is what a default start pays.
-    `possible_environment_workload` adds nothing.
+    `service`, when it is known, adds what the service pays for the `child_start` of
+    the children of its `initial_environment_workload`
+    (`start_funding.initial_children_mu`, #538). It pays them out of this balance, so
+    a start that carries no `initial_mu` funds them: a child started by a parent with
+    no amount, and a local start with no amount at all. Without the manifest it is the
+    balance of the service alone, as the quotes ask for it: `EstimatedCost.cost` adds
+    the starts of the children on top of it. `possible_environment_workload` adds
+    nothing.
     """
     hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
     if hours <= 0 or system_resources is None:
         return 0
     from src.utils.cost_functions.execution_cost import worst_case_charge_mu
-    from src.utils.cost_functions.start_funding import children_initial_cost_mu
+    from src.utils.cost_functions.start_funding import initial_children_mu
 
     own = worst_case_charge_mu(
         system_resources=resolve_billable_resources(system_resources, service_hash),
@@ -1230,7 +1230,7 @@ def default_initial_balance(
     )
     if service is None:
         return own
-    return own + children_initial_cost_mu(service, scarcity=scarcity)
+    return own + initial_children_mu(service, scarcity=scarcity)
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     """What an instance holds and what it has left to spend.

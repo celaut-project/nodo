@@ -766,7 +766,7 @@ node would refuse.
 - **Type:** `array` of clauses
 - **Required:** No
 - **Description:** Declare the **descendant workloads** of the service: the instances that it starts, locally or on other peers. Unlike `resources` (this instance's own needs), these describe its **descendants**. Serialized directly to the `Service` fields of the same names, outside `Service.Container`.
-  - `initial_environment_workload` is the load that the service **needs to start**. It is in the admission and in the cost (`EstimatedCost.children_initial_cost`).
+  - `initial_environment_workload` is the load that the service **needs to start**. It is in the admission and in the cost (`EstimatedCost.cost` includes the starts of these children).
   - `possible_environment_workload` is the load that the service **can ask for later**. It is in the admission only: *will it fit, at any time and at any cost?* It has no cost.
 - Both fields have one shape, in **conjunctive normal form** over groups (#538):
   - The field is an **AND** of clauses. Every clause must fit.
@@ -826,13 +826,12 @@ across peers, and it does not hold the capacity it found for later — by the ti
 actually spawns that descendant, the answer could have changed.
 
 **Cost.** Only `initial_environment_workload` has a cost. A service pays the `child_start` of
-each child out of its own balance, so `GetServiceEstimatedCost` gives
-`EstimatedCost.children_initial_cost`: for each workload, `count` times the build of the child
+each child out of its own balance, so the `cost` of `GetServiceEstimatedCost` includes the
+starts of the initial children: for each workload, `count` times the build of the child
 (0 when the workload names no service — neither a `hash` nor a complete `service` — or when it
 is built on the node) plus the default balance of the node for the `at_init` of the child. A
 group adds up its workloads, a clause costs its dearest group, and the clauses add up.
-`cost` does not include it. A start with no `initial_mu` is funded with it; a start whose
-`initial_mu` cannot pay it is refused (`workload_admission.ON_UNDERFUNDED`). Declare the
+A start with no `initial_mu` pays it; a start whose `initial_mu` cannot pay it is refused (`workload_admission.ON_UNDERFUNDED`). Declare the
 resources of each initial child: a child with no resources is quoted at the floors of the node,
 which is too little for a real service. See [`PRICING.md`](PRICING.md#starting-an-instance).
 
@@ -943,8 +942,8 @@ standard protobuf JSON base64 encoding.
 
 **Example — `(G1 or G2) and G3` at the start.** `G1` = one instance of 3 GiB and one of 4 GiB,
 `G2` = two instances of 1 GiB and 4 vCPU, `G3` = four instances of 2 GiB and 2 vCPU. Resources
-are shortened to `at_most`. The service is admitted when `G3` fits and `G1` or `G2` fits. Its
-`children_initial_cost` is the dearer of `G1` and `G2`, plus `G3` (priced from `at_init`; with
+are shortened to `at_most`. The service is admitted when `G3` fits and `G1` or `G2` fits. The
+starts of its children in `cost` are the dearer of `G1` and `G2`, plus `G3` (priced from `at_init`; with
 `at_most` only, as here, each child is priced at the floors of the node).
 
 ```json

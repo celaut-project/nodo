@@ -457,7 +457,8 @@ message Service {
     // service. It is in the admission only. It has no cost.
     repeated Clause possible_environment_workload = 5;
     // The load that the service needs to start. It is in the admission, as
-    // possible_environment_workload, and in the cost: EstimatedCost.children_initial_cost.
+    // possible_environment_workload, and in the cost: EstimatedCost.cost includes the
+    // starts of these children.
     repeated Clause initial_environment_workload = 6;
 }
 
@@ -626,12 +627,20 @@ message DescendantTunnel {
 message EstimatedCost {
     // The least Configuration.initial_mu with which the node starts the service, in MU.
     // It is the cost to build the service, plus the balance that the instance has after
-    // the build. This balance is the initial_mu of the request. If the request has no
-    // initial_mu, the node uses its own default balance for the resources at the start,
-    // without children_initial_cost. A caller that sets initial_mu to this value pays no
-    // more than this value for the start, because the node takes the cost of the build
-    // from initial_mu. A service with initial children needs more: see
-    // children_initial_cost.
+    // the build, plus what the instance pays to start its initial children. The balance
+    // is the initial_mu of the request. If the request has no initial_mu, the node uses
+    // its own default balance for the resources at the start. A caller that sets
+    // initial_mu to this value pays no more than this value for the start, because the
+    // node takes the cost of the build from initial_mu.
+    //
+    // The initial children are the children of Service.initial_environment_workload.
+    // Each start of a child takes its initial_mu from the balance of the parent. For
+    // each workload: count times the build of the child plus the default balance of the
+    // node for the at_init resources of the child. The cost of a group is the sum of its
+    // workloads, the cost of a clause is the highest cost of its groups, and the total is
+    // the sum of the clauses. A client funds the parent with
+    // cost + maintenance * (periods + 1) * (1 + variance), where maintenance is the cost
+    // of one period of the parent.
     Amount cost = 1;
     // The cost of one maintenance period with the resources at the start, in MU.
     Amount init_maintenance_cost = 2;
@@ -652,17 +661,10 @@ message EstimatedCost {
     // limit the price of a running instance. The ceiling of the price is in
     // max_maintenance_cost, and only when the node sets the bound.
     float variance = 5;
-    // The MU that the instance pays to start its initial children, in MU: the
-    // children of Service.initial_environment_workload. Each start of a child takes its
-    // initial_mu from the balance of the parent. For each workload: count times the
-    // build of the child plus the default balance of the node for the at_init resources
-    // of the child. The cost of a group is the sum of its workloads, the cost of a clause
-    // is the highest cost of its groups, and the total is the sum of the clauses. It
-    // uses the local price. It is not in cost. A client funds the parent with
-    // cost + maintenance * (periods + 1) * (1 + variance) + children_initial_cost, where
-    // maintenance is the cost of one period of the parent. If the request has no
-    // initial_mu, the default balance of the node includes children_initial_cost.
-    Amount children_initial_cost = 6;
+    // Field 6 was children_initial_cost: the starts of the initial children, apart from
+    // cost. They are in cost now.
+    reserved 6;
+    reserved "children_initial_cost";
 }
 
 // Peers use this message to evaluate the Service.Workload entries of a service: a descendant workload

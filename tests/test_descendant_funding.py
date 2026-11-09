@@ -3,10 +3,11 @@
 A service pays the ``child_start`` of each child of its ``initial_environment_workload`` out of
 its own balance. So:
 
-* the default balance of a start with no ``initial_mu`` (``manager.default_initial_balance``)
-  includes ``children_initial_cost``, and
+* a start with no ``initial_mu`` pays the quote, whose ``cost`` includes the starts of the
+  initial children (a local start with no amount at all gets them in
+  ``manager.default_initial_balance``), and
 * a start that carries its own ``initial_mu`` is refused (``workload_admission.ON_UNDERFUNDED:
-  reject``) when the balance after the build cannot pay ``children_initial_cost`` and one
+  reject``) when the balance after the build cannot pay those starts and one
   maintenance period of the service. Before this, the parent started and then retried the
   start of its children in a loop (#628).
 
@@ -28,7 +29,7 @@ from src.manager.manager import default_initial_balance  # noqa: E402
 from src.utils.cost_functions import start_funding  # noqa: E402
 from src.utils.cost_functions import workload_admission as wa  # noqa: E402
 from src.utils.cost_functions.start_funding import (  # noqa: E402
-    children_initial_cost_mu,
+    initial_children_mu,
     underfunded_reason,
 )
 from tests.test_price_volatility import GIB, IDLE, _config, _guest  # noqa: E402
@@ -67,7 +68,7 @@ class TheDefaultBalanceTests(unittest.TestCase):
         with _config():
             alone = default_initial_balance(system_resources=_guest(), scarcity=IDLE)
             funded = default_initial_balance(system_resources=_guest(), scarcity=IDLE, service=service)
-            children = children_initial_cost_mu(service, scarcity=IDLE)
+            children = initial_children_mu(service, scarcity=IDLE)
         self.assertGreater(children, 0)
         self.assertEqual(funded - alone, children)
 
@@ -84,9 +85,9 @@ class TheDefaultBalanceTests(unittest.TestCase):
         child.dependency.service.initial_environment_workload.add().any_of.add().workloads.append(
             _workload(mem=2 * GIB))
         with _config():
-            got = children_initial_cost_mu(_service(child), scarcity=IDLE)
-            alone = children_initial_cost_mu(_service(_workload()), scarcity=IDLE)
-            grandchild = children_initial_cost_mu(_service(_workload(mem=2 * GIB)), scarcity=IDLE)
+            got = initial_children_mu(_service(child), scarcity=IDLE)
+            alone = initial_children_mu(_service(_workload()), scarcity=IDLE)
+            grandchild = initial_children_mu(_service(_workload(mem=2 * GIB)), scarcity=IDLE)
         self.assertEqual(got, alone + grandchild)
 
     def test_a_service_with_no_resources_at_the_start_is_still_not_funded(self):
@@ -95,19 +96,23 @@ class TheDefaultBalanceTests(unittest.TestCase):
                 default_initial_balance(system_resources=None, service=_service(_workload())), 0
             )
 
-    def test_the_launch_and_the_local_execution_pass_the_manifest(self):
-        """A default start funds the children; the gateway quote does not (it quotes them apart)."""
+    def test_only_a_start_with_no_amount_at_all_passes_the_manifest(self):
+        """The children are added once: in `cost` of the quotes, or in the balance of a local
+        start that has no amount at all. The default balance that the quotes of
+        `launch_service` ask for is the service alone."""
         import inspect
+        import re
 
         from src.gateway.launcher import launch_service
         from src.gateway.launcher.local_execution import local_execution
 
-        for module in (launch_service, local_execution):
+        for module, passes in ((launch_service, False), (local_execution, True)):
             source = inspect.getsource(module)
             calls = source.split("default_initial_balance(")[1:]
             self.assertTrue(calls, module.__name__)
             for call in calls:
-                self.assertIn("service=", call.split("))", 1)[0], module.__name__)
+                args = re.sub(r"get_arch_tag\([^)]*\)", "", call.split("))", 1)[0])
+                self.assertEqual("service=" in args, passes, module.__name__)
 
 
 class TheShortfallTests(unittest.TestCase):
@@ -119,7 +124,7 @@ class TheShortfallTests(unittest.TestCase):
     def test_too_little_names_every_figure_and_the_least_amount(self):
         reason = underfunded_reason(initial_mu=99, build_mu=10, minimum_mu=20, children_mu=70)
         for text in ("initial_mu 99 MU", "leaves 89 MU", "build of 10 MU", "cost 70 MU",
-                     "children_initial_cost", "costs 20 MU", "least initial_mu is 100 MU"):
+                     "initial children", "costs 20 MU", "least initial_mu is 100 MU"):
             self.assertIn(text, reason)
 
     def test_a_service_with_no_initial_children_is_not_checked_here(self):
@@ -129,7 +134,7 @@ class TheShortfallTests(unittest.TestCase):
 def _evaluate(service, initial_mu, **config):
     with patch.object(wa.env_manager, "get", side_effect=lambda key, default=None: config.get(key, default)), \
             patch("src.utils.cost_functions.execution_cost.system_scarcity", return_value=IDLE), \
-            patch.object(start_funding, "children_initial_cost_mu", return_value=700), \
+            patch.object(start_funding, "initial_children_mu", return_value=700), \
             patch.object(start_funding, "start_build_mu", return_value=100), \
             patch.object(start_funding, "minimum_runtime_mu", return_value=200), \
             patch.object(wa.log, "LOGGER") as logger:
@@ -166,7 +171,7 @@ class TheFundingCheckTests(unittest.TestCase):
 
     def test_a_build_that_cannot_be_priced_is_counted_as_zero(self):
         with patch("src.utils.cost_functions.execution_cost.system_scarcity", return_value=IDLE), \
-                patch.object(start_funding, "children_initial_cost_mu", return_value=700), \
+                patch.object(start_funding, "initial_children_mu", return_value=700), \
                 patch.object(start_funding, "start_build_mu", side_effect=RuntimeError("not on disk")), \
                 patch.object(start_funding, "minimum_runtime_mu", return_value=200), \
                 patch.object(wa.log, "LOGGER"):
@@ -226,12 +231,14 @@ class TheLaunchTests(unittest.TestCase):
         balancer.assert_called_once()
         self.assertNotIn("least initial_mu", str(error))
 
-    def test_a_start_with_no_initial_mu_is_not_checked_and_gets_the_default_with_children(self):
+    def test_a_start_with_no_initial_mu_is_not_checked_and_quotes_the_service_alone(self):
+        """The quotes ask for the balance of the service alone and add the children once,
+        in `cost`, which the father then pays (`_client_charge_mu`)."""
         configuration = celaut.Configuration()
         error, _, balancer, check, default = self._launch(configuration, "never")
         check.assert_not_called()
         balancer.assert_called_once()
-        self.assertIsNotNone(default.call_args.kwargs.get("service"))
+        self.assertIsNone(default.call_args.kwargs.get("service"))
         self.assertEqual(configuration.initial_mu.n, "4321")
 
 

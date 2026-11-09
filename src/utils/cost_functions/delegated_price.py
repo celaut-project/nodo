@@ -26,7 +26,7 @@ from src.utils.cost_functions.execution_cost import (
     build_charge_mu, charge_at_launch_price, launch_price_bp, system_scarcity,
 )
 from src.utils.cost_functions.generate_estimated_cost import _service_hash_or_none
-from src.utils.cost_functions.start_funding import children_initial_cost_mu
+from src.utils.cost_functions.start_funding import initial_children_mu
 from src.utils.monetary import prices
 from src.utils.utils import from_amount, to_amount
 from src.virtualizers.architecture import UnsupportedArchitectureException
@@ -78,26 +78,30 @@ def own_price(
         arch: Optional[str] = None,
         service: Optional[celaut.Service] = None,
         launch_bp: Optional[Mapping[str, int]] = None,
+        children_mu: Optional[int] = None,
 ) -> celaut_pb2.EstimatedCost:
     """The price of this node for running the service on a peer, whether or not it has room.
 
     The least ``initial_mu`` (the build and the balance that ``configuration`` asks
     for), and one maintenance period at the start and at the most, at ``launch_bp``:
     the multipliers of a launch now when not given. These are the figures that the ticks
-    of a delegated instance charge (``maintain.settle_child``). With the manifest,
-    ``children_initial_cost`` too, as in the local quote.
+    of a delegated instance charge (``maintain.settle_child``). With the manifest, the
+    cost includes the starts of the initial children too, as in the local quote (#538):
+    ``children_mu``, or ``initial_children_mu`` of the manifest when not given. A caller
+    that needs the build alone again passes the same figure to ``peer_build_mu``.
     """
     launch_bp = launch_bp or launch_price_bp(system_scarcity())
     seconds = int(env_manager.get("MANAGER_ITERATION_TIME"))
     start, most = billable_shapes(resources, _service_hash_or_none(metadata), service)
     initial_mu = from_amount(configuration.initial_mu) \
         if configuration and configuration.HasField("initial_mu") else 0
+    if children_mu is None:
+        children_mu = initial_children_mu(service)
     return celaut_pb2.EstimatedCost(
-        cost=to_amount(own_build_mu(metadata) + initial_mu),
+        cost=to_amount(own_build_mu(metadata) + initial_mu + int(children_mu)),
         init_maintenance_cost=to_amount(charge_at_launch_price(start, seconds, launch_bp, arch)),
         max_maintenance_cost=to_amount(charge_at_launch_price(most, seconds, launch_bp, arch)),
         maintenance_seconds_loop=seconds,
-        children_initial_cost=to_amount(children_initial_cost_mu(service)),
     )
 
 
@@ -126,11 +130,16 @@ def priced_shape(
 
 
 def peer_build_mu(peer_cost: celaut_pb2.EstimatedCost, initial_mu: int) -> int:
-    """The build that the peer quoted, in local MU.
+    """What the peer takes from a start before the balance of the instance, in local MU.
 
     ``peer_cost`` is the quote of the peer, already in local MU. ``initial_mu`` is the
     balance that the quote asked for, in local MU. The quote is the build plus that
-    balance (#563), so the build is what is left above it.
+    balance (#563) plus the starts of the initial children of the service (#538), so this
+    is the build and those starts: what is left above the balance. The peer pays the
+    starts of the children out of the balance of the instance, so this is also what the
+    instance has spent on them once it runs. For the price of this node
+    (``own_price``), add the starts of its children to ``initial_mu`` to get the build
+    alone.
     """
     return max(_mu(peer_cost.cost) - max(int(initial_mu), 0), 0)
 
@@ -149,7 +158,8 @@ def _per_second_at_least(own_mu: int, own_seconds: int, peer_mu: int, peer_secon
 def covers(own: celaut_pb2.EstimatedCost, peer_cost: celaut_pb2.EstimatedCost) -> bool:
     """True if what this node charges covers what the peer would charge it.
 
-    The start (the cost has the same balance in both, so this compares the builds), and
+    The start (the cost has the same balance in both, so this compares the builds and the
+    starts of the initial children), and
     the maintenance per second at the start and at the most that the service may grow
     to: the service changes its resources on the peer, and this node charges it for them
     by its own rates (``maintain.measured_shape``). A peer that quoted no period is

@@ -284,7 +284,7 @@ def estimated_cost_for_local(estimated_cost, *, payment_system: MatchingPaymentS
     """Copy a peer quote and express every monetary field in local MU."""
     local_cost = type(estimated_cost)()
     local_cost.CopyFrom(estimated_cost)
-    for field in ("cost", "init_maintenance_cost", "max_maintenance_cost", "children_initial_cost"):
+    for field in ("cost", "init_maintenance_cost", "max_maintenance_cost"):
         amount = getattr(local_cost, field)
         amount.n = str(convert_mu(
             int(amount.n or 0),
