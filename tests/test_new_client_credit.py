@@ -5,9 +5,9 @@ cover. A client created at zero was therefore refused at its first launch: the t
 shipped defaults only ever worked together while debt was on.
 
 The credit is one hour of the smallest useful guest -- 0.5 GiB of RAM and one vCPU -- at
-this node's own prices, at the worst case that `pricing.MAX_PRICE_VOLATILITY` allows: a
-launch is funded at that price (issue #335), and a credit below it refuses the client at
-its first launch again. Asserted against those prices rather than against the literal
+this node's own prices, at the ceiling of the price bound for that hour (1 +
+`pricing.PRICE_VOLATILITY`, #636): a launch is funded at that price (issue #335), and a
+credit below it refuses the client at its first launch again. Asserted against those prices rather than against the literal
 number, so that changing a price and leaving the credit behind fails here instead of
 quietly making the default mean something else.
 """
