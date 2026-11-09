@@ -510,6 +510,19 @@ TABLES = {
             refused_closed INTEGER NOT NULL DEFAULT 0
         )
     ''',
+    # The price multiplier of this node over time (#636): one sample per minute of the
+    # multiplier of each resource that a launch would record (`launch_price_bp`, 1x
+    # while free), in basis points. The computed volatility of the quotes is the p95 of
+    # its rises over one volatility period (`price_history.computed_volatility`). Pruned
+    # to the window of that computation.
+    "price_history": '''
+        CREATE TABLE IF NOT EXISTS price_history (
+            ts INTEGER PRIMARY KEY,
+            cpu_bp INTEGER NOT NULL,
+            mem_bp INTEGER NOT NULL,
+            disk_bp INTEGER NOT NULL
+        )
+    ''',
     "payments": '''
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

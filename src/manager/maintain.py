@@ -30,7 +30,7 @@ from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import from_amount, peers_id_iterator
 from src.utils.cost_functions.execution_cost import RESOURCES, SCARCITY_SCALE, charge_at_launch_price, system_scarcity
-from src.utils.cost_functions import price_bound
+from src.utils.cost_functions import price_bound, price_history
 from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_US
 from src.utils.cost_functions.general_cost_functions import RATE_STATEMENT_QUERY, RATE_STATEMENT_ROW, compute_maintenance_cost
 from src.utils.monetary import format_mu, prices
@@ -641,6 +641,8 @@ def maintain_vmachines(debug_mode: bool=False):
     # One reading of system load for the whole sweep: every instance in this tick is
     # priced against the same machine state, and psutil is read once instead of per VM.
     scarcity = system_scarcity(force_refresh=True)
+    # The history that the computed volatility of the quotes reads (#636), once a minute.
+    price_history.record(scarcity)
 
     # Only the instances whose VM is meant to be running: a suspended one (issue #594)
     # has no process to check and no resources to charge, and finding it "lost" would

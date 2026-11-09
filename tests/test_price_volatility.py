@@ -285,6 +285,7 @@ class TheWiringTests(unittest.TestCase):
                 patch.object(maintain, "vm_maintain"), \
                 patch.object(maintain, "spend_mu", spend), \
                 patch.object(maintain, "system_scarcity", return_value=scarcity), \
+                patch.object(maintain, "price_history"), \
                 patch.object(maintain, "_reputation_interface"), \
                 patch.object(maintain, "vm_janitor_cleanup_orphans"), \
                 patch.object(maintain, "MANAGER_ITERATION_TIME", HOUR):

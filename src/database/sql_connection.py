@@ -54,6 +54,9 @@ TRACEABILITY_TABLES = (
     "service_reputation",
     "tunnel_traffic",
     "demand_history",
+    # The history of the price multiplier (#636). Without it the computed volatility of
+    # the quotes is the floor, pricing.PRICE_VOLATILITY_MIN.
+    "price_history",
     # A donation debt survives a restart and is paid on a later tick, so losing the
     # table loses money this node already owes. `donation_payouts` is what each wallet
     # has been credited against its share: losing it would reset every wallet's
@@ -3035,6 +3038,27 @@ class SQLConnection(metaclass=Singleton):
                 int(refused_closed),
             ),
         )
+
+    def add_price_sample(self, ts: int, launch_bp: Mapping[str, int], keep_seconds: int) -> None:
+        """Record the multipliers of a launch at ``ts`` (#636), and drop the samples older
+        than ``keep_seconds``. One sample per second at most: a second one replaces it."""
+        def work(cursor):
+            cursor.execute(
+                'INSERT OR REPLACE INTO price_history (ts, cpu_bp, mem_bp, disk_bp) VALUES (?, ?, ?, ?)',
+                (int(ts), int(launch_bp["cpu"]), int(launch_bp["mem"]), int(launch_bp["disk"])),
+            )
+            cursor.execute('DELETE FROM price_history WHERE ts < ?', (int(ts) - int(keep_seconds),))
+        self._transaction(work)
+
+    def get_price_samples(self, since_ts: int) -> List[tuple]:
+        """The samples of the price multiplier from ``since_ts``, oldest first:
+        ``(ts, {"cpu": bp, "mem": bp, "disk": bp})``."""
+        result = self._execute(
+            'SELECT ts, cpu_bp, mem_bp, disk_bp FROM price_history WHERE ts >= ? ORDER BY ts ASC',
+            (int(since_ts),),
+        )
+        return [(int(row[0]), {"cpu": int(row[1]), "mem": int(row[2]), "disk": int(row[3])})
+                for row in result.fetchall()]
 
     def get_demand_history(self, days: int = 30) -> List[dict]:
         """The recorded hours over the last ``days``, oldest first.
