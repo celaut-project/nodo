@@ -405,6 +405,27 @@ the parent started, failed to start its children and retried in a loop (#628). T
 `workload_admission.ON_UNDERFUNDED` is `reject` (default) or `warn`. A service with no initial
 children is not checked here; the two rules above apply as before.
 
+The check uses the functions of the quote (`children_initial_cost_mu`, the build and the
+period) at the **base load** (`execution_cost.base_load`): no load surcharge on any resource,
+and not free. A client quotes first and starts later, and the load can move between the two.
+Every price rises with the load, so a quote at any load, while the node charges, is at least
+the figure of the check. This is the drift rule:
+
+- A start funded with `cost + children_initial_cost` of any earlier quote of this node passes
+  the check, at any load of the start.
+- At the base load, the check asks for exactly the `children_initial_cost` of the quote.
+- While the node is free at the start, the start charges nothing and is not checked. A quote
+  taken while the node was free gives `children_initial_cost = 0`; if the node charges at the
+  start, the check refuses it.
+- The check does not ask for the load surcharge. The real `child_start` is priced at the load
+  of the moment that the parent starts the child, as for any start. If the load is up then,
+  the parent pays more than the quote; the client covers this with `variance` and top-ups.
+
+Before this rule, the check priced the children at the load of the start, at the worst case
+of the volatility bound. With the CPU busy at the start, it asked for up to
+`SCARCITY_MAX_MULTIPLIER` times the base price (41.75M MU against quotes of 9.7M–27.2M on a
+test node) and refused starts funded exactly as the quote said.
+
 When the request has no `initial_mu`, the default balance includes the children:
 
 ```

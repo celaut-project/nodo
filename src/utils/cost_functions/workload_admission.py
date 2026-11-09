@@ -424,13 +424,24 @@ def evaluate_start_funding(
     ``workload_admission.ON_UNDERFUNDED`` decides what a shortfall means: ``reject`` (the
     default) returns the message, so the caller refuses the launch; ``warn`` logs it and
     returns None.
+
+    The figures are the ones of the quote (``children_initial_cost_mu`` and the same
+    functions for the build and the period), at ``execution_cost.base_load``: the price
+    with no load surcharge. The client funds a start from a quote that it got earlier, at
+    the load of that moment, and the load moves. At the load of the start, the check
+    asked for up to ``SCARCITY_MAX_MULTIPLIER`` times the base price and refused a start
+    funded exactly as the quote said. At the base load, the check asks for the least that
+    any quote of this node gives while it charges, so it never asks for more than the
+    quote. While the node is free, the start charges nothing and is not checked.
     """
     # Imported here: start_funding pulls in the pricing modules, and this module stays
     # importable without them (see check_resource_availability_on_peer).
     from src.utils.cost_functions import start_funding
-    from src.utils.cost_functions.execution_cost import system_scarcity
+    from src.utils.cost_functions.execution_cost import base_load, is_free, system_scarcity
 
-    scarcity = system_scarcity()
+    if is_free(system_scarcity()):
+        return None
+    scarcity = base_load()
     children_mu = start_funding.children_initial_cost_mu(service, scarcity=scarcity)
     if children_mu <= 0:
         return None
