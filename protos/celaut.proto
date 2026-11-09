@@ -661,10 +661,6 @@ message EstimatedCost {
     // limit the price of a running instance. The ceiling of the price is in
     // max_maintenance_cost, and only when the node sets the bound.
     float variance = 5;
-    // Field 6 was children_initial_cost: the starts of the initial children, apart from
-    // cost. They are in cost now.
-    reserved 6;
-    reserved "children_initial_cost";
 }
 
 // Peers use this message to evaluate the Service.Workload entries of a service: a descendant workload

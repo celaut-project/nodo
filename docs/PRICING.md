@@ -392,8 +392,6 @@ declares its own `initial_environment_workload` adds the cost of its own childre
   (`nodo increase_deposit`).
 - `cost` does not include the maintenance of the children. There is no
   `children_maintenance_cost`.
-- Until #538 was reviewed, the quote gave the children apart, in `EstimatedCost`
-  field 6 (`children_initial_cost`). The field is removed and its number is reserved.
 
 The funding formula for a client:
 

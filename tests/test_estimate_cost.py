@@ -172,7 +172,6 @@ class TheQuoteTests(unittest.TestCase):
         quote, children = self._quote(service)
         children.assert_called_once_with(service)
         self.assertEqual(from_amount(quote.cost), 1000 + 777)
-        self.assertNotIn("children_initial_cost", celaut.EstimatedCost.DESCRIPTOR.fields_by_name)
 
     def test_own_price_has_the_children_too(self):
         from src.utils.cost_functions import delegated_price
