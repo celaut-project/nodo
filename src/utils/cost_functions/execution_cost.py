@@ -236,6 +236,9 @@ def maintenance_charge_mu(
     bound or no launch price, the charge is unbounded. This clamp lives here, and not in
     the maintenance loop, so that every caller that prices a running instance gets it --
     see `worst_case_charge_mu` for the quote.
+    ``k`` comes from ``PriceBound.period_index``, the function of the funding sum
+    (``price_bound.tick_period_index``): a balance funded for ``N`` periods covers the
+    ceilings of the first ``N`` ticks (#636, 6).
     """
     current = scarcity if scarcity is not None else system_scarcity()
     if is_free(current):
@@ -253,7 +256,20 @@ def maintenance_charge_mu(
         )
         for resource in RESOURCES
     }
-    return _charge_at(system_resources, seconds, bps, arch, p)
+    charge = _charge_at(system_resources, seconds, bps, arch, p)
+    if bound is not None and launch_bp is not None \
+            and all(launch_bp.get(resource) is not None for resource in RESOURCES):
+        # The term of the funding sum for this period: the charge at the launch price
+        # times (1 + v)^k, rounded down. Each resource rounds down on its own above, and
+        # the sum of those can pass the term by a fraction of a MU per resource. Held to
+        # the term, N ticks never charge more than the sum of N periods
+        # (`price_bound.funding_sum_mu`, #636, 6).
+        factor = bound.factor(k)
+        if factor is not None:
+            launch = {resource: int(launch_bp[resource]) for resource in RESOURCES}
+            term = _charge_at(system_resources, seconds, launch, arch, p) * factor
+            charge = min(charge, int(term))
+    return charge
 
 
 # After this many periods the rest of a worst case is priced at the highest multiplier,

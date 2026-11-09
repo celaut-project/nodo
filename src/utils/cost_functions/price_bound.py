@@ -10,8 +10,9 @@ The same arithmetic serves this node and its clients:
 
 * the ticks of a local instance clamp the multiplier of each resource to the ceiling
   (``execution_cost.maintenance_charge_mu``);
-* the initial balance is funded at the ceiling (``execution_cost.worst_case_charge_mu``);
-* a client funds a start with ``funding_sum_mu``, the formula of ``EstimatedCost.cost``;
+* a client funds a start with ``EstimatedCost.cost`` plus ``funding_sum_mu`` for the
+  periods that it chooses, and this node funds a start that carries no ``initial_mu``
+  with the same sum for ``deposits.DEFAULT_INITIAL_PERIODS`` periods;
 * this node checks the charges of a peer against the bound that the peer signed
   (``statement_check.maintenance_overcharge``).
 
@@ -124,16 +125,33 @@ def of_quote(estimated_cost, *, source: str = "") -> Optional[PriceBound]:
                   source=source)
 
 
+def tick_period_index(bound: PriceBound, i: int, loop_seconds: int) -> int:
+    """``k(i)``, the volatility period of the tick ``i`` (1 for the first tick).
+
+    The tick ``i`` charges the maintenance period that ends ``i * loop_seconds`` after
+    the launch, and the ticks take ``k`` from the time at the end of the interval that
+    they charge (``execution_cost.maintenance_charge_mu``). So ``k(i)`` is
+    ``period_index(i * loop_seconds)``: ``floor(i * loop_seconds / T) + 1``, and 1 when
+    ``T = 0``. The funding sum (``funding_sum_mu``) uses this function, so a client, the
+    default balance of this node and the ticks use the same ``k(i)`` (#636, 6).
+    """
+    return bound.period_index(int(i) * max(int(loop_seconds), 0))
+
+
 def funding_sum_mu(init_mu: int, loop_seconds: int, bound: Optional[PriceBound],
                    periods: int) -> int:
-    """What a client adds to ``EstimatedCost.cost`` to fund ``periods`` maintenance
-    periods at the start resources, in MU (the comment of ``EstimatedCost.cost``).
+    """The balance that funds ``periods`` maintenance periods at the start resources, in
+    MU: what a client adds to ``EstimatedCost.cost`` (the comment of
+    ``EstimatedCost.cost``).
 
     The sum, for each period ``i`` from 1 to ``periods``, of
-    ``init_mu * (1 + v)^k(i)``, where ``k(i) = floor(i * loop_seconds / T) + 1``, and
-    ``k(i) = 1`` when ``T = 0``. Rounded up to a whole MU. With no bound, the node
-    promises nothing, and this is ``init_mu`` for each period, at the price of the
-    estimate.
+    ``init_mu * (1 + v)^k(i)``, where ``k(i)`` is ``tick_period_index``. Rounded up to a
+    whole MU. With no bound, the node promises nothing, and this is ``init_mu`` for each
+    period, at the price of the estimate.
+
+    This node uses it too: for the default balance of a start that carries no
+    ``initial_mu`` (``deposits.DEFAULT_INITIAL_PERIODS`` periods) and for the least
+    balance of a start (one period, ``start_funding.minimum_runtime_mu``).
     """
     init_mu, periods, loop_seconds = int(init_mu), int(periods), int(loop_seconds)
     if init_mu <= 0 or periods <= 0:
@@ -142,10 +160,7 @@ def funding_sum_mu(init_mu: int, loop_seconds: int, bound: Optional[PriceBound],
         return init_mu * periods
     total = Fraction(0)
     for i in range(1, periods + 1):
-        if bound.period_seconds <= 0:
-            k = 1
-        else:
-            k = (i * max(loop_seconds, 0)) // bound.period_seconds + 1
+        k = tick_period_index(bound, i, loop_seconds)
         factor = bound.factor(k)
         if factor is None:
             raise OverflowError(f"(1 + {bound.volatility})^{k} is too large to fund")
