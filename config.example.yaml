@@ -837,9 +837,11 @@ pricing:
   # (1 + PRICE_VOLATILITY)^k, per resource, and never more than SCARCITY_MAX_MULTIPLIER.
   # The bound is a ceiling only: a fall of the load reaches a running instance in full.
   # Each instance keeps the volatility and the period of its launch for its whole life.
-  # The balance that an instance starts with is funded at the ceiling of its first
-  # deposits.INITIAL_RUNTIME_HOURS. A peer that delegates here reports a charge above
-  # the bound as an overcharge (docs/REPUTATION.md).
+  # A client funds a start with EstimatedCost.cost (the builds, no balance) plus, for
+  # each of the N periods that it chooses, init_maintenance_cost times (1 + v)^k(i).
+  # The default balance (deposits.DEFAULT_INITIAL_PERIODS) is that sum, and the ticks
+  # use the same k(i). A peer that delegates here reports a charge above the bound as
+  # an overcharge (docs/REPUTATION.md).
   #
   # Whether the quotes promise a price bound. false = no promise: the price of a
   # running instance follows the load up to SCARCITY_MAX_MULTIPLIER, and the peers rank
@@ -863,13 +865,15 @@ pricing:
 free_tier:
   # Starting balance credited to every new client, in MU. 0 gives nothing away -- and
   # with costs.ALLOW_DEBT off, which is the default, a client credited nothing is
-  # refused at its first launch (issue #324). So the default funds one hour of the
-  # smallest useful guest at the prices above: 0.5 GiB of RAM (500_000) plus one vCPU
-  # (4_000_000), on an unloaded node, at the ceiling of the price bound for that hour
-  # (1 + pricing.PRICE_VOLATILITY = 1.10, one period of 24 h covers it), because a
-  # launch is funded at the highest price that the instance can reach: 4_950_000. With
-  # pricing.PRICE_BOUNDED false, set it back to 4_500_000. Derived from those prices, not a round number:
-  # an operator who changes a price and wants the credit to keep meaning "one hour"
+  # refused at its first launch (issue #324). So the default funds the default balance
+  # (deposits.DEFAULT_INITIAL_PERIODS: 360 periods of 10 s, one hour) of the smallest
+  # useful guest at the prices above: 0.5 GiB of RAM (500_000 per hour) plus one vCPU
+  # (4_000_000 per hour), on an unloaded node, at the ceiling of the price bound for
+  # each period (1 + pricing.PRICE_VOLATILITY = 1.10; the 360 periods are all in the
+  # first volatility period of 24 h), because a start with no initial_mu is funded with
+  # that sum: 4_950_000. With pricing.PRICE_BOUNDED false, set it back to 4_500_000.
+  # Derived from those prices, not a round number: an operator who changes a price or
+  # DEFAULT_INITIAL_PERIODS and wants the credit to keep meaning "the default balance"
   # has to recompute it.
   #
   # It does not cover a build (pricing.BUILD_MU, charged once for a service this node
@@ -961,9 +965,14 @@ deposits:
   MAX_FEE_OVERHEAD: 0.02
   # Refill a peer once its remaining balance drops below this share of a full deposit.
   REFILL_BELOW: 0.2
-  # How long a new instance is funded for when the client asks for no specific balance.
-  # The actual amount is the price of the resources it requested, for this long.
-  INITIAL_RUNTIME_HOURS: 1.0
+  # How many maintenance periods (MANAGER_ITERATION_TIME) a new instance is funded for
+  # when the client sends no initial_mu. The node funds the start with
+  # EstimatedCost.cost plus the funding sum of this many periods: the price of the
+  # resources that it requested for one period, times (1 + PRICE_VOLATILITY)^k(i) for
+  # the period i. 360 periods of 10 s is one hour. A whole number, at least 1. Each
+  # child of a service gets this default in its own StartService, paid by its parent.
+  # (deposits.INITIAL_RUNTIME_HOURS was removed and is refused.)
+  DEFAULT_INITIAL_PERIODS: 360
 
 # Every parameter of the peer-selection formula, and nothing else. The score a
 # candidate is ranked by reads as an effective cost in log space:

@@ -4,10 +4,11 @@
 cover. A client created at zero was therefore refused at its first launch: the two
 shipped defaults only ever worked together while debt was on.
 
-The credit is one hour of the smallest useful guest -- 0.5 GiB of RAM and one vCPU -- at
-this node's own prices, at the ceiling of the price bound for that hour (1 +
-`pricing.PRICE_VOLATILITY`, #636): a launch is funded at that price (issue #335), and a
-credit below it refuses the client at its first launch again. Asserted against those prices rather than against the literal
+The credit is the default balance of the smallest useful guest -- 0.5 GiB of RAM and one
+vCPU -- at this node's own prices: the funding sum of `deposits.DEFAULT_INITIAL_PERIODS`
+periods, at the ceiling of the price bound (1 + `pricing.PRICE_VOLATILITY`, #636). A start
+with no `initial_mu` is funded with that sum (issue #335), and a credit below it refuses
+the client at its first launch again. Asserted against those prices rather than against the literal
 number, so that changing a price and leaving the credit behind fails here instead of
 quietly making the default mean something else.
 """
@@ -18,7 +19,10 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from protos import celaut_pb2 as celaut
-    from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, worst_case_charge_mu
+    from src.utils.config import ConfigManager
+    from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, launch_charge_mu
+    from src.utils.cost_functions.price_bound import current_bound, funding_sum_mu
+    from src.utils.cost_functions.start_funding import default_initial_periods
     from src.utils.monetary import free_tier
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -31,30 +35,40 @@ UNLOADED = {CPU: 0.0, MEM: 0.0, DISK: 0.0}
 class NewClientCreditTests(unittest.TestCase):
     @staticmethod
     def _smallest_guest_hour() -> int:
-        """MU to fund 0.5 GiB and one vCPU for an hour, launched on an unloaded node."""
-        return worst_case_charge_mu(
+        """The default balance of 0.5 GiB and one vCPU, launched on an unloaded node."""
+        loop = int(ConfigManager().get("MANAGER_ITERATION_TIME"))
+        init = launch_charge_mu(
             system_resources=celaut.Sysresources(
                 mem_limit=GIB // 2, cpu_period=100000, cpu_quota=100000, disk_space=0
             ),
-            seconds=3600,
+            seconds=loop,
             scarcity=UNLOADED,
         )
+        return funding_sum_mu(init, loop, current_bound(), default_initial_periods())
+
+    def test_the_default_periods_are_an_hour(self):
+        # 360 periods of 10 s: the hour that the credit has always meant.
+        loop = int(ConfigManager().get("MANAGER_ITERATION_TIME"))
+        self.assertEqual(default_initial_periods() * loop, 3600)
 
     def test_a_new_client_is_credited_something(self):
         # The reported failure: GenerateClient then StartService, on a default install.
         self.assertGreater(free_tier().credit_mu_per_new_client, 0)
 
-    def test_the_credit_funds_an_hour_of_the_smallest_guest(self):
+    def test_the_credit_funds_the_default_balance_of_the_smallest_guest(self):
         self.assertGreaterEqual(
             free_tier().credit_mu_per_new_client, self._smallest_guest_hour()
         )
 
-    def test_the_credit_is_that_hour_and_no_more(self):
+    def test_the_credit_is_that_balance_and_no_more(self):
         # Pinned in both directions: this is a giveaway, and one that drifted upward
-        # would be funding strangers' work out of the operator's capacity.
-        self.assertEqual(
-            free_tier().credit_mu_per_new_client, self._smallest_guest_hour()
-        )
+        # would be funding strangers' work out of the operator's capacity. The credit is
+        # the hour at the ceiling (4_950_000); the sum is of 10 s periods, and a period
+        # rounds each resource down, so the sum is below it by less than 1 MU per
+        # resource per period.
+        gap = free_tier().credit_mu_per_new_client - self._smallest_guest_hour()
+        self.assertGreaterEqual(gap, 0)
+        self.assertLess(gap, 2 * default_initial_periods())
 
 
 if __name__ == "__main__":

@@ -4,11 +4,9 @@ from protos import celaut_pb2 as celaut
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.execution_cost import (
     build_charge_mu,
-    is_free,
     maintenance_charge_mu,
-    worst_case_charge_mu,
 )
-from src.utils.cost_functions.price_bound import CURRENT, PriceBound
+from src.utils.cost_functions.price_bound import PriceBound
 from src.utils.monetary import HOUR_SECONDS, prices
 
 env_manager = ConfigManager()
@@ -45,36 +43,28 @@ RATE_STATEMENT_ROW = "statement_row_mu"
 RATE_SCARCITY_MAX_MULTIPLIER = "scarcity_max_multiplier"
 
 
-def compute_start_service_cost(metadata: celaut.Metadata, initial_balance_mu: int) -> int:
-    """The least ``initial_mu`` that starts an instance: the one-off build, plus the balance it has after it.
+def compute_start_service_cost(
+    metadata: celaut.Metadata,
+    service: Optional[celaut.Service] = None,
+    scarcity: Optional[Dict[str, float]] = None,
+) -> int:
+    """``EstimatedCost.cost``: what the start spends, the build and the builds of the
+    initial children (``start_funding.start_cost_mu``).
 
-    The caller pays ``initial_mu`` and nothing else, and the node takes the build from it
-    (#563, ``start_funding``). So this total is the quote of what the caller must send for
-    the instance to be left with ``initial_balance_mu``. It is not a second charge on top
-    of the balance.
+    It has no balance (#636, 9). The caller pays ``initial_mu`` and nothing else, and the
+    node takes the build from it (#563), so the caller funds a start with this figure
+    plus the balance for the periods that it chooses (``price_bound.funding_sum_mu``).
+    Counting the balance here as well paid ``deposits.INITIAL_RUNTIME_HOURS`` twice: once
+    in the cost and once in the periods on top of it.
 
-    The build is the only thing the *start* charges for. The runtime window is priced
-    once, as ``initial_balance_mu`` -- the balance the instance holds and the maintenance
-    ticks then spend.
-
-    This used to add ``seconds`` of occupancy on top of that balance, billing the same
-    window twice: on an idle node the documented instance cost 0.0205 ERG to start where
-    0.01525 ERG buys the build and funds the hour, and the difference bought nothing. On a
-    loaded node it was worse, because that occupancy carried the live scarcity surcharge —
-    so the price quoted to start swung with whatever else the machine was doing.
-
-    Takes no resources for the same reason: nothing here is priced per resource any more.
-
-    While the node is free the build costs nothing, but the balance is still asked for
-    (#636, H). The ticks charge nothing while the node stays free, and what is not
-    spent goes back to the father at the stop. The balance covers the ceiling of the
-    price over the anchor of the launch (``worst_case_charge_mu``), so the instance is
-    not stopped at its first tick when the node leaves the free state. A free start
-    that asked for 0 got a balance of 0, and ``costs.ALLOW_DEBT`` off then stopped it.
+    No case for a free node (#636, 2): the builds are 0 while the node is free, so the
+    cost is 0, and the funding sum asks for the balance as for any start. The ticks
+    charge nothing while the node stays free, and what is not spent goes back to the
+    father at the stop.
     """
-    if is_free():
-        return int(initial_balance_mu)
-    return int(build_charge_mu(metadata=metadata) + initial_balance_mu)
+    from src.utils.cost_functions.start_funding import start_cost_mu
+
+    return start_cost_mu(metadata=metadata, service=service, scarcity=scarcity)
 
 
 def compute_maintenance_cost(
@@ -101,21 +91,6 @@ def compute_maintenance_cost(
     return maintenance_charge_mu(
         system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch,
         launch_bp=launch_bp, bound=bound, elapsed_seconds=elapsed_seconds,
-    )
-
-
-def compute_worst_case_maintenance_cost(
-    system_resources: celaut.Sysresources,
-    seconds: float,
-    scarcity: Optional[Dict[str, float]] = None,
-    arch: Optional[str] = None,
-    bound=CURRENT,
-) -> int:
-    """The most the ticks can charge in the first `seconds` of an instance launched now;
-    see `worst_case_charge_mu`. ``bound`` omitted reads the bound of now."""
-    return worst_case_charge_mu(
-        system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch,
-        bound=bound,
     )
 
 

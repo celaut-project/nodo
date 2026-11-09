@@ -26,7 +26,6 @@ from src.database.migrate import TABLES, create_tables
 from src.database.sql_connection import SQLConnection
 from src.manager import statement_check
 from src.manager.maintain import _row_elapsed, _row_launch_bound, _row_launch_bp
-from src.manager.manager import default_initial_balance
 from src.manager.statement_check import MaintenanceQuote, Row
 from src.utils.config import ConfigManager
 from src.utils.config_validation import ConfigValidationError, validate_pricing_config
@@ -36,8 +35,8 @@ from src.utils.cost_functions.execution_cost import (
     DISK,
     MEM,
     launch_price_bp,
+    launch_charge_mu,
     maintenance_charge_mu,
-    worst_case_charge_mu,
 )
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost
 from src.utils.cost_functions.price_bound import (
@@ -46,8 +45,13 @@ from src.utils.cost_functions.price_bound import (
     funding_sum_mu,
     of_quote,
     strict,
+    tick_period_index,
 )
-from src.utils.cost_functions.start_funding import balance_after_build, minimum_runtime_mu
+from src.utils.cost_functions.start_funding import (
+    balance_after_build,
+    default_balance_mu,
+    minimum_runtime_mu,
+)
 from src.utils.cost_functions.volatility_cost_normalization import (
     volatility_cost_normalization as vcnorm,
 )
@@ -76,7 +80,8 @@ BASE = {
     "pricing.PRICE_VOLATILITY_WINDOW_HOURS": 168,
     "pricing.PRICE_VOLATILITY_MIN": 0.05,
     "free_tier.FREE_WHILE_SCARCITY_BELOW": 0.0,
-    "deposits.INITIAL_RUNTIME_HOURS": 1.0,
+    "deposits.DEFAULT_INITIAL_PERIODS": 360,
+    "MANAGER_ITERATION_TIME": 10,
 }
 TENTH_A_DAY = PriceBound(0.10, DAY)
 
@@ -190,6 +195,24 @@ class TheFundingSumTests(unittest.TestCase):
         from src.utils.monetary import format_mu
 
         self.assertIn(format_mu(total), lines[2])
+        # `nodo estimate` also prints cost + sum(N) for the default N of the node.
+        lines = price_bound_lines(quote, hours=(), default_periods=360)
+        self.assertIn("Default funding", lines[-1])
+        self.assertIn(format_mu(500 + funding_sum_mu(1000, 6 * HOUR, TENTH_A_DAY, 360)), lines[-1])
+
+    def test_a_peer_must_be_left_one_period_at_its_bound(self):
+        # Delegation (#636): what is left after the peer's cost pays the funding sum of
+        # one period of its quote, which is what the peer checks at its start.
+        from src.gateway.launcher import launch_service
+
+        bounded = celaut.EstimatedCost(init_maintenance_cost=to_amount(1000),
+                                       maintenance_seconds_loop=10, price_bounded=True,
+                                       price_volatility=0.10, volatility_period_seconds=DAY)
+        self.assertEqual(launch_service._peer_period_mu(bounded), 1100)
+        unbounded = celaut.EstimatedCost(init_maintenance_cost=to_amount(1000),
+                                         maintenance_seconds_loop=10)
+        self.assertEqual(launch_service._peer_period_mu(unbounded), 1000)
+        self.assertEqual(launch_service._peer_period_mu(celaut.EstimatedCost()), 0)
 
 
 class TheCeilingByPeriodTests(unittest.TestCase):
@@ -230,26 +253,57 @@ class TheCeilingByPeriodTests(unittest.TestCase):
             for elapsed in (0, 30 * HOUR, 30 * DAY):
                 self.assertEqual(_tick(IDLE, launch, TENTH_A_DAY, elapsed), _tick(IDLE))
 
-    def test_the_initial_balance_covers_the_hours_at_the_ceiling(self):
+    def test_the_default_balance_is_the_funding_sum_of_the_default_periods(self):
+        # 360 periods of 10 s, all in the first period of 24 h: just (1 + v) each.
         with _config():
-            # T >= INITIAL_RUNTIME_HOURS: just (1 + v).
-            self.assertEqual(default_initial_balance(_guest(), scarcity=IDLE),
-                             _tick(IDLE) * 110 // 100)
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(default_balance_mu(_guest(), scarcity=IDLE),
+                             funding_sum_mu(init, 10, TENTH_A_DAY, 360))
+            self.assertEqual(default_balance_mu(_guest(), scarcity=IDLE),
+                             math.ceil(init * 360 * 1.1 - 1e-9))
         with _config(pricing__PRICE_VOLATILITY_PERIOD_HOURS=0.5):
-            # Two half hours: 1.1 and 1.21.
-            half = maintenance_charge_mu(_guest(), HOUR / 2, scarcity=IDLE)
-            self.assertEqual(default_initial_balance(_guest(), scarcity=IDLE),
-                             half * 110 // 100 + half * 121 // 100)
+            # T = 1800 s: the ticks 1-179 are in k = 1, 180-359 in k = 2, and 360 in k = 3.
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            expected = init * (179 * 1.1 + 180 * 1.21 + 1.331)
+            self.assertEqual(default_balance_mu(_guest(), scarcity=IDLE),
+                             math.ceil(round(expected, 6)))
+        with _config(deposits__DEFAULT_INITIAL_PERIODS=7):
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(default_balance_mu(_guest(), scarcity=IDLE),
+                             math.ceil(round(init * 7 * 1.1, 6)))
 
-    def test_no_tick_of_the_first_hours_exceeds_the_balance(self):
-        with _config(pricing__PRICE_VOLATILITY_PERIOD_HOURS=0.25):
-            launch = launch_price_bp(IDLE)
-            bound = current_bound()
-            balance = default_initial_balance(_guest(), scarcity=IDLE)
-            spent = sum(maintenance_charge_mu(_guest(), 60, scarcity=FULL, launch_bp=launch,
-                                              bound=bound, elapsed_seconds=60 * i - 1)
-                        for i in range(1, 61))
-            self.assertLessEqual(spent, balance)
+    def test_the_sum_and_the_tick_use_the_same_k(self):
+        # 6 (#636): the tick i charges the interval that ends at i * loop, and takes its
+        # k from that time. The sum takes k(i) from the same function.
+        bound = PriceBound(0.10, 1800)
+        for i in (1, 179, 180, 181, 359, 360, 361):
+            with self.subTest(i=i):
+                self.assertEqual(tick_period_index(bound, i, 10), bound.period_index(i * 10))
+        self.assertEqual(tick_period_index(bound, 179, 10), 1)
+        self.assertEqual(tick_period_index(bound, 180, 10), 2)
+        self.assertEqual(tick_period_index(PriceBound(0.10, 0), 10 ** 6, 10), 1)
+
+    def test_no_n_ticks_exceed_the_sum_of_n_periods(self):
+        # At the ceiling for every tick, and across a change of period: the sum of N
+        # periods pays N ticks, for every N.
+        for hours in (24, 0.25, 0.5):
+            with self.subTest(T=hours), _config(pricing__PRICE_VOLATILITY_PERIOD_HOURS=hours):
+                launch = launch_price_bp(IDLE)
+                bound = current_bound()
+                init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+                spent = 0
+                for i in range(1, 361):
+                    spent += maintenance_charge_mu(_guest(), 10, scarcity=FULL, launch_bp=launch,
+                                                   bound=bound, elapsed_seconds=10 * i)
+                    self.assertLessEqual(spent, funding_sum_mu(init, 10, bound, i))
+                self.assertLessEqual(spent, default_balance_mu(_guest(), scarcity=IDLE))
+
+    def test_one_period_is_the_minimum(self):
+        resources = celaut.Service.Container.Resources(at_init=_guest())
+        with _config():
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(minimum_runtime_mu(resources, scarcity=IDLE),
+                             funding_sum_mu(init, 10, TENTH_A_DAY, 1))
 
 
 class TheStoredBoundTests(unittest.TestCase):
@@ -299,7 +353,8 @@ class TheStoredBoundTests(unittest.TestCase):
         current.assert_called_once_with()
         self.assertEqual(recorded["launch_bound"], read)
         with _config():
-            self.assertEqual(recorded["balance_mu"], _tick(IDLE) * 107 // 100)
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(recorded["balance_mu"], funding_sum_mu(init, 10, read, 360))
 
     def test_rows_read_strictly(self):
         self.assertEqual(_row_launch_bound({"launch_volatility": float("nan"),
@@ -393,6 +448,24 @@ class TheConfigTests(unittest.TestCase):
     def test_the_removed_key_is_refused(self):
         with self.assertRaisesRegex(ConfigValidationError, "MAX_PRICE_VOLATILITY"):
             validate_pricing_config({"pricing": {"MAX_PRICE_VOLATILITY": 2.0}})
+
+    def test_initial_runtime_hours_is_refused(self):
+        # 9 (#636): the hours of the default balance were removed.
+        with self.assertRaisesRegex(ConfigValidationError, "DEFAULT_INITIAL_PERIODS"):
+            validate_pricing_config({"pricing": {}, "deposits": {"INITIAL_RUNTIME_HOURS": 1.0}})
+
+    def test_default_initial_periods_is_a_whole_number_of_at_least_one(self):
+        for bad in (0, -1, 1.5, "360", True, None):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ConfigValidationError,
+                                                                "DEFAULT_INITIAL_PERIODS"):
+                validate_pricing_config({"pricing": {}, "deposits": {"DEFAULT_INITIAL_PERIODS": bad}})
+        for good in (1, 360):
+            validate_pricing_config({"pricing": {}, "deposits": {"DEFAULT_INITIAL_PERIODS": good}})
+
+    def test_the_example_config_sets_360_periods(self):
+        from src.utils.cost_functions.start_funding import default_initial_periods
+
+        self.assertEqual(default_initial_periods(), 360)
 
     def test_valid_values_load(self):
         validate_pricing_config({"pricing": {
@@ -557,34 +630,42 @@ class TheFreeNodeTests(unittest.TestCase):
             base = _tick(IDLE)
         self.assertEqual(from_amount(quote.max_maintenance_cost), base)
         self.assertEqual(from_amount(quote.init_maintenance_cost), base)
-        # The build is free, the balance is not.
-        self.assertEqual(from_amount(quote.cost), 777)
+        # 2 (#636): the builds are free, so the cost is 0, and initial_mu does not change
+        # it. The balance is the funding sum over the anchor, which is not 0.
+        self.assertEqual(from_amount(quote.cost), 0)
+        self.assertGreater(funding_sum_mu(from_amount(quote.init_maintenance_cost),
+                                          quote.maintenance_seconds_loop, of_quote(quote), 1), 0)
 
     def test_a_free_launch_is_funded_the_ceiling_and_survives_leaving_the_free_state(self):
         with _config(**self.FREE, costs__ALLOW_DEBT=False):
             scarcity = IDLE
             launch = launch_price_bp(scarcity)
             bound = current_bound()
-            balance = default_initial_balance(_guest(), scarcity=scarcity, bound=bound)
+            balance = default_balance_mu(_guest(), scarcity=scarcity, bound=bound)
             resources = celaut.Service.Container.Resources(at_init=_guest())
             minimum = minimum_runtime_mu(resources, scarcity=scarcity, bound=bound)
+            from src.utils.cost_functions import start_funding
+
             with patch.object(execution_cost, "is_free", return_value=True), \
-                    patch("src.utils.cost_functions.general_cost_functions.is_free", return_value=True):
-                cost = compute_start_service_cost(celaut.Metadata(), balance)
+                    patch.object(start_funding, "is_free", return_value=True):
+                cost = compute_start_service_cost(celaut.Metadata())
             self.assertEqual(launch, {CPU: 10000, MEM: 10000, DISK: 10000})
-            self.assertEqual(cost, balance)
-            self.assertEqual(balance_after_build(cost, 0, minimum), balance)
-            # Free: ticks charge 0. Then the node fills up: every tick of the first hour
-            # is at the ceiling over the anchor, and the balance pays all of them.
-            self.assertEqual(maintenance_charge_mu(_guest(), 60, scarcity=IDLE, launch_bp=launch,
-                                                   bound=bound, elapsed_seconds=60), 0)
+            # 2 (#636): no special case. The cost is 0, and the start is the cost plus the
+            # funding sum, as for any start.
+            self.assertEqual(cost, 0)
+            self.assertEqual(balance_after_build(cost + balance, 0, minimum), balance)
+            # Free: ticks charge 0. Then the node fills up: every tick of the default
+            # periods is at the ceiling over the anchor, and the balance pays all of them.
+            self.assertEqual(maintenance_charge_mu(_guest(), 10, scarcity=IDLE, launch_bp=launch,
+                                                   bound=bound, elapsed_seconds=10), 0)
             left = balance
-            for i in range(1, 61):
-                left -= maintenance_charge_mu(_guest(), 60, scarcity=FULL, launch_bp=launch,
-                                              bound=bound, elapsed_seconds=60 * i)
+            for i in range(1, 361):
+                left -= maintenance_charge_mu(_guest(), 10, scarcity=FULL, launch_bp=launch,
+                                              bound=bound, elapsed_seconds=10 * i)
             self.assertGreaterEqual(left, 0)
         with _config():
-            self.assertEqual(balance, _tick(IDLE) * 110 // 100)
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(balance, funding_sum_mu(init, 10, TENTH_A_DAY, 360))
 
 
 if __name__ == "__main__":

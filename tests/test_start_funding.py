@@ -22,7 +22,8 @@ from src.gateway.launcher.local_execution import local_execution as local_execut
 from src.payment_system.mu_conversion import MatchingPaymentSystem, configuration_for_peer
 from src.utils.cost_functions import start_funding
 from src.utils.cost_functions.delegated_price import covers, peer_build_mu
-from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, worst_case_charge_mu
+from src.utils.cost_functions.execution_cost import CPU, DISK, MEM, launch_charge_mu
+from src.utils.cost_functions.price_bound import current_bound, funding_sum_mu
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
     balance_after_build,
@@ -72,7 +73,7 @@ class TheMinimumRuntimeTests(unittest.TestCase):
 
     def test_it_is_one_maintenance_period_with_the_resources_at_the_start(self):
         with _config(pricing__PRICE_BOUNDED=False):
-            expected = worst_case_charge_mu(_guest(), PERIOD_SECONDS, scarcity=IDLE)
+            expected = launch_charge_mu(_guest(), PERIOD_SECONDS, scarcity=IDLE)
             self.assertGreater(expected, 0)
             self.assertEqual(minimum_runtime_mu(self._resources(), scarcity=IDLE), expected)
 
@@ -81,8 +82,8 @@ class TheMinimumRuntimeTests(unittest.TestCase):
             at_launch = minimum_runtime_mu(self._resources(), scarcity=IDLE)
         with _config(pricing__PRICE_BOUNDED=False):
             at_current_price = minimum_runtime_mu(self._resources(), scarcity=IDLE)
-        # Each resource rounds on its own, so the two sides can differ by a few MU.
-        self.assertAlmostEqual(at_launch, 2 * at_current_price, delta=5)
+        # The funding sum of one period: the launch price times (1 + v), exactly.
+        self.assertEqual(at_launch, 2 * at_current_price)
 
     def test_with_the_bound_off_it_is_the_price_of_the_current_load(self):
         loaded = {CPU: 0.5, MEM: 0.5, DISK: 0.5}
@@ -92,12 +93,14 @@ class TheMinimumRuntimeTests(unittest.TestCase):
                 minimum_runtime_mu(self._resources(), scarcity=IDLE),
             )
 
-    def test_it_is_the_figure_that_the_quote_gives_as_the_most_one_period_can_cost(self):
-        # The same function prices `max_maintenance_cost` for the resources at the start.
+    def test_it_is_the_funding_sum_of_one_period(self):
+        # The formula of the client for N = 1 (#636): `cost` plus the sum of one period
+        # passes the rule.
         with _config():
+            init = launch_charge_mu(_guest(), PERIOD_SECONDS, scarcity=IDLE)
             self.assertEqual(
                 minimum_runtime_mu(self._resources(), scarcity=IDLE),
-                worst_case_charge_mu(_guest(), PERIOD_SECONDS, scarcity=IDLE),
+                funding_sum_mu(init, PERIOD_SECONDS, current_bound(), 1),
             )
 
     def test_a_service_with_no_resources_at_the_start_has_no_minimum(self):
@@ -135,7 +138,7 @@ class TheLaunchOnThisNodeTests(unittest.TestCase):
         with _config(**values), \
                 patch.object(local_execute, "start_build_mu", return_value=build_mu), \
                 patch.object(local_execute, "minimum_runtime_mu", return_value=minimum_mu), \
-                patch.object(local_execute, "default_initial_balance", return_value=1_000), \
+                patch.object(local_execute, "default_balance_mu", return_value=1_000), \
                 patch.object(local_execute, "get_configured_virtualizer", return_value="ch"), \
                 patch.object(local_execute, "select_virtualizer", return_value="ch"), \
                 patch.object(local_execute, "build", return_value="svc-hash",
@@ -252,23 +255,28 @@ class TheAmountForAPeerTests(unittest.TestCase):
 
 
 class TheQuoteTests(unittest.TestCase):
-    """`EstimatedCost.cost` keeps its value: it is the build plus the balance asked for."""
+    """`EstimatedCost.cost` is what the start spends: the builds, with no balance (#636, 9)."""
 
-    def test_the_quote_of_the_node_is_the_build_plus_the_balance(self):
+    def test_the_quote_of_the_node_is_the_build_and_no_balance(self):
         from src.utils.cost_functions import general_cost_functions
 
-        with _config(), patch.object(general_cost_functions, "build_charge_mu", return_value=300), \
-                patch.object(general_cost_functions, "is_free", return_value=False):
-            self.assertEqual(
-                general_cost_functions.compute_start_service_cost(celaut.Metadata(), 1_000), 1_300
-            )
+        with _config(), patch.object(start_funding, "build_charge_mu", return_value=300), \
+                patch.object(start_funding, "is_free", return_value=False):
+            self.assertEqual(general_cost_functions.compute_start_service_cost(celaut.Metadata()), 300)
 
-    def test_the_build_of_the_peer_is_what_its_quote_has_above_the_balance(self):
+    def test_a_free_node_quotes_a_cost_of_zero(self):
+        # 2 (#636): no special case. The build is free, and no balance is in the cost.
+        from src.utils.cost_functions import general_cost_functions
+
+        with _config(), patch.object(start_funding, "build_charge_mu", return_value=300), \
+                patch.object(start_funding, "is_free", return_value=True):
+            self.assertEqual(general_cost_functions.compute_start_service_cost(celaut.Metadata()), 0)
+
+    def test_the_build_of_the_peer_is_its_whole_cost(self):
         peer_cost = celaut.EstimatedCost(cost=celaut.Amount(n="1200"))
 
-        self.assertEqual(peer_build_mu(peer_cost, 1_000), 200)
-        # A quote below the balance has no build.
-        self.assertEqual(peer_build_mu(peer_cost, 5_000), 0)
+        self.assertEqual(peer_build_mu(peer_cost), 1_200)
+        self.assertEqual(peer_build_mu(celaut.EstimatedCost()), 0)
 
     def test_a_peer_is_covered_when_our_price_is_not_below_its_quote(self):
         # The start and one period (#577): what this node charges covers what the peer
@@ -313,8 +321,9 @@ class DelegatedPriceTests(unittest.TestCase):
         resources = celaut.Service.Container.Resources(at_init=_guest())
         own = self._own(resources, free_tier__FREE_WHILE_SCARCITY_BELOW=0.5)
 
-        # The build and the period are charged although this node is idle and free.
-        self.assertEqual(int(own.cost.n), 1_300)
+        # The build and the period are charged although this node is idle and free. The
+        # cost is the build alone: initial_mu is not in it (#636, 9).
+        self.assertEqual(int(own.cost.n), 300)
         self.assertGreater(int(own.init_maintenance_cost.n), 0)
 
     def test_the_period_is_priced_at_the_multiplier_of_the_launch(self):

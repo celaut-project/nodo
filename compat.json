@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "bd39c034ddce9743fe4dd8be3e4df71332f3f6c9e3b385d6be4c9a310b238ae4",
+  "celaut_proto": "4117b19dd6eeb29c1193477405d2ed9e7b663e1ccccbde7bb40e9f9cc736764d",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.ON_CLOSE",
@@ -73,7 +73,7 @@
     "dependencies.yq.BIN",
     "deposits.AUTOMATIC_REFILL",
     "deposits.AUTOMATIC_REFILL_GOSSIP_PEERS",
-    "deposits.INITIAL_RUNTIME_HOURS",
+    "deposits.DEFAULT_INITIAL_PERIODS",
     "deposits.MAX_FEE_OVERHEAD",
     "deposits.REFILL_BELOW",
     "energy.CURRENCY",

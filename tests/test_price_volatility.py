@@ -25,7 +25,6 @@ from protos import celaut_pb2 as celaut  # noqa: E402
 from src.database.migrate import create_tables
 from src.database.sql_connection import SQLConnection
 from src.manager.maintain import _row_launch_bound, _row_launch_bp
-from src.manager.manager import default_initial_balance
 from src.utils.config import ConfigManager
 from src.utils.config_validation import ConfigValidationError, validate_pricing_config
 from src.utils.cost_functions import execution_cost
@@ -33,11 +32,12 @@ from src.utils.cost_functions.execution_cost import (
     CPU,
     DISK,
     MEM,
+    launch_charge_mu,
     launch_price_bp,
     maintenance_charge_mu,
-    worst_case_charge_mu,
 )
-from src.utils.cost_functions.price_bound import PriceBound, current_bound
+from src.utils.cost_functions.price_bound import PriceBound, current_bound, funding_sum_mu
+from src.utils.cost_functions.start_funding import default_balance_mu
 from src.utils.monetary import prices
 from src.utils.utils import from_amount
 
@@ -61,7 +61,8 @@ BASE = {
     "pricing.PRICE_VOLATILITY": 1.0,
     "pricing.PRICE_VOLATILITY_PERIOD_HOURS": 0,
     "free_tier.FREE_WHILE_SCARCITY_BELOW": 0.0,
-    "deposits.INITIAL_RUNTIME_HOURS": 1.0,
+    "deposits.DEFAULT_INITIAL_PERIODS": 360,
+    "MANAGER_ITERATION_TIME": 10,
 }
 
 
@@ -190,56 +191,51 @@ class TheClampTests(unittest.TestCase):
 
 
 class TheQuoteAndTheFundingTests(unittest.TestCase):
-    def test_the_worst_case_is_what_no_tick_can_exceed(self):
+    def test_the_default_balance_is_what_no_ticks_can_exceed(self):
+        # v = 1, T = 0: every period at twice the launch price, at most.
         with _config():
             for load in (IDLE, HALF, FULL):
                 with self.subTest(load=load):
                     launch = launch_price_bp(load)
-                    worst = worst_case_charge_mu(_guest(), HOUR, scarcity=load)
+                    balance = default_balance_mu(_guest(), scarcity=load)
                     for later in (IDLE, HALF, FULL):
-                        self.assertLessEqual(_tick(later, launch), worst)
+                        spent = sum(maintenance_charge_mu(_guest(), 10, scarcity=later,
+                                                          launch_bp=launch, bound=TWICE,
+                                                          elapsed_seconds=10 * i)
+                                    for i in range(1, 361))
+                        self.assertLessEqual(spent, balance)
 
-    def test_the_worst_case_of_an_idle_launch_is_twice_its_price(self):
+    def test_the_default_balance_of_an_idle_launch_is_twice_its_price(self):
         with _config():
-            self.assertEqual(
-                worst_case_charge_mu(_guest(), HOUR, scarcity=IDLE), 2 * _tick(IDLE)
-            )
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(default_balance_mu(_guest(), scarcity=IDLE), 2 * 360 * init)
 
-    def test_the_worst_case_of_a_loaded_launch_stops_at_the_maximum(self):
+    def test_the_default_balance_is_the_formula_of_the_client_at_any_load(self):
+        # The sum does not know SCARCITY_MAX_MULTIPLIER: a launch at the maximum is
+        # funded at twice it, as a client funds it from the quote. It only over-funds.
         with _config():
-            self.assertEqual(
-                worst_case_charge_mu(_guest(), HOUR, scarcity=FULL), _tick(FULL)
-            )
+            init = launch_charge_mu(_guest(), 10, scarcity=FULL)
+            self.assertEqual(default_balance_mu(_guest(), scarcity=FULL),
+                             funding_sum_mu(init, 10, TWICE, 360))
 
-    def test_with_no_bound_the_worst_case_is_the_charge_now(self):
+    def test_with_no_bound_the_default_balance_is_the_price_now(self):
         with _config(pricing__PRICE_BOUNDED=False):
-            self.assertEqual(worst_case_charge_mu(_guest(), HOUR, scarcity=HALF), _tick(HALF))
-
-    def test_a_free_node_prices_the_worst_case_at_the_anchor(self):
-        # #636, H: not 0. The ceiling over the 1x anchor of a launch while free.
-        with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5):
-            worst = worst_case_charge_mu(_guest(), HOUR, scarcity=IDLE)
-        with _config():
-            self.assertEqual(worst, 2 * _tick(IDLE, bound=None))
-
-    def test_the_initial_balance_funds_the_hours_at_the_worst_case(self):
-        with _config():
-            balance = default_initial_balance(_guest(), scarcity=IDLE)
-            self.assertEqual(balance, 2 * _tick(IDLE))
-            launch = launch_price_bp(IDLE)
-            # The balance lasts the hour even if the node fills up at once.
-            self.assertGreaterEqual(balance, _tick(FULL, launch))
-
-    def test_the_initial_balance_is_unchanged_with_no_bound(self):
-        with _config(pricing__PRICE_BOUNDED=False):
-            self.assertEqual(default_initial_balance(_guest(), scarcity=IDLE), _tick(IDLE))
+            init = launch_charge_mu(_guest(), 10, scarcity=HALF)
+            self.assertEqual(default_balance_mu(_guest(), scarcity=HALF), 360 * init)
 
     def test_an_instance_launched_free_is_funded_the_ceiling_of_the_anchor(self):
         # #636, H: it was funded nothing, and stopped when the node left the free state.
         with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5):
-            balance = default_initial_balance(_guest(), scarcity=IDLE)
+            balance = default_balance_mu(_guest(), scarcity=IDLE)
         with _config():
-            self.assertEqual(balance, 2 * _tick(IDLE, bound=None))
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(balance, 2 * 360 * init)
+            # The balance lasts the default periods even if the node fills up at once.
+            launch = launch_price_bp(IDLE)
+            spent = sum(maintenance_charge_mu(_guest(), 10, scarcity=FULL, launch_bp=launch,
+                                              bound=TWICE, elapsed_seconds=10 * i)
+                        for i in range(1, 361))
+            self.assertLessEqual(spent, balance)
 
     def test_the_quote_is_the_price_now_with_the_bound(self):
         from src.utils.cost_functions import generate_estimated_cost as module
@@ -357,19 +353,22 @@ class TheWiringTests(unittest.TestCase):
         add.assert_called_once()
         return add.call_args.kwargs
 
-    def test_the_launch_records_its_price_and_funds_the_worst_case_of_it(self):
+    def test_the_launch_records_its_price_and_funds_the_sum_of_it(self):
         recorded = self._launch(IDLE)
         with _config():
             self.assertEqual(recorded["launch_bp"], launch_price_bp(IDLE))
             self.assertEqual(recorded["launch_bound"], PriceBound(1.0, 0))
-            # One sample prices both: the balance is the worst case of the recorded price.
-            self.assertEqual(recorded["balance_mu"], 2 * _tick(IDLE))
+            # One sample prices both: the balance is the funding sum of the recorded
+            # price for the default periods.
+            init = launch_charge_mu(_guest(), 10, scarcity=IDLE)
+            self.assertEqual(recorded["balance_mu"], 2 * 360 * init)
 
     def test_a_launch_on_a_loaded_node_records_the_loaded_price(self):
         recorded = self._launch(FULL)
         with _config():
             self.assertEqual(recorded["launch_bp"], launch_price_bp(FULL))
-            self.assertEqual(recorded["balance_mu"], _tick(FULL))
+            init = launch_charge_mu(_guest(), 10, scarcity=FULL)
+            self.assertEqual(recorded["balance_mu"], 2 * 360 * init)
 
 
 class TheRecordTests(unittest.TestCase):

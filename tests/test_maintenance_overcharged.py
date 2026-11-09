@@ -460,13 +460,15 @@ class TheQuoteIsStoredUnconvertedTests(_Database):
             self.assertIsNotNone(peer_quotes.signed("p4", self._peer_quote()))
 
     def test_the_launcher_hands_the_signed_quote_to_the_delegation(self):
-        local = celaut.EstimatedCost(cost=celaut.Amount(n="1100"))
+        # `cost` is the builds, no balance (#636, 9): the peer quotes a build of 100, and
+        # this node no build.
+        local = celaut.EstimatedCost(cost=celaut.Amount(n="100"))
         signed = self._peer_quote()
         peer_quotes.remember(PEER_ID, local, signed)
         configuration = celaut.Configuration()
         configuration.initial_mu.n = "1000"
         with patch.object(launch_service_mod, "_own_price",
-                          return_value=celaut.EstimatedCost(cost=configuration.initial_mu)), \
+                          return_value=celaut.EstimatedCost(cost=celaut.Amount(n="0"))), \
                 patch.object(launch_service_mod.sc, "peer_exists", return_value=True), \
                 patch.object(launch_service_mod, "service_requires_parent_colocation",
                              return_value=False), \

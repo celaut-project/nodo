@@ -379,12 +379,10 @@ class EstimatedCostRpcTests(unittest.TestCase):
         it.recursion_guard_hops = None
         with patch.object(cost_mod, "read_service_from_disk", return_value=celaut.Service()), \
                 patch.object(cost_mod, "enforce_network_policy"), \
-                patch.object(cost_mod, "default_initial_balance", return_value=1), \
                 patch.object(cost_mod, "generate_estimated_cost", side_effect=lambda **_: celaut.EstimatedCost()) as quote, \
                 patch.object(cost_mod, "get_resource_availability", side_effect=lambda **_: {"can_execute": self.room}), \
                 patch.object(cost_mod.BeeClient, "respond", side_effect=lambda message_iterator, indices: iter([message_iterator])), \
-                patch.object(cost_mod.activity_window, "is_open", side_effect=lambda: self.window_open), \
-                patch.object(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount()):
+                patch.object(cost_mod.activity_window, "is_open", side_effect=lambda: self.window_open):
             self._quote_mock = quote
             return list(it.generate())
 
@@ -453,8 +451,6 @@ class EstimatedCostRpcTests(unittest.TestCase):
         with patch.object(cost_mod, "generate_estimated_cost", side_effect=slow_quote), \
                 patch.object(cost_mod, "read_service_from_disk", return_value=celaut.Service()), \
                 patch.object(cost_mod, "enforce_network_policy"), \
-                patch.object(cost_mod, "default_initial_balance", return_value=1), \
-                patch.object(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount()), \
                 patch.object(cost_mod, "get_resource_availability", return_value={"can_execute": True}), \
                 patch.object(cost_mod.BeeClient, "respond", side_effect=lambda message_iterator, indices: iter([message_iterator])), \
                 patch.object(cost_mod.activity_window, "is_open", return_value=True):

@@ -1,11 +1,10 @@
 from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
-from src.utils.cost_functions.start_funding import initial_children_mu
 from src.utils.cost_functions import price_bound
 from src.utils.cost_functions.execution_cost import launch_charge_mu
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost
-from src.utils.utils import from_amount, to_amount
+from src.utils.utils import to_amount
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 from src.utils.verify import get_service_hex_main_hash
@@ -47,9 +46,9 @@ def generate_estimated_cost(
     per-arch rate would have the node bill above what it offered. Omitted, both sides
     use the scalar price, which is what a node with no per-arch pricing does.
 
-    ``service`` is the manifest, where the caller holds it. ``cost`` includes what the
-    instance pays to start the children of its ``initial_environment_workload``
-    (``start_funding.initial_children_mu``, #538). Without the manifest it is 0. Disk reads it too, only to notice a ``read_mode=ro``
+    ``service`` is the manifest, where the caller holds it. ``cost`` includes the builds
+    of the children of its ``initial_environment_workload``
+    (``start_funding.initial_children_mu``, #538). Without the manifest they are 0. Disk reads it too, only to notice a ``read_mode=ro``
     declaration: such an instance holds its image
     and no writable capacity at all, so the rootfs floors describe nothing it will
     be given and pricing it at them would quote a small immutable capsule at the
@@ -60,29 +59,17 @@ def generate_estimated_cost(
     caller that remembers the price and checks availability itself on every answer.
     """
 
-    initial_mu = from_amount(config.initial_mu) \
-        if config and config.HasField("initial_mu") else 0
-
     # Only the launcher checks here (the balancer's local candidate, its preflight), so a
     # refusal for disk alone may free the disk of suspended instances nobody pays for.
     if check_availability and not availability_reclaiming_disk(resources=resources, arch=arch)["can_execute"]:
         return
 
-    # The least `initial_mu` that starts the service: the one-off build, plus the balance
-    # the instance has after it (#563). The caller pays `initial_mu` and nothing else, and
-    # this node takes the build out of it, so this figure is not a second charge on top
-    # of the balance. The balance is what buys the runtime window (it is derived from the
-    # requested resources by `default_initial_balance`), so the window is not also
-    # charged here -- doing both billed it twice.
-    initial_cost_mu = compute_start_service_cost(
-        metadata=metadata,
-        initial_balance_mu=initial_mu,
-    )
-    # The instance pays the `child_start` of its initial children out of its balance
-    # (#538), so the least `initial_mu` that starts it includes them. `initial_mu` is the
-    # balance of the service alone, and this is on top of it. A free node prices them
-    # at 0, as it does the build and the balance.
-    initial_cost_mu += initial_children_mu(service)
+    # What the start spends: the build, and the builds of the initial children of the
+    # service (#538). No balance (#636, 9): the caller adds the balance for the periods
+    # that it chooses (`price_bound.funding_sum_mu`), and a start with no `initial_mu`
+    # gets the default of the node that runs it. `Configuration.initial_mu` does not
+    # change the quote. A free node quotes 0 (#636, 2).
+    initial_cost_mu = compute_start_service_cost(metadata=metadata, service=service)
 
     # Both maintenance figures are quoted for what the instance will *hold*, not for
     # what its manifest asks for. The virtualizer raises anything below a floor when it
@@ -99,7 +86,7 @@ def generate_estimated_cost(
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(
 
-        # Initial cost: the build, the balance and the starts of the initial children.
+        # Initial cost: the build and the builds of the initial children. No balance.
         cost=to_amount(initial_cost_mu),
 
         # Maintenance cost per manager iteration, at the resources it starts with.

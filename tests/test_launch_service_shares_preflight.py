@@ -37,7 +37,7 @@ class SharesPreflightTests(unittest.TestCase):
              patch.object(mod.activity_window, "is_open", return_value=True), \
              patch.object(mod.sc, "pop_forced_execution_peer", return_value=None), \
              patch.object(mod, "get_arch_tag", return_value="amd64"), \
-             patch.object(mod, "default_initial_balance", return_value=1):
+             patch.object(mod, "default_balance_mu", return_value=1):
             balancer.return_value = iter([])
             with self.assertRaises(Exception) as ctx:
                 mod.launch_service(

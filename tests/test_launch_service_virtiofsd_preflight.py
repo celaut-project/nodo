@@ -61,7 +61,7 @@ class VirtiofsdPreflightTests(unittest.TestCase):
             patched(mod.sc, "internal_instance_exists", return_value=False)
             patched(mod.utils, "get_network_name", return_value="lan")
             patched(mod, "get_arch_tag", return_value="amd64")
-            patched(mod, "default_initial_balance", return_value=1)
+            patched(mod, "default_balance_mu", return_value=1)
             patched(mod, "_client_charge_mu", return_value=1)  # the price is not tested here
             balancer.return_value = iter([(peer, cost) for peer in candidates])
             error = None

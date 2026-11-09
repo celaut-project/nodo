@@ -81,7 +81,6 @@ class QuoteWhileNotExecutingTests(unittest.TestCase):
         with patch.object(cost_mod, "executes_locally", side_effect=lambda: self.executes), \
                 patch.object(cost_mod, "read_service_from_disk", return_value=celaut.Service()) as read, \
                 patch.object(cost_mod, "enforce_network_policy"), \
-                patch.object(cost_mod, "default_initial_balance", return_value=1), \
                 patch.object(cost_mod, "generate_estimated_cost",
                              side_effect=lambda **_: celaut.EstimatedCost()) as price, \
                 patch.object(cost_mod, "get_resource_availability",
@@ -91,8 +90,7 @@ class QuoteWhileNotExecutingTests(unittest.TestCase):
                 patch.object(cost_mod.activity_window, "is_open", return_value=True), \
                 patch.object(cost_mod, "delegation_time_budget", return_value=None), \
                 patch.object(cost_mod.env_manager, "get",
-                             side_effect=lambda k, d=None: self.delegates if k == "network.DELEGATE_EXECUTION" else d), \
-                patch.object(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount()):
+                             side_effect=lambda k, d=None: self.delegates if k == "network.DELEGATE_EXECUTION" else d):
             self.read, self.price, self.room = read, price, room
             return list(it.generate())
 

@@ -6,7 +6,6 @@ from protos.gateway_bee import rpc_output
 from src.utils.tools.query_cache import QueryCache, canonical_key, quote_ttl, with_sorted_hashes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
-from src.manager.manager import default_initial_balance
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.cost_functions.architecture_resources import NOT_EXECUTING_REASON, executes_locally
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
@@ -27,7 +26,7 @@ from src.utils.cost_functions.delegated_quote import (
 )
 from src.utils.cost_functions.delegated_price import covers, own_price
 from src.utils.logger import LOGGER as logger
-from src.utils.utils import get_only_the_ip_from_context, to_amount
+from src.utils.utils import get_only_the_ip_from_context
 
 
 env_manager = ConfigManager()
@@ -131,9 +130,8 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         if not executes_locally():
             return None, Exception(NOT_EXECUTING_REASON)
 
-        # The question as received: the configuration before `_quote` fills in the
-        # default `initial_mu`, and the metadata with its hashes in a fixed order
-        # (the parser collects them in a set).
+        # The question as received: the configuration, and the metadata with its
+        # hashes in a fixed order (the parser collects them in a set).
         key = canonical_key(
             "GetServiceEstimatedCost",
             self.service_hash,
@@ -192,12 +190,10 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         budget = delegation_time_budget(getattr(self, "context", None))
         if budget is None:
             return local_price
-        initial_mu = self._initial_mu(service)
-        if initial_mu is None:
-            return local_price
+        # The question as the client asked it: `initial_mu` does not change a quote
+        # (#636, 9), so the peers are not given a balance.
         configuration = celaut_pb2.Configuration()
         configuration.CopyFrom(self.configuration)
-        configuration.initial_mu.CopyFrom(to_amount(initial_mu))
 
         peer_arch = arch_from_tags(service.container.architecture.tags)
         quotes = peer_round(
@@ -224,31 +220,6 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         if any(covers(own, cost) for cost in quotes.values()):
             return own
         return None
-
-    def _initial_mu(self, service: celaut_pb2.Service) -> Optional[int]:
-        """The balance that the quote asks for, in local MU: the one asked for, or this node's default.
-
-        The cost of a quote is the build plus this balance (#563). It has to be known
-        before the peers can be asked. None if it cannot be known. The default is the
-        balance of the service alone: each quote adds the starts of the children of its
-        ``initial_environment_workload`` to ``cost`` on top of it (#538), so the manifest
-        is not passed.
-        """
-        if self.configuration.HasField("initial_mu") and self.configuration.initial_mu.n:
-            return int(self.configuration.initial_mu.n)
-        try:
-            arch = get_arch_tag(service=service, metadata=self.metadata)
-        except UnsupportedArchitectureException:
-            arch = None
-        try:
-            return int(default_initial_balance(
-                system_resources=service.container.resources.at_init,
-                service_hash=self.service_hash,
-                arch=arch,
-            ))
-        except Exception as e:
-            logger(f"No default deposit for {self.service_hash}, so no peer price is offered: {e}")
-            return None
 
     def _quote(self) -> Tuple[
         celaut_pb2.EstimatedCost, celaut_pb2.Service.Container.Resources, Optional[str],
@@ -289,23 +260,6 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         # before it.
         priced_service = service
         del service
-
-        # Needs the requested resources to price, so it happens here rather than
-        # before the service is read. The balance of the service alone:
-        # `generate_estimated_cost` adds what it pays to start its initial children to
-        # `cost` (#538), as a default start pays it (`launch_service`).
-        if not self.configuration.HasField('initial_mu') or not self.configuration.initial_mu:
-            try:
-                self.configuration.initial_mu.CopyFrom(
-                    to_amount(default_initial_balance(
-                        system_resources=resources.at_init,
-                        service_hash=self.service_hash,
-                        arch=service_arch,
-                    ))
-                )
-            except Exception as e:
-                logger(f"Failed to set initial_mu: {e}")
-                raise Exception(f"Failed to set initial_mu: {e}")
 
         price = generate_estimated_cost(
             metadata=self.metadata,

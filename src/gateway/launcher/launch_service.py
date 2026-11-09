@@ -6,7 +6,7 @@ from src.balancers.execution_balancer.execution_balancer import execution_balanc
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
 from src.database import ledger
-from src.manager.manager import bind_child_token, default_initial_balance, descends_from_dev_client, spend_mu
+from src.manager.manager import bind_child_token, descends_from_dev_client, spend_mu
 from src.utils import activity_window, demand_history, utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
@@ -14,10 +14,12 @@ from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
 from src.utils.cost_functions.architecture_resources import executes_locally
 from src.utils.cost_functions import peer_quotes
-from src.utils.cost_functions.delegated_price import own_price, peer_build_mu
+from src.utils.cost_functions import price_bound
+from src.utils.cost_functions.delegated_price import own_build_of, own_price, peer_build_mu
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
     balance_after_build,
+    default_balance_mu,
     initial_children_mu,
     minimum_runtime_mu,
     start_build_mu,
@@ -101,7 +103,7 @@ def _mu(amount: celaut_pb2.Amount) -> int:
 
 
 def _own_children_mu(service: celaut.Service) -> int:
-    """What the starts of the initial children of the service cost at the price of this node.
+    """The builds of the initial children of the service at the price of this node.
 
     Read once per launch: ``own_price`` puts it in the cost, and ``_delegation_terms``
     takes the same figure out again to get the build of this node alone (#538). A figure
@@ -145,33 +147,46 @@ def _client_charge_mu(peer: str, estimated_cost: celaut_pb2.EstimatedCost,
 
     ``requested`` says whether the father set the amount. If it did, the amount is
     ``configuration.initial_mu`` as it is, and a candidate that it does not fund is
-    skipped (``_funding_failure``). If it did not, the node uses the least amount that
-    starts the service with the default balance: its own price, which is the build plus
-    that balance plus the starts of the initial children (``configuration.initial_mu`` holds the balance that the quotes asked
-    for). It is the same for ``local`` and for a peer (#577): ``own`` is the price of
-    this node, and the quote of a peer is not part of it.
+    skipped (``_funding_failure``). If it did not, the node funds the start with the
+    ``cost`` of its own price (the builds, of the service and of its initial children)
+    plus the default balance, which ``configuration.initial_mu`` holds
+    (``start_funding.default_balance_mu``, #636, 9). It is the same for ``local`` and for
+    a peer (#577): ``own`` is the price of this node, and the quote of a peer is not part
+    of it.
     """
     if requested:
         return _mu(configuration.initial_mu)
-    return from_amount((estimated_cost if peer == 'local' else own).cost)
+    return from_amount((estimated_cost if peer == 'local' else own).cost) \
+        + _mu(configuration.initial_mu)
 
 
 def _delegation_terms(estimated_cost: celaut_pb2.EstimatedCost,
-                      configuration: celaut_pb2.Configuration,
                       own: celaut_pb2.EstimatedCost,
                       own_children_mu: int = 0) -> tuple[int, int]:
     """The build of this node, and what the peer takes before the balance, in local MU.
 
     The first comes out of what the father paid, and the second out of what this node
-    sends the peer. ``configuration.initial_mu`` is the balance that the quotes asked
-    for. Both prices are the build plus it plus the starts of the initial children
-    (#538). This node keeps only its build: ``own_children_mu`` is the figure that its
-    price put in for the children, and those MU go to the peer with the balance. The peer
-    pays the starts of the children itself, so its part is its build and those starts.
+    sends the peer. The ``cost`` of both prices is the build plus the builds of the
+    initial children (#538), with no balance (#636, 9). This node keeps only its build:
+    ``own_children_mu`` is the figure that its price put in for the children, and those
+    MU go to the peer with the balance. The peer builds the children itself, so its part
+    is its whole ``cost``.
     """
-    balance_asked = _mu(configuration.initial_mu)
-    return (peer_build_mu(own, balance_asked + max(int(own_children_mu), 0)),
-            peer_build_mu(estimated_cost, balance_asked))
+    return own_build_of(own, own_children_mu), peer_build_mu(estimated_cost)
+
+
+def _peer_period_mu(estimated_cost: celaut_pb2.EstimatedCost) -> int:
+    """One maintenance period of a peer, as it quoted it, in local MU: the funding sum
+    of one period (``price_bound.funding_sum_mu``) at the bound of its quote, read
+    strictly. 0 for a quote with no ``init_maintenance_cost``."""
+    if not estimated_cost.HasField("init_maintenance_cost"):
+        return 0
+    return price_bound.funding_sum_mu(
+        _mu(estimated_cost.init_maintenance_cost),
+        int(estimated_cost.maintenance_seconds_loop),
+        price_bound.of_quote(estimated_cost, source=" in the quote of a peer"),
+        1,
+    )
 
 
 def _funding_failure(
@@ -213,8 +228,7 @@ def _funding_failure(
         else:
             if own is None:
                 return "this node could not price the service, so no peer is covered"
-            own_build, peer_build = _delegation_terms(
-                estimated_cost, configuration, own, own_children_mu)
+            own_build, peer_build = _delegation_terms(estimated_cost, own, own_children_mu)
             # The balance is what this node sends the peer, and the peer applies its
             # own rule to it.
             balance_mu = balance_after_build(
@@ -224,10 +238,9 @@ def _funding_failure(
             balance_after_build(
                 initial_mu=balance_mu,
                 build_mu=peer_build,
-                # What the peer quoted for one period, at its current price. The peer
-                # checks the worst case of its own bound at the start.
-                minimum_mu=_mu(estimated_cost.init_maintenance_cost)
-                if estimated_cost.HasField("init_maintenance_cost") else 0,
+                # One period as the peer quoted it: the funding sum of one period at
+                # its bound (#636). The peer checks the same sum at the start.
+                minimum_mu=_peer_period_mu(estimated_cost),
             )
     except StartAmountTooSmall as e:
         return str(e)
@@ -301,8 +314,7 @@ def _force_delegate(
     if funding_failure:
         raise Exception(f"force_execution: {funding_failure}")
 
-    own_build_mu, peer_build_value = _delegation_terms(
-        estimated_cost, configuration, own, own_children_mu)
+    own_build_mu, peer_build_value = _delegation_terms(estimated_cost, own, own_children_mu)
     refund_container = []
     start_charge = []
     if not spend_mu(
@@ -414,16 +426,17 @@ def launch_service(
             and int(configuration.initial_mu.n or 0) > 0
 
         if not initial_mu_requested:
-            # Funded for what it asked for, not a flat amount: a 128 MiB instance and an
-            # 8 GiB one no longer start with the same balance. This is the balance that
-            # the quotes ask for, of the service alone. What the father pays is the quote
-            # of the candidate: the build of the candidate plus this balance plus the
-            # starts of the initial children (`_client_charge_mu`, #563, #538).
+            # The default balance (#636, 9): `deposits.DEFAULT_INITIAL_PERIODS` periods
+            # of the resources that it asked for, by the funding sum of the quotes. The
+            # balance of the service alone: each child gets its own default in its own
+            # StartService. What the father pays is the `cost` of the candidate (the
+            # builds) plus this balance (`_client_charge_mu`, #563, #538).
             configuration.initial_mu.CopyFrom(to_amount(
-                default_initial_balance(
+                default_balance_mu(
                     system_resources=service.container.resources.at_init,
                     service_hash=service_id,
                     arch=get_arch_tag(service=service, metadata=metadata),
+                    service=service,
                 )
             ))
 
@@ -455,11 +468,12 @@ def launch_service(
                 f"Unable to launch service {service_id}: {workload_admission_failure}"
             )
 
-        # A father that sets `initial_mu` must give enough for the children of
-        # `initial_environment_workload` (#538): the service pays their `child_start`
-        # out of its balance. Refused now, the start fails at once and charges nothing,
+        # A father that sets `initial_mu` must give enough for the builds of the
+        # children of `initial_environment_workload` (#538): the service pays their
+        # `child_start` out of its balance. Refused now, the start fails at once and charges nothing,
         # instead of a parent that retries the start of its children in a loop (#628).
-        # Without an `initial_mu`, the father pays the quote, which includes them.
+        # Without an `initial_mu`, the father pays the `cost` of the quote, which
+        # includes them, plus the default balance.
         if initial_mu_requested:
             try:
                 funding_arch = get_arch_tag(service=service, metadata=metadata)
@@ -695,7 +709,7 @@ def launch_service(
                 # Delegate the service instance execution.
                 if peer != 'local':
                     own_build_mu, peer_build_value = _delegation_terms(
-                        estimated_cost, configuration, own, own_children_mu)
+                        estimated_cost, own, own_children_mu)
                     instance = delegate_execution(
                         service_id=service_id,
                         peer=peer,

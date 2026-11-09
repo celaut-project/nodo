@@ -22,7 +22,7 @@ from typing import Dict, Mapping, Optional
 import psutil
 
 from protos import celaut_pb2 as celaut
-from src.utils.cost_functions.price_bound import CURRENT, PriceBound, current_bound
+from src.utils.cost_functions.price_bound import PriceBound
 from src.utils.logger import LOGGER as logger
 from src.utils.monetary import (
     SCARCITY_SCALE,
@@ -234,8 +234,7 @@ def maintenance_charge_mu(
     period ``k``, so an interval that spans a change of period is held to the higher
     ceiling. Each resource's multiplier is held to ``launch_bp * (1 + v)^k``. With no
     bound or no launch price, the charge is unbounded. This clamp lives here, and not in
-    the maintenance loop, so that every caller that prices a running instance gets it --
-    see `worst_case_charge_mu` for the quote.
+    the maintenance loop, so that every caller that prices a running instance gets it.
     ``k`` comes from ``PriceBound.period_index``, the function of the funding sum
     (``price_bound.tick_period_index``): a balance funded for ``N`` periods covers the
     ceilings of the first ``N`` ticks (#636, 6).
@@ -270,63 +269,6 @@ def maintenance_charge_mu(
             term = _charge_at(system_resources, seconds, launch, arch, p) * factor
             charge = min(charge, int(term))
     return charge
-
-
-# After this many periods the rest of a worst case is priced at the highest multiplier,
-# so that a tiny period over a long time cannot make the sum slow. It only over-funds.
-_MAX_PERIODS = 10_000
-
-
-def worst_case_charge_mu(
-    system_resources: celaut.Sysresources,
-    seconds: float,
-    scarcity: Optional[Dict[str, float]] = None,
-    arch: Optional[str] = None,
-    bound=CURRENT,
-) -> int:
-    """The most `maintenance_charge_mu` can levy in the first `seconds` of an instance
-    launched now.
-
-    The instance is priced at the launch price of this moment, and then at the ceiling
-    that its bound allows in each period (#636): the seconds of the period ``k`` at
-    ``launch * (1 + v)^k``, per resource, and never above ``SCARCITY_MAX_MULTIPLIER``.
-    When ``T`` is at least ``seconds`` that is just ``launch * (1 + v)``. The initial
-    balance (``INITIAL_RUNTIME_HOURS``) and the least balance of a start (one period)
-    both use this, so they cannot disagree with the ticks that spend the balance.
-
-    ``bound`` is the bound of the launch, read once by the caller
-    (``price_bound.current_bound``); omitted, it is read here. With no bound
-    (``pricing.PRICE_BOUNDED`` false) the node promises no worst case, and this is the
-    charge at the launch price.
-
-    A free node prices at the anchor of a launch while free (1x, ``launch_price_bp``),
-    not at 0 (#636, H). Its ticks charge 0 while it stays free, but when it leaves the
-    free state they charge up to the ceiling over that anchor. A balance of 0 then
-    stopped the instance at its first tick with ``costs.ALLOW_DEBT`` off.
-    """
-    current = scarcity if scarcity is not None else system_scarcity()
-    if bound is CURRENT:
-        bound = current_bound()
-
-    p = prices()
-    launch = launch_price_bp(current)
-    if bound is None or seconds <= 0:
-        return _charge_at(system_resources, seconds, launch, arch, p)
-    top = p.scarcity_max_multiplier * SCARCITY_SCALE
-    total, k, left = 0, 1, float(seconds)
-    while left > 0:
-        bps = {resource: bound.ceiling_bp(launch[resource], k, top) for resource in RESOURCES}
-        last = (bound.period_seconds <= 0 or bound.volatility <= 0 or k >= _MAX_PERIODS
-                or all(bps[resource] >= top for resource in RESOURCES))
-        # The rest is one span when the ceiling does not change any more: one period for
-        # the whole life, no rise, or every resource at the highest multiplier.
-        span = left if last else min(left, float(bound.period_seconds))
-        if last and k >= _MAX_PERIODS:
-            bps = {resource: top for resource in RESOURCES}
-        total += _charge_at(system_resources, span, bps, arch, p)
-        left -= span
-        k += 1
-    return total
 
 
 def launch_charge_mu(
@@ -410,6 +352,6 @@ def build_charge_mu(metadata: celaut.Metadata) -> int:
 
 # There is deliberately no `start_charge_mu`. Starting an instance costs the one-off
 # build and nothing else: the runtime window is priced exactly once, as the balance the
-# instance starts with (`manager.default_initial_balance`), which the maintenance ticks
-# then spend. Charging occupancy for that same window here as well billed it twice --
+# instance starts with (`initial_mu` less the build, or `start_funding.default_balance_mu`
+# for a start with none), which the maintenance ticks then spend. Charging occupancy for that same window here as well billed it twice --
 # the client paid for two hours and got one. See compute_start_service_cost.

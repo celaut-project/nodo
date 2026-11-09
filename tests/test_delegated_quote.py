@@ -287,7 +287,6 @@ class QuoteTests(_FreshCache, unittest.TestCase):
             patched(cost_mod, "enforce_hidden_mode",
                     side_effect=HiddenModeRejection(rejection) if hidden_rejection else None)
             patched(cost_mod, "get_arch_tag", return_value="amd64")
-            patched(cost_mod, "default_initial_balance", return_value=1_000)
             patched(cost_mod, "generate_estimated_cost", return_value=local or price(1_300))
             patched(cost_mod, "get_resource_availability", return_value={"can_execute": True})
             patched(cost_mod.activity_window, "is_open", return_value=True)
@@ -410,7 +409,7 @@ class LaunchTests(_FreshCache, unittest.TestCase):
                 own_children=0):
         """Launch with ``candidates``. ``initial_mu`` None is a request with no amount.
 
-        The default balance that the quotes ask for is 1 000 MU. ``build_mu`` and
+        The default balance is 1 000 MU. ``build_mu`` and
         ``minimum_mu`` are what the local node would take for the build and for one
         maintenance period.
         """
@@ -446,7 +445,7 @@ class LaunchTests(_FreshCache, unittest.TestCase):
             patched(mod.sc, "internal_instance_exists", return_value=False)
             patched(mod.utils, "get_network_name", return_value="lan")
             patched(mod, "get_arch_tag", return_value="amd64")
-            patched(mod, "default_initial_balance", return_value=1_000)
+            patched(mod, "default_balance_mu", return_value=1_000)
             balancer.return_value = iter(candidates)
             error = None
             try:
@@ -458,9 +457,9 @@ class LaunchTests(_FreshCache, unittest.TestCase):
             return SimpleNamespace(error=error, spend=spend, delegate=delegate, local=local)
 
     def test_the_client_pays_its_initial_mu_and_the_build_of_this_node_comes_out_of_it(self):
-        # The quotes ask for a balance of 1 500, and the peer quotes it with a build of
-        # 200: 1 700. This node quotes it with a build of 40: 1 540.
-        r = self._launch([("peer-a", price(1_700))], initial_mu=1_500, own=price(1_540))
+        # `cost` is the builds, no balance (#636, 9): the peer quotes a build of 200, and
+        # this node a build of 40.
+        r = self._launch([("peer-a", price(200))], initial_mu=1_500, own=price(40))
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_500)
         kwargs = r.delegate.call_args.kwargs
@@ -469,37 +468,38 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         self.assertEqual(kwargs["peer_build_mu"], 200)
 
     def test_with_no_amount_the_client_pays_the_price_of_this_node_and_not_the_peer(self):
-        # The peer quotes 1 200, and this node advertises 1 300 for the same service.
-        r = self._launch([("peer-a", price(1_200))])
+        # The peer quotes 200, and this node advertises 300 for the same service. With no
+        # amount, the client pays the cost of this node plus the default balance, 1 000.
+        r = self._launch([("peer-a", price(200))], own=price(300))
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_300)
         kwargs = r.delegate.call_args.kwargs
         self.assertEqual(int(kwargs["config"].initial_mu.n), 1_300)
-        # The build of the peer is what its quote has above the default balance, 1 000.
+        # The build of the peer is its whole cost.
         self.assertEqual(kwargs["peer_build_mu"], 200)
 
     def test_the_initial_children_are_paid_once_and_go_to_the_peer(self):
-        # #538: both prices have the children in `cost`. This node advertises a build of
-        # 40 and children of 300 above the default balance of 1 000; the peer quotes a
-        # build of 20 and children of 250 (1 270, so this node covers it).
-        r = self._launch([("peer-a", price(1_270))], own=price(1_340), own_children=300)
+        # #538: both prices have the builds of the children in `cost`. This node
+        # advertises a build of 40 and children of 300; the peer quotes a build of 20 and
+        # children of 250 (270, so this node covers it).
+        r = self._launch([("peer-a", price(270))], own=price(340), own_children=300)
         self.assertIsNone(r.error)
-        # The father pays the price of this node once: no second figure for the children.
+        # The father pays the cost of this node once, plus the default balance.
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_340)
         kwargs = r.delegate.call_args.kwargs
         self.assertEqual(int(kwargs["config"].initial_mu.n), 1_340)
         # This node keeps its build alone; the balance and the children go to the peer,
-        # which takes its build and pays the starts of its children.
+        # which takes its build and the builds of its children.
         self.assertEqual(kwargs["own_build_mu"], 40)
         self.assertEqual(kwargs["peer_build_mu"], 270)
 
     def test_a_client_that_sets_its_amount_is_never_charged_more_than_it_set(self):
-        r = self._launch([("peer-a", price(1_800))], initial_mu=1_500)
+        r = self._launch([("peer-a", price(800))], initial_mu=1_500, own=price(300))
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_500)
 
-    def test_the_local_node_is_charged_its_quote_when_there_is_no_amount(self):
-        r = self._launch([("local", price(1_300))])
+    def test_the_local_node_is_charged_its_quote_and_the_default_balance_with_no_amount(self):
+        r = self._launch([("local", price(300))])
         self.assertIsNone(r.error)
         self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 1_300)
 
@@ -523,11 +523,12 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         r.spend.assert_not_called()
 
     def test_a_peer_that_the_amount_does_not_fund_is_skipped_and_the_next_one_runs_it(self):
-        # After the build of 200 of peer-a, 30 MU is left. One period costs 50. The quote
-        # of peer-b has no build: 230 MU are left.
-        cheap = price(430, init=50)
-        free = price(230, init=50)
-        r = self._launch([("peer-a", cheap), ("peer-b", free)], initial_mu=230, own=price(230))
+        # After the build of 200 of peer-a, 30 MU is left. One period costs 50 (the sum of
+        # one period of an unbounded quote). The quote of peer-b has no build: 230 MU are
+        # left.
+        cheap = price(200, init=50)
+        free = price(0, init=50)
+        r = self._launch([("peer-a", cheap), ("peer-b", free)], initial_mu=230, own=price(0))
         self.assertIsNone(r.error)
         self.assertEqual(r.delegate.call_args.kwargs["peer"], "peer-b")
         self.assertEqual(r.spend.call_count, 1)

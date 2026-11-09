@@ -390,16 +390,26 @@ def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
     # Both divide a deposit, so neither may be zero.
     _require_share(deposits, "deposits", "MAX_FEE_OVERHEAD", strictly_positive=True)
     _require_share(deposits, "deposits", "REFILL_BELOW", strictly_positive=True)
+    # Removed (#636, 9): EstimatedCost.cost has no balance any more, and a start with
+    # no initial_mu is funded for a number of maintenance periods. A config that still
+    # sets the hours would silently fund a different runtime.
     if "INITIAL_RUNTIME_HOURS" in deposits:
-        try:
-            hours = float(deposits["INITIAL_RUNTIME_HOURS"])
-        except (TypeError, ValueError) as exc:
+        raise ConfigValidationError(
+            "deposits.INITIAL_RUNTIME_HOURS was removed (#636). Use "
+            "deposits.DEFAULT_INITIAL_PERIODS: the number of maintenance periods "
+            "(MANAGER_ITERATION_TIME) that the default balance funds. 1.0 hour at a 10 s "
+            "period is 360."
+        )
+    if "DEFAULT_INITIAL_PERIODS" in deposits:
+        periods = deposits["DEFAULT_INITIAL_PERIODS"]
+        if isinstance(periods, bool) or not isinstance(periods, int):
             raise ConfigValidationError(
-                f"deposits.INITIAL_RUNTIME_HOURS must be a number, got {deposits['INITIAL_RUNTIME_HOURS']!r}"
-            ) from exc
-        if hours < 0:
+                f"deposits.DEFAULT_INITIAL_PERIODS must be a whole number, got {periods!r}"
+            )
+        if periods < 1:
             raise ConfigValidationError(
-                f"deposits.INITIAL_RUNTIME_HOURS must not be negative, got {hours}"
+                f"deposits.DEFAULT_INITIAL_PERIODS must be at least 1, got {periods}. The "
+                "default balance funds at least one maintenance period."
             )
 
     rate = _validate_payment_rate(config)

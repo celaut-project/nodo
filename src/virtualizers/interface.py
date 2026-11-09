@@ -110,7 +110,7 @@ def resolve_billable_resources(
     The counterpart to ``execute``'s ``resolved_resources``, for callers that have to
     put a price on a manifest before any instance exists: quotes
     (``GetServiceEstimatedCost``) and the balance a new instance is funded with
-    (``manager.default_initial_balance``). Both resolve the manifest the way
+    (``start_funding.default_balance_mu``). Both resolve the manifest the way
     ``execute`` resolves a guest, so what is quoted is what the maintenance tick then
     charges the row -- including for a service that asks for less than a floor: no CPU
     at all, sub-MIN_MEM_MIB RAM, a rootfs under MIN_ROOTFS_BYTES.

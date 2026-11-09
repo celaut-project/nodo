@@ -373,7 +373,7 @@ class LaunchPlacementTests(unittest.TestCase):
             "_detect_local_preflight_failure": None,
             "descends_from_dev_client": True,
             "get_arch_tag": "amd64",
-            "default_initial_balance": 1,
+            "default_balance_mu": 1,
             # Pricing is not tested here: what funds a start has its own tests (#563).
             "_funding_failure": None,
             "_delegation_terms": (0, 0),

@@ -341,31 +341,31 @@ class PerResourcePricingTests(unittest.TestCase):
 class StartCostTests(unittest.TestCase):
     """What starting an instance costs, and what the client gets for it."""
 
-    def _cost(self, initial_balance_mu: int, build_mu: int = 10_000_000,
-              free: bool = False) -> int:
+    def _cost(self, build_mu: int = 10_000_000, free: bool = False) -> int:
         from src.utils.cost_functions import general_cost_functions as rates
+        from src.utils.cost_functions import start_funding
 
-        # Both patched in the namespace that calls them: `general_cost_functions` binds
-        # these at import, so patching `execution_cost` would miss it.
+        # Both patched in the namespace that calls them: `start_funding` binds these at
+        # import, so patching `execution_cost` would miss it.
         #
         # `is_free` is stubbed rather than driven through a threshold because it samples
         # the real machine when given no scarcity reading -- a load-dependent test would
         # pass or fail with whatever else is running. What the free tier does to a charge
         # is covered against explicit readings in FreeTierTests; what matters here is
         # only that the start cost is behind that guard at all.
-        with patch.object(rates, "build_charge_mu", return_value=build_mu), \
-             patch.object(rates, "is_free", return_value=free):
-            return rates.compute_start_service_cost(
-                metadata=celaut.Metadata(), initial_balance_mu=initial_balance_mu
-            )
+        with patch.object(start_funding, "build_charge_mu", return_value=build_mu), \
+             patch.object(start_funding, "is_free", return_value=free):
+            return rates.compute_start_service_cost(metadata=celaut.Metadata())
 
     def test_the_runtime_window_is_charged_exactly_once(self):
-        """It used to be charged twice.
+        """It used to be charged twice, and then the balance was in `cost` (#636, 9).
 
         The start charge added `INITIAL_RUNTIME_HOURS` of occupancy, and the instance was
         *also* funded with a balance derived from the same window -- so the client paid
-        for two hours and got one, with the difference buying nothing. Everything charged
-        here must either buy the build or become the instance's balance.
+        for two hours and got one. Then `cost` held the balance of that window, and the
+        funding sum of the client added the periods on top of it: the same hours again.
+        Now `cost` buys the build only, and the window is the balance that the client
+        adds for the periods that it chooses.
         """
         with _config():
             window_mu = execution_cost.maintenance_charge_mu(
@@ -373,16 +373,16 @@ class StartCostTests(unittest.TestCase):
                 seconds=3600,
                 scarcity=IDLE,
             )
-            cost = self._cost(initial_balance_mu=window_mu)
+            cost = self._cost()
 
         self.assertEqual(window_mu, 5_250_000)  # an hour of the documented instance
-        self.assertEqual(cost, 10_000_000 + 5_250_000)
+        self.assertEqual(cost, 10_000_000)
 
     def test_a_free_node_charges_no_build_to_start(self):
-        # The balance is still asked for (#636, H): the ticks charge nothing while the
-        # node is free, and the balance pays them when it stops being free.
+        # 2 (#636): no special case. The cost is 0, and the funding sum asks for the
+        # balance as for any start.
         with _config():
-            self.assertEqual(self._cost(initial_balance_mu=5_250_000, free=True), 5_250_000)
+            self.assertEqual(self._cost(free=True), 0)
 
 
 class ScarcityTests(unittest.TestCase):

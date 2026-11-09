@@ -23,14 +23,15 @@ class ForceDelegateTests(unittest.TestCase):
     def setUp(self):
         self.service = celaut.Service()
         self.metadata = celaut.Metadata()
-        # The quote asked for a balance of 1 000 MU, and the peer quoted a build of 100 on it.
+        # The father sends 1 000 MU, and the peer quoted a build of 100: `cost` is the
+        # builds, no balance (#636, 9).
         self.configuration = celaut.Configuration()
         self.configuration.initial_mu.n = "1000"
         self.cost = celaut.EstimatedCost()
-        self.cost.cost.n = "1100"
+        self.cost.cost.n = "100"
         # The price of this node has its own tests: here it has no build.
         own = patch.object(launch_service_mod, "_own_price",
-                           side_effect=lambda *_: celaut.EstimatedCost(cost=self.configuration.initial_mu))
+                           side_effect=lambda *_: celaut.EstimatedCost(cost=celaut.Amount(n="0")))
         own.start()
         self.addCleanup(own.stop)
 
@@ -128,7 +129,7 @@ class ForceDelegateTests(unittest.TestCase):
             launch_service_mod.sc, "internal_instance_exists", return_value=False
         ), patch.object(
             launch_service_mod, "_own_price",
-            return_value=celaut.EstimatedCost(cost=celaut.Amount(n="1040")),
+            return_value=celaut.EstimatedCost(cost=celaut.Amount(n="40")),
         ):
             self._call()
 
@@ -140,7 +141,7 @@ class ForceDelegateTests(unittest.TestCase):
 
     def test_an_amount_that_does_not_fund_the_peer_charges_nothing(self):
         self.configuration.initial_mu.n = "50"
-        self.cost.cost.n = "150"
+        self.cost.cost.n = "100"
         self.cost.init_maintenance_cost.n = "60"
         with patch.object(launch_service_mod.sc, "peer_exists", return_value=True), patch.object(
             launch_service_mod, "service_requires_parent_colocation", return_value=False
