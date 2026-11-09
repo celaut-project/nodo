@@ -70,10 +70,15 @@ nodo estimate my-solver
 
 ```
 Execution feasibility: YES
-Estimated cost:
-  initial:      1.20e+08
-  maintenance:  3.00e+06 / iteration
+Estimated costs:
+- To start (initial_mu):    18609814 MU
+- Maintenance, as started:  4335.48K MU per hour
+- Maintenance, at its most: 8609.4K MU per hour
+- Charged every:            10 seconds
 ```
+
+For a service that declares `initial_environment_workload`, "To start" includes the starts
+of its initial children: a start with no `initial_mu` pays it (see `docs/PRICING.md`).
 
 If it prints `Execution feasibility: NO`, the `reason` line names the failing guard
 (usually `resources.at_most.mem_limit` vs the node's memory pool). Fix the service

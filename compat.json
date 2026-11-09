@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "7c22a1d431bf623548f66aed787446bb458b11e999428e546244188d4da674b9",
+  "celaut_proto": "a3f54f06711fca6554dc1ca288e58db412bce4c5772bba1f581bed06a071814f",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.ON_CLOSE",
@@ -338,6 +338,7 @@
     "virtualizers.qemu.INITRAMFS_PATHS.linux/arm64",
     "virtualizers.qemu.KERNEL_PATHS.linux/amd64",
     "virtualizers.qemu.KERNEL_PATHS.linux/arm64",
+    "workload_admission.ON_UNDERFUNDED",
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],

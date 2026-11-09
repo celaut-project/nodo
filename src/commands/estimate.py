@@ -42,7 +42,8 @@ def estimate(service: str) -> None:
     # service (#563). It is the build plus the balance that the instance has after it.
     # Asking with the throwaway balance would report that balance as the cost. Left
     # unset, the node funds the quote with its own default (the requested resources for
-    # `deposits.INITIAL_RUNTIME_HOURS`), which is what a real launch pays.
+    # `deposits.INITIAL_RUNTIME_HOURS`). "To start" includes the starts of the initial
+    # children of the service (#538): a real launch with no `initial_mu` pays it.
     configuration = celaut_pb2.Configuration()
 
     channel = local_channel()

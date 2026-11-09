@@ -425,17 +425,28 @@ The `service.json` file defines **runtime metadata** for the service: its archit
             "prose": "Public IPv4 network access"
         }
     ],
-    "possible_environment_workload": [
+    "initial_environment_workload": [
         {
-            "workloads": [
+            "any_of": [
                 {
-                    "count": 2,
-                    "resources": { "mem_limit": 536870912 },
-                    "dependency": {
-                        "hash": [
-                            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                        ]
-                    }
+                    "workloads": [
+                        {
+                            "count": 2,
+                            "dependency": {
+                                "hash": [
+                                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                                ],
+                                "service": {
+                                    "container": {
+                                        "resources": {
+                                            "at_init": { "mem_limit": 268435456 },
+                                            "at_most": { "mem_limit": 536870912 }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
                 }
             ]
         }
@@ -751,18 +762,31 @@ node would refuse.
 
 ---
 
-#### `possible_environment_workload`
-- **Type:** `array` of objects
+#### `initial_environment_workload` and `possible_environment_workload`
+- **Type:** `array` of clauses
 - **Required:** No
-- **Description:** Declares the **worst-case descendant workloads** the service may request during its lifetime (a service can spawn child services locally or on other peers). It exists for scheduling admission decisions — *can the network satisfy any execution this service could trigger?* Unlike `resources` (this instance's own needs), `possible_environment_workload` describes its **descendants**. Serialized directly to `Service.possible_environment_workload`, outside `Service.Container`.
-- Each array entry is **one independent concurrent execution scenario**. Scenarios are **not cumulative** and imply **no temporal ordering**; a scheduler only needs to check whether each scenario, in isolation, could be satisfied.
-- Each scenario has a `workloads` array; each item groups identical concurrent descendants:
+- **Description:** Declare the **descendant workloads** of the service: the instances that it starts, locally or on other peers. Unlike `resources` (this instance's own needs), these describe its **descendants**. Serialized directly to the `Service` fields of the same names, outside `Service.Container`.
+  - `initial_environment_workload` is the load that the service **needs to start**. It is in the admission and in the cost (`EstimatedCost.cost` includes the starts of these children).
+  - `possible_environment_workload` is the load that the service **can ask for later**. It is in the admission only: *will it fit, at any time and at any cost?* It has no cost.
+- Both fields have one shape, in **conjunctive normal form** over groups (#538):
+  - The field is an **AND** of clauses. Every clause must fit.
+  - A clause is `{"any_of": [group, ...]}`: an **OR** of groups. One group is enough. The service chooses the group at run time.
+  - A group is `{"workloads": [workload, ...]}`: an **AND** of workloads that run at the same time.
+  - A workload is `count` concurrent instances of one dependency:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `count` | int | `1` | Number of concurrent descendant instances in this group |
-| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit — plus an optional [`benchmark`](#benchmark)) |
-| `dependency` | object or `null` | omitted | Optional identity, embedded specification, and availability information for the descendant service |
+| `count` | int | `1` | Number of concurrent descendant instances of this workload |
+| `dependency` | object or `null` | omitted | The descendant service: its identity, a full or partial specification, and where it is |
+
+A workload has **no `resources` field**. Its resources are the ones of its dependency service,
+in `dependency.service.container.resources`: `at_init` for the start (its
+[`benchmark`](#benchmark) is the minimum score for each core) and `at_most` for the limit
+(`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds;
+`0` = no limit). The `service` can be partial: it can carry only the resources and the
+architecture. **A workload with no resources is always satisfiable.** The old shape (a list of
+scenarios with `workloads`, and `workloads[].resources`) is refused with a message that says
+where the field went.
 
 ##### `workloads[].dependency`
 
@@ -780,44 +804,52 @@ one `hash` or an embedded `service`:
 The booleans are independent: a service may be embedded, stored on the filesystem, both, or
 neither.
 
-At launch, every scenario's workload groups that declare `resources` are checked for
-existence — is there a place, right now, that could run one instance shaped like this? — using
-the same admission gate a service's own `resources.at_most` goes through: first locally, then,
-if `network.DELEGATE_EXECUTION` is on, by asking known peers (`GetResourceAvailability`). A
-service is refused if any group has nowhere that could take it. Every limit the group declares
-is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
-`cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
-time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
-10–1000 range cgroups accept. A group's `benchmark` is checked too, as the minimum it is:
-against the scores of whichever node is asked, for the group's architecture — the embedded
-dependency service's, or the node's native one for a resource-only group.
+**Admission.** At launch, the node checks both fields:
 
-This is an existence check, not a capacity reservation: it does not prove `count` concurrent
-instances of a group could all run at once, locally or spread across peers, and it does not
-hold the capacity it found for later — by the time the service actually spawns that
-descendant, the answer could have changed.
+- A workload fits if there is a place, right now, that could run one instance of its shape —
+  the limits of `at_most` (of `at_init` when the service gives no `at_most`), the minimum of
+  `at_init.benchmark`, and the architecture of `service.container.architecture` (the native one
+  of the node asked when it is empty). `at_most.benchmark` has no meaning and is ignored. The
+  node uses the same admission gate a service's own `resources.at_most` goes through: first
+  locally, then, if `network.DELEGATE_EXECUTION` is on, by asking known peers
+  (`GetResourceAvailability`). Every limit is checked, not just memory: `mem_limit` and
+  `disk_space` against what is free right now, `cpu_quota`/`cpu_period` against how many
+  cores the host has at all (a quota is a share of time, so a momentary spike is not a reason
+  to refuse), and `blkio_weight` against the 10–1000 range cgroups accept.
+- A group fits if all its workloads fit.
+- A clause fits if at least one of its groups fits. The check stops at the first group that fits.
+- The service is admitted if all clauses of both fields fit.
 
-The declaration also **funds** the descendants. A service pays for the instances that it
-starts out of its own balance, so the balance that a start gives it by default
-(`manager.default_initial_balance`, and so `EstimatedCost.cost`) covers the dearest scenario:
-for each group, the runtime of `count` instances for the same `deposits.INITIAL_RUNTIME_HOURS`
-as the service itself, plus one build for the group (none if `dependency.hash` names a service
-that is built on the node). Scenarios do not add up. A request with its own `initial_mu` is
-not changed. See [`PRICING.md`](PRICING.md#starting-an-instance).
+This is an existence check, not a capacity reservation: it does not prove that `count`
+concurrent instances, or the workloads of one group, could all run at once, locally or spread
+across peers, and it does not hold the capacity it found for later — by the time the service
+actually spawns that descendant, the answer could have changed.
 
-Two settings under `workload_admission` in `config.yaml` govern it. `POLICY` decides how much
-is probed — `fail_fast` (default) stops at the first group that fits nowhere, `full` probes
-all of them so the error names each one — and never changes *what* is admitted; every group
-must fit either way. `ON_UNSATISFIABLE` decides what a group that fits nowhere means:
-`reject` (default) refuses the launch, `warn` logs it and launches anyway, for an operator
-who would rather risk it than lose a launch to a reading taken at a busy instant.
+**Cost.** Only `initial_environment_workload` has a cost. A service pays the `child_start` of
+each child out of its own balance, so the `cost` of `GetServiceEstimatedCost` includes the
+starts of the initial children: for each workload, `count` times the build of the child
+(0 when the workload names no service — neither a `hash` nor a complete `service` — or when it
+is built on the node) plus the default balance of the node for the `at_init` of the child. A
+group adds up its workloads, a clause costs its dearest group, and the clauses add up.
+A start with no `initial_mu` pays it; a start whose `initial_mu` cannot pay it is refused (`workload_admission.ON_UNDERFUNDED`). Declare the
+resources of each initial child: a child with no resources is quoted at the floors of the node,
+which is too little for a real service. See [`PRICING.md`](PRICING.md#starting-an-instance).
 
-**Hash-only dependency — resolve by content identity:**
+Three settings under `workload_admission` in `config.yaml` govern it. `POLICY` decides how much
+is probed — `fail_fast` (default) stops at the first clause that fits nowhere, `full` probes
+every workload so the error names each one — and never changes *what* is admitted.
+`ON_UNSATISFIABLE` decides what a clause that fits nowhere means: `reject` (default) refuses
+the launch, `warn` logs it and launches anyway, for an operator who would rather risk it than
+lose a launch to a reading taken at a busy instant. `ON_UNDERFUNDED` decides what a start
+means whose `initial_mu` cannot pay the initial children: `reject` (default) or `warn`.
+
+The examples below are single workloads; put them in `{"any_of": [{"workloads": [...]}]}`.
+
+**Hash-only dependency — resolve by content identity** (no resources: always satisfiable, and quoted at the floors):
 
 ```json
 {
     "count": 1,
-    "resources": { "mem_limit": 536870912 },
     "dependency": {
         "hash": [
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -831,7 +863,6 @@ who would rather risk it than lose a launch to a reading taken at a busy instant
 ```json
 {
     "count": 1,
-    "resources": { "mem_limit": 536870912 },
     "dependency": {
         "hash": [
             { "type": "sha3_256", "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
@@ -846,11 +877,11 @@ who would rather risk it than lose a launch to a reading taken at a busy instant
 ```json
 {
     "count": 1,
-    "resources": { "mem_limit": 536870912 },
     "dependency": {
         "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
         "service": {
             "container": {
+                "architecture": { "tags": ["linux/amd64"] },
                 "resources": {
                     "at_init": { "mem_limit": 536870912 },
                     "at_most": { "mem_limit": 1073741824 }
@@ -858,11 +889,18 @@ who would rather risk it than lose a launch to a reading taken at a busy instant
             },
             "possible_environment_workload": [
                 {
-                    "workloads": [
+                    "any_of": [
                         {
-                            "count": 2,
-                            "resources": { "mem_limit": 268435456 },
-                            "dependency": null
+                            "workloads": [
+                                {
+                                    "count": 2,
+                                    "dependency": {
+                                        "service": {
+                                            "container": { "resources": { "at_most": { "mem_limit": 268435456 } } }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     ]
                 }
@@ -878,7 +916,6 @@ who would rather risk it than lose a launch to a reading taken at a busy instant
 ```json
 {
     "count": 1,
-    "resources": { "mem_limit": 536870912 },
     "dependency": {
         "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"],
         "service": {
@@ -903,43 +940,35 @@ The special `dependency.hash` values are hexadecimal for operator convenience. O
 protobuf `bytes` fields inside `dependency.service` (such as `container.filesystem`) use
 standard protobuf JSON base64 encoding.
 
-**Example — two independent scenarios (`2×5 GB + 1×40 GB`, or `4×16 GB`):**
+**Example — `(G1 or G2) and G3` at the start.** `G1` = one instance of 3 GiB and one of 4 GiB,
+`G2` = two instances of 1 GiB and 4 vCPU, `G3` = four instances of 2 GiB and 2 vCPU. Resources
+are shortened to `at_most`. The service is admitted when `G3` fits and `G1` or `G2` fits. The
+starts of its children in `cost` are the dearer of `G1` and `G2`, plus `G3` (priced from `at_init`; with
+`at_most` only, as here, each child is priced at the floors of the node).
+
 ```json
 {
-    "possible_environment_workload": [
-        {
-            "workloads": [
-                {
-                    "count": 2,
-                    "resources": { "mem_limit": 5000000000 },
-                    "dependency": {
-                        "hash": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
-                    }
-                },
-                {
-                    "count": 1,
-                    "resources": { "mem_limit": 40000000000 },
-                    "dependency": {
-                        "service": {
-                            "container": {
-                                "resources": {
-                                    "at_init": { "mem_limit": 40000000000 },
-                                    "at_most": { "mem_limit": 48000000000 }
-                                }
-                            }
-                        }
-                    }
-                }
-            ]
-        },
-        {
-            "workloads": [
-                { "count": 4, "resources": { "mem_limit": 16000000000 } }
-            ]
-        }
+    "initial_environment_workload": [
+        { "any_of": [
+            { "workloads": [
+                { "count": 1, "dependency": { "service": { "container": { "resources": { "at_most": { "mem_limit": 3221225472 } } } } } },
+                { "count": 1, "dependency": { "service": { "container": { "resources": { "at_most": { "mem_limit": 4294967296 } } } } } }
+            ] },
+            { "workloads": [
+                { "count": 2, "dependency": { "service": { "container": { "resources": { "at_most": { "mem_limit": 1073741824, "cpu_period": 100000, "cpu_quota": 400000 } } } } } }
+            ] }
+        ] },
+        { "any_of": [
+            { "workloads": [
+                { "count": 4, "dependency": { "service": { "container": { "resources": { "at_most": { "mem_limit": 2147483648, "cpu_period": 100000, "cpu_quota": 200000 } } } } } }
+            ] }
+        ] }
     ]
 }
 ```
+
+A service whose children only fit one at a time puts each child in its own group of one clause
+(OR); a service that needs them all at the same time puts them in one group (AND).
 
 ---
 

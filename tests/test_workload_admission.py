@@ -1,5 +1,6 @@
-"""Unit tests for the possible_environment_workload admission check -- the
-scheduler side of the declaration issue #163 specified and the packer serializes.
+"""Unit tests for the descendant workload admission check -- the scheduler side of
+the declaration issues #163 and #538 specified and the packer serializes. The
+declaration is CNF: an AND of clauses, each an OR of groups, each an AND of workloads.
 
 ``src/utils/cost_functions/workload_admission.py`` only touches bee_rpc/grpc
 inside ``check_resource_availability_on_peer`` (imported lazily there), so the
@@ -82,13 +83,22 @@ def _config(**overrides):
     )
 
 
+def _add_workload(group: celaut.Service.Group, count: int = 1, **limits) -> celaut.Service.Workload:
+    """A workload of ``group`` whose dependency service is limited to ``limits`` (at_most)."""
+    workload = group.workloads.add()
+    workload.count = count
+    at_most = workload.dependency.service.container.resources.at_most
+    for name, value in limits.items():
+        setattr(at_most, name, value)
+    return workload
+
+
 def _two_unsatisfiable_groups() -> celaut.Service:
+    """One clause with one group of two workloads (the AND of before #538)."""
     service = celaut.Service()
-    scenario = service.possible_environment_workload.add()
-    scenario.workloads.add().count = 1
-    scenario.workloads.add().count = 1
-    scenario.workloads[0].resources.mem_limit = 111
-    scenario.workloads[1].resources.mem_limit = 222
+    group = service.possible_environment_workload.add().any_of.add()
+    _add_workload(group, mem_limit=111)
+    _add_workload(group, mem_limit=222)
     return service
 
 
@@ -210,9 +220,7 @@ class OnUnsatisfiablePolicyTests(unittest.TestCase):
 
 def _service_with_workload(count: int, mem_limit: int) -> celaut.Service:
     service = celaut.Service()
-    workload = service.possible_environment_workload.add().workloads.add()
-    workload.count = count
-    workload.resources.mem_limit = mem_limit
+    _add_workload(service.possible_environment_workload.add().any_of.add(), count, mem_limit=mem_limit)
     return service
 
 
@@ -222,7 +230,18 @@ class EvaluatePossibleEnvironmentWorkloadsTests(unittest.TestCase):
 
     def test_workload_with_no_resources_field_is_trivially_admitted(self):
         service = celaut.Service()
-        service.possible_environment_workload.add().workloads.add().count = 3
+        group = service.possible_environment_workload.add().any_of.add()
+        group.workloads.add().count = 3
+        hash_only = group.workloads.add()
+        hash_only.count = 1
+        hash_only.dependency.hash.add(value=b"\x11" * 32)
+        with patch.object(wa, "_workload_group_is_satisfiable") as probe:
+            self.assertIsNone(evaluate_possible_environment_workloads(service))
+        probe.assert_not_called()
+
+    def test_a_clause_with_no_group_declares_nothing(self):
+        service = celaut.Service()
+        service.initial_environment_workload.add()
         self.assertIsNone(evaluate_possible_environment_workloads(service))
 
     def test_zero_count_workload_is_trivially_admitted(self):
@@ -293,15 +312,13 @@ class EvaluatePossibleEnvironmentWorkloadsTests(unittest.TestCase):
         "src.utils.cost_functions.workload_admission._local_resource_availability",
         return_value={"can_execute": True, "reason": ""},
     )
-    def test_scenarios_are_checked_independently_not_summed(self, mock_availability):
-        # Two scenarios, each individually satisfiable (mocked can_execute=True
-        # for any single group) -- this must not be rejected as if the demands
-        # were cumulative across scenarios.
+    def test_clauses_are_checked_by_existence_not_summed(self, mock_availability):
+        # Two clauses, each individually satisfiable (mocked can_execute=True for any
+        # single workload) -- this must not be rejected as if the demands were
+        # added up across clauses.
         service = celaut.Service()
-        service.possible_environment_workload.add().workloads.add().count = 1
-        service.possible_environment_workload.add().workloads.add().count = 1
-        service.possible_environment_workload[0].workloads[0].resources.mem_limit = 10**9
-        service.possible_environment_workload[1].workloads[0].resources.mem_limit = 10**9
+        _add_workload(service.possible_environment_workload.add().any_of.add(), mem_limit=10**9)
+        _add_workload(service.possible_environment_workload.add().any_of.add(), mem_limit=10**9)
         self.assertIsNone(evaluate_possible_environment_workloads(service))
 
 
@@ -317,13 +334,11 @@ class RefusalMessageTests(unittest.TestCase):
     @_NO_PEER_TAKES_IT
     def test_every_declared_limit_is_named(self, peer_check, peers, local):
         service = celaut.Service()
-        workload = service.possible_environment_workload.add().workloads.add()
-        workload.count = 3
-        workload.resources.mem_limit = 1024
-        workload.resources.disk_space = 2048
-        workload.resources.cpu_quota = 200000
-        workload.resources.cpu_period = 50000
-        workload.resources.blkio_weight = 500
+        _add_workload(
+            service.possible_environment_workload.add().any_of.add(), 3,
+            mem_limit=1024, disk_space=2048, cpu_quota=200000, cpu_period=50000,
+            blkio_weight=500,
+        )
 
         with _config():
             failure = evaluate_possible_environment_workloads(service)
@@ -343,9 +358,7 @@ class RefusalMessageTests(unittest.TestCase):
         # wrong with this group: a fixed memory/disk/cpu list describes it entirely
         # by fields that are fine.
         service = celaut.Service()
-        workload = service.possible_environment_workload.add().workloads.add()
-        workload.count = 1
-        workload.resources.blkio_weight = 5
+        _add_workload(service.possible_environment_workload.add().any_of.add(), blkio_weight=5)
 
         with _config():
             failure = evaluate_possible_environment_workloads(service)
@@ -357,9 +370,7 @@ class RefusalMessageTests(unittest.TestCase):
     @_NO_PEER_TAKES_IT
     def test_undeclared_limits_are_left_out_rather_than_reported_as_zero(self, peer_check, peers, local):
         service = celaut.Service()
-        workload = service.possible_environment_workload.add().workloads.add()
-        workload.count = 1
-        workload.resources.mem_limit = 1024
+        _add_workload(service.possible_environment_workload.add().any_of.add(), mem_limit=1024)
 
         with _config():
             failure = evaluate_possible_environment_workloads(service)
@@ -369,6 +380,129 @@ class RefusalMessageTests(unittest.TestCase):
         # past to find the one that matters.
         for undeclared in ("disk_space", "cpu_quota", "cpu_period", "blkio_weight"):
             self.assertNotIn(undeclared, failure)
+
+
+GIB = 1 << 30
+
+
+def _issue_example() -> celaut.Service:
+    """`(G1 or G2) and G3` at the start, the example of #538.
+
+    G1 = one instance of 3 GiB and one of 4 GiB, G2 = two instances of 1 GiB and
+    4 vCPU, G3 = four instances of 2 GiB and 2 vCPU.
+    """
+    service = celaut.Service()
+    first = service.initial_environment_workload.add()
+    g1 = first.any_of.add()
+    _add_workload(g1, 1, mem_limit=3 * GIB)
+    _add_workload(g1, 1, mem_limit=4 * GIB)
+    _add_workload(first.any_of.add(), 2, mem_limit=1 * GIB, cpu_period=100000, cpu_quota=400000)
+    _add_workload(
+        service.initial_environment_workload.add().any_of.add(), 4,
+        mem_limit=2 * GIB, cpu_period=100000, cpu_quota=200000,
+    )
+    return service
+
+
+def _fits_up_to(max_mem: int, asked: list):
+    """A local availability that takes any shape of at most ``max_mem`` bytes."""
+    def _local(request):
+        asked.append(request.resources.mem_limit)
+        return {"can_execute": request.resources.mem_limit <= max_mem, "reason": "memory"}
+    return _local
+
+
+@_TWO_PEERS
+@_NO_PEER_TAKES_IT
+class ConjunctiveNormalFormTests(unittest.TestCase):
+    """An AND of clauses, a clause is an OR of groups, a group an AND of workloads."""
+
+    def test_the_example_is_admitted_when_only_one_alternative_fits(self, peer_check, peers):
+        asked = []
+        with _config(), patch.object(wa, "_local_resource_availability", side_effect=_fits_up_to(2 * GIB, asked)):
+            self.assertIsNone(evaluate_possible_environment_workloads(_issue_example()))
+        # G1 stops at its 3 GiB workload, G2 (1 GiB) fits, G3 (2 GiB) fits.
+        self.assertEqual(asked, [3 * GIB, 1 * GIB, 2 * GIB])
+
+    def test_the_check_of_a_clause_stops_at_the_first_group_that_fits(self, peer_check, peers):
+        asked = []
+        with _config(), patch.object(wa, "_local_resource_availability", side_effect=_fits_up_to(8 * GIB, asked)):
+            self.assertIsNone(evaluate_possible_environment_workloads(_issue_example()))
+        # G1 fits whole, so G2 is never asked about.
+        self.assertEqual(asked, [3 * GIB, 4 * GIB, 2 * GIB])
+
+    def test_a_clause_where_no_group_fits_refuses_and_names_every_group(self, peer_check, peers):
+        asked = []
+        with _config(), patch.object(wa, "_local_resource_availability", side_effect=_fits_up_to(GIB // 2, asked)):
+            failure = evaluate_possible_environment_workloads(_issue_example())
+        self.assertIn("initial_environment_workload[0]: no group fits", failure)
+        self.assertIn("initial_environment_workload[0].any_of[0].workloads[0]", failure)
+        self.assertIn("initial_environment_workload[0].any_of[1].workloads[0]", failure)
+        # fail_fast: the second clause is not probed once the first one fails.
+        self.assertNotIn("initial_environment_workload[1]", failure)
+
+    def test_full_policy_names_every_clause_and_workload_that_fails(self, peer_check, peers):
+        asked = []
+        with _config(**{"workload_admission.POLICY": PROBE_ALL_GROUPS}), \
+                patch.object(wa, "_local_resource_availability", side_effect=_fits_up_to(GIB // 2, asked)):
+            failure = evaluate_possible_environment_workloads(_issue_example())
+        for path in (
+                "initial_environment_workload[0].any_of[0].workloads[0]",
+                "initial_environment_workload[0].any_of[0].workloads[1]",
+                "initial_environment_workload[0].any_of[1].workloads[0]",
+                "initial_environment_workload[1].any_of[0].workloads[0]",
+        ):
+            self.assertIn(path, failure)
+
+    def test_the_last_clause_must_fit_too(self, peer_check, peers):
+        asked = []
+        with _config(), patch.object(wa, "_local_resource_availability", side_effect=_fits_up_to(GIB, asked)):
+            failure = evaluate_possible_environment_workloads(_issue_example())
+        # G2 fits the first clause, G3 (2 GiB) does not fit the second.
+        self.assertIn("initial_environment_workload[1]: no group fits", failure)
+        self.assertNotIn("initial_environment_workload[0]", failure)
+
+    def test_both_fields_are_checked(self, peer_check, peers):
+        service = celaut.Service()
+        _add_workload(service.initial_environment_workload.add().any_of.add(), mem_limit=GIB)
+        _add_workload(service.possible_environment_workload.add().any_of.add(), mem_limit=4 * GIB)
+        asked = []
+        with _config(), patch.object(wa, "_local_resource_availability", side_effect=_fits_up_to(2 * GIB, asked)):
+            failure = evaluate_possible_environment_workloads(service)
+        self.assertIn("possible_environment_workload[0]: no group fits", failure)
+        self.assertEqual(asked, [GIB, 4 * GIB])
+
+
+class GroupRequestTests(unittest.TestCase):
+    """The shape of a workload is the one of its dependency service (#538)."""
+
+    def test_limits_of_at_most_and_benchmark_of_at_init(self):
+        workload = celaut.Service.Workload(count=1)
+        container = workload.dependency.service.container
+        container.architecture.tags.append("linux/arm64")
+        container.resources.at_init.mem_limit = 1
+        container.resources.at_init.benchmark.add(key="int_ops_per_sec", value=500)
+        container.resources.at_most.mem_limit = 7
+        container.resources.at_most.disk_space = 9
+        container.resources.at_most.benchmark.add(key="flt_ops_per_sec", value=1)
+
+        request = wa.group_request(workload)
+
+        self.assertEqual(list(request.architecture.tags), ["linux/arm64"])
+        self.assertEqual(request.resources.mem_limit, 7)
+        self.assertEqual(request.resources.disk_space, 9)
+        # at_most.benchmark has no meaning; the minimum is at_init's.
+        self.assertEqual([(e.key, e.value) for e in request.resources.benchmark], [("int_ops_per_sec", 500)])
+
+    def test_a_service_with_no_at_most_is_limited_by_at_init(self):
+        workload = celaut.Service.Workload(count=1)
+        workload.dependency.service.container.resources.at_init.mem_limit = 5
+        self.assertEqual(wa.group_request(workload).resources.mem_limit, 5)
+
+    def test_a_workload_with_no_service_asks_for_nothing(self):
+        workload = celaut.Service.Workload(count=1)
+        workload.dependency.hash.add(value=b"\x22" * 32)
+        self.assertFalse(wa.group_request(workload).ListFields())
 
 
 if __name__ == "__main__":

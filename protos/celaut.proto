@@ -254,44 +254,49 @@ message Service {
         repeated ContractRate payment_contracts = 2;
     }
 
-    // A single possible concurrent execution scenario for the descendant services this
-    // service may spawn during its lifetime. Unlike `resources` (which describe this
-    // instance itself), these describe its descendants.
+    // The descendants of the service: the instances that it starts while it runs. A
+    // declaration is in conjunctive normal form over groups. It is an AND of clauses, a
+    // clause is an OR of groups, and a group is an AND of workloads that run at the same
+    // time. Unlike `container.resources` (which describe this instance), these describe
+    // its descendants.
 
-    // One scenario of instances that the service can start at the same time. Scenarios
-    // are independent: they do not add up, and they have no sequence. Each workload of a
-    // scenario must be able to run on the node or on a peer that it knows. If not, the
-    // node can refuse to start the service. The node checks one instance of each workload. It does not
-    // keep resources for the instances.
-    message PossibleEnvironmentWorkload {
-        // One group of identical instances that run at the same time.
-        message Workload {
-            // The service of the workload. A workload that gives only resources has no
-            // Dependency.
-            message Dependency {
-                // Known content hashes of the service.
-                repeated Metadata.HashTag.Hash hash = 1;
-                // The full or a partial specification of the service.
-                Service service = 2;
-                // True if the service field is complete, so a reader can calculate its
-                // hashes and compare them with the hash field.
-                bool is_completed = 3;
-                // True if the full service is in the filesystem of this service, for
-                // example as a file that it sends later to StartService.
-                bool on_filesystem = 4;
-            }
-
-            // The number of instances that run at the same time.
-            uint32 count = 1;
-            // The most resources that each of these instances can use. Its benchmark
-            // gives the minimum score for each core.
-            Sysresources resources = 2;
-            // The service of the instances, if the workload is for one service. If the
-            // field is absent, the workload gives only resources.
-            Dependency dependency = 3;
+    // One group of identical instances that run at the same time.
+    message Workload {
+        // The service of the workload.
+        message Dependency {
+            // Known content hashes of the service.
+            repeated Metadata.HashTag.Hash hash = 1;
+            // The full or a partial specification of the service. The resources of the
+            // workload are in service.container.resources: at_init for the start, and
+            // at_most for the limit. A partial service can have only the resources and
+            // the architecture.
+            Service service = 2;
+            // True if the service field is complete, so a reader can calculate its
+            // hashes and compare them with the hash field.
+            bool is_completed = 3;
+            // True if the full service is in the filesystem of this service, for
+            // example as a file that it sends later to StartService.
+            bool on_filesystem = 4;
         }
-        // The groups of the scenario.
+
+        // The number of instances that run at the same time.
+        uint32 count = 1;
+        // The service of the instances: a hash, a service, or both. A workload with no
+        // resources in its service is always satisfiable.
+        Dependency dependency = 2;
+    }
+
+    // AND: all the workloads of the group run at the same time.
+    message Group {
+        // The workloads of the group.
         repeated Workload workloads = 1;
+    }
+
+    // OR: one group of the clause is sufficient. The service chooses the group at run
+    // time.
+    message Clause {
+        // The groups of the clause.
+        repeated Group any_of = 1;
     }
 
     // What the node runs: the architecture, the filesystem, the entry point and the
@@ -447,8 +452,14 @@ message Service {
     Api api = 3;
     // The domains where the instances of the service find their peers.
     repeated Network network = 4;
-    // The scenarios of instances that the service can start while it runs.
-    repeated PossibleEnvironmentWorkload possible_environment_workload = 5;
+    // The load that the service can ask for later, while it runs. Each clause must fit
+    // on the node or on a peer that it knows. If not, the node can refuse to start the
+    // service. It is in the admission only. It has no cost.
+    repeated Clause possible_environment_workload = 5;
+    // The load that the service needs to start. It is in the admission, as
+    // possible_environment_workload, and in the cost: EstimatedCost.cost includes the
+    // starts of these children.
+    repeated Clause initial_environment_workload = 6;
 }
 
 // A running instance of a service, as a caller can reach it.
@@ -557,8 +568,8 @@ message Sysresources {
     // second, over a working set of that size). Compare a bandwidth only with a
     // bandwidth over the same size. If the node has no score for that size, it uses the
     // score of the smallest larger size that it measured. If it has no such score, it
-    // does not apply that minimum. In Service.Container.Resources.at_init, in
-    // PossibleEnvironmentWorkload.Workload.resources and in a GetResourceAvailability
+    // does not apply that minimum. In Service.Container.Resources.at_init (also in the
+    // service of a Service.Workload) and in a GetResourceAvailability
     // request, the values are the minimum. In Peer.resources, they are the scores that the node
     // measured. In Service.Container.Resources.at_most, they have no meaning.
     repeated Uint64KeyValue benchmark = 99;
@@ -616,10 +627,20 @@ message DescendantTunnel {
 message EstimatedCost {
     // The least Configuration.initial_mu with which the node starts the service, in MU.
     // It is the cost to build the service, plus the balance that the instance has after
-    // the build. This balance is the initial_mu of the request. If the request has no
-    // initial_mu, the node uses its own default balance for the resources at the start.
-    // A caller that sets initial_mu to this value pays no more than this value for the
-    // start, because the node takes the cost of the build from initial_mu.
+    // the build, plus what the instance pays to start its initial children. The balance
+    // is the initial_mu of the request. If the request has no initial_mu, the node uses
+    // its own default balance for the resources at the start. A caller that sets
+    // initial_mu to this value pays no more than this value for the start, because the
+    // node takes the cost of the build from initial_mu.
+    //
+    // The initial children are the children of Service.initial_environment_workload.
+    // Each start of a child takes its initial_mu from the balance of the parent. For
+    // each workload: count times the build of the child plus the default balance of the
+    // node for the at_init resources of the child. The cost of a group is the sum of its
+    // workloads, the cost of a clause is the highest cost of its groups, and the total is
+    // the sum of the clauses. A client funds the parent with
+    // cost + maintenance * (periods + 1) * (1 + variance), where maintenance is the cost
+    // of one period of the parent.
     Amount cost = 1;
     // The cost of one maintenance period with the resources at the start, in MU.
     Amount init_maintenance_cost = 2;
@@ -640,10 +661,14 @@ message EstimatedCost {
     // limit the price of a running instance. The ceiling of the price is in
     // max_maintenance_cost, and only when the node sets the bound.
     float variance = 5;
+    // Field 6 was children_initial_cost: the starts of the initial children, apart from
+    // cost. They are in cost now.
+    reserved 6;
+    reserved "children_initial_cost";
 }
 
-// Peers use this message to evaluate Service.PossibleEnvironmentWorkload scenarios: a descendant workload
-// group can declare only `resources`, with no `hash`/embedded `service` to ask
+// Peers use this message to evaluate the Service.Workload entries of a service: a descendant workload
+// can declare only resources, with no `hash`/complete `service` to ask
 // GetServiceEstimatedCost about. Resources differ per architecture -- most visibly
 // `benchmark`, since the same "1.0 core" is native silicon under one virtualizer and
 // software emulation under another (#448).

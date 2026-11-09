@@ -78,7 +78,8 @@ These are the most commonly used commands for daily tasks:
   Prints:
   - execution feasibility (`YES/NO`)
   - reason when execution is not possible
-  - estimated costs (to start, and maintenance per hour)
+  - estimated costs (to start, and maintenance per hour). "To start" includes the starts
+    of the initial children of a service that declares `initial_environment_workload`
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  

@@ -25,7 +25,7 @@ load_example_config()
 from protos import celaut_pb2 as celaut, pack_pb2  # noqa: E402
 from src.packers.service_json import (  # noqa: E402
     parse_service_spec,
-    populate_possible_environment_workloads,
+    populate_environment_workloads,
 )
 from src.utils import keyvalue, benchmark  # noqa: E402
 from src.utils.cost_functions import resource_availability as ra  # noqa: E402
@@ -291,14 +291,22 @@ class PackerServiceJsonTests(unittest.TestCase):
 
 
 class NestedServiceJsonTests(unittest.TestCase):
-    """Workload groups and embedded dependency services are protobuf-JSON `Sysresources`."""
+    """Workloads and embedded dependency services are protobuf-JSON `Sysresources`.
+
+    The resources of a workload are the ones of its dependency service (#538). The
+    benchmark minimum is in `at_init`, as for the service itself.
+    """
 
     def _workloads(self, resources):
         service = pack_pb2.Service()
-        populate_possible_environment_workloads(
-            service, [{"workloads": [{"count": 1, "resources": resources}]}]
+        populate_environment_workloads(
+            service.possible_environment_workload,
+            [{"any_of": [{"workloads": [{"count": 1, "dependency": {
+                "service": {"container": {"resources": {"at_init": resources}}},
+            }}]}]}],
         )
-        return service.possible_environment_workload[0].workloads[0].resources
+        workload = service.possible_environment_workload[0].any_of[0].workloads[0]
+        return workload.dependency.service.container.resources.at_init
 
     def test_a_workload_group_carries_it(self):
         resources = self._workloads(
@@ -510,11 +518,12 @@ class DelegationCarryThroughTests(unittest.TestCase):
 
     def test_a_workload_group_is_put_to_a_peer_with_its_benchmark(self):
         service = celaut.Service()
-        workload = service.possible_environment_workload.add().workloads.add()
+        workload = service.possible_environment_workload.add().any_of.add().workloads.add()
         workload.count = 1
-        workload.resources.mem_limit = 111
-        keyvalue.set_value(workload.resources.benchmark, "int_ops_per_sec", 500000)
-        keyvalue.set_value(workload.resources.benchmark, "unknown_primitive", 4)
+        resources = workload.dependency.service.container.resources
+        resources.at_most.mem_limit = 111
+        keyvalue.set_value(resources.at_init.benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(resources.at_init.benchmark, "unknown_primitive", 4)
 
         asked = []
 
@@ -541,8 +550,8 @@ class DelegationCarryThroughTests(unittest.TestCase):
             self.assertEqual(list(request.architecture.tags), [])
 
     def test_a_group_with_an_embedded_dependency_asks_for_its_architecture(self):
-        workload = celaut.Service.PossibleEnvironmentWorkload.Workload(count=1)
-        workload.resources.mem_limit = 1
+        workload = celaut.Service.Workload(count=1)
+        workload.dependency.service.container.resources.at_most.mem_limit = 1
         workload.dependency.service.container.architecture.tags.append("linux/arm64")
         self.assertEqual(list(wa.group_request(workload).architecture.tags), ["linux/arm64"])
 

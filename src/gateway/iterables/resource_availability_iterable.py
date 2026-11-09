@@ -15,9 +15,9 @@ class GetResourceAvailabilityIterable:
 
     Unlike GetServiceEstimatedCost, the input is a bare resource profile that need not
     correspond to any packed service on either side -- there is no hash to look up and
-    no registry round-trip. It is what a peer evaluating a
-    Service.PossibleEnvironmentWorkload scenario asks, since a descendant workload
-    group may declare only `resources`, with no `hash` or embedded `service`.
+    no registry round-trip. It is what a peer evaluating the Service.Workload entries
+    of a service asks, since a descendant workload may declare only resources (a
+    partial `service`), with no `hash` or complete `service`.
 
     The answer is `get_architecture_availability`'s, verbatim: the same admission gate a
     real StartService goes through locally, so a peer is told exactly what this node

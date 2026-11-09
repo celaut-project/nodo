@@ -42,6 +42,10 @@ MEM = "mem"
 DISK = "disk"
 RESOURCES = (CPU, MEM, DISK)
 
+# A key of a load sample that is not a resource: set, `is_free` is False whatever the load.
+# Only `base_load` sets it.
+_CHARGING = "charging"
+
 # Scarcity is sampled from the whole machine, so every caller within a tick wants the
 # same answer. Re-reading it per instance would both cost syscalls and let two instances
 # in one tick be priced against different readings.
@@ -143,7 +147,22 @@ def is_free(scarcity: Optional[Dict[str, float]] = None) -> bool:
     if threshold <= 0:
         return False
     current = scarcity if scarcity is not None else system_scarcity()
+    if current.get(_CHARGING):
+        return False
     return all(current.get(resource, 1.0) < threshold for resource in RESOURCES)
+
+
+def base_load() -> Dict[str, float]:
+    """The load sample of the lowest price that this node quotes while it charges.
+
+    No surcharge on any resource (scarcity 0.0), and not free: ``is_free`` is False for
+    it even with ``free_tier`` on. Every price of this module rises with the load
+    (``scarcity_bp``, and ``_bounded_bp`` of the launch price), so a quote that is not
+    free, at any load, is at least the quote at this sample. The funding check of a
+    start prices the children at it (``workload_admission.evaluate_start_funding``,
+    #538), so it never asks for more than a quote that the client got before.
+    """
+    return {**{resource: 0.0 for resource in RESOURCES}, _CHARGING: 1.0}
 
 
 def launch_price_bp(scarcity: Optional[Dict[str, float]] = None) -> Dict[str, int]:
