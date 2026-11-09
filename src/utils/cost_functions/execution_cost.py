@@ -282,10 +282,13 @@ def worst_case_charge_mu(
     (``price_bound.current_bound``); omitted, it is read here. With no bound
     (``pricing.PRICE_BOUNDED`` false) the node promises no worst case, and this is the
     charge at the launch price.
+
+    A free node prices at the anchor of a launch while free (1x, ``launch_price_bp``),
+    not at 0 (#636, H). Its ticks charge 0 while it stays free, but when it leaves the
+    free state they charge up to the ceiling over that anchor. A balance of 0 then
+    stopped the instance at its first tick with ``costs.ALLOW_DEBT`` off.
     """
     current = scarcity if scarcity is not None else system_scarcity()
-    if is_free(current):
-        return 0
     if bound is CURRENT:
         bound = current_bound()
 
@@ -319,11 +322,11 @@ def launch_charge_mu(
     """MU for holding the resources for `seconds` at the price of a launch now (#636).
 
     The maintenance figures of a quote: the price ``P`` at the time of the estimate,
-    which the bound multiplies by ``(1 + v)^k``.
+    which the bound multiplies by ``(1 + v)^k``. A free node quotes the anchor of a
+    launch while free (1x), not 0, so its quote shows the ceiling that a launch then
+    gets (H).
     """
     current = scarcity if scarcity is not None else system_scarcity()
-    if is_free(current):
-        return 0
     return _charge_at(system_resources, seconds, launch_price_bp(current), arch, prices())
 
 

@@ -91,7 +91,8 @@ def child_start_cost_mu(
     the figures of a real start (``compute_start_service_cost``), so the quote and the
     charge come from the same price. The build is 0 when the workload names no service
     (neither a hash nor a complete service), when the service is built here already,
-    and while the node is free. Free, the start costs nothing at all.
+    and while the node is free. Free, the start costs the balance of the child only: a
+    child started while the node is free gets a balance too (#636, H).
 
     The resources are the ones of ``dependency.service.container.resources``. A
     workload with no resources is priced at the floors of this node, as a real start of
@@ -102,7 +103,7 @@ def child_start_cost_mu(
     from src.manager.manager import default_initial_balance
 
     count = int(workload.count)
-    if count <= 0 or is_free(scarcity):
+    if count <= 0:
         return 0
     service = workload.dependency.service
     service_hash = _workload_hash(workload)
@@ -113,7 +114,8 @@ def child_start_cost_mu(
         scarcity=scarcity,
         service=service,
     )
-    build = prices().build_mu if service_hash and not is_built(service_hash) else 0
+    build = prices().build_mu if service_hash and not is_built(service_hash) \
+        and not is_free(scarcity) else 0
     return int(count * (build + balance))
 
 

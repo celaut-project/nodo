@@ -378,9 +378,11 @@ class StartCostTests(unittest.TestCase):
         self.assertEqual(window_mu, 5_250_000)  # an hour of the documented instance
         self.assertEqual(cost, 10_000_000 + 5_250_000)
 
-    def test_a_free_node_charges_nothing_to_start(self):
+    def test_a_free_node_charges_no_build_to_start(self):
+        # The balance is still asked for (#636, H): the ticks charge nothing while the
+        # node is free, and the balance pays them when it stops being free.
         with _config():
-            self.assertEqual(self._cost(initial_balance_mu=5_250_000, free=True), 0)
+            self.assertEqual(self._cost(initial_balance_mu=5_250_000, free=True), 5_250_000)
 
 
 class ScarcityTests(unittest.TestCase):

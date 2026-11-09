@@ -215,9 +215,12 @@ class TheQuoteAndTheFundingTests(unittest.TestCase):
         with _config(pricing__PRICE_BOUNDED=False):
             self.assertEqual(worst_case_charge_mu(_guest(), HOUR, scarcity=HALF), _tick(HALF))
 
-    def test_a_free_node_has_no_worst_case(self):
+    def test_a_free_node_prices_the_worst_case_at_the_anchor(self):
+        # #636, H: not 0. The ceiling over the 1x anchor of a launch while free.
         with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5):
-            self.assertEqual(worst_case_charge_mu(_guest(), HOUR, scarcity=IDLE), 0)
+            worst = worst_case_charge_mu(_guest(), HOUR, scarcity=IDLE)
+        with _config():
+            self.assertEqual(worst, 2 * _tick(IDLE, bound=None))
 
     def test_the_initial_balance_funds_the_hours_at_the_worst_case(self):
         with _config():
@@ -231,9 +234,12 @@ class TheQuoteAndTheFundingTests(unittest.TestCase):
         with _config(pricing__PRICE_BOUNDED=False):
             self.assertEqual(default_initial_balance(_guest(), scarcity=IDLE), _tick(IDLE))
 
-    def test_an_instance_launched_free_is_funded_nothing(self):
+    def test_an_instance_launched_free_is_funded_the_ceiling_of_the_anchor(self):
+        # #636, H: it was funded nothing, and stopped when the node left the free state.
         with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5):
-            self.assertEqual(default_initial_balance(_guest(), scarcity=IDLE), 0)
+            balance = default_initial_balance(_guest(), scarcity=IDLE)
+        with _config():
+            self.assertEqual(balance, 2 * _tick(IDLE, bound=None))
 
     def test_the_quote_is_the_price_now_with_the_bound(self):
         from src.utils.cost_functions import generate_estimated_cost as module

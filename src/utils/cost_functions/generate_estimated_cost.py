@@ -93,7 +93,7 @@ def generate_estimated_cost(
 
     # The price bound of the quote (#636), read once. The maintenance figures are the
     # price at the time of the estimate, at the launch price of now (``P``); the bound is
-    # ``P * (1 + v)^k``.
+    # ``P * (1 + v)^k``. A free node quotes the anchor of a launch while free (1x), not 0.
     bound = price_bound.current_bound()
 
     # Calculate estimated cost for local execution.

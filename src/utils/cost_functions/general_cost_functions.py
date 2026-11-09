@@ -64,9 +64,16 @@ def compute_start_service_cost(metadata: celaut.Metadata, initial_balance_mu: in
     so the price quoted to start swung with whatever else the machine was doing.
 
     Takes no resources for the same reason: nothing here is priced per resource any more.
+
+    While the node is free the build costs nothing, but the balance is still asked for
+    (#636, H). The ticks charge nothing while the node stays free, and what is not
+    spent goes back to the father at the stop. The balance covers the ceiling of the
+    price over the anchor of the launch (``worst_case_charge_mu``), so the instance is
+    not stopped at its first tick when the node leaves the free state. A free start
+    that asked for 0 got a balance of 0, and ``costs.ALLOW_DEBT`` off then stopped it.
     """
     if is_free():
-        return 0
+        return int(initial_balance_mu)
     return int(build_charge_mu(metadata=metadata) + initial_balance_mu)
 
 

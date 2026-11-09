@@ -70,13 +70,13 @@ class OneWorkloadTests(unittest.TestCase):
     def test_count_multiplies_the_start(self):
         with _config(), patch.object(start_funding, "is_built", return_value=False):
             got = child_start_cost_mu(_workload(count=3, hash_value=HASH), scarcity=IDLE)
-        self.assertEqual(got, 3 * (BUILD + _balance()))
+            self.assertEqual(got, 3 * (BUILD + _balance()))
 
     def test_a_service_that_is_built_here_costs_no_build(self):
         with _config(), patch.object(start_funding, "is_built", return_value=True) as built:
             got = child_start_cost_mu(_workload(hash_value=HASH), scarcity=IDLE)
+            self.assertEqual(got, _balance())
         built.assert_called_once_with(HASH.hex())
-        self.assertEqual(got, _balance())
 
     def test_a_complete_service_with_no_hash_is_named_by_its_own_hash(self):
         workload = _workload()
@@ -85,8 +85,8 @@ class OneWorkloadTests(unittest.TestCase):
             workload.dependency.service.SerializeToString()))
         with _config(), patch.object(start_funding, "is_built", return_value=False) as built:
             got = child_start_cost_mu(workload, scarcity=IDLE)
+            self.assertEqual(got, BUILD + _balance())
         built.assert_called_once_with(expected)
-        self.assertEqual(got, BUILD + _balance())
 
     def test_a_workload_with_no_resources_is_priced_at_the_floors(self):
         with _config():
@@ -99,9 +99,13 @@ class OneWorkloadTests(unittest.TestCase):
         with _config():
             self.assertEqual(child_start_cost_mu(_workload(count=0), scarcity=IDLE), 0)
 
-    def test_a_node_that_is_free_charges_nothing(self):
-        with _config(), patch.object(start_funding, "is_free", return_value=True):
-            self.assertEqual(child_start_cost_mu(_workload(count=2), scarcity=IDLE), 0)
+    def test_a_node_that_is_free_charges_the_balance_and_no_build(self):
+        # #636, H: a child started while the node is free gets a balance too.
+        with _config(), patch.object(start_funding, "is_free", return_value=True), \
+                patch.object(start_funding, "is_built", return_value=False):
+            got = child_start_cost_mu(_workload(count=2, hash_value=HASH), scarcity=IDLE)
+            self.assertEqual(got, 2 * _balance())
+            self.assertGreater(got, 0)
 
 
 class TheDeclarationTests(unittest.TestCase):
