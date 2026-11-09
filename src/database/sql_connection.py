@@ -1129,6 +1129,7 @@ class SQLConnection(metaclass=Singleton):
         arch: Optional[str] = None,
         launch_bp: Optional[Mapping[str, int]] = None,
         movements: Optional[Sequence[ledger.Movement]] = None,
+        launch_bound=None,
     ):
         """
         Adds an internal container to the database, with the first rows of its account.
@@ -1164,9 +1165,13 @@ class SQLConnection(metaclass=Singleton):
                 outlive. NULL is charged the node's scalar memory price.
             launch_bp (Optional[Mapping[str, int]]): The scarcity multiplier of each
                 resource ("cpu", "mem", "disk") at launch, in basis points
-                (``execution_cost.launch_price_bp``). The tick bounds its charge
-                against it when ``pricing.MAX_PRICE_VOLATILITY`` is on. A free launch
-                is 0 for each. None stores NULL, which means no bound.
+                (``execution_cost.launch_price_bp``). A free launch is 1x (10000) for
+                each. None stores NULL, which means no bound.
+            launch_bound (Optional[price_bound.PriceBound]): The price bound of the
+                launch (#636): ``launch_volatility`` and ``launch_period_seconds``. The
+                tick holds its charge to ``launch_bp * (1 + v)^k`` with them, for the
+                whole life of the instance. None stores NULL: no bound
+                (``pricing.PRICE_BOUNDED`` false).
             movements (Optional[Sequence[ledger.Movement]]): How the instance came to
                 hold ``balance_mu``, in order: the ``start`` and the ``build``. They
                 must add up to ``balance_mu``. None is one ``start`` of ``balance_mu``.
@@ -1180,12 +1185,14 @@ class SQLConnection(metaclass=Singleton):
             # database's column defaults to NULL however the fresh schema is declared.
             # Writing it at the one insert is what makes the two agree.
             cursor.execute('''
-                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility, launch_period_seconds, launched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
                   disk_space, int(cpu_period or 0), int(cpu_quota or 0),
                   serialized_instance, service_id, virtualizer, envs, arch,
-                  launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk")))
+                  launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk"),
+                  None if launch_bound is None else float(launch_bound.volatility),
+                  None if launch_bound is None else int(launch_bound.period_seconds)))
             self._append_opening(cursor, container_id, movements)
 
         self._transaction(work)
@@ -1365,7 +1372,9 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp FROM local_instances WHERE id = ? AND killed_at IS NULL
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp,
+                   launch_volatility, launch_period_seconds, CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts
+            FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -1579,7 +1588,8 @@ class SQLConnection(metaclass=Singleton):
         balance and the rows of resources (all zero but the disk)."""
         result = self._execute('''
             SELECT id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, arch,
-                   launch_cpu_bp, launch_mem_bp, launch_disk_bp, suspended_reason
+                   launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility,
+                   launch_period_seconds, CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts, suspended_reason
             FROM local_instances
             WHERE killed_at IS NULL AND suspended_at IS NOT NULL AND suspended_reason IN (?, ?)
             ORDER BY id

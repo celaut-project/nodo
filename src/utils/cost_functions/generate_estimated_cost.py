@@ -2,11 +2,9 @@ from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
 from src.utils.cost_functions.start_funding import initial_children_mu
-from src.utils.cost_functions.general_cost_functions import (
-    compute_maintenance_cost,
-    compute_start_service_cost,
-    compute_worst_case_maintenance_cost,
-)
+from src.utils.cost_functions import price_bound
+from src.utils.cost_functions.execution_cost import launch_charge_mu
+from src.utils.cost_functions.general_cost_functions import compute_start_service_cost
 from src.utils.utils import from_amount, to_amount
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
@@ -93,6 +91,11 @@ def generate_estimated_cost(
     # charges the resolved row, so a quote has to describe that same shape.
     service_hash = _service_hash_or_none(metadata)
 
+    # The price bound of the quote (#636), read once. The maintenance figures are the
+    # price at the time of the estimate, at the launch price of now (``P``); the bound is
+    # ``P * (1 + v)^k``.
+    bound = price_bound.current_bound()
+
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(
 
@@ -100,7 +103,7 @@ def generate_estimated_cost(
         cost=to_amount(initial_cost_mu),
 
         # Maintenance cost per manager iteration, at the resources it starts with.
-        init_maintenance_cost=to_amount(compute_maintenance_cost(
+        init_maintenance_cost=to_amount(launch_charge_mu(
             system_resources=resolve_billable_resources(
                 resources.at_init, service_hash, service=service
             ),
@@ -108,23 +111,20 @@ def generate_estimated_cost(
             arch=arch,
         )) if resources.HasField('at_init') else to_amount(0),
 
-        # Maintenance cost per manager iteration, at the most it may grow to. Of the
-        # resources AND of the price: with `pricing.MAX_PRICE_VOLATILITY` on, this is
-        # priced at the highest multiplier the bound lets a tick reach, so no tick
-        # charges the instance more than this figure. With it off, it is priced at the
-        # current load, as before. The charge that the tick levies comes from the same
-        # clamp (`execution_cost.maintenance_charge_mu`).
-        max_maintenance_cost=to_amount(compute_worst_case_maintenance_cost(
+        # Maintenance cost per manager iteration, at the most it may grow to, at the same
+        # price. Not a limit: the limit is this figure times (1 + v)^k when the quote is
+        # bounded, and the ticks hold to it (`execution_cost.maintenance_charge_mu`).
+        max_maintenance_cost=to_amount(launch_charge_mu(
             system_resources=resolve_billable_resources(
                 resources.at_most, service_hash, service=service
             ),
             seconds=MANAGER_ITERATION_TIME,
             arch=arch,
         )) if resources.HasField('at_most') else to_amount(0),
-        
+
         # Maintenance frecuency in seconds.
         maintenance_seconds_loop=MANAGER_ITERATION_TIME,
-        
-        # Variance of the three costs.
-        variance=0,  # TODO compute_variance
+
+        # price_bounded, price_volatility and volatility_period_seconds.
+        **price_bound.to_fields(bound),
     )

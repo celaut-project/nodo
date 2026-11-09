@@ -98,8 +98,8 @@ class TheCheckIsTheQuoteTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)
 
     def test_a_quote_at_any_load_is_at_least_the_check(self):
-        for bound in (2.0, 0):
-            with self.subTest(bound=bound), _config(pricing__MAX_PRICE_VOLATILITY=bound):
+        for bounded in (True, False):
+            with self.subTest(bounded=bounded), _config(pricing__PRICE_BOUNDED=bounded):
                 floor = initial_children_mu(_parent(), scarcity=base_load())
                 for load in LOADS:
                     self.assertGreaterEqual(initial_children_mu(_parent(), scarcity=load), floor)

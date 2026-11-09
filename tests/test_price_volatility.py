@@ -1,10 +1,13 @@
-"""The price of a running instance may rise only so far above its launch price (#335).
+"""The price of a running instance may rise only so far above its launch price (#335, #636).
 
 Scarcity is read from the load of the moment, so without a bound an instance funded at
 1x could be charged at 10x, run out of balance and be stopped for a price it never saw.
-`pricing.MAX_PRICE_VOLATILITY` bounds the rise. These tests cover the clamp, that the
-quote and the funding come from the same figure as the tick, the free launch, and the
-columns that record the launch price.
+The price bound of a launch (`pricing.PRICE_VOLATILITY` v per
+`pricing.PRICE_VOLATILITY_PERIOD_HOURS` T) bounds the rise. These are the tests of #335,
+run with v = 1.0 and T = 0, which is the old `MAX_PRICE_VOLATILITY: 2.0`: the clamp,
+that the funding comes from the same figure as the tick, the free launch, and the
+columns that record the launch price. The tests of the periods are in
+tests/test_price_bound.py.
 
 The imports are not guarded, for the reason given in tests/test_pricing_model.py: a
 test of money that is skipped says that the sums were checked when they were not.
@@ -21,7 +24,7 @@ load_example_config()
 from protos import celaut_pb2 as celaut  # noqa: E402
 from src.database.migrate import create_tables
 from src.database.sql_connection import SQLConnection
-from src.manager.maintain import _row_launch_bp
+from src.manager.maintain import _row_launch_bound, _row_launch_bp
 from src.manager.manager import default_initial_balance
 from src.utils.config import ConfigManager
 from src.utils.config_validation import ConfigValidationError, validate_pricing_config
@@ -34,6 +37,7 @@ from src.utils.cost_functions.execution_cost import (
     maintenance_charge_mu,
     worst_case_charge_mu,
 )
+from src.utils.cost_functions.price_bound import PriceBound, current_bound
 from src.utils.monetary import prices
 from src.utils.utils import from_amount
 
@@ -53,7 +57,9 @@ BASE = {
     "pricing.MODIFY_RESOURCES_MU": 10_000,
     "pricing.SCARCITY_MAX_MULTIPLIER": 10,
     "pricing.SCARCITY_CURVE": 1.0,
-    "pricing.MAX_PRICE_VOLATILITY": 2.0,
+    "pricing.PRICE_BOUNDED": True,
+    "pricing.PRICE_VOLATILITY": 1.0,
+    "pricing.PRICE_VOLATILITY_PERIOD_HOURS": 0,
     "free_tier.FREE_WHILE_SCARCITY_BELOW": 0.0,
     "deposits.INITIAL_RUNTIME_HOURS": 1.0,
 }
@@ -75,38 +81,38 @@ def _guest() -> celaut.Sysresources:
     return celaut.Sysresources(mem_limit=GIB, cpu_period=100000, cpu_quota=100000, disk_space=GIB)
 
 
-def _tick(scarcity, launch_bp=None) -> int:
-    return maintenance_charge_mu(_guest(), HOUR, scarcity=scarcity, launch_bp=launch_bp)
+# The old `MAX_PRICE_VOLATILITY: 2.0`: twice the launch price, for the whole life.
+TWICE = PriceBound(1.0, 0)
+
+
+def _tick(scarcity, launch_bp=None, bound=TWICE) -> int:
+    return maintenance_charge_mu(_guest(), HOUR, scarcity=scarcity, launch_bp=launch_bp,
+                                 bound=bound)
 
 
 class TheKeyTests(unittest.TestCase):
     def test_the_bound_is_read(self):
         with _config():
-            self.assertEqual(prices().volatility_bound(), 2.0)
+            self.assertEqual(current_bound(), PriceBound(1.0, 0))
 
-    def test_zero_means_no_bound(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=0):
-            self.assertIsNone(prices().volatility_bound())
+    def test_price_bounded_false_means_no_bound(self):
+        with _config(pricing__PRICE_BOUNDED=False):
+            self.assertIsNone(current_bound())
 
-    def test_a_value_from_the_maximum_multiplier_up_means_no_bound(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=10):
-            self.assertIsNone(prices().volatility_bound())
-        with _config(pricing__MAX_PRICE_VOLATILITY=9.5):
-            self.assertEqual(prices().volatility_bound(), 9.5)
-
-    def test_a_value_between_zero_and_one_is_refused(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=0.5):
-            with self.assertRaisesRegex(ValueError, "MAX_PRICE_VOLATILITY"):
-                prices()
+    def test_a_negative_or_not_finite_value_is_refused(self):
+        for bad in (-0.5, float("nan"), float("inf")):
+            with self.subTest(bad=bad), _config(pricing__PRICE_VOLATILITY=bad):
+                with self.assertRaisesRegex(ValueError, "PRICE_VOLATILITY"):
+                    prices()
 
     def test_the_config_check_takes_what_prices_takes(self):
-        for good in (0, 1, 1.0, 2, 2.5, 10):
-            validate_pricing_config({"pricing": {"MAX_PRICE_VOLATILITY": good}})
+        for good in (0, 0.1, 1, 2.5, 10):
+            validate_pricing_config({"pricing": {"PRICE_VOLATILITY": good}})
 
     def test_the_config_check_refuses_the_rest(self):
-        for bad in (0.5, -1, "fast", True, None, float("nan")):
+        for bad in (-1, "fast", True, float("nan"), float("inf")):
             with self.subTest(bad=bad), self.assertRaises(ConfigValidationError):
-                validate_pricing_config({"pricing": {"MAX_PRICE_VOLATILITY": bad}})
+                validate_pricing_config({"pricing": {"PRICE_VOLATILITY": bad}})
 
 
 class TheClampTests(unittest.TestCase):
@@ -140,10 +146,11 @@ class TheClampTests(unittest.TestCase):
             self.assertEqual(_tick(FULL, launch), _tick(FULL))
             self.assertGreater(_tick(FULL, launch), at_launch)
 
-    def test_a_bound_of_one_fixes_the_price(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=1.0):
+    def test_a_volatility_of_zero_fixes_the_price(self):
+        with _config():
             launch = launch_price_bp(HALF)
-            self.assertEqual(_tick(FULL, launch), _tick(HALF, launch))
+            fixed = PriceBound(0.0, 0)
+            self.assertEqual(_tick(FULL, launch, fixed), _tick(HALF, launch, fixed))
 
     def test_the_bound_works_per_resource(self):
         with _config():
@@ -155,10 +162,12 @@ class TheClampTests(unittest.TestCase):
             self.assertEqual(_tick(memory_only, launch), idle + ram)
 
     def test_no_bound_is_the_old_behaviour(self):
-        for off in (0, 10):
-            with self.subTest(value=off), _config(pricing__MAX_PRICE_VOLATILITY=off):
-                launch = launch_price_bp(IDLE)
-                self.assertEqual(_tick(FULL, launch), _tick(FULL))
+        with _config():
+            launch = launch_price_bp(IDLE)
+            self.assertEqual(_tick(FULL, launch, None), _tick(FULL))
+        # A bound above the maximum multiplier never clamps.
+        with _config():
+            self.assertEqual(_tick(FULL, launch, PriceBound(9.0, 0)), _tick(FULL))
 
     def test_a_row_with_no_launch_price_is_not_bounded(self):
         with _config():
@@ -172,12 +181,12 @@ class TheClampTests(unittest.TestCase):
             # The node crosses the threshold: the instance pays, but only up to 2x base.
             capped = _tick(FULL, launch)
         with _config():
-            self.assertEqual(capped, 2 * _tick(IDLE))
+            self.assertEqual(capped, 2 * _tick(IDLE, bound=None))
 
     def test_a_free_launch_is_charged_when_there_is_no_bound(self):
-        with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5, pricing__MAX_PRICE_VOLATILITY=0):
+        with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5):
             launch = launch_price_bp(IDLE)
-            self.assertGreater(_tick(FULL, launch), 0)
+            self.assertGreater(_tick(FULL, launch, None), 0)
 
 
 class TheQuoteAndTheFundingTests(unittest.TestCase):
@@ -203,7 +212,7 @@ class TheQuoteAndTheFundingTests(unittest.TestCase):
             )
 
     def test_with_no_bound_the_worst_case_is_the_charge_now(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=0):
+        with _config(pricing__PRICE_BOUNDED=False):
             self.assertEqual(worst_case_charge_mu(_guest(), HOUR, scarcity=HALF), _tick(HALF))
 
     def test_a_free_node_has_no_worst_case(self):
@@ -219,14 +228,14 @@ class TheQuoteAndTheFundingTests(unittest.TestCase):
             self.assertGreaterEqual(balance, _tick(FULL, launch))
 
     def test_the_initial_balance_is_unchanged_with_no_bound(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=0):
+        with _config(pricing__PRICE_BOUNDED=False):
             self.assertEqual(default_initial_balance(_guest(), scarcity=IDLE), _tick(IDLE))
 
     def test_an_instance_launched_free_is_funded_nothing(self):
         with _config(free_tier__FREE_WHILE_SCARCITY_BELOW=0.5):
             self.assertEqual(default_initial_balance(_guest(), scarcity=IDLE), 0)
 
-    def test_the_quote_of_the_most_a_tick_charges_is_bounded(self):
+    def test_the_quote_is_the_price_now_with_the_bound(self):
         from src.utils.cost_functions import generate_estimated_cost as module
 
         resources = celaut.Service.Container.Resources()
@@ -242,9 +251,15 @@ class TheQuoteAndTheFundingTests(unittest.TestCase):
                 metadata=celaut.Metadata(), config=celaut.Configuration(),
                 resources=resources, check_availability=False,
             )
+        # Both figures are the price at the estimate; the bound is in the new fields.
         self.assertEqual(
-            from_amount(quote.max_maintenance_cost), 2 * from_amount(quote.init_maintenance_cost)
+            from_amount(quote.max_maintenance_cost), from_amount(quote.init_maintenance_cost)
         )
+        with _config():
+            self.assertEqual(from_amount(quote.init_maintenance_cost), _tick(IDLE, bound=None))
+        self.assertTrue(quote.price_bounded)
+        self.assertAlmostEqual(quote.price_volatility, 1.0)
+        self.assertEqual(quote.volatility_period_seconds, 0)
 
 
 class TheWiringTests(unittest.TestCase):
@@ -282,7 +297,7 @@ class TheWiringTests(unittest.TestCase):
             launch = launch_price_bp(IDLE)
             at_launch = _tick(IDLE)
         row = dict(self.ROW, launch_cpu_bp=launch[CPU], launch_mem_bp=launch[MEM],
-                   launch_disk_bp=launch[DISK])
+                   launch_disk_bp=launch[DISK], launch_volatility=1.0, launch_period_seconds=0)
         # The node is full, which is 10x unbounded. The row holds the tick at 2x.
         self.assertEqual(self._sweep(row, FULL), 2 * at_launch)
 
@@ -339,6 +354,7 @@ class TheWiringTests(unittest.TestCase):
         recorded = self._launch(IDLE)
         with _config():
             self.assertEqual(recorded["launch_bp"], launch_price_bp(IDLE))
+            self.assertEqual(recorded["launch_bound"], PriceBound(1.0, 0))
             # One sample prices both: the balance is the worst case of the recorded price.
             self.assertEqual(recorded["balance_mu"], 2 * _tick(IDLE))
 
@@ -376,9 +392,17 @@ class TheRecordTests(unittest.TestCase):
             _row_launch_bp(self.sc.get_sys_req("a")), {CPU: 10000, MEM: 25000, DISK: 0}
         )
 
+    def test_the_launch_bound_is_recorded_and_read_back(self):
+        self._add("a", launch_bp={CPU: 10000, MEM: 10000, DISK: 10000},
+                  launch_bound=PriceBound(0.1, 86400))
+        row = self.sc.get_sys_req("a")
+        self.assertEqual(_row_launch_bound(row), PriceBound(0.1, 86400))
+        self.assertIsNotNone(row["launched_ts"])
+
     def test_no_launch_price_reads_as_no_bound(self):
         self._add("a")
         self.assertIsNone(_row_launch_bp(self.sc.get_sys_req("a")))
+        self.assertIsNone(_row_launch_bound(self.sc.get_sys_req("a")))
 
     def test_a_row_without_the_columns_reads_as_no_bound(self):
         self.assertIsNone(_row_launch_bp({"arch": None}))

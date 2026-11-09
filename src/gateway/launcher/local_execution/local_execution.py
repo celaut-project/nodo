@@ -17,6 +17,7 @@ from src.utils import dead_instances, keyvalue
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
+from src.utils.cost_functions.price_bound import current_bound
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
     balance_after_build,
@@ -127,6 +128,10 @@ def local_execution(
     # funding would not cover the ceiling that the row allows.
     launch_scarcity = system_scarcity()
     launch_bp = launch_price_bp(launch_scarcity)
+    # The price bound of this launch (#636), read once: the balance is funded at its
+    # ceiling, and the row stores it, so the ticks use it for the whole life of the
+    # instance and never the config or the price history of a later moment.
+    launch_bound = current_bound()
 
     # The father paid `initial_mu`, and only that (#563). The build is taken out of it,
     # and what is left is the balance of the instance. A request that carries no amount
@@ -145,6 +150,7 @@ def local_execution(
                 arch=service_arch,
                 scarcity=launch_scarcity,
                 service=service,
+                bound=launch_bound,
             )
         start_balance_mu: int = balance_after_build(
             initial_mu=initial_mu,
@@ -155,6 +161,7 @@ def local_execution(
                 arch=service_arch,
                 service=service,
                 scarcity=launch_scarcity,
+                bound=launch_bound,
             ),
         )
     except Exception as e:
@@ -408,6 +415,7 @@ def local_execution(
             cpu_quota=int(resolved_resources.cpu_quota),
             arch=service_arch,
             launch_bp=launch_bp,
+            launch_bound=launch_bound,
             # What the father paid, and the build taken from it (#570). The start
             # names the execution as its receipt does (#419).
             movements=(

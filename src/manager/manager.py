@@ -41,6 +41,7 @@ from src.utils.utils import (
     generate_uris_by_peer_id
 )
 from src.utils.config import ConfigManager
+from src.utils.cost_functions.price_bound import CURRENT
 from src.utils.monetary import free_tier, format_mu
 from src.payment_system.mu_conversion import convert_mu, matching_payment_system
 from src.virtualizers.interface import remove_firewall_rule
@@ -1183,6 +1184,7 @@ def default_initial_balance(
     arch: Optional[str] = None,
     scarcity: Optional[Dict[str, float]] = None,
     service: Optional[celaut_pb2.Service] = None,
+    bound=CURRENT,
 ) -> int:
     """MU to fund a new instance with when nobody asked for a specific amount.
 
@@ -1200,12 +1202,16 @@ def default_initial_balance(
     spend this balance will charge, or the balance funds a different number of hours
     than INITIAL_RUNTIME_HOURS says.
 
-    The hours are priced at the worst case that the ticks can reach, not at the load of
-    the moment. With `pricing.MAX_PRICE_VOLATILITY` on, that is the launch price times
-    the bound, and no tick of this instance can charge more -- so the instance is never
-    stopped for a rise that its funding did not cover. With it off, the price is the
-    one at the current load, as it was before the bound existed. `scarcity` is the load
-    sample the launch is priced against; omitted, it is read here.
+    The hours are priced at the ceiling that the ticks can reach, not at the load of the
+    moment (#636): the launch price times `(1 + v)^k` for the seconds of each volatility
+    period `k` that the hours cover, just `1 + v` when the period is at least
+    INITIAL_RUNTIME_HOURS. No tick of this instance in those hours can charge more, so
+    the instance is never stopped for a rise that its funding did not cover. With
+    `pricing.PRICE_BOUNDED` false, the price is the launch price. A free node funds the
+    ceiling over the anchor of a launch while free (1x), not 0 (H). `scarcity` is the
+    load sample the launch is priced against; omitted, it is read here. `bound` is the
+    bound that the launch stores (None for no bound); omitted, the bound of now is
+    read here.
 
     `service`, when it is known, adds what the service pays for the `child_start` of
     the children of its `initial_environment_workload`
@@ -1227,6 +1233,7 @@ def default_initial_balance(
         seconds=hours * 3600,
         scarcity=scarcity,
         arch=arch,
+        bound=bound,
     )
     if service is None:
         return own

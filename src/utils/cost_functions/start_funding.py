@@ -31,6 +31,7 @@ from src.utils.cost_functions.execution_cost import (
     worst_case_charge_mu,
 )
 from src.utils.cost_functions.general_cost_functions import compute_worst_case_maintenance_cost
+from src.utils.cost_functions.price_bound import CURRENT
 from src.utils.arch_guard import arch_from_tags
 from src.utils.config import ConfigManager
 from src.utils.verify import get_service_hex_main_hash, get_service_list_of_hashes
@@ -151,14 +152,15 @@ def minimum_runtime_mu(
         arch: Optional[str] = None,
         service: Optional[celaut.Service] = None,
         scarcity: Optional[Dict[str, float]] = None,
+        bound=CURRENT,
 ) -> int:
     """The least balance that an instance holds after the build: one maintenance period.
 
     It is one period (``MANAGER_ITERATION_TIME``) with the resources at the start, at the
-    worst case that the price can reach. With ``pricing.MAX_PRICE_VOLATILITY`` on, that
-    is the launch price times the bound, so no tick of the instance can charge more than
-    this figure. With the bound off, it is the price at the current load. It is the same
-    function that prices ``EstimatedCost.max_maintenance_cost``.
+    ceiling of the first volatility period: the launch price times ``1 + v`` (#636), so
+    the first tick of the instance cannot charge more than this figure. With
+    ``pricing.PRICE_BOUNDED`` false, it is the launch price. ``bound`` is the bound of
+    the launch, read once by the launcher; omitted, it is read here.
     """
     if not resources.HasField("at_init"):
         return 0
@@ -167,6 +169,7 @@ def minimum_runtime_mu(
         seconds=env_manager.get("MANAGER_ITERATION_TIME"),
         scarcity=scarcity,
         arch=arch,
+        bound=bound,
     ))
 
 

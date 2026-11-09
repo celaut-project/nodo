@@ -71,22 +71,22 @@ class TheMinimumRuntimeTests(unittest.TestCase):
         return celaut.Service.Container.Resources(at_init=_guest())
 
     def test_it_is_one_maintenance_period_with_the_resources_at_the_start(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=0):
+        with _config(pricing__PRICE_BOUNDED=False):
             expected = worst_case_charge_mu(_guest(), PERIOD_SECONDS, scarcity=IDLE)
             self.assertGreater(expected, 0)
             self.assertEqual(minimum_runtime_mu(self._resources(), scarcity=IDLE), expected)
 
-    def test_with_the_bound_on_it_is_the_launch_price_times_the_bound(self):
-        with _config(pricing__MAX_PRICE_VOLATILITY=2.0):
+    def test_with_the_bound_on_it_is_the_launch_price_times_one_plus_v(self):
+        with _config(pricing__PRICE_VOLATILITY=1.0, pricing__PRICE_VOLATILITY_PERIOD_HOURS=0):
             at_launch = minimum_runtime_mu(self._resources(), scarcity=IDLE)
-        with _config(pricing__MAX_PRICE_VOLATILITY=0):
+        with _config(pricing__PRICE_BOUNDED=False):
             at_current_price = minimum_runtime_mu(self._resources(), scarcity=IDLE)
         # Each resource rounds on its own, so the two sides can differ by a few MU.
         self.assertAlmostEqual(at_launch, 2 * at_current_price, delta=5)
 
     def test_with_the_bound_off_it_is_the_price_of_the_current_load(self):
         loaded = {CPU: 0.5, MEM: 0.5, DISK: 0.5}
-        with _config(pricing__MAX_PRICE_VOLATILITY=0):
+        with _config(pricing__PRICE_BOUNDED=False):
             self.assertGreater(
                 minimum_runtime_mu(self._resources(), scarcity=loaded),
                 minimum_runtime_mu(self._resources(), scarcity=IDLE),

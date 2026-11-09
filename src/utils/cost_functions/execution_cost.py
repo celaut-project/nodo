@@ -22,6 +22,7 @@ from typing import Dict, Mapping, Optional
 import psutil
 
 from protos import celaut_pb2 as celaut
+from src.utils.cost_functions.price_bound import CURRENT, PriceBound, current_bound
 from src.utils.logger import LOGGER as logger
 from src.utils.monetary import (
     SCARCITY_SCALE,
@@ -157,8 +158,8 @@ def base_load() -> Dict[str, float]:
 
     No surcharge on any resource (scarcity 0.0), and not free: ``is_free`` is False for
     it even with ``free_tier`` on. Every price of this module rises with the load
-    (``scarcity_bp``, and ``_bounded_bp`` of the launch price), so a quote that is not
-    free, at any load, is at least the quote at this sample. The funding check of a
+    (``scarcity_bp``, and the ceiling of the launch price), so a quote at any load is at
+    least the quote at this sample. The funding check of a
     start prices the children at it (``workload_admission.evaluate_start_funding``,
     #538), so it never asks for more than a quote that the client got before.
     """
@@ -168,12 +169,12 @@ def base_load() -> Dict[str, float]:
 def launch_price_bp(scarcity: Optional[Dict[str, float]] = None) -> Dict[str, int]:
     """The multiplier each resource was priced at, in basis points, for a launch now.
 
-    This is what `local_instances` records for an instance, and what the bound of
-    `pricing.MAX_PRICE_VOLATILITY` is measured from. A launch while the node is free
-    (`is_free`) records 1x for every resource, the base price: the node charges nothing
-    while it is free, but the bound still needs a price to be measured from, and 0 times
-    any bound is 0, which would keep the instance free for as long as it runs. Anchored
-    at 1x, a rise stops at the bound times the base price.
+    This is what `local_instances` records for an instance, and what its price bound
+    (#636) is measured from. A launch while the node is free (`is_free`) records 1x for
+    every resource, the base price: the node charges nothing while it is free, but the
+    bound still needs a price to be measured from, and 0 times any bound is 0, which
+    would keep the instance free for as long as it runs. Anchored at 1x, a rise stops at
+    the bound times the base price.
 
     The multiplier is recorded, not an amount of MU, because an instance can be resized
     (`ModifyServiceSystemResources`) and an amount would then price the old shape.
@@ -185,8 +186,10 @@ def launch_price_bp(scarcity: Optional[Dict[str, float]] = None) -> Dict[str, in
     return {resource: scarcity_bp(current.get(resource, 1.0), p) for resource in RESOURCES}
 
 
-def _bounded_bp(current_bp: int, launch_bp: Optional[int], p: Prices) -> int:
-    """`current_bp`, held down to the ceiling that `launch_bp` allows.
+def _bounded_bp(current_bp: int, launch_bp: Optional[int], bound: Optional[PriceBound],
+                k: int, p: Prices) -> int:
+    """`current_bp`, held down to the ceiling of the period `k`: `launch_bp` times
+    `(1 + v)^k` (#636).
 
     Ceiling only, not symmetric: the bound limits how far the price may RISE above the
     launch price, and a fall passes through whole. A symmetric bound would also keep a
@@ -195,14 +198,13 @@ def _bounded_bp(current_bp: int, launch_bp: Optional[int], p: Prices) -> int:
     The risk the bound answers is the other one: a rise that the funding of the
     instance did not cover, which stops it and costs the client reputation (#323).
 
-    No bound set, or no launch price known (NULL on a row from before the column
-    existed), leaves `current_bp` as it is.
+    No bound (the instance was launched with `pricing.PRICE_BOUNDED` false), or no
+    launch price known (NULL on a dev instance), leaves `current_bp` as it is.
     """
-    bound = p.volatility_bound()
     if bound is None or launch_bp is None:
         return current_bp
-    ceiling = int(Decimal(int(launch_bp)) * Decimal(str(bound)))
-    return min(current_bp, ceiling)
+    top = p.scarcity_max_multiplier * SCARCITY_SCALE
+    return min(current_bp, bound.ceiling_bp(int(launch_bp), k, top))
 
 
 def maintenance_charge_mu(
@@ -211,6 +213,8 @@ def maintenance_charge_mu(
     scarcity: Optional[Dict[str, float]] = None,
     arch: Optional[str] = None,
     launch_bp: Optional[Mapping[str, int]] = None,
+    bound: Optional[PriceBound] = None,
+    elapsed_seconds: Optional[float] = None,
 ) -> int:
     """MU owed for holding the requested resources for `seconds`.
 
@@ -223,21 +227,28 @@ def maintenance_charge_mu(
     memory price, so a caller that does not know the arch bills the ordinary rate
     rather than nothing.
 
-    ``launch_bp`` is the price the instance was launched at (`launch_price_bp`). With
-    `pricing.MAX_PRICE_VOLATILITY` on, each resource's multiplier is held to that
-    price times the bound. Omitted, the charge is unbounded. This clamp lives here, and
-    not in the maintenance loop, so that every caller that prices a running instance
-    gets it -- see `worst_case_charge_mu` for the quote.
+    ``launch_bp`` is the price the instance was launched at (`launch_price_bp`), and
+    ``bound`` the price bound that it was launched with (#636: the volatility and the
+    period that its row stores, never the config of now). ``elapsed_seconds`` is the
+    time since its launch, at the end of the interval that is charged: it gives the
+    period ``k``, so an interval that spans a change of period is held to the higher
+    ceiling. Each resource's multiplier is held to ``launch_bp * (1 + v)^k``. With no
+    bound or no launch price, the charge is unbounded. This clamp lives here, and not in
+    the maintenance loop, so that every caller that prices a running instance gets it --
+    see `worst_case_charge_mu` for the quote.
     """
     current = scarcity if scarcity is not None else system_scarcity()
     if is_free(current):
         return 0
 
     p = prices()
+    k = bound.period_index(elapsed_seconds) if bound is not None else 1
     bps = {
         resource: _bounded_bp(
             scarcity_bp(current.get(resource, 1.0), p),
             None if launch_bp is None else launch_bp.get(resource),
+            bound,
+            k,
             p,
         )
         for resource in RESOURCES
@@ -245,39 +256,75 @@ def maintenance_charge_mu(
     return _charge_at(system_resources, seconds, bps, arch, p)
 
 
+# After this many periods the rest of a worst case is priced at the highest multiplier,
+# so that a tiny period over a long time cannot make the sum slow. It only over-funds.
+_MAX_PERIODS = 10_000
+
+
 def worst_case_charge_mu(
     system_resources: celaut.Sysresources,
     seconds: float,
     scarcity: Optional[Dict[str, float]] = None,
     arch: Optional[str] = None,
+    bound=CURRENT,
 ) -> int:
-    """The most `maintenance_charge_mu` can levy for an instance launched now.
+    """The most `maintenance_charge_mu` can levy in the first `seconds` of an instance
+    launched now.
 
-    The instance is priced at the launch price of this moment, and then at the highest
-    multiplier its bound allows. A quote of the maximum maintenance cost and the funding
-    of the initial balance both use this, so they cannot disagree with the ticks that
-    spend the balance: no tick of such an instance can exceed this figure.
+    The instance is priced at the launch price of this moment, and then at the ceiling
+    that its bound allows in each period (#636): the seconds of the period ``k`` at
+    ``launch * (1 + v)^k``, per resource, and never above ``SCARCITY_MAX_MULTIPLIER``.
+    When ``T`` is at least ``seconds`` that is just ``launch * (1 + v)``. The initial
+    balance (``INITIAL_RUNTIME_HOURS``) and the least balance of a start (one period)
+    both use this, so they cannot disagree with the ticks that spend the balance.
 
-    With `pricing.MAX_PRICE_VOLATILITY` off there is no worst case that the node
-    promises, and this is the charge at the current load, as it was before the bound
-    existed.
+    ``bound`` is the bound of the launch, read once by the caller
+    (``price_bound.current_bound``); omitted, it is read here. With no bound
+    (``pricing.PRICE_BOUNDED`` false) the node promises no worst case, and this is the
+    charge at the launch price.
     """
     current = scarcity if scarcity is not None else system_scarcity()
     if is_free(current):
         return 0
+    if bound is CURRENT:
+        bound = current_bound()
 
     p = prices()
     launch = launch_price_bp(current)
+    if bound is None or seconds <= 0:
+        return _charge_at(system_resources, seconds, launch, arch, p)
     top = p.scarcity_max_multiplier * SCARCITY_SCALE
-    bps = {
-        resource: (
-            scarcity_bp(current.get(resource, 1.0), p)
-            if p.volatility_bound() is None
-            else _bounded_bp(top, launch[resource], p)
-        )
-        for resource in RESOURCES
-    }
-    return _charge_at(system_resources, seconds, bps, arch, p)
+    total, k, left = 0, 1, float(seconds)
+    while left > 0:
+        bps = {resource: bound.ceiling_bp(launch[resource], k, top) for resource in RESOURCES}
+        last = (bound.period_seconds <= 0 or bound.volatility <= 0 or k >= _MAX_PERIODS
+                or all(bps[resource] >= top for resource in RESOURCES))
+        # The rest is one span when the ceiling does not change any more: one period for
+        # the whole life, no rise, or every resource at the highest multiplier.
+        span = left if last else min(left, float(bound.period_seconds))
+        if last and k >= _MAX_PERIODS:
+            bps = {resource: top for resource in RESOURCES}
+        total += _charge_at(system_resources, span, bps, arch, p)
+        left -= span
+        k += 1
+    return total
+
+
+def launch_charge_mu(
+    system_resources: celaut.Sysresources,
+    seconds: float,
+    scarcity: Optional[Dict[str, float]] = None,
+    arch: Optional[str] = None,
+) -> int:
+    """MU for holding the resources for `seconds` at the price of a launch now (#636).
+
+    The maintenance figures of a quote: the price ``P`` at the time of the estimate,
+    which the bound multiplies by ``(1 + v)^k``.
+    """
+    current = scarcity if scarcity is not None else system_scarcity()
+    if is_free(current):
+        return 0
+    return _charge_at(system_resources, seconds, launch_price_bp(current), arch, prices())
 
 
 def charge_at_launch_price(

@@ -8,6 +8,7 @@ from src.utils.cost_functions.execution_cost import (
     maintenance_charge_mu,
     worst_case_charge_mu,
 )
+from src.utils.cost_functions.price_bound import CURRENT, PriceBound
 from src.utils.monetary import HOUR_SECONDS, prices
 
 env_manager = ConfigManager()
@@ -75,6 +76,8 @@ def compute_maintenance_cost(
     scarcity: Optional[Dict[str, float]] = None,
     arch: Optional[str] = None,
     launch_bp: Optional[Mapping[str, int]] = None,
+    bound: Optional[PriceBound] = None,
+    elapsed_seconds: Optional[float] = None,
 ) -> int:
     """MU owed for holding `system_resources` for `seconds`.
 
@@ -84,11 +87,13 @@ def compute_maintenance_cost(
     `arch` selects the per-architecture memory price when one is configured; omitted,
     the node's scalar memory price applies.
 
-    `launch_bp` is the price the instance was launched at; see `maintenance_charge_mu`.
+    `launch_bp` is the price the instance was launched at, `bound` the price bound that
+    it was launched with and `elapsed_seconds` the time since its launch; see
+    `maintenance_charge_mu`.
     """
     return maintenance_charge_mu(
         system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch,
-        launch_bp=launch_bp,
+        launch_bp=launch_bp, bound=bound, elapsed_seconds=elapsed_seconds,
     )
 
 
@@ -97,10 +102,13 @@ def compute_worst_case_maintenance_cost(
     seconds: float,
     scarcity: Optional[Dict[str, float]] = None,
     arch: Optional[str] = None,
+    bound=CURRENT,
 ) -> int:
-    """The most a tick can charge an instance launched now; see `worst_case_charge_mu`."""
+    """The most the ticks can charge in the first `seconds` of an instance launched now;
+    see `worst_case_charge_mu`. ``bound`` omitted reads the bound of now."""
     return worst_case_charge_mu(
-        system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch
+        system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch,
+        bound=bound,
     )
 
 
