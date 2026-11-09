@@ -188,7 +188,7 @@ class LaunchTests(unittest.TestCase):
         return self._launch(service, candidates, patch_declarations=False)
 
     def _launch(self, service, candidates, hidden=True, patch_declarations=True):
-        cost = SimpleNamespace(cost=SimpleNamespace(), variance=0.0)
+        cost = SimpleNamespace(cost=SimpleNamespace(), price_bounded=False)
         mod = launch_mod
         with ExitStack() as stack:
             def patched(target, name, **kwargs):

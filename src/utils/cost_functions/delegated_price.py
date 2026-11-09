@@ -85,7 +85,8 @@ def own_price(
     The least ``initial_mu`` (the build and the balance that ``configuration`` asks
     for), and one maintenance period at the start and at the most, at ``launch_bp``:
     the multipliers of a launch now when not given. These are the figures that the ticks
-    of a delegated instance charge (``maintain.settle_child``). With the manifest, the
+    of a delegated instance charge (``maintain.settle_child``), for its whole life: the
+    quote is bounded with no volatility (#636). With the manifest, the
     cost includes the starts of the initial children too, as in the local quote (#538):
     ``children_mu``, or ``initial_children_mu`` of the manifest when not given. A caller
     that needs the build alone again passes the same figure to ``peer_build_mu``.
@@ -102,6 +103,12 @@ def own_price(
         init_maintenance_cost=to_amount(charge_at_launch_price(start, seconds, launch_bp, arch)),
         max_maintenance_cost=to_amount(charge_at_launch_price(most, seconds, launch_bp, arch)),
         maintenance_seconds_loop=seconds,
+        # The ticks of a delegated instance charge the multipliers of its launch for its
+        # whole life (``maintain.settle_child``): a fixed price, the bound with v = 0
+        # (#636). The peer's own bound is a cost of this node, not of the client.
+        price_bounded=True,
+        price_volatility=0.0,
+        volatility_period_seconds=0,
     )
 
 

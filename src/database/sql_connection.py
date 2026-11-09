@@ -3095,12 +3095,15 @@ class SQLConnection(metaclass=Singleton):
                    base_mem_limit, base_disk_space, base_cpu_period, base_cpu_quota,
                    peer_base_mem_limit, peer_base_disk_space, peer_base_cpu_period,
                    peer_base_cpu_quota, quote_init_maintenance_cost,
-                   quote_max_maintenance_cost, quote_maintenance_seconds_loop, quote_variance,
+                   quote_max_maintenance_cost, quote_maintenance_seconds_loop,
+                   quote_price_bounded, quote_price_volatility,
+                   quote_volatility_period_seconds,
                    suspended_at,
                    CASE WHEN suspended_at IS NULL THEN NULL
                         ELSE CAST(strftime('%s', 'now') AS INTEGER)
                              - CAST(strftime('%s', suspended_at) AS INTEGER)
-                   END AS suspended_for_s
+                   END AS suspended_for_s,
+                   CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts
             FROM delegated_instances WHERE killed_at IS NULL
             ''' + ('AND token_delegation = ?' if token is not None else ''),
             (token,) if token is not None else ())
@@ -3144,9 +3147,12 @@ class SQLConnection(metaclass=Singleton):
                 'quote_init_maintenance_cost': _as_int(row[35]) if row[35] is not None else None,
                 'quote_max_maintenance_cost': _as_int(row[36]) if row[36] is not None else None,
                 'quote_maintenance_seconds_loop': row[37],
-                'quote_variance': row[38],
-                'suspended_at': row[39],
-                'suspended_for_s': row[40],
+                'quote_price_bounded': row[38],
+                'quote_price_volatility': row[39],
+                'quote_volatility_period_seconds': row[40],
+                'suspended_at': row[41],
+                'suspended_for_s': row[42],
+                'launched_ts': row[43],
             }
             for row in result.fetchall()
         ]
@@ -3698,9 +3704,10 @@ class SQLConnection(metaclass=Singleton):
                 could not be read.
             quote (Optional[Mapping]): The maintenance quote of the peer for this
                 instance, in the MU of the peer (#567): ``init_maintenance_cost``,
-                ``max_maintenance_cost``, ``maintenance_seconds_loop`` and ``variance``
-                (``peer_quotes.maintenance_terms``). None stores NULL: the charge of the
-                peer is then not checked.
+                ``max_maintenance_cost``, ``maintenance_seconds_loop``,
+                ``price_bounded``, ``price_volatility`` and ``volatility_period_seconds``
+                (``peer_quotes.maintenance_terms``, #636). None stores NULL: the charge of
+                the peer is then not checked.
         """
         movements = _opening_movements(balance_mu, movements)
         mark = mark or {}
@@ -3720,10 +3727,11 @@ class SQLConnection(metaclass=Singleton):
                     base_mem_limit, base_disk_space, base_cpu_period, base_cpu_quota,
                     arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, charged_until,
                     quote_init_maintenance_cost, quote_max_maintenance_cost,
-                    quote_maintenance_seconds_loop, quote_variance, launched_at
+                    quote_maintenance_seconds_loop, quote_price_bounded,
+                    quote_price_volatility, quote_volatility_period_seconds, launched_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (external_token, alias, peer_id, father_id, serialized_instance, service_id,
                   str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
                   mark.get("hash"), str(int(sent_peer_mu)),
@@ -3736,7 +3744,9 @@ class SQLConnection(metaclass=Singleton):
                   launch_bp.get("mem"), launch_bp.get("disk"), time.time(),
                   _mu_text(quote.get("init_maintenance_cost")),
                   _mu_text(quote.get("max_maintenance_cost")),
-                  quote.get("maintenance_seconds_loop"), quote.get("variance")))
+                  quote.get("maintenance_seconds_loop"),
+                  None if quote.get("price_bounded") is None else int(bool(quote["price_bounded"])),
+                  quote.get("price_volatility"), quote.get("volatility_period_seconds")))
             self._append_opening(cursor, alias, movements)
 
         self._transaction(work)

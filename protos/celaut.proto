@@ -638,29 +638,48 @@ message EstimatedCost {
     // each workload: count times the build of the child plus the default balance of the
     // node for the at_init resources of the child. The cost of a group is the sum of its
     // workloads, the cost of a clause is the highest cost of its groups, and the total is
-    // the sum of the clauses. A client funds the parent with
-    // cost + maintenance * (periods + 1) * (1 + variance), where maintenance is the cost
-    // of one period of the parent.
+    // the sum of the clauses.
+    //
+    // When price_bounded is true, a client funds the parent with cost plus the sum, for
+    // each maintenance period i from 1 to the number of periods, of
+    // init_maintenance_cost * (1 + price_volatility)^k(i). Here
+    // k(i) = floor(i * maintenance_seconds_loop / volatility_period_seconds) + 1, and
+    // k(i) = 1 when volatility_period_seconds is 0. This sum funds the at_init resources
+    // only. The client pays for an increase from at_init to at_most when the resources
+    // change (ModifyServiceSystemResources), and the sum does not include it. When
+    // price_bounded is false, the node gives no limit, and the client cannot calculate a
+    // sum that is sufficient.
     Amount cost = 1;
-    // The cost of one maintenance period with the resources at the start, in MU.
+    // The cost of one maintenance period with the resources at the start (at_init), in
+    // MU. It is the price at the time of the estimate. It is not a limit.
     Amount init_maintenance_cost = 2;
-    // The cost of one maintenance period with the maximum resources, in MU. This is the
-    // statement that the node signs about the price. If the node sets
-    // `pricing.MAX_PRICE_VOLATILITY`, the figure is a hard ceiling: it is priced at the
-    // worst-case price multiplier that the bound allows, and no maintenance period of the
-    // instance charges more. A client that sees a charge above this figure has proof
-    // that the node broke its quote. If the node does not set the bound, the figure is
-    // only the charge at the current load of the node, and a later period can charge
-    // more. In that case the figure is not a ceiling.
+    // The cost of one maintenance period with the maximum resources (at_most), in MU. It
+    // is the price at the time of the estimate. It is not a limit. The limit is in
+    // price_bounded.
     Amount max_maintenance_cost = 3;
     // The length of one maintenance period, in seconds.
     int32 maintenance_seconds_loop = 4;
-    // How much the real costs can be different from the estimate, with no unit. A
-    // reader multiplies each cost by (1 + variance * k). The reader selects the factor
-    // k. A node that cannot estimate the difference sends 0. The variance does not
-    // limit the price of a running instance. The ceiling of the price is in
-    // max_maintenance_cost, and only when the node sets the bound.
-    float variance = 5;
+    // True: the node promises a limit for the price of the instance. While the instance
+    // has its at_init resources, a maintenance period must not cost more than
+    // init_maintenance_cost * (1 + price_volatility)^k. While it has its at_most
+    // resources, the limit is max_maintenance_cost * (1 + price_volatility)^k. Both are
+    // for one maintenance period and change in proportion to its length. k is the
+    // volatility period that the instance is in:
+    // k = floor((t - launch) / volatility_period_seconds) + 1, where t is the time of the
+    // charge and launch is the start of the instance. k = 1 when
+    // volatility_period_seconds is 0. The price can go down with no limit. A charge above
+    // the limit is an overcharge, and a client can report it.
+    // False (the default): the node does not promise a limit. The price can increase
+    // with no limit. price_volatility and volatility_period_seconds have no meaning.
+    bool price_bounded = 5;
+    // The largest relative increase of the price in one volatility period, with no unit:
+    // 0.10 is 10 %. It has a meaning only when price_bounded is true. A reader uses 0 for
+    // a value that is negative or not finite.
+    float price_volatility = 6;
+    // The length of one volatility period, in seconds. The first period starts at the
+    // launch of the instance. 0: one period for all the life of the instance, and k is
+    // always 1. A reader uses 0 for a negative value.
+    int32 volatility_period_seconds = 7;
 }
 
 // Peers use this message to evaluate the Service.Workload entries of a service: a descendant workload

@@ -619,7 +619,7 @@ class QuoteTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchTests(unittest.TestCase):
     def _launch(self, service, candidates, tor_proxy):
-        cost = SimpleNamespace(cost=SimpleNamespace(), variance=0.0)
+        cost = SimpleNamespace(cost=SimpleNamespace(), price_bounded=False)
         mod = launch_mod
         with ExitStack() as stack:
             def patched(target, name, **kwargs):
