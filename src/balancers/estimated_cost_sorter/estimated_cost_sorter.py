@@ -9,7 +9,8 @@ from src.reputation_system.onchain_credit import (
     DEFAULT_ONCHAIN_WEIGHT,
     standing_by_peer,
 )
-from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization as vcnorm
+from src.utils.cost_functions import price_bound
+from src.utils.cost_functions.volatility_cost_normalization import volatility_cost_normalization as vcnorm
 from src.utils.config import ConfigManager
 from src.utils.utils import from_amount
 from src.utils.logger import LOGGER as logger
@@ -77,7 +78,7 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
             not hasattr(estimated_cost, 'max_maintenance_cost') or \
             not hasattr(estimated_cost.max_maintenance_cost, 'n') or \
             not hasattr(estimated_cost, 'maintenance_seconds_loop') or \
-            not hasattr(estimated_cost, 'variance'):
+            not hasattr(estimated_cost, 'price_bounded'):
             logger(f"Estimated cost for peer {peer_id} is missing required fields, skipping. Estimated cost: {estimated_cost}")
             return float('inf')  # Assign a very high cost to skip this peer
 
@@ -85,18 +86,23 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
         # directly comparable. This used to convert through each node's own
         # gas-per-ERG factor (`1 / (peer_gas_per_erg / local_gas_per_erg)`), which only
         # existed because "gas" meant something different on every node.
+        # The volatility of a bounded quote, read strictly (#636). An unbounded quote has
+        # none to weigh.
+        bound = price_bound.of_quote(estimated_cost, source=f" in the quote of {peer_id}")
+        volatility = 0.0 if bound is None else bound.volatility
+
         def maintenance_mu_per_hour(amount) -> int:
             seconds = estimated_cost.maintenance_seconds_loop
             if seconds <= 0:
                 return 0
             return int(
-                vcnorm(cost=from_amount(amount), variance=estimated_cost.variance)
+                vcnorm(cost=from_amount(amount), volatility=volatility)
                 * HOUR_SECONDS
                 / seconds
             )
 
         cost_mu: int = int(
-            vcnorm(cost=from_amount(estimated_cost.cost), variance=estimated_cost.variance)
+            vcnorm(cost=from_amount(estimated_cost.cost), volatility=volatility)
             + mean([
                 maintenance_mu_per_hour(estimated_cost.init_maintenance_cost),
                 maintenance_mu_per_hour(estimated_cost.max_maintenance_cost),
