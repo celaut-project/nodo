@@ -1,3 +1,5 @@
+import math
+
 from protos import celaut_pb2
 
 from src.commands.execute import resolve_service_hash
@@ -5,6 +7,7 @@ from src.manager.manager import get_dev_clients
 from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 from src.identity.grpc_transport import local_channel
+from src.utils.cost_functions import price_bound
 from src.utils.monetary import format_mu
 from src.utils.utils import (
     from_amount,
@@ -17,6 +20,8 @@ env_manager = ConfigManager()
 # Balance the throwaway estimation client is given, only to authenticate the request;
 # it is never spent, since estimating launches nothing, and never quoted.
 ESTIMATION_BALANCE_MU = 10 ** 16
+# The runs that `nodo estimate` shows the funding of: cost plus the maintenance sum.
+FUNDING_HOURS = (1, 24)
 
 
 def estimate(service: str) -> None:
@@ -82,3 +87,43 @@ def estimate(service: str) -> None:
     print(f"- Maintenance, as started:  {per_hour(estimated_cost.init_maintenance_cost)} per hour")
     print(f"- Maintenance, at its most: {per_hour(estimated_cost.max_maintenance_cost)} per hour")
     print(f"- Charged every:            {estimated_cost.maintenance_seconds_loop} seconds")
+    for line in price_bound_lines(estimated_cost):
+        print(line)
+
+
+def _period_text(seconds: int) -> str:
+    if seconds <= 0:
+        return "for the whole life of the instance"
+    if seconds % 3600 == 0:
+        return f"per {seconds // 3600} h"
+    return f"per {seconds} s"
+
+
+def price_bound_lines(estimated_cost, hours=FUNDING_HOURS):
+    """The price bound of a quote and what a client sends to fund it (#636).
+
+    The funding is the formula of ``EstimatedCost.cost`` in protos/celaut.proto:
+    ``cost`` plus, for each maintenance period ``i``, ``init_maintenance_cost`` times
+    ``(1 + price_volatility)^k(i)`` (``price_bound.funding_sum_mu``).
+    """
+    bound = price_bound.of_quote(estimated_cost)
+    loop_seconds = int(estimated_cost.maintenance_seconds_loop or 0)
+    lines = ["Price bound:"]
+    if bound is None:
+        lines.append("- Bounded: no. The node promises no limit: the price can rise with its load.")
+    else:
+        lines.append(
+            f"- Bounded: yes. The price rises at most {bound.volatility * 100:g} % "
+            f"{_period_text(bound.period_seconds)}, from the launch "
+            f"(price_volatility {bound.volatility:g}, volatility_period_seconds {bound.period_seconds})."
+        )
+    if loop_seconds <= 0:
+        return lines
+    cost_mu = from_amount(estimated_cost.cost)
+    init_mu = from_amount(estimated_cost.init_maintenance_cost)
+    for h in hours:
+        periods = math.ceil(h * 3600 / loop_seconds)
+        total = cost_mu + price_bound.funding_sum_mu(init_mu, loop_seconds, bound, periods)
+        note = "" if bound is not None else " (at the price of now; no limit)"
+        lines.append(f"- Funding for {h} h ({periods} periods): {format_mu(total)}{note}")
+    return lines

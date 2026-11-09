@@ -196,10 +196,14 @@ pricing:
   # Scarcity: per resource, never global.
   SCARCITY_MAX_MULTIPLIER: 10        # ceiling of the surcharge when a resource runs out
   SCARCITY_CURVE: 1.0                # 1.0 = linear; >1 stays flat until real scarcity
-  MAX_PRICE_VOLATILITY: 2.0          # a running instance pays at most 2x its launch multiplier; 0 = no bound
+  PRICE_BOUNDED: true                # quotes promise a price bound (price_bounded)
+  PRICE_VOLATILITY: 0.10             # v: at most +10 % per period; omit to compute it
+  PRICE_VOLATILITY_PERIOD_HOURS: 24  # T; 0 = one period for the whole life
+  PRICE_VOLATILITY_WINDOW_HOURS: 168 # window of the computed v (default 7 periods)
+  PRICE_VOLATILITY_MIN: 0.05         # floor of the computed v
 
 free_tier:
-  CREDIT_MU_PER_NEW_CLIENT: 9000000  # one hour of 0.5 GiB + 1 vCPU at the prices above, at 2x
+  CREDIT_MU_PER_NEW_CLIENT: 4950000  # one hour of 0.5 GiB + 1 vCPU at the prices above, at 1.10x
   FREE_WHILE_SCARCITY_BELOW: 0.0     # charge nothing while every resource is under this load
 ```
 
@@ -258,54 +262,88 @@ it. Without a bound, an instance that was funded at 1x can be charged up to
 in about six minutes instead of one hour. It is stopped. The
 service takes no reputation penalty for this death.
 
-`pricing.MAX_PRICE_VOLATILITY` bounds that. At launch, the node records the scarcity
-multiplier of each resource in `local_instances` (`launch_cpu_bp`, `launch_mem_bp`,
-`launch_disk_bp`, in basis points). Each tick then charges, per resource:
+The price bound of a launch bounds that (#636, which replaces the `MAX_PRICE_VOLATILITY`
+of #335). A quote with `price_bounded` true promises that the price of the instance
+rises by at most a factor `(1 + v)` per period `T`, counted from its launch. At launch,
+the node records in `local_instances` the scarcity multiplier of each resource
+(`launch_cpu_bp`, `launch_mem_bp`, `launch_disk_bp`, in basis points) and the bound that
+it read (`launch_volatility` = v, `launch_period_seconds` = T). Each tick then charges,
+per resource:
 
 ```
-multiplier[r] = min(current_multiplier[r], launch_multiplier[r] * MAX_PRICE_VOLATILITY)
+k             = floor((t - launched_at) / T) + 1      (k = 1 when T = 0)
+multiplier[r] = min(current_multiplier[r],
+                    launch_multiplier[r] * (1 + v)^k,
+                    SCARCITY_MAX_MULTIPLIER)
 ```
 
-- `2.0` lets a tick charge at most twice the launch price.
-- `1.0` fixes the multiplier for the life of the instance.
-- `0`, or a value from `SCARCITY_MAX_MULTIPLIER` up, is no bound. This was the
-  behaviour before the key existed.
-- A value between `0` and `1` is refused.
+`t` is the end of the interval that the tick charges, so an interval that spans a change
+of period has the higher `k`. The tick uses the values that the row stored, never the
+config or the price history of a later moment, so the ceiling of an instance does not
+move during its life.
+
+- `pricing.PRICE_BOUNDED: false` promises nothing: the row stores NULL, and the price of a
+  running instance follows the load up to `SCARCITY_MAX_MULTIPLIER`. Peers rank such a
+  node after the bounded ones.
+- `PRICE_VOLATILITY: 0` fixes the multiplier for the life of the instance.
+- `PRICE_VOLATILITY_PERIOD_HOURS: 0` is one period for the whole life. With
+  `PRICE_VOLATILITY: 1.0` it is the old `MAX_PRICE_VOLATILITY: 2.0`.
+- Invalid values (NaN, infinite, negative; a window of 0) refuse to load, and so does
+  the removed `MAX_PRICE_VOLATILITY`.
+
+**The computed volatility.** Without `PRICE_VOLATILITY`, the node computes `v` from its own
+history (`price_history`, one sample a minute of the multiplier that a launch would record,
+1x while free). For every stretch of length `T` in `PRICE_VOLATILITY_WINDOW_HOURS`, the rise
+is the highest multiplier in the stretch over the one at its start, less 1, for the
+resource that rose the most; a fall is 0. `v` is the p95 of those rises, and never less
+than `PRICE_VOLATILITY_MIN`. There is no cap. With no history, a history shorter than `T`,
+or `T = 0`, `v` is the floor. A quote and a launch read it once each, and the launch stores
+what it read.
 
 **The bound is a ceiling only.** It is not symmetric, for this reason: the risk that it
 covers is a rise that the funding of the instance did not cover. A fall of the load
 reaches a running instance in full, so a client never pays more than the current load
 asks. A symmetric bound would also keep the price up while the node empties out. The
 cost is a one-way bet in favour of the client, which the node accepts, because the
-instance is funded at the worst case.
+instance is funded at the ceiling.
 
 Three more facts:
 
 - **A launch while the node is free is anchored at 1x.** An instance launched while
   `free_tier.FREE_WHILE_SCARCITY_BELOW` made the node free records 1x (the base price)
   for each resource. It pays nothing while the node stays free; once the node crosses
-  the threshold its multiplier may rise to the bound times 1x, and no further.
+  the threshold its multiplier may rise to the ceiling over 1x, and no further. Its
+  balance is funded for that ceiling (see "Free node" below).
 - **Only the multiplier is bounded.** A change of the base prices (`RAM_MU_PER_GIB_HOUR`
   and the others) reaches a running instance in full.
-- **A row with no recorded launch price is not bounded.** Its columns are NULL (an instance
-  from before the columns existed), and it is charged at the current load as before. An
-  instance that a peer runs for you (delegated) is not bounded either. The peer meters
-  its price, and this node never priced the instance.
+- **A row with no recorded launch price or bound is not bounded** (a dev instance). It is
+  charged at the current load. An instance that a peer runs for you (delegated) is charged
+  by this node at the multipliers of its launch for its whole life (#577): a fixed price,
+  which the quote of this node states as bounded with `v = 0`.
 
 The clamp is in `execution_cost.maintenance_charge_mu`, not in the maintenance loop, so
-the tick and the quote come from the same function.
+the tick and the funding (`worst_case_charge_mu`) come from the same function.
 
-**What the quote shows with the bound on.** `GetServiceEstimatedCost` has these figures:
+**What the quote shows.** `GetServiceEstimatedCost` has these figures:
 
 | Field | Meaning |
 |---|---|
-| `init_maintenance_cost` | One tick for the resources at the start, at the load now. This is the launch price. |
-| `max_maintenance_cost` | One tick for the maximum resources, at the highest multiplier that the bound allows. No tick can charge more. |
-| `cost` | The least `initial_mu` that starts the service: the build, plus the balance that the instance has after it. The balance is `INITIAL_RUNTIME_HOURS` at the worst case (launch multiplier times the bound). |
-| `variance` | Not computed (0). The node does not need it: `max_maintenance_cost` is the limit. A node that delegates to this one allows `max_maintenance_cost` times `1 + variance` (#567). |
+| `init_maintenance_cost` | One tick for the resources at the start, at the launch price of now (`P`). |
+| `max_maintenance_cost` | One tick for the maximum resources, at the same price. Neither figure is a limit by itself. |
+| `price_bounded` | `pricing.PRICE_BOUNDED`. True: a tick never charges more than the figure of the resources held times `(1 + price_volatility)^k`. |
+| `price_volatility`, `volatility_period_seconds` | `v` and `T` of the bound. Meaningless when `price_bounded` is false. |
+| `cost` | The least `initial_mu` that starts the service: the build, plus the balance that the instance has after it. The balance is `INITIAL_RUNTIME_HOURS` at the ceiling. |
 
-With the bound off, `max_maintenance_cost` is the charge at the current load, as before:
-the node does not promise a limit, and the client has no worst case to read.
+A node that delegates to this one checks the charges of the child against the bound
+(`MAINTENANCE_OVERCHARGED`, docs/REPUTATION.md). A quote with `price_bounded` false is
+never checked.
+
+**Free node (#636, H).** While the node is free the maintenance figures of the quote are at
+the anchor (1x), not 0, and so are the balances: the build is free, but a start still asks
+for the balance that covers the ceiling over the anchor for `INITIAL_RUNTIME_HOURS`. The
+ticks charge nothing while the node stays free, and the unspent balance goes back to the
+father at the stop. Before, a free start got a balance of 0, and with `costs.ALLOW_DEBT`
+off the instance was stopped at its first tick after the node left the free state (#323).
 
 The quote and the funding are exact only when the load does not move between the quote and
 the launch. A launch at a higher load than its quote records a higher launch price and
@@ -330,8 +368,8 @@ Two rules apply, and the node rejects the start and charges nothing if one fails
 - **The build must fit.** `initial_mu` is at least the build.
 - **Minimum runtime.** The balance after the build is at least one maintenance period
   (`MANAGER_ITERATION_TIME`) with the resources at the start. The period is priced at the
-  launch price times `MAX_PRICE_VOLATILITY` when the bound is on, and at the current price
-  when it is off (`start_funding.minimum_runtime_mu`). Without this rule, a caller could
+  launch price times `1 + v` when the quotes are bounded, and at the launch price when
+  they are not (`start_funding.minimum_runtime_mu`). Without this rule, a caller could
   pay the build and get an instance that dies at the first tick.
 
 If the request has no `initial_mu`, the node uses the build plus the default balance:
@@ -388,20 +426,24 @@ declares its own `initial_environment_workload` adds the cost of its own childre
   This is out of scope, as for the service itself (see "This node delegates only at no loss").
 - `possible_environment_workload` has no cost. It is in the admission only.
 - Children that the service starts later, and that are not in `initial_environment_workload`,
-  are not in the quote. The client covers them with `variance` and with top-ups
-  (`nodo increase_deposit`).
+  are not in the quote. The client covers them with top-ups (`nodo increase_deposit`).
 - `cost` does not include the maintenance of the children. There is no
   `children_maintenance_cost`.
 
-The funding formula for a client:
+The funding formula for a client (the comment of `EstimatedCost.cost`), when the quote is
+bounded:
 
 ```
 parent_balance = cost
-               + parent_maintenance × (periods + 1) × (1 + variance)
+               + Σ_{i=1..periods} init_maintenance_cost × (1 + price_volatility)^k(i)
+k(i)           = floor(i × maintenance_seconds_loop / volatility_period_seconds) + 1
+                 (k(i) = 1 when volatility_period_seconds = 0)
 ```
 
-`parent_maintenance` is the cost of one period of the parent (`init_maintenance_cost`, or
-`max_maintenance_cost` for the worst case). The parent is free to give a different
+The sum funds the resources at the start only. A rise from `at_init` to `at_most` is paid
+when the resources change (`ModifyServiceSystemResources`). `nodo estimate` prints this sum
+for 1 h and 24 h (`price_bound.funding_sum_mu`). An unbounded quote gives no limit, so no
+sum is sufficient. The parent is free to give a different
 `initial_mu` to a child in its own `StartService`: the quote is an estimate for the default
 balance of the node.
 
@@ -423,12 +465,14 @@ the figure of the check. This is the drift rule:
   period of the parent, passes the check, at any load of the start. (A quote that asks for
   no `initial_mu` has the default balance in `cost`, which pays the period already.)
 - At the base load, the check asks for exactly the children that the quote put in `cost`.
-- While the node is free at the start, the start charges nothing and is not checked. A quote
-  taken while the node was free gives `cost = 0`; if the node charges at the start, the
-  check refuses it.
+- While the node is free at the start, the build is free and the start is not checked. A
+  quote taken while the node was free gives `cost` = the balance (the build is 0); if the
+  node charges at the start, the check can refuse it for the build.
 - The check does not ask for the load surcharge. The real `child_start` is priced at the load
   of the moment that the parent starts the child, as for any start. If the load is up then,
-  the parent pays more than the quote; the client covers this with `variance` and top-ups.
+  the parent pays more than the quote; the client covers this with top-ups.
+- With a computed volatility, the check reads `v` at the start, and the quote read it at the
+  quote. A `v` that rose in between makes the check ask for a little more than the quote.
 
 Before this rule, the check priced the children at the load of the start, at the worst case
 of the volatility bound. With the CPU busy at the start, it asked for up to
@@ -459,11 +503,13 @@ restart of the daemon is, and at most six (`maintain.LOCAL_TICK_MAX_INTERVALS`),
 host that stalled does not bill a span in which no guest ran. The `maintenance` movement
 carries the seconds it priced, which is what the father checks it against (#570).
 
-With `pricing.MAX_PRICE_VOLATILITY` on, the hours are priced at the launch multiplier times
-the bound (see [above](#bounding-the-price-of-a-running-instance)): twice the price at an
-idle node with the shipped `2.0`. No tick can charge more, so a price rise cannot stop the
-instance. `free_tier.CREDIT_MU_PER_NEW_CLIENT` follows, or a new client is refused at its
-first launch (issue #324).
+When the quotes are bounded, the hours are priced at the ceiling of each period that they
+cover (see [above](#bounding-the-price-of-a-running-instance)): the launch multiplier times
+`(1 + v)^k` for the seconds of the period `k`, which is just `1 + v` when `T` is at least
+`INITIAL_RUNTIME_HOURS` (1.10x at an idle node with the shipped values). No tick in those
+hours can charge more, so a price rise cannot stop the instance.
+`free_tier.CREDIT_MU_PER_NEW_CLIENT` follows, or a new client is refused at its first
+launch (issue #324).
 
 Occupancy is deliberately **not** charged again as part of the start. Doing both billed
 the same window twice: the client paid for the hour once as a start charge that bought

@@ -4680,6 +4680,7 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
                 app.scarcity.max_multiplier, app.scarcity.curve
             ),
         ),
+        metric_line("Price bound", app.scarcity.bound_text()),
         Line::from(""),
     ];
 

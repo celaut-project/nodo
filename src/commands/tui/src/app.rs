@@ -2739,11 +2739,20 @@ fn get_guest_kernel_reserves(config: &Path) -> Vec<(&'static str, GuestKernelRes
         .collect()
 }
 
-/// The scarcity surcharge, which bounds what any of these prices can become.
+/// The scarcity surcharge, which bounds what any of these prices can become, and the
+/// price bound that the quotes promise over it (#636).
 #[derive(Debug, Clone, Copy)]
 pub struct Scarcity {
     pub max_multiplier: u64,
     pub curve: f64,
+    /// `pricing.PRICE_BOUNDED`.
+    pub price_bounded: bool,
+    /// `pricing.PRICE_VOLATILITY`, or `None` when the node computes it.
+    pub price_volatility: Option<f64>,
+    /// `pricing.PRICE_VOLATILITY_PERIOD_HOURS`; 0 is one period for the whole life.
+    pub volatility_period_hours: f64,
+    /// `pricing.PRICE_VOLATILITY_MIN`, the floor of the computed volatility.
+    pub volatility_min: f64,
 }
 
 impl Default for Scarcity {
@@ -2751,6 +2760,29 @@ impl Default for Scarcity {
         Self {
             max_multiplier: 1,
             curve: 1.0,
+            price_bounded: true,
+            price_volatility: None,
+            volatility_period_hours: 24.0,
+            volatility_min: 0.05,
+        }
+    }
+}
+
+impl Scarcity {
+    /// The price bound as one line: whether the quotes promise it, and how far a price
+    /// may rise per period, from the launch of the instance.
+    pub fn bound_text(&self) -> String {
+        if !self.price_bounded {
+            return "none (the price follows the load)".to_string();
+        }
+        let period = if self.volatility_period_hours > 0.0 {
+            format!("per {} h", self.volatility_period_hours)
+        } else {
+            "for the whole life".to_string()
+        };
+        match self.price_volatility {
+            Some(v) => format!("+{}% {period}", v * 100.0),
+            None => format!("computed, at least +{}% {period}", self.volatility_min * 100.0),
         }
     }
 }
@@ -2818,6 +2850,23 @@ pub(crate) fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
             .and_then(|value| value.trim().parse::<f64>().ok())
             .filter(|value| *value > 0.0)
             .unwrap_or(1.0),
+        price_bounded: yaml_scalar(document.as_ref(), &["pricing", "PRICE_BOUNDED"])
+            .map(|value| value.trim() != "false")
+            .unwrap_or(true),
+        price_volatility: yaml_scalar(document.as_ref(), &["pricing", "PRICE_VOLATILITY"])
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0),
+        volatility_period_hours: yaml_scalar(
+            document.as_ref(),
+            &["pricing", "PRICE_VOLATILITY_PERIOD_HOURS"],
+        )
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(24.0),
+        volatility_min: yaml_scalar(document.as_ref(), &["pricing", "PRICE_VOLATILITY_MIN"])
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .unwrap_or(0.05),
     };
     (entries, scarcity)
 }
