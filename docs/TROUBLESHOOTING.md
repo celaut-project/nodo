@@ -272,7 +272,8 @@ of a real connect from the guest bridge (it supplies its own listener, so this w
 with the node stopped), the foreign chains that can reject, and the same command.
 Then start the node again. [`FIREWALL.md`](FIREWALL.md) → *Sharing the host with
 another firewall* has the longer worked examples, including giving the guest bridge
-a firewalld zone of its own rather than `trusted`.
+a firewalld zone of its own rather than `trusted`, and the policy guests need to reach
+the Internet (see also *A child launched, but its parent cannot connect to it*, below).
 
 **Pinning a port you have already opened yourself** in `config.yaml`
 (`network.GATEWAY_PORT: 58443`) stops nodo re-picking — but it does not exempt the
@@ -287,6 +288,41 @@ anything. If peers on the Internet must reach this node you also need a port
 forward to this host's `GATEWAY_PORT`, an ISP that is not putting you behind CGNAT,
 and a check from a genuinely external network. Run `nodo nat-guide`, which reports
 the facts it can establish and tells you the rest.
+
+## A child launched, but its parent cannot connect to it (or `*` gets no Internet)
+
+**Symptoms.** A service that launches a dependency waits forever for it, or reports
+it dead, while `nodo instances` shows the child `running` and the host can connect to
+it. Or a service with network tag `*` fails with `No route to host` (`EHOSTUNREACH`)
+or a DNS timeout (`EAI_AGAIN`), while the node log says
+`[FW] Allowed ALL egress … [network tag '*']`. Published ports keep working, which
+makes it look like the service's fault.
+
+**Cause, on a host with firewalld.** nodo's accept rules end only their own chain;
+firewalld's `inet firewalld filter_FORWARD` then rejects forwarded traffic that its
+zones and policies do not allow (`reject with icmpx admin-prohibited`). Guest →
+guest needs the bridge in a zone with `forward`; guest → Internet needs a firewalld
+**policy** from that zone to the uplink's. `--add-forward` alone does not do the
+second. A packet trace shows it plainly:
+
+```
+inet nodo forward rule ip saddr <parent> ip daddr <child> tcp dport 8080 accept …
+inet firewalld filter_FWD_public rule reject with icmpx admin-prohibited (verdict drop)
+```
+
+**Check.** Without root: `nodo info` or `nodo status` shows the
+`guest_forwarding_firewalld` alert, stored by the daemon at start, with the commands.
+With root: `sudo nodo doctor` → *Guest-to-guest forwarding*, *Guest-to-Internet
+forwarding* and *firewalld* send real packets and name what is missing.
+
+**Fix.** Give the bridge a zone of its own and a policy out of it — the commands are
+in [`FIREWALL.md`](FIREWALL.md) → *Sharing the host with another firewall*, and in
+`.forward_notice.cmd` with your ports filled in. `install.sh` sets this up itself
+when firewalld is running. Then `sudo nodo doctor`. The policy does not widen what a
+guest may reach: nodo's per-VM rules still drop everything a guest was not granted.
+
+Not firewalld? The doctor's rejecting-chain lines name whatever else drops on the
+forward hook; with Docker, see the `DOCKER-USER` rules in the same section.
 
 ## KyA prompt blocks automation
 
