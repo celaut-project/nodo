@@ -12,7 +12,7 @@ import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database import ledger
-from src.manager import balance_statement, hibernation, orphan_starts, statement_check
+from src.manager import balance_statement, closing_check, hibernation, orphan_starts, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, top_up_unlimited_clients, handle_internal_failure, revive_instance, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
@@ -1191,6 +1191,8 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             rows = tuple(chain.rows)
             statement_check.settle_failed_reads(peer_id, token, chain.rows, statement.head_seq)
             _check_maintenance_quote(row, chain.rows, start.ts)
+            # What the peer did about closing time, against what its quote said (#344).
+            closing_check.check(row, chain.rows)
         else:
             if chain.problem:
                 statement_check.penalise_chain(peer_id, token, chain, from_seq)

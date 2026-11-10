@@ -72,6 +72,16 @@ class Reason:
     `stop` row before the maintenance. The peer charges for an instance that does not
     answer (#631)."""
 
+    INSTANCE_HIBERNATED_UNANNOUNCED = "instance_hibernated_unannounced"
+    """A peer hibernated a delegated instance in a way that its quote did not say (#344).
+    The quote (`closes_at`, `on_close`) is the reference: a hibernation with `REFUSE`, or
+    before the close that a `HIBERNATE` or `STOP` quote named. Scored less than a stop."""
+
+    INSTANCE_STOPPED_UNANNOUNCED = "instance_stopped_unannounced"
+    """A peer stopped a delegated instance in a way that its quote did not say (#344): the
+    `stop` row of the peer has the reason `activity_window`, and the quote said `REFUSE`,
+    or `HIBERNATE`, or a `STOP` with a close that was later. Scored more than a hibernation."""
+
     # Services.
     INSTANCE_LOST = "instance_lost"
     """The instance's virtual machine no longer exists and had to be pruned."""
