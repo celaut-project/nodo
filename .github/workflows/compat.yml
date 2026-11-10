@@ -1,11 +1,13 @@
 name: compat
 
 # compat.json is what `nodo update` compares the installed and the incoming version by
-# (protocol, config keys, database schema, storage layout). It must be regenerated in the
-# commit that changes any of them: `python -m src.utils.compat --write`.
+# (protocol, config keys, database schema, storage layout). CI regenerates it on every push
+# to dev and stable that changes one of them, and commits the result when it differs:
+# `python -m src.utils.compat --write`. A pull request does not need to include it.
 
 on:
-  pull_request:
+  push:
+    branches: [dev, stable]
     paths:
       - 'compat.json'
       - 'protos/celaut.proto'
@@ -13,8 +15,9 @@ on:
       - 'src/database/**'
       - 'src/utils/compat.py'
       - 'bash/requirements.txt'
-  push:
-    branches: [dev, stable]
+
+permissions:
+  contents: write
 
 jobs:
   compat-manifest:
@@ -25,4 +28,16 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r bash/requirements.txt
+      - run: python -m src.utils.compat --write
       - run: python -m src.utils.compat --check
+      - name: Commit compat.json when it changed
+        run: |
+          if git diff --quiet -- compat.json; then
+            echo "compat.json is up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add compat.json
+          git commit -m "chore(compat): regenerate compat.json"
+          git push

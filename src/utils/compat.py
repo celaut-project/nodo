@@ -13,9 +13,10 @@ changed. Three things qualify (the third is two entries, the database and ``stor
   to spell it.
 * ``storage_format``: ``STORAGE_FORMAT``, the layout of ``storage/``.
 
-CI writes the result to ``compat.json`` (``python -m src.utils.compat --write``) and fails
-when the file is behind the sources (``--check``), so a schema cannot change without the
-change showing in the manifest.
+On each push to ``dev`` and ``stable`` that changes one of them, CI writes the result to
+``compat.json`` (``python -m src.utils.compat --write``) and commits the file if it differs.
+A pull request does not need to include it. ``--check`` exits with an error when the file is
+behind the sources. Use it to verify the manifest by hand.
 """
 import contextlib
 import hashlib
