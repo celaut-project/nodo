@@ -107,7 +107,7 @@ def _begin_notice(
         deadline = notice.grace_deadline(grace)
         if not sc.begin_local_stopping(token, deadline, kind, reason, credit):
             return None
-        if not notice.send(notice.socket_path(token), _VERB[kind], deadline):
+        if not notice.deliver(token, _VERB[kind], deadline):
             log.LOGGER(
                 f"Could not write the notice to {token}; it is stopped with no notice."
             )

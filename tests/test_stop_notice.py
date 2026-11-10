@@ -5,11 +5,14 @@ A service that declares ``notice_declaration`` has a virtio console. The node wr
 stops or hibernates as before. A service with no declaration is stopped at once.
 """
 
+import json
 import os
+import select
 import socket
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -259,17 +262,202 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(notice.stop_grace_seconds(), 0)
 
 
+_LINUX_PTS = os.path.isdir("/dev/pts")
+
+
+class _VmInfoServer:
+    """A fake CH API socket that answers ``GET /api/v1/vm.info`` with ``body``."""
+
+    def __init__(self, test, path, body, status=200):
+        self.requests = []
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(path)
+        server.listen(4)
+        test.addCleanup(server.close)
+
+        def run():
+            while True:
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    return
+                with conn:
+                    request = conn.recv(4096)
+                    self.requests.append(request.split(b"\r\n", 1)[0])
+                    payload = body if isinstance(body, bytes) else json.dumps(body).encode()
+                    conn.sendall(
+                        b"HTTP/1.1 %d X\r\nContent-Type: application/json\r\n"
+                        b"Content-Length: %d\r\n\r\n" % (status, len(payload)) + payload)
+
+        threading.Thread(target=run, daemon=True).start()
+
+
+@skip
+class CloudHypervisorPtyTests(unittest.TestCase):
+    """The console of the notice on Cloud Hypervisor: ``--console pty`` (#645)."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory(dir="/tmp")
+        self.addCleanup(self.dir.cleanup)
+        self.api = os.path.join(self.dir.name, "ch.sock")
+
+    def _pty(self):
+        """A pty pair: the test holds the master, as CH does. Returns (master, slave path)."""
+        import tty
+
+        master, slave = os.openpty()
+        tty.setraw(slave)  # CH makes the slave raw when it creates it
+        path = os.ttyname(slave)
+        os.close(slave)
+        self.addCleanup(os.close, master)
+        os.set_blocking(master, False)
+        return master, path
+
+    @staticmethod
+    def _read_all(fd, wait=0.5):
+        data, end = b"", time.time() + wait
+        while time.time() < end:
+            ready, _, _ = select.select([fd], [], [], 0.05)
+            if ready:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                data += chunk
+        return data
+
+    def test_the_path_of_the_pty_comes_from_vm_info(self):
+        server = _VmInfoServer(self, self.api, {"config": {"console": {"mode": "Pty", "file": "/dev/pts/7"}}})
+        self.assertEqual(notice.ch_console_pty(self.api), "/dev/pts/7")
+        self.assertEqual(server.requests, [b"GET /api/v1/vm.info HTTP/1.1"])
+
+    def test_no_pty_in_vm_info_is_none(self):
+        for console in ({"mode": "Off", "file": None}, {"mode": "Pty", "file": "/etc/passwd"},
+                        {"mode": "Pty", "file": "/dev/pts/../../etc/x"}, {"mode": "Pty"}, None):
+            with self.subTest(console=console):
+                path = os.path.join(self.dir.name, f"s{len(os.listdir(self.dir.name))}.sock")
+                _VmInfoServer(self, path, {"config": {"console": console}})
+                self.assertIsNone(notice.ch_console_pty(path))
+
+    def test_a_ch_that_does_not_answer_is_none_and_not_an_error(self):
+        self.assertIsNone(notice.ch_console_pty(self.api))
+        _VmInfoServer(self, self.api, b"not json")
+        self.assertIsNone(notice.ch_console_pty(self.api))
+
+    def test_an_error_status_is_none(self):
+        _VmInfoServer(self, self.api, {"config": {"console": {"mode": "Pty", "file": "/dev/pts/7"}}}, status=500)
+        self.assertIsNone(notice.ch_console_pty(self.api))
+
+    @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
+    def test_the_line_reaches_the_master_as_it_is_written(self):
+        master, path = self._pty()
+        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1700000000)))
+        self.assertEqual(self._read_all(master), b"STOP 1700000000\n")
+
+    @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
+    def test_a_second_open_and_close_also_reaches_the_master(self):
+        """The spike of #645 lost a line after a second open of the pty; the node opens it per line."""
+        master, path = self._pty()
+        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1)))
+        self.assertTrue(notice.write_pty(path, notice.line(notice.HIBERNATE, 2)))
+        self.assertEqual(self._read_all(master), b"STOP 1\nHIBERNATE 2\n")
+
+    @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
+    def test_a_slave_that_someone_made_cooked_is_made_raw_again(self):
+        import termios
+        master, path = self._pty()
+        fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+        attrs = termios.tcgetattr(fd)
+        attrs[1] |= termios.OPOST | termios.ONLCR
+        attrs[3] |= termios.ECHO | termios.ICANON
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        os.close(fd)
+        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 5)))
+        self.assertEqual(self._read_all(master), b"STOP 5\n")  # no \r\n
+
+    @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
+    def test_what_the_guest_writes_is_thrown_away_with_a_limit_and_does_not_block(self):
+        master, path = self._pty()
+        written = 0
+        try:
+            while written < 1024 * 1024:
+                written += os.write(master, b"x" * 4096)
+        except BlockingIOError:
+            pass
+        started = time.time()
+        with mock.patch.object(notice, "DISCARD_LIMIT_BYTES", 1024):
+            self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1)))
+        self.assertLess(time.time() - started, 1.0)
+        self.assertEqual(self._read_all(master), b"STOP 1\n")
+
+    @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
+    def test_the_pty_never_becomes_a_controlling_tty_of_the_node(self):
+        master, path = self._pty()
+        with mock.patch.object(notice.os, "open", wraps=os.open) as opened:
+            self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1)))
+        flags = opened.call_args[0][1]
+        self.assertTrue(flags & os.O_NOCTTY and flags & os.O_NONBLOCK)
+
+    def test_a_path_that_is_not_a_pty_is_refused(self):
+        regular = os.path.join(self.dir.name, "f")
+        Path(regular).write_text("")
+        self.assertFalse(notice.write_pty(regular, b"STOP 1\n"))
+        self.assertFalse(notice.write_pty("/dev/pts/999999", b"STOP 1\n"))
+        self.assertEqual(Path(regular).read_text(), "")
+
+    def test_has_device_reads_the_runtime_state_of_a_ch_vm(self):
+        missing = os.path.join(self.dir.name, "none.sock")
+        with mock.patch.object(notice, "socket_path", return_value=missing):
+            for state, expected in (
+                ({"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty"}, True),
+                ({"virtualizer": "ch", "control_socket": self.api}, False),
+                (None, False),
+            ):
+                with self.subTest(state=state), \
+                        mock.patch.object(notice, "_runtime_state", return_value=state):
+                    self.assertEqual(notice.has_device("x"), expected)
+
+    def test_deliver_finds_the_pty_again_at_each_notice(self):
+        """Nothing is kept between notices: a restart of the node finds the pty the same way."""
+        state = {"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty"}
+        missing = os.path.join(self.dir.name, "none.sock")
+        with mock.patch.object(notice, "socket_path", return_value=missing), \
+                mock.patch.object(notice, "_runtime_state", return_value=state), \
+                mock.patch.object(notice, "ch_console_pty", side_effect=["/dev/pts/3", "/dev/pts/9"]) as found, \
+                mock.patch.object(notice, "write_pty", return_value=True) as wrote:
+            self.assertTrue(notice.deliver("x", notice.STOP, 10))
+            self.assertTrue(notice.deliver("x", notice.HIBERNATE, 20))
+        self.assertEqual(found.call_count, 2)
+        self.assertEqual([c.args for c in wrote.call_args_list],
+                         [("/dev/pts/3", b"STOP 10\n"), ("/dev/pts/9", b"HIBERNATE 20\n")])
+
+    def test_deliver_with_no_pty_is_false(self):
+        state = {"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty"}
+        missing = os.path.join(self.dir.name, "none.sock")
+        with mock.patch.object(notice, "socket_path", return_value=missing), \
+                mock.patch.object(notice, "_runtime_state", return_value=state), \
+                mock.patch.object(notice, "write_pty") as wrote:
+            self.assertFalse(notice.deliver("x", notice.STOP, 10))
+        wrote.assert_not_called()
+        with mock.patch.object(notice, "socket_path", return_value=missing), \
+                mock.patch.object(notice, "_runtime_state", return_value={}):
+            self.assertFalse(notice.deliver("x", notice.STOP, 10))
+
+
 @skip
 class HypervisorArgumentTests(unittest.TestCase):
     def test_ch_without_the_declaration_keeps_the_console_off(self):
         args, _ = ch._resolve_ch_stream_args(runtime_dir=Path("/run/nodo/vm-a"))
         self.assertEqual(args[args.index("--console") + 1], "off")
 
-    def test_ch_with_the_declaration_gets_the_socket_and_keeps_the_serial_log(self):
+    def test_ch_with_the_declaration_gets_a_pty_and_keeps_the_serial_log(self):
+        """CH v51.1 refuses ``--console socket=``: the console of the notice is a pty."""
         args, serial = ch._resolve_ch_stream_args(
-            runtime_dir=Path("/run/nodo/vm-a"), notice_socket="/run/nodo/ch/notice-x.sock")
-        self.assertEqual(
-            args[args.index("--console") + 1], "socket=/run/nodo/ch/notice-x.sock")
+            runtime_dir=Path("/run/nodo/vm-a"), notice_console=True)
+        self.assertEqual(args[args.index("--console") + 1], "pty")
+        self.assertNotIn("socket=", " ".join(args))
         self.assertIn(f"file={serial}", args)
 
     def _qemu(self, **kw):
@@ -312,8 +500,8 @@ class StoppingTestCase(unittest.TestCase):
         patches = [
             mock.patch.object(stopping.notice, "has_device", return_value=True),
             mock.patch.object(stopping.notice, "stop_grace_seconds", return_value=15),
-            mock.patch.object(stopping.notice, "send",
-                              side_effect=lambda path, verb, deadline, **kw: self.sent.append(
+            mock.patch.object(stopping.notice, "deliver",
+                              side_effect=lambda token, verb, deadline: self.sent.append(
                                   (verb, int(deadline))) or True),
             mock.patch.object(stopping, "vm_has_ended", return_value=False),
         ]
@@ -357,7 +545,7 @@ class BeginNoticeTests(StoppingTestCase):
         self.assertIsNone(stopping.begin_notice("delegated", stopping.STOP, "manual_kill"))
 
     def test_a_line_that_cannot_be_written_leaves_no_mark(self):
-        with mock.patch.object(stopping.notice, "send", return_value=False):
+        with mock.patch.object(stopping.notice, "deliver", return_value=False):
             self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "manual_kill"))
         self.assertIsNone(self.sc.get_local_stopping("a"))
 

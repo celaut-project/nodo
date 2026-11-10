@@ -11,11 +11,16 @@ combination that this version supports, the default declaration, the check that 
 the others, and the lines.
 """
 
+import errno
+import http.client
+import json
 import os
+import select
 import socket
 import stat
+import termios
 import time
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from protos import celaut_pb2
 from src.virtualizers.architecture import UnsupportedArchitectureException
@@ -39,6 +44,22 @@ JSON_KEY = "notice_declaration"
 
 #: A line is short. The node writes no more than this.
 MAX_LINE_BYTES = 128
+
+#: The console of the notice on Cloud Hypervisor: ``--console pty``. CH v51.1 has no
+#: ``socket=`` for the console. The runtime state of the VM says ``notice_console: pty``.
+CH_CONSOLE_PTY = "pty"
+
+#: What the node reads from the pty before and after it writes, at most, and throws away
+#: unread: the echo of the guest tty, and what the guest wrote while nobody was attached.
+#: Never parsed. The bound keeps a guest that writes a lot from holding the node.
+DISCARD_LIMIT_BYTES = 64 * 1024
+
+#: How long a notice may take on Cloud Hypervisor: ``vm.info`` on the API socket, then the
+#: write to the pty. It runs under the lock of the instance, so it is short.
+CH_TIMEOUT_SECONDS = 1.0
+
+#: ``vm.info`` is a small JSON document. The node reads no more than this of it.
+_VM_INFO_LIMIT_BYTES = 1024 * 1024
 
 
 class UnsupportedNoticeException(UnsupportedArchitectureException):
@@ -208,16 +229,182 @@ def remove_socket(vmachine_id: str) -> None:
         pass
 
 
-def has_device(vmachine_id: str) -> bool:
-    """Whether the VM ``vmachine_id`` has the console of the notice.
-
-    A VM that started before the notice existed, or whose service declares none, has no
-    socket, and the node stops it at once.
-    """
+def _has_socket(vmachine_id: str) -> bool:
     try:
         return stat.S_ISSOCK(os.stat(socket_path(vmachine_id)).st_mode)
     except OSError:
         return False
+
+
+def _runtime_state(vmachine_id: str) -> Optional[Dict[str, Any]]:
+    from src.virtualizers.microvm.runtime_state import load_runtime_state
+
+    try:
+        return load_runtime_state(vmachine_id)
+    except Exception:
+        return None
+
+
+def _ch_api_socket(vmachine_id: str) -> Optional[str]:
+    """The API socket of a CH VM whose console carries the notice, else None."""
+    state = _runtime_state(vmachine_id) or {}
+    if state.get("notice_console") != CH_CONSOLE_PTY:
+        return None
+    path = state.get("control_socket")
+    return path if isinstance(path, str) and path else None
+
+
+def has_device(vmachine_id: str) -> bool:
+    """Whether the VM ``vmachine_id`` has the console of the notice.
+
+    QEMU: the socket of its ``virtconsole``. Cloud Hypervisor: a runtime state that says
+    ``notice_console: pty``. A VM that started before the notice existed, or whose
+    service declares none, has neither, and the node stops it at once.
+    """
+    return _has_socket(vmachine_id) or _ch_api_socket(vmachine_id) is not None
+
+
+class _UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, path: str, timeout: float):
+        super().__init__("localhost", timeout=timeout)
+        self._path = path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        try:
+            sock.connect(self._path)
+        except OSError:
+            sock.close()
+            raise
+        self.sock = sock
+
+
+def ch_console_pty(api_socket: str, *, timeout: float = CH_TIMEOUT_SECONDS) -> Optional[str]:
+    """The path of the pty of the console of a CH VM, from ``GET /api/v1/vm.info``.
+
+    None if CH does not answer, or if its console is not a pty. CH opens the pty when it
+    starts, so the path changes with each process (a hibernation and its wake are two),
+    and the node reads it again at each notice. Nothing is kept: a node that restarts
+    finds it the same way. The path must be a pty slave (``/dev/pts/<n>``).
+    """
+    conn = _UnixHTTPConnection(api_socket, timeout)
+    try:
+        conn.request("GET", "/api/v1/vm.info")
+        response = conn.getresponse()
+        if response.status != 200:
+            return None
+        info = json.loads(response.read(_VM_INFO_LIMIT_BYTES + 1)[:_VM_INFO_LIMIT_BYTES])
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+    finally:
+        conn.close()
+    console = ((info or {}).get("config") or {}).get("console") or {}
+    if str(console.get("mode", "")).lower() != CH_CONSOLE_PTY:
+        return None
+    path = console.get("file")
+    if not isinstance(path, str) or not _is_pty_slave_path(path):
+        return None
+    return path
+
+
+def _is_pty_slave_path(path: str) -> bool:
+    head, _, number = os.path.realpath(path).rpartition("/")
+    return head == "/dev/pts" and number.isdigit()
+
+
+def _discard(fd: int, budget: int) -> int:
+    """Read what is there, up to ``budget`` bytes, and throw it away. Never waits."""
+    left = budget
+    while left > 0:
+        try:
+            chunk = os.read(fd, min(4096, left))
+        except (BlockingIOError, InterruptedError):
+            break
+        except OSError as e:
+            if e.errno in (errno.EAGAIN, errno.EIO):
+                break
+            raise
+        if not chunk:
+            break
+        left -= len(chunk)
+    return budget - left
+
+
+def _make_raw(fd: int) -> None:
+    """Raw, with no echo, no output processing, no hangup on close (#645).
+
+    CH already makes the slave raw. The node does it again in case someone changed it,
+    so the bytes reach the guest as they are written.
+    """
+    attrs = termios.tcgetattr(fd)
+    attrs[0] &= ~(
+        termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP
+        | termios.INLCR | termios.IGNCR | termios.ICRNL | termios.IXON
+    )
+    attrs[1] &= ~termios.OPOST
+    attrs[2] = (attrs[2] & ~(termios.CSIZE | termios.PARENB | termios.HUPCL)) | termios.CS8 | termios.CLOCAL
+    attrs[3] &= ~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.ISIG | termios.IEXTEN)
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+
+
+def write_pty(path: str, payload: bytes, *, timeout: float = CH_TIMEOUT_SECONDS) -> bool:
+    """Write ``payload`` to the pty slave at ``path``. True if all of it was written.
+
+    The node opens the slave for this write only, with ``O_NOCTTY`` (the pty never becomes
+    a controlling tty of the node) and ``O_NONBLOCK`` (a CH that does not read never holds
+    the node), and closes it. A guest that keeps ``/dev/hvc0`` open gets the line; a
+    close on the host does not hang up the guest tty. What the guest wrote is read and
+    thrown away, up to ``DISCARD_LIMIT_BYTES``, and never parsed.
+    """
+    if not _is_pty_slave_path(path):
+        return False
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        return False
+    try:
+        if not (stat.S_ISCHR(os.fstat(fd).st_mode) and os.isatty(fd)):
+            return False
+        _make_raw(fd)
+        budget = DISCARD_LIMIT_BYTES
+        budget -= _discard(fd, budget)
+        end = time.monotonic() + timeout
+        view = memoryview(payload)
+        while view:
+            try:
+                view = view[os.write(fd, view):]
+                continue
+            except (BlockingIOError, InterruptedError):
+                pass
+            left = end - time.monotonic()
+            if left <= 0:
+                return False
+            select.select([], [fd], [], left)
+        _discard(fd, budget)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def deliver(vmachine_id: str, verb: str, deadline: float) -> bool:
+    """Write the line to the console of the notice of the VM, whatever carries it.
+
+    QEMU: its socket. Cloud Hypervisor: its pty, found in ``vm.info``. False if the VM
+    has no such console, or the line could not be written; the caller then stops the VM
+    as it does without a notice.
+    """
+    if _has_socket(vmachine_id):
+        return send(socket_path(vmachine_id), verb, deadline)
+    api_socket = _ch_api_socket(vmachine_id)
+    if api_socket is None:
+        return False
+    pty = ch_console_pty(api_socket)
+    if pty is None:
+        return False
+    return write_pty(pty, line(verb, deadline))
 
 
 def send(path: str, verb: str, deadline: float, *, timeout: float = 2.0) -> bool:

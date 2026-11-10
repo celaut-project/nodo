@@ -99,7 +99,7 @@ def _resolve_ch_binary() -> str:
 
 
 def _resolve_ch_stream_args(
-    runtime_dir: Path, notice_socket: Optional[str] = None
+    runtime_dir: Path, notice_console: bool = False
 ) -> Tuple[List[str], Optional[Path]]:
     """CH's stream arguments, and the file the guest's serial output lands in.
 
@@ -114,12 +114,17 @@ def _resolve_ch_stream_args(
     The virtio console stays off because it would be a second copy of the same output:
     the cmdline points the kernel at ttyS0, which is what ``--serial`` captures.
 
-    With ``notice_socket`` it is that socket instead (#645): the service declared a notice, and the node writes its ``STOP`` or ``HIBERNATE`` line to the
-    socket. The guest reads it from ``/dev/hvc0``. The kernel ``console=`` stays on the
-    serial port, so ``hvc0`` is not a second copy of the log.
+    With ``notice_console`` it is a pty instead (#645): the service declared a notice,
+    and the node writes its ``STOP`` or ``HIBERNATE`` line to the pty. The guest reads
+    it from ``/dev/hvc0``. Cloud Hypervisor v51.1 has no ``socket=`` for the console
+    (``No socket option support for console device``), so a pty it is. CH writes the
+    path of the pty in ``vm.info``, and the node reads it there at each notice
+    (``notice.ch_console_pty``): nothing is kept, and a restart of the node finds it
+    again. The kernel ``console=`` stays on the serial port, so ``hvc0`` is not a second
+    copy of the log.
     """
     serial_log_path = runtime_dir / SERIAL_LOG_NAME
-    console = f"socket={notice_socket}" if notice_socket else "off"
+    console = notice.CH_CONSOLE_PTY if notice_console else "off"
     return ["--serial", f"file={serial_log_path}", "--console", console], serial_log_path
 
 
@@ -517,15 +522,10 @@ def execute(
             f"guest_net_device={network.GUEST_NET_DEVICE}, kernel_cmdline={kernel_cmdline}"
         )
 
-        # The service declared a notice: the VM gets the console that carries it. A stale
-        # socket (a revive of a VM that was killed) would make the hypervisor fail to bind.
-        notice_socket = None
-        if notice.is_declared(service):
-            ensure_private_dir(Path(notice.socket_path(vmachine_id)).parent)
-            notice.remove_socket(vmachine_id)
-            notice_socket = notice.socket_path(vmachine_id)
+        # The service declared a notice: the VM gets the console that carries it, a pty.
+        notice_console = notice.is_declared(service)
         stream_args, serial_log_path = _resolve_ch_stream_args(
-            runtime_dir=runtime_dir, notice_socket=notice_socket
+            runtime_dir=runtime_dir, notice_console=notice_console
         )
         if serial_log_path:
             log.LOGGER(f"[CH][{vmachine_id}] guest serial log path: {serial_log_path}")
@@ -703,6 +703,9 @@ def execute(
                 "arch": bundle["arch"],
                 "pid": process.pid,
                 "control_socket": str(api_socket_path),
+                # The console of the notice (#645): "pty", or absent. The path of the
+                # pty is not kept here: the node reads it from vm.info at each notice.
+                **({"notice_console": notice.CH_CONSOLE_PTY} if notice_console else {}),
                 "tap": tap_name,
                 "ip": vm_ip,
                 "mac": mac,
