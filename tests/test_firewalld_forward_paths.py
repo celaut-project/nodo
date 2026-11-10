@@ -331,6 +331,12 @@ class CommandTests(unittest.TestCase):
         self.assertIn("{ sudo firewall-cmd --permanent --info-zone=nodo", line)
         self.assertNotIn("\n", line)
 
+    def test_the_unprivileged_form_fits_one_sudo_sh_c(self):
+        # install.sh runs it as "sudo sh -c '<line>'": no sudo inside, no single quote.
+        line = fwd.one_line(fwd.setup_commands(BRIDGE, [59192, 59193], sudo=False))
+        self.assertNotIn("sudo", line)
+        self.assertNotIn("'", line)
+
     def test_the_notice_names_the_chain_and_the_missing_policy(self):
         fake = FakeFirewalld(
             interfaces={"host0": "public", BRIDGE: "nodo"},

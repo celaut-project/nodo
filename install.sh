@@ -769,8 +769,9 @@ setup_firewalld() {
     local fw_cmd
     fw_cmd="$("$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/setup_firewalld.py" print "$TARGET_DIR" 2>/dev/null)"
     if [ -n "$fw_cmd" ]; then
+      # One root shell for the lot: the commands carry no sudo of their own.
       priv_record "firewalld: a zone for the guest bridge that forwards, and a policy out of it (else guests cannot reach each other or the Internet)" \
-        "$fw_cmd"
+        "sudo sh -c '$fw_cmd'"
     fi
     return 0
   fi

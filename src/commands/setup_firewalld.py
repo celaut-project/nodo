@@ -7,8 +7,8 @@ Internet (#534, #624, #639). The fix is firewalld's own configuration -- a zone 
 the bridge that forwards, and a policy from it to every other zone -- and the
 installer is the moment that has root and an operator watching.
 
-``apply`` writes it (idempotent; root). ``print`` writes the commands to stdout as
-one line, for the unprivileged install's list of steps that need root. Both do
+``apply`` writes it (idempotent; root). ``print`` writes the commands (without sudo) to
+stdout as one line, for the unprivileged install's list of steps that need root. Both do
 nothing on a host without a running firewalld, or one already set up. Set
 ``NODO_SKIP_FIREWALLD=1`` to have the installer leave firewalld alone.
 
@@ -54,7 +54,10 @@ def main(argv) -> int:
     ports = _ports(env)
 
     if mode == "print":
-        print(fwd.one_line(fwd.setup_commands(bridge, ports)))
+        # Without sudo: install.sh runs the line in one 'sudo sh -c', so every root
+        # step it lists starts with sudo. No single quote can appear in it (a zone,
+        # a policy, an interface name and port numbers).
+        print(fwd.one_line(fwd.setup_commands(bridge, ports, sudo=False)))
         return 0
 
     print(
