@@ -77,7 +77,7 @@ class LauncherTests(unittest.TestCase):
     def _launch(self, service, token):
         # A funded configuration, so the launch does not price a starting balance on
         # the way in: what is under test is the order of the checks, not the
-        # pricing stack `default_initial_balance` would pull in.
+        # pricing stack `default_balance_mu` would pull in.
         configuration = celaut.Configuration()
         configuration.initial_mu.n = "1000"
 
@@ -163,8 +163,6 @@ class CostQuoteTests(unittest.TestCase):
     def test_an_allowed_service_is_quoted(self):
         with _policy(whitelist=["dns:*"]), patch.object(
             cost_mod, "read_service_from_disk", return_value=_service(["dns:local"])
-        ), patch.object(
-            cost_mod, "default_initial_balance", return_value=1
         ), patch.object(
             cost_mod, "generate_estimated_cost", return_value=celaut.EstimatedCost()
         ) as quote, patch.object(cost_mod.BeeClient, "respond", return_value=iter([])):

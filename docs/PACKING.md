@@ -827,11 +827,14 @@ actually spawns that descendant, the answer could have changed.
 
 **Cost.** Only `initial_environment_workload` has a cost. A service pays the `child_start` of
 each child out of its own balance, so the `cost` of `GetServiceEstimatedCost` includes the
-starts of the initial children: for each workload, `count` times the build of the child
+builds of the initial children: for each workload, `count` times the build of the child
 (0 when the workload names no service — neither a `hash` nor a complete `service` — or when it
-is built on the node) plus the default balance of the node for the `at_init` of the child. A
-group adds up its workloads, a clause costs its dearest group, and the clauses add up.
-A start with no `initial_mu` pays it; a start whose `initial_mu` cannot pay it is refused (`workload_admission.ON_UNDERFUNDED`). Declare the
+is built on the node). A group adds up its workloads, a clause costs its dearest group, and
+the clauses add up. The balance of a child is not in `cost` (#636): each child gets its
+balance in its own `StartService` (with no `initial_mu`, the default of the node that runs
+it), and the parent pays it out of its own balance. So fund a parent for more periods than
+it needs for itself. A start whose `initial_mu` cannot pay the builds is refused
+(`workload_admission.ON_UNDERFUNDED`). Declare the
 resources of each initial child: a child with no resources is quoted at the floors of the node,
 which is too little for a real service. See [`PRICING.md`](PRICING.md#starting-an-instance).
 

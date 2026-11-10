@@ -1,13 +1,14 @@
-"""The maintenance that a peer charges a delegated child, against its quote (#567).
+"""The maintenance that a peer charges a delegated child, against its quote (#567, #636).
 
 The father pays the price of this node (#577), so what the peer charges for the child is
 the cost of the delegation. The peer signed a quote for one maintenance period. The
 delegated row keeps it in the MU of the peer, and each statement of the child that is
 checked is an interval: the cost of its ``maintenance`` movements per second that they
-priced, against ``max_maintenance_cost`` per ``maintenance_seconds_loop`` times
-``1 + variance``. A peer above it loses ``maintenance_overcharged``. Nothing else
-changes: not the instance, not its charge, and not the score of the service or the
-client.
+priced, against the figure of the resources per ``maintenance_seconds_loop`` times
+``(1 + price_volatility)^k``, when the quote is bounded. A peer above it loses
+``maintenance_overcharged``. Nothing else changes: not the instance, not its charge, and
+not the score of the service or the client. The tests of the periods and of the figure
+of each resource are in tests/test_price_bound.py.
 """
 import json
 import time
@@ -28,6 +29,7 @@ try:
     from src.manager.statement_check import MaintenanceQuote, Row
     from src.reputation_system.reasons import Reason
     from src.utils.cost_functions import peer_quotes
+    from src.utils.cost_functions.price_bound import PriceBound
     from tests.statement_chain import FakeLedger
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -41,7 +43,8 @@ SHAPE = {"mem_limit": 1 << 30, "disk_space": 2 << 30, "cpu_period": 100_000,
          "cpu_quota": 100_000}
 # The quote of the peer: at most 100 of its MU for a period of 10 s.
 QUOTE = {"quote_init_maintenance_cost": 60, "quote_max_maintenance_cost": 100,
-         "quote_maintenance_seconds_loop": 10, "quote_variance": 0.0}
+         "quote_maintenance_seconds_loop": 10, "quote_price_bounded": 1,
+         "quote_price_volatility": 0.0, "quote_volatility_period_seconds": 0}
 
 
 def _period(seconds=10, **resources):
@@ -93,7 +96,7 @@ class OverchargeRuleTests(unittest.TestCase):
     """``statement_check.maintenance_overcharge``: the rule, on the scale of the peer."""
 
     def setUp(self):
-        self.quote = MaintenanceQuote(max_mu=100, seconds=10, variance=0.0)
+        self.quote = MaintenanceQuote(max_mu=100, seconds=10, bound=PriceBound(0.0, 0))
 
     def test_a_charge_at_most_the_quote_is_not_an_overcharge(self):
         rows = _rows((100, 10), (100, 10), (80, 10))
@@ -108,13 +111,13 @@ class OverchargeRuleTests(unittest.TestCase):
         self.assertEqual(seq, 3)
         self.assertIn("400 MU", problem)
 
-    def test_the_variance_of_the_quote_is_allowed(self):
+    def test_the_volatility_of_the_quote_is_allowed(self):
         rows = _rows((140, 10), (140, 10))
 
         self.assertIsNone(statement_check.maintenance_overcharge(
-            rows, MaintenanceQuote(100, 10, 0.5), 1000))
+            rows, MaintenanceQuote(100, 10, PriceBound(0.5, 0)), 1000))
         self.assertIsNotNone(statement_check.maintenance_overcharge(
-            rows, MaintenanceQuote(100, 10, 0.2), 1000))
+            rows, MaintenanceQuote(100, 10, PriceBound(0.2, 0)), 1000))
 
     def test_the_rounding_of_each_period_is_allowed(self):
         """A period of 3 s at 100 MU per 10 s is 30 MU, and the peer may round it up."""
@@ -156,10 +159,14 @@ class OverchargeRuleTests(unittest.TestCase):
 
         self.assertIsNone(statement_check.maintenance_overcharge(rows, None, 1000))
         self.assertIsNone(MaintenanceQuote.of_row({}))
-        # A node quotes 0 for a service with no `at_most`: that is no ceiling.
-        self.assertIsNone(MaintenanceQuote.of_row(dict(QUOTE, quote_max_maintenance_cost=0)))
+        # No figure at all, or no period: no limit.
+        self.assertIsNone(MaintenanceQuote.of_row(dict(
+            QUOTE, quote_max_maintenance_cost=0, quote_init_maintenance_cost=0)))
         self.assertIsNone(MaintenanceQuote.of_row(dict(QUOTE, quote_maintenance_seconds_loop=0)))
-        self.assertEqual(MaintenanceQuote.of_row(QUOTE), MaintenanceQuote(100, 10, 0.0))
+        # A peer that promised no bound (#636).
+        self.assertIsNone(MaintenanceQuote.of_row(dict(QUOTE, quote_price_bounded=0)))
+        self.assertEqual(MaintenanceQuote.of_row(QUOTE),
+                         MaintenanceQuote(100, 10, PriceBound(0.0, 0), init_mu=60))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -408,7 +415,7 @@ class TheQuoteIsStoredUnconvertedTests(_Database):
         return celaut.EstimatedCost(
             cost=celaut.Amount(n="5001"), init_maintenance_cost=celaut.Amount(n="61"),
             max_maintenance_cost=celaut.Amount(n="101"), maintenance_seconds_loop=10,
-            variance=0.25)
+            price_bounded=True, price_volatility=0.25, volatility_period_seconds=0)
 
     # A peer of its own: the quotes of other tests stay in the query cache.
     ASKED_PEER = "peer-of-the-quote-test-567"
@@ -453,13 +460,15 @@ class TheQuoteIsStoredUnconvertedTests(_Database):
             self.assertIsNotNone(peer_quotes.signed("p4", self._peer_quote()))
 
     def test_the_launcher_hands_the_signed_quote_to_the_delegation(self):
-        local = celaut.EstimatedCost(cost=celaut.Amount(n="1100"))
+        # `cost` is the builds, no balance (#636, 9): the peer quotes a build of 100, and
+        # this node no build.
+        local = celaut.EstimatedCost(cost=celaut.Amount(n="100"))
         signed = self._peer_quote()
         peer_quotes.remember(PEER_ID, local, signed)
         configuration = celaut.Configuration()
         configuration.initial_mu.n = "1000"
         with patch.object(launch_service_mod, "_own_price",
-                          return_value=celaut.EstimatedCost(cost=configuration.initial_mu)), \
+                          return_value=celaut.EstimatedCost(cost=celaut.Amount(n="0"))), \
                 patch.object(launch_service_mod.sc, "peer_exists", return_value=True), \
                 patch.object(launch_service_mod, "service_requires_parent_colocation",
                              return_value=False), \
@@ -499,8 +508,12 @@ class TheQuoteIsStoredUnconvertedTests(_Database):
         self.assertEqual(
             {k: row[k] for k in QUOTE},
             {"quote_init_maintenance_cost": 61, "quote_max_maintenance_cost": 101,
-             "quote_maintenance_seconds_loop": 10, "quote_variance": 0.25})
-        self.assertEqual(MaintenanceQuote.of_row(row), MaintenanceQuote(101, 10, 0.25))
+             "quote_maintenance_seconds_loop": 10, "quote_price_bounded": 1,
+             "quote_price_volatility": 0.25, "quote_volatility_period_seconds": 0})
+        quote = MaintenanceQuote.of_row(row)
+        self.assertEqual((quote.max_mu, quote.init_mu, quote.seconds, quote.bound),
+                         (101, 61, 10, PriceBound(0.25, 0)))
+        self.assertIsNotNone(quote.launch_ts)
 
     def test_a_delegation_with_no_quote_writes_none(self):
         self.sc.add_delegated_instance(

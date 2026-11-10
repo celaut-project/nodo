@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "891e063db61c71f6ce9d8352229616864f8ec47faea4edae16b97b2ee5aba93f",
+  "celaut_proto": "4117b19dd6eeb29c1193477405d2ed9e7b663e1ccccbde7bb40e9f9cc736764d",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.ON_CLOSE",
@@ -73,7 +73,7 @@
     "dependencies.yq.BIN",
     "deposits.AUTOMATIC_REFILL",
     "deposits.AUTOMATIC_REFILL_GOSSIP_PEERS",
-    "deposits.INITIAL_RUNTIME_HOURS",
+    "deposits.DEFAULT_INITIAL_PERIODS",
     "deposits.MAX_FEE_OVERHEAD",
     "deposits.REFILL_BELOW",
     "energy.CURRENCY",
@@ -230,9 +230,13 @@
     "pricing.BUILD_MU",
     "pricing.CPU_MU_PER_VCPU_HOUR",
     "pricing.DISK_MU_PER_GIB_HOUR",
-    "pricing.MAX_PRICE_VOLATILITY",
     "pricing.MODIFY_RESOURCES_MU",
     "pricing.NET_MU_PER_GIB",
+    "pricing.PRICE_BOUNDED",
+    "pricing.PRICE_VOLATILITY",
+    "pricing.PRICE_VOLATILITY_MIN",
+    "pricing.PRICE_VOLATILITY_PERIOD_HOURS",
+    "pricing.PRICE_VOLATILITY_WINDOW_HOURS",
     "pricing.RAM_MU_PER_GIB_HOUR",
     "pricing.SCARCITY_CURVE",
     "pricing.SCARCITY_MAX_MULTIPLIER",
@@ -342,6 +346,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "899355a1af4cc0937b6ab97632cf7e3968ae41d03c8b3fe601e950c62019eb4b",
+  "database": "97f409d2ea2e291b50947e790824cd7f4cf0a4934e00b1fd57c36a51f0ad57a6",
   "storage_format": 1
 }

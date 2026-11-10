@@ -188,7 +188,7 @@ class LaunchTests(unittest.TestCase):
         return self._launch(service, candidates, patch_declarations=False)
 
     def _launch(self, service, candidates, hidden=True, patch_declarations=True):
-        cost = SimpleNamespace(cost=SimpleNamespace(), variance=0.0)
+        cost = SimpleNamespace(cost=SimpleNamespace(), price_bounded=False)
         mod = launch_mod
         with ExitStack() as stack:
             def patched(target, name, **kwargs):
@@ -221,7 +221,7 @@ class LaunchTests(unittest.TestCase):
             patched(mod.sc, "internal_instance_exists", return_value=False)
             patched(mod.utils, "get_network_name", return_value="lan")
             patched(mod, "get_arch_tag", return_value="amd64")
-            patched(mod, "default_initial_balance", return_value=1)
+            patched(mod, "default_balance_mu", return_value=1)
             patched(mod, "_client_charge_mu", return_value=1)  # the price is not tested here
             balancer.return_value = iter([(peer, cost) for peer in candidates])
             error = None

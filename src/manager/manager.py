@@ -48,7 +48,6 @@ from src.virtualizers.interface import kill
 from src.virtualizers.interface import execute as vm_execute
 from src.virtualizers.interface import revivable
 from src.virtualizers.interface import hotplug
-from src.virtualizers.interface import resolve_billable_resources
 from src.virtualizers.firewall import (
     TransportProtocol,
     resolve_slot_transport_protocols,
@@ -1176,61 +1175,6 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 
     return new_client_id
 
-
-def default_initial_balance(
-    system_resources: celaut_pb2.Sysresources = None,
-    service_hash: Optional[str] = None,
-    arch: Optional[str] = None,
-    scarcity: Optional[Dict[str, float]] = None,
-    service: Optional[celaut_pb2.Service] = None,
-) -> int:
-    """MU to fund a new instance with when nobody asked for a specific amount.
-
-    Derived rather than configured: it is what the requested resources actually cost for
-    `deposits.INITIAL_RUNTIME_HOURS`. The flat `DEFAULT_INITIAL_GAS_AMOUNT` this replaces
-    funded a 128 MiB instance and an 8 GiB one identically, which meant it was either
-    far too much for one or far too little for the other.
-
-    Priced for what the instance will hold rather than for what its manifest asks: the
-    ticks that spend this balance charge the resolved row, so the balance is computed
-    from those same figures or it funds fewer hours than INITIAL_RUNTIME_HOURS.
-    `service_hash`, when known, prices an already-built service's real rootfs image
-    instead of the floor. `arch` is the guest's architecture, which selects the memory
-    price when the operator prices memory per arch -- the same rate the ticks that
-    spend this balance will charge, or the balance funds a different number of hours
-    than INITIAL_RUNTIME_HOURS says.
-
-    The hours are priced at the worst case that the ticks can reach, not at the load of
-    the moment. With `pricing.MAX_PRICE_VOLATILITY` on, that is the launch price times
-    the bound, and no tick of this instance can charge more -- so the instance is never
-    stopped for a rise that its funding did not cover. With it off, the price is the
-    one at the current load, as it was before the bound existed. `scarcity` is the load
-    sample the launch is priced against; omitted, it is read here.
-
-    `service`, when it is known, adds what the service pays for the `child_start` of
-    the children of its `initial_environment_workload`
-    (`start_funding.initial_children_mu`, #538). It pays them out of this balance, so
-    a start that carries no `initial_mu` funds them: a child started by a parent with
-    no amount, and a local start with no amount at all. Without the manifest it is the
-    balance of the service alone, as the quotes ask for it: `EstimatedCost.cost` adds
-    the starts of the children on top of it. `possible_environment_workload` adds
-    nothing.
-    """
-    hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
-    if hours <= 0 or system_resources is None:
-        return 0
-    from src.utils.cost_functions.execution_cost import worst_case_charge_mu
-    from src.utils.cost_functions.start_funding import initial_children_mu
-
-    own = worst_case_charge_mu(
-        system_resources=resolve_billable_resources(system_resources, service_hash),
-        seconds=hours * 3600,
-        scarcity=scarcity,
-        arch=arch,
-    )
-    if service is None:
-        return own
-    return own + initial_children_mu(service, scarcity=scarcity)
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     """What an instance holds and what it has left to spend.

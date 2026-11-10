@@ -413,13 +413,16 @@ def evaluate_start_funding(
         service_hash: Optional[str] = None,
         arch: Optional[str] = None,
 ) -> Optional[str]:
-    """The reason to refuse a start whose ``initial_mu`` cannot pay the initial children.
+    """The reason to refuse a start whose ``initial_mu`` cannot pay the builds of the
+    initial children.
 
-    Only for a request that carries its own ``initial_mu``: with none, the father pays the
-    quote, and ``EstimatedCost.cost`` includes the starts of the initial children.
-    The balance after the build of this node must pay those starts and one
-    maintenance period of the service (``start_funding.underfunded_reason``). A service
-    with no initial children is not checked here.
+    Only for a request that carries its own ``initial_mu``: with none, the father pays
+    ``EstimatedCost.cost``, which includes the builds of the initial children, plus the
+    default balance. The balance after the build of this node must pay those builds and
+    one maintenance period of the service (``start_funding.underfunded_reason``). The
+    balances of the children are not checked (#636, 9): the parent pays them from its own
+    periods when it starts them. A service with no initial children to build is not
+    checked here.
 
     ``workload_admission.ON_UNDERFUNDED`` decides what a shortfall means: ``reject`` (the
     default) returns the message, so the caller refuses the launch; ``warn`` logs it and

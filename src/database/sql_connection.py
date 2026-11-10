@@ -54,6 +54,9 @@ TRACEABILITY_TABLES = (
     "service_reputation",
     "tunnel_traffic",
     "demand_history",
+    # The history of the price multiplier (#636). Without it the computed volatility of
+    # the quotes is the floor, pricing.PRICE_VOLATILITY_MIN.
+    "price_history",
     # A donation debt survives a restart and is paid on a later tick, so losing the
     # table loses money this node already owes. `donation_payouts` is what each wallet
     # has been credited against its share: losing it would reset every wallet's
@@ -1129,6 +1132,7 @@ class SQLConnection(metaclass=Singleton):
         arch: Optional[str] = None,
         launch_bp: Optional[Mapping[str, int]] = None,
         movements: Optional[Sequence[ledger.Movement]] = None,
+        launch_bound=None,
     ):
         """
         Adds an internal container to the database, with the first rows of its account.
@@ -1164,9 +1168,13 @@ class SQLConnection(metaclass=Singleton):
                 outlive. NULL is charged the node's scalar memory price.
             launch_bp (Optional[Mapping[str, int]]): The scarcity multiplier of each
                 resource ("cpu", "mem", "disk") at launch, in basis points
-                (``execution_cost.launch_price_bp``). The tick bounds its charge
-                against it when ``pricing.MAX_PRICE_VOLATILITY`` is on. A free launch
-                is 0 for each. None stores NULL, which means no bound.
+                (``execution_cost.launch_price_bp``). A free launch is 1x (10000) for
+                each. None stores NULL, which means no bound.
+            launch_bound (Optional[price_bound.PriceBound]): The price bound of the
+                launch (#636): ``launch_volatility`` and ``launch_period_seconds``. The
+                tick holds its charge to ``launch_bp * (1 + v)^k`` with them, for the
+                whole life of the instance. None stores NULL: no bound
+                (``pricing.PRICE_BOUNDED`` false).
             movements (Optional[Sequence[ledger.Movement]]): How the instance came to
                 hold ``balance_mu``, in order: the ``start`` and the ``build``. They
                 must add up to ``balance_mu``. None is one ``start`` of ``balance_mu``.
@@ -1180,12 +1188,14 @@ class SQLConnection(metaclass=Singleton):
             # database's column defaults to NULL however the fresh schema is declared.
             # Writing it at the one insert is what makes the two agree.
             cursor.execute('''
-                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility, launch_period_seconds, launched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
                   disk_space, int(cpu_period or 0), int(cpu_quota or 0),
                   serialized_instance, service_id, virtualizer, envs, arch,
-                  launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk")))
+                  launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk"),
+                  None if launch_bound is None else float(launch_bound.volatility),
+                  None if launch_bound is None else int(launch_bound.period_seconds)))
             self._append_opening(cursor, container_id, movements)
 
         self._transaction(work)
@@ -1365,7 +1375,9 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp FROM local_instances WHERE id = ? AND killed_at IS NULL
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp,
+                   launch_volatility, launch_period_seconds, CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts
+            FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -1579,7 +1591,8 @@ class SQLConnection(metaclass=Singleton):
         balance and the rows of resources (all zero but the disk)."""
         result = self._execute('''
             SELECT id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, arch,
-                   launch_cpu_bp, launch_mem_bp, launch_disk_bp, suspended_reason
+                   launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility,
+                   launch_period_seconds, CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts, suspended_reason
             FROM local_instances
             WHERE killed_at IS NULL AND suspended_at IS NOT NULL AND suspended_reason IN (?, ?)
             ORDER BY id
@@ -3026,6 +3039,27 @@ class SQLConnection(metaclass=Singleton):
             ),
         )
 
+    def add_price_sample(self, ts: int, launch_bp: Mapping[str, int], keep_seconds: int) -> None:
+        """Record the multipliers of a launch at ``ts`` (#636), and drop the samples older
+        than ``keep_seconds``. One sample per second at most: a second one replaces it."""
+        def work(cursor):
+            cursor.execute(
+                'INSERT OR REPLACE INTO price_history (ts, cpu_bp, mem_bp, disk_bp) VALUES (?, ?, ?, ?)',
+                (int(ts), int(launch_bp["cpu"]), int(launch_bp["mem"]), int(launch_bp["disk"])),
+            )
+            cursor.execute('DELETE FROM price_history WHERE ts < ?', (int(ts) - int(keep_seconds),))
+        self._transaction(work)
+
+    def get_price_samples(self, since_ts: int) -> List[tuple]:
+        """The samples of the price multiplier from ``since_ts``, oldest first:
+        ``(ts, {"cpu": bp, "mem": bp, "disk": bp})``."""
+        result = self._execute(
+            'SELECT ts, cpu_bp, mem_bp, disk_bp FROM price_history WHERE ts >= ? ORDER BY ts ASC',
+            (int(since_ts),),
+        )
+        return [(int(row[0]), {"cpu": int(row[1]), "mem": int(row[2]), "disk": int(row[3])})
+                for row in result.fetchall()]
+
     def get_demand_history(self, days: int = 30) -> List[dict]:
         """The recorded hours over the last ``days``, oldest first.
 
@@ -3095,12 +3129,15 @@ class SQLConnection(metaclass=Singleton):
                    base_mem_limit, base_disk_space, base_cpu_period, base_cpu_quota,
                    peer_base_mem_limit, peer_base_disk_space, peer_base_cpu_period,
                    peer_base_cpu_quota, quote_init_maintenance_cost,
-                   quote_max_maintenance_cost, quote_maintenance_seconds_loop, quote_variance,
+                   quote_max_maintenance_cost, quote_maintenance_seconds_loop,
+                   quote_price_bounded, quote_price_volatility,
+                   quote_volatility_period_seconds,
                    suspended_at,
                    CASE WHEN suspended_at IS NULL THEN NULL
                         ELSE CAST(strftime('%s', 'now') AS INTEGER)
                              - CAST(strftime('%s', suspended_at) AS INTEGER)
-                   END AS suspended_for_s
+                   END AS suspended_for_s,
+                   CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts
             FROM delegated_instances WHERE killed_at IS NULL
             ''' + ('AND token_delegation = ?' if token is not None else ''),
             (token,) if token is not None else ())
@@ -3144,9 +3181,12 @@ class SQLConnection(metaclass=Singleton):
                 'quote_init_maintenance_cost': _as_int(row[35]) if row[35] is not None else None,
                 'quote_max_maintenance_cost': _as_int(row[36]) if row[36] is not None else None,
                 'quote_maintenance_seconds_loop': row[37],
-                'quote_variance': row[38],
-                'suspended_at': row[39],
-                'suspended_for_s': row[40],
+                'quote_price_bounded': row[38],
+                'quote_price_volatility': row[39],
+                'quote_volatility_period_seconds': row[40],
+                'suspended_at': row[41],
+                'suspended_for_s': row[42],
+                'launched_ts': row[43],
             }
             for row in result.fetchall()
         ]
@@ -3698,9 +3738,10 @@ class SQLConnection(metaclass=Singleton):
                 could not be read.
             quote (Optional[Mapping]): The maintenance quote of the peer for this
                 instance, in the MU of the peer (#567): ``init_maintenance_cost``,
-                ``max_maintenance_cost``, ``maintenance_seconds_loop`` and ``variance``
-                (``peer_quotes.maintenance_terms``). None stores NULL: the charge of the
-                peer is then not checked.
+                ``max_maintenance_cost``, ``maintenance_seconds_loop``,
+                ``price_bounded``, ``price_volatility`` and ``volatility_period_seconds``
+                (``peer_quotes.maintenance_terms``, #636). None stores NULL: the charge of
+                the peer is then not checked.
         """
         movements = _opening_movements(balance_mu, movements)
         mark = mark or {}
@@ -3720,10 +3761,11 @@ class SQLConnection(metaclass=Singleton):
                     base_mem_limit, base_disk_space, base_cpu_period, base_cpu_quota,
                     arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, charged_until,
                     quote_init_maintenance_cost, quote_max_maintenance_cost,
-                    quote_maintenance_seconds_loop, quote_variance, launched_at
+                    quote_maintenance_seconds_loop, quote_price_bounded,
+                    quote_price_volatility, quote_volatility_period_seconds, launched_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (external_token, alias, peer_id, father_id, serialized_instance, service_id,
                   str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
                   mark.get("hash"), str(int(sent_peer_mu)),
@@ -3736,7 +3778,9 @@ class SQLConnection(metaclass=Singleton):
                   launch_bp.get("mem"), launch_bp.get("disk"), time.time(),
                   _mu_text(quote.get("init_maintenance_cost")),
                   _mu_text(quote.get("max_maintenance_cost")),
-                  quote.get("maintenance_seconds_loop"), quote.get("variance")))
+                  quote.get("maintenance_seconds_loop"),
+                  None if quote.get("price_bounded") is None else int(bool(quote["price_bounded"])),
+                  quote.get("price_volatility"), quote.get("volatility_period_seconds")))
             self._append_opening(cursor, alias, movements)
 
         self._transaction(work)

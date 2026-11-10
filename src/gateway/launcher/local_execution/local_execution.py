@@ -8,18 +8,18 @@ from src.database.sql_connection import SQLConnection
 from src.virtualizers.architecture import get_arch_tag
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
 from src.virtualizers.selection import select_virtualizer
-from src.manager.manager import (
-    default_initial_balance,
-    reserve_instance_name,
-)
+from src.manager.manager import reserve_instance_name
 from src.utils import utils, logger as log
 from src.utils import dead_instances, keyvalue
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
+from src.utils.cost_functions.price_bound import current_bound
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
     balance_after_build,
+    default_balance_mu,
+    initial_children_mu,
     minimum_runtime_mu,
     start_build_mu,
 )
@@ -117,21 +117,26 @@ def local_execution(
 
     # Resolved before the balance is derived, because it selects the memory price the
     # ticks that spend that balance will charge: funding an instance at the scalar
-    # rate and then charging it a per-arch one buys a different number of hours than
-    # `deposits.INITIAL_RUNTIME_HOURS` promises.
+    # rate and then charging it a per-arch one buys a different number of periods than
+    # `deposits.DEFAULT_INITIAL_PERIODS` promises.
     service_arch = get_arch_tag(service=service, metadata=metadata)
 
     # One reading of the load prices the whole launch. The balance below is funded at
-    # the worst case of this price, and the instance row records this price, which is
+    # the ceilings of this price (the funding sum), and the instance row records this price, which is
     # what the ticks measure the bound from: two readings could differ, and then the
     # funding would not cover the ceiling that the row allows.
     launch_scarcity = system_scarcity()
     launch_bp = launch_price_bp(launch_scarcity)
+    # The price bound of this launch (#636), read once: the balance is funded at its
+    # ceilings, and the row stores it, so the ticks use it for the whole life of the
+    # instance and never the config or the price history of a later moment.
+    launch_bound = current_bound()
 
     # The father paid `initial_mu`, and only that (#563). The build is taken out of it,
     # and what is left is the balance of the instance. A request that carries no amount
-    # (a direct call: `launch_service` always sets one) is funded with the build plus
-    # the default balance, so that the instance still has the default runtime.
+    # (a direct call: `launch_service` always sets one) is funded as `launch_service`
+    # funds it: `cost` (the build and the builds of the initial children) plus the
+    # default balance (#636, 9).
     #
     # Settled before the build, so that a start that does not fit costs nothing: the
     # father is given the whole charge back, and nothing is built for it.
@@ -139,12 +144,14 @@ def local_execution(
         build_mu = start_build_mu(metadata=metadata, scarcity=launch_scarcity)
         initial_mu: int = from_amount(config.initial_mu) \
             if config.HasField("initial_mu") \
-            else build_mu + default_initial_balance(
+            else build_mu + initial_children_mu(service, scarcity=launch_scarcity) \
+            + default_balance_mu(
                 system_resources=resources.at_init,
                 service_hash=service_id,
                 arch=service_arch,
-                scarcity=launch_scarcity,
                 service=service,
+                scarcity=launch_scarcity,
+                bound=launch_bound,
             )
         start_balance_mu: int = balance_after_build(
             initial_mu=initial_mu,
@@ -155,6 +162,7 @@ def local_execution(
                 arch=service_arch,
                 service=service,
                 scarcity=launch_scarcity,
+                bound=launch_bound,
             ),
         )
     except Exception as e:
@@ -408,6 +416,7 @@ def local_execution(
             cpu_quota=int(resolved_resources.cpu_quota),
             arch=service_arch,
             launch_bp=launch_bp,
+            launch_bound=launch_bound,
             # What the father paid, and the build taken from it (#570). The start
             # names the execution as its receipt does (#419).
             movements=(

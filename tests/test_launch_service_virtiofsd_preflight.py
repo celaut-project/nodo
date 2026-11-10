@@ -31,7 +31,7 @@ MISSING = "this service declares shared directories, which need the Rust virtiof
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class VirtiofsdPreflightTests(unittest.TestCase):
     def _launch(self, declarations, require_side_effect, candidates=()):
-        cost = SimpleNamespace(cost=SimpleNamespace(), variance=0.0)
+        cost = SimpleNamespace(cost=SimpleNamespace(), price_bounded=False)
         with ExitStack() as stack:
             def patched(target, name, **kwargs):
                 return stack.enter_context(patch.object(target, name, **kwargs))
@@ -61,7 +61,7 @@ class VirtiofsdPreflightTests(unittest.TestCase):
             patched(mod.sc, "internal_instance_exists", return_value=False)
             patched(mod.utils, "get_network_name", return_value="lan")
             patched(mod, "get_arch_tag", return_value="amd64")
-            patched(mod, "default_initial_balance", return_value=1)
+            patched(mod, "default_balance_mu", return_value=1)
             patched(mod, "_client_charge_mu", return_value=1)  # the price is not tested here
             balancer.return_value = iter([(peer, cost) for peer in candidates])
             error = None

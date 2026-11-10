@@ -9,6 +9,12 @@ of the caller:
 The maximum spend of the caller for the start is then ``initial_mu``, less what the
 instance does not spend. The caller does not add the build to its own estimate.
 
+``EstimatedCost.cost`` is what the start spends: the build, and the builds of the initial
+children (``start_cost_mu``). It has no balance (#636, 9). The caller adds the balance
+for the periods that it chooses (``price_bound.funding_sum_mu``). A start that carries no
+``initial_mu`` gets ``cost`` plus the sum for ``deposits.DEFAULT_INITIAL_PERIODS``
+periods (``default_balance_mu``).
+
 Two rules keep the start from a trap for the caller:
 
 * The build must fit in ``initial_mu``. If it does not, the node rejects the start and
@@ -27,10 +33,10 @@ from protos import celaut_pb2 as celaut
 from src.utils.cost_functions.execution_cost import (
     build_charge_mu,
     is_free,
+    launch_charge_mu,
     prices,
-    worst_case_charge_mu,
 )
-from src.utils.cost_functions.general_cost_functions import compute_worst_case_maintenance_cost
+from src.utils.cost_functions.price_bound import CURRENT, current_bound, funding_sum_mu
 from src.utils.arch_guard import arch_from_tags
 from src.utils.config import ConfigManager
 from src.utils.verify import get_service_hex_main_hash, get_service_list_of_hashes
@@ -51,7 +57,7 @@ def start_build_mu(metadata: celaut.Metadata, scarcity: Optional[Dict[str, float
     """The cost of the build that a start takes from ``initial_mu``, in MU.
 
     Zero while the node is free (``free_tier``) and for a service that is already built.
-    The same figure that the quote adds to the balance (``compute_start_service_cost``).
+    The same figure that the quote puts in ``cost`` (``start_cost_mu``).
     """
     if is_free(scarcity):
         return 0
@@ -82,45 +88,36 @@ def child_start_cost_mu(
         workload: celaut.Service.Workload,
         scarcity: Optional[Dict[str, float]] = None,
 ) -> int:
-    """What the parent pays for the ``child_start`` of the instances of one workload.
+    """What the start of the instances of one workload spends, apart from their balances.
 
-    ``count`` times the least ``initial_mu`` that starts one child with the default
-    balance of this node: the build of the child plus
-    ``manager.default_initial_balance`` for the ``at_init`` of its service. These are
-    the figures of a real start (``compute_start_service_cost``), so the quote and the
-    charge come from the same price. The build is 0 when the workload names no service
-    (neither a hash nor a complete service), when the service is built here already,
-    and while the node is free. Free, the start costs nothing at all.
+    ``count`` times the build of the child: ``pricing.BUILD_MU`` when the workload names
+    a service (a hash or a complete service) that is not built here, and 0 when it names
+    none, when the service is built here already and while the node is free. A service
+    that declares its own ``initial_environment_workload`` adds the builds of its
+    children, as its own ``cost`` does.
 
-    The resources are the ones of ``dependency.service.container.resources``. A
-    workload with no resources is priced at the floors of this node, as a real start of
-    a service that declares none. A service that declares its own
-    ``initial_environment_workload`` adds the cost of its children, as its default
-    balance does.
+    No balance (#636, 9). Each child gets its balance in its own ``StartService``: the
+    ``initial_mu`` that the parent sends, or with none the default of the node that runs
+    it (``default_balance_mu``). The parent pays that ``child_start`` out of its own
+    balance when it starts the child.
     """
-    from src.manager.manager import default_initial_balance
-
     count = int(workload.count)
-    if count <= 0 or is_free(scarcity):
+    if count <= 0:
         return 0
     service = workload.dependency.service
     service_hash = _workload_hash(workload)
-    balance = default_initial_balance(
-        system_resources=service.container.resources.at_init,
-        service_hash=service_hash,
-        arch=arch_from_tags(service.container.architecture.tags),
-        scarcity=scarcity,
-        service=service,
-    )
-    build = prices().build_mu if service_hash and not is_built(service_hash) else 0
-    return int(count * (build + balance))
+    build = prices().build_mu if service_hash and not is_built(service_hash) \
+        and not is_free(scarcity) else 0
+    grandchildren = initial_children_mu(service, scarcity=scarcity) \
+        if service.initial_environment_workload else 0
+    return int(count * (build + grandchildren))
 
 
 def initial_children_mu(
         service: Optional[celaut.Service],
         scarcity: Optional[Dict[str, float]] = None,
 ) -> int:
-    """What a service pays to start its initial children. ``EstimatedCost.cost`` includes it.
+    """The builds of the initial children of a service. ``EstimatedCost.cost`` includes it.
 
     ``Service.initial_environment_workload`` is an AND of clauses, a clause an OR of
     groups, and a group an AND of workloads that run at the same time. The cost of a
@@ -145,39 +142,121 @@ def initial_children_mu(
     return int(total)
 
 
+def start_cost_mu(
+        metadata: celaut.Metadata,
+        service: Optional[celaut.Service] = None,
+        scarcity: Optional[Dict[str, float]] = None,
+) -> int:
+    """``EstimatedCost.cost``: what the start spends, with no balance (#636, 9).
+
+    The build of the service (``start_build_mu``) and the builds of its initial children
+    (``initial_children_mu``). Both are 0 while the node is free, so a free node quotes
+    a cost of 0, and the funding sum asks for the balance as for any start (#636, 2).
+    """
+    return int(start_build_mu(metadata=metadata, scarcity=scarcity)
+               + initial_children_mu(service, scarcity=scarcity))
+
+
+def default_initial_periods() -> int:
+    """``deposits.DEFAULT_INITIAL_PERIODS``: how many maintenance periods the default
+    balance of a start funds. At least 1."""
+    return max(int(ConfigManager().get("deposits.DEFAULT_INITIAL_PERIODS", 360)), 1)
+
+
+def periods_funding_mu(
+        system_resources: Optional[celaut.Sysresources],
+        periods: int,
+        service_hash: Optional[str] = None,
+        arch: Optional[str] = None,
+        service: Optional[celaut.Service] = None,
+        scarcity: Optional[Dict[str, float]] = None,
+        bound=CURRENT,
+) -> int:
+    """The balance that funds ``periods`` maintenance periods of an instance launched now.
+
+    ``price_bound.funding_sum_mu`` of the maintenance of one period
+    (``MANAGER_ITERATION_TIME``) with ``system_resources``, at the price of a launch now
+    (``launch_charge_mu``, the ``init_maintenance_cost`` of a quote). It is the formula
+    that a client uses with a quote, and the ticks of the instance take ``k`` from the same
+    function (``price_bound.tick_period_index``, #636, 6).
+
+    Priced for what the instance will hold, not for what its manifest asks
+    (``resolve_billable_resources``): the ticks charge the resolved row. ``arch`` selects
+    the memory price when the operator prices memory per arch. A free node prices at the
+    anchor of a launch while free (1x), not at 0: its ticks charge 0 while it stays free,
+    and up to the bound over that anchor when it leaves the free state. ``scarcity`` is
+    the load sample of the launch; omitted, it is read here. ``bound`` is the bound of
+    the launch (None for no bound); omitted, the bound of now is read here.
+    """
+    if system_resources is None or int(periods) <= 0:
+        return 0
+    if bound is CURRENT:
+        bound = current_bound()
+    loop_seconds = int(ConfigManager().get("MANAGER_ITERATION_TIME"))
+    init_mu = launch_charge_mu(
+        system_resources=resolve_billable_resources(system_resources, service_hash, service=service),
+        seconds=loop_seconds,
+        scarcity=scarcity,
+        arch=arch,
+    )
+    return int(funding_sum_mu(init_mu, loop_seconds, bound, int(periods)))
+
+
+def default_balance_mu(
+        system_resources: Optional[celaut.Sysresources],
+        service_hash: Optional[str] = None,
+        arch: Optional[str] = None,
+        service: Optional[celaut.Service] = None,
+        scarcity: Optional[Dict[str, float]] = None,
+        bound=CURRENT,
+) -> int:
+    """The balance of a start that carries no ``initial_mu``: ``periods_funding_mu`` for
+    ``deposits.DEFAULT_INITIAL_PERIODS`` periods (#636, 9).
+
+    The node funds such a start with ``EstimatedCost.cost`` (``start_cost_mu``) plus this
+    figure. It has no balance for the children: each child gets its own default in its
+    own ``StartService``, and the parent pays it out of this balance.
+    """
+    return periods_funding_mu(
+        system_resources, default_initial_periods(), service_hash=service_hash, arch=arch,
+        service=service, scarcity=scarcity, bound=bound,
+    )
+
+
 def minimum_runtime_mu(
         resources: celaut.Service.Container.Resources,
         service_hash: Optional[str] = None,
         arch: Optional[str] = None,
         service: Optional[celaut.Service] = None,
         scarcity: Optional[Dict[str, float]] = None,
+        bound=CURRENT,
 ) -> int:
     """The least balance that an instance holds after the build: one maintenance period.
 
-    It is one period (``MANAGER_ITERATION_TIME``) with the resources at the start, at the
-    worst case that the price can reach. With ``pricing.MAX_PRICE_VOLATILITY`` on, that
-    is the launch price times the bound, so no tick of the instance can charge more than
-    this figure. With the bound off, it is the price at the current load. It is the same
-    function that prices ``EstimatedCost.max_maintenance_cost``.
+    ``periods_funding_mu`` for one period with the resources at the start: the launch
+    price times ``(1 + v)^k(1)`` (#636), the most that the first tick of the instance can
+    charge. With ``pricing.PRICE_BOUNDED`` false, it is the launch price. So a client
+    that funds ``cost`` plus the funding sum of one period passes. ``bound`` is the
+    bound of the launch, read once by the launcher; omitted, it is read here.
     """
     if not resources.HasField("at_init"):
         return 0
-    return int(compute_worst_case_maintenance_cost(
-        system_resources=resolve_billable_resources(resources.at_init, service_hash, service=service),
-        seconds=env_manager.get("MANAGER_ITERATION_TIME"),
-        scarcity=scarcity,
-        arch=arch,
-    ))
+    return periods_funding_mu(
+        resources.at_init, 1, service_hash=service_hash, arch=arch, service=service,
+        scarcity=scarcity, bound=bound,
+    )
 
 
 def underfunded_reason(initial_mu: int, build_mu: int, minimum_mu: int, children_mu: int) -> Optional[str]:
     """Why ``initial_mu`` does not fund the initial children of a service, or None (#538).
 
     A service pays the ``child_start`` of its initial children out of its own balance.
-    So the balance after the build must pay ``children_mu``
-    (``initial_children_mu``) and one maintenance period of the service
+    So the balance after the build must pay ``children_mu``, the builds of the children
+    (``initial_children_mu``), and one maintenance period of the service
     (``minimum_mu``). If not, the parent starts and then fails to start its children in
-    a loop (#628). A service with no initial children is not checked here:
+    a loop (#628). The balances of the children are not in ``children_mu`` (#636, 9):
+    the parent pays them out of the periods that it was funded for. A service with no
+    initial children to build is not checked here:
     ``balance_after_build`` applies the rule of the build and the period.
     """
     initial_mu, build_mu = int(initial_mu), int(build_mu)
@@ -189,7 +268,7 @@ def underfunded_reason(initial_mu: int, build_mu: int, minimum_mu: int, children
         return None
     return (
         f"initial_mu {initial_mu} MU leaves {max(initial_mu - build_mu, 0)} MU after the "
-        f"build of {build_mu} MU. The initial children of the service cost {children_mu} MU "
+        f"build of {build_mu} MU. The builds of the initial children cost {children_mu} MU "
         f"and one maintenance period costs {minimum_mu} MU. "
         f"The least initial_mu is {least} MU."
     )

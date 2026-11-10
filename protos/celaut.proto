@@ -458,7 +458,7 @@ message Service {
     repeated Clause possible_environment_workload = 5;
     // The load that the service needs to start. It is in the admission, as
     // possible_environment_workload, and in the cost: EstimatedCost.cost includes the
-    // starts of these children.
+    // builds of these children. Each child gets its balance in its own start.
     repeated Clause initial_environment_workload = 6;
 }
 
@@ -506,8 +506,9 @@ message Configuration {
     // does not spend. If the build does not fit in the amount, or if the balance that
     // is left is less than one maintenance period with the resources at the start, the
     // node rejects the start and charges nothing. If it is absent or zero, the node uses
-    // the cost of the build plus a default balance that it calculates from the resources
-    // at the start.
+    // EstimatedCost.cost plus a default balance. The node calculates the default balance
+    // from the resources at the start, for its own default number of maintenance
+    // periods.
     optional Amount initial_mu = 3;
 }
 
@@ -625,28 +626,29 @@ message DescendantTunnel {
 
 // The cost to run a service on the node. The node that answers sets it.
 message EstimatedCost {
-    // The least Configuration.initial_mu with which the node starts the service, in MU.
-    // It is the cost to build the service, plus the balance that the instance has after
-    // the build, plus what the instance pays to start its initial children. The balance
-    // is the initial_mu of the request. If the request has no initial_mu, the node uses
-    // its own default balance for the resources at the start. A caller that sets
-    // initial_mu to this value pays no more than this value for the start, because the
-    // node takes the cost of the build from initial_mu.
+    // The cost that the start spends, in MU. It is the cost to build the service, plus
+    // the cost to build its initial children. It does not include a balance, for the
+    // service or for its children. If the service is already built, its build cost is
+    // 0. The node takes the cost of the builds from Configuration.initial_mu, and the
+    // remainder is the balance of the instance.
     //
     // The initial children are the children of Service.initial_environment_workload.
-    // Each start of a child takes its initial_mu from the balance of the parent. For
-    // each workload: count times the build of the child plus the default balance of the
-    // node for the at_init resources of the child. The cost of a group is the sum of its
-    // workloads, the cost of a clause is the highest cost of its groups, and the total is
-    // the sum of the clauses.
+    // For each workload: count times the cost to build the child. The cost of a group is
+    // the sum of its workloads, the cost of a clause is the highest cost of its groups,
+    // and the total is the sum of the clauses. Each child gets its balance in its own
+    // StartService. The parent pays that start from its own balance.
     //
-    // To fund the parent for a number of maintenance periods, a client adds the cost to
-    // this sum: for each maintenance period i, from 1 to the number of periods, the
-    // init_maintenance_cost times (1 + price_volatility) to the power k(i). The value
-    // k(i) is floor(i * maintenance_seconds_loop / volatility_period_seconds) + 1. If
-    // volatility_period_seconds is 0, k(i) is 1. This sum applies only when price_bounded
-    // is true. If price_bounded is false, the node makes no promise, and the client
-    // chooses the amount itself.
+    // To fund the instance for N maintenance periods, a client sends an initial_mu that
+    // is this cost plus a sum. The client chooses N. The sum is: for each maintenance
+    // period i, from 1 to N, the init_maintenance_cost times (1 + price_volatility) to
+    // the power k(i). The value k(i) is
+    // floor(i * maintenance_seconds_loop / volatility_period_seconds) + 1. If
+    // volatility_period_seconds is 0, k(i) is 1. The node uses the same k(i) for the
+    // charge of the period i. The balance must pay at least one period (N = 1), or the
+    // node does not start the service. This sum applies only when price_bounded is
+    // true. If price_bounded is false, the node makes no promise, and the client chooses
+    // the amount itself. If the request has no initial_mu, the node uses this cost plus
+    // the sum for its own default number of periods.
     Amount cost = 1;
     // The cost of one maintenance period with the resources at_init, in MU. The resources
     // at_init are the resources that the instance has when it starts. The figure is the

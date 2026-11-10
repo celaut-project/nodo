@@ -27,7 +27,7 @@ def _cost(mu: int) -> "celaut_pb2.EstimatedCost":
         init_maintenance_cost=to_amount(0),
         max_maintenance_cost=to_amount(0),
         maintenance_seconds_loop=3600,
-        variance=0.0,
+        price_bounded=True,
     )
 
 

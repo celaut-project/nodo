@@ -583,13 +583,11 @@ class QuoteTests(unittest.TestCase):
             patched(cost_mod, "executes_locally", return_value=True)
             patched(cost_mod, "read_service_from_disk", return_value=service)
             patched(cost_mod, "enforce_network_policy")
-            patched(cost_mod, "default_initial_balance", return_value=1)
             patched(cost_mod, "generate_estimated_cost", side_effect=lambda **_: celaut.EstimatedCost())
             patched(cost_mod, "get_resource_availability", return_value={"can_execute": True})
             patched(cost_mod.BeeClient, "respond",
                     side_effect=lambda message_iterator, indices: iter([message_iterator]))
             patched(cost_mod.activity_window, "is_open", return_value=True)
-            patched(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount())
             # The local price only. A peer offer while Tor is not ready: test_delegated_quote.py.
             patched(cost_mod, "delegation_time_budget", return_value=None)
             return list(it.generate())
@@ -619,7 +617,7 @@ class QuoteTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LaunchTests(unittest.TestCase):
     def _launch(self, service, candidates, tor_proxy):
-        cost = SimpleNamespace(cost=SimpleNamespace(), variance=0.0)
+        cost = SimpleNamespace(cost=SimpleNamespace(), price_bounded=False)
         mod = launch_mod
         with ExitStack() as stack:
             def patched(target, name, **kwargs):
@@ -650,7 +648,7 @@ class LaunchTests(unittest.TestCase):
             patched(mod.sc, "internal_instance_exists", return_value=False)
             patched(mod.utils, "get_network_name", return_value="lan")
             patched(mod, "get_arch_tag", return_value="amd64")
-            patched(mod, "default_initial_balance", return_value=1)
+            patched(mod, "default_balance_mu", return_value=1)
             patched(mod, "_client_charge_mu", return_value=1)  # the price is not tested here
             balancer.return_value = iter([(peer, cost) for peer in candidates])
             error = None

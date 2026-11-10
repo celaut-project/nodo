@@ -175,8 +175,9 @@ def delegate_execution(
     charged what this node advertises (#577), as a local one is: this node keeps its own
     build, ``own_build_mu``, and the rest is the balance of the child. That balance is what
     the father can get back, and it is what this node sends the peer, in the MU of the
-    peer. The peer takes its own build from it, ``peer_build_mu`` as it quoted it, in local
-    MU, and the rest is the balance of the child there. The account of the child here
+    peer. The peer takes its own build from it, ``peer_build_mu`` as it quoted it (its
+    ``cost``: its build and the builds of the initial children, no balance, #636), in
+    local MU, and the rest is the balance of the child there. The account of the child here
     opens with the ``start`` and the ``build`` of this node, and shows nothing of the
     peer.
 

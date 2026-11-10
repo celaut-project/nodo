@@ -29,6 +29,7 @@ the two scales still meet.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Mapping, Optional, Union
@@ -55,9 +56,13 @@ HOUR_SECONDS = 3600
 # Scarcity multipliers are fractional, and every charge must stay integer, so they are
 # carried as basis points: 10_000 bp == 1.0x (no surcharge).
 SCARCITY_SCALE = 10_000
-# Used when `pricing.MAX_PRICE_VOLATILITY` is absent. It is the value that
-# config.example.yaml ships, so a node with no such key behaves like one that has it.
-DEFAULT_MAX_PRICE_VOLATILITY = 2.0
+# The price bound of a quote (#636) when the keys are absent: bounded, one day per
+# volatility period, the computed volatility over a window of seven periods, with a floor
+# of 5 %. `pricing.PRICE_VOLATILITY` has no default: absent, the node computes it.
+DEFAULT_PRICE_BOUNDED = True
+DEFAULT_PRICE_VOLATILITY_PERIOD_HOURS = 24.0
+DEFAULT_VOLATILITY_WINDOW_PERIODS = 7
+DEFAULT_PRICE_VOLATILITY_MIN = 0.05
 
 # The one display unit that needs no rate, because it *is* the unit of account. Every
 # other unit comes from a payment contract or from `ui.UNITS.<name>` (see `display_unit`).
@@ -285,25 +290,21 @@ class Prices:
     # vCPU is worth, not a claim that the node reserves more of them -- a different
     # decision, and not one to smuggle in here.)
     ram_mu_per_gib_hour_by_arch: Mapping[str, int] = field(default_factory=dict)
-    # How far a running instance's scarcity multiplier may rise above the one it was
-    # launched at (`pricing.MAX_PRICE_VOLATILITY`). 0 is unbounded. Read it through
-    # `volatility_bound`, never raw: a value at or above `scarcity_max_multiplier` also
-    # means unbounded, because no multiplier can climb that far. Last, with a default,
-    # so a construction of this vector that omits it is valid.
-    max_price_volatility: float = 0.0
-
-    def volatility_bound(self) -> Optional[float]:
-        """The factor a launch multiplier may grow by, or None when nothing is bounded.
-
-        None for 0 (the operator switched the bound off) and for any value from
-        `scarcity_max_multiplier` up: a launch multiplier is at least 1x, so the bound
-        would then sit at or above the highest multiplier that exists and never clamp.
-        Answering None for both gives every caller one test for "no bound".
-        """
-        bound = float(self.max_price_volatility)
-        if bound <= 0 or bound >= self.scarcity_max_multiplier:
-            return None
-        return bound
+    # The price bound that the quotes of this node promise (#636). `price_bounded` is
+    # `pricing.PRICE_BOUNDED`. `price_volatility` is `v`, `pricing.PRICE_VOLATILITY`, or
+    # None when the operator did not set it and the node computes it
+    # (`price_bound.current_bound`). `volatility_period_seconds` is `T`
+    # (`pricing.PRICE_VOLATILITY_PERIOD_HOURS`, 0 is one period for the whole life), and
+    # the window and the floor are those of the computed volatility. Read the bound of a
+    # quote or a launch through `price_bound.current_bound`, never from here: it is read
+    # once, and a launch stores what it read. Last, with defaults, so a construction of
+    # this vector that omits them is valid.
+    price_bounded: bool = DEFAULT_PRICE_BOUNDED
+    price_volatility: Optional[float] = None
+    volatility_period_seconds: int = int(DEFAULT_PRICE_VOLATILITY_PERIOD_HOURS * HOUR_SECONDS)
+    volatility_window_seconds: int = int(
+        DEFAULT_VOLATILITY_WINDOW_PERIODS * DEFAULT_PRICE_VOLATILITY_PERIOD_HOURS * HOUR_SECONDS)
+    volatility_min: float = DEFAULT_PRICE_VOLATILITY_MIN
 
     def ram_for_arch(self, arch: Optional[str]) -> int:
         """The memory price a guest of ``arch`` pays, per GiB-hour.
@@ -414,15 +415,7 @@ def prices() -> Prices:
     curve = _number("pricing.SCARCITY_CURVE", 1.0)
     if curve <= 0:
         raise ValueError(f"pricing.SCARCITY_CURVE must be positive, got {curve}.")
-    # 0 is "unbounded"; 1.0 fixes the multiplier for the life of the instance. Between
-    # 0 and 1 is refused: the bound only ever limits a rise, so a value under 1 would
-    # also cut the price of an instance below the one it was launched at, while the
-    # load did not move.
-    volatility = _number("pricing.MAX_PRICE_VOLATILITY", DEFAULT_MAX_PRICE_VOLATILITY)
-    if volatility != 0 and not volatility >= 1:
-        raise ValueError(
-            f"pricing.MAX_PRICE_VOLATILITY must be 0 (unbounded) or at least 1, got {volatility}."
-        )
+    bound = _price_bound_settings()
 
     return Prices(
         ram_mu_per_gib_hour=_price_mu("RAM_MU_PER_GIB_HOUR"),
@@ -437,18 +430,55 @@ def prices() -> Prices:
         statement_row_mu=_price_mu("STATEMENT_ROW_MU"),
         scarcity_max_multiplier=max_multiplier,
         scarcity_curve=curve,
-        max_price_volatility=volatility,
+        **bound,
     )
+
+
+def _finite(key: str, default: float, *, least: float, strictly: bool = False) -> float:
+    value = _number(key, default)
+    if not math.isfinite(value) or value < least or (strictly and value == least):
+        relation = "more than" if strictly else "at least"
+        raise ValueError(f"{key} must be a finite number {relation} {least:g}, got {value}.")
+    return value
+
+
+def _price_bound_settings() -> Dict[str, Any]:
+    """The `Prices` fields of the price bound (#636), from `pricing:`.
+
+    The same rules as `config_validation`, which refuses them at load: here they keep a
+    config that was changed after the load from pricing with a value that means nothing.
+    """
+    bounded = _config().get("pricing.PRICE_BOUNDED", DEFAULT_PRICE_BOUNDED)
+    if not isinstance(bounded, bool):
+        raise ValueError(f"pricing.PRICE_BOUNDED must be true or false, got {bounded!r}.")
+    raw_volatility = _config().get("pricing.PRICE_VOLATILITY", None)
+    volatility = None if raw_volatility in (None, "") else \
+        _finite("pricing.PRICE_VOLATILITY", 0.0, least=0.0)
+    period_hours = _finite("pricing.PRICE_VOLATILITY_PERIOD_HOURS",
+                           DEFAULT_PRICE_VOLATILITY_PERIOD_HOURS, least=0.0)
+    default_window = DEFAULT_VOLATILITY_WINDOW_PERIODS * (
+        period_hours or DEFAULT_PRICE_VOLATILITY_PERIOD_HOURS)
+    window_hours = _finite("pricing.PRICE_VOLATILITY_WINDOW_HOURS", default_window,
+                           least=0.0, strictly=True)
+    return {
+        "price_bounded": bounded,
+        "price_volatility": volatility,
+        "volatility_period_seconds": int(round(period_hours * HOUR_SECONDS)),
+        "volatility_window_seconds": max(1, int(round(window_hours * HOUR_SECONDS))),
+        "volatility_min": _finite("pricing.PRICE_VOLATILITY_MIN",
+                                  DEFAULT_PRICE_VOLATILITY_MIN, least=0.0),
+    }
 
 
 def free_tier() -> FreeTier:
     # One hour of the smallest useful guest at the shipped prices -- 0.5 GiB of RAM plus
-    # one vCPU -- at the worst case that `pricing.MAX_PRICE_VOLATILITY` allows (2x at the
-    # shipped value), because that is what the first launch of a client is funded at.
+    # one vCPU -- at the ceiling of the shipped price bound for that hour (1.10x: one
+    # period of `pricing.PRICE_VOLATILITY` 0.10, #636), because that is what the first
+    # launch of a client is funded at.
     # Matches config.example.yaml. Not 0: with costs.ALLOW_DEBT off, which
     # is the default, a client credited nothing is refused at its first launch and the
     # node does no work for anybody it did not fund by hand (issue #324).
-    raw_credit = _config().get("free_tier.CREDIT_MU_PER_NEW_CLIENT", 9_000_000)
+    raw_credit = _config().get("free_tier.CREDIT_MU_PER_NEW_CLIENT", 4_950_000)
     credit = _decimal(raw_credit if raw_credit not in (None, "") else 0,
                       what="free_tier.CREDIT_MU_PER_NEW_CLIENT")
     return FreeTier(

@@ -9,10 +9,11 @@ MU that was made from it, and the launcher finds it again when it delegates (``s
 In memory, and bounded: a quote that is not found gives a delegated row with no quote,
 and the charge of that instance is not checked.
 """
-import math
 import threading
 from collections import OrderedDict
 from typing import Optional
+
+from src.utils.cost_functions import price_bound
 
 MAX_QUOTES = 1024
 
@@ -58,17 +59,21 @@ def signed(peer_id: str, local_cost):
 def maintenance_terms(peer_cost) -> Optional[dict]:
     """The maintenance figures of ``peer_cost`` that a delegated row keeps, as the peer
     sent them: ``init_maintenance_cost`` and ``max_maintenance_cost`` in its MU,
-    ``maintenance_seconds_loop`` and ``variance``. None with no quote, or when a figure
-    cannot be read."""
+    ``maintenance_seconds_loop``, and its price bound (#636): ``price_bounded``,
+    ``price_volatility`` and ``volatility_period_seconds``, read strictly
+    (``price_bound.strict``). An unbounded quote keeps no volatility and no period. None
+    with no quote, or when a figure cannot be read."""
     if peer_cost is None:
         return None
     try:
-        variance = float(peer_cost.variance)
+        bound = price_bound.of_quote(peer_cost, source=" in a quote of a peer")
         return {
             "init_maintenance_cost": int(peer_cost.init_maintenance_cost.n or 0),
             "max_maintenance_cost": int(peer_cost.max_maintenance_cost.n or 0),
             "maintenance_seconds_loop": int(peer_cost.maintenance_seconds_loop),
-            "variance": variance if math.isfinite(variance) else 0.0,
+            "price_bounded": bound is not None,
+            "price_volatility": None if bound is None else bound.volatility,
+            "volatility_period_seconds": None if bound is None else bound.period_seconds,
         }
     except (AttributeError, TypeError, ValueError):
         return None

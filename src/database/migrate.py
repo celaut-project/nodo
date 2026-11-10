@@ -164,11 +164,13 @@ TABLES = {
     #
     # launch_cpu_bp, launch_mem_bp and launch_disk_bp are the scarcity multiplier of
     # each resource at the moment the instance launched, in basis points (10000 is 1x).
-    # `pricing.MAX_PRICE_VOLATILITY` bounds the tick charge against them, and the tick
-    # should not have to re-derive a load that is gone. A node that was free when
-    # the instance launched records 1x, so the bound still has a price to measure from. NULL (a row from
-    # before the columns existed, or a dev instance) means no bound: that instance is
-    # charged at the current load, as it always was.
+    # launch_volatility and launch_period_seconds are the price bound of the launch
+    # (#636): v and T. The tick holds its charge to launch_*_bp * (1 + v)^k, where k is
+    # the period since `launched_at`, and it should not have to re-derive a load or a
+    # config that is gone. A node that was free when the instance launched records 1x,
+    # so the bound still has a price to measure from. NULL (a launch with
+    # pricing.PRICE_BOUNDED false, or a dev instance) means no bound: that instance is
+    # charged at the current load.
     #
     # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
     # maintenance tick prices an instance by, so all four have to be here: the tick
@@ -193,6 +195,8 @@ TABLES = {
             launch_cpu_bp INTEGER DEFAULT NULL,
             launch_mem_bp INTEGER DEFAULT NULL,
             launch_disk_bp INTEGER DEFAULT NULL,
+            launch_volatility REAL DEFAULT NULL,
+            launch_period_seconds INTEGER DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
             killed_at DATETIME DEFAULT NULL,
             death_reason TEXT DEFAULT NULL,
@@ -250,10 +254,11 @@ TABLES = {
     # cannot raise the charge above what the service can hold. `charged_peer_mu` is what the
     # peer has charged this node for it, and no part of what the child is charged.
     # The `quote_*` columns are the maintenance quote that the peer gave for this instance
-    # (#567): `init_maintenance_cost`, `max_maintenance_cost`, `maintenance_seconds_loop`
-    # and `variance` of its `EstimatedCost`, in the MU of the peer, not converted. The
-    # statements of the child are checked against them. NULL: no quote was kept, and the
-    # charge of the peer is not checked.
+    # (#567): `init_maintenance_cost`, `max_maintenance_cost`, `maintenance_seconds_loop`,
+    # `price_bounded`, `price_volatility` and `volatility_period_seconds` of its
+    # `EstimatedCost` (#636), in the MU of the peer, not converted. The statements of the
+    # child are checked against them when `quote_price_bounded` is 1. NULL: no quote was
+    # kept, and the charge of the peer is not checked.
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -292,7 +297,9 @@ TABLES = {
             quote_init_maintenance_cost TEXT DEFAULT NULL,
             quote_max_maintenance_cost TEXT DEFAULT NULL,
             quote_maintenance_seconds_loop INTEGER DEFAULT NULL,
-            quote_variance REAL DEFAULT NULL,
+            quote_price_bounded INTEGER DEFAULT NULL,
+            quote_price_volatility REAL DEFAULT NULL,
+            quote_volatility_period_seconds INTEGER DEFAULT NULL,
             arch TEXT DEFAULT NULL,
             launch_cpu_bp INTEGER DEFAULT NULL,
             launch_mem_bp INTEGER DEFAULT NULL,
@@ -501,6 +508,19 @@ TABLES = {
             admissions INTEGER NOT NULL DEFAULT 0,
             refusals INTEGER NOT NULL DEFAULT 0,
             refused_closed INTEGER NOT NULL DEFAULT 0
+        )
+    ''',
+    # The price multiplier of this node over time (#636): one sample per minute of the
+    # multiplier of each resource that a launch would record (`launch_price_bp`, 1x
+    # while free), in basis points. The computed volatility of the quotes is the p95 of
+    # its rises over one volatility period (`price_history.computed_volatility`). Pruned
+    # to the window of that computation.
+    "price_history": '''
+        CREATE TABLE IF NOT EXISTS price_history (
+            ts INTEGER PRIMARY KEY,
+            cpu_bp INTEGER NOT NULL,
+            mem_bp INTEGER NOT NULL,
+            disk_bp INTEGER NOT NULL
         )
     ''',
     "payments": '''
@@ -982,6 +1002,8 @@ def create_tables(cursor):
         "launch_cpu_bp": "INTEGER DEFAULT NULL",
         "launch_mem_bp": "INTEGER DEFAULT NULL",
         "launch_disk_bp": "INTEGER DEFAULT NULL",
+        "launch_volatility": "REAL DEFAULT NULL",
+        "launch_period_seconds": "INTEGER DEFAULT NULL",
         "launched_at": "DATETIME DEFAULT NULL",
         # NULL on every row written before this column existed: none of them is
         # suspended.

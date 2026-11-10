@@ -30,6 +30,7 @@ from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import from_amount, peers_id_iterator
 from src.utils.cost_functions.execution_cost import RESOURCES, SCARCITY_SCALE, charge_at_launch_price, system_scarcity
+from src.utils.cost_functions import price_bound, price_history
 from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_US
 from src.utils.cost_functions.general_cost_functions import RATE_STATEMENT_QUERY, RATE_STATEMENT_ROW, compute_maintenance_cost
 from src.utils.monetary import format_mu, prices
@@ -84,6 +85,37 @@ def _row_launch_bp(sys_req):
     if any(value is None for value in found.values()):
         return None
     return {resource: int(value) for resource, value in found.items()}
+
+
+def _row_launch_bound(sys_req):
+    """The price bound that the instance was launched with (#636), or None.
+
+    ``launch_volatility`` and ``launch_period_seconds`` of its row: the tick uses what
+    the launch stored, never the config or the price history of now, so the ceiling of
+    an instance does not move during its life. None (NULL: a launch with
+    ``pricing.PRICE_BOUNDED`` false, or a row that does not carry the columns) is no
+    bound. Indexed defensively, as ``_row_launch_bp``.
+    """
+    try:
+        volatility = sys_req["launch_volatility"]
+        period = sys_req["launch_period_seconds"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if volatility is None or period is None:
+        return None
+    return price_bound.strict(volatility, period, source=" on an instance row")
+
+
+def _row_elapsed(sys_req, now: Optional[float] = None) -> Optional[float]:
+    """Seconds since the launch of the instance (``launched_ts``), or None if unknown:
+    the period ``k`` of the bound is counted from it."""
+    try:
+        launched = sys_req["launched_ts"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if launched is None:
+        return None
+    return (time.time() if now is None else now) - float(launched)
 
 
 def _row_arch(sys_req) -> str:
@@ -485,6 +517,8 @@ def tick_price_mu(token: str, scarcity=None) -> Optional[int]:
             scarcity=scarcity,
             arch=_row_arch(sys_req),
             launch_bp=_row_launch_bp(sys_req),
+            bound=_row_launch_bound(sys_req),
+            elapsed_seconds=_row_elapsed(sys_req),
         ))
     except Exception as e:
         log.LOGGER(f"Could not price a tick for {token}: {e}")
@@ -607,6 +641,8 @@ def maintain_vmachines(debug_mode: bool=False):
     # One reading of system load for the whole sweep: every instance in this tick is
     # priced against the same machine state, and psutil is read once instead of per VM.
     scarcity = system_scarcity(force_refresh=True)
+    # The history that the computed volatility of the quotes reads (#636), once a minute.
+    price_history.record(scarcity)
 
     # Only the instances whose VM is meant to be running: a suspended one (issue #594)
     # has no process to check and no resources to charge, and finding it "lost" would
@@ -703,9 +739,12 @@ def maintain_vmachines(debug_mode: bool=False):
             scarcity=scarcity,
             arch=_row_arch(sys_req),
             # What this instance was launched at, so that a rise of the load since
-            # then reaches it only as far as `pricing.MAX_PRICE_VOLATILITY` allows.
-            # The clamp is in the cost function, the same one that the quote uses.
+            # then reaches it only as far as the bound of its launch allows (#636):
+            # launch price * (1 + v)^k, with k the period it is in now. The clamp is in
+            # the cost function, the same one that funds the balance.
             launch_bp=_row_launch_bp(sys_req),
+            bound=_row_launch_bound(sys_req),
+            elapsed_seconds=_row_elapsed(sys_req),
         )
         if debug_mode:
             log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {seconds}s")
@@ -794,6 +833,8 @@ def _charge_hibernated(hibernated: List[dict], scarcity, debug_mode: bool = Fals
             scarcity=scarcity,
             arch=_row_arch(row),
             launch_bp=_row_launch_bp(row),
+            bound=_row_launch_bound(row),
+            elapsed_seconds=_row_elapsed(row),
         )
         if debug_mode:
             log.LOGGER(f"Charging hibernated {token}: {format_mu(charge_mu)} for {seconds}s")
@@ -1020,8 +1061,10 @@ def _check_maintenance_quote(row: dict, rows, since_ts: Optional[int]) -> None:
 
     The quote is the one that the peer gave for this instance, kept on the row in its MU
     (``quote_*``), not its rates of today: a peer that raised its prices since is held to
-    the price that it signed. It is for the most resources of the service, so a hotplug
-    up to them is not an overcharge. A row with no quote is not checked.
+    the bound that it signed (#636): the figure of the resources that the child holds
+    (``init`` at the start, ``max`` at the most) times ``(1 + v)^k`` from the launch of the
+    row. A row with no quote, or with a quote that has ``price_bounded`` false, is not
+    checked.
 
     Only the peer is scored, with ``MAINTENANCE_OVERCHARGED``: not the service and not
     the client. A price above the quote shows at every period, so it is scored at most

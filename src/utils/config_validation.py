@@ -8,6 +8,7 @@ those keys is rejected outright — there is no migration or fallback.
 """
 from __future__ import annotations
 
+import math
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
 
@@ -357,21 +358,7 @@ def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
         if curve <= 0:
             raise ConfigValidationError(f"pricing.SCARCITY_CURVE must be positive, got {curve}")
 
-    if "MAX_PRICE_VOLATILITY" in pricing:
-        raw_volatility = pricing["MAX_PRICE_VOLATILITY"]
-        try:
-            if isinstance(raw_volatility, bool):
-                raise TypeError("a boolean is not a number")
-            volatility = float(raw_volatility)
-        except (TypeError, ValueError) as exc:
-            raise ConfigValidationError(
-                f"pricing.MAX_PRICE_VOLATILITY must be a number, got {raw_volatility!r}"
-            ) from exc
-        if volatility != 0 and not volatility >= 1:
-            raise ConfigValidationError(
-                "pricing.MAX_PRICE_VOLATILITY must be 0 (no bound) or at least 1 "
-                f"(1 = the price is fixed for the life of the instance), got {volatility}"
-            )
+    _validate_price_bound(pricing)
 
     free = config.get("free_tier") or {}
     if not isinstance(free, dict):
@@ -403,16 +390,26 @@ def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
     # Both divide a deposit, so neither may be zero.
     _require_share(deposits, "deposits", "MAX_FEE_OVERHEAD", strictly_positive=True)
     _require_share(deposits, "deposits", "REFILL_BELOW", strictly_positive=True)
+    # Removed (#636, 9): EstimatedCost.cost has no balance any more, and a start with
+    # no initial_mu is funded for a number of maintenance periods. A config that still
+    # sets the hours would silently fund a different runtime.
     if "INITIAL_RUNTIME_HOURS" in deposits:
-        try:
-            hours = float(deposits["INITIAL_RUNTIME_HOURS"])
-        except (TypeError, ValueError) as exc:
+        raise ConfigValidationError(
+            "deposits.INITIAL_RUNTIME_HOURS was removed (#636). Use "
+            "deposits.DEFAULT_INITIAL_PERIODS: the number of maintenance periods "
+            "(MANAGER_ITERATION_TIME) that the default balance funds. 1.0 hour at a 10 s "
+            "period is 360."
+        )
+    if "DEFAULT_INITIAL_PERIODS" in deposits:
+        periods = deposits["DEFAULT_INITIAL_PERIODS"]
+        if isinstance(periods, bool) or not isinstance(periods, int):
             raise ConfigValidationError(
-                f"deposits.INITIAL_RUNTIME_HOURS must be a number, got {deposits['INITIAL_RUNTIME_HOURS']!r}"
-            ) from exc
-        if hours < 0:
+                f"deposits.DEFAULT_INITIAL_PERIODS must be a whole number, got {periods!r}"
+            )
+        if periods < 1:
             raise ConfigValidationError(
-                f"deposits.INITIAL_RUNTIME_HOURS must not be negative, got {hours}"
+                f"deposits.DEFAULT_INITIAL_PERIODS must be at least 1, got {periods}. The "
+                "default balance funds at least one maintenance period."
             )
 
     rate = _validate_payment_rate(config)
@@ -484,6 +481,47 @@ PER_ARCH_PRICE_KEYS = (
     "RAM_MU_PER_GIB_HOUR",
 )
 
+
+
+def _validate_price_bound(pricing: dict) -> None:
+    """The price bound of the quotes (#636). Invalid values refuse to load.
+
+    ``PRICE_BOUNDED`` is a boolean. ``PRICE_VOLATILITY`` (``v``; absent or null: computed),
+    ``PRICE_VOLATILITY_PERIOD_HOURS`` (``T``; 0 is one period for the whole life) and
+    ``PRICE_VOLATILITY_MIN`` are finite and at least 0, and
+    ``PRICE_VOLATILITY_WINDOW_HOURS`` is finite and more than 0. The old
+    ``MAX_PRICE_VOLATILITY`` is refused: it was a ratio, and ``PRICE_VOLATILITY`` is a
+    relative rise, so a value kept by mistake would mean something else.
+    """
+    if "MAX_PRICE_VOLATILITY" in pricing:
+        raise ConfigValidationError(
+            "pricing.MAX_PRICE_VOLATILITY was removed (#636). Use pricing.PRICE_BOUNDED, "
+            "pricing.PRICE_VOLATILITY (a relative rise per period: 0.10 is 10 %) and "
+            "pricing.PRICE_VOLATILITY_PERIOD_HOURS. MAX_PRICE_VOLATILITY: 2.0 is "
+            "PRICE_VOLATILITY: 1.0 with PRICE_VOLATILITY_PERIOD_HOURS: 0."
+        )
+    if "PRICE_BOUNDED" in pricing and not isinstance(pricing["PRICE_BOUNDED"], bool):
+        raise ConfigValidationError(
+            f"pricing.PRICE_BOUNDED must be true or false, got {pricing['PRICE_BOUNDED']!r}"
+        )
+    for key, strictly in (("PRICE_VOLATILITY", False), ("PRICE_VOLATILITY_PERIOD_HOURS", False),
+                          ("PRICE_VOLATILITY_WINDOW_HOURS", True), ("PRICE_VOLATILITY_MIN", False)):
+        if key not in pricing:
+            continue
+        raw = pricing[key]
+        if raw is None and key == "PRICE_VOLATILITY":
+            continue
+        try:
+            if isinstance(raw, bool):
+                raise TypeError("a boolean is not a number")
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(f"pricing.{key} must be a number, got {raw!r}") from exc
+        if not math.isfinite(value) or value < 0 or (strictly and value == 0):
+            relation = "more than 0" if strictly else "at least 0"
+            raise ConfigValidationError(
+                f"pricing.{key} must be a finite number {relation}, got {raw!r}"
+            )
 
 
 def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:

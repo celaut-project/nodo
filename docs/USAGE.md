@@ -663,7 +663,9 @@ These commands offer extended management and exploration features:
 
 These are the **internal** server-side calculations `nodo estimate` performs to
 decide feasibility; they are **not** printed by the command (its output is the
-feasibility verdict and the price figures only). `nodo estimate` uses the same
+feasibility verdict, the price figures, the price bound of the quote and what a client
+sends to fund 1 h and 24 h of it: `cost` plus the sum of the periods in the comment of
+`EstimatedCost.cost`, #636). `nodo estimate` uses the same
 internal checks as runtime cost estimation:
 
 - **Execution feasibility check**

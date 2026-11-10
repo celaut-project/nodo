@@ -79,6 +79,8 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         # The time that the child is charged up to starts at the start (#577).
         self.assertIsInstance(rows[0].pop('charged_until'), float)
+        # The launch, which the period of the price bound of the quote counts from (#636).
+        self.assertIsInstance(rows[0].pop('launched_ts'), int)
         self.assertEqual(
             rows[0],
             {
@@ -121,7 +123,9 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'quote_init_maintenance_cost': None,
                 'quote_max_maintenance_cost': None,
                 'quote_maintenance_seconds_loop': None,
-                'quote_variance': None,
+                'quote_price_bounded': None,
+                'quote_price_volatility': None,
+                'quote_volatility_period_seconds': None,
                 'suspended_at': None,
                 'suspended_for_s': None,
             },

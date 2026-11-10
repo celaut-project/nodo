@@ -74,7 +74,7 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
             not hasattr(cost_proto, 'max_maintenance_cost') or \
             not hasattr(cost_proto.max_maintenance_cost, 'n') or \
             not hasattr(cost_proto, 'maintenance_seconds_loop') or \
-            not hasattr(cost_proto, 'variance'):
+            not hasattr(cost_proto, 'price_bounded'):
             log.LOGGER(f"Estimated cost is missing required fields, skipping. Estimated cost: {cost_proto}")
             return "Invalid EstimatedCost (missing required fields)"
 
@@ -87,8 +87,13 @@ def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
             fields.append(f"max_maintenance_cost: {cost_proto.max_maintenance_cost.n}")
         fields += [
             f"maintenance_seconds_loop: {cost_proto.maintenance_seconds_loop}",
-            f"variance: {cost_proto.variance}"
+            f"price_bounded: {cost_proto.price_bounded}",
         ]
+        if cost_proto.price_bounded:
+            fields += [
+                f"price_volatility: {cost_proto.price_volatility}",
+                f"volatility_period_seconds: {cost_proto.volatility_period_seconds}",
+            ]
         return "\n" + "\n".join(f"    {line}" for line in fields)
     
     lines = ["Collected execution costs:"]
