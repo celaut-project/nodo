@@ -134,6 +134,12 @@ def _iptables_backend(run: Optional[Runner] = None) -> IptablesBackend:
     return IptablesBackend(run=run) if run else IptablesBackend()
 
 
+#: The one table the compatibility chain is written to (see the module docstring).
+#: A rejector anywhere else -- firewalld's ``inet firewalld`` above all -- is out of
+#: its reach, and applying the rules "because of" it would be a fix in name only.
+COMPAT_TABLE = "ip filter"
+
+
 def _forward_hook_is_clear(run: Optional[Runner] = None) -> Tuple[Optional[bool], str]:
     """Does anything outside nodo's tables drop on the forward hook?
 
@@ -142,18 +148,57 @@ def _forward_hook_is_clear(run: Optional[Runner] = None) -> Tuple[Optional[bool]
     best, because the cost of an unnecessary accept in nodo's own chain is four
     visible lines an operator can delete, and the cost of the opposite mistake is
     a node whose services cannot reach their own dependencies.
+
+    Only rejectors in ``COMPAT_TABLE`` count as "not clear": those are the ones the
+    compatibility chain can answer. The others are reported by
+    ``_unreachable_rejectors``, so the log says plainly that nodo cannot help with
+    them instead of logging the compatibility step as if it were the fix (#639).
     """
-    try:
-        backend: FirewallBackend = detect_backend(run=run) if run else detect_backend()
-        scan = backend.foreign_forward_rejectors()
-    except Exception as e:
-        return None, f"the forward hook could not be read ({e})"
+    scan, error = _forward_scan(run)
+    if scan is None:
+        return None, f"the forward hook could not be read ({error})"
     if not scan.readable:
         return None, f"the forward hook could not be read ({scan.reason})"
-    if not scan.rejectors:
-        return True, "nothing outside nodo's ruleset drops on the forward hook"
-    names = ", ".join(f"{r.table}/{r.chain}" for r in scan.rejectors)
+    reachable = [r for r in scan.rejectors if r.table == COMPAT_TABLE]
+    if not reachable:
+        return True, "nothing in the table it writes to drops on the forward hook"
+    names = ", ".join(f"{r.table}/{r.chain}" for r in reachable)
     return False, f"the forward hook is not clear: {names}"
+
+
+def _forward_scan(run: Optional[Runner] = None):
+    try:
+        backend: FirewallBackend = detect_backend(run=run) if run else detect_backend()
+        return backend.foreign_forward_rejectors(), ""
+    except Exception as e:
+        return None, str(e)
+
+
+def _unreachable_rejectors(run: Optional[Runner] = None) -> List[str]:
+    """``table/chain`` of every forward rejector the compatibility chain cannot reach."""
+    scan, _ = _forward_scan(run)
+    if scan is None or not scan.readable:
+        return []
+    return [f"{r.table}/{r.chain}" for r in scan.rejectors if r.table != COMPAT_TABLE]
+
+
+def _log_unreachable(run: Optional[Runner], log: Log) -> None:
+    beyond = _unreachable_rejectors(run)
+    if not beyond:
+        return
+    firewalld = any(name.startswith("inet firewalld/") for name in beyond)
+    log(
+        f"[FW] The forward compatibility rules cannot help with {', '.join(beyond)}: "
+        f"they live in {COMPAT_TABLE}, and an accept there does not end another "
+        "table's chain. "
+        + (
+            "firewalld rejects forwarded guest traffic unless the guest bridge is in a "
+            "zone that forwards and a policy lets that zone reach the uplink; "
+            "'nodo info' has the commands and 'sudo nodo doctor' tests both paths."
+            if firewalld
+            else "That table's owner has to allow the guest bridge."
+        )
+    )
 
 
 def compat_state(
@@ -262,6 +307,7 @@ def ensure_compat(
         )
 
     needed: Optional[bool] = True
+    _log_unreachable(run, log)
     if mode is CompatMode.AUTO:
         clear, why = _forward_hook_is_clear(run)
         if clear is True:
