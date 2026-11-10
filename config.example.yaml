@@ -1167,6 +1167,11 @@ activity_window:
   #           still holds, exactly as `nodo stop` would refund it -- but its work is
   #           destroyed mid-flight, so only ask for this on a machine whose hours are
   #           genuinely not negotiable.
+  #   hibernate  Hibernate every instance that is not descended from a dev client: the
+  #           VM stops and the disk is kept. The node wakes it with its old resources on
+  #           the first tick after the window opens. Memory and processes are lost, so
+  #           work that cannot restart from its disk is lost. A closed node refuses
+  #           resource increases and manual wakes in every mode.
   ON_CLOSE: refuse
 
 timing:

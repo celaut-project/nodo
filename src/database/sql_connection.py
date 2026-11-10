@@ -16,7 +16,7 @@ from src.database import ledger
 from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
-from src.utils.dead_instances import HIBERNATED, HIBERNATED_OUT_OF_BALANCE
+from src.utils.dead_instances import HIBERNATED, HIBERNATED_BY_WINDOW, HIBERNATED_OUT_OF_BALANCE
 from src.utils.singleton import Singleton
 from src.identity.transport_stack import carries_prose, share_prose_on_ledger
 from src.utils.utils import from_amount, generate_uris_by_peer_id
@@ -1493,7 +1493,8 @@ class SQLConnection(metaclass=Singleton):
                 last_revive_reason = suspended_reason,
                 last_revived_at = CURRENT_TIMESTAMP,
                 revive_failing_since = NULL,
-                suspended_at = NULL, suspended_reason = NULL
+                suspended_at = NULL, suspended_reason = NULL,
+                saved_mem_limit = NULL, saved_cpu_period = NULL, saved_cpu_quota = NULL
             WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
         ''', (id,))
         resumed = cursor.rowcount > 0
@@ -1536,7 +1537,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (id,)).fetchone()
         return row is not None
 
-    def hibernate_local_instance(self, id: str) -> bool:
+    def hibernate_local_instance(self, id: str, reason: str = HIBERNATED) -> bool:
         """Mark a live local instance hibernated (issue #498): suspended on purpose, with
         its row zeroed to the disk it keeps.
 
@@ -1544,15 +1545,25 @@ class SQLConnection(metaclass=Singleton):
         An instance already suspended for another reason becomes hibernated: it was
         asked to stay down, and a top-up must not start it. True if the row changed,
         False if it already was hibernated or is not alive.
+
+        With ``reason`` `hibernated_by_window` (issue #344) the row also keeps the CPU and
+        RAM it had in the same statement, so the node can give them back when it wakes the
+        instance. The right-hand sides read the old row, so the saved figures are the live
+        ones.
         """
-        cursor = self._execute('''
+        saves = reason == HIBERNATED_BY_WINDOW
+        saved = (
+            "saved_mem_limit = mem_limit, saved_cpu_period = cpu_period, "
+            "saved_cpu_quota = cpu_quota, "
+        ) if saves else ""
+        cursor = self._execute(f'''
             UPDATE local_instances
-            SET suspended_at = COALESCE(suspended_at, CURRENT_TIMESTAMP),
+            SET {saved}suspended_at = COALESCE(suspended_at, CURRENT_TIMESTAMP),
                 suspended_reason = ?, mem_limit = 0, cpu_period = 0, cpu_quota = 0
             WHERE id = ? AND killed_at IS NULL
               AND (suspended_at IS NULL
-                   OR COALESCE(suspended_reason, '') NOT IN (?, ?))
-        ''', (HIBERNATED, id, HIBERNATED, HIBERNATED_OUT_OF_BALANCE))
+                   OR COALESCE(suspended_reason, '') NOT IN (?, ?, ?))
+        ''', (reason, id, HIBERNATED, HIBERNATED_BY_WINDOW, HIBERNATED_OUT_OF_BALANCE))
         changed = cursor.rowcount > 0
         if changed:
             _local_capacity_changed()
@@ -1562,9 +1573,21 @@ class SQLConnection(metaclass=Singleton):
         row = self._execute('''
             SELECT 1 FROM local_instances
             WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
-              AND suspended_reason IN (?, ?)
-        ''', (id, HIBERNATED, HIBERNATED_OUT_OF_BALANCE)).fetchone()
+              AND suspended_reason IN (?, ?, ?)
+        ''', (id, HIBERNATED, HIBERNATED_BY_WINDOW, HIBERNATED_OUT_OF_BALANCE)).fetchone()
         return row is not None
+
+    def get_window_hibernated_instances(self) -> List[dict]:
+        """The instances that the activity window hibernated (issue #344), with the
+        resources saved to wake them: id, mem_limit, cpu_period and cpu_quota."""
+        result = self._execute('''
+            SELECT id, saved_mem_limit AS mem_limit, saved_cpu_period AS cpu_period,
+                   saved_cpu_quota AS cpu_quota
+            FROM local_instances
+            WHERE killed_at IS NULL AND suspended_at IS NOT NULL AND suspended_reason = ?
+            ORDER BY id
+        ''', (HIBERNATED_BY_WINDOW,))
+        return [dict(row) for row in result.fetchall()]
 
     def mark_hibernated_unpaid(self, id: str) -> bool:
         """A hibernated instance could not pay its disk: its grace period starts now.
@@ -1574,8 +1597,8 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             UPDATE local_instances
             SET suspended_reason = ?, suspended_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND killed_at IS NULL AND suspended_reason = ?
-        ''', (HIBERNATED_OUT_OF_BALANCE, id, HIBERNATED))
+            WHERE id = ? AND killed_at IS NULL AND suspended_reason IN (?, ?)
+        ''', (HIBERNATED_OUT_OF_BALANCE, id, HIBERNATED, HIBERNATED_BY_WINDOW))
         return cursor.rowcount > 0
 
     def clear_hibernated_unpaid(self, id: str) -> bool:
@@ -1594,9 +1617,9 @@ class SQLConnection(metaclass=Singleton):
                    launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility,
                    launch_period_seconds, CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts, suspended_reason
             FROM local_instances
-            WHERE killed_at IS NULL AND suspended_at IS NOT NULL AND suspended_reason IN (?, ?)
+            WHERE killed_at IS NULL AND suspended_at IS NOT NULL AND suspended_reason IN (?, ?, ?)
             ORDER BY id
-        ''', (HIBERNATED, HIBERNATED_OUT_OF_BALANCE))
+        ''', (HIBERNATED, HIBERNATED_BY_WINDOW, HIBERNATED_OUT_OF_BALANCE))
         return [dict(row) for row in result.fetchall()]
 
     def get_committed_resources(self) -> List[dict]:

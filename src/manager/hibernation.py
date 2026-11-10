@@ -16,6 +16,7 @@ from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.manager.manager import _revive_locked, get_sysresources
 from src.manager.modify_resources import modify_sysreq
+from src.utils import dead_instances
 from src.utils import logger as log
 from src.utils.instance_lock import instance_lock
 from src.virtualizers.interface import kill, revivable
@@ -77,12 +78,16 @@ def _uses_shares(token: str) -> bool:
     return bool(state.get("exported_shares") or network_share_ids(state.get("virtiofs") or []))
 
 
-def hibernate_instance(token: str) -> bool:
+def hibernate_instance(token: str, reason: str = dead_instances.HIBERNATED) -> bool:
     """Stop the VM of ``token`` and keep its disk, with its row zeroed to what it keeps.
 
     The VM goes first and the row is marked after, as in `suspend_instance`: a failure in
     between leaves a live row at its old price, which is charged in full and tried again by
     the next request. True if the instance is hibernated when this returns.
+
+    ``reason`` is `hibernated` when a client asked for it. The activity window passes
+    `hibernated_by_window` (issue #344): the row then keeps the CPU and RAM it had, and
+    `wake_window_instances` gives them back at the next opening.
     """
     with instance_lock(token):
         if not sc.internal_instance_exists(id=token):
@@ -92,7 +97,7 @@ def hibernate_instance(token: str) -> bool:
         check_can_hibernate(token)
         log.LOGGER(f"Hibernate instance {token}: keeping its disk.")
         kill(vmachine_id=token, archive=False, keep_disk=True)
-        sc.hibernate_local_instance(token)
+        sc.hibernate_local_instance(token, reason=reason)
         return True
 
 
@@ -119,6 +124,54 @@ def wake_instance(token: str, sysreq: celaut_pb2.Sysresources) -> bool:
             log.LOGGER(f"Could not wake {token}: {e}")
         _zero_row(token)
         return False
+
+
+def wake_window_instances() -> int:
+    """Wake every instance that the activity window hibernated (issue #344), with the
+    resources it held when it went down. Returns how many are running again.
+
+    Called on each tick while the node is open. One that cannot be woken (the service
+    pool or the host limits have no room for it) stays hibernated and is tried again on
+    the next tick; one that a client hibernated (`hibernated`) is not in this list and is
+    never touched. Never raises: this runs in the manager loop.
+    """
+    woken = 0
+    try:
+        rows = sc.get_window_hibernated_instances()
+    except Exception as e:
+        log.LOGGER(f"Error reading the instances hibernated by the activity window: {e}")
+        return 0
+    for row in rows:
+        token = row["id"]
+        saved = {field: row.get(field) for field in ("mem_limit", "cpu_period", "cpu_quota")}
+        if not saved["mem_limit"] or not saved["cpu_quota"]:
+            log.LOGGER(f"Instance {token} was hibernated by the activity window but has no "
+                       "saved resources; it stays hibernated.")
+            continue
+        try:
+            if wake_instance(token, celaut_pb2.Sysresources(**{
+                    field: int(value) for field, value in saved.items() if value is not None})):
+                woken += 1
+                log.LOGGER(f"Instance {token} is running again: the activity window opened.")
+            else:
+                log.LOGGER(f"Instance {token} could not be woken yet; it stays hibernated.")
+        except Exception as e:
+            log.LOGGER(f"Error waking {token} at opening time: {e}")
+    return woken
+
+
+def is_growth(token: str, sysreq: celaut_pb2.Sysresources) -> bool:
+    """Whether ``sysreq`` asks ``token`` for more of any resource than its row holds.
+
+    A closed node refuses this (issue #344), or an instance could take more of a machine
+    that is not taking work. A field the request does not set keeps the row's value, so
+    it is never growth.
+    """
+    row = sc.get_sys_req(id=token)
+    return any(
+        sysreq.HasField(field) and getattr(sysreq, field) > int(row[field] or 0)
+        for field in ("mem_limit", "disk_space", "cpu_period", "cpu_quota")
+    )
 
 
 def _zero_row(token: str) -> None:

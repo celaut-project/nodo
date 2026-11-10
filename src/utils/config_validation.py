@@ -174,7 +174,7 @@ def _require_nonneg_number(block: Dict[str, Any], section: str, key: str) -> Non
 
 HOST_LIMIT_SHARE_KEYS = ("MAX_CPU_SHARE", "MAX_RAM_SHARE", "MAX_DISK_SHARE")
 HOST_LIMIT_NET_KEYS = ("MAX_NET_GIB_PER_DAY", "MAX_NET_MIB_PER_SECOND")
-ON_CLOSE_VALUES = ("refuse", "stop")
+ON_CLOSE_VALUES = ("refuse", "stop", "hibernate")
 
 
 def validate_host_policy_config(config: Dict[str, Any]) -> None:

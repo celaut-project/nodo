@@ -12,7 +12,7 @@ import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database import ledger
-from src.manager import balance_statement, orphan_starts, statement_check
+from src.manager import balance_statement, hibernation, orphan_starts, statement_check
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, top_up_unlimited_clients, handle_internal_failure, revive_instance, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
@@ -1661,6 +1661,12 @@ def enforce_activity_window(debug_mode: bool = False):
     `stop_instance`, exactly as `nodo stop` would refund it.
     """
     if activity_window.is_open():
+        # Opening (or no window at all): what the window put down comes back, with the
+        # resources it had. Only the node's own hibernations, never a client's.
+        hibernation.wake_window_instances()
+        return
+    if activity_window.hibernates_running_instances():
+        _hibernate_for_window(debug_mode)
         return
     if not activity_window.stops_running_instances():
         if debug_mode:
@@ -1682,6 +1688,35 @@ def enforce_activity_window(debug_mode: bool = False):
             stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
         except Exception as e:
             log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
+
+
+def _hibernate_for_window(debug_mode: bool = False):
+    """`ON_CLOSE: hibernate` (issue #344): put every running instance down with its disk kept.
+
+    Only the running ones: an instance that is already suspended or hibernated has no VM
+    to stop. One that cannot be hibernated (no revivable disk, or a shared filesystem) is
+    stopped as `ON_CLOSE: stop` would stop it, and the log says why: a closed node does not
+    keep running what the policy told it to put down.
+    """
+    for vmachine_id in sc.get_running_internal_containers_ids():
+        if descends_from_dev_client(vmachine_id):
+            if debug_mode:
+                log.LOGGER(f"Instance {vmachine_id} descends from a dev client; the "
+                           "activity window does not hibernate it.")
+            continue
+        try:
+            log.LOGGER(f"Hibernating instance {vmachine_id}: this node is outside its "
+                       f"activity window and activity_window.ON_CLOSE is 'hibernate'.")
+            hibernation.hibernate_instance(
+                vmachine_id, reason=dead_instances.HIBERNATED_BY_WINDOW)
+        except hibernation.HibernationRefused as e:
+            log.LOGGER(f"Instance {vmachine_id} cannot be hibernated ({e}); stopping it.")
+            try:
+                stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
+            except Exception as stop_error:
+                log.LOGGER(f"Error stopping {vmachine_id} at closing time: {stop_error}")
+        except Exception as e:
+            log.LOGGER(f"Error hibernating {vmachine_id} at closing time: {e}")
 
 
 def close_orphaned_delegated_endpoints() -> None:

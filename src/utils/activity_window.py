@@ -42,6 +42,7 @@ SECTION = "activity_window"
 # What closing time does to work already running.
 ON_CLOSE_REFUSE = "refuse"
 ON_CLOSE_STOP = "stop"
+ON_CLOSE_HIBERNATE = "hibernate"
 DEFAULT_ON_CLOSE = ON_CLOSE_REFUSE
 
 # Said once per process rather than per call: this is read on every admission decision,
@@ -179,6 +180,15 @@ def stops_running_instances() -> bool:
     happens only when the config asks for it by name.
     """
     return _text("ON_CLOSE", DEFAULT_ON_CLOSE).lower() == ON_CLOSE_STOP
+
+
+def hibernates_running_instances() -> bool:
+    """Whether closing time hibernates what is running (``ON_CLOSE: hibernate``, issue #344).
+
+    The node puts the instance down with its disk kept and wakes it at the next opening.
+    As for `stop`, only the exact name asks for it.
+    """
+    return _text("ON_CLOSE", DEFAULT_ON_CLOSE).lower() == ON_CLOSE_HIBERNATE
 
 
 def closed_reason() -> str:
