@@ -1159,7 +1159,7 @@ static LEVERS: &[Lever] = &[
         organelle: Organelle::Wall,
         label: "after hours",
         question: "What happens outside the hours this node works?",
-        consequence: "Both positions refuse new work from outside. \"stop\" also destroys what is already running, mid-flight, and refunds what its balance still holds. Work from a dev client is exempt either way, so `nodo execute` and the core services keep working.",
+        consequence: "Every position refuses new work from outside. \"hibernate\" also puts what is already running down with its disk kept, and wakes it when the hours open; memory and processes are lost. \"stop\" destroys what is already running, mid-flight, and refunds what its balance still holds. Work from a dev client is exempt in every position, so `nodo execute` and the core services keep working.",
         kind: LeverKind::Cycle(&[
             LeverState {
                 label: "always open",
@@ -1173,6 +1173,13 @@ static LEVERS: &[Lever] = &[
                 writes: &[
                     ("activity_window.ENABLED", "true"),
                     ("activity_window.ON_CLOSE", "refuse"),
+                ],
+            },
+            LeverState {
+                label: "hibernate work",
+                writes: &[
+                    ("activity_window.ENABLED", "true"),
+                    ("activity_window.ON_CLOSE", "hibernate"),
                 ],
             },
             LeverState {
@@ -2226,7 +2233,7 @@ mod tests {
                 ("workload_admission.ON_UNSATISFIABLE", &["reject", "warn"]),
                 ("virtualizers.ch.SECURITY.DEVICE_NODES_POLICY", &["deny", "allowlist"]),
                 ("ui.DISPLAY_UNIT", &["erg", "mu"]),
-                ("activity_window.ON_CLOSE", &["refuse", "stop"]),
+                ("activity_window.ON_CLOSE", &["refuse", "hibernate", "stop"]),
             ];
             let mut writes: Vec<(&str, &str)> = Vec::new();
             for lever in levers() {
@@ -2333,8 +2340,14 @@ mod tests {
             let stopping = document(
                 "activity_window:\n  ENABLED: true\n  ON_CLOSE: stop\n",
             );
-            assert_eq!(status(lever, Some(&stopping)), LeverStatus::State(2));
+            assert_eq!(status(lever, Some(&stopping)), LeverStatus::State(3));
             assert_eq!(status(lever, Some(&stopping)).label(lever), "stop work");
+
+            let hibernating = document(
+                "activity_window:\n  ENABLED: true\n  ON_CLOSE: hibernate\n",
+            );
+            assert_eq!(status(lever, Some(&hibernating)), LeverStatus::State(2));
+            assert_eq!(status(lever, Some(&hibernating)).label(lever), "hibernate work");
 
             let refusing = document(
                 "activity_window:\n  ENABLED: true\n  ON_CLOSE: refuse\n",

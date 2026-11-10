@@ -546,6 +546,7 @@ if __name__ == '__main__':
                     check_envs=True,
                     ask_envs=sys.stdin.isatty() and not no_input,
                     receipt_path=receipt_path,
+                    show_closing=True,
                 )
 
             case "force_execution":

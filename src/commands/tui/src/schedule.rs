@@ -27,12 +27,20 @@ pub enum OnClose {
     Refuse,
     /// Also stop everything not descended from a dev client, mid-flight.
     Stop,
+    /// Hibernate everything not descended from a dev client: the VM stops and the disk is
+    /// kept, and the node wakes it when the window opens (issue #344).
+    Hibernate,
 }
 
 impl OnClose {
+    /// Anything that is not exactly `stop` or `hibernate` is `refuse`: the other two
+    /// pause or destroy work, so they need the exact name.
     pub fn parse(text: &str) -> Self {
-        if text.trim().eq_ignore_ascii_case("stop") {
+        let text = text.trim();
+        if text.eq_ignore_ascii_case("stop") {
             Self::Stop
+        } else if text.eq_ignore_ascii_case("hibernate") {
+            Self::Hibernate
         } else {
             Self::Refuse
         }
@@ -42,6 +50,17 @@ impl OnClose {
         match self {
             Self::Refuse => "refuse",
             Self::Stop => "stop",
+            Self::Hibernate => "hibernate",
+        }
+    }
+
+    /// The next position of the closing-policy line, from the safest to the most
+    /// destructive: refuse, hibernate, stop.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Refuse => Self::Hibernate,
+            Self::Hibernate => Self::Stop,
+            Self::Stop => Self::Refuse,
         }
     }
 }
@@ -584,5 +603,13 @@ mod tests {
         // `config_validation` stops the node on it -- so this is about a value this
         // page has not heard of, not about guessing.
         assert_eq!(OnClose::parse("whatever"), OnClose::Refuse);
+        // Issue #344: `hibernate` is its own value. It used to read as `refuse`, and a
+        // press of `c` would have written `stop` or `refuse` over it.
+        assert_eq!(OnClose::parse("hibernate"), OnClose::Hibernate);
+        assert_eq!(OnClose::parse(" Hibernate "), OnClose::Hibernate);
+        assert_eq!(OnClose::Hibernate.as_str(), "hibernate");
+        assert_eq!(OnClose::Refuse.next(), OnClose::Hibernate);
+        assert_eq!(OnClose::Hibernate.next(), OnClose::Stop);
+        assert_eq!(OnClose::Stop.next(), OnClose::Refuse);
     }
 }

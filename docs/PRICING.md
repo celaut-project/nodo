@@ -636,6 +636,17 @@ instance is a client, that client must send its `Client` too, as for `StopServic
 (#597). Without a token the instance that sends the request, found by its address,
 changes itself; a hibernating instance is answered before its VM stops.
 
+The activity window can hibernate an instance too (`activity_window.ON_CLOSE: hibernate`,
+#344). Its `suspended_reason` is then `hibernated_by_window`, which is not `hibernated`: the
+client did not ask for it. The node saves the CPU and RAM of the instance, and wakes it with
+them on the first tick after the window opens, under the same admission as any wake. If there
+is no room it stays hibernated and the next tick tries again. A wake by hand while the node
+is closed is refused with the reason of the window. An instance that a client hibernated is
+never woken by the node. If one that the window hibernated cannot pay its disk, it becomes
+`hibernated_out_of_balance` and the node no longer wakes it by itself. Hibernation stops
+the VM and does not freeze it: memory and processes are lost, so work that cannot restart
+from its disk is lost.
+
 The node refuses to hibernate an instance that exports or mounts a shared filesystem, or
 that cannot be started again from its own disk, and refunds the call. Wake on incoming
 connection and saving the RAM are not part of it.

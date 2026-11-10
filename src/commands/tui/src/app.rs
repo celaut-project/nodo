@@ -1628,6 +1628,14 @@ pub struct InstanceRevive {
     /// Why it was suspended before the last of them, and how long ago that was.
     pub last_reason: Option<String>,
     pub last_age_secs: Option<i64>,
+    /// What this node told the client about closing time at launch (issue #344): the
+    /// action (`refuse`, `stop`, `hibernate`) and the unix time of the next close, 0 when
+    /// none was scheduled. `None` for a row that holds no value.
+    pub on_close: Option<String>,
+    pub closes_at: Option<i64>,
+    /// The unix time at which the instance was suspended, to see whether the window put
+    /// it down before the close that was announced.
+    pub suspended_epoch: Option<i64>,
 }
 
 /// Latest node-level energy sample. Cost is derived from watts * price, never stored.
@@ -6176,10 +6184,7 @@ impl App {
             return;
         }
         let mut schedule = self.schedule();
-        schedule.on_close = match schedule.on_close {
-            schedule::OnClose::Refuse => schedule::OnClose::Stop,
-            schedule::OnClose::Stop => schedule::OnClose::Refuse,
-        };
+        schedule.on_close = schedule.on_close.next();
         self.schedule_draft = Some(schedule);
         self.status = self.schedule_draft_status();
     }
@@ -8019,15 +8024,29 @@ fn get_instances(
                 li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota,
                 {age}, {revive_columns}"
     );
+    // What the node told the client about closing time (issue #344). Put after every
+    // other column, so the positions that the rest of this query reads do not move.
+    let suspended_epoch = if column_exists(&connection, "local_instances", "suspended_at") {
+        "CAST(strftime('%s', li.suspended_at) AS INTEGER)".to_string()
+    } else {
+        "NULL".to_string()
+    };
+    let closing_columns = format!(
+        "{}, {}, {suspended_epoch}",
+        optional("launch_on_close", "NULL"),
+        optional("launch_closes_at", "NULL"),
+    );
+    let closing_at = if has_consumption { 20 } else { 17 };
     let sql = if has_consumption {
         format!(
             "{base}, ic.mu_per_second, ic.sample_count,
-                CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', ic.last_refresh) AS INTEGER)
+                CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', ic.last_refresh) AS INTEGER),
+                {closing_columns}
              FROM local_instances li
              LEFT JOIN instance_consumption ic ON ic.instance_id = li.id{alive}"
         )
     } else {
-        format!("{base} FROM local_instances li{alive}")
+        format!("{base}, {closing_columns} FROM local_instances li{alive}")
     };
     let mut statement = connection.prepare(&sql)?;
     let mut instances: Vec<Instance> = statement
@@ -8061,6 +8080,9 @@ fn get_instances(
                 count: row.get::<_, Option<i64>>(14)?.unwrap_or(0).max(0) as u64,
                 last_reason: row.get(15)?,
                 last_age_secs: row.get::<_, Option<i64>>(16)?.filter(|secs| *secs >= 0),
+                on_close: row.get(closing_at)?,
+                closes_at: row.get(closing_at + 1)?,
+                suspended_epoch: row.get(closing_at + 2)?,
             };
             // Negative when the row's clock is ahead of ours (a database copied off
             // another machine); dropped rather than shown, since "started in the
@@ -12310,7 +12332,10 @@ ergo: Cold Wallet: 9cold\n";
 
         #[test]
         fn c_swaps_what_closing_time_does() {
+            // From the safest to the most destructive: refuse, hibernate, stop (#344).
             let mut app = on_schedule_page(NIGHT);
+            app.toggle_schedule_on_close();
+            assert_eq!(app.schedule().on_close, OnClose::Hibernate);
             app.toggle_schedule_on_close();
             assert_eq!(app.schedule().on_close, OnClose::Stop);
             app.toggle_schedule_on_close();
@@ -12370,6 +12395,8 @@ ergo: Cold Wallet: 9cold\n";
             // `ON_CLOSE: stop` would act on it.
             let mut app = on_schedule_page(NIGHT);
             app.on_right();
+            // Refuse, hibernate, stop: two presses reach `stop`.
+            app.toggle_schedule_on_close();
             app.toggle_schedule_on_close();
 
             let (_, writes) = schedule_writes(&app.schedule());

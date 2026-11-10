@@ -2,6 +2,7 @@ import math
 
 from protos import celaut_pb2
 
+from src.commands.closing_display import quote_closing_lines
 from src.commands.execute import resolve_service_hash
 from src.manager.manager import get_dev_clients
 from src.utils.bee_client import BeeClient
@@ -88,6 +89,8 @@ def estimate(service: str) -> None:
     for line in price_bound_lines(
             estimated_cost,
             default_periods=int(env_manager.get("deposits.DEFAULT_INITIAL_PERIODS", 360))):
+        print(line)
+    for line in quote_closing_lines(estimated_cost):
         print(line)
 
 
