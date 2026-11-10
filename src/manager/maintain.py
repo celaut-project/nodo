@@ -12,7 +12,7 @@ import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database import ledger
-from src.manager import balance_statement, closing_check, hibernation, orphan_starts, statement_check
+from src.manager import balance_statement, closing_check, hibernation, orphan_starts, statement_check, stopping
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, top_up_unlimited_clients, handle_internal_failure, revive_instance, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
@@ -624,6 +624,15 @@ def maintain_vmachines(debug_mode: bool=False):
 
     def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
         lost_this_sweep.add(vmachine_id)
+        # A VM that ends while the node waits after a notice (#645) is the service doing
+        # what it was told: a PID 1 that exits panics the guest kernel. The stop ends
+        # there. It is not a loss, and it is not scored.
+        stop_row = sc.get_local_stopping(vmachine_id)
+        if stop_row:
+            log.LOGGER(f"The VM of {vmachine_id} ended after its notice ({reason}); "
+                       "ending the stop.")
+            stopping.finish_stop(vmachine_id, stop_row)
+            return
         # One penalty per failure, not per turn of a crash loop: a loss right after a
         # revive is the same failure again. One that comes after the instance ran for a
         # while is a new one, and scores again.
@@ -1695,12 +1704,17 @@ def enforce_activity_window(debug_mode: bool = False):
         elif policy == activity_window.ON_CLOSE_STOP:
             if closes_at and now < closes_at:
                 _log_broken_commitment(vmachine_id, closes_at, now)
+            if stopping.is_stopping(vmachine_id):
+                continue  # Its notice is out. The tick ends the stop (#645).
             log.LOGGER(
                 f"Stopping instance {vmachine_id}: this node is outside its activity "
                 f"window and its on-close policy is 'stop'."
             )
             try:
-                stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
+                # The tick cannot wait: with a notice the stop ends in a later tick.
+                if stopping.begin_notice(
+                        vmachine_id, stopping.STOP, dead_instances.ACTIVITY_WINDOW) is None:
+                    stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
             except Exception as e:
                 log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
         elif debug_mode:
@@ -1722,15 +1736,23 @@ def _hibernate_for_window(vmachine_id: str):
     as `stop` would stop it, and the log says why: a closed node does not keep running
     what its policy told it to put down.
     """
+    if stopping.is_stopping(vmachine_id):
+        return  # Its notice is out. The tick ends the stop (#645).
     try:
         log.LOGGER(f"Hibernating instance {vmachine_id}: this node is outside its "
                    f"activity window and its on-close policy is 'hibernate'.")
-        hibernation.hibernate_instance(
-            vmachine_id, reason=dead_instances.HIBERNATED_BY_WINDOW)
+        hibernation.check_can_hibernate(vmachine_id)
+        # The tick cannot wait: with a notice the hibernation ends in a later tick.
+        if stopping.begin_notice(
+                vmachine_id, stopping.HIBERNATE, dead_instances.HIBERNATED_BY_WINDOW) is None:
+            hibernation.hibernate_instance(
+                vmachine_id, reason=dead_instances.HIBERNATED_BY_WINDOW)
     except hibernation.HibernationRefused as e:
         log.LOGGER(f"Instance {vmachine_id} cannot be hibernated ({e}); stopping it.")
         try:
-            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
+            if stopping.begin_notice(
+                    vmachine_id, stopping.STOP, dead_instances.ACTIVITY_WINDOW) is None:
+                stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
         except Exception as stop_error:
             log.LOGGER(f"Error stopping {vmachine_id} at closing time: {stop_error}")
     except Exception as e:
@@ -2304,6 +2326,8 @@ def _manager_pass(short_interval_count: int) -> int:
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
+    # The stops whose notice is over (#645).
+    stopping.finish_due_stops()
     revive_suspended_instances()
     reap_expired_suspensions()
     sweep_dead_instances()

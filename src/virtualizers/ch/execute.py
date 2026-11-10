@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
-from src.utils import logger as log
+from src.utils import logger as log, notice
 from src.utils.config import ConfigManager
 from src.utils.firewall import policy as fw_policy
 from src.utils.privileges import without_capabilities
@@ -98,7 +98,9 @@ def _resolve_ch_binary() -> str:
     return resolved
 
 
-def _resolve_ch_stream_args(runtime_dir: Path) -> Tuple[List[str], Optional[Path]]:
+def _resolve_ch_stream_args(
+    runtime_dir: Path, notice_socket: Optional[str] = None
+) -> Tuple[List[str], Optional[Path]]:
     """CH's stream arguments, and the file the guest's serial output lands in.
 
     Fixed rather than configurable, and QEMU pins the same shape on its side. The
@@ -111,9 +113,14 @@ def _resolve_ch_stream_args(runtime_dir: Path) -> Tuple[List[str], Optional[Path
 
     The virtio console stays off because it would be a second copy of the same output:
     the cmdline points the kernel at ttyS0, which is what ``--serial`` captures.
+
+    With ``notice_socket`` it is that socket instead (#645): the service declared a notice, and the node writes its ``STOP`` or ``HIBERNATE`` line to the
+    socket. The guest reads it from ``/dev/hvc0``. The kernel ``console=`` stays on the
+    serial port, so ``hvc0`` is not a second copy of the log.
     """
     serial_log_path = runtime_dir / SERIAL_LOG_NAME
-    return ["--serial", f"file={serial_log_path}", "--console", "off"], serial_log_path
+    console = f"socket={notice_socket}" if notice_socket else "off"
+    return ["--serial", f"file={serial_log_path}", "--console", console], serial_log_path
 
 
 def _kernel_cmdline(vm_ip: str, netmask: str, rootfs_format: str = ROOTFS_FORMAT_EXT4) -> str:
@@ -510,7 +517,16 @@ def execute(
             f"guest_net_device={network.GUEST_NET_DEVICE}, kernel_cmdline={kernel_cmdline}"
         )
 
-        stream_args, serial_log_path = _resolve_ch_stream_args(runtime_dir=runtime_dir)
+        # The service declared a notice: the VM gets the console that carries it. A stale
+        # socket (a revive of a VM that was killed) would make the hypervisor fail to bind.
+        notice_socket = None
+        if notice.is_declared(service):
+            ensure_private_dir(Path(notice.socket_path(vmachine_id)).parent)
+            notice.remove_socket(vmachine_id)
+            notice_socket = notice.socket_path(vmachine_id)
+        stream_args, serial_log_path = _resolve_ch_stream_args(
+            runtime_dir=runtime_dir, notice_socket=notice_socket
+        )
         if serial_log_path:
             log.LOGGER(f"[CH][{vmachine_id}] guest serial log path: {serial_log_path}")
         if stream_args:

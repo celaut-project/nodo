@@ -379,7 +379,7 @@ class KillClosesTunnelsTests(RegistryTestCase):
         registry.register(_record("mine0003", mine.pid, instance="abcdef0123456789"))
         registry.register(_record("othr0003", other.pid, instance="db", token="ffff"))
 
-        with patch.object(kill_command, "stop_instance", return_value=0) as stop:
+        with patch.object(kill_command, "stop_with_notice", return_value=0) as stop:
             ok, document = _run_json(kill_command.kill, "web")
 
         self.assertTrue(ok)
@@ -394,7 +394,7 @@ class KillClosesTunnelsTests(RegistryTestCase):
         process = self.spawn()
         registry.register(_record("mine0004", process.pid))
         text = io.StringIO()
-        with patch.object(kill_command, "stop_instance", return_value=0), redirect_stdout(text):
+        with patch.object(kill_command, "stop_with_notice", return_value=0), redirect_stdout(text):
             self.assertTrue(kill_command.kill("web"))
         self.assertIn("Service instance web deleted.", text.getvalue())
         self.assertIn("Closed tunnel mine0004", text.getvalue())
@@ -402,7 +402,7 @@ class KillClosesTunnelsTests(RegistryTestCase):
     def test_a_failed_kill_leaves_the_tunnels_alone(self):
         process = self.spawn()
         registry.register(_record("mine0005", process.pid))
-        with patch.object(kill_command, "stop_instance", return_value=None):
+        with patch.object(kill_command, "stop_with_notice", return_value=None):
             ok, document = _run_json(kill_command.kill, "web")
         self.assertFalse(ok)
         self.assertIn("error", document)
@@ -413,7 +413,7 @@ class KillClosesTunnelsTests(RegistryTestCase):
         process = self.spawn()
         registry.register(_record("mine0006", process.pid, instance="abcdef0123456789"))
         with patch.object(kill_command, "can_admin_network", return_value=False), patch.object(
-            kill_command, "stop_instance", side_effect=AssertionError("stopped in-process")
+            kill_command, "stop_with_notice", side_effect=AssertionError("stopped in-process")
         ), patch.object(kill_command, "stop_through_daemon", return_value=True) as daemon:
             ok, document = _run_json(kill_command.kill, "web")
         self.assertTrue(ok)

@@ -15,7 +15,8 @@ database, as it reads the token, and sends it.
 from typing import Any, Dict, List
 
 from src.database.sql_connection import SQLConnection
-from src.manager.manager import resolve_instance_token, stop_instance
+from src.manager.manager import resolve_instance_token
+from src.manager.stopping import stop_with_notice
 from src.utils import tunnel_registry
 from src.utils.privileges import can_admin_network
 
@@ -49,7 +50,8 @@ def kill(instance: str, as_json: bool = False) -> bool:
     token = resolve_instance_token(reference=instance) or instance
 
     if can_admin_network():
-        if stop_instance(token=token) is None:
+        # After a notice to the service, if it declared one (#645).
+        if stop_with_notice(token=token) is None:
             return emit_error(as_json, "Something was wrong.")
     else:
         try:

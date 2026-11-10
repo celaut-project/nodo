@@ -172,6 +172,33 @@ def _require_nonneg_number(block: Dict[str, Any], section: str, key: str) -> Non
         raise ConfigValidationError(f"{section}.{key} must not be negative, got {value}")
 
 
+def validate_instances_config(config: Dict[str, Any]) -> None:
+    """Validate ``instances.STOP_GRACE_SECONDS`` (#645): a whole number, 0 or more.
+
+    It is how long the node waits, after it writes a notice, before it stops the VM.
+    A value that is not a whole number would be read as some other wait in each place that
+    reads it, so it stops here. ``true`` and ``false`` are refused: YAML reads them as
+    booleans, and ``True`` would be a wait of one second.
+    """
+    instances = config.get("instances")
+    if instances is None:
+        return
+    if not isinstance(instances, dict):
+        raise ConfigValidationError("Malformed 'instances' mapping.")
+    if "STOP_GRACE_SECONDS" not in instances:
+        return
+    value = instances["STOP_GRACE_SECONDS"]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigValidationError(
+            f"instances.STOP_GRACE_SECONDS must be a whole number of seconds, got {value!r}"
+        )
+    if value < 0:
+        raise ConfigValidationError(
+            f"instances.STOP_GRACE_SECONDS must be 0 or more, got {value}. "
+            "0 turns the notice off."
+        )
+
+
 HOST_LIMIT_SHARE_KEYS = ("MAX_CPU_SHARE", "MAX_RAM_SHARE", "MAX_DISK_SHARE")
 HOST_LIMIT_NET_KEYS = ("MAX_NET_GIB_PER_DAY", "MAX_NET_MIB_PER_SECOND")
 ON_CLOSE_VALUES = ("refuse", "stop", "hibernate")

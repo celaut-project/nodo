@@ -1555,6 +1555,66 @@ class SQLConnection(metaclass=Singleton):
         ''', (id,)).fetchone()
         return row is not None
 
+    def begin_local_stopping(self, id: str, until: float, kind: str, reason: str,
+                             credit: bool = True) -> bool:
+        """Mark a running local instance as stopping (#645): the node wrote a notice to its
+        service and waits until the unix time ``until``.
+
+        True if the row is marked now. False if it is not alive, is suspended, or is
+        already stopping: a second request does not move the first deadline.
+        """
+        cursor = self._execute('''
+            UPDATE local_instances
+            SET stopping_until = ?, stopping_kind = ?, stopping_reason = ?, stopping_credit = ?
+            WHERE id = ? AND killed_at IS NULL AND suspended_at IS NULL
+              AND stopping_until IS NULL
+        ''', (float(until), kind, reason, 1 if credit else 0, id))
+        return cursor.rowcount > 0
+
+    def clear_local_stopping(self, id: str) -> None:
+        """Take the stopping mark off a row: the stop did not happen, or it is done."""
+        self._execute('''
+            UPDATE local_instances
+            SET stopping_until = NULL, stopping_kind = NULL, stopping_reason = NULL,
+                stopping_credit = NULL
+            WHERE id = ?
+        ''', (id,))
+
+    def get_local_stopping(self, id: str) -> Optional[dict]:
+        """``{until, kind, reason, credit}`` of a live local instance that is stopping, or
+        None."""
+        row = self._execute('''
+            SELECT stopping_until, stopping_kind, stopping_reason, stopping_credit
+            FROM local_instances
+            WHERE id = ? AND killed_at IS NULL AND stopping_until IS NOT NULL
+        ''', (id,)).fetchone()
+        if row is None:
+            return None
+        return {
+            "until": float(row["stopping_until"]),
+            "kind": row["stopping_kind"],
+            "reason": row["stopping_reason"],
+            "credit": bool(row["stopping_credit"]),
+        }
+
+    def get_stopping_local_instances(self) -> dict:
+        """The live local instances that are stopping, by id, each as in
+        ``get_local_stopping``."""
+        rows = self._execute('''
+            SELECT id, stopping_until, stopping_kind, stopping_reason, stopping_credit
+            FROM local_instances
+            WHERE killed_at IS NULL AND stopping_until IS NOT NULL
+        ''').fetchall()
+        return {
+            row["id"]: {
+                "until": float(row["stopping_until"]),
+                "kind": row["stopping_kind"],
+                "reason": row["stopping_reason"],
+                "credit": bool(row["stopping_credit"]),
+            }
+            for row in rows
+        }
+
     def hibernate_local_instance(self, id: str, reason: str = HIBERNATED) -> bool:
         """Mark a live local instance hibernated (issue #498): suspended on purpose, with
         its row zeroed to the disk it keeps.
@@ -1577,7 +1637,9 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute(f'''
             UPDATE local_instances
             SET {saved}suspended_at = COALESCE(suspended_at, CURRENT_TIMESTAMP),
-                suspended_reason = ?, mem_limit = 0, cpu_period = 0, cpu_quota = 0
+                suspended_reason = ?, mem_limit = 0, cpu_period = 0, cpu_quota = 0,
+                stopping_until = NULL, stopping_kind = NULL, stopping_reason = NULL,
+                stopping_credit = NULL
             WHERE id = ? AND killed_at IS NULL
               AND (suspended_at IS NULL
                    OR COALESCE(suspended_reason, '') NOT IN (?, ?, ?))

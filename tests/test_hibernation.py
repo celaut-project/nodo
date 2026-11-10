@@ -323,7 +323,7 @@ class GatewayTests(HibernationTestCase):
         order = []
         with mock.patch.object(hibernation, "check_can_hibernate"), \
                 mock.patch.object(hibernation, "hibernate_instance",
-                                  side_effect=lambda token: order.append("stopped")):
+                                  side_effect=lambda token, reason=None: order.append("stopped")):
             context = mock.Mock(peer=lambda: "ipv4:10.0.0.9:5555")
             with mock.patch.object(gateway, "parse_with_client", return_value=(request, "")), \
                     mock.patch.object(gateway, "spend_mu", return_value=True):

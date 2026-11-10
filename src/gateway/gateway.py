@@ -20,7 +20,7 @@ from src.tunneling.rpc_tunnel import (
 )
 from src.gateway.utils import generate_full_node_peer_info
 from src.gateway.client_gate import ClientRequired, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
-from src.manager import balance_statement, hibernation
+from src.manager import balance_statement, hibernation, stopping
 from src.manager.manager import ALLOW_DEBT, add_peer_instance, descends_from_dev_client, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
 from src.manager.chat import ChatError, get_client_thread, receive_chat_message
@@ -70,7 +70,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
             token = (request or celaut_pb2.TokenMessage()).token
             log.LOGGER(f'    with id {token}')
             require_father(context, token, client_id)
-            refunded_amount = stop_instance(token=token)
+            # After a notice to the service, if it declared one (#645).
+            refunded_amount = stopping.stop_with_notice(token=token)
             if not refunded_amount: refunded_amount = 0
 
             log.LOGGER(f'Stopped instance {token}.')
@@ -364,7 +365,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 yield from BeeClient.respond(message_iterator=hibernation.hibernated_view(token))
             finally:
                 try:
-                    hibernation.hibernate_instance(token)
+                    if request.service_token:
+                        # A father asks: the service gets a notice first, if it declared
+                        # one (#645). An instance that hibernates itself already knows.
+                        stopping.hibernate_with_notice(token)
+                    else:
+                        hibernation.hibernate_instance(token)
                 except Exception as e:
                     log.LOGGER(f'Could not hibernate {token}: {e}')
             return

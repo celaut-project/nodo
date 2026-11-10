@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "20d1bf72f56e875370aa073cd94eb98c4bdff0f30a6de9c7db47ac3099f0715a",
+  "celaut_proto": "6bc4b82f38d00851682260d96ee373e773ad6f1e417c03b1c6f08ca5d12ec194",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",
@@ -112,6 +112,7 @@
     "instances.MAX_SUSPENDED_DISK_GIB_PER_FATHER",
     "instances.MAX_SUSPENDED_PER_FATHER",
     "instances.REVIVE_FAILURE_GRACE_SECONDS",
+    "instances.STOP_GRACE_SECONDS",
     "instances.SUSPENDED_GRACE_SECONDS",
     "ledger.MAX_DESCENDANT_ACCOUNTS",
     "ledger.MAX_DESCENDANT_DEPTH",
@@ -347,6 +348,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "cd74322e21eacb8d71388b89da35065e08471ea64bf84d4a21451fda0ba88ab0",
+  "database": "4883ec88fe91f501d63871b468f7544a9bd86da2df6f3afc642c12b283d46bbc",
   "storage_format": 1
 }

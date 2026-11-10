@@ -71,6 +71,32 @@ def _state_is_alive(state: Optional[Dict[str, Any]]) -> bool:
     return pid_alive(pid, process_name=recorded_process_name(state))
 
 
+def _is_stopping(vmachine_id: str) -> bool:
+    """Whether the instance waits after a notice (#645). "Cannot tell" is False."""
+    try:
+        return sc.get_local_stopping(vmachine_id) is not None
+    except Exception:
+        return False
+
+
+def vm_has_ended(vmachine_id: str) -> bool:
+    """Whether the VM of ``vmachine_id`` is over: no state, no process of its own, or a
+    guest that panicked (#645).
+
+    A service that was told to stop, and that is PID 1, ends by exiting, and the guest
+    kernel then panics. That ends a wait for the notice early. "Cannot tell" is False:
+    the node then waits for the limit, which is what it does for a service that does not
+    answer. Never raises.
+    """
+    try:
+        state = load_runtime_state(vmachine_id)
+        if not state:
+            return True
+        return (not _state_is_alive(state)) or bool(guest_panic_line(state))
+    except Exception:
+        return False
+
+
 def maintain(
     hypervisor: Hypervisor,
     vmachine_id: str,
@@ -209,6 +235,10 @@ def sweep_orphans(debug_mode: bool = False) -> None:
         if not reason:
             continue
         if reason != "orphan_runtime_state" and _can_be_revived(vmachine_id):
+            continue
+        # The VM of an instance that is stopping after a notice (#645) ends by itself.
+        # The tick ends that stop with its own reason; this is not an orphan.
+        if reason != "orphan_runtime_state" and _is_stopping(vmachine_id):
             continue
 
         recorded = recorded_virtualizer(state)
