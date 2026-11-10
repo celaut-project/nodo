@@ -12,6 +12,7 @@ firewalld is not what is rejecting the packet, and telling the operator to
 configure it would send them after the wrong thing.
 """
 
+import re
 import shutil
 import subprocess
 import textwrap
@@ -47,13 +48,40 @@ def _firewalld(port: int, run: Runner) -> Optional[Frontend]:
     state = ((proc.stdout or "") + (proc.stderr or "")).strip().lower()
     if proc.returncode != 0 or state != "running":
         return None
+    # The default zone is where peers come in; a guest bridge in a zone of its own
+    # (docs/FIREWALL.md, and what the installer sets up) needs the port there too,
+    # or the guests are the ones left out.
+    zone = _guest_zone(run)
+    guests = (
+        f"sudo firewall-cmd --permanent --zone={zone} --add-port={port}/tcp && "
+        if zone
+        else ""
+    )
     return Frontend(
         name="firewalld",
         command=(
-            f"sudo firewall-cmd --permanent --add-port={port}/tcp && "
+            f"sudo firewall-cmd --permanent --add-port={port}/tcp && {guests}"
             "sudo firewall-cmd --reload"
         ),
     )
+
+
+_ZONE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _guest_zone(run: Runner) -> str:
+    """The firewalld zone the guest bridge is in, or "" (none, or unknown)."""
+    try:
+        from src.utils.config import ConfigManager
+
+        bridge = str(ConfigManager().get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
+        proc = run(["firewall-cmd", f"--get-zone-of-interface={bridge}"])
+    except Exception:
+        return ""
+    answer = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if proc.returncode != 0 or not _ZONE_NAME.match(answer) or answer.lower() == "running":
+        return ""
+    return answer
 
 
 def _ufw(port: int, run: Runner) -> Optional[Frontend]:
@@ -103,10 +131,15 @@ def _firewalld_scoped(port: int, subnet: str, run: Runner) -> Optional[Frontend]
         f'rule family="ipv4" source address="{subnet}" '
         f'port protocol="tcp" port="{port}" accept'
     )
+    # Guests are the only ones meant to reach this port, so the rule goes in the
+    # zone that holds their bridge when it has one -- in the default zone it would
+    # never match a packet arriving on a bridge that zone does not handle.
+    zone = _guest_zone(run)
+    in_zone = f" --zone={zone}" if zone else ""
     return Frontend(
         name="firewalld",
         command=(
-            f"sudo firewall-cmd --permanent --add-rich-rule='{rule}' && "
+            f"sudo firewall-cmd --permanent{in_zone} --add-rich-rule='{rule}' && "
             "sudo firewall-cmd --reload"
         ),
     )
