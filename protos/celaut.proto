@@ -3,6 +3,8 @@ package celaut;
 
 import "buffer.proto";
 
+// Developer note: a trivial comment to test the regeneration of compat.json in CI.
+
 // -----------------------
 // HOW TO COMMENT THIS FILE
 //
