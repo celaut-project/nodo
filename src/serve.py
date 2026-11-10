@@ -85,6 +85,15 @@ def _ensure_guest_bridge() -> None:
             f"Could not bring up the guest bridge before verifying the gateway port: {e}. "
             "The port cannot be proven reachable until an instance has run."
         )
+    # firewalld's verdict on the bridge, read now rather than at the first launch:
+    # the daemon is the one process with root, and what it stores here is what
+    # 'nodo info' / 'nodo status' show an operator who has none (#624).
+    try:
+        from src.virtualizers.microvm.network import _report_firewalld_zone
+
+        _report_firewalld_zone()
+    except Exception as e:
+        log.LOGGER(f"Could not read firewalld's verdict on the guest bridge: {e}")
 
 
 def _open_gateway_port(port: int) -> None:

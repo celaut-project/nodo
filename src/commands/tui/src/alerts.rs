@@ -329,7 +329,7 @@ fn plaintext_gateway_port_alert(
     })
 }
 
-/// Guests cannot reach each other: firewalld has no zone for the guest bridge.
+/// firewalld rejects guest-to-guest or guest-to-Internet traffic nodo allowed.
 ///
 /// Nothing on the node looks wrong -- the gateway answers and the VMs boot -- but a
 /// service that launches a dependency sees it as a dead child. The whole signal is
@@ -344,9 +344,10 @@ fn guest_forwarding_alert(config: &Path) -> Option<OperatorAlert> {
     Some(OperatorAlert {
         key: "guest_forwarding_firewalld",
         summary: format!(
-            "Guests cannot reach each other: firewalld has no zone for the guest \
-             bridge, so services this node launches as dependencies will look like \
-             dead children. Fix it, then run `sudo nodo doctor`: {}",
+            "firewalld rejects guest traffic that nodo allows (inet firewalld \
+             filter_FORWARD): dependencies this node launches look like dead \
+             children, and guests with network tag '*' get no Internet. Fix it, \
+             then run `sudo nodo doctor`: {}",
             notice_instruction(config, FORWARD_NOTICE_FILE, &pending)
         ),
     })

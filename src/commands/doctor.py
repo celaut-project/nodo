@@ -924,7 +924,9 @@ def _doctor_network_checks():
 
     _doctor_guest_gateway_reachability()
     _doctor_guest_plaintext_gateway_reachability()
-    _doctor_guest_to_guest_forwarding()
+    between = _doctor_guest_to_guest_forwarding()
+    egress = _doctor_guest_egress()
+    _doctor_firewalld_verdict(between, egress)
 
 
 def _doctor_guest_gateway_reachability():
@@ -1218,25 +1220,21 @@ def _doctor_guest_to_guest_forwarding():
 
     if probe.reachable is True:
         print(f"[OK] A guest on {bridge} can reach another guest through the host.", flush=True)
-        # The packet got through, so a pending "guests cannot reach each other"
-        # notice (written at daemon start from a heuristic) is stale.
-        try:
-            env_manager.clear_forward_notice()
-        except Exception:
-            pass
+        # The stored firewalld notice is settled in _doctor_firewalld_verdict, once
+        # the egress probe has run too: one path passing says nothing of the other.
         # Worth one line even on success: these are the rules nodo put in a table it
         # does not own, and an operator who does not know they are there cannot
         # decide whether to keep them.
         if compat is not None and compat.complete:
             print(f"  {compat.detail}", flush=True)
-        return
+        return probe
 
     if compat is not None and compat.partial:
         print(f"[WARN] {compat.detail}", flush=True)
 
     if probe.reachable is None:
         print(f"[WARN] Could not test it: {probe.detail}", flush=True)
-        return
+        return probe
 
     print(
         f"[FAIL] Guests on {bridge} CANNOT reach each other. Any service that launches "
@@ -1285,33 +1283,163 @@ def _doctor_guest_to_guest_forwarding():
         print(
             f"  {compat.detail} Since that is in place and this still fails, the drop "
             "is in a table iptables does not write to -- firewalld's own inet firewalld "
-            "is the usual answer, and its filter_FORWARD rejects by zone. Allow "
-            f"forwarding for {bridge} in firewalld itself, in a zone of its own "
-            "rather than 'trusted' (which would expose every port this host listens "
-            "on to every guest):",
+            "filter_FORWARD is the usual answer (see the firewalld lines below).",
             flush=True
         )
-        try:
-            from src.utils.firewall import firewalld_bridge as fwd
-
-            ports = []
-            for read in (env_manager.gateway_port_or_none, env_manager.get_plaintext_gateway_port):
-                try:
-                    port = read()
-                except Exception:
-                    continue
-                if isinstance(port, int) and port > 0 and port not in ports:
-                    ports.append(port)
-            for command in fwd.zone_commands(bridge, ports):
-                print(f"    {command}", flush=True)
-        except Exception as e:
-            print(f"    (could not build the commands: {e})", flush=True)
     else:
         print(
             f"  {compat.detail} Run 'nodo firewall-compat apply' as root, or start the "
             "node, to have nodo ask for those paths back.",
             flush=True
         )
+    return probe
+
+
+def _guest_network_settings():
+    from src.utils.config import ConfigManager
+
+    env_manager = ConfigManager()
+    return (
+        env_manager,
+        str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")),
+        str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")),
+        str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")),
+    )
+
+
+def _masquerade_present(subnet):
+    """Is nodo's guest masquerade in place? None when it cannot be read."""
+    try:
+        from src.utils.firewall import policy
+        from src.utils.firewall.backends import detect_backend
+        from src.utils.firewall.rules import Chain
+
+        rules = detect_backend().list_rules(Chain.POSTROUTING, policy.MASQUERADE_COMMENT_PREFIX)
+        return any(subnet in (applied.comment or "") for applied in rules)
+    except Exception:
+        return None
+
+
+def _doctor_guest_egress():
+    """Can a guest reach the Internet? The network tag '*' path, tried (#639).
+
+    The packet leaves through the uplink, which on a firewalld host is another zone
+    than the guest bridge's, so it is the path a zone with ``forward`` does not
+    open. Skipped on a hidden node: its guests do not leave directly, and a probe
+    there would itself be the leak hidden mode exists to prevent.
+    """
+    print("\nGuest-to-Internet forwarding (network tag '*'):", flush=True)
+    try:
+        from src.routing.policy import hidden_mode
+        from src.utils.firewall.reachability import probe_tcp_egress
+
+        if hidden_mode():
+            print("[SKIP] Hidden mode: guests do not reach the Internet directly.", flush=True)
+            return None
+        _, bridge, gateway_ip, subnet = _guest_network_settings()
+    except Exception as e:
+        print(f"[WARN] Could not load the probe or the guest network settings: {e}", flush=True)
+        return None
+
+    if _masquerade_present(subnet) is False:
+        print(
+            f"[WARN] Could not test it: nodo's masquerade for {subnet} is not in place "
+            "yet (the first instance launch adds it), so a probe could not get an answer.",
+            flush=True,
+        )
+        return None
+
+    probe = probe_tcp_egress(bridge=bridge, subnet=subnet, gateway_ip=gateway_ip)
+    if probe.reachable is True:
+        print(f"[OK] A guest on {bridge} can reach the Internet through the host.", flush=True)
+    elif probe.reachable is None:
+        print(f"[WARN] Could not test it: {probe.detail}", flush=True)
+    else:
+        print(
+            f"[FAIL] Guests on {bridge} CANNOT reach the Internet. Services with network "
+            "tag '*' (and peers on other hosts) fail with 'No route to host' or a DNS "
+            "timeout, although nodo logs the egress as allowed.",
+            flush=True,
+        )
+        print(f"  {probe.detail}", flush=True)
+    return probe
+
+
+def _doctor_firewalld_verdict(between, egress):
+    """Name firewalld when it is what rejects, and settle the stored notice.
+
+    The notice (``.forward_notice``) is what ``nodo info`` and ``nodo status``
+    show without root. It is written at daemon start from firewalld's
+    configuration; here it is settled by the two real packets: both through clears
+    it, and a failure on a host where firewalld runs rewrites it with what is
+    missing. An inconclusive probe leaves it as it is.
+    """
+    passed = [probe for probe in (between, egress) if probe is not None]
+    failed = any(probe.reachable is False for probe in passed)
+    try:
+        from src.utils.firewall import firewalld_bridge as fwd
+
+        env_manager, bridge, _, _ = _guest_network_settings()
+        verdict = fwd.assess(bridge)
+    except Exception as e:
+        print(f"[WARN] Could not read firewalld's configuration: {e}", flush=True)
+        return
+
+    all_through = (
+        between is not None and between.reachable is True
+        and (egress is None or egress.reachable is True)
+    )
+    if all_through and (egress is not None or not verdict.blocked):
+        try:
+            env_manager.clear_forward_notice()
+        except Exception:
+            pass
+    if not verdict.running:
+        return
+
+    print("\nfirewalld:", flush=True)
+    for problem in verdict.problems(bridge):
+        print(f"[FAIL] {fwd.FIREWALLD_CHAIN} rejects {problem}", flush=True)
+    for note in verdict.notes:
+        print(f"[WARN] {note}", flush=True)
+    if not verdict.blocked and not failed:
+        zone = verdict.zone or f"no zone (default '{verdict.effective_zone}')"
+        policy = verdict.egress_policy or "none needed"
+        print(f"[OK] Bridge zone: {zone}; egress policy: {policy}.", flush=True)
+        return
+    if failed and not verdict.blocked:
+        print(
+            "[WARN] A probe failed although firewalld's configuration looks right; "
+            "a rule outside firewalld (see the rejecting chains above) may be the cause.",
+            flush=True,
+        )
+        return
+
+    ports = []
+    for read in (env_manager.gateway_port_or_none, env_manager.get_plaintext_gateway_port):
+        try:
+            port = read()
+        except Exception:
+            continue
+        if isinstance(port, int) and port > 0 and port not in ports:
+            ports.append(port)
+    commands = fwd.setup_commands(bridge, ports)
+    print(
+        "  nodo's accepts end only their own chain, so firewalld's reject still applies. "
+        "Give the bridge a zone that forwards and a policy out of it (nodo's per-VM rules "
+        "still decide what each guest may reach):",
+        flush=True,
+    )
+    for command in commands:
+        print(f"    {command}", flush=True)
+    try:
+        env_manager.emit_forward_notice(
+            fwd.notice_title(bridge, verdict),
+            fwd.notice_body(bridge, commands, verdict),
+            command=fwd.one_line(commands),
+        )
+    except Exception:
+        pass
 
 
 def _compat_state(bridge):
