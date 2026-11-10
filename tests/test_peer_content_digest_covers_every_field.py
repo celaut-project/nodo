@@ -49,6 +49,8 @@ def _censused_messages():
         "Amount": celaut_pb2.Amount.DESCRIPTOR,
         "ArchitectureResources": celaut_pb2.ArchitectureResources.DESCRIPTOR,
         "Service.Container.Architecture": celaut_pb2.Service.Container.Architecture.DESCRIPTOR,
+        "ActivityWindow": celaut_pb2.ActivityWindow.DESCRIPTOR,
+        "ActivityWindow.Span": celaut_pb2.ActivityWindow.Span.DESCRIPTOR,
         "Sysresources": celaut_pb2.Sysresources.DESCRIPTOR,
         "Uint64KeyValue": celaut_pb2.Uint64KeyValue.DESCRIPTOR,
     }
@@ -98,6 +100,8 @@ def _announcement():
     at_most.mem_limit = 8 * 1024 ** 3
     at_most.disk_space = 100 * 1024 ** 3
     keyvalue.set_value(at_most.benchmark, "int_ops_per_sec", 900000)
+    peer.activity_window.spans.add(start_minute=1320, end_minute=360)
+    peer.activity_window.on_close = celaut_pb2.ON_CLOSE_STOP
     peer.public_key = "ab" * 32
     peer.signature = "cd" * 64
     peer.ts = 1700000000
@@ -129,6 +133,11 @@ MUTATIONS = {
     "ContractRate.contract": lambda p: p.payment_contracts[0].contract.ledger.tags.append("testnet"),
     "ContractRate.mu_per_unit": lambda p: setattr(p.payment_contracts[0].mu_per_unit, "n", "5"),
     "Amount.n": lambda p: setattr(p.payment_contracts[0].mu_per_unit, "n", "7"),
+    "Peer.activity_window": lambda p: p.activity_window.spans.add(start_minute=60, end_minute=120),
+    "ActivityWindow.spans": lambda p: p.activity_window.spans.add(start_minute=700, end_minute=800),
+    "ActivityWindow.on_close": lambda p: setattr(p.activity_window, "on_close", celaut_pb2.ON_CLOSE_HIBERNATE),
+    "ActivityWindow.Span.start_minute": lambda p: setattr(p.activity_window.spans[0], "start_minute", 1321),
+    "ActivityWindow.Span.end_minute": lambda p: setattr(p.activity_window.spans[0], "end_minute", 361),
     "Peer.resources": lambda p: p.resources.add().architecture.tags.append("linux/arm64"),
     "ArchitectureResources.architecture": lambda p: p.resources[0].architecture.tags.append("amd64"),
     "ArchitectureResources.resources": lambda p: p.resources[0].ClearField("resources"),

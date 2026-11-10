@@ -126,6 +126,8 @@ class DelegatedInstanceQueryTests(unittest.TestCase):
                 'quote_price_bounded': None,
                 'quote_price_volatility': None,
                 'quote_volatility_period_seconds': None,
+                'quote_on_close': None,
+                'quote_closes_at': None,
                 'suspended_at': None,
                 'suspended_for_s': None,
             },

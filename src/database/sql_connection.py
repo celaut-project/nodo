@@ -1133,6 +1133,8 @@ class SQLConnection(metaclass=Singleton):
         launch_bp: Optional[Mapping[str, int]] = None,
         movements: Optional[Sequence[ledger.Movement]] = None,
         launch_bound=None,
+        launch_on_close: Optional[str] = None,
+        launch_closes_at: Optional[int] = None,
     ):
         """
         Adds an internal container to the database, with the first rows of its account.
@@ -1178,6 +1180,11 @@ class SQLConnection(metaclass=Singleton):
             movements (Optional[Sequence[ledger.Movement]]): How the instance came to
                 hold ``balance_mu``, in order: the ``start`` and the ``build``. They
                 must add up to ``balance_mu``. None is one ``start`` of ``balance_mu``.
+            launch_on_close (Optional[str]): What this node told the client it does at
+                closing time (#344): "refuse", "stop" or "hibernate". The instance keeps
+                this action, as it keeps its price bound. None stores NULL.
+            launch_closes_at (Optional[int]): The unix time of the next close at launch,
+                0 if none was scheduled. None stores NULL.
         """
         launch_bp = launch_bp or {}
         movements = _opening_movements(balance_mu, movements)
@@ -1188,14 +1195,15 @@ class SQLConnection(metaclass=Singleton):
             # database's column defaults to NULL however the fresh schema is declared.
             # Writing it at the one insert is what makes the two agree.
             cursor.execute('''
-                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility, launch_period_seconds, launched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility, launch_period_seconds, launch_on_close, launch_closes_at, launched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
                   disk_space, int(cpu_period or 0), int(cpu_quota or 0),
                   serialized_instance, service_id, virtualizer, envs, arch,
                   launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk"),
                   None if launch_bound is None else float(launch_bound.volatility),
-                  None if launch_bound is None else int(launch_bound.period_seconds)))
+                  None if launch_bound is None else int(launch_bound.period_seconds),
+                  launch_on_close, launch_closes_at))
             self._append_opening(cursor, container_id, movements)
 
         self._transaction(work)
@@ -1462,6 +1470,16 @@ class SQLConnection(metaclass=Singleton):
             SELECT id FROM local_instances WHERE killed_at IS NULL AND suspended_at IS NULL
         ''')
         return [row['id'] for row in result.fetchall()]
+
+    def get_local_closing_terms(self) -> dict:
+        """What each live local instance was told about closing time (#344), by id:
+        ``(launch_on_close, launch_closes_at)``. A column that is NULL reads as None."""
+        result = self._execute('''
+            SELECT id, launch_on_close, launch_closes_at FROM local_instances
+            WHERE killed_at IS NULL
+        ''')
+        return {row['id']: (row['launch_on_close'], row['launch_closes_at'])
+                for row in result.fetchall()}
 
     def suspend_local_instance(self, id: str, reason: Optional[str] = None) -> bool:
         """Mark a live local instance suspended: VM stopped, disk and row kept.
@@ -3154,7 +3172,7 @@ class SQLConnection(metaclass=Singleton):
                    peer_base_cpu_quota, quote_init_maintenance_cost,
                    quote_max_maintenance_cost, quote_maintenance_seconds_loop,
                    quote_price_bounded, quote_price_volatility,
-                   quote_volatility_period_seconds,
+                   quote_volatility_period_seconds, quote_on_close, quote_closes_at,
                    suspended_at,
                    CASE WHEN suspended_at IS NULL THEN NULL
                         ELSE CAST(strftime('%s', 'now') AS INTEGER)
@@ -3207,9 +3225,11 @@ class SQLConnection(metaclass=Singleton):
                 'quote_price_bounded': row[38],
                 'quote_price_volatility': row[39],
                 'quote_volatility_period_seconds': row[40],
-                'suspended_at': row[41],
-                'suspended_for_s': row[42],
-                'launched_ts': row[43],
+                'quote_on_close': row[41],
+                'quote_closes_at': row[42],
+                'suspended_at': row[43],
+                'suspended_for_s': row[44],
+                'launched_ts': row[45],
             }
             for row in result.fetchall()
         ]
@@ -3763,7 +3783,9 @@ class SQLConnection(metaclass=Singleton):
                 instance, in the MU of the peer (#567): ``init_maintenance_cost``,
                 ``max_maintenance_cost``, ``maintenance_seconds_loop``,
                 ``price_bounded``, ``price_volatility`` and ``volatility_period_seconds``
-                (``peer_quotes.maintenance_terms``, #636). None stores NULL: the charge of
+                (``peer_quotes.maintenance_terms``, #636), and what the peer said about
+                closing time, ``on_close`` (a name) and ``closes_at`` (#344). None stores
+                NULL: the charge of
                 the peer is then not checked.
         """
         movements = _opening_movements(balance_mu, movements)
@@ -3785,10 +3807,11 @@ class SQLConnection(metaclass=Singleton):
                     arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, charged_until,
                     quote_init_maintenance_cost, quote_max_maintenance_cost,
                     quote_maintenance_seconds_loop, quote_price_bounded,
-                    quote_price_volatility, quote_volatility_period_seconds, launched_at
+                    quote_price_volatility, quote_volatility_period_seconds,
+                    quote_on_close, quote_closes_at, launched_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (external_token, alias, peer_id, father_id, serialized_instance, service_id,
                   str(int(balance_mu)), str(int(peer_balance_mu)), mark.get("seq"), mark.get("ts"),
                   mark.get("hash"), str(int(sent_peer_mu)),
@@ -3803,7 +3826,8 @@ class SQLConnection(metaclass=Singleton):
                   _mu_text(quote.get("max_maintenance_cost")),
                   quote.get("maintenance_seconds_loop"),
                   None if quote.get("price_bounded") is None else int(bool(quote["price_bounded"])),
-                  quote.get("price_volatility"), quote.get("volatility_period_seconds")))
+                  quote.get("price_volatility"), quote.get("volatility_period_seconds"),
+                  quote.get("on_close"), quote.get("closes_at")))
             self._append_opening(cursor, alias, movements)
 
         self._transaction(work)

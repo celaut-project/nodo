@@ -44,10 +44,8 @@ class OnCloseHibernateTests(unittest.TestCase):
     def _closed(self, hibernate=True, dev=()):
         stack = [
             mock.patch.object(maintain.activity_window, "is_open", return_value=False),
-            mock.patch.object(maintain.activity_window, "hibernates_running_instances",
-                              return_value=hibernate),
-            mock.patch.object(maintain.activity_window, "stops_running_instances",
-                              return_value=False),
+            mock.patch.object(maintain.activity_window, "on_close_policy",
+                              return_value="hibernate" if hibernate else "refuse"),
             mock.patch.object(maintain, "sc", self.sc),
             mock.patch.object(maintain, "descends_from_dev_client",
                               side_effect=lambda token: token in dev),

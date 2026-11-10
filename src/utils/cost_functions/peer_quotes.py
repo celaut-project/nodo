@@ -13,6 +13,7 @@ import threading
 from collections import OrderedDict
 from typing import Optional
 
+from src.utils import on_close
 from src.utils.cost_functions import price_bound
 
 MAX_QUOTES = 1024
@@ -74,6 +75,10 @@ def maintenance_terms(peer_cost) -> Optional[dict]:
             "price_bounded": bound is not None,
             "price_volatility": None if bound is None else bound.volatility,
             "volatility_period_seconds": None if bound is None else bound.period_seconds,
+            # What the peer said it does at closing time (#344). A quote from a peer that
+            # does not set these reads as "refuse" and 0.
+            "on_close": on_close.to_name(peer_cost.on_close),
+            "closes_at": int(peer_cost.closes_at or 0),
         }
     except (AttributeError, TypeError, ValueError):
         return None

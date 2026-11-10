@@ -336,6 +336,8 @@ same volatility period, so a balance funded for `N` periods covers the ceilings 
 | `max_maintenance_cost` | One tick for the maximum resources, at the same price. Neither figure is a limit by itself. |
 | `price_bounded` | `pricing.PRICE_BOUNDED`. True: a tick never charges more than the figure of the resources held times `(1 + price_volatility)^k`. |
 | `price_volatility`, `volatility_period_seconds` | `v` and `T` of the bound. Meaningless when `price_bounded` is false. |
+| `closes_at` | Unix time of the next scheduled close of the activity window (`activity_window.next_close`), 0 if none is scheduled. An absolute time. It comes from the configuration of the node and never from its load. **It is not a promise that the instance lives until this time** (the node can stop for a cause that is not in its schedule), and **a value of 0 is not a promise of a long life**. |
+| `on_close` | What the node does with a running instance when the window closes: `ON_CLOSE_REFUSE` (nothing; the default, so an older node reads as this), `ON_CLOSE_STOP` or `ON_CLOSE_HIBERNATE`. A node with no window says `ON_CLOSE_REFUSE` whatever `ON_CLOSE` holds. The host keeps both values in the row of the instance (`launch_on_close`, `launch_closes_at`), and a delegating node keeps those of the peer (`quote_on_close`, `quote_closes_at`). |
 | `cost` | What the start spends: the build, plus the builds of the initial children. No balance (#636, 9). The client adds the balance for the periods that it chooses (the funding sum below). |
 
 A node that delegates to this one checks the charges of the child against the bound

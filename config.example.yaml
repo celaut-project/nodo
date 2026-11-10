@@ -1173,6 +1173,11 @@ activity_window:
   #           work that cannot restart from its disk is lost. A closed node refuses
   #           resource increases and manual wakes in every mode.
   ON_CLOSE: refuse
+  # By default an instance gets the closing action in its own row: the one that its
+  # quote told the client at launch, even if you edit ON_CLOSE while it runs. Set this to
+  # true to ignore the row and use the current ON_CLOSE for every instance. You take the
+  # risk: a delegating node can score a peer that acts differently from its quote.
+  FORCE_ACTUAL_ON_CLOSE_POLICY: false
 
 timing:
   GENERAL_WAIT_TIME: 2

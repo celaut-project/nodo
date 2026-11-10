@@ -1642,11 +1642,16 @@ def _follow_peer_suspension(row: dict, said: Optional[bool]) -> bool:
 
 
 def enforce_activity_window(debug_mode: bool = False):
-    """Reap what is still running once the activity window closes.
+    """Act on what is still running once the activity window closes, and wake it at opening.
 
-    Only under `activity_window.ON_CLOSE: stop`. The other setting, `refuse`, means the
-    window governs admission alone: instances already running keep running and keep
-    being charged, and the only thing that reaps them is an empty balance.
+    What happens to an instance is the action in its own row (`launch_on_close`, issue
+    #344): the one that this node told the client at launch, kept as the price bound is.
+    `refuse` leaves it running and charged, and only an empty balance reaps it. `stop`
+    stops it and refunds what its balance holds, exactly as `nodo stop` would. `hibernate`
+    puts it down with its disk kept (`hibernation.hibernate_instance`), and the first tick
+    after the window opens wakes it. A row with no value takes the current
+    `activity_window.ON_CLOSE`, and so does every row when
+    `activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY` is true.
 
     Instances descended from a dev client are left alone, the same exemption
     `launch_service` applies at admission: the window is about renting this machine out
@@ -1657,66 +1662,77 @@ def enforce_activity_window(debug_mode: bool = False):
     unlike an instance the virtualizer lost, or one that could not pay.
 
     Runs after the charging sweep, so an instance is billed for the interval it really
-    did hold before it is taken away. Its remaining balance is refunded by
-    `stop_instance`, exactly as `nodo stop` would refund it.
+    did hold before it is taken away.
     """
     if activity_window.is_open():
         # Opening (or no window at all): what the window put down comes back, with the
         # resources it had. Only the node's own hibernations, never a client's.
         hibernation.wake_window_instances()
         return
-    if activity_window.hibernates_running_instances():
-        _hibernate_for_window(debug_mode)
-        return
-    if not activity_window.stops_running_instances():
-        if debug_mode:
-            log.LOGGER("Outside the activity window; ON_CLOSE is not 'stop', so running "
-                       "instances are left alone.")
-        return
+
+    force = activity_window.force_actual_on_close_policy()
+    current = activity_window.on_close_policy()
+    terms = sc.get_local_closing_terms() if not force else {}
+    running = None
+    now = time.time()
 
     for vmachine_id in sc.get_all_internal_containers_ids():
         if descends_from_dev_client(vmachine_id):
             if debug_mode:
                 log.LOGGER(f"Instance {vmachine_id} descends from a dev client; the "
-                           "activity window does not reap it.")
+                           "activity window does not touch it.")
             continue
-        log.LOGGER(
-            f"Stopping instance {vmachine_id}: this node is outside its activity "
-            f"window and activity_window.ON_CLOSE is 'stop'."
-        )
-        try:
-            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
-        except Exception as e:
-            log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
-
-
-def _hibernate_for_window(debug_mode: bool = False):
-    """`ON_CLOSE: hibernate` (issue #344): put every running instance down with its disk kept.
-
-    Only the running ones: an instance that is already suspended or hibernated has no VM
-    to stop. One that cannot be hibernated (no revivable disk, or a shared filesystem) is
-    stopped as `ON_CLOSE: stop` would stop it, and the log says why: a closed node does not
-    keep running what the policy told it to put down.
-    """
-    for vmachine_id in sc.get_running_internal_containers_ids():
-        if descends_from_dev_client(vmachine_id):
-            if debug_mode:
-                log.LOGGER(f"Instance {vmachine_id} descends from a dev client; the "
-                           "activity window does not hibernate it.")
-            continue
-        try:
-            log.LOGGER(f"Hibernating instance {vmachine_id}: this node is outside its "
-                       f"activity window and activity_window.ON_CLOSE is 'hibernate'.")
-            hibernation.hibernate_instance(
-                vmachine_id, reason=dead_instances.HIBERNATED_BY_WINDOW)
-        except hibernation.HibernationRefused as e:
-            log.LOGGER(f"Instance {vmachine_id} cannot be hibernated ({e}); stopping it.")
+        policy, closes_at = terms.get(vmachine_id, (None, None))
+        policy = policy or current
+        if policy == activity_window.ON_CLOSE_HIBERNATE:
+            if running is None:
+                running = set(sc.get_running_internal_containers_ids())
+            if vmachine_id not in running:
+                continue
+            _hibernate_for_window(vmachine_id)
+        elif policy == activity_window.ON_CLOSE_STOP:
+            if closes_at and now < closes_at:
+                _log_broken_commitment(vmachine_id, closes_at, now)
+            log.LOGGER(
+                f"Stopping instance {vmachine_id}: this node is outside its activity "
+                f"window and its on-close policy is 'stop'."
+            )
             try:
                 stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
-            except Exception as stop_error:
-                log.LOGGER(f"Error stopping {vmachine_id} at closing time: {stop_error}")
-        except Exception as e:
-            log.LOGGER(f"Error hibernating {vmachine_id} at closing time: {e}")
+            except Exception as e:
+                log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
+        elif debug_mode:
+            log.LOGGER(f"Outside the activity window; the on-close policy of {vmachine_id} "
+                       "is 'refuse', so it is left alone.")
+
+
+def _log_broken_commitment(vmachine_id: str, closes_at: int, now: float):
+    """The node closes an instance before the close that its quote announced (#344): the
+    operator shortened the window. It is logged and never blocked."""
+    log.LOGGER(f"Broken commitment: instance {vmachine_id} is closed {int(closes_at - now)}s "
+               f"before the close that its quote announced.")
+
+
+def _hibernate_for_window(vmachine_id: str):
+    """Put one running instance down with its disk kept (`ON_CLOSE: hibernate`, #344).
+
+    One that cannot be hibernated (no revivable disk, or a shared filesystem) is stopped
+    as `stop` would stop it, and the log says why: a closed node does not keep running
+    what its policy told it to put down.
+    """
+    try:
+        log.LOGGER(f"Hibernating instance {vmachine_id}: this node is outside its "
+                   f"activity window and its on-close policy is 'hibernate'.")
+        hibernation.hibernate_instance(
+            vmachine_id, reason=dead_instances.HIBERNATED_BY_WINDOW)
+    except hibernation.HibernationRefused as e:
+        log.LOGGER(f"Instance {vmachine_id} cannot be hibernated ({e}); stopping it.")
+        try:
+            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
+        except Exception as stop_error:
+            log.LOGGER(f"Error stopping {vmachine_id} at closing time: {stop_error}")
+    except Exception as e:
+        log.LOGGER(f"Error hibernating {vmachine_id} at closing time: {e}")
 
 
 def close_orphaned_delegated_endpoints() -> None:
