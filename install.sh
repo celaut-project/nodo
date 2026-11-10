@@ -754,11 +754,36 @@ assign_gateway_port() {
     || printf "Gateway port not assigned; 'sudo nodo serve' will report why.\n"
 }
 
+setup_firewalld() {
+  # firewalld rejects forwarded guest traffic in its own inet firewalld
+  # filter_FORWARD, after every accept nodo writes: a service's dependency looks
+  # dead and network tag '*' gets no Internet (#534, #624, #639). Only firewalld's
+  # own configuration fixes that, so with root it is written here (a zone 'nodo'
+  # for the bridge that forwards, and a policy 'nodo-egress' out of it); without
+  # root the commands join the steps that need root. Nothing happens on a host
+  # without a running firewalld, or one already set up. NODO_SKIP_FIREWALLD=1
+  # leaves firewalld alone.
+  command -v firewall-cmd >/dev/null 2>&1 || return 0
+  [ "$(firewall-cmd --state 2>/dev/null)" = running ] || return 0
+  if [ "$UNPRIVILEGED" = true ]; then
+    local fw_cmd
+    fw_cmd="$("$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/setup_firewalld.py" print "$TARGET_DIR" 2>/dev/null)"
+    if [ -n "$fw_cmd" ]; then
+      priv_record "firewalld: a zone for the guest bridge that forwards, and a policy out of it (else guests cannot reach each other or the Internet)" \
+        "$fw_cmd"
+    fi
+    return 0
+  fi
+  "$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/setup_firewalld.py" apply "$TARGET_DIR" \
+    || printf "firewalld not set up; 'sudo nodo doctor' will report what is missing.\n"
+}
+
 if [ "$UNPRIVILEGED" = true ]; then
   # Opening the port needs CAP_NET_ADMIN, which the daemon has and this shell
   # does not: the node assigns it when the unit starts it.
   GATEWAY_NOTICE="$TARGET_DIR/.gateway_notice"
   rm -f "$GATEWAY_NOTICE"
+  setup_firewalld
   printf "\nnodo is installed in %s.\n" "$TARGET_DIR"
   priv_offer "These last steps need root:" "$INTERACTIVE" "$PRIVILEGED_SCRIPT"
   case $? in
@@ -779,6 +804,7 @@ if [ "$UNPRIVILEGED" = true ]; then
 fi
 
 assign_gateway_port
+setup_firewalld
 
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 
@@ -814,9 +840,9 @@ if [ -s "$GATEWAY_NOTICE" ]; then
   cat "$GATEWAY_NOTICE"
 fi
 
-# Same reasoning for guests that cannot reach each other: firewalld rejects the
-# guest bridge's traffic, nothing on the node looks wrong, and the only symptom is
-# a service whose dependencies look dead. The daemon writes this at start, so it
+# Same reasoning for guests that firewalld cuts off (from each other or from the
+# Internet): nothing on the node looks wrong, and the only symptom is a service
+# whose dependencies look dead or whose '*' egress fails. The daemon writes this at start, so it
 # is only here if the restart above got that far; 'nodo info' shows it otherwise.
 FORWARD_NOTICE="$TARGET_DIR/.forward_notice"
 if [ -s "$FORWARD_NOTICE" ]; then
