@@ -1071,6 +1071,17 @@ def create_tables(cursor):
     retire_unmetered_column(cursor)
     ensure_peer_address_uniqueness(cursor)
     forget_peer_rates_per_whole_unit(cursor)
+    # Last, after the one-way migrations above: they add their own columns and copy
+    # values into them, which a column added here first would skip
+    # (`retire_unmetered_column` copies only when it adds `clients.unlimited`).
+    ensure_defined_columns(cursor)
+    # Again, for an index or a trigger on a column that was only just added. Both are
+    # `IF NOT EXISTS`.
+    for sql in INDEXES + TRIGGERS:
+        try:
+            cursor.execute(sql)
+        except sqlite3.Error as e:
+            print(f"Error creating an index or a trigger: {e}")
 
 
 def retire_unmetered_column(cursor) -> None:
@@ -1199,6 +1210,56 @@ def forget_peer_rates_per_whole_unit(cursor) -> None:
                   "peers announce them again per base unit.")
     except sqlite3.Error as e:
         print(f"Error clearing peer rates stored per whole unit: {e}")
+
+
+def defined_columns(table_sql: str) -> dict:
+    """The columns that ``table_sql`` (a ``CREATE TABLE``) defines and that an existing
+    table can take with ``ALTER TABLE ADD COLUMN``: name -> declaration.
+
+    Read from a scratch table in memory, so the declaration is SQLite's own reading of
+    the definition: the type, ``NOT NULL`` and the default. A column of the primary key,
+    or a ``NOT NULL`` one with no default, is left out: SQLite cannot add it.
+    """
+    scratch = sqlite3.connect(":memory:")
+    try:
+        cursor = scratch.cursor()
+        cursor.execute(table_sql)
+        table = cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchone()[0]
+        columns = {}
+        for _, name, kind, notnull, default, pk in cursor.execute(f"PRAGMA table_info({table})").fetchall():
+            if pk or (notnull and default is None):
+                continue
+            declaration = kind or ""
+            if notnull:
+                declaration += " NOT NULL"
+            declaration += f" DEFAULT {default if default is not None else 'NULL'}"
+            columns[name] = declaration.strip()
+        return columns
+    finally:
+        scratch.close()
+
+
+def ensure_defined_columns(cursor) -> None:
+    """Give every existing table the columns that its definition in ``TABLES`` has.
+
+    ``CREATE TABLE IF NOT EXISTS`` leaves an existing table as it is, so a column that a
+    change added to a definition never reached a database made before that change, and
+    every query of the column failed (``no such column: quote_on_close`` after
+    ``nodo migrate``, #642). This adds them, whatever change added them to ``TABLES``.
+    """
+    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    existing = {row[0] for row in cursor.fetchall()}
+    for table_name, table_sql in TABLES.items():
+        if table_name not in existing:
+            continue  # `CREATE TABLE` makes it whole; nothing to add.
+        try:
+            columns = defined_columns(table_sql)
+        except sqlite3.Error as e:
+            print(f"Error reading the definition of '{table_name}': {e}")
+            continue
+        ensure_columns(cursor, table_name, columns)
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:
