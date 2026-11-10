@@ -70,8 +70,10 @@ def main(argv) -> int:
     try:
         done = fwd.apply(bridge, ports)
     except Exception as e:
-        print(f"firewalld was not changed: {e}", file=sys.stderr, flush=True)
-        print("Run these yourself:", file=sys.stderr, flush=True)
+        # Not "unchanged": the steps before the failure are in the permanent
+        # configuration. The commands below skip what is there, so re-running is safe.
+        print(f"firewalld setup did not finish: {e}", file=sys.stderr, flush=True)
+        print("Run these yourself (safe to re-run):", file=sys.stderr, flush=True)
         for command in fwd.setup_commands(bridge, ports):
             print(f"  {command}", file=sys.stderr, flush=True)
         return 0

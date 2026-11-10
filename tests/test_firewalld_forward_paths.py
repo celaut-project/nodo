@@ -304,6 +304,20 @@ class ApplyTests(unittest.TestCase):
         self.assertFalse(any("--new-zone" in c for c in written))
         self.assertTrue(any("--new-policy=nodo-egress" in c for c in written))
 
+    def test_a_slow_reload_is_reported_as_unfinished_with_what_was_done(self):
+        fake = FakeFirewalld()
+
+        def run(command):
+            if command == ["firewall-cmd", "--reload"]:
+                raise subprocess.TimeoutExpired(command, 120)
+            return fake(command)
+
+        with self.assertRaises(RuntimeError) as caught:
+            fwd.apply(BRIDGE, [59192], run=run)
+        self.assertIn("did not answer within 120s", str(caught.exception))
+        self.assertIn("created policy nodo-egress", str(caught.exception))
+        self.assertEqual(fwd.APPLY_TIMEOUT_S, 120)
+
     def test_a_failing_step_raises_with_firewalld_words(self):
         def run(command):
             if any(a.startswith(("--info-", "--query-")) for a in command):

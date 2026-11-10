@@ -59,6 +59,17 @@ def _default_runner(command: Sequence[str]) -> subprocess.CompletedProcess:
     )
 
 
+#: ``--reload`` rebuilds firewalld's whole ruleset and took longer than 10 s on a
+#: loaded test node, which made a successful install report a failure.
+APPLY_TIMEOUT_S = 120
+
+
+def _apply_runner(command: Sequence[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        list(command), capture_output=True, text=True, check=False, timeout=APPLY_TIMEOUT_S
+    )
+
+
 def _text(proc: subprocess.CompletedProcess) -> str:
     return ((proc.stdout or "") + (proc.stderr or "")).strip()
 
@@ -389,18 +400,27 @@ def apply(bridge: str, ports: Sequence[int], *, run: Optional[Runner] = None) ->
     words when a step fails, and leaves firewalld's runtime untouched until the
     final ``--reload``.
     """
-    run = run or _default_runner
+    run = run or _apply_runner
     done: List[str] = []
     fc = ["firewall-cmd", "--permanent"]
     zone, policy = GUEST_ZONE, EGRESS_POLICY
 
+    def call(args: List[str]) -> subprocess.CompletedProcess:
+        try:
+            return run(args)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(
+                f"{' '.join(args)} did not answer within {e.timeout:g}s"
+                + (f" (done so far: {'; '.join(done)})" if done else "")
+            ) from e
+
     def must(args: List[str]) -> None:
-        proc = run(args)
+        proc = call(args)
         if proc.returncode != 0:
             raise RuntimeError(f"{' '.join(args)}: {_text(proc) or proc.returncode}")
 
     def query(args: List[str]) -> bool:
-        return run(args).returncode == 0
+        return call(args).returncode == 0
 
     if not query([*fc, f"--info-zone={zone}"]):
         must([*fc, f"--new-zone={zone}"])
@@ -422,7 +442,7 @@ def apply(bridge: str, ports: Sequence[int], *, run: Optional[Runner] = None) ->
         must([*fc, f"--policy={policy}", f"--add-ingress-zone={zone}"])
     if not query([*fc, f"--policy={policy}", "--query-egress-zone=ANY"]):
         must([*fc, f"--policy={policy}", "--add-egress-zone=ANY"])
-    info = _info(run([*fc, f"--info-policy={policy}"]))
+    info = _info(call([*fc, f"--info-policy={policy}"]))
     if info.get("target", "").upper() != "ACCEPT":
         must([*fc, f"--policy={policy}", "--set-target=ACCEPT"])
         done.append(f"policy {policy}: {zone} -> ANY, target ACCEPT")
