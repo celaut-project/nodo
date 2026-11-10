@@ -796,6 +796,30 @@ selection rather than pricing — and the rest of the formula now lives beside t
 [`REPUTATION.md`](REPUTATION.md) walks the whole formula through at these defaults, with
 worked numbers.
 
+The order of the candidates has three keys, in this sequence: the price bound (a bounded
+candidate first), then the **interruption class** (a smaller class first), then the score
+below. The class is a rank and never a term of the score, and it removes no candidate. It
+compares the `on_close` and `closes_at` of the quote with the **funded life** of the
+instance: the periods that `initial_mu`, less the builds, pays at the quote
+(`deposits.DEFAULT_INITIAL_PERIODS` if the request has no `initial_mu`), times
+`maintenance_seconds_loop`. The funded life is a lower bound of what the client may need,
+because the client can add balance later.
+
+| Class | `on_close` | The close |
+|---|---|---|
+| 0 | `REFUSE`, or `closes_at` is 0 | any |
+| 1 | `HIBERNATE` | at or after the end of the funded life |
+| 2 | `STOP` | at or after the end of the funded life |
+| 3 | `HIBERNATE` | before the end of the funded life |
+| 4 | `STOP` | before the end of the funded life |
+
+A stop is always worse than a hibernation in the same position, and a close inside the funded
+life is worse than one outside it. Class 2 comes before class 3: a stop that may never come,
+against a pause that will come. The distance of `closes_at` is not used inside a class. Before
+it asks for a quote, a node skips a peer whose stored `Peer.activity_window` says that the peer
+is closed now. With no schedule, or one that it cannot read, it does not skip: the quote is the
+authority.
+
 A candidate is ranked by an effective cost in log space:
 
 ```

@@ -228,6 +228,7 @@ def quotes_from_peers(
 def _sorted_at_a_profit(
         costs: Dict[str, celaut_pb2.EstimatedCost],
         own: Optional[celaut_pb2.EstimatedCost],
+        initial_mu: Optional[int] = None,
 ) -> List[tuple[str, celaut_pb2.EstimatedCost]]:
     """``costs`` cheapest first, without the peers that this node would delegate at a loss.
 
@@ -244,7 +245,7 @@ def _sorted_at_a_profit(
             kept[peer] = cost
         else:
             log.LOGGER(f"Peer {peer} costs this node more than it charges; not a candidate.")
-    return list(estimated_cost_sorter(estimated_costs=kept))
+    return list(estimated_cost_sorter(estimated_costs=kept, initial_mu=initial_mu))
 
 
 def execution_balancer(
@@ -353,7 +354,11 @@ def execution_balancer(
 
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")
-        return _sorted_at_a_profit(peers, own)
+        # The balance of the start, in local MU: with it the sorter knows the funded life
+        # of each quote (#344). A request with no `initial_mu` gets the default periods.
+        initial_mu = int(configuration.initial_mu.n) \
+            if configuration.HasField("initial_mu") and configuration.initial_mu.n else None
+        return _sorted_at_a_profit(peers, own, initial_mu)
     except Exception as e:
         log.LOGGER('Error during estimated cost sorter on execution balancer:' + str(e))
         raise StopIteration

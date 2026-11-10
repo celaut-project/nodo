@@ -1,6 +1,7 @@
-from typing import Dict, Tuple, Generator
+from typing import Dict, Optional, Tuple, Generator
 from statistics import mean
 from protos import celaut_pb2
+from src.balancers.estimated_cost_sorter.interruption import interruption_class
 from src.balancers.scoring import DEFAULT_REPUTATION_HALF_CREDIT, reputation_factor, score
 from src.payment_system.donations.credit import bonus_by_peer
 from src.reputation_system.interface import compute_reputation
@@ -42,7 +43,18 @@ def _parameter(key: str, default: float) -> float:
         return float(default)
 
 
-def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) -> Generator[Tuple[str, celaut_pb2.EstimatedCost], None, None]:
+def estimated_cost_sorter(
+        estimated_costs: Dict[str, celaut_pb2.EstimatedCost],
+        initial_mu: Optional[int] = None,
+        now: Optional[float] = None,
+) -> Generator[Tuple[str, celaut_pb2.EstimatedCost], None, None]:
+    """The candidates, best first: a price bound, then a smaller interruption class, then
+    a higher score.
+
+    ``initial_mu`` is the balance that the start carries, in local MU, or None for a start
+    with no ``initial_mu`` (the default periods of the node). With it the sorter works out
+    the funded life of each quote (issue #344). ``now`` is a unix time, for tests.
+    """
 
     reputation_weight: float = _parameter("SOCIALIZATION_FACTOR", 2.0)
     reputation_half: float = _parameter("REPUTATION_HALF_CREDIT", DEFAULT_REPUTATION_HALF_CREDIT)
@@ -165,13 +177,27 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
             return bool(prices().price_bounded)
         return bool(getattr(estimated_cost, 'price_bounded', False))
 
-    # The candidates that promise a price bound go first; inside each group, the order
-    # of the score (#636, G).
+    def _interruption(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> int:
+        """The class of the closing policy of the quote (#344). A candidate whose class
+        cannot be worked out is class 0: it is never pushed down by a guess."""
+        try:
+            return interruption_class(estimated_cost, initial_mu, now)
+        except Exception as e:
+            logger(f"Could not classify the interruption of the quote of {peer_id}: {e}")
+            return 0
+
+    # The candidates that promise a price bound go first; then the ones with the better
+    # interruption class (a smaller number); inside each group, the order of the score
+    # (#636, G). The class is a rank and never a term of the score, and it removes no one.
     return (
         (_id, estimated_cost) for _id, estimated_cost in
         sorted(
             estimated_costs.items(),
-            key=lambda item: (_is_bounded(item[0], item[1]), __compute_score(item[0], item[1])),
+            key=lambda item: (
+                _is_bounded(item[0], item[1]),
+                -_interruption(item[0], item[1]),
+                __compute_score(item[0], item[1]),
+            ),
             reverse=True
         )
     )

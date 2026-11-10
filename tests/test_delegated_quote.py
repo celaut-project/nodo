@@ -48,7 +48,7 @@ def price(cost, init=None, maximum=None):
     return estimated
 
 
-def cheapest_first(estimated_costs):
+def cheapest_first(estimated_costs, **_):
     """A stand-in for the sorter: by start cost only, no reputation."""
     return iter(sorted(estimated_costs.items(), key=lambda item: int(item[1].cost.n)))
 

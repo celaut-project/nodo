@@ -411,7 +411,7 @@ class StartServiceTests(unittest.TestCase):
         with RecursionGuard(token="tok-1", generate=True, remaining_hops=1), \
                 patch.object(balancer_mod, "generate_estimated_cost", return_value=celaut.EstimatedCost()), \
                 patch.object(balancer_mod, "peers_id_iterator") as peers, \
-                patch.object(balancer_mod, "estimated_cost_sorter", side_effect=lambda estimated_costs: iter(estimated_costs.items())):
+                patch.object(balancer_mod, "estimated_cost_sorter", side_effect=lambda estimated_costs, **_: iter(estimated_costs.items())):
             candidates = balancer_mod.execution_balancer(
                 service_id="svc-1",
                 resources=celaut.Service.Container.Resources(),
@@ -440,7 +440,7 @@ class StartServiceTests(unittest.TestCase):
                 patch.object(balancer_mod, "configuration_for_peer", side_effect=lambda c, **_: c), \
                 patch.object(balancer_mod, "estimated_cost_for_local", side_effect=lambda e, **_: e), \
                 patch.object(balancer_mod.BeeClient, "get_service_estimated_cost", side_effect=_cost), \
-                patch.object(balancer_mod, "estimated_cost_sorter", side_effect=lambda estimated_costs: iter(estimated_costs.items())):
+                patch.object(balancer_mod, "estimated_cost_sorter", side_effect=lambda estimated_costs, **_: iter(estimated_costs.items())):
             balancer_mod.execution_balancer(
                 service_id="svc-1",
                 resources=celaut.Service.Container.Resources(),
