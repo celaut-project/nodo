@@ -1,8 +1,9 @@
 """Prove the guest paths work, instead of assuming they do.
 
-Two questions, both answered with a real packet: can a guest reach the gateway on
-this host (``probe_tcp_from_bridge``), and can a guest reach another guest
-(``probe_tcp_between_guests``). Both cross a netfilter hook nodo shares with every
+Three questions, each answered with a real packet: can a guest reach the gateway on
+this host (``probe_tcp_from_bridge``), can a guest reach another guest
+(``probe_tcp_between_guests``), and can a guest reach the Internet
+(``probe_tcp_egress``). Both cross a netfilter hook nodo shares with every
 other firewall on the box, and on both an ``accept`` in nodo's own table settles
 nothing -- see the module docstring of ``backends.py``.
 
@@ -783,3 +784,156 @@ def _listener_output(listener: subprocess.Popen) -> str:
 
 def _text(proc: subprocess.CompletedProcess) -> str:
     return ((proc.stdout or "") + (proc.stderr or "")).strip() or f"exit status {proc.returncode}"
+
+
+#: Where the egress probe connects: public anycast resolvers on 443, the port least
+#: likely to be filtered upstream. Only the TCP handshake is made; nothing is sent.
+EGRESS_PROBE_TARGETS = (("1.1.1.1", 443), ("9.9.9.9", 443))
+
+# Exit codes of _EGRESS_SNIPPET.
+_EGRESS_REACHED = 0       # connected, or refused by the far end: the path is open
+_EGRESS_TIMEOUT = 1       # no answer at all
+_EGRESS_REJECTED = 2      # an ICMP error came back: unreachable / prohibited
+
+_EGRESS_SNIPPET = (
+    "import errno,socket,sys\n"
+    "s=socket.socket()\n"
+    "s.settimeout(float(sys.argv[3]))\n"
+    "try:\n"
+    "    s.connect((sys.argv[1], int(sys.argv[2])))\n"
+    "    print('connected')\n"
+    "except ConnectionRefusedError as e:\n"
+    "    print('refused by the far end: ' + str(e))\n"
+    "except OSError as e:\n"
+    "    print(type(e).__name__ + ': ' + str(e))\n"
+    "    sys.exit(2 if e.errno in (errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EACCES,\n"
+    "                              errno.EPERM) else 1)\n"
+    "finally:\n"
+    "    s.close()\n"
+)
+
+
+def _host_connects(ip: str, port: int, timeout_s: float) -> bool:
+    try:
+        with socket.create_connection((ip, port), timeout=timeout_s):
+            return True
+    except ConnectionRefusedError:
+        return True
+    except OSError:
+        return False
+
+
+def probe_tcp_egress(
+    *,
+    bridge: str,
+    subnet: str,
+    gateway_ip: str,
+    targets: Sequence[tuple] = EGRESS_PROBE_TARGETS,
+    run: Optional[Runner] = None,
+    host_connects: Callable[[str, int, float], bool] = _host_connects,
+    attempts: int = PROBE_ATTEMPTS,
+    connect_timeout_s: float = PROBE_CONNECT_TIMEOUT_S,
+    retry_delay_s: float = PROBE_RETRY_DELAY_S,
+    sleep: Callable[[float], None] = time.sleep,
+) -> ProbeResult:
+    """Can a guest on this bridge reach the Internet? The network tag '*' path.
+
+    One throwaway namespace wired like a real guest (isolated port, default route
+    via the gateway), and a TCP connect to a public address the host itself can
+    reach. The host check comes first and decides what a failure means: if the
+    host cannot reach the target either, the guest path cannot be judged and the
+    answer is "unknown". If the host can, a guest that gets an ICMP error back
+    (``EHOSTUNREACH``: what ``reject with icmpx admin-prohibited`` looks like from
+    inside) or no answer at all is being stopped on this host's forward path.
+
+    Like ``probe_tcp_between_guests`` this does not measure nodo's per-VM policy:
+    the probe's address is not a registered VM, so ``block_all`` does not apply to
+    it. A failure here is the host's configuration, never isolation working.
+    """
+    runner = run or _default_runner
+
+    if not can_create_network_namespace():
+        return ProbeResult(
+            None, "needs root (CAP_SYS_ADMIN and CAP_NET_ADMIN) to create a network namespace"
+        )
+
+    link = runner(["ip", "link", "show", bridge])
+    if link.returncode != 0:
+        return ProbeResult(
+            None,
+            f"bridge {bridge} does not exist yet; it is created on the first instance launch",
+        )
+
+    forwarding = runner(["sysctl", "-n", "net.ipv4.ip_forward"])
+    if forwarding.returncode == 0 and (forwarding.stdout or "").strip() == "0":
+        return ProbeResult(
+            None,
+            "net.ipv4.ip_forward is 0, so this host routes nothing for guests yet; "
+            "the node sets it on the first instance launch",
+        )
+
+    target = next(
+        ((ip, port) for ip, port in targets if host_connects(ip, port, connect_timeout_s)),
+        None,
+    )
+    if target is None:
+        names = ", ".join(f"{ip}:{port}" for ip, port in targets)
+        return ProbeResult(
+            None,
+            f"this host itself cannot reach {names}, so a guest failing to would say "
+            "nothing about the guest path",
+        )
+    ip, port = target
+
+    try:
+        (source_ip,), prefix_len = _pick_source_ips(
+            subnet=subnet, gateway_ip=gateway_ip, in_use=_addresses_in_use(runner, bridge)
+        )
+    except RuntimeError as e:
+        return ProbeResult(None, str(e))
+
+    suffix = f"{random.randrange(16 ** 5):05x}"
+    try:
+        with contextlib.ExitStack() as stack:
+            guest = _open_endpoint(
+                stack, runner, bridge=bridge, tag="e", suffix=suffix,
+                ip=source_ip, prefix_len=prefix_len,
+            )
+            route = runner([
+                *guest.entry.ip_prefix, "route", "add", "default",
+                "via", gateway_ip, "dev", guest.guest_veth,
+            ])
+            if route.returncode != 0:
+                return ProbeResult(None, f"could not add a default route: {_text(route)}")
+
+            last, code = "", _EGRESS_TIMEOUT
+            for attempt in range(1, max(1, attempts) + 1):
+                connect = runner([
+                    *guest.entry.exec_prefix,
+                    sys.executable, "-c", _EGRESS_SNIPPET,
+                    ip, str(port), str(connect_timeout_s),
+                ])
+                last, code = _text(connect), connect.returncode
+                if code == _EGRESS_REACHED:
+                    return ProbeResult(
+                        True,
+                        f"TCP connect from {source_ip} on {bridge} to {ip}:{port} got an "
+                        f"answer ({last}), so the host forwards guest traffic out",
+                        source_ip=source_ip,
+                    )
+                if attempt < attempts:
+                    sleep(retry_delay_s)
+
+            how = (
+                "was rejected with an ICMP error"
+                if code == _EGRESS_REJECTED
+                else "got no answer"
+            )
+            return ProbeResult(
+                False,
+                f"TCP connect from {source_ip} on {bridge} to {ip}:{port} {how} after "
+                f"{attempts} attempt(s) ({last}), while this host reaches {ip}:{port} itself",
+                source_ip=source_ip,
+            )
+    except _ProbeUnknown as e:
+        return ProbeResult(None, str(e))
