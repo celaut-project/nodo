@@ -30,6 +30,7 @@ from src.utils.cost_functions.start_funding import (
     minimum_runtime_mu,
     start_build_mu,
 )
+from tests.test_estimate_cost import HASH, _workload
 from tests.test_price_volatility import GIB, IDLE, _config, _guest
 
 PERIOD_SECONDS = 10  # MANAGER_ITERATION_TIME of config.example.yaml.
@@ -360,6 +361,101 @@ class DelegatedPriceTests(unittest.TestCase):
                                      maintenance_seconds_loop=10)
         self.assertFalse(covers(own, dear))
         self.assertTrue(covers(own, cheap))
+
+
+class TheBuildOfAChildWithNoHashTests(unittest.TestCase):
+    """The build of an initial child whose hash is not known (#638).
+
+    ``personal-nutrition`` declared a database as a workload with resources and no hash. The
+    quote had no build for it, the client funded the parent with that quote, and the parent
+    ran out of balance before it started the child.
+    """
+
+    def _cost(self, workload, built=False, scarcity=IDLE):
+        with _config(), patch.object(start_funding, "is_built", return_value=built):
+            return start_funding.child_start_cost_mu(workload, scarcity=scarcity)
+
+    def _build(self):
+        with _config():
+            return start_funding.prices().build_mu
+
+    def test_no_hash_gives_the_build(self):
+        self.assertEqual(self._cost(_workload()), self._build())
+
+    def test_no_hash_gives_the_build_even_if_the_node_has_a_built_image(self):
+        # With no hash the node cannot look for the image: it does not know which one.
+        self.assertEqual(self._cost(_workload(), built=True), self._build())
+
+    def test_a_known_hash_with_a_built_image_gives_zero(self):
+        self.assertEqual(self._cost(_workload(hash_value=HASH), built=True), 0)
+
+    def test_a_known_hash_with_an_image_that_is_not_built_gives_the_build(self):
+        self.assertEqual(self._cost(_workload(hash_value=HASH), built=False), self._build())
+
+    def test_count_multiplies_the_build_of_a_child_with_no_hash(self):
+        self.assertEqual(self._cost(_workload(count=3)), 3 * self._build())
+
+    def test_count_zero_costs_nothing(self):
+        self.assertEqual(self._cost(_workload(count=0)), 0)
+
+    def test_a_free_node_still_takes_no_build(self):
+        with patch.object(start_funding, "is_free", return_value=True):
+            self.assertEqual(self._cost(_workload()), 0)
+
+    def test_the_grandchildren_of_a_complete_service_are_added(self):
+        child = _workload()
+        child.dependency.service.initial_environment_workload.add().any_of.add().workloads.append(
+            _workload())
+        self.assertEqual(self._cost(child), 2 * self._build())
+
+
+class TheCheckAgreesWithTheQuoteTests(unittest.TestCase):
+    """`evaluate_start_funding` and `underfunded_reason` use the same function as the quote,
+    so a child with no hash is in the three of them (#638)."""
+
+    def _parent(self):
+        service = celaut.Service()
+        service.container.resources.at_init.CopyFrom(_guest())
+        service.container.resources.at_most.CopyFrom(_guest())
+        service.initial_environment_workload.add().any_of.add().workloads.append(_workload())
+        return service
+
+    def test_the_quote_has_the_build_of_the_child(self):
+        with _config():
+            build = start_funding.prices().build_mu
+            self.assertEqual(
+                start_funding.initial_children_mu(self._parent(), scarcity=IDLE), build)
+
+    def test_a_start_funded_with_the_old_quote_is_now_refused(self):
+        """The cost of the build of the parent alone, which was the quote before #638,
+        does not fund the child that has no hash."""
+        from src.utils.cost_functions import workload_admission as wa
+
+        with _config(), patch(LIVE, return_value=IDLE), \
+                patch.object(wa.log, "LOGGER"):
+            build = start_funding.prices().build_mu
+            # The build of the parent, as the quote has it: the same figure as the child.
+            patcher = patch.object(start_funding, "start_build_mu", return_value=build)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+            period = start_funding.minimum_runtime_mu(
+                self._parent().container.resources, scarcity=IDLE)
+            old_quote = build + period
+            new_quote = build + build + period
+            self.assertIsNotNone(
+                wa.evaluate_start_funding(self._parent(), celaut.Metadata(), old_quote))
+            self.assertIsNone(
+                wa.evaluate_start_funding(self._parent(), celaut.Metadata(), new_quote))
+
+    def test_the_message_of_underfunded_reason_names_the_child_builds(self):
+        with _config():
+            build = start_funding.prices().build_mu
+            reason = start_funding.underfunded_reason(
+                initial_mu=build, build_mu=build, minimum_mu=1, children_mu=build)
+        self.assertIn(f"The builds of the initial children cost {build} MU", reason)
+
+
+LIVE = "src.utils.cost_functions.execution_cost.system_scarcity"
 
 
 if __name__ == "__main__":

@@ -828,8 +828,9 @@ actually spawns that descendant, the answer could have changed.
 **Cost.** Only `initial_environment_workload` has a cost. A service pays the `child_start` of
 each child out of its own balance, so the `cost` of `GetServiceEstimatedCost` includes the
 builds of the initial children: for each workload, `count` times the build of the child
-(0 when the workload names no service — neither a `hash` nor a complete `service` — or when it
-is built on the node). A group adds up its workloads, a clause costs its dearest group, and
+(`BUILD_MU`, or 0 when the workload gives a `hash` or a complete `service` and the image is built
+on the node: with no hash the node cannot look for the image, and it assumes that it is not
+built, #638. Declare the `hash` to get the exact price). A group adds up its workloads, a clause costs its dearest group, and
 the clauses add up. The balance of a child is not in `cost` (#636): each child gets its
 balance in its own `StartService` (with no `initial_mu`, the default of the node that runs
 it), and the parent pays it out of its own balance. So fund a parent for more periods than
