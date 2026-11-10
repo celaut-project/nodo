@@ -281,31 +281,45 @@ def preflight() -> ipaddress.IPv4Network:
     return network
 
 
-def _report_firewalld_zone() -> None:
-    """Tell the operator when firewalld has no zone for the guest bridge.
+#: firewalld's verdict from the last preflight in this process, for the launch path:
+#: a guest granted network tag '*' on a host that will reject its egress gets that
+#: said in the log next to the grant, instead of a success line. None until read.
+FIREWALLD_VERDICT = None
 
-    ``_ensure_forward_compat`` cannot help here and used to stop at a line in
-    ``app.log``: firewalld's own table rejects forwarded traffic by zone, and an
-    interface in no zone falls to the default one. The result is guests that cannot
-    reach each other, reported by their parents as dead children. This raises the
-    same operator notice the gateway port does, so it reaches ``nodo info``, the
-    TUI and the installer. It is a heuristic (``nodo doctor`` sends the real packet
-    and is the authority); see ``src/utils/firewall/firewalld_bridge.py``.
+
+def _report_firewalld_zone() -> None:
+    """Tell the operator when firewalld will reject what nodo allows on the bridge.
+
+    ``_ensure_forward_compat`` cannot help here: firewalld's own ``inet firewalld
+    filter_FORWARD`` rejects forwarded traffic by zone and by policy, after nodo's
+    accepts. Two paths break, each with its own missing piece: guest to guest
+    (the bridge needs a zone that forwards) and guest to the Internet (it needs a
+    policy from that zone to the uplink's). This raises the operator notice the
+    gateway port uses, so it reaches ``nodo info``, ``nodo status``, the TUI and the
+    installer without root. It is read from firewalld's configuration (``nodo
+    doctor`` sends the real packets and is the authority); see
+    ``src/utils/firewall/firewalld_bridge.py``.
 
     Never raises and never fatal: it is advice about the host, not a requirement.
     """
+    global FIREWALLD_VERDICT
     try:
         from src.utils.firewall import firewalld_bridge as fwd
 
         manager = ConfigManager()
-        zone = fwd.bridge_zone(NETWORK_BRIDGE_NAME)
-        if not zone.unzoned:
-            # Fixed, not running, or unreadable: nothing to say. A stale notice goes
-            # only when the answer is conclusive -- an unreadable one proves nothing.
-            if not zone.running or zone.readable:
+        verdict = fwd.assess(NETWORK_BRIDGE_NAME)
+        FIREWALLD_VERDICT = verdict
+        if not verdict.blocked:
+            # Fixed or not running: nothing to say. A stale notice goes only when
+            # the answer is conclusive -- an unreadable one proves nothing.
+            if not verdict.running or verdict.conclusive:
                 manager.clear_forward_notice()
+            for note in verdict.notes:
+                log.LOGGER(f"[FW] firewalld: {note}")
             return
 
+        for problem in verdict.problems(NETWORK_BRIDGE_NAME):
+            log.LOGGER(f"[FW] firewalld ({fwd.FIREWALLD_CHAIN}) rejects {problem}")
         ports = []
         for read in (manager.gateway_port_or_none, manager.get_plaintext_gateway_port):
             try:
@@ -314,14 +328,19 @@ def _report_firewalld_zone() -> None:
                 continue
             if isinstance(port, int) and port > 0 and port not in ports:
                 ports.append(port)
-        commands = fwd.zone_commands(NETWORK_BRIDGE_NAME, ports)
+        commands = fwd.setup_commands(NETWORK_BRIDGE_NAME, ports)
         manager.emit_forward_notice(
-            fwd.notice_title(NETWORK_BRIDGE_NAME),
-            fwd.notice_body(NETWORK_BRIDGE_NAME, commands),
+            fwd.notice_title(NETWORK_BRIDGE_NAME, verdict),
+            fwd.notice_body(NETWORK_BRIDGE_NAME, commands, verdict),
             command=fwd.one_line(commands),
         )
     except Exception as e:
-        log.LOGGER(f"[FW] Could not evaluate the firewalld zone of the guest bridge: {e}")
+        log.LOGGER(f"[FW] Could not evaluate firewalld for the guest bridge: {e}")
+
+
+def _egress_blocked_by_firewalld() -> bool:
+    verdict = FIREWALLD_VERDICT
+    return bool(verdict is not None and verdict.running and verdict.egress is False)
 
 
 def _ensure_forward_compat() -> None:
@@ -710,6 +729,15 @@ def configure_guest_firewall_policy(
                 f"Failed to apply allow-all egress (network tag '*') for VM {vmachine_id} ({vm_ip})."
             )
         log.LOGGER(f"{log_prefix} firewall allow-all egress (network tag '*')")
+        if _egress_blocked_by_firewalld():
+            # nodo's accept is in place, and firewalld will still reject the packet
+            # after it (#639): say so where the grant is logged, not "allowed".
+            log.LOGGER(
+                f"{log_prefix} firewall warning: network tag '*' is granted in nodo's "
+                "table, but firewalld has no policy from the guest bridge's zone to the "
+                "uplink, so inet firewalld filter_FORWARD will reject this guest's "
+                "Internet traffic. See 'nodo info' or run 'sudo nodo doctor'."
+            )
 
     # Every peer instance, not the first one that works. A resolution is the set of
     # peers the service was told it may reach, and `ConfigurationFile.network_resolution`
@@ -726,6 +754,16 @@ def configure_guest_firewall_policy(
     # is what made the difference visible.
     for net_res in network_resolution:
         tag = net_res.tags[0] if net_res.tags else "<untagged>"
+        if not net_res.peer_instances:
+            # Nothing to allow, so nothing failed: '*' is handled above as a rule of
+            # its own and resolves to no peer at all, which used to be logged as a
+            # rule that "could not be applied" on every start (#639).
+            if "*" not in net_res.tags:
+                log.LOGGER(
+                    f"{log_prefix} firewall: network tag '{tag}' resolved to no peer "
+                    "instance, so there is nothing to allow for it"
+                )
+            continue
         applied = 0
         for instance in net_res.peer_instances:
             if vm_allow_connection_to_instance(

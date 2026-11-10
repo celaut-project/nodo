@@ -284,7 +284,7 @@ def plaintext_gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]
 
 
 def guest_forwarding_alert(config_manager=None) -> Optional[OperatorAlert]:
-    """Guests cannot reach each other, because firewalld has no zone for the bridge.
+    """firewalld rejects guest-to-guest or guest-to-Internet traffic nodo allowed.
 
     Worth an alert of its own because of *how* it fails: nothing on the node looks
     wrong. The gateway answers, the VMs boot, and a service that launches a
@@ -294,8 +294,9 @@ def guest_forwarding_alert(config_manager=None) -> Optional[OperatorAlert]:
 
     A ``.forward_notice`` on disk is the whole signal, written by
     ``_report_firewalld_zone`` in ``src/virtualizers/microvm/network.py`` at daemon
-    start and removed when the bridge has a zone or when ``nodo doctor`` gets a real
-    guest-to-guest packet through. Same cheapness contract as the gateway alerts: a
+    start (from firewalld's zone, forward flag and policies) and removed when that
+    configuration lets both paths through or when ``nodo doctor`` gets a real
+    guest-to-guest and guest-to-Internet packet through. Same cheapness contract as the gateway alerts: a
     config read and two ``stat``s, no subprocess, no socket.
 
     It is a stored verdict from the last start, not a live probe, so it can outlive
@@ -319,8 +320,9 @@ def guest_forwarding_alert(config_manager=None) -> Optional[OperatorAlert]:
         return None
 
     lead = (
-        "Guests cannot reach each other: firewalld has no zone for the guest bridge, "
-        "so services this node launches as dependencies will look like dead children."
+        "firewalld rejects guest traffic that nodo allows (inet firewalld "
+        "filter_FORWARD): dependencies this node launches look like dead children, "
+        "and guests with network tag '*' get no Internet."
     )
     summary = (
         f"{lead} Fix it, then run `{sudo_nodo('doctor')}`:{_command_block(command)}"

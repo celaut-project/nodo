@@ -89,7 +89,8 @@ class CommandTests(unittest.TestCase):
         text = "\n".join(commands)
         self.assertNotIn("trusted", text)
         self.assertIn(f"--new-zone={fwd.GUEST_ZONE}", text)
-        self.assertIn(f"--add-interface={BRIDGE}", text)
+        self.assertIn(f"--change-interface={BRIDGE}", text)
+        self.assertIn(f"--new-policy={fwd.EGRESS_POLICY}", text)
         self.assertIn("--add-port=52285/tcp", text)
         self.assertIn("--add-port=52286/tcp", text)
         self.assertIn("--add-forward", text)
@@ -173,10 +174,13 @@ class ReportFromNetworkSetupTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def _zone(self, **kwargs):
-        return mock.patch.object(fwd, "bridge_zone", return_value=fwd.BridgeZone(**kwargs))
+        # What the daemon reads now is the whole verdict (zone, forward, egress
+        # policy), not only the zone; these keep the original four cases.
+        return mock.patch.object(fwd, "assess", return_value=fwd.Assessment(**kwargs))
 
     def test_an_unzoned_bridge_raises_the_notice_with_both_ports(self):
-        with self._zone(running=True, zone=None):
+        with self._zone(running=True, zone=None, effective_zone="public",
+                        guest_to_guest=False, egress=True):
             self.network._report_firewalld_zone()
         self.manager.emit_forward_notice.assert_called_once()
         kwargs = self.manager.emit_forward_notice.call_args.kwargs
@@ -185,7 +189,8 @@ class ReportFromNetworkSetupTests(unittest.TestCase):
         self.manager.clear_forward_notice.assert_not_called()
 
     def test_a_zoned_bridge_clears_a_stale_notice(self):
-        with self._zone(running=True, zone="nodo"):
+        with self._zone(running=True, zone="nodo", effective_zone="nodo",
+                        guest_to_guest=True, egress=True):
             self.network._report_firewalld_zone()
         self.manager.emit_forward_notice.assert_not_called()
         self.manager.clear_forward_notice.assert_called_once()
@@ -197,13 +202,13 @@ class ReportFromNetworkSetupTests(unittest.TestCase):
         self.manager.clear_forward_notice.assert_called_once()
 
     def test_an_unreadable_answer_neither_raises_nor_clears(self):
-        with self._zone(running=True, readable=False):
+        with self._zone(running=True):
             self.network._report_firewalld_zone()
         self.manager.emit_forward_notice.assert_not_called()
         self.manager.clear_forward_notice.assert_not_called()
 
     def test_it_is_never_fatal(self):
-        with mock.patch.object(fwd, "bridge_zone", side_effect=RuntimeError("boom")):
+        with mock.patch.object(fwd, "assess", side_effect=RuntimeError("boom")):
             self.network._report_firewalld_zone()
 
 
