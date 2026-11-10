@@ -1999,6 +1999,14 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             metric_line("Burn", burn_detail(instance, money)),
             metric_line("Energy", energy_detail(instance)),
         ];
+        // What the node said about closing time when it launched this instance (#344).
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs() as i64)
+            .unwrap_or(0);
+        if let Some(closing) = closing_detail(instance, now) {
+            lines.insert(4, metric_line("Closing", closing));
+        }
         // `observe` attaches to a local process, so it is only offered for local
         // instances. Full id, so the line can be copied as-is.
         if instance.is_local() {
@@ -2042,6 +2050,10 @@ fn state_detail(instance: &Instance) -> String {
     let state = match revive.suspended.as_deref() {
         None => "running".to_string(),
         Some("") => "suspended • VM stopped, disk kept".to_string(),
+        Some("hibernated_by_window") => {
+            "hibernated by the activity window • VM stopped, disk kept, wakes when it opens"
+                .to_string()
+        }
         Some(reason) => format!("suspended ({reason}) • VM stopped, disk kept"),
     };
     if revive.count == 0 {
@@ -2058,6 +2070,44 @@ fn state_detail(instance: &Instance) -> String {
     };
     format!("{state} • revived {}×{last}", revive.count)
 }
+
+/// The `Closing` line (issue #344): what this node told the client about closing time at
+/// launch, and how long is left to the close it announced. `None` for a remote instance
+/// and for a row that holds no value.
+///
+/// Neither figure is a promise of a long life: the node can stop for a cause that is not
+/// in its schedule. A window that put the instance down before the announced close is
+/// shown as a broken commitment; the node logs it and never blocks the operator.
+fn closing_detail(instance: &Instance, now: i64) -> Option<String> {
+    if !instance.is_local() {
+        return None;
+    }
+    let revive = &instance.revive;
+    if revive.on_close.is_none() && revive.closes_at.is_none() {
+        return None;
+    }
+    let action = revive.on_close.as_deref().unwrap_or("refuse");
+    let mut text = match revive.closes_at.filter(|at| *at > 0) {
+        None => format!("{action} • no close scheduled"),
+        Some(at) if at <= now => format!("{action} • the announced close has passed"),
+        Some(at) => format!(
+            "{action} • closes in {}",
+            format_duration_compact(Some((at - now) as f64))
+        ),
+    };
+    let closed_early = matches!(
+        (revive.suspended.as_deref(), revive.closes_at, revive.suspended_epoch),
+        (Some("hibernated_by_window"), Some(at), Some(stopped))
+            if at > 0 && stopped < at - CLOSING_CLOCK_SKEW_SECS
+    );
+    if closed_early {
+        text.push_str(" • closed before the announced close");
+    }
+    Some(text)
+}
+
+/// The difference between two clocks that is not a broken commitment, in seconds.
+const CLOSING_CLOCK_SKEW_SECS: i64 = 120;
 
 /// The `Started` line: how long the instance has been up, and what is left of its
 /// balance at the rate it is burning.
@@ -4391,6 +4441,14 @@ fn draw_schedule_summary(
             Span::styled("refuse", Style::default().fg(good())),
             Span::styled(
                 " — new work only. What runs keeps running and keeps being charged.",
+                Style::default().fg(muted()),
+            ),
+        ],
+        schedule::OnClose::Hibernate => vec![
+            Span::styled("at closing: ", Style::default().fg(muted())),
+            Span::styled("hibernate", Style::default().fg(good())),
+            Span::styled(
+                " — running instances stop with their disk kept, and wake when the window opens. Memory and processes are lost.",
                 Style::default().fg(muted()),
             ),
         ],
@@ -7343,10 +7401,61 @@ mod tests {
                 count: 3,
                 last_reason: Some("guest_panic".to_string()),
                 last_age_secs: Some(90),
+                ..crate::app::InstanceRevive::default()
             };
             let text = state_detail(&item);
             assert!(text.starts_with("suspended (process_lost)"), "{text}");
             assert!(text.contains("revived 3×, last after guest_panic"), "{text}");
+        }
+
+        /// Issue #344: an instance that the activity window put down is not "suspended
+        /// (hibernated_by_window)": it is hibernated, and it wakes when the window opens.
+        #[test]
+        fn the_state_line_names_a_hibernation_by_the_window() {
+            use super::super::state_detail;
+            let mut item = instance(None, InstanceUsage::default());
+            item.revive.suspended = Some("hibernated_by_window".to_string());
+            let text = state_detail(&item);
+            assert!(text.starts_with("hibernated by the activity window"), "{text}");
+            assert!(text.contains("wakes when it opens"), "{text}");
+        }
+
+        /// Issue #344: the card says what the node told the client about closing time.
+        #[test]
+        fn the_closing_line_says_the_policy_and_the_time_left() {
+            use super::super::closing_detail;
+            let mut item = instance(None, InstanceUsage::default());
+            // No value on the row: no line.
+            assert_eq!(closing_detail(&item, 1_000), None);
+            item.revive.on_close = Some("hibernate".to_string());
+            item.revive.closes_at = Some(1_000 + 7_800);
+            let text = closing_detail(&item, 1_000).unwrap();
+            assert!(text.starts_with("hibernate • closes in "), "{text}");
+            assert!(text.contains("2h"), "{text}");
+            item.revive.closes_at = Some(0);
+            assert_eq!(
+                closing_detail(&item, 1_000).unwrap(),
+                "hibernate • no close scheduled"
+            );
+            item.revive.closes_at = Some(500);
+            assert!(closing_detail(&item, 1_000).unwrap().contains("has passed"));
+        }
+
+        /// Issue #344: a window that put the instance down before the announced close is a
+        /// broken commitment, with a margin for the difference between clocks.
+        #[test]
+        fn the_closing_line_flags_a_close_before_the_announced_one() {
+            use super::super::closing_detail;
+            let mut item = instance(None, InstanceUsage::default());
+            item.revive.on_close = Some("hibernate".to_string());
+            item.revive.closes_at = Some(10_000);
+            item.revive.suspended = Some("hibernated_by_window".to_string());
+            item.revive.suspended_epoch = Some(5_000);
+            let early = closing_detail(&item, 6_000).unwrap();
+            assert!(early.contains("closed before the announced close"), "{early}");
+            item.revive.suspended_epoch = Some(9_950);
+            let on_time = closing_detail(&item, 10_100).unwrap();
+            assert!(!on_time.contains("closed before"), "{on_time}");
         }
 
         /// A raw percentage is ambiguous on its own: 180% is nearly idle on 4 vCPUs and
@@ -8860,7 +8969,7 @@ mod tests {
             let (x, y) = find(&screen, "at closing:");
 
             app.click_at(x + 1, y);
-            assert_eq!(app.schedule().on_close, crate::schedule::OnClose::Stop);
+            assert_eq!(app.schedule().on_close, crate::schedule::OnClose::Hibernate);
         }
     }
 

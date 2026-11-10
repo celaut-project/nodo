@@ -201,9 +201,10 @@ class ClosingTimeReaperTests(unittest.TestCase):
     def _run(self, *, is_open: bool, stops: bool, dev_ids=()):
         connection = mock.MagicMock()
         connection.get_all_internal_containers_ids.return_value = ["rented-1", "mine-1"]
+        connection.get_local_closing_terms.return_value = {}
         with mock.patch.object(maintain_module.activity_window, "is_open", return_value=is_open), \
                 mock.patch.object(maintain_module.activity_window,
-                                  "stops_running_instances", return_value=stops), \
+                                  "on_close_policy", return_value="stop" if stops else "refuse"), \
                 mock.patch.object(maintain_module, "sc", connection), \
                 mock.patch.object(maintain_module, "descends_from_dev_client",
                                   side_effect=lambda id: id in dev_ids), \
@@ -232,15 +233,16 @@ class ClosingTimeReaperTests(unittest.TestCase):
         from the one they switched on.
         """
         stop = self._run(is_open=False, stops=True, dev_ids=("mine-1",))
-        stop.assert_called_once_with(token="rented-1")
+        stop.assert_called_once_with(token="rented-1", reason="activity_window")
 
     def test_an_instance_that_will_not_stop_does_not_take_the_tick_down(self):
         """This runs in the manager loop, which nothing above it catches."""
         connection = mock.MagicMock()
         connection.get_all_internal_containers_ids.return_value = ["a", "b"]
+        connection.get_local_closing_terms.return_value = {}
         with mock.patch.object(maintain_module.activity_window, "is_open", return_value=False), \
                 mock.patch.object(maintain_module.activity_window,
-                                  "stops_running_instances", return_value=True), \
+                                  "on_close_policy", return_value="stop"), \
                 mock.patch.object(maintain_module, "sc", connection), \
                 mock.patch.object(maintain_module, "descends_from_dev_client",
                                   return_value=False), \

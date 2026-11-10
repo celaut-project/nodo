@@ -796,6 +796,30 @@ selection rather than pricing — and the rest of the formula now lives beside t
 [`REPUTATION.md`](REPUTATION.md) walks the whole formula through at these defaults, with
 worked numbers.
 
+The order of the candidates has three keys, in this sequence: the price bound (a bounded
+candidate first), then the **interruption class** (a smaller class first), then the score
+below. The class is a rank and never a term of the score, and it removes no candidate. It
+compares the `on_close` and `closes_at` of the quote with the **funded life** of the
+instance: the periods that `initial_mu`, less the builds, pays at the quote
+(`deposits.DEFAULT_INITIAL_PERIODS` if the request has no `initial_mu`), times
+`maintenance_seconds_loop`. The funded life is a lower bound of what the client may need,
+because the client can add balance later.
+
+| Class | `on_close` | The close |
+|---|---|---|
+| 0 | `REFUSE`, or `closes_at` is 0 | any |
+| 1 | `HIBERNATE` | at or after the end of the funded life |
+| 2 | `STOP` | at or after the end of the funded life |
+| 3 | `HIBERNATE` | before the end of the funded life |
+| 4 | `STOP` | before the end of the funded life |
+
+A stop is always worse than a hibernation in the same position, and a close inside the funded
+life is worse than one outside it. Class 2 comes before class 3: a stop that may never come,
+against a pause that will come. The distance of `closes_at` is not used inside a class. Before
+it asks for a quote, a node skips a peer whose stored `Peer.activity_window` says that the peer
+is closed now. With no schedule, or one that it cannot read, it does not skip: the quote is the
+authority.
+
 A candidate is ranked by an effective cost in log space:
 
 ```
@@ -1006,7 +1030,8 @@ about renting this machine out after hours, not about locking its owner out of i
 |---|---|---|
 | `activity_window.ENABLED` | `false` | Master switch. |
 | `activity_window.WINDOWS` | `[]` | A list of `{START, END}` entries, one per open stretch of the day — a night shift and a lunch break are two entries, not one. Each `START`/`END` is local time, `HH:MM`; `START` is inclusive, `END` exclusive. An entry earlier `END` than `START` wraps around midnight: `22:00`–`06:00` is one window, open all night. An empty list, or an entry with `END` equal to `START`, means always open, so enabling the section before choosing the hours refuses nothing. The node is open whenever the clock falls inside *any* entry. |
-| `activity_window.ON_CLOSE` | `refuse` | `refuse` stops taking new work and leaves running instances alone — they keep being charged, and an empty balance still reaps them. `stop` **also stops every instance not descended from a dev client** the moment the window closes, refunding what its balance still holds; its work is destroyed mid-flight, so only ask for it on a machine whose hours are genuinely not negotiable. One policy, shared by every window: what happens to running work at closing time does not depend on which window it was in. |
+| `activity_window.ON_CLOSE` | `refuse` | `refuse` stops taking new work and leaves running instances alone — they keep being charged, and an empty balance still reaps them. `stop` **also stops every instance not descended from a dev client** the moment the window closes, refunding what its balance still holds; its work is destroyed mid-flight, so only ask for it on a machine whose hours are genuinely not negotiable. `hibernate` **hibernates** every instance not descended from a dev client when the window closes: the VM stops, the disk, row, address and account stay, and the node saves the instance's CPU and RAM. On the first tick after the window opens the node wakes it with those resources, under the normal admission (service pool, host limits); if there is no room it stays hibernated and is tried again on the next tick. An instance that a client hibernated is never woken by the node, and one that cannot be hibernated (no revivable disk, or a shared filesystem) is stopped as `stop` would. A hibernated instance pays only for its disk. **Hibernation stops the VM, it does not freeze it**: memory and processes are lost, so work that cannot restart from its disk is lost. In all three modes a closed node also refuses a resource increase and a wake by hand (dev work is exempt). One policy, shared by every window: what happens to running work at closing time does not depend on which window it was in. The node announces its schedule in `Peer.activity_window`: the spans in minutes from 00:00 UTC and the `on_close` policy. **This tells a reader the hours in which the machine is not used by its operator.** It is a hint and not a promise; the quote is the authority. With no window configured the node announces an empty list of spans ("always open"). |
+| `activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY` | `false` | By default an instance gets the closing action that its own row holds: the one that the quote told the client at launch (`launch_on_close`). If you edit `ON_CLOSE` while it runs, it still gets that action. If this is `true`, the node ignores the row and uses the current `ON_CLOSE` for every instance, and it writes a line in the log at start. You take the risk: a delegating node that stored the quote can score a peer that acts differently. Must be `true` or `false`. |
 
 ```yaml
 activity_window:

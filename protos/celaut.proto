@@ -681,6 +681,47 @@ message EstimatedCost {
     // launch of the instance. If the value is 0, the whole life of the instance is one
     // period. A reader that gets a value below 0 reads it as 0.
     int32 volatility_period_seconds = 7;
+    // The unix time of the next scheduled close of the activity window of the node, in
+    // seconds. 0 means that no close is scheduled. It is an absolute time, so it does
+    // not change while the answer travels. It is not a promise that the instance lives
+    // until this time: the node can stop for a cause that is not in its schedule. It is
+    // also not a promise of a long life when it is 0.
+    int64 closes_at = 8;
+    // What the node does with a running instance when the window closes. A node that
+    // does not set this field reads as ON_CLOSE_REFUSE.
+    OnClose on_close = 9;
+}
+
+// What a node does with a running instance when its activity window closes.
+enum OnClose {
+    // The node does not touch the instance. It refuses a new child and a resource
+    // increase until the window opens. This is the default value, so an older node reads
+    // as ON_CLOSE_REFUSE.
+    ON_CLOSE_REFUSE = 0;
+    // The node stops the instance and refunds the balance.
+    ON_CLOSE_STOP = 1;
+    // The node hibernates the instance, and wakes it when the window opens.
+    ON_CLOSE_HIBERNATE = 2;
+}
+
+// The hours in which a node takes new work, and what it does with a running instance
+// when it closes. It describes one repeating day: the same spans every day.
+message ActivityWindow {
+    // One open span, in minutes from 00:00 UTC, from 0 to 1439. The span starts at
+    // start_minute (included) and ends at end_minute (not included). If end_minute is
+    // less than start_minute, the span passes midnight UTC.
+    message Span {
+        // The first minute of the span, from 0 to 1439, in minutes from 00:00 UTC. It is
+        // in the span.
+        int32 start_minute = 1;
+        // The end of the span, from 0 to 1439, in minutes from 00:00 UTC. It is not in
+        // the span. If it is less than start_minute, the span passes midnight UTC.
+        int32 end_minute = 2;
+    }
+    // The node is open when the time is in any span.
+    repeated Span spans = 1;
+    // What the node does with a running instance when it closes.
+    OnClose on_close = 2;
 }
 
 // Peers use this message to evaluate the Service.Workload entries of a service: a descendant workload
@@ -708,6 +749,10 @@ message ResourceAvailability {
     bool can_execute = 1;
     // Why the node cannot. Empty if can_execute is true. For a person: do not parse it.
     string reason = 2;
+    // The unix time of the next opening of the activity window, in seconds. The node sets
+    // it when it answers can_execute = false because it is closed. It is 0 if there is
+    // no opening to give, or if the cause is not the window.
+    int64 opens_at = 3;
 }
 
 // The request of LocateShare.
@@ -1124,6 +1169,13 @@ message Peer {
     // caller asks for a cost or for availability, it can skip a node whose entry does
     // not fit the request.
     repeated ArchitectureResources resources = 8;
+    // The hours in which the node takes new work. If the message is absent, the node
+    // gives no schedule: a reader does not assume that the node is open or closed. An
+    // empty list of spans means that the node is always open. It is the schedule that
+    // the node has now: it can change, and the node then announces a new Peer with a
+    // higher ts. It is not a promise. The quote (EstimatedCost.closes_at and on_close)
+    // is the authority for one instance.
+    ActivityWindow activity_window = 9;
     // The unix time of the announcement, in seconds. A reader accepts a Peer only if its
     // ts is more than the ts of the last Peer that it accepted for the same public_key.
     int64 ts = 99;

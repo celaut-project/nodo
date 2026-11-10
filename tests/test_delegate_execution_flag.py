@@ -37,7 +37,7 @@ class DelegateExecutionFlagTests(unittest.TestCase):
                                   return_value=celaut_pb2.EstimatedCost()), \
                 mock.patch.object(balancer_module, "peers_id_iterator", return_value=iter(["peer-1"])), \
                 mock.patch.object(balancer_module, "estimated_cost_sorter",
-                                  side_effect=lambda estimated_costs: iter(estimated_costs.items())), \
+                                  side_effect=lambda estimated_costs, **_: iter(estimated_costs.items())), \
                 mock.patch.object(balancer_module, "estimate_cost_on_peer",
                                   return_value=celaut_pb2.EstimatedCost()) as estimate:
             candidates = [peer for peer, _ in balancer_module.execution_balancer(

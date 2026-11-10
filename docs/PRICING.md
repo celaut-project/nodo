@@ -336,6 +336,8 @@ same volatility period, so a balance funded for `N` periods covers the ceilings 
 | `max_maintenance_cost` | One tick for the maximum resources, at the same price. Neither figure is a limit by itself. |
 | `price_bounded` | `pricing.PRICE_BOUNDED`. True: a tick never charges more than the figure of the resources held times `(1 + price_volatility)^k`. |
 | `price_volatility`, `volatility_period_seconds` | `v` and `T` of the bound. Meaningless when `price_bounded` is false. |
+| `closes_at` | Unix time of the next scheduled close of the activity window (`activity_window.next_close`), 0 if none is scheduled. An absolute time. It comes from the configuration of the node and never from its load. **It is not a promise that the instance lives until this time** (the node can stop for a cause that is not in its schedule), and **a value of 0 is not a promise of a long life**. |
+| `on_close` | What the node does with a running instance when the window closes: `ON_CLOSE_REFUSE` (nothing; the default, so an older node reads as this), `ON_CLOSE_STOP` or `ON_CLOSE_HIBERNATE`. A node with no window says `ON_CLOSE_REFUSE` whatever `ON_CLOSE` holds. The host keeps both values in the row of the instance (`launch_on_close`, `launch_closes_at`), and a delegating node keeps those of the peer (`quote_on_close`, `quote_closes_at`). |
 | `cost` | What the start spends: the build, plus the builds of the initial children. No balance (#636, 9). The client adds the balance for the periods that it chooses (the funding sum below). |
 
 A node that delegates to this one checks the charges of the child against the bound
@@ -633,6 +635,17 @@ it, and the instance pays `MODIFY_RESOURCES_MU`, not the caller. While the fathe
 instance is a client, that client must send its `Client` too, as for `StopService`
 (#597). Without a token the instance that sends the request, found by its address,
 changes itself; a hibernating instance is answered before its VM stops.
+
+The activity window can hibernate an instance too (`activity_window.ON_CLOSE: hibernate`,
+#344). Its `suspended_reason` is then `hibernated_by_window`, which is not `hibernated`: the
+client did not ask for it. The node saves the CPU and RAM of the instance, and wakes it with
+them on the first tick after the window opens, under the same admission as any wake. If there
+is no room it stays hibernated and the next tick tries again. A wake by hand while the node
+is closed is refused with the reason of the window. An instance that a client hibernated is
+never woken by the node. If one that the window hibernated cannot pay its disk, it becomes
+`hibernated_out_of_balance` and the node no longer wakes it by itself. Hibernation stops
+the VM and does not freeze it: memory and processes are lost, so work that cannot restart
+from its disk is lost.
 
 The node refuses to hibernate an instance that exports or mounts a shared filesystem, or
 that cannot be started again from its own disk, and refunds the call. Wake on incoming

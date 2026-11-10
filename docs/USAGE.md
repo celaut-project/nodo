@@ -49,6 +49,7 @@ These are the most commonly used commands for daily tasks:
   - Without a terminal, or with `--no-input`, `execute` does not ask. It reports the missing vars and starts the instance without them.  
   `execute` never prints the values, only the names.  
   Use `--receipt <file>` to keep the signed start receipt of the instance (one JSON line, appended). Check it with `nodo receipt verify <file> --token <instance>` (see [Execution receipts](EXECUTION_RECEIPTS.md)).  
+  Before the launch, `execute` asks the node for its quote and prints what the node does at closing time: the next close of its activity window (in local time, with the time left) and the action (`refuse`, `stop` or `hibernate`). This is not a promise of a long life: the node can stop for a cause that is not in its schedule. If the quote cannot be read, `execute` prints nothing and launches as before.  
   **Example:**  
   `nodo execute 1234567890abcdef`
   `nodo execute -e workers 8 -e timeout 20 1234567890abcdef`
@@ -80,6 +81,9 @@ These are the most commonly used commands for daily tasks:
   - reason when execution is not possible
   - estimated costs (to start, and maintenance per hour). "To start" includes the starts
     of the initial children of a service that declares `initial_environment_workload`
+  - closing time (issue #344): the next close of the activity window of the node (local time,
+    time left) and what the node does then: `refuse`, `stop` or `hibernate`. "No close is
+    scheduled" is not a promise of a long life
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  
@@ -1173,7 +1177,15 @@ nodo tunnel_close <tunnel id> --json       # and close one
   them as `State: suspended (<reason>)` and `Revives: <n> (last: <reason>, <time>)`.
   An instance whose CPU or RAM was set to 0 (issue #498) has `suspended_reason`
   `hibernated` and prints `State: hibernated`: see "Hibernating an instance" in
-  `docs/PRICING.md`.
+  `docs/PRICING.md`. An instance that the activity window put down (`ON_CLOSE: hibernate`,
+  issue #344) has `suspended_reason` `hibernated_by_window` and prints
+  `State: hibernated (activity window)`; the node wakes it when the window opens.
+  Each instance also prints `Closing: <action>, <next close>`: what the node told the client
+  about closing time when it launched the instance (a local instance), or what the peer
+  quoted (a delegated one). `--json` has `on_close` and `closes_at` (unix time, 0 if none was
+  scheduled), and for a local instance `closed_before_announced`: true if the window put it
+  down before the close that was announced. The node logs the same fact, and never blocks the
+  operator.
   A delegated instance carries `suspended_at` too: set while the peer has it suspended,
   `State: suspended on the peer`. This node charges its father nothing then, and stops
   it, with a refund, once it has been suspended for `instances.SUSPENDED_GRACE_SECONDS`.
@@ -1299,7 +1311,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | PRICING: prices, nudge ±10 % | `+` / `-`, `e` | `nodo config get pricing --json` / `nodo config set pricing.…=<value>` (new) |
 | ENERGY: settings | `e`, Enter | `nodo config get energy` / `nodo config set energy.…` (new) |
 | ENERGY: history chart, today/7d/30d | — | `nodo energy [--json] [--hours N]` (new) |
-| SCHEDULE: windows, on/off, closing behaviour | `a`/`d`/`w`/`c`/arrows/Enter | `nodo config set activity_window.ENABLED=… activity_window.WINDOWS=… activity_window.ON_CLOSE=…` (new) |
+| SCHEDULE: windows, on/off, closing behaviour (`c` goes refuse, hibernate, stop) | `a`/`d`/`w`/`c`/arrows/Enter | `nodo config set activity_window.ENABLED=… activity_window.WINDOWS=… activity_window.ON_CLOSE=…` (new) |
 | SCHEDULE: demand by hour, refused while closed | — | `nodo schedule [--json] [--days N]` (new) |
 | CONFIG: browse / filter the tree | arrows, `/`, `x` | `nodo config get [<path>] [--json]` (new); `nodo envs` (interpolated) |
 | CONFIG: edit a value | `e` | `nodo config set <path>=<value>` (new) |

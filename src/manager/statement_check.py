@@ -1081,7 +1081,8 @@ def _invalid_statement():
 
 
 def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: int = 0,
-                  window: int = 0, per_account: bool = False) -> None:
+                  window: int = 0, per_account: bool = False,
+                  amount: int = STATEMENT_PENALTY) -> None:
     """Score a fault of a peer, once: the same fault read again costs it nothing.
 
     A fault is the peer, the account (by ``account_ref``, never the credential), the
@@ -1103,4 +1104,4 @@ def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: in
     if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq, window,
                                                   any_seq=per_account):
         return
-    interface.update_peer_reputation(peer_id=peer_id, amount=STATEMENT_PENALTY, reason=reason)
+    interface.update_peer_reputation(peer_id=peer_id, amount=amount, reason=reason)

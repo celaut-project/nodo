@@ -471,6 +471,16 @@ def _unsigned_peer(uris: List[celaut.Instance.Uri], *, quiet: bool = False) -> c
     except Exception as e:
         log.LOGGER(f'Could not work out the resources to announce: {e}')
 
+    # The hours of the node and what it does at closing time (#344), in UTC. Built on
+    # every call from the current UTC offset, so a change of offset (daylight saving)
+    # changes the content digest and `announcement_change_tick` announces it again.
+    from src.utils import activity_window as window
+    from src.utils.on_close import to_enum
+
+    peer.activity_window.on_close = to_enum(window.effective_on_close())
+    for start_minute, end_minute in window.utc_spans():
+        peer.activity_window.spans.add(start_minute=start_minute, end_minute=end_minute)
+
     from src.reputation_system.fetch import local_proofs
 
     reputation_proofs = list(local_proofs())

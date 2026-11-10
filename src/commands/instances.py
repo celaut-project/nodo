@@ -1,5 +1,6 @@
 import sqlite3
 import os
+from src.commands import closing_display
 from src.utils import dead_instances
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
@@ -26,6 +27,14 @@ env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA = env_manager.get("METADATA_REGISTRY")
 DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
+
+def _closing_cell(on_close, closes_at, closed_early: bool) -> str:
+    """The closing terms of an instance, for the text listing (#344). "-" with none."""
+    text = closing_display.instance_closing_text(on_close, closes_at)
+    if text != "-" and closed_early:
+        text += "  [closed before the close that was announced]"
+    return text
+
 
 def _int_or_none(value):
     try:
@@ -374,10 +383,12 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                 "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer, "
                 f"{optional_column('suspended_at')}, {optional_column('suspended_reason')}, "
                 f"{optional_column('revive_count', '0')}, {optional_column('last_revive_reason')}, "
-                f"{optional_column('last_revived_at')} FROM local_instances WHERE killed_at IS NULL"
+                f"{optional_column('last_revived_at')}, {optional_column('launch_on_close')}, "
+                f"{optional_column('launch_closes_at')} FROM local_instances WHERE killed_at IS NULL"
             )
             for (id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer, suspended_at,
-                 suspended_reason, revive_count, last_revive_reason, last_revived_at) in cursor.fetchall():
+                 suspended_reason, revive_count, last_revive_reason, last_revived_at,
+                 launch_on_close, launch_closes_at) in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
@@ -415,10 +426,12 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
                     'balance': balance_value,
-                    'state': ('hibernated' if suspended_reason == 'hibernated' else
-                              'hibernated (out of balance)' if suspended_reason == 'hibernated_out_of_balance' else
-                              f"suspended ({suspended_reason})" if suspended_reason else 'suspended')
-                    if suspended_at else 'running',
+                    'state': closing_display.state_label(suspended_at, suspended_reason),
+                    # What this node told the client about closing time at launch (#344).
+                    'closing': _closing_cell(
+                        launch_on_close, launch_closes_at,
+                        closing_display.broken_commitment(
+                            suspended_at, suspended_reason, launch_closes_at)),
                     # A crash loop shows here (issue #594): how many times the VM was
                     # started again on its own disk, and the last time why and when.
                     'revives': (
@@ -439,6 +452,10 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                         'balance_mu': _int_or_none(balance_mu),
                         'suspended_at': suspended_at,
                         'suspended_reason': suspended_reason,
+                        'on_close': launch_on_close,
+                        'closes_at': _int_or_none(launch_closes_at),
+                        'closed_before_announced': closing_display.broken_commitment(
+                            suspended_at, suspended_reason, launch_closes_at),
                         'revive_count': _int_or_none(revive_count) or 0,
                         'last_revive_reason': last_revive_reason,
                         'last_revived_at': last_revived_at,
@@ -457,11 +474,16 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
             delegated_suspended = (
                 "suspended_at" if column_exists(conn, "delegated_instances", "suspended_at") else "NULL"
             )
+            def optional_delegated(column):
+                return column if column_exists(conn, "delegated_instances", column) else "NULL"
+
             cursor.execute(
                 "SELECT token_delegation, id, peer_id, father_id, serialized_instance, service_id, "
-                f"balance_mu, {delegated_suspended} FROM delegated_instances WHERE killed_at IS NULL"
+                f"balance_mu, {delegated_suspended}, {optional_delegated('quote_on_close')}, "
+                f"{optional_delegated('quote_closes_at')} FROM delegated_instances WHERE killed_at IS NULL"
             )
-            for external_token, id, peer_id, father_id, si, service, balance_mu, suspended_at in cursor.fetchall():
+            for (external_token, id, peer_id, father_id, si, service, balance_mu, suspended_at,
+                 quote_on_close, quote_closes_at) in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
 
                 # The deposit this node holds for the instance, in our MU -- the same
@@ -484,6 +506,8 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                     'balance': balance_value,
                     # The peer has it suspended (issue #594): this node charges nothing for it.
                     'state': 'suspended on the peer' if suspended_at else 'running',
+                    # What the peer quoted about closing time (#344).
+                    'closing': _closing_cell(quote_on_close, quote_closes_at, False),
                     'location': peer_id or 'Unknown Peer',
                     'virtualizer': 'delegated',
                     'mem_limit': 'N/A',
@@ -497,6 +521,8 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                         'service_id': service,
                         'balance_mu': _int_or_none(balance_mu),
                         'suspended_at': suspended_at,
+                        'on_close': quote_on_close,
+                        'closes_at': _int_or_none(quote_closes_at),
                         'uris': get_uris(si) if si else [],
                     } if as_json else {}),
                 })
@@ -561,6 +587,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
             ("Parent Type", "parent_type"),
             ("Balance", "balance"),
             ("State", "state"),
+            ("Closing", "closing"),
             ("Revives", "revives"),
             ("Location", "location"),
             ("Virtualizer", "virtualizer"),
@@ -581,6 +608,9 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
         for label, key in fields:
             # Only a local instance is ever revived here.
             if key == "revives" and key not in inst:
+                continue
+            # A row with no closing terms (the database is older, or nothing was kept).
+            if key == "closing" and inst.get(key) in (None, "-"):
                 continue
             output_lines.extend(format_line(label, inst.get(key, 'N/A')))
 

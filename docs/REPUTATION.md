@@ -245,6 +245,8 @@ so it absorbs the excess (#577).
 | A signed `stop` row of a descendant with MU left, and the father gone ([#631](#who-records-the-fault)) | `killed_with_mu` | -1000 |
 | Maintenance of a descendant after a tunnel to it failed ([#631](#liveness-the-ancestor-tunnel)) | `maintenance_while_unreachable` | -1000 |
 | A statement and an execution receipt of the same peer that do not agree ([`EXECUTION_RECEIPTS.md`](EXECUTION_RECEIPTS.md#receipts-and-the-balance-statement)) | `statement_contradicts_receipt` | -1000 |
+| A hibernation of a delegated instance that its quote did not say ([closing time](#closing-time-and-the-quote)) | `instance_hibernated_unannounced` | -50 |
+| A stop of a delegated instance, for the activity window, that its quote did not say ([closing time](#closing-time-and-the-quote)) | `instance_stopped_unannounced` | -200 |
 
 The same scale as a service that does not hash to its id (`get_service_wrong_hash`): in
 every case the peer signed or reported something false about money. A fault is scored
@@ -621,6 +623,45 @@ Cases that the tunnel does **not** cover:
 - The node of the ancestor reads the statement after the retention ended, or it deletes
   its hop records (`descendant_peers`) with the retention. With the default retention (0)
   the node deletes neither.
+
+### Closing time and the quote
+
+A quote says what the node does at closing time: `on_close` and `closes_at` (see
+[`PRICING.md`](PRICING.md)). The delegating node keeps both on the row of the delegated
+instance. The quote is the reference. A change that does not match it costs the peer
+reputation. A change that matches it costs nothing.
+
+| The quote said | The peer hibernates | The peer stops |
+|---|---|---|
+| `REFUSE`, or `closes_at` 0 | `instance_hibernated_unannounced` | `instance_stopped_unannounced` |
+| `HIBERNATE`, close at T | Before T: `instance_hibernated_unannounced`. From T: expected | `instance_stopped_unannounced` at any time |
+| `STOP`, close at T | Before T: `instance_hibernated_unannounced`. From T: milder than the quote, no score | Before T: `instance_stopped_unannounced`. From T: expected |
+
+A stop costs more than a hibernation: a hibernated instance keeps its disk, and a stopped
+one is destroyed. The references are `instance_lost` (-100): a hibernation costs less, a
+stop costs more. The delegating node reads both in the signed statement of the child:
+
+- A **stop** is a `stop` row with the reason `activity_window`. `process_lost` and
+  `guest_panic` are failures, `out_of_balance` is the balance (the reason
+  `instance_out_of_balance` is retired, #562, and an instance that runs out of balance
+  scores nothing), and `manual_kill` can be a stop that this node or its client asked for.
+- A **hibernation** is a `maintenance` row that charges no memory (`mem_limit` 0) after one
+  that charged memory, with no `resource_change` row between them. A resize that the
+  instance asked for leaves a `resource_change` row, so a hibernation without one was not
+  asked for by the instance. A long hibernation is one event, scored once.
+
+A hibernated instance still answers `Metrics` on its peer, so the delegating node reads it
+as held and never calls it `peer_stopped`.
+
+Limits of this judgement:
+
+- It needs the statement to be read. The statement of a dead account stays readable only for
+  the retention of the peer. If the peer no longer gives it, nothing is scored.
+- A hibernation is seen when the statement is read (every few ticks), not at once.
+- A peer that stops the instance for the activity window and also refuses the statement is
+  scored for the refusal (`statement_inconsistent`), not for the stop.
+- A node that promises to resume (`ON_CLOSE: hibernate`) and does not is a separate case.
+  It is not scored.
 
 ## Known limits of this version
 

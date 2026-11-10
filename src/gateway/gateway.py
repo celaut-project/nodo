@@ -21,12 +21,13 @@ from src.tunneling.rpc_tunnel import (
 from src.gateway.utils import generate_full_node_peer_info
 from src.gateway.client_gate import ClientRequired, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
 from src.manager import balance_statement, hibernation
-from src.manager.manager import ALLOW_DEBT, add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
+from src.manager.manager import ALLOW_DEBT, add_peer_instance, descends_from_dev_client, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
 from src.manager.chat import ChatError, get_client_thread, receive_chat_message
 from src.manager.metrics import get_client_metrics, get_metrics
 from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
+from src.utils import activity_window
 from src.utils import logger as log
 from src.utils.bee_client import BeeClient
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
@@ -320,6 +321,18 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     f'No local instance is registered at {caller_ip}, so this node cannot tell '
                     f'which instance is asking to change its resources ({context.peer()}).'
                 )
+        # A closed node takes no growth and starts nothing (issue #344): neither a resize
+        # that asks for more than the instance holds nor a wake by hand. Asked before the
+        # instance is charged, so there is nothing to refund. Dev work is exempt, as in
+        # `launch_service`. Shrinking and hibernating stay open: they give the machine back.
+        if not activity_window.is_open() and not descends_from_dev_client(token):
+            action_now = hibernation.plan(token, request.max_sysreq)
+            if action_now == hibernation.WAKE or (
+                    action_now == hibernation.RESIZE
+                    and hibernation.is_growth(token, request.max_sysreq)):
+                reason = activity_window.closed_reason()
+                log.LOGGER(f'Refusing to resize {token}: {reason}')
+                raise Exception(reason)
         # The instance that changes pays, not the caller: the holder of a token may be a
         # client with no instance of its own, and the cost of waking stays with the
         # instance that gets it.

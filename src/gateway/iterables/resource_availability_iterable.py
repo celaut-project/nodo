@@ -74,12 +74,15 @@ class GetResourceAvailabilityIterable:
             # function answers "does this shape fit?", which is a question about the
             # machine, and is also what the operator's own launches go through. The
             # hours belong to the door, not to the room.
+            # `opens_at` (#344) is set only for this cause: the unix time of the next opening.
+            opens_at = 0
             if executes_locally() and not activity_window.is_open():
                 availability = dict(
                     availability,
                     can_execute=False,
                     reason=activity_window.closed_reason(),
                 )
+                opens_at = activity_window.next_open()
 
             # No `indices`: the response is a single flat message, the same shape
             # StopService's Refund is serialized with. The caller pairs it with
@@ -88,6 +91,7 @@ class GetResourceAvailabilityIterable:
                 message_iterator=celaut_pb2.ResourceAvailability(
                     can_execute=availability["can_execute"],
                     reason=availability.get("reason", ""),
+                    opens_at=opens_at,
                 )
             )
         finally:

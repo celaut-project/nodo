@@ -10,7 +10,7 @@ from src.virtualizers.interface import build, execute, get_configured_virtualize
 from src.virtualizers.selection import select_virtualizer
 from src.manager.manager import reserve_instance_name
 from src.utils import utils, logger as log
-from src.utils import dead_instances, keyvalue
+from src.utils import activity_window, dead_instances, keyvalue
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
@@ -417,6 +417,10 @@ def local_execution(
             arch=service_arch,
             launch_bp=launch_bp,
             launch_bound=launch_bound,
+            # What this node does at closing time, read from its own configuration at the
+            # launch and kept for the life of the instance (#344).
+            launch_on_close=activity_window.effective_on_close(),
+            launch_closes_at=activity_window.next_close(),
             # What the father paid, and the build taken from it (#570). The start
             # names the execution as its receipt does (#419).
             movements=(

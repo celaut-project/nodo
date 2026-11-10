@@ -57,7 +57,12 @@ HIBERNATED = "hibernated"
 # `suspended_grace_seconds`) counts from the tick that found it unable to pay: it keeps its
 # disk until then, and a top-up that lets it pay a tick makes it `hibernated` again.
 HIBERNATED_OUT_OF_BALANCE = "hibernated_out_of_balance"
-HIBERNATED_REASONS = (HIBERNATED, HIBERNATED_OUT_OF_BALANCE)
+# Hibernated by the node, not by the client: `ON_CLOSE: hibernate` (issue #344) put it down
+# when the activity window closed, and the node wakes it, with the resources it saved, on
+# the first tick after the window opens. A client that hibernated an instance (`hibernated`)
+# is never woken by the node.
+HIBERNATED_BY_WINDOW = "hibernated_by_window"
+HIBERNATED_REASONS = (HIBERNATED, HIBERNATED_BY_WINDOW, HIBERNATED_OUT_OF_BALANCE)
 
 # An instance id is a hash, so it holds hex digits only. Other text is refused to
 # make sure an id can never name a path outside the dead-instance directory.

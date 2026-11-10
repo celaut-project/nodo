@@ -24,6 +24,7 @@ Two halves of one contract (#459, absorbing #454):
 The pre-filter only ever skips what can never fit. A request within the ceilings can
 still be refused for load, and that is what the call is for.
 """
+from datetime import datetime
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 from protos import celaut_pb2 as celaut
@@ -186,6 +187,43 @@ def request_misfit(
     return "; ".join(reasons) or None
 
 
+def schedule_closed_reason(window, now: Optional[datetime] = None) -> Optional[str]:
+    """Why ``window``, the ``Peer.activity_window`` of a peer, says it is closed now, or None.
+
+    None -- "ask it" -- when the message is absent (the peer gives no schedule), when it has
+    no spans (always open), and when it cannot be read: a minute out of 0 to 1439, or a
+    span whose two edges are equal. The schedule is a hint and the quote is the authority
+    (#344), so a doubt is never a reason to skip. ``now`` is a UTC time, by default now.
+    """
+    if window is None or not len(window.spans):
+        return None
+    moment = now or datetime.utcnow()
+    minute = moment.hour * 60 + moment.minute
+    for span in window.spans:
+        start, end = span.start_minute, span.end_minute
+        if not (0 <= start <= 1439 and 0 <= end <= 1439) or start == end:
+            return None
+        if (start <= minute < end) if start < end else (minute >= start or minute < end):
+            return None
+    return "its announced schedule says that it is closed now"
+
+
+def stored_activity_window(peer_id: str):
+    """The ``activity_window`` of the last ``Peer`` stored for ``peer_id``; None if it
+    gives none, if there is no stored announcement, or if it cannot be read."""
+    try:
+        from src.database.sql_connection import SQLConnection
+
+        blob = SQLConnection().get_peer_advertisement(peer_id)
+        if not blob:
+            return None
+        peer = celaut.Peer()
+        peer.ParseFromString(blob)
+        return peer.activity_window if peer.HasField("activity_window") else None
+    except Exception:
+        return None
+
+
 def stored_announcement(peer_id: str) -> List[celaut.ArchitectureResources]:
     """The ``resources`` of the last ``Peer`` stored for ``peer_id``; [] if none or unreadable.
 
@@ -212,7 +250,8 @@ def should_skip_peer(
         rpc: str,
 ) -> bool:
     """True when ``peer_id``'s own announcement says the ``rpc`` call is pointless. Logs why."""
-    reason = request_misfit(stored_announcement(peer_id), arch, ask)
+    reason = request_misfit(stored_announcement(peer_id), arch, ask) \
+        or schedule_closed_reason(stored_activity_window(peer_id))
     if reason:
         log.LOGGER(f"Skipping {rpc} on peer {peer_id}: by its own announcement, {reason}.")
         return True

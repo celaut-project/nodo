@@ -1167,7 +1167,17 @@ activity_window:
   #           still holds, exactly as `nodo stop` would refund it -- but its work is
   #           destroyed mid-flight, so only ask for this on a machine whose hours are
   #           genuinely not negotiable.
+  #   hibernate  Hibernate every instance that is not descended from a dev client: the
+  #           VM stops and the disk is kept. The node wakes it with its old resources on
+  #           the first tick after the window opens. Memory and processes are lost, so
+  #           work that cannot restart from its disk is lost. A closed node refuses
+  #           resource increases and manual wakes in every mode.
   ON_CLOSE: refuse
+  # By default an instance gets the closing action in its own row: the one that its
+  # quote told the client at launch, even if you edit ON_CLOSE while it runs. Set this to
+  # true to ignore the row and use the current ON_CLOSE for every instance. You take the
+  # risk: a delegating node can score a peer that acts differently from its quote.
+  FORCE_ACTUAL_ON_CLOSE_POLICY: false
 
 timing:
   GENERAL_WAIT_TIME: 2

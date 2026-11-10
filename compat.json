@@ -1,7 +1,8 @@
 {
-  "celaut_proto": "4117b19dd6eeb29c1193477405d2ed9e7b663e1ccccbde7bb40e9f9cc736764d",
+  "celaut_proto": "20d1bf72f56e875370aa073cd94eb98c4bdff0f30a6de9c7db47ac3099f0715a",
   "config_keys": [
     "activity_window.ENABLED",
+    "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",
     "activity_window.ON_CLOSE",
     "activity_window.WINDOWS",
     "balancers.COST_AVERAGE_VARIATION",
@@ -346,6 +347,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "97f409d2ea2e291b50947e790824cd7f4cf0a4934e00b1fd57c36a51f0ad57a6",
+  "database": "cd74322e21eacb8d71388b89da35065e08471ea64bf84d4a21451fda0ba88ab0",
   "storage_format": 1
 }

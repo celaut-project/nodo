@@ -174,7 +174,7 @@ def _require_nonneg_number(block: Dict[str, Any], section: str, key: str) -> Non
 
 HOST_LIMIT_SHARE_KEYS = ("MAX_CPU_SHARE", "MAX_RAM_SHARE", "MAX_DISK_SHARE")
 HOST_LIMIT_NET_KEYS = ("MAX_NET_GIB_PER_DAY", "MAX_NET_MIB_PER_SECOND")
-ON_CLOSE_VALUES = ("refuse", "stop")
+ON_CLOSE_VALUES = ("refuse", "stop", "hibernate")
 
 
 def validate_host_policy_config(config: Dict[str, Any]) -> None:
@@ -234,6 +234,13 @@ def validate_host_policy_config(config: Dict[str, Any]) -> None:
                     f"{where}.{key} must be a time of day as HH:MM, got {raw!r}. "
                     "Midnight is 00:00; a window that ends before it starts wraps around it."
                 )
+
+    if "FORCE_ACTUAL_ON_CLOSE_POLICY" in window and not isinstance(
+            window["FORCE_ACTUAL_ON_CLOSE_POLICY"], bool):
+        raise ConfigValidationError(
+            "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY must be true or false, "
+            f"got {window['FORCE_ACTUAL_ON_CLOSE_POLICY']!r}"
+        )
 
     if "ON_CLOSE" in window:
         on_close = str(window["ON_CLOSE"] or "").strip().lower()

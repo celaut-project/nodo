@@ -639,6 +639,14 @@ def canonical_peer_content_digest(peer) -> str:
         f"{key}={amount.n}" for key, amount in keyvalue.items(peer.mu_per_call)
     )
     resources = sorted(_canonical_architecture_resources(r) for r in peer.resources)
+    # `activity_window` (#344): an absent message ("no schedule") and an empty one
+    # ("always open") are different claims, so presence is part of the encoding.
+    if peer.HasField("activity_window"):
+        window = peer.activity_window
+        spans = ",".join(sorted(f"{s.start_minute}-{s.end_minute}" for s in window.spans))
+        activity_window = f"w:{int(window.on_close)}:{spans}"
+    else:
+        activity_window = "-"
 
     canonical = "|".join([
         "/".join(uris),
@@ -647,6 +655,7 @@ def canonical_peer_content_digest(peer) -> str:
         rates,
         scheme,
         "/".join(resources),
+        activity_window,
     ])
     # Blake2b-256. Nothing outside this function reads the value -- a verifier
     # recomputes it from the peer's own advertisement, and it is never stored or

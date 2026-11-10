@@ -1,6 +1,7 @@
 from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
+from src.utils import activity_window, on_close
 from src.utils.cost_functions import price_bound
 from src.utils.cost_functions.execution_cost import launch_charge_mu
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost
@@ -114,4 +115,9 @@ def generate_estimated_cost(
 
         # price_bounded, price_volatility and volatility_period_seconds.
         **price_bound.to_fields(bound),
+
+        # What the node does at closing time, from its own configuration and never from
+        # its load (#344): the next close as an absolute time, 0 if none is scheduled.
+        closes_at=activity_window.next_close(),
+        on_close=on_close.to_enum(activity_window.effective_on_close()),
     )

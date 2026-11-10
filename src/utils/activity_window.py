@@ -29,7 +29,7 @@ stretch could not be expressed at all. The node is open whenever the clock falls
 *any* configured window; `ON_CLOSE` is one policy shared by all of them, because what
 happens to running work when the node closes does not depend on which window it was in.
 """
-from datetime import datetime, time as clock
+from datetime import datetime, timedelta, time as clock
 from typing import List, Optional, Tuple
 
 from src.utils.config import ConfigManager
@@ -42,11 +42,13 @@ SECTION = "activity_window"
 # What closing time does to work already running.
 ON_CLOSE_REFUSE = "refuse"
 ON_CLOSE_STOP = "stop"
+ON_CLOSE_HIBERNATE = "hibernate"
 DEFAULT_ON_CLOSE = ON_CLOSE_REFUSE
 
 # Said once per process rather than per call: this is read on every admission decision,
 # and a config typo would otherwise print a line per launch.
 _malformed_announced = False
+_force_announced = False
 
 
 def _log(message: str) -> None:
@@ -178,7 +180,96 @@ def stops_running_instances() -> bool:
     work alone. Destroying an instance is the irreversible half of this feature, so it
     happens only when the config asks for it by name.
     """
-    return _text("ON_CLOSE", DEFAULT_ON_CLOSE).lower() == ON_CLOSE_STOP
+    return on_close_policy() == ON_CLOSE_STOP
+
+
+def on_close_policy() -> str:
+    """The configured ``ON_CLOSE`` as one of the three names. A value nobody recognises
+    reads as `refuse`: the other two destroy or pause work, so they need the exact name."""
+    value = _text("ON_CLOSE", DEFAULT_ON_CLOSE).lower()
+    return value if value in (ON_CLOSE_STOP, ON_CLOSE_HIBERNATE) else ON_CLOSE_REFUSE
+
+
+def effective_on_close() -> str:
+    """What this node tells a client it will do at closing time (issue #344).
+
+    With no window nothing ever closes, so the node promises nothing and says `refuse`,
+    whatever ``ON_CLOSE`` holds. This is the value that a quote and a launch row keep.
+    """
+    return on_close_policy() if windows() else ON_CLOSE_REFUSE
+
+
+def force_actual_on_close_policy() -> bool:
+    """Whether every instance gets the current ``ON_CLOSE``, not the one in its row
+    (``activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY``, default false)."""
+    global _force_announced
+    try:
+        forced = env_manager.get(f"{SECTION}.FORCE_ACTUAL_ON_CLOSE_POLICY", False) is True
+    except Exception:
+        return False
+    if forced and not _force_announced:
+        _force_announced = True
+        _log(f"[WINDOW] {SECTION}.FORCE_ACTUAL_ON_CLOSE_POLICY is true: this node ignores "
+             "the on-close action that each instance was quoted and uses the current "
+             f"{SECTION}.ON_CLOSE for all of them. A peer can score this.")
+    return forced
+
+
+def _boundary_times(now: datetime, pick) -> List[datetime]:
+    """The local datetimes after ``now``, in the next three days, at which a window
+    ``pick`` edge falls (``pick`` takes a (start, end) pair and returns the edge)."""
+    found = []
+    for offset in range(3):
+        day = (now + timedelta(days=offset)).date()
+        for window in windows():
+            moment = datetime.combine(day, pick(window))
+            if moment > now:
+                found.append(moment)
+    return sorted(found)
+
+
+def next_close(now: Optional[datetime] = None) -> int:
+    """The unix time of the next close of the window after ``now``, or 0.
+
+    An absolute time, so it does not change while an answer travels. It is the end of a
+    span at which the node is not open: where one window ends and the next starts at the
+    same minute the node never closes, and that edge is not a close. 0 when there is no
+    window, or when no close is found in the next three days (an always-open schedule).
+    """
+    now = now or datetime.now()
+    for moment in _boundary_times(now, lambda window: window[1]):
+        if not is_open(moment):
+            return int(moment.timestamp())
+    return 0
+
+
+def next_open(now: Optional[datetime] = None) -> int:
+    """The unix time of the next opening of the window after ``now``, or 0 if there is
+    none. An edge where one window starts as another ends is not an opening."""
+    now = now or datetime.now()
+    for moment in _boundary_times(now, lambda window: window[0]):
+        if is_open(moment) and not is_open(moment - timedelta(seconds=1)):
+            return int(moment.timestamp())
+    return 0
+
+
+def utc_spans(now: Optional[datetime] = None) -> List[Tuple[int, int]]:
+    """The windows as (start_minute, end_minute) pairs in minutes from 00:00 UTC.
+
+    Converted with the UTC offset in force on the day of ``now``, so the answer moves
+    when the offset does (daylight saving) and the announcement is built again from it.
+    A span whose two edges fall in the same UTC minute is left out.
+    """
+    day = (now or datetime.now()).date()
+    spans = []
+    for start, end in windows():
+        edges = []
+        for edge in (start, end):
+            utc = datetime.utcfromtimestamp(datetime.combine(day, edge).timestamp())
+            edges.append(utc.hour * 60 + utc.minute)
+        if edges[0] != edges[1]:
+            spans.append((edges[0], edges[1]))
+    return spans
 
 
 def closed_reason() -> str:

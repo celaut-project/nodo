@@ -371,8 +371,13 @@ def execute(
     check_envs: bool = False,
     ask_envs: bool = False,
     receipt_path: str | None = None,
+    show_closing: bool = False,
 ):
     """Launch ``service`` through this node's gateway.
+
+    ``show_closing`` prints what this node does at closing time before the launch (#344).
+    Only `nodo execute` asks for it: ``core_services.runtime`` calls this from inside the
+    node, and it must not ask its own gateway for a price.
 
     ``receipt_path``, when given, gets the signed start receipt (#419) as one JSON line,
     the shape ``nodo receipt verify`` reads.
@@ -405,6 +410,12 @@ def execute(
             envs = complete_envs(service_hash=service, envs=envs, interactive=ask_envs)
             if envs is None:
                 return
+
+        # What this node does at closing time, before the launch (#344). Never a reason
+        # to stop the launch.
+        if show_closing and not silent:
+            from src.commands.closing_display import print_closing_before_launch
+            print_closing_before_launch(service)
 
         response = launch_via_gateway(
             service=service,
