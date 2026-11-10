@@ -90,11 +90,24 @@ def child_start_cost_mu(
 ) -> int:
     """What the start of the instances of one workload spends, apart from their balances.
 
-    ``count`` times the build of the child: ``pricing.BUILD_MU`` when the workload names
-    a service (a hash or a complete service) that is not built here, and 0 when it names
-    none, when the service is built here already and while the node is free. A service
-    that declares its own ``initial_environment_workload`` adds the builds of its
-    children, as its own ``cost`` does.
+    ``count`` times the build of the child: ``pricing.BUILD_MU`` when the child may need
+    a build here, and 0 when the node knows that it does not, and while the node is free.
+
+    | Hash of the service | Image          | Build in the quote |
+    |---------------------|----------------|--------------------|
+    | known               | built here     | 0                  |
+    | known               | not built here | ``BUILD_MU``       |
+    | not known           | any            | ``BUILD_MU``       |
+
+    The hash is known when the workload gives a hash or a complete service. A workload
+    that gives only resources has none, and the node cannot tell if the image is built:
+    it assumes that it is not (#638). A quote that is too low cannot be recovered, because
+    the parent runs out of balance before it starts the child. A quote that is too high
+    can: the balance that the parent does not spend goes back to it when it stops. The
+    price is flat, so it is exact when the image is not built.
+
+    A service that declares its own ``initial_environment_workload`` adds the builds of
+    its children, as its own ``cost`` does.
 
     No balance (#636, 9). Each child gets its balance in its own ``StartService``: the
     ``initial_mu`` that the parent sends, or with none the default of the node that runs
@@ -106,8 +119,8 @@ def child_start_cost_mu(
         return 0
     service = workload.dependency.service
     service_hash = _workload_hash(workload)
-    build = prices().build_mu if service_hash and not is_built(service_hash) \
-        and not is_free(scarcity) else 0
+    needs_build = True if not service_hash else not is_built(service_hash)
+    build = prices().build_mu if needs_build and not is_free(scarcity) else 0
     grandchildren = initial_children_mu(service, scarcity=scarcity) \
         if service.initial_environment_workload else 0
     return int(count * (build + grandchildren))

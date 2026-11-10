@@ -59,10 +59,11 @@ def _unbuilt():
 
 
 class OneWorkloadTests(unittest.TestCase):
-    def test_a_workload_with_no_service_named_costs_nothing(self):
-        # No build to pay, and its balance is not in the cost (#636, 9).
+    def test_a_workload_with_no_service_named_costs_the_build(self):
+        # The hash is not known, so the node assumes that the image is not built (#638).
+        # Its balance is not in the cost (#636, 9).
         with _config():
-            self.assertEqual(child_start_cost_mu(_workload(), scarcity=IDLE), 0)
+            self.assertEqual(child_start_cost_mu(_workload(), scarcity=IDLE), BUILD)
 
     def test_count_multiplies_the_build(self):
         with _config(), _unbuilt():

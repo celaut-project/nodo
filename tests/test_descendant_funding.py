@@ -89,9 +89,12 @@ class TheDefaultBalanceTests(unittest.TestCase):
         with _config(), hashed, unbuilt, patch.object(start_funding, "is_free", return_value=True):
             self.assertEqual(initial_children_mu(_service(_workload(count=2)), scarcity=IDLE), 0)
 
-    def test_a_workload_that_names_no_service_costs_nothing(self):
+    def test_a_workload_that_names_no_service_costs_the_build(self):
+        # The node cannot tell that the image is built, so it assumes that it is not (#638).
+        # A quote that is too low cannot be recovered, and one that is too high can.
         with _config():
-            self.assertEqual(initial_children_mu(_service(_workload(count=2)), scarcity=IDLE), 0)
+            self.assertEqual(initial_children_mu(_service(_workload(count=2)), scarcity=IDLE),
+                             2 * BUILD)
 
     def test_possible_environment_workload_adds_nothing(self):
         hashed, unbuilt = _unbuilt()

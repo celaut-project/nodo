@@ -425,10 +425,21 @@ No balance of a child is in `cost` (#636, 9). Each child gets its balance in its
 that runs it (`cost` of the child plus the funding sum for `DEFAULT_INITIAL_PERIODS`). The
 parent pays that `child_start` out of its own balance, so a client that funds the parent for
 `N` periods funds the starts of the children from the same balance: a parent whose children
-start with the default balance needs more than one period of its own. The build is 0 when the
-workload names no service (neither a `hash` nor a complete `service`), when the child is
-built on this node, and while the node is free (`start_funding.initial_children_mu`). A child
-that declares its own `initial_environment_workload` adds the builds of its own children.
+start with the default balance needs more than one period of its own. The build is `BUILD_MU`
+unless the node knows that the child needs none (`start_funding.initial_children_mu`, #638):
+
+| Hash of the service of the workload | Image | Build in the quote |
+|---|---|---|
+| known (a `hash`, or a complete `service`) | built on this node | 0 |
+| known | not built on this node | `BUILD_MU` |
+| not known (the workload gives only resources) | any | `BUILD_MU` |
+
+With no hash the node cannot tell which image to look for, so it assumes that the image is not
+built. A quote that is too low cannot be recovered: the parent runs out of balance before it
+starts the child, and the child never starts. A quote that is too high can be recovered: the
+balance that the parent does not spend goes back to it when it stops. Declare the `hash` of the
+child in the workload to get the exact price. The build is also 0 while the node is free. A
+child that declares its own `initial_environment_workload` adds the builds of its own children.
 
 - The quote does not probe peers. It uses all the groups of a clause, not only the ones that
   fit now. This can over-quote. An over-quote is safe: the balance that the instance does not
