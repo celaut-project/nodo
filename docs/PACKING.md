@@ -1071,6 +1071,8 @@ With no key, the packer writes the default. `false` writes no declaration. An ob
 
 Ignore a verb that you do not know: a later node can add verbs. The node waits until `<t>` or until the VM ends, whichever comes first, and then stops or hibernates the instance as it did before. The wait is `instances.STOP_GRACE_SECONDS` of the node (15 seconds by default, see `docs/CONFIG.md`); the service cannot ask for more. To say "done" before `<t>`, end the VM: the entrypoint (PID 1) exits, or the service powers the guest off (`poweroff -f`). The node sees it within about a second. The instance is alive and charged during the wait.
 
+If the node cannot write the line (for example, the console of the VM does not answer), it logs the failure and still waits for the whole `<t>` before it stops the instance: a service that declared the notice is never stopped before the limit because of a failed write. If the service ends its VM, the wait ends. If a hibernation fails when the wait is over, the node stops the instance.
+
 No notice is written when the instance asks for its own hibernation (it already knows), and none for `burnall`, an instance out of balance, a lost or panicked VM, a failed launch or the janitor: those stop at once.
 
 **How to read the device.** `/dev/hvc0` is a tty in canonical mode: a `read` returns one line.

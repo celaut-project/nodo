@@ -26,6 +26,7 @@ instance that asks for its own hibernation. They call ``stop_instance`` or
 ``hibernate_instance`` and never come here.
 """
 
+import threading
 import time
 from typing import Optional
 
@@ -50,6 +51,14 @@ POLL_SECONDS = 0.25
 #: end it: both are safe.
 TICK_SLACK_SECONDS = 5.0
 
+#: How many callers wait after a notice at the same time (``stop_with_notice`` and
+#: ``hibernate_with_notice``). The other callers queue for a place, and their own wait
+#: starts when they get it. A caller that waits holds a thread of the gRPC server, so this
+#: stays well under the size of its pool.
+MAX_CONCURRENT_WAITS = 16
+
+_wait_places = threading.BoundedSemaphore(MAX_CONCURRENT_WAITS)
+
 _VERB = {STOP: notice.STOP, HIBERNATE: notice.HIBERNATE}
 
 
@@ -72,9 +81,14 @@ def begin_notice(
     """Mark the instance as stopping and write the notice. Returns the limit (unix time).
 
     None means that there is no notice, and the caller stops the instance at once: the
-    wait is 0, the instance is not a local one that runs, its VM has no console of the
-    notice (its service declares none, or it started before this existed), or the node
-    could not write the line. If a notice is already out, it returns the limit of that one.
+    wait is 0, the instance is not a local one that runs, or its VM has no console of the
+    notice (its service declares none, or it started before this existed). If a notice is
+    already out, it returns the limit of that one.
+
+    The service declared a notice, so the node does not stop it before the limit just
+    because the line did not arrive: it could be in the middle of a write. The row stays
+    marked, the node logs the failure, and the caller waits for the whole limit (or for
+    the end of the VM).
     """
     if kind not in _VERB:
         raise ValueError(f"unknown kind of stop: {kind!r}")
@@ -107,15 +121,16 @@ def _begin_notice(
         deadline = notice.grace_deadline(grace)
         if not sc.begin_local_stopping(token, deadline, kind, reason, credit):
             return None
-        if not notice.deliver(token, _VERB[kind], deadline):
-            log.LOGGER(
-                f"Could not write the notice to {token}; it is stopped with no notice."
-            )
-            sc.clear_local_stopping(token)
-            return None
-    log.LOGGER(
-        f"Wrote {_VERB[kind]} to {token}: the node stops it at {int(deadline)} at the latest."
-    )
+        delivered = notice.deliver(token, _VERB[kind], deadline)
+    if delivered:
+        log.LOGGER(
+            f"Wrote {_VERB[kind]} to {token}: the node stops it at {int(deadline)} at the latest."
+        )
+    else:
+        log.LOGGER(
+            f"Could not write {_VERB[kind]} to {token}. Its service declared a notice, so the "
+            f"node still waits until {int(deadline)} before it stops it."
+        )
     return deadline
 
 
@@ -141,9 +156,10 @@ def stop_with_notice(
     that runs it writes the notice when it gets the ``StopService`` call, and that call has
     no deadline of its own, so it waits for the wait of the peer.
     """
-    deadline = begin_notice(token, STOP, reason, credit)
-    if deadline is not None:
-        wait_until(token, deadline)
+    with _wait_places:
+        deadline = begin_notice(token, STOP, reason, credit)
+        if deadline is not None:
+            wait_until(token, deadline)
     refund = stop_instance(token=token, credit=credit, reason=reason)
     if refund is None and deadline is not None and not sc.internal_instance_exists(id=token):
         # The tick ended the stop between the wait and this call, and the leftover went
@@ -164,10 +180,12 @@ def hibernate_with_notice(
     if not sc.internal_instance_exists(id=token) or sc.is_local_instance_hibernated(id=token):
         return hibernation.hibernate_instance(token, reason=reason)
     hibernation.check_can_hibernate(token)
-    deadline = begin_notice(token, HIBERNATE, reason)
+    with _wait_places:
+        deadline = begin_notice(token, HIBERNATE, reason)
+        if deadline is not None:
+            wait_until(token, deadline)
     if deadline is None:
         return hibernation.hibernate_instance(token, reason=reason)
-    wait_until(token, deadline)
     try:
         return hibernation.hibernate_instance(token, reason=reason)
     except Exception:
@@ -186,8 +204,11 @@ def finish_stop(token: str, stopping: dict) -> None:
             try:
                 hibernation.hibernate_instance(token, reason=stopping["reason"])
                 return
-            except hibernation.HibernationRefused as e:
-                log.LOGGER(f"Instance {token} cannot be hibernated ({e}); stopping it.")
+            except Exception as e:
+                # Refused, or any other failure (the VM ended in a state that the
+                # hibernation cannot save, a full disk). The row must not stay marked for
+                # the tick to try again at each pass, so the instance is stopped.
+                log.LOGGER(f"Instance {token} could not be hibernated ({e}); stopping it.")
                 stop_instance(token=token, reason=dead_instances.ACTIVITY_WINDOW)
                 return
         stop_instance(

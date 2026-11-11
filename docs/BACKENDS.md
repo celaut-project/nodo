@@ -100,7 +100,10 @@ things hold it:
    `socket=` for the console, and the path of the pty is in `GET /api/v1/vm.info`
    (`config.console.file`). The node reads it there at each notice, so nothing is kept
    and a restart of the node or a wake (a new CH process, a new pty) needs nothing. The
-   runtime state says `notice_console: pty`. On QEMU it is a `virtconsole` on a
+   runtime state says `notice_console: pty`. The node writes only to a pty whose master the
+   CH process of the VM holds (`/proc/<pid>/fdinfo`, `tty-index`), because `vm.info` is the
+   answer of a process that a guest could take over; it checks this before it opens the
+   slave and again after. On QEMU it is a `virtconsole` on a
    `virtio-serial-pci`, on a chardev socket in the directory of the control sockets.
    On both, the kernel `console=` stays on the serial port. `src/utils/notice.py`
    `deliver` picks the transport.

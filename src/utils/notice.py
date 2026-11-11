@@ -254,6 +254,12 @@ def _ch_api_socket(vmachine_id: str) -> Optional[str]:
     return path if isinstance(path, str) and path else None
 
 
+def _ch_pid(vmachine_id: str) -> Optional[int]:
+    """The PID of the CH process of the VM, from its runtime state, else None."""
+    pid = (_runtime_state(vmachine_id) or {}).get("pid")
+    return pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else None
+
+
 def has_device(vmachine_id: str) -> bool:
     """Whether the VM ``vmachine_id`` has the console of the notice.
 
@@ -313,6 +319,38 @@ def _is_pty_slave_path(path: str) -> bool:
     return head == "/dev/pts" and number.isdigit()
 
 
+def owns_pty(pid: int, path: str) -> bool:
+    """Whether the process ``pid`` holds the master of the pty slave at ``path``.
+
+    ``vm.info`` is the answer of the CH process, so the node does not trust the path
+    that it gives: a CH that a guest took over could name the pty of another session.
+    The node writes only to a pty that this process owns. A process that holds the
+    master of ``/dev/pts/<n>`` has a ``/dev/ptmx`` descriptor whose ``fdinfo`` says
+    ``tty-index: <n>``. False if the node cannot read the process (it ended, or the node
+    has no right to look): then nothing is written.
+    """
+    if not _is_pty_slave_path(path):
+        return False
+    number = os.path.realpath(path).rpartition("/")[2]
+    fd_dir = f"/proc/{int(pid)}/fd"
+    try:
+        descriptors = os.listdir(fd_dir)
+    except OSError:
+        return False
+    for descriptor in descriptors:
+        try:
+            if os.readlink(f"{fd_dir}/{descriptor}") != "/dev/ptmx":
+                continue
+            with open(f"/proc/{int(pid)}/fdinfo/{descriptor}") as info:
+                for entry in info:
+                    key, _, value = entry.partition(":")
+                    if key == "tty-index" and value.strip() == number:
+                        return True
+        except OSError:
+            continue
+    return False
+
+
 def _discard(fd: int, budget: int) -> int:
     """Read what is there, up to ``budget`` bytes, and throw it away. Never waits."""
     left = budget
@@ -348,8 +386,14 @@ def _make_raw(fd: int) -> None:
     termios.tcsetattr(fd, termios.TCSANOW, attrs)
 
 
-def write_pty(path: str, payload: bytes, *, timeout: float = CH_TIMEOUT_SECONDS) -> bool:
+def write_pty(
+    path: str, payload: bytes, *, owner_pid: int, timeout: float = CH_TIMEOUT_SECONDS
+) -> bool:
     """Write ``payload`` to the pty slave at ``path``. True if all of it was written.
+
+    ``owner_pid`` is the process that must hold the master (the CH process of the VM).
+    The node checks it before it opens the slave and again after, and writes nothing to
+    a pty that another process owns (see :func:`owns_pty`).
 
     The node opens the slave for this write only, with ``O_NOCTTY`` (the pty never becomes
     a controlling tty of the node) and ``O_NONBLOCK`` (a CH that does not read never holds
@@ -357,7 +401,7 @@ def write_pty(path: str, payload: bytes, *, timeout: float = CH_TIMEOUT_SECONDS)
     close on the host does not hang up the guest tty. What the guest wrote is read and
     thrown away, up to ``DISCARD_LIMIT_BYTES``, and never parsed.
     """
-    if not _is_pty_slave_path(path):
+    if not owns_pty(owner_pid, path):
         return False
     try:
         fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK | os.O_CLOEXEC)
@@ -365,6 +409,9 @@ def write_pty(path: str, payload: bytes, *, timeout: float = CH_TIMEOUT_SECONDS)
         return False
     try:
         if not (stat.S_ISCHR(os.fstat(fd).st_mode) and os.isatty(fd)):
+            return False
+        # The pty number can pass to another session between the check and the open.
+        if not owns_pty(owner_pid, path):
             return False
         _make_raw(fd)
         budget = DISCARD_LIMIT_BYTES
@@ -401,10 +448,13 @@ def deliver(vmachine_id: str, verb: str, deadline: float) -> bool:
     api_socket = _ch_api_socket(vmachine_id)
     if api_socket is None:
         return False
+    pid = _ch_pid(vmachine_id)
+    if pid is None:
+        return False
     pty = ch_console_pty(api_socket)
     if pty is None:
         return False
-    return write_pty(pty, line(verb, deadline))
+    return write_pty(pty, line(verb, deadline), owner_pid=pid)
 
 
 def send(path: str, verb: str, deadline: float, *, timeout: float = 2.0) -> bool:

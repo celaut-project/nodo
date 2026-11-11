@@ -10,6 +10,7 @@ import os
 import select
 import socket
 import sqlite3
+import subprocess
 import tempfile
 import threading
 import time
@@ -353,15 +354,15 @@ class CloudHypervisorPtyTests(unittest.TestCase):
     @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
     def test_the_line_reaches_the_master_as_it_is_written(self):
         master, path = self._pty()
-        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1700000000)))
+        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1700000000), owner_pid=os.getpid()))
         self.assertEqual(self._read_all(master), b"STOP 1700000000\n")
 
     @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
     def test_a_second_open_and_close_also_reaches_the_master(self):
         """The spike of #645 lost a line after a second open of the pty; the node opens it per line."""
         master, path = self._pty()
-        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1)))
-        self.assertTrue(notice.write_pty(path, notice.line(notice.HIBERNATE, 2)))
+        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1), owner_pid=os.getpid()))
+        self.assertTrue(notice.write_pty(path, notice.line(notice.HIBERNATE, 2), owner_pid=os.getpid()))
         self.assertEqual(self._read_all(master), b"STOP 1\nHIBERNATE 2\n")
 
     @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
@@ -374,7 +375,7 @@ class CloudHypervisorPtyTests(unittest.TestCase):
         attrs[3] |= termios.ECHO | termios.ICANON
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
         os.close(fd)
-        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 5)))
+        self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 5), owner_pid=os.getpid()))
         self.assertEqual(self._read_all(master), b"STOP 5\n")  # no \r\n
 
     @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
@@ -388,7 +389,7 @@ class CloudHypervisorPtyTests(unittest.TestCase):
             pass
         started = time.time()
         with mock.patch.object(notice, "DISCARD_LIMIT_BYTES", 1024):
-            self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1)))
+            self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1), owner_pid=os.getpid()))
         self.assertLess(time.time() - started, 1.0)
         self.assertEqual(self._read_all(master), b"STOP 1\n")
 
@@ -396,15 +397,15 @@ class CloudHypervisorPtyTests(unittest.TestCase):
     def test_the_pty_never_becomes_a_controlling_tty_of_the_node(self):
         master, path = self._pty()
         with mock.patch.object(notice.os, "open", wraps=os.open) as opened:
-            self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1)))
+            self.assertTrue(notice.write_pty(path, notice.line(notice.STOP, 1), owner_pid=os.getpid()))
         flags = opened.call_args[0][1]
         self.assertTrue(flags & os.O_NOCTTY and flags & os.O_NONBLOCK)
 
     def test_a_path_that_is_not_a_pty_is_refused(self):
         regular = os.path.join(self.dir.name, "f")
         Path(regular).write_text("")
-        self.assertFalse(notice.write_pty(regular, b"STOP 1\n"))
-        self.assertFalse(notice.write_pty("/dev/pts/999999", b"STOP 1\n"))
+        self.assertFalse(notice.write_pty(regular, b"STOP 1\n", owner_pid=os.getpid()))
+        self.assertFalse(notice.write_pty("/dev/pts/999999", b"STOP 1\n", owner_pid=os.getpid()))
         self.assertEqual(Path(regular).read_text(), "")
 
     def test_has_device_reads_the_runtime_state_of_a_ch_vm(self):
@@ -421,7 +422,7 @@ class CloudHypervisorPtyTests(unittest.TestCase):
 
     def test_deliver_finds_the_pty_again_at_each_notice(self):
         """Nothing is kept between notices: a restart of the node finds the pty the same way."""
-        state = {"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty"}
+        state = {"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty", "pid": 4242}
         missing = os.path.join(self.dir.name, "none.sock")
         with mock.patch.object(notice, "socket_path", return_value=missing), \
                 mock.patch.object(notice, "_runtime_state", return_value=state), \
@@ -432,9 +433,49 @@ class CloudHypervisorPtyTests(unittest.TestCase):
         self.assertEqual(found.call_count, 2)
         self.assertEqual([c.args for c in wrote.call_args_list],
                          [("/dev/pts/3", b"STOP 10\n"), ("/dev/pts/9", b"HIBERNATE 20\n")])
+        self.assertEqual([c.kwargs for c in wrote.call_args_list],
+                         [{"owner_pid": 4242}, {"owner_pid": 4242}])
+
+    @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
+    def test_owns_pty_is_true_for_the_holder_of_the_master_only(self):
+        master, path = self._pty()
+        self.assertTrue(notice.owns_pty(os.getpid(), path))
+        other, other_path = self._pty()
+        self.assertTrue(notice.owns_pty(os.getpid(), other_path))
+        self.assertFalse(notice.owns_pty(os.getpid(), "/dev/pts/999999"))
+        child = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(child.kill)
+        self.assertFalse(notice.owns_pty(child.pid, path))  # holds no master
+        self.assertFalse(notice.owns_pty(2 ** 22 + 1, path))  # no such process
+
+    @unittest.skipUnless(_LINUX_PTS, "needs /dev/pts")
+    def test_a_pty_that_the_ch_process_does_not_own_gets_nothing(self):
+        """A CH that a guest took over names the pty of another session in ``vm.info``."""
+        import termios
+        master, path = self._pty()
+        child = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(child.kill)
+        fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+        before = termios.tcgetattr(fd)
+        os.close(fd)
+        self.assertFalse(notice.write_pty(path, notice.line(notice.STOP, 1), owner_pid=child.pid))
+        self.assertEqual(self._read_all(master), b"")  # nothing written
+        fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+        self.assertEqual(termios.tcgetattr(fd), before)  # not made raw again
+        os.close(fd)
+
+    def test_deliver_with_no_pid_for_ch_is_false(self):
+        state = {"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty"}
+        missing = os.path.join(self.dir.name, "none.sock")
+        with mock.patch.object(notice, "socket_path", return_value=missing), \
+                mock.patch.object(notice, "_runtime_state", return_value=state), \
+                mock.patch.object(notice, "ch_console_pty", return_value="/dev/pts/3"), \
+                mock.patch.object(notice, "write_pty") as wrote:
+            self.assertFalse(notice.deliver("x", notice.STOP, 10))
+        wrote.assert_not_called()
 
     def test_deliver_with_no_pty_is_false(self):
-        state = {"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty"}
+        state = {"virtualizer": "ch", "control_socket": self.api, "notice_console": "pty", "pid": 4242}
         missing = os.path.join(self.dir.name, "none.sock")
         with mock.patch.object(notice, "socket_path", return_value=missing), \
                 mock.patch.object(notice, "_runtime_state", return_value=state), \
@@ -544,10 +585,14 @@ class BeginNoticeTests(StoppingTestCase):
     def test_no_notice_for_an_instance_that_is_not_a_local_one(self):
         self.assertIsNone(stopping.begin_notice("delegated", stopping.STOP, "manual_kill"))
 
-    def test_a_line_that_cannot_be_written_leaves_no_mark(self):
-        with mock.patch.object(stopping.notice, "deliver", return_value=False):
-            self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "manual_kill"))
-        self.assertIsNone(self.sc.get_local_stopping("a"))
+    def test_a_line_that_cannot_be_written_still_gives_the_whole_wait(self):
+        """The service declared a notice: a line that did not arrive is no reason to stop it
+        before the limit. The row stays marked, and the caller waits."""
+        with mock.patch.object(stopping.time, "time", return_value=1000.0), \
+                mock.patch.object(stopping.notice, "deliver", return_value=False):
+            deadline = stopping.begin_notice("a", stopping.STOP, "manual_kill")
+        self.assertEqual(deadline, 1015.0)
+        self.assertEqual(self.sc.get_local_stopping("a")["until"], 1015.0)
 
     def test_a_failure_of_the_notice_never_keeps_the_node_from_stopping(self):
         with mock.patch.object(stopping.notice, "has_device", side_effect=RuntimeError("x")):
@@ -579,6 +624,64 @@ class StopWithNoticeTests(StoppingTestCase):
         self.assertGreaterEqual(clock["now"], 1015.0)
         self.assertEqual(self.sent, [("STOP", 1015)])
         stop.assert_called_once_with(token="a", credit=True, reason="manual_kill")
+
+    def test_a_line_that_cannot_be_written_does_not_stop_it_before_the_limit(self):
+        clock = {"now": 1000.0}
+
+        def sleep(seconds):
+            clock["now"] += seconds
+
+        with mock.patch.object(stopping.time, "time", side_effect=lambda: clock["now"]), \
+                mock.patch.object(stopping.time, "sleep", side_effect=sleep), \
+                mock.patch.object(stopping.notice, "deliver", return_value=False), \
+                mock.patch.object(stopping, "stop_instance", return_value=3) as stop:
+            self.assertEqual(stopping.stop_with_notice("a"), 3)
+        self.assertGreaterEqual(clock["now"], 1015.0)
+        stop.assert_called_once()
+
+    def test_the_callers_that_wait_are_limited_and_the_others_queue(self):
+        """With ``MAX_CONCURRENT_WAITS`` places taken, the next caller writes no notice and
+        waits for a place. Its own wait starts when it gets one."""
+        places = threading.BoundedSemaphore(2)
+        inside, release, started = [], threading.Event(), threading.Event()
+        peak = {"now": 0, "max": 0}
+        lock = threading.Lock()
+
+        def wait_until(token, deadline):
+            with lock:
+                peak["now"] += 1
+                peak["max"] = max(peak["max"], peak["now"])
+                inside.append(token)
+                if len(inside) == 2:
+                    started.set()
+            release.wait(5)
+            with lock:
+                peak["now"] -= 1
+
+        with mock.patch.object(stopping, "_wait_places", places), \
+                mock.patch.object(stopping, "wait_until", side_effect=wait_until), \
+                mock.patch.object(stopping, "begin_notice", return_value=2000.0), \
+                mock.patch.object(stopping, "stop_instance", return_value=1):
+            threads = [threading.Thread(target=stopping.stop_with_notice, args=(t,))
+                       for t in ("a", "b", "c", "d")]
+            for thread in threads:
+                thread.start()
+            self.assertTrue(started.wait(5))
+            time.sleep(0.2)
+            self.assertEqual(len(inside), 2)  # the other two queue
+            release.set()
+            for thread in threads:
+                thread.join(5)
+        self.assertEqual(len(inside), 4)
+        self.assertEqual(peak["max"], 2)
+
+    def test_the_places_are_given_back_when_a_wait_fails(self):
+        places = threading.BoundedSemaphore(1)
+        with mock.patch.object(stopping, "_wait_places", places), \
+                mock.patch.object(stopping, "begin_notice", side_effect=RuntimeError("x")):
+            for _ in range(2):  # the second call would block if the first kept the place
+                with self.assertRaises(RuntimeError):
+                    stopping.stop_with_notice("a")
 
     def test_the_wait_ends_early_when_the_vm_ends(self):
         clock = {"now": 1000.0}
@@ -701,6 +804,16 @@ class TickTests(StoppingTestCase):
             stopping.finish_due_stops(now=until + 100)
         stop.assert_called_once_with(token="a", reason=dead_instances.ACTIVITY_WINDOW)
 
+    def test_a_hibernation_that_fails_for_any_reason_is_a_stop(self):
+        """Not a row that stays marked for the tick to try again at each pass."""
+        stopping.begin_notice("a", stopping.HIBERNATE, dead_instances.HIBERNATED_BY_WINDOW)
+        until = self.sc.get_local_stopping("a")["until"]
+        with mock.patch.object(hibernation, "hibernate_instance",
+                               side_effect=OSError("no space left")), \
+                mock.patch.object(stopping, "stop_instance") as stop:
+            self.assertEqual(stopping.finish_due_stops(now=until + 100), 1)
+        stop.assert_called_once_with(token="a", reason=dead_instances.ACTIVITY_WINDOW)
+
     def test_a_failure_does_not_take_the_tick_down(self):
         stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
         with mock.patch.object(stopping, "stop_instance", side_effect=RuntimeError("busy")):
@@ -771,6 +884,45 @@ class WindowTests(StoppingTestCase):
         hib.assert_not_called()
         stop.assert_not_called()
         self.assertEqual(self.sc.get_local_stopping("a")["kind"], "hibernate")
+
+    def test_the_window_puts_the_instances_down_together(self):
+        """Each notice writes to a VM and may take seconds: the tick does not add them."""
+        for number in range(2, 5):
+            self.sc.add_local_instance(
+                father_id="father", container_ip=f"192.168.200.{number + 6}",
+                container_id=str(number), name=f"web{number}", balance_mu=100,
+                serialized_instance="x", service_id="svc", virtualizer="ch",
+                mem_limit=1000, disk_space=500, cpu_period=100, cpu_quota=50, envs="{}")
+        ids = self.sc.get_all_internal_containers_ids()
+        self.assertEqual(len(ids), 4)
+        barrier = threading.Barrier(4, timeout=5)
+
+        def deliver(token, verb, deadline):
+            barrier.wait()  # only passes if the four notices run at the same time
+            return True
+
+        with mock.patch.object(stopping.notice, "deliver", side_effect=deliver):
+            stop, hib = self._close("stop")
+        self.assertEqual(sorted(self.sc.get_stopping_local_instances()), sorted(ids))
+        stop.assert_not_called()
+
+    def test_a_failure_of_one_instance_does_not_keep_the_window_from_the_others(self):
+        self.sc.add_local_instance(
+            father_id="father", container_ip="192.168.200.9", container_id="b",
+            name="web-b", balance_mu=100, serialized_instance="x", service_id="svc",
+            virtualizer="ch", mem_limit=1000, disk_space=500, cpu_period=100,
+            cpu_quota=50, envs="{}")
+        calls = []
+
+        def begin(token, kind, reason, *args, **kwargs):
+            calls.append(token)
+            if token == "a":
+                raise RuntimeError("boom")
+            return 1.0
+
+        with mock.patch.object(stopping, "begin_notice", side_effect=begin):
+            self._close("stop")
+        self.assertIn("b", calls)
 
     def test_with_no_device_the_window_stops_at_once_as_before(self):
         with mock.patch.object(stopping.notice, "has_device", return_value=False):
