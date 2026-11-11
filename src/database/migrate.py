@@ -213,8 +213,7 @@ TABLES = {
             revive_failing_since DATETIME DEFAULT NULL,
             stopping_until REAL DEFAULT NULL,
             stopping_kind TEXT DEFAULT NULL,
-            stopping_reason TEXT DEFAULT NULL,
-            stopping_credit INTEGER DEFAULT NULL
+            stopping_reason TEXT DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -1034,13 +1033,12 @@ def create_tables(cursor):
         # The node wrote a notice to the service (#645) and waits for it. `stopping_until`
         # is the unix time at which the node stops the VM whatever happens. `stopping_kind`
         # is `stop` or `hibernate`, `stopping_reason` the reason that the stop or the
-        # hibernation records, and `stopping_credit` whether the stop credits the father.
+        # hibernation records. The stop always credits the father.
         # NULL on a row that is not stopping. The tick does not score such a row as lost,
         # and it ends the stop when the time has come or the VM has ended.
         "stopping_until": "REAL DEFAULT NULL",
         "stopping_kind": "TEXT DEFAULT NULL",
         "stopping_reason": "TEXT DEFAULT NULL",
-        "stopping_credit": "INTEGER DEFAULT NULL",
     })
     ensure_columns(cursor, "delegated_instances", {
         "launched_at": "DATETIME DEFAULT NULL",

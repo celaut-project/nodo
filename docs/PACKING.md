@@ -1073,7 +1073,7 @@ Ignore a verb that you do not know: a later node can add verbs. The node stops o
 
 If the node cannot write the line (for example, the console of the VM does not answer), it logs the failure and still waits for the whole `<t>` before it stops the instance: a service that declared the notice is never stopped before the limit because of a failed write. If the service ends its VM, the wait ends. If a hibernation fails when the wait is over, the node stops the instance.
 
-No notice is written when the instance asks for its own hibernation (it already knows), and none for `burnall`, an instance out of balance, a lost or panicked VM, a failed launch or the janitor: those stop at once.
+No notice is written when the instance asks for its own hibernation (it already knows), and none for `burnall` (which says so before it asks, and kills every service by force), an instance out of balance, a lost or panicked VM, a failed launch or the janitor: those stop at once.
 
 **How to read the device.** `/dev/hvc0` is a tty in canonical mode: a `read` returns one line.
 

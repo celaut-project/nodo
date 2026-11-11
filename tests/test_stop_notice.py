@@ -562,7 +562,6 @@ class BeginNoticeTests(StoppingTestCase):
         self.assertEqual(row["until"], 1015.0)
         self.assertEqual(row["kind"], "stop")
         self.assertEqual(row["reason"], dead_instances.MANUAL_KILL)
-        self.assertTrue(row["credit"])
 
     def test_a_second_request_joins_the_first_and_writes_nothing(self):
         first = stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
@@ -619,11 +618,11 @@ class StopWithNoticeTests(StoppingTestCase):
         with mock.patch.object(stopping.time, "time", side_effect=lambda: clock["now"]), \
                 mock.patch.object(stopping.time, "sleep", side_effect=sleep), \
                 mock.patch.object(stopping, "stop_instance", return_value=42) as stop:
-            refund = stopping.stop_with_notice("a", credit=True, reason="manual_kill")
+            refund = stopping.stop_with_notice("a", reason="manual_kill")
         self.assertEqual(refund, 42)
         self.assertGreaterEqual(clock["now"], 1015.0)
         self.assertEqual(self.sent, [("STOP", 1015)])
-        stop.assert_called_once_with(token="a", credit=True, reason="manual_kill")
+        stop.assert_called_once_with(token="a", reason="manual_kill")
 
     def test_a_line_that_cannot_be_written_does_not_stop_it_before_the_limit(self):
         clock = {"now": 1000.0}
@@ -705,20 +704,20 @@ class RequestTests(StoppingTestCase):
         with mock.patch.object(stopping.time, "time", return_value=1000.0), \
                 mock.patch.object(stopping.time, "sleep") as sleep, \
                 mock.patch.object(stopping, "stop_instance") as stop:
-            self.assertEqual(stopping.request_stop("a", credit=False, reason="manual_kill"), 0)
+            self.assertEqual(stopping.request_stop("a", reason="manual_kill"), 0)
         sleep.assert_not_called()
         stop.assert_not_called()
         self.assertEqual(self.sent, [("STOP", 1015)])
         row = self.sc.get_local_stopping("a")
-        self.assertEqual((row["until"], row["kind"], row["credit"]), (1015.0, "stop", False))
+        self.assertEqual((row["until"], row["kind"]), (1015.0, "stop"))
 
     def test_the_tick_ends_the_stop_that_a_request_marked(self):
         with mock.patch.object(stopping.time, "time", return_value=1000.0):
-            stopping.request_stop("a", credit=False, reason="manual_kill")
+            stopping.request_stop("a", reason="manual_kill")
         with mock.patch.object(stopping, "stop_instance") as stop:
             self.assertEqual(stopping.finish_due_stops(now=1014.0), 0)
             self.assertEqual(stopping.finish_due_stops(now=1015.0), 1)
-        stop.assert_called_once_with(token="a", credit=False, reason="manual_kill")
+        stop.assert_called_once_with(token="a", reason="manual_kill")  # the father is credited
 
     def test_a_second_stop_joins_the_first_and_writes_nothing(self):
         stopping.request_stop("a")
@@ -728,8 +727,8 @@ class RequestTests(StoppingTestCase):
     def test_a_stop_with_no_declaration_is_at_once_and_returns_the_refund(self):
         with mock.patch.object(stopping.notice, "has_device", return_value=False), \
                 mock.patch.object(stopping, "stop_instance", return_value=42) as stop:
-            self.assertEqual(stopping.request_stop("a", credit=True, reason="manual_kill"), 42)
-        stop.assert_called_once_with(token="a", credit=True, reason="manual_kill")
+            self.assertEqual(stopping.request_stop("a", reason="manual_kill"), 42)
+        stop.assert_called_once_with(token="a", reason="manual_kill")
         self.assertEqual(self.sent, [])
 
     def test_a_hibernation_marks_the_instance_and_returns_at_once(self):
@@ -768,14 +767,24 @@ class RequestTests(StoppingTestCase):
 @skip
 class TickTests(StoppingTestCase):
     def test_the_tick_ends_a_stop_at_the_limit(self):
-        stopping.begin_notice("a", stopping.STOP, dead_instances.ACTIVITY_WINDOW, credit=False)
+        stopping.begin_notice("a", stopping.STOP, dead_instances.ACTIVITY_WINDOW)
         until = self.sc.get_local_stopping("a")["until"]
         with mock.patch.object(stopping, "stop_instance") as stop:
             self.assertEqual(stopping.finish_due_stops(now=until - 1), 0)
             stop.assert_not_called()
             self.assertEqual(stopping.finish_due_stops(now=until), 1)
         stop.assert_called_once_with(
-            token="a", credit=False, reason=dead_instances.ACTIVITY_WINDOW)
+            token="a", reason=dead_instances.ACTIVITY_WINDOW)
+
+    def test_a_stop_always_credits_the_father(self):
+        """No row says otherwise: only ``nodo burnall`` stops with ``credit=False``, and it
+        gives no notice."""
+        stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
+        columns = [r["name"] for r in self.sc._execute("PRAGMA table_info(local_instances)").fetchall()]
+        self.assertNotIn("stopping_credit", columns)
+        with mock.patch.object(stopping, "stop_instance") as stop:
+            stopping.finish_due_stops(now=10 ** 12)
+        self.assertNotIn("credit", stop.call_args.kwargs)  # the default of stop_instance: True
 
     def test_the_tick_ends_a_stop_when_the_vm_ended(self):
         stopping.begin_notice("a", stopping.STOP, dead_instances.ACTIVITY_WINDOW)

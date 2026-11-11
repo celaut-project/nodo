@@ -130,6 +130,22 @@ class BurnallOrderingTests(unittest.TestCase):
             self._run(typed=None)
         confirm.assert_called_once_with(total=4, roots=2, remote=0)
 
+    def test_it_says_that_the_services_are_killed_with_no_notice(self):
+        """A service that declared a notice (#645) gets none from burnall. The warning is
+        printed before the list, so --yes and --dry-run show it too, and again in the prompt."""
+        for argv in (["--dry-run"], ["--yes"]):
+            printed = []
+            with patch("builtins.print", side_effect=lambda *a, **k: printed.append(" ".join(map(str, a)))):
+                self._run(argv=argv)
+            text = "\n".join(printed)
+            self.assertIn("by force", text, argv)
+            self.assertIn("no STOP notice", text, argv)
+        printed = []
+        with patch("builtins.print", side_effect=lambda *a, **k: printed.append(" ".join(map(str, a)))):
+            burnall_cmd._confirmed(total=2, roots=0)
+        self.assertIn("by force", "\n".join(printed))
+        self.assertIn("none of them gets a STOP notice", "\n".join(printed))
+
     def test_the_throne_is_shown_before_anything_is_stopped(self):
         # An operator gets one look at the scale of this before being asked.
         printed = []

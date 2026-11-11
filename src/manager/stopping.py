@@ -63,7 +63,6 @@ def begin_notice(
     token: str,
     kind: str,
     reason: str,
-    credit: bool = True,
     *,
     grace_seconds: Optional[int] = None,
 ) -> Optional[float]:
@@ -83,7 +82,7 @@ def begin_notice(
         raise ValueError(f"unknown kind of stop: {kind!r}")
     # A failure of the notice never keeps the node from stopping the instance.
     try:
-        return _begin_notice(token, kind, reason, credit, grace_seconds)
+        return _begin_notice(token, kind, reason, grace_seconds)
     except Exception as e:
         log.LOGGER(f"Could not give a notice to {token} ({e}); it is stopped with no notice.")
         try:
@@ -94,7 +93,7 @@ def begin_notice(
 
 
 def _begin_notice(
-    token: str, kind: str, reason: str, credit: bool, grace_seconds: Optional[int]
+    token: str, kind: str, reason: str, grace_seconds: Optional[int]
 ) -> Optional[float]:
     grace = notice.stop_grace_seconds() if grace_seconds is None else grace_seconds
     if grace <= 0:
@@ -108,7 +107,7 @@ def _begin_notice(
         if not notice.has_device(token):
             return None
         deadline = notice.grace_deadline(grace)
-        if not sc.begin_local_stopping(token, deadline, kind, reason, credit):
+        if not sc.begin_local_stopping(token, deadline, kind, reason):
             return None
         delivered = notice.deliver(token, _VERB[kind], deadline)
     if delivered:
@@ -136,7 +135,6 @@ def wait_until(token: str, deadline: float) -> None:
 
 def stop_with_notice(
     token: str,
-    credit: bool = True,
     reason: str = dead_instances.MANUAL_KILL,
 ) -> Optional[int]:
     """``stop_instance``, after a notice when the service has one. Returns the refund.
@@ -145,10 +143,10 @@ def stop_with_notice(
     call this: ``request_stop`` marks the instance and returns. A delegated instance has no
     VM here, so it is stopped at once; its peer marks it when it gets ``StopService``.
     """
-    deadline = begin_notice(token, STOP, reason, credit)
+    deadline = begin_notice(token, STOP, reason)
     if deadline is not None:
         wait_until(token, deadline)
-    refund = stop_instance(token=token, credit=credit, reason=reason)
+    refund = stop_instance(token=token, reason=reason)
     if refund is None and deadline is not None and not sc.internal_instance_exists(id=token):
         # The tick ended the stop between the wait and this call, and the leftover went
         # to the father there.
@@ -158,7 +156,6 @@ def stop_with_notice(
 
 def request_stop(
     token: str,
-    credit: bool = True,
     reason: str = dead_instances.MANUAL_KILL,
 ) -> Optional[int]:
     """The stop that a father asks for through ``StopService``. It never waits.
@@ -169,9 +166,9 @@ def request_stop(
     stop ends. With no notice the instance is stopped at once, and this returns the refund
     as ``stop_instance`` does.
     """
-    deadline = begin_notice(token, STOP, reason, credit)
+    deadline = begin_notice(token, STOP, reason)
     if deadline is None:
-        return stop_instance(token=token, credit=credit, reason=reason)
+        return stop_instance(token=token, reason=reason)
     return 0
 
 
@@ -212,7 +209,6 @@ def finish_stop(token: str, stopping: dict) -> None:
                 return
         stop_instance(
             token=token,
-            credit=stopping["credit"],
             reason=stopping["reason"] or dead_instances.MANUAL_KILL,
         )
     except Exception as e:
