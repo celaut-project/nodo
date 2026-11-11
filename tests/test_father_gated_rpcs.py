@@ -108,7 +108,7 @@ class FatherGatedGatewayTests(unittest.TestCase):
         request = (celaut_pb2.TokenMessage(token=TOKEN), client_id)
         with patch.object(gateway_module, "parse_with_client", return_value=request), \
                 patch.object(client_gate, "require_caller", side_effect=_caller_is(client_id)), \
-                patch.object(gateway_module.stopping, "stop_with_notice", return_value=7) as stop_instance, \
+                patch.object(gateway_module.stopping, "request_stop", return_value=7) as stop_instance, \
                 patch.object(gateway_module.BeeClient, "respond",
                              side_effect=lambda message_iterator: iter([message_iterator])):
             try:

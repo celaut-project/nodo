@@ -639,50 +639,6 @@ class StopWithNoticeTests(StoppingTestCase):
         self.assertGreaterEqual(clock["now"], 1015.0)
         stop.assert_called_once()
 
-    def test_the_callers_that_wait_are_limited_and_the_others_queue(self):
-        """With ``MAX_CONCURRENT_WAITS`` places taken, the next caller writes no notice and
-        waits for a place. Its own wait starts when it gets one."""
-        places = threading.BoundedSemaphore(2)
-        inside, release, started = [], threading.Event(), threading.Event()
-        peak = {"now": 0, "max": 0}
-        lock = threading.Lock()
-
-        def wait_until(token, deadline):
-            with lock:
-                peak["now"] += 1
-                peak["max"] = max(peak["max"], peak["now"])
-                inside.append(token)
-                if len(inside) == 2:
-                    started.set()
-            release.wait(5)
-            with lock:
-                peak["now"] -= 1
-
-        with mock.patch.object(stopping, "_wait_places", places), \
-                mock.patch.object(stopping, "wait_until", side_effect=wait_until), \
-                mock.patch.object(stopping, "begin_notice", return_value=2000.0), \
-                mock.patch.object(stopping, "stop_instance", return_value=1):
-            threads = [threading.Thread(target=stopping.stop_with_notice, args=(t,))
-                       for t in ("a", "b", "c", "d")]
-            for thread in threads:
-                thread.start()
-            self.assertTrue(started.wait(5))
-            time.sleep(0.2)
-            self.assertEqual(len(inside), 2)  # the other two queue
-            release.set()
-            for thread in threads:
-                thread.join(5)
-        self.assertEqual(len(inside), 4)
-        self.assertEqual(peak["max"], 2)
-
-    def test_the_places_are_given_back_when_a_wait_fails(self):
-        places = threading.BoundedSemaphore(1)
-        with mock.patch.object(stopping, "_wait_places", places), \
-                mock.patch.object(stopping, "begin_notice", side_effect=RuntimeError("x")):
-            for _ in range(2):  # the second call would block if the first kept the place
-                with self.assertRaises(RuntimeError):
-                    stopping.stop_with_notice("a")
-
     def test_the_wait_ends_early_when_the_vm_ends(self):
         clock = {"now": 1000.0}
 
@@ -742,20 +698,63 @@ class StopWithNoticeTests(StoppingTestCase):
 
 
 @skip
-class HibernateWithNoticeTests(StoppingTestCase):
-    def test_it_writes_hibernate_waits_and_then_hibernates_as_before(self):
+class RequestTests(StoppingTestCase):
+    """What a father asks through the gateway: mark, return, and let the tick end it."""
+
+    def test_a_stop_marks_the_instance_returns_at_once_and_refunds_nothing_yet(self):
+        with mock.patch.object(stopping.time, "time", return_value=1000.0), \
+                mock.patch.object(stopping.time, "sleep") as sleep, \
+                mock.patch.object(stopping, "stop_instance") as stop:
+            self.assertEqual(stopping.request_stop("a", credit=False, reason="manual_kill"), 0)
+        sleep.assert_not_called()
+        stop.assert_not_called()
+        self.assertEqual(self.sent, [("STOP", 1015)])
+        row = self.sc.get_local_stopping("a")
+        self.assertEqual((row["until"], row["kind"], row["credit"]), (1015.0, "stop", False))
+
+    def test_the_tick_ends_the_stop_that_a_request_marked(self):
+        with mock.patch.object(stopping.time, "time", return_value=1000.0):
+            stopping.request_stop("a", credit=False, reason="manual_kill")
+        with mock.patch.object(stopping, "stop_instance") as stop:
+            self.assertEqual(stopping.finish_due_stops(now=1014.0), 0)
+            self.assertEqual(stopping.finish_due_stops(now=1015.0), 1)
+        stop.assert_called_once_with(token="a", credit=False, reason="manual_kill")
+
+    def test_a_second_stop_joins_the_first_and_writes_nothing(self):
+        stopping.request_stop("a")
+        self.assertEqual(stopping.request_stop("a"), 0)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_a_stop_with_no_declaration_is_at_once_and_returns_the_refund(self):
+        with mock.patch.object(stopping.notice, "has_device", return_value=False), \
+                mock.patch.object(stopping, "stop_instance", return_value=42) as stop:
+            self.assertEqual(stopping.request_stop("a", credit=True, reason="manual_kill"), 42)
+        stop.assert_called_once_with(token="a", credit=True, reason="manual_kill")
+        self.assertEqual(self.sent, [])
+
+    def test_a_hibernation_marks_the_instance_and_returns_at_once(self):
         with mock.patch.object(hibernation, "check_can_hibernate"), \
-                mock.patch.object(stopping, "vm_has_ended", return_value=True), \
-                mock.patch.object(hibernation, "hibernate_instance", return_value=True) as hib:
-            self.assertTrue(stopping.hibernate_with_notice("a"))
+                mock.patch.object(stopping.time, "sleep") as sleep, \
+                mock.patch.object(hibernation, "hibernate_instance") as hib:
+            self.assertTrue(stopping.request_hibernation("a"))
+        sleep.assert_not_called()
+        hib.assert_not_called()
         self.assertEqual(self.sent[0][0], "HIBERNATE")
+        self.assertEqual(self.sc.get_local_stopping("a")["kind"], "hibernate")
+
+    def test_a_hibernation_with_no_declaration_is_at_once(self):
+        with mock.patch.object(stopping.notice, "has_device", return_value=False), \
+                mock.patch.object(hibernation, "check_can_hibernate"), \
+                mock.patch.object(hibernation, "hibernate_instance", return_value=True) as hib:
+            self.assertTrue(stopping.request_hibernation("a"))
         hib.assert_called_once_with("a", reason=dead_instances.HIBERNATED)
+        self.assertEqual(self.sent, [])
 
     def test_a_refusal_comes_before_any_notice(self):
         with mock.patch.object(hibernation, "check_can_hibernate",
                                side_effect=hibernation.HibernationRefused("shares")):
             with self.assertRaises(hibernation.HibernationRefused):
-                stopping.hibernate_with_notice("a")
+                stopping.request_hibernation("a")
         self.assertEqual(self.sent, [])
         self.assertIsNone(self.sc.get_local_stopping("a"))
 
@@ -768,14 +767,13 @@ class HibernateWithNoticeTests(StoppingTestCase):
 
 @skip
 class TickTests(StoppingTestCase):
-    def test_the_tick_ends_a_stop_after_the_limit_and_the_slack(self):
+    def test_the_tick_ends_a_stop_at_the_limit(self):
         stopping.begin_notice("a", stopping.STOP, dead_instances.ACTIVITY_WINDOW, credit=False)
         until = self.sc.get_local_stopping("a")["until"]
         with mock.patch.object(stopping, "stop_instance") as stop:
-            self.assertEqual(stopping.finish_due_stops(now=until + 1), 0)
+            self.assertEqual(stopping.finish_due_stops(now=until - 1), 0)
             stop.assert_not_called()
-            self.assertEqual(
-                stopping.finish_due_stops(now=until + stopping.TICK_SLACK_SECONDS), 1)
+            self.assertEqual(stopping.finish_due_stops(now=until), 1)
         stop.assert_called_once_with(
             token="a", credit=False, reason=dead_instances.ACTIVITY_WINDOW)
 
@@ -947,14 +945,17 @@ class CallerTableTests(unittest.TestCase):
         for name in ("handle_internal_failure", "reap_expired_suspensions"):
             self.assertNotIn("begin_notice", inspect.getsource(getattr(maintain, name)))
 
-    def test_stop_service_and_kill_wait(self):
+    def test_stop_service_marks_and_kill_waits(self):
+        """The gRPC server holds no thread for the wait; the CLI process of ``nodo kill`` does."""
         import inspect
         from src.commands import kill
         from src.gateway import gateway
-        self.assertIn("stop_with_notice", inspect.getsource(gateway.Gateway.StopService))
+        source = inspect.getsource(gateway.Gateway.StopService)
+        self.assertIn("request_stop", source)
+        self.assertNotIn("stop_with_notice", source)
         self.assertIn("stop_with_notice", inspect.getsource(kill.kill))
 
-    def test_a_father_that_hibernates_waits_and_the_instance_that_hibernates_itself_does_not(self):
+    def test_a_father_that_hibernates_marks_and_the_instance_that_hibernates_itself_does_not(self):
         from protos import celaut_pb2 as pb
         from src.gateway import gateway
         request = pb.ModifyServiceSystemResourcesInput(
@@ -968,7 +969,7 @@ class CallerTableTests(unittest.TestCase):
                     mock.patch.object(hibernation, "hibernated_view", return_value=pb.Refund()), \
                     mock.patch.object(hibernation, "hibernate_instance",
                                       side_effect=lambda *a, **k: called.append("plain")), \
-                    mock.patch.object(gateway.stopping, "hibernate_with_notice",
+                    mock.patch.object(gateway.stopping, "request_hibernation",
                                       side_effect=lambda *a, **k: called.append("with_notice")), \
                     mock.patch.object(gateway, "parse_with_client", return_value=(request, "")), \
                     mock.patch.object(gateway, "require_father"), \
@@ -981,12 +982,22 @@ class CallerTableTests(unittest.TestCase):
                 list(gateway.Gateway.ModifyServiceSystemResources(mock.Mock(), iter(()), context))
             self.assertEqual(called, [expected], token)
 
-    def test_a_delegated_stop_has_no_deadline_that_could_end_before_the_wait_of_the_peer(self):
-        """The call to the peer has no timeout of its own, so it waits for the peer's wait."""
-        import inspect
-        from src.utils.bee_client import BeeClient
-        self.assertNotIn("timeout", inspect.signature(BeeClient.stop_service).parameters)
-        self.assertIn("StopService", inspect.getsource(BeeClient.stop_service))
+    def test_stop_service_answers_with_the_refund_of_the_request_and_does_not_wait(self):
+        from protos import celaut_pb2 as pb
+        from src.gateway import gateway
+        for refund in (0, 42):
+            with mock.patch.object(gateway, "parse_with_client",
+                                   return_value=(pb.TokenMessage(token="a"), "")), \
+                    mock.patch.object(gateway, "require_father"), \
+                    mock.patch.object(gateway.stopping, "request_stop", return_value=refund) as req, \
+                    mock.patch.object(gateway.stopping, "wait_until") as wait, \
+                    mock.patch.object(gateway.BeeClient, "respond",
+                                      side_effect=lambda message_iterator: iter([message_iterator])):
+                out = list(gateway.Gateway.StopService(mock.Mock(), iter(()), mock.Mock()))
+            req.assert_called_once_with(token="a")
+            wait.assert_not_called()
+            self.assertEqual(len(out), 1)
+            self.assertEqual(out[0], pb.Refund(amount=gateway.to_amount(refund)))
 
 
 if __name__ == "__main__":

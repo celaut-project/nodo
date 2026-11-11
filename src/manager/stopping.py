@@ -9,11 +9,14 @@ not changed: they stop at once. This module is the part before them.
 
 The stop has two phases:
 
-1. ``begin_notice`` marks the row as stopping (``stopping_until`` and what to do at the
-   end), and writes the line. It holds ``instance_lock`` only for this.
-2. The end is by the caller that waits (``stop_with_notice``, ``hibernate_with_notice``),
-   outside the lock, or by the maintenance tick (``finish_due_stops``) when there is no
-   caller that waits: the close of the window, or a caller that is gone.
+1. ``begin_notice`` marks the row as stopping (``stopping_until``, the unix time of the
+   end, and what to do then), and writes the line. It holds ``instance_lock`` only for
+   this.
+2. The end is by the maintenance tick (``finish_due_stops``) at ``stopping_until``, or
+   when the VM ends before. The gRPC callers (``request_stop``, ``request_hibernation``)
+   and the activity window only mark the row and return: none of them holds a thread of
+   the server for the wait. The one caller that waits is ``nodo kill`` (``stop_with_notice``):
+   it runs in the CLI process and not in the server, and it ends the stop itself.
 
 A stopping instance is not a lost instance. The row says it, so the tick does not score
 ``INSTANCE_LOST`` when the VM ends by itself, and it ends the stop instead
@@ -26,7 +29,6 @@ instance that asks for its own hibernation. They call ``stop_instance`` or
 ``hibernate_instance`` and never come here.
 """
 
-import threading
 import time
 from typing import Optional
 
@@ -45,19 +47,6 @@ HIBERNATE = "hibernate"
 
 #: How often a caller that waits looks at the VM.
 POLL_SECONDS = 0.25
-
-#: The tick ends a stop only this long after the limit. A caller that waits ends its own
-#: stop at the limit, and this keeps the tick from taking it first. Either of them may
-#: end it: both are safe.
-TICK_SLACK_SECONDS = 5.0
-
-#: How many callers wait after a notice at the same time (``stop_with_notice`` and
-#: ``hibernate_with_notice``). The other callers queue for a place, and their own wait
-#: starts when they get it. A caller that waits holds a thread of the gRPC server, so this
-#: stays well under the size of its pool.
-MAX_CONCURRENT_WAITS = 16
-
-_wait_places = threading.BoundedSemaphore(MAX_CONCURRENT_WAITS)
 
 _VERB = {STOP: notice.STOP, HIBERNATE: notice.HIBERNATE}
 
@@ -152,14 +141,13 @@ def stop_with_notice(
 ) -> Optional[int]:
     """``stop_instance``, after a notice when the service has one. Returns the refund.
 
-    For ``StopService`` and ``nodo kill``. A delegated instance has no VM here: the peer
-    that runs it writes the notice when it gets the ``StopService`` call, and that call has
-    no deadline of its own, so it waits for the wait of the peer.
+    For ``nodo kill``, which runs in the CLI process and can wait. The gRPC server does not
+    call this: ``request_stop`` marks the instance and returns. A delegated instance has no
+    VM here, so it is stopped at once; its peer marks it when it gets ``StopService``.
     """
-    with _wait_places:
-        deadline = begin_notice(token, STOP, reason, credit)
-        if deadline is not None:
-            wait_until(token, deadline)
+    deadline = begin_notice(token, STOP, reason, credit)
+    if deadline is not None:
+        wait_until(token, deadline)
     refund = stop_instance(token=token, credit=credit, reason=reason)
     if refund is None and deadline is not None and not sc.internal_instance_exists(id=token):
         # The tick ended the stop between the wait and this call, and the leftover went
@@ -168,36 +156,47 @@ def stop_with_notice(
     return refund
 
 
-def hibernate_with_notice(
-    token: str, reason: str = dead_instances.HIBERNATED
-) -> bool:
-    """``hibernate_instance``, after a notice when the service has one.
+def request_stop(
+    token: str,
+    credit: bool = True,
+    reason: str = dead_instances.MANUAL_KILL,
+) -> Optional[int]:
+    """The stop that a father asks for through ``StopService``. It never waits.
 
-    For a hibernation that a father asks for, and for the activity window. A refusal
-    (``HibernationRefused``) comes before any notice, as it does without one. True if the
-    instance is hibernated when this returns.
+    A service that declared a notice gets it, and the instance is marked to stop at the
+    limit: the tick ends the stop, and this returns 0 as the refund, because the leftover
+    is not known yet (the instance is charged until then). It goes to the father when the
+    stop ends. With no notice the instance is stopped at once, and this returns the refund
+    as ``stop_instance`` does.
+    """
+    deadline = begin_notice(token, STOP, reason, credit)
+    if deadline is None:
+        return stop_instance(token=token, credit=credit, reason=reason)
+    return 0
+
+
+def request_hibernation(token: str, reason: str = dead_instances.HIBERNATED) -> bool:
+    """The hibernation that a father asks for. It never waits.
+
+    A refusal (``HibernationRefused``) comes before any notice, as it does without one. A
+    service that declared a notice gets it, and the instance is marked to hibernate at
+    the limit: the tick ends it. With no notice it is hibernated at once. True if the
+    instance is hibernated or marked.
     """
     if not sc.internal_instance_exists(id=token) or sc.is_local_instance_hibernated(id=token):
         return hibernation.hibernate_instance(token, reason=reason)
     hibernation.check_can_hibernate(token)
-    with _wait_places:
-        deadline = begin_notice(token, HIBERNATE, reason)
-        if deadline is not None:
-            wait_until(token, deadline)
-    if deadline is None:
+    if begin_notice(token, HIBERNATE, reason) is None:
         return hibernation.hibernate_instance(token, reason=reason)
-    try:
-        return hibernation.hibernate_instance(token, reason=reason)
-    except Exception:
-        sc.clear_local_stopping(token)
-        raise
+    return True
 
 
 def finish_stop(token: str, stopping: dict) -> None:
     """End the stop of a stopping instance, as its row says. Never raises.
 
-    Called by the tick when the limit has passed or the VM ended. Safe if the caller that
-    waits ends it too: a stop on an instance that is dead does nothing.
+    Called by the tick when the limit has passed or the VM ended. Safe if ``nodo kill``,
+    which waits in its own process, ends it too: a stop on an instance that is dead does
+    nothing.
     """
     try:
         if stopping["kind"] == HIBERNATE:
@@ -223,8 +222,8 @@ def finish_stop(token: str, stopping: dict) -> None:
 def finish_due_stops(now: Optional[float] = None) -> int:
     """End the stop of each instance whose notice is over. Returns how many it ended.
 
-    An instance is over when its limit passed (plus a short slack, see
-    ``TICK_SLACK_SECONDS``) or its VM ended. Called on each tick. Never raises: it runs in
+    An instance is over when its limit passed or its VM ended. Called on each tick. Never
+    raises: it runs in
     the manager loop.
     """
     now = time.time() if now is None else now
@@ -235,7 +234,7 @@ def finish_due_stops(now: Optional[float] = None) -> int:
         return 0
     ended = 0
     for token, stopping in rows.items():
-        if now >= stopping["until"] + TICK_SLACK_SECONDS or vm_has_ended(token):
+        if now >= stopping["until"] or vm_has_ended(token):
             finish_stop(token, stopping)
             ended += 1
     return ended

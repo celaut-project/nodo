@@ -70,11 +70,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
             token = (request or celaut_pb2.TokenMessage()).token
             log.LOGGER(f'    with id {token}')
             require_father(context, token, client_id)
-            # After a notice to the service, if it declared one (#645).
-            refunded_amount = stopping.stop_with_notice(token=token)
+            # A service that declared a notice is marked to stop at its limit and the tick
+            # ends it: this call does not wait, and its refund is 0 (#645).
+            refunded_amount = stopping.request_stop(token=token)
             if not refunded_amount: refunded_amount = 0
 
-            log.LOGGER(f'Stopped instance {token}.')
+            log.LOGGER(f'Stop of instance {token} accepted.')
             yield from BeeClient.respond(
                     message_iterator=celaut_pb2.Refund(
                         amount=to_amount(refunded_amount)
@@ -367,8 +368,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 try:
                     if request.service_token:
                         # A father asks: the service gets a notice first, if it declared
-                        # one (#645). An instance that hibernates itself already knows.
-                        stopping.hibernate_with_notice(token)
+                        # one, and the tick hibernates it at the limit (#645). An
+                        # instance that hibernates itself already knows.
+                        stopping.request_hibernation(token)
                     else:
                         hibernation.hibernate_instance(token)
                 except Exception as e:
