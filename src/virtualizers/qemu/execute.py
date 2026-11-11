@@ -37,7 +37,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.manager.modify_resources import modify_sysreq
-from src.utils import logger as log
+from src.utils import logger as log, notice
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.virtualizers.microvm import bundle as microvm_bundle
@@ -279,6 +279,7 @@ def build_qemu_command(
     qmp_socket_path: Optional[str] = None,
     rootfs_read_only: bool = False,
     metadata_disk_path: Optional[Path] = None,
+    notice_socket_path: Optional[str] = None,
 ) -> List[str]:
     """Full ``qemu-system-<arch>`` argv for one emulated guest.
 
@@ -354,6 +355,21 @@ def build_qemu_command(
     command.extend(["-device", _balloon_device_arg(qemu_binary)])
     if qmp_socket_path:
         command.extend(["-qmp", f"unix:{qmp_socket_path},server=on,wait=off"])
+
+    # The notice of the node to the service (#645): a virtio console on a socket, next to
+    # the serial port. The guest reads it from /dev/hvc0. The kernel console stays on the
+    # serial port, so hvc0 is not a second copy of the log.
+    if notice_socket_path:
+        command.extend(
+            [
+                "-chardev",
+                f"socket,id=notice0,path={notice_socket_path},server=on,wait=off",
+                "-device",
+                "virtio-serial-pci,id=noticeserial0",
+                "-device",
+                "virtconsole,chardev=notice0",
+            ]
+        )
 
     if virtiofs_args:
         command.extend(virtiofs_args)
@@ -640,6 +656,13 @@ def execute(
         has_shared_mem = shares.any
         virtiofs_args = build_virtiofs_args(shares.mounts_state, mem_mib) if has_shared_mem else []
 
+        # The service declared a notice: the VM gets the console that carries it (#645).
+        notice_socket = None
+        if notice.is_declared(service):
+            ensure_private_dir(Path(notice.socket_path(vmachine_id)).parent)
+            notice.remove_socket(vmachine_id)
+            notice_socket = notice.socket_path(vmachine_id)
+
         start_command = build_qemu_command(
             qemu_binary=qemu_binary,
             arch=arch,
@@ -657,6 +680,7 @@ def execute(
             qmp_socket_path=str(qmp_socket_path),
             rootfs_read_only=rootfs_read_only,
             metadata_disk_path=metadata_disk_path,
+            notice_socket_path=notice_socket,
         )
         log.LOGGER(
             f"[QEMU][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "

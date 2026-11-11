@@ -359,6 +359,14 @@ instances:
   # oldest of these go, from any father, before the launch is refused.
   MAX_SUSPENDED_PER_FATHER: 10
   MAX_SUSPENDED_DISK_GIB_PER_FATHER: 20
+  # A service can declare a notice (`notice_declaration` in service.json). Before the node
+  # stops it, or hibernates it, for a father (`nodo kill`, StopService) or for the close of
+  # the activity window, the node writes `STOP <t>` or `HIBERNATE <t>` to /dev/hvc0 of
+  # the VM. It then waits for the service to exit, at most this many seconds, and stops the
+  # VM at the end of the wait. A service that does not read the device makes the node wait
+  # all of it. A service with no declaration is stopped at once. The default is 15. 0 turns
+  # the notice off: every service is stopped at once.
+  STOP_GRACE_SECONDS: 15
 
 # The ledger of balance movements (issue #570): one row for each change of the balance
 # of a client or an instance, which its owner reads with GetBalanceStatement.

@@ -1,7 +1,7 @@
 from typing import Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
-from src.utils import activity_window, on_close
+from src.utils import activity_window, notice, on_close
 from src.utils.cost_functions import price_bound
 from src.utils.cost_functions.execution_cost import launch_charge_mu
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost
@@ -59,6 +59,10 @@ def generate_estimated_cost(
     ``check_availability=False`` prices the service whatever the current load, for a
     caller that remembers the price and checks availability itself on every answer.
     """
+
+    # A node that cannot carry the notice of the service refuses it, as it refuses an
+    # architecture that it cannot run (#645).
+    notice.enforce_supported(service)
 
     # Only the launcher checks here (the balancer's local candidate, its preflight), so a
     # refusal for disk alone may free the disk of suspended instances nobody pays for.

@@ -1373,7 +1373,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `tunnels [<tunnel> \| --instance <i> \| --inbound] [--json]` | the tunnels running on this host, one with its log, those reaching an instance, or the streams relayed for others |
 | `tunnel_close <tunnel>... \| --all [--json]` | stop tunnels |
 | `kill <instance> [--json]` | stop one instance and close its tunnels (root) |
-| `burnall [--yes]` | stop every instance, parents first |
+| `burnall [--yes]` | stop every instance, parents first, by force: no service gets a `STOP` notice |
 | `prune [--all] [--dry-run]` | reclaim orphaned runtime dirs |
 | `peers [<peer>] [--json] [--limit N]` | peers, or one with its history |
 | `peer_reputation <peer> <+N\|-N> [--json]` | move our local score of a peer |

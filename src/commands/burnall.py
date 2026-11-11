@@ -20,6 +20,11 @@ with that peer, which makes them the ones still costing the operator money after
 burn that skipped them reported success. ``stop_instance`` routes an external token
 on its own; the sweep simply has to hand it one.
 
+No notice is written to any service (#645): ``stop_instance`` stops at once, and the
+command says so, before the list and again in the confirmation. A service that declared
+a notice to flush its state gets no chance to, so the operator must know that before
+typing the phrase.
+
 Every instance is still stopped through ``stop_instance``: the memory is
 released, the row is purged and the unspent deposit is refunded. Where the
 refund lands is the one thing this does differently from ``kill``, and it is
@@ -113,6 +118,8 @@ def _confirmed(total: int, roots: int, remote: int = 0) -> bool:
     if remote:
         print(f"  {remote} of them run on a peer, billed to this node's deposit there.")
     print("  There is no undo.")
+    print("  Every service is killed by force: none of them gets a STOP notice first,")
+    print("  so a service that needed it to flush its state can lose data.")
     if roots:
         print(f"  {roots} of them were asked for by a client.")
         print("  Stopping one is indistinguishable, from that client's side, from a")
@@ -213,6 +220,8 @@ def burnall(argv: List[str] = None) -> None:
     except Exception:
         suspended = set()
 
+    print("WARNING: burnall kills every service by force, with no STOP notice first. A")
+    print("service that needs the notice to flush its state can lose data.")
     print(f"{len(ordered)} instance(s), parents first:")
     for i in ordered:
         where = "  delegated" if i in delegated else ""

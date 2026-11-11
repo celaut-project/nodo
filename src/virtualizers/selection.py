@@ -21,6 +21,7 @@ Rule:
 from typing import Optional
 
 from protos import celaut_pb2
+from src.utils import notice
 from src.utils.arch_guard import host_arch_tag
 from src.virtualizers.architecture import (
     UnsupportedArchitectureException,
@@ -40,6 +41,10 @@ def select_virtualizer(
     from the host and emulation is not available -- exactly what a cross-arch
     request did before this backend existed.
     """
+    # The same rule as for an architecture: a node that cannot carry the notice that the
+    # service declares does not run it (#645).
+    notice.enforce_supported(service)
+
     service_arch = get_arch_tag(service=service, metadata=metadata)
     host_arch = host_arch_tag()
 

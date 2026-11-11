@@ -15,7 +15,7 @@ from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import WORKLOAD_FIELDS, populate_environment_workloads
-from src.utils import keyvalue
+from src.utils import keyvalue, notice
 from src.utils.benchmark import parse_benchmark, unrecognised_keys
 from src.utils.hashing import (
     BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
@@ -596,6 +596,17 @@ class ZipContainerPacker:
             for key, value in (declared or {}).items()
         }
 
+    def parseNoticeDeclaration(self):
+        """Where the service reads the notices of the node (#645).
+
+        Written by default. ``service.json`` changes it with ``notice_declaration``, and
+        turns it off with ``false``: a service that never reads ``/dev/hvc0`` should, or the
+        node waits for it at each stop.
+        """
+        declaration = notice.declaration_from_json(self.json.get(notice.JSON_KEY))
+        if declaration is not None:
+            self.service.container.notice_declaration.CopyFrom(declaration)
+
     def parseContainer(self):
         def _normalize_path_segments(raw_path):
             if isinstance(raw_path, str):
@@ -827,6 +838,7 @@ class ZipContainerPacker:
             celaut.DataFormat()
         )
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
+        self.parseNoticeDeclaration()
 
         # `envs` names the variables the service asks for, with an empty DataFormat.
         envs = self.json.get('envs') or []

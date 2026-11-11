@@ -821,6 +821,7 @@ class ConfigManager(metaclass=Singleton):
                 validate_benchmark_config,
                 validate_bitcoin_config,
                 validate_host_policy_config,
+                validate_instances_config,
                 validate_pricing_config,
                 validate_routing_config,
             )
@@ -843,6 +844,10 @@ class ConfigManager(metaclass=Singleton):
             # ceiling the operator set and a window that does not parse leaves the node
             # open all night, so a malformed one stops here rather than being guessed at.
             validate_host_policy_config(self._config)
+
+            # How long the node waits after it writes a notice to a service that it will
+            # stop (#645).
+            validate_instances_config(self._config)
 
             # The shape of the peer-selection formula. A negative weight or a
             # half-credit of zero would not make the node quote a wrong price -- it

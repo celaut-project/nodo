@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
 from time import sleep
 import os
@@ -12,7 +13,7 @@ import grpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database import ledger
-from src.manager import balance_statement, closing_check, hibernation, orphan_starts, statement_check
+from src.manager import balance_statement, closing_check, hibernation, orphan_starts, statement_check, stopping
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, top_up_unlimited_clients, handle_internal_failure, revive_instance, suspend_instance, accept_peer_refresh, delegation_lock, descends_from_dev_client, ensure_dev_client_pools, forget_delegation_locks, stop_instance, spend_mu, get_client_id_on_other_peer, fetch_peer_info
@@ -624,6 +625,15 @@ def maintain_vmachines(debug_mode: bool=False):
 
     def remove_and_penalize_vmachine(vmachine_id: str, reason: str = dead_instances.PROCESS_LOST):
         lost_this_sweep.add(vmachine_id)
+        # A VM that ends while the node waits after a notice (#645) is the service doing
+        # what it was told: a PID 1 that exits panics the guest kernel. The stop ends
+        # there. It is not a loss, and it is not scored.
+        stop_row = sc.get_local_stopping(vmachine_id)
+        if stop_row:
+            log.LOGGER(f"The VM of {vmachine_id} ended after its notice ({reason}); "
+                       "ending the stop.")
+            stopping.finish_stop(vmachine_id, stop_row)
+            return
         # One penalty per failure, not per turn of a crash loop: a loss right after a
         # revive is the same failure again. One that comes after the instance ran for a
         # while is a new one, and scores again.
@@ -1677,6 +1687,10 @@ def enforce_activity_window(debug_mode: bool = False):
     terms = sc.get_local_closing_terms() if not force else {}
     running = None
     now = time.time()
+    # What to do to each instance, run together at the end: a notice (#645) writes to the
+    # VM and may take a second or two, and the window must not hold the tick for the sum
+    # of them.
+    actions = []
 
     for vmachine_id in sc.get_all_internal_containers_ids():
         if descends_from_dev_client(vmachine_id):
@@ -1691,21 +1705,52 @@ def enforce_activity_window(debug_mode: bool = False):
                 running = set(sc.get_running_internal_containers_ids())
             if vmachine_id not in running:
                 continue
-            _hibernate_for_window(vmachine_id)
+            actions.append((_hibernate_for_window, vmachine_id))
         elif policy == activity_window.ON_CLOSE_STOP:
             if closes_at and now < closes_at:
                 _log_broken_commitment(vmachine_id, closes_at, now)
-            log.LOGGER(
-                f"Stopping instance {vmachine_id}: this node is outside its activity "
-                f"window and its on-close policy is 'stop'."
-            )
-            try:
-                stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
-            except Exception as e:
-                log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
+            actions.append((_stop_for_window, vmachine_id))
         elif debug_mode:
             log.LOGGER(f"Outside the activity window; the on-close policy of {vmachine_id} "
                        "is 'refuse', so it is left alone.")
+
+    _run_window_actions(actions)
+
+
+#: How many instances the window puts down at the same time.
+WINDOW_ACTION_WORKERS = 8
+
+
+def _run_window_actions(actions) -> None:
+    """Run the ``(function, vmachine_id)`` pairs, up to ``WINDOW_ACTION_WORKERS`` together,
+    and return when all are done. Each function catches its own errors."""
+    if len(actions) <= 1:
+        for function, vmachine_id in actions:
+            function(vmachine_id)
+        return
+    with ThreadPoolExecutor(max_workers=min(WINDOW_ACTION_WORKERS, len(actions))) as pool:
+        for future in [pool.submit(function, vmachine_id) for function, vmachine_id in actions]:
+            try:
+                future.result()
+            except Exception as e:
+                log.LOGGER(f"Error in the activity window: {e}")
+
+
+def _stop_for_window(vmachine_id: str):
+    """Stop one instance at closing time (`ON_CLOSE: stop`), after a notice if its service
+    declared one. The tick cannot wait: with a notice the stop ends in a later tick."""
+    if stopping.is_stopping(vmachine_id):
+        return  # Its notice is out. The tick ends the stop (#645).
+    log.LOGGER(
+        f"Stopping instance {vmachine_id}: this node is outside its activity "
+        f"window and its on-close policy is 'stop'."
+    )
+    try:
+        if stopping.begin_notice(
+                vmachine_id, stopping.STOP, dead_instances.ACTIVITY_WINDOW) is None:
+            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
+    except Exception as e:
+        log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
 
 
 def _log_broken_commitment(vmachine_id: str, closes_at: int, now: float):
@@ -1722,15 +1767,23 @@ def _hibernate_for_window(vmachine_id: str):
     as `stop` would stop it, and the log says why: a closed node does not keep running
     what its policy told it to put down.
     """
+    if stopping.is_stopping(vmachine_id):
+        return  # Its notice is out. The tick ends the stop (#645).
     try:
         log.LOGGER(f"Hibernating instance {vmachine_id}: this node is outside its "
                    f"activity window and its on-close policy is 'hibernate'.")
-        hibernation.hibernate_instance(
-            vmachine_id, reason=dead_instances.HIBERNATED_BY_WINDOW)
+        hibernation.check_can_hibernate(vmachine_id)
+        # The tick cannot wait: with a notice the hibernation ends in a later tick.
+        if stopping.begin_notice(
+                vmachine_id, stopping.HIBERNATE, dead_instances.HIBERNATED_BY_WINDOW) is None:
+            hibernation.hibernate_instance(
+                vmachine_id, reason=dead_instances.HIBERNATED_BY_WINDOW)
     except hibernation.HibernationRefused as e:
         log.LOGGER(f"Instance {vmachine_id} cannot be hibernated ({e}); stopping it.")
         try:
-            stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
+            if stopping.begin_notice(
+                    vmachine_id, stopping.STOP, dead_instances.ACTIVITY_WINDOW) is None:
+                stop_instance(token=vmachine_id, reason=dead_instances.ACTIVITY_WINDOW)
         except Exception as stop_error:
             log.LOGGER(f"Error stopping {vmachine_id} at closing time: {stop_error}")
     except Exception as e:
@@ -2304,6 +2357,8 @@ def _manager_pass(short_interval_count: int) -> int:
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())
+    # The stops whose notice is over (#645).
+    stopping.finish_due_stops()
     revive_suspended_instances()
     reap_expired_suspensions()
     sweep_dead_instances()

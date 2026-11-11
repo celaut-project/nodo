@@ -384,6 +384,23 @@ message Service {
             DataFormat format = 2;
         }
 
+        // Where the service reads the notices of the node, and what carries them. A
+        // notice tells the service that the node will stop it, or hibernate it, after a
+        // time that the notice gives. A service with no declaration gets no notice. A
+        // node that does not know the system, the format or the path refuses to run the
+        // service.
+        message NoticeDeclaration {
+            // The path of the device in the container, as path segments. For example
+            // "dev", "hvc0".
+            repeated string path = 1;
+            // The system that carries the notices. The tags name it, for example
+            // "virtio-console".
+            Api.Protocol system = 2;
+            // The format of what the node writes. The tags name it, for example
+            // "nodo-notice".
+            DataFormat format = 3;
+        }
+
         // The resources of one instance of the service.
         message Resources {
             // The resources that the instance needs at the start. Its benchmark gives the
@@ -411,6 +428,9 @@ message Service {
         // The packer sets the names (service.json envs). A caller gives the values in
         // Configuration.environment_variables.
         repeated DataFormatKeyValue environment_variables = 7;
+        // Where the service reads the notices of the node. Optional. With no value, the
+        // node stops the service at once, with no notice.
+        optional NoticeDeclaration notice_declaration = 8;
 
     }
 

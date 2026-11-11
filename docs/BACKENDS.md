@@ -95,6 +95,18 @@ things hold it:
    CH and QEMU genuinely differ (an API socket and KVM against a QMP socket and
    TCG; a cgroup move against a balloon resize). Neither is in the family layer,
    and there is no base class inviting them in.
+4. **The console of the notice (#645) is per backend too.** A service that declares
+   `notice_declaration` gets `/dev/hvc0`. On CH it is `--console pty`: CH v51.1 has no
+   `socket=` for the console, and the path of the pty is in `GET /api/v1/vm.info`
+   (`config.console.file`). The node reads it there at each notice, so nothing is kept
+   and a restart of the node or a wake (a new CH process, a new pty) needs nothing. The
+   runtime state says `notice_console: pty`. The node writes only to a pty whose master the
+   CH process of the VM holds (`/proc/<pid>/fdinfo`, `tty-index`), because `vm.info` is the
+   answer of a process that a guest could take over; it checks this before it opens the
+   slave and again after. On QEMU it is a `virtconsole` on a
+   `virtio-serial-pci`, on a chardev socket in the directory of the control sockets.
+   On both, the kernel `console=` stays on the serial port. `src/utils/notice.py`
+   `deliver` picks the transport.
 
 ### The registry, and why the neutral layer needs one
 

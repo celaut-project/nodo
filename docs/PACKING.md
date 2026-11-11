@@ -1048,6 +1048,95 @@ The older `entrypoint` top-level field is still supported and will be automatica
 
 ---
 
+#### `notice_declaration`
+- **Type:** `object`, or `false`
+- **Required:** No
+- **Default:** `{"path": ["dev", "hvc0"], "system": ["virtio-console"], "format": ["nodo-notice"]}`
+- **Description:** Declares where the service reads the notices of the node (issue #645). Before the node stops the service or hibernates it, it writes one line to the device, and gives the service time to flush its state, close its connections and exit.
+
+With no key, the packer writes the default. `false` writes no declaration. An object changes `path`, `system` or `format`; a field that it does not give keeps its default. `path` is a list of segments or a string (`"/dev/hvc0"`); `system` and `format` are a tag or a list of tags. The packer checks the shape only. This version of the node supports one combination, the default, and refuses to quote or run a service that declares another one, as for an architecture that it cannot run.
+
+```json
+{
+    "notice_declaration": false
+}
+```
+
+**The lines.** Text, one message per line, `VERB <t>\n`, where `<t>` is the unix time, in seconds, after which the node stops the VM whatever happens:
+
+| Line | When |
+|---|---|
+| `STOP <t>` | The father stops it (`StopService`, `nodo kill`), or the activity window closes with `ON_CLOSE: stop` |
+| `HIBERNATE <t>` | The father hibernates it, or the activity window closes with `ON_CLOSE: hibernate`. The VM stops and the disk is kept; at the wake, the entrypoint runs again on the same disk. |
+
+Ignore a verb that you do not know: a later node can add verbs. The node stops or hibernates the instance at `<t>`, or when the VM ends if that is earlier, as it did before. `StopService` and a hibernation that a father asks for do not wait: the node marks the instance, writes the line and answers at once, and the maintenance tick ends the stop at `<t>`. The `Refund` in the answer of `StopService` is then 0, because the leftover is not known until the stop ends (the instance is charged until then); it goes to the father when the stop ends. A service with no notice is stopped at once, and the answer has the refund as before. `nodo kill` run as root waits in its own process. The wait is `instances.STOP_GRACE_SECONDS` of the node (15 seconds by default, see `docs/CONFIG.md`); the service cannot ask for more. To say "done" before `<t>`, end the VM: the entrypoint (PID 1) exits, or the service powers the guest off (`poweroff -f`). The node sees it within about a second. The instance is alive and charged during the wait.
+
+If the node cannot write the line (for example, the console of the VM does not answer), it logs the failure and still waits for the whole `<t>` before it stops the instance: a service that declared the notice is never stopped before the limit because of a failed write. If the service ends its VM, the wait ends. If a hibernation fails when the wait is over, the node stops the instance.
+
+No notice is written when the instance asks for its own hibernation (it already knows), and none for `burnall` (which says so before it asks, and kills every service by force), an instance out of balance, a lost or panicked VM, a failed launch or the janitor: those stop at once.
+
+**How to read the device.** `/dev/hvc0` is a tty in canonical mode: a `read` returns one line.
+
+- Open it **once**, when the service starts, and keep it open for the whole life of the service. A line that arrives while no process holds the device open can be lost, so do not open it again for each line.
+- Read it with plain `read(2)` calls, line by line: the shell `read` builtin, or an unbuffered file in Python. Do not use `cat /dev/hvc0 | ...` or `head -n1 /dev/hvc0` with busybox: on a real guest they gave the first line seconds late, or never returned.
+- Open it with `O_NOCTTY`, or ignore `SIGHUP`. The node opens and closes its side of the console for each line; in our tests that never hung up the guest tty, but a process whose controlling tty is `/dev/hvc0` would get `SIGHUP` on a hangup and die.
+- The tty echoes what it reads, so the node gets its own line back. The node reads what the guest writes to the device, throws it away (64 KiB at most each time) and never parses it. Do not write to the device.
+
+A shell entrypoint (busybox `sh`), PID 1, that runs the application and stops it on a notice:
+
+```sh
+#!/bin/sh
+/app/server &                 # the application
+APP=$!
+trap '' HUP                   # a hangup of the tty never kills PID 1
+# Open /dev/hvc0 once, read it line by line.
+while IFS= read -r line; do
+  set -- $line
+  case "$1" in
+    STOP|HIBERNATE)
+      kill -TERM "$APP"       # flush and close, before $2 (the unix time of the hard stop)
+      wait "$APP"
+      exit 0;;                # PID 1 exits: the node ends the wait now
+    *) ;;                     # a verb that this service does not know: ignore it
+  esac
+done < /dev/hvc0              # no /dev/hvc0 (an older node): the loop is skipped
+wait "$APP"
+```
+
+The same in Python, in a thread, so that the service keeps working until the line comes:
+
+```python
+import os, threading
+
+def watch_notices(on_notice):
+    """Calls on_notice(verb, deadline) for STOP and HIBERNATE. Open once, keep open."""
+    try:
+        fd = os.open("/dev/hvc0", os.O_RDONLY | os.O_NOCTTY)
+    except FileNotFoundError:
+        return                                    # an older node: no notices
+    with open(fd, "rb", buffering=0) as hvc:      # unbuffered: one read(2) per line
+        for raw in hvc:
+            parts = raw.decode("ascii", "replace").split()
+            if len(parts) >= 2 and parts[0] in ("STOP", "HIBERNATE"):
+                on_notice(parts[0], int(parts[1]))
+            # any other verb: ignore it
+
+def on_notice(verb, deadline):
+    save_state()                                  # before `deadline`
+    os._exit(0)                                   # PID 1 exits: the node ends the wait now
+
+threading.Thread(target=watch_notices, args=(on_notice,), daemon=True).start()
+```
+
+**Two consequences of the default.** Both are accepted:
+
+1. **A service that is packed with the declaration gets no notice on a node from before the notice.** Such a node does not know the field. It runs the service with no `/dev/hvc0` and stops it at once, as before (tested with a node on `dev` 394b7e9f). So a service must not depend on the device being there: when it is missing, the service runs without notices. A node that knows the field but not the declared path, system or format refuses the service.
+2. **A service that declares the notice but never reads `/dev/hvc0` makes the node wait until `<t>` at each stop and each hibernation**, because nothing ends the VM early. If the service does not read the device, set `"notice_declaration": false`.
+
+A service with no declaration (`false`, or one that was packed before the notice existed) keeps its bytes and its hash, gets no device, and is stopped at once, as before.
+
+---
+
 #### `api`
 - **Type:** `array of objects`
 - **Required:** No

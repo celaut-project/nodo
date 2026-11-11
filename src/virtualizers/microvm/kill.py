@@ -24,7 +24,7 @@ import signal
 from pathlib import Path
 from typing import List, Optional
 
-from src.utils import dead_instances
+from src.utils import dead_instances, notice
 from src.utils import logger as log
 from src.virtualizers.microvm import network, paths
 from src.virtualizers.microvm.cgroups import remove_vm_cgroup
@@ -143,6 +143,9 @@ def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False,
         log.LOGGER(hypervisor.log(vmachine_id, f"event=cleanup control_socket_removed={socket_path}"))
     except Exception as e:
         log.LOGGER(hypervisor.log(vmachine_id, f"failed removing control socket {socket_path}: {e}"))
+
+    # The notice socket (#645) is in the same directory, for the same reason.
+    notice.remove_socket(vmachine_id)
 
     # The guest process is dead here, so its logs are complete. Save them before the
     # runtime directory goes: it holds the only copy. A suspended instance has no state
