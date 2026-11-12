@@ -26,11 +26,11 @@ class UnsupportedDevicesException(UnsupportedArchitectureException):
 
 
 def has_devices(service: Optional[celaut_pb2.Service]) -> bool:
-    return bool(
-        service is not None
-        and service.HasField("container")
-        and len(service.container.devices)
-    )
+    # Anything that is not a Service message (a placeholder in a caller or a test)
+    # asks for no device.
+    if not isinstance(service, celaut_pb2.Service):
+        return False
+    return bool(service.HasField("container") and len(service.container.devices))
 
 
 def refusal(service: Optional[celaut_pb2.Service], virtualizer: Optional[str] = None) -> Optional[str]:
