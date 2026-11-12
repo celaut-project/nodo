@@ -1048,6 +1048,20 @@ The older `entrypoint` top-level field is still supported and will be automatica
 
 ---
 
+#### `node_protocol_stack`
+- **Type:** `array` of protocol descriptors, bottom layer first
+- **Required:** No
+- **Default:** `[]`
+- **Description:** The protocols that the service expects from the node (issue #648). An empty stack declares that the service does not use the gateway of the node: it does not modify its resources and it does not request a dependency execution. The node gives such a service no access to the gateway: no firewall rule to its ports, and no `gateway` in its `__config__`. A service that talks to the gateway must declare the protocol. Each entry has the same shape as an `api` slot `protocol_stack` entry (`tags`, `prose`, `formal`).
+
+```json
+{
+    "node_protocol_stack": [{"tags": ["grpc"]}]
+}
+```
+
+---
+
 #### `notice_declaration`
 - **Type:** `object`, or `false`
 - **Required:** No

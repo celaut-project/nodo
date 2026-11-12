@@ -441,14 +441,34 @@ def build_network_resolution(
     return resolutions
 
 
+def service_uses_gateway(service: celaut.Service) -> bool:
+    """True if the service declares a node protocol stack (#648).
+
+    An empty ``node_protocol_stack`` declares that the service does not modify its
+    resources and does not request a dependency execution, so the node gives it no
+    access to its gateway.
+
+    TODO: Only the presence of the stack counts now, not its content. The stack
+    should go down to bee-rpc, and the RPCs that it names should tell, from the spec
+    alone, whether the service will modify its resources and whether it will request
+    a dependency execution. Then the node can give each service only the part of the
+    gateway that it declares, and refuse a stack that it does not understand.
+    """
+    return len(service.container.node_protocol_stack) > 0
+
+
 def build_configuration_file(
     config: Optional[celaut.Configuration],
     resources: celaut.Sysresources,
     network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
+    uses_gateway: bool = True,
 ) -> celaut.ConfigurationFile:
     cfg = celaut.ConfigurationFile()
-    local_peer = generate_node_peer_info(network=NETWORK_BRIDGE_NAME)
-    cfg.gateway.CopyFrom(peer_gateway_instance(local_peer))
+    # A service with an empty node_protocol_stack does not use the gateway (#648):
+    # it is not told where the gateway is.
+    if uses_gateway:
+        local_peer = generate_node_peer_info(network=NETWORK_BRIDGE_NAME)
+        cfg.gateway.CopyFrom(peer_gateway_instance(local_peer))
 
     if config:
         cfg.config.CopyFrom(config)

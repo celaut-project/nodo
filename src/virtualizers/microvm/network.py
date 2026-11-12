@@ -674,6 +674,7 @@ def configure_guest_firewall_policy(
     vmachine_id: str,
     vm_ip: str,
     network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
+    uses_gateway: bool = True,
 ) -> None:
     if not vm_block_all(vmachine_id=vmachine_id, source_ip=vm_ip):
         raise MicroVMError(
@@ -695,6 +696,9 @@ def configure_guest_firewall_policy(
     # __config__ names (a service speaks plain gRPC), and the TLS one is reachable too,
     # so a service that wants to pin the node's certificate can (issue #257).
     #
+    # A service with an empty node_protocol_stack declared that it does not use the
+    # gateway (#648): neither port is opened for it.
+    #
     # Both are read here rather than at import: they are assigned by the daemon, which
     # may well happen after this module was first loaded.
     for gateway_port in dict.fromkeys(
@@ -703,7 +707,7 @@ def configure_guest_firewall_policy(
             env_manager.get_plaintext_gateway_port(),
             env_manager.get_gateway_port(),
         )
-        if port
+        if port and uses_gateway
     ):
         if not vm_allow_host_connection(
             vmachine_id=vmachine_id,

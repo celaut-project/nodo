@@ -607,6 +607,29 @@ class ZipContainerPacker:
         if declaration is not None:
             self.service.container.notice_declaration.CopyFrom(declaration)
 
+    def parseNodeProtocolStack(self):
+        """The protocols that the service expects from the node (#648).
+
+        ``service.json`` gives them in ``node_protocol_stack``, a list of descriptors,
+        bottom layer first. With no key, the stack is empty: the service declares that
+        it does not use the gateway of the node, so it cannot request a dependency
+        execution or modify its resources, and the node gives it no access to it.
+        """
+        stack = self.json.get('node_protocol_stack')
+        if stack is None:
+            return
+        if not isinstance(stack, list):
+            raise ValueError(
+                "service.json: 'node_protocol_stack' must be a list of protocol "
+                "descriptors (bottom layer first)."
+            )
+        self.service.container.node_protocol_stack.extend(
+            self._parse_protocol_descriptor(
+                declaration, f"'node_protocol_stack'[{index}]",
+            )
+            for index, declaration in enumerate(stack)
+        )
+
     def parseContainer(self):
         def _normalize_path_segments(raw_path):
             if isinstance(raw_path, str):
@@ -839,6 +862,7 @@ class ZipContainerPacker:
         )
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
         self.parseNoticeDeclaration()
+        self.parseNodeProtocolStack()
 
         # `envs` names the variables the service asks for, with an empty DataFormat.
         envs = self.json.get('envs') or []

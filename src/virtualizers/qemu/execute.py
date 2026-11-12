@@ -519,6 +519,7 @@ def execute(
                 config=config,
                 resources=initial_system_resources,
                 network_resolution=network_resolution,
+                uses_gateway=rootfs.service_uses_gateway(service),
             )
             with open(config_host_path, "wb") as f:
                 f.write(cfg.SerializeToString())
@@ -593,6 +594,7 @@ def execute(
             vmachine_id=vmachine_id,
             vm_ip=vm_ip,
             network_resolution=network_resolution,
+            uses_gateway=rootfs.service_uses_gateway(service),
         )
 
         vcpus, init_mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
