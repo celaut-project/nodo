@@ -30,6 +30,16 @@ def _service_hash_or_none(metadata: celaut.Metadata) -> Optional[str]:
         return None
 
 
+def _enforce_devices(service) -> None:
+    from src.devices import admission as devices_admission
+
+    if not devices_admission.has_devices(service):
+        return
+    from src.virtualizers.selection import select_virtualizer
+
+    devices_admission.enforce_supported(service, select_virtualizer(service))
+
+
 def generate_estimated_cost(
         metadata: celaut.Metadata,
         config: celaut.Configuration,
@@ -63,6 +73,8 @@ def generate_estimated_cost(
     # A node that cannot carry the notice of the service refuses it, as it refuses an
     # architecture that it cannot run (#645).
     notice.enforce_supported(service)
+    # The same for the devices of the service (#536): refused, never ignored.
+    _enforce_devices(service)
 
     # Only the launcher checks here (the balancer's local candidate, its preflight), so a
     # refusal for disk alone may free the disk of suspended instances nobody pays for.

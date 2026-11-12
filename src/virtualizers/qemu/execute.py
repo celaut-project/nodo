@@ -74,6 +74,7 @@ from src.virtualizers.qemu.config import (
     QEMU_CONSOLE_BY_ARCH,
     QEMU_MACHINE_BY_ARCH,
     qemu_initramfs_path,
+    qemu_kernel_override,
     qemu_kernel_path,
     qemu_system_binary,
 )
@@ -471,9 +472,12 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] emulator resolved: {qemu_binary} (arch={arch})")
 
         # Kernel/initramfs: a QEMU override first, else the bundle's own assets.
-        # Loading the bundle still validates that they exist for this arch.
+        # Loading the bundle still validates that they exist for this arch. The
+        # kernel is the one that the bundle names by hash (#536), not the configured
+        # CH kernel of today: only an explicit virtualizers.qemu.KERNEL_PATHS entry
+        # (the operator's choice for emulation) replaces it.
         bundle = microvm_bundle.load_bundle(service_id=service_id, arch=arch)
-        kernel_path = qemu_kernel_path(arch) or bundle["kernel_path"]
+        kernel_path = qemu_kernel_override(arch) or bundle["kernel_path"]
         initramfs_path = qemu_initramfs_path(arch) or bundle["initramfs_path"]
         rootfs_format = bundle["rootfs_format"]
         rootfs_read_only = is_read_only_format(rootfs_format)

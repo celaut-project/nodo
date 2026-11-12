@@ -323,6 +323,14 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     f'No local instance is registered at {caller_ip}, so this node cannot tell '
                     f'which instance is asking to change its resources ({context.peer()}).'
                 )
+        # A change of devices (#536) is for ATTACH_ON_REQUEST, which this node does not
+        # support: it refuses, never ignores it (celaut.proto, DeviceChange). Before the
+        # charge, so there is nothing to refund.
+        if request.HasField("devices"):
+            raise Exception(
+                'This node does not attach or detach devices on request '
+                '(ATTACH_ON_REQUEST): the change of devices is refused.'
+            )
         # A closed node takes no growth and starts nothing (issue #344): neither a resize
         # that asks for more than the instance holds nor a wake by hand. Asked before the
         # instance is charged, so there is nothing to refund. Dev work is exempt, as in

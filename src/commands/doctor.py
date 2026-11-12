@@ -527,6 +527,56 @@ def _doctor_guest_kernel(kernel_paths: dict, host_arch_tag: str):
     return kernel_path
 
 
+def _doctor_kernel_store(kernel_paths: dict, host_arch_tag: str):
+    """The guest kernels by hash (#536): the store, the ABI aliases, the bundles."""
+    print("\nGuest kernel store:", flush=True)
+    try:
+        from src.virtualizers.microvm import kernel_store
+
+        kernels = kernel_store.store_listing()
+        report = kernel_store.bundle_kernel_report()
+    except Exception as e:
+        print(f"[WARN] Could not read the kernel store: {e}", flush=True)
+        return
+    root = kernel_store.store_root()
+    if not kernels:
+        print(f"[WARN] The kernel store {root} is empty.", flush=True)
+        print("  Suggestion: run 'nodo migrate' (as root) or re-run the installer.", flush=True)
+    by_hash = report["by_hash"]
+    for kernel in kernels:
+        used = by_hash.get(kernel["hash"], 0)
+        print(
+            f"[OK] {kernel['hash']} ({kernel['size']} bytes, {used} bundle(s))",
+            flush=True,
+        )
+        for old in kernel["abi_aliases"]:
+            print(f"     claims the ABI of {old} (operator alias)", flush=True)
+    default = kernel_paths.get(host_arch_tag, "")
+    if default and os.path.isfile(default):
+        try:
+            default_hash = kernel_store.file_hash(default)
+            print(f"[OK] New builds for {host_arch_tag} get {default_hash}", flush=True)
+        except OSError as e:
+            print(f"[WARN] Could not hash {default}: {e}", flush=True)
+    if report["unstamped"]:
+        print(
+            f"[WARN] {len(report['unstamped'])} bundle(s) have no kernel hash yet "
+            f"(the node pins them at its next start or at 'nodo migrate').",
+            flush=True,
+        )
+    for kernel_hash, names in sorted(report["unresolved"].items()):
+        print(
+            f"[FAIL] Kernel {kernel_hash} is not on this node; {len(names)} bundle(s) "
+            f"cannot start: {', '.join(names[:5])}",
+            flush=True,
+        )
+        print(
+            "  Suggestion: put that kernel back in the store, alias it in "
+            "virtualizers.ch.KERNEL_ABI_ALIASES, or remove and rebuild those services.",
+            flush=True,
+        )
+
+
 def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
     """Check custom initramfs exists and contains required entries."""
     print("\nCustom initramfs:", flush=True)
@@ -859,6 +909,7 @@ def _doctor_cloud_hypervisor(main_dir: str):
     ch_binary = _doctor_ch_binary(cfg.get("binary_path", ""))
     _doctor_host_kernel()
     guest_kernel = _doctor_guest_kernel(cfg.get("kernel_paths", {}), host_arch_tag)
+    _doctor_kernel_store(cfg.get("kernel_paths", {}), host_arch_tag)
     initramfs = _doctor_initramfs(cfg.get("initramfs_paths", {}), host_arch_tag)
     _doctor_vgic()
     _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)

@@ -1153,6 +1153,30 @@ A service with no declaration (`false`, or one that was packed before the notice
 
 ---
 
+#### `devices`
+
+**Experimental (#536), off by default on nodes.** The devices that the node attaches directly to the instance, for example a GPU through VFIO. One entry for each device:
+
+```json
+"devices": [
+  {
+    "tags": ["pci:10de:2204+<algorithm>:<kernel hash>"],
+    "resources": {
+      "at_init": {"mem_limit": 17179869184, "benchmark": {"fp32_flops": 30000000000000}},
+      "at_most": {"mem_limit": 25769803776}
+    },
+    "attach": ["at_start"]
+  }
+]
+```
+
+- **`tags`**: the architecture of the device: the chip and the guest kernel together, `pci:<vendor>:<device>+<algorithm>:<hash>`. `<vendor>` and `<device>` are the PCI ids of the chip (4 lowercase hex digits). `<algorithm>` is the id of a hash algorithm: its output for the empty input, in lowercase hex (SHA-256: `e3b0c442…b855`). `<hash>` is that algorithm's output for the guest kernel file. The tags are **synonyms** of one architecture, never alternatives: one chip and one kernel. A service for two chips is two services. `nodo devices --json` on a node prints the tags that it offers.
+- **`resources.at_init`**: the minimum that the service needs: `mem_limit` is the memory of the device, and `benchmark` has minimum scores with device keys (for example `fp32_flops`). An absent score on the node is not a reason to refuse.
+- **`attach`**: `at_start` (the default) or `on_request`. A node uses the first value that it supports, and refuses the service if it supports none. Nodes today support only `at_start`.
+- **All the devices of a service share one guest kernel**: one virtual machine boots one kernel.
+- **A service with devices must have the same `at_init` and `at_most` resources**: the node cannot change the resources of an instance that has devices (VFIO pins all the guest memory). The packer refuses it otherwise.
+- The service brings the kernel module, the firmware and the userspace driver, built for that kernel. A device is available only with the native architecture of the node: the QEMU emulation path refuses a service with devices.
+
 #### `api`
 - **Type:** `array of objects`
 - **Required:** No

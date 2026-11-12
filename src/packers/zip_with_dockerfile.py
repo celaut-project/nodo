@@ -608,6 +608,61 @@ class ZipContainerPacker:
         if declaration is not None:
             self.service.container.notice_declaration.CopyFrom(declaration)
 
+    def parseDevices(self):
+        """``devices``: the devices that the node attaches directly to the instance (#536).
+
+        A list, one entry for each device::
+
+            {"tags": ["pci:<vendor>:<device>+<algorithm>:<hash>", ...],
+             "resources": {"at_init": {"mem_limit": ..., "benchmark": {...}},
+                           "at_most": {"mem_limit": ...}},
+             "attach": ["at_start"]}
+
+        The tags are synonyms of one architecture: one chip and one guest kernel. A
+        service with devices must have the same at_init and at_most resources. Refused
+        here, at the pack, when the declaration is not valid.
+        """
+        declared = self.json.get("devices")
+        if declared is None:
+            return
+        if not isinstance(declared, list):
+            raise ValueError("service.json 'devices' must be a list.")
+        attach_names = {
+            "at_start": celaut.Device.ATTACH_AT_START,
+            "on_request": celaut.Device.ATTACH_ON_REQUEST,
+        }
+        for i, entry in enumerate(declared):
+            if not isinstance(entry, dict):
+                raise ValueError(f"service.json devices[{i}] must be an object.")
+            device = self.service.container.devices.add()
+            tags = entry.get("tags") or []
+            if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+                raise ValueError(f"service.json devices[{i}].tags must be a list of strings.")
+            device.architecture.tags.extend(tags)
+            res = entry.get("resources") or {}
+            for end in ("at_init", "at_most"):
+                part = res.get(end) or {}
+                target = getattr(device.resources, end)
+                if "mem_limit" in part:
+                    target.mem_limit = int(part["mem_limit"])
+                if end == "at_init" and part.get("benchmark"):
+                    keyvalue.from_dict(
+                        target.benchmark,
+                        parse_benchmark(part["benchmark"], f"devices[{i}].resources.at_init.benchmark"),
+                    )
+            for mode in entry.get("attach") or []:
+                if mode not in attach_names:
+                    raise ValueError(
+                        f"service.json devices[{i}].attach: '{mode}' is not one of "
+                        f"{', '.join(sorted(attach_names))}."
+                    )
+                device.attach.append(attach_names[mode])
+        from src.devices import spec as device_spec
+
+        reason = device_spec.container_reason(self.service.container)
+        if reason:
+            raise ValueError(f"service.json devices: {reason}")
+
     def parseNodeProtocolStack(self):
         """The protocols that the service expects from the node (#648).
 
@@ -867,6 +922,7 @@ class ZipContainerPacker:
         self.service.container.architecture.tags.extend([self.json.get('architecture')])
         self.parseNoticeDeclaration()
         self.parseNodeProtocolStack()
+        self.parseDevices()
 
         # `envs` names the variables the service asks for, with an empty DataFormat.
         envs = self.json.get('envs') or []

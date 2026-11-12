@@ -28,6 +28,9 @@ message Service {
         repeated celaut.Service.Api.Protocol node_protocol_stack = 6;
         repeated celaut.DataFormatKeyValue environment_variables = 7;
         optional celaut.Service.Container.NoticeDeclaration notice_declaration = 8;
+        // The devices that the node attaches directly to the instance, as in
+        // celaut.Service.Container.devices (#536).
+        repeated celaut.Device devices = 9;
     }
     string prose = 1;
     Container container = 2;

@@ -356,6 +356,27 @@ def _start_onion_server(virtual_port: int):
         return None
 
 
+def _pin_bundle_kernels():
+    """Name the kernel of every bundle by hash before any launch (#536).
+
+    A bundle built before the kernel store names only a path. The installer no
+    longer overwrites that path, so it still holds the kernel that the bundle was
+    built with: hash it now. Best effort, and a no-op once every bundle has a hash.
+    """
+    try:
+        from src.virtualizers.microvm import kernel_store
+
+        counts = kernel_store.migrate_all_bundles()
+        if counts.get("migrated") or counts.get("kernels_ingested"):
+            log.LOGGER(
+                f"[kernel-store] pinned {counts['migrated']} of {counts['bundles']} "
+                f"bundle(s) to a kernel hash; {counts['kernels_ingested']} kernel(s) "
+                f"added to the store."
+            )
+    except Exception as e:
+        log.LOGGER(f"[kernel-store] could not pin the bundle kernels: {e}")
+
+
 def serve():
     # Resolved before anything else: a node whose gateway port is unassigned or
     # unreachable cannot serve a single request, and every service it accepted
@@ -372,6 +393,7 @@ def serve():
     port = env_manager.get_gateway_port()
     _sweep_leaked_probes()
     _ensure_guest_bridge()
+    _pin_bundle_kernels()
     if not hidden_mode():
         # A hidden node opens nothing: its TLS port listens on loopback, and the only way
         # in from outside is the onion service.

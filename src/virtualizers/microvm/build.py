@@ -33,7 +33,7 @@ from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.architecture import get_arch_tag, UnsupportedArchitectureException
 # Image floors and the sizing they feed. Shared with the pricing side, so a quote is
 # computed from the same numbers the image is formatted at (see `limits`).
-from src.virtualizers.microvm import limits, paths
+from src.virtualizers.microvm import kernel_store, limits, paths
 # What a built bundle can hold, declared where it is read back rather than where
 # it is written: both launch paths need it and neither should import this module.
 from src.virtualizers.microvm.bundle_formats import (
@@ -1422,6 +1422,9 @@ def build(
         )
 
     kernel_path, initramfs_path = _validate_guest_assets(arch)
+    # The bundle names its kernel by hash (#536): a later guest-kernel update adds a
+    # new kernel to the store and never changes the one that this build boots.
+    kernel_hash, kernel_path = kernel_store.kernel_for_build(kernel_path)
 
     bundle_dir = _bundle_dir(service_id, arch)
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -1548,6 +1551,8 @@ def build(
         "rootfs_path": str(rootfs_path),
         "rootfs_format": rootfs_format,
         "kernel_path": kernel_path,
+        "kernel_hash": kernel_hash,
+        "kernel_hash_algorithm": kernel_store.STORE_ALGORITHM_HEX,
         "initramfs_path": initramfs_path,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "requested_disk_space_bytes": requested_disk_space_bytes,
