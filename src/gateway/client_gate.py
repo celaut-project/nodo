@@ -193,6 +193,25 @@ def require_caller(context, client_id: str = "") -> str:
     return client_id
 
 
+def deposit_account(caller: str, client_id: str = "") -> str:
+    """The account id that a new deposit token pays into (#630): a ``client_id`` or the
+    token of the calling instance.
+
+    A client gets a token for its own ``client_id``, as before. A local instance gets a
+    token for itself (it sends no ``client_id``, or its own token), so a service that
+    earns money can recharge its own MU. The node still proves the payment on the ledger
+    and each token works once, so an instance cannot credit itself without paying. An
+    instance that names anything else but an existing client is refused.
+    """
+    if not sc.internal_instance_exists(id=caller):
+        return client_id  # a client: require_caller already checked it
+    if not client_id or client_id == caller:
+        return caller
+    if sc.client_exists(client_id=client_id):
+        return client_id
+    raise ClientRequired("A deposit token pays into a client or into the caller itself.")
+
+
 def require_father(context, token: str, client_id: str = "") -> None:
     """Refuse a call on the instance ``token`` unless its father is the caller, when the
     father is a client (issue #597).

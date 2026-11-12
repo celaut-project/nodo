@@ -40,7 +40,7 @@ class DepositTokenClaimTests(unittest.TestCase):
         self.addCleanup(lambda: setattr(SQLConnection, "_connection", saved))
         self.sql.record_payment = mock.MagicMock()
 
-        self.token = self.sql.add_deposit_token(client_id="client-1", status="pending")
+        self.token = self.sql.add_deposit_token(account_id="client-1", status="pending")
         self.credits = []
         self.validations = 0
 
@@ -58,8 +58,8 @@ class DepositTokenClaimTests(unittest.TestCase):
             time.sleep(0.05)
             return valid
 
-        def credit(client_id, amount_mu, detail=None):
-            self.credits.append((client_id, amount_mu))
+        def credit(account_id, amount_mu, detail=None):
+            self.credits.append((account_id, amount_mu))
             return True
 
         manager = mock.MagicMock()

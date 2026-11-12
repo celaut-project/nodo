@@ -35,7 +35,7 @@ class DepositGenerationPauseTests(unittest.TestCase):
         with mock.patch.object(payment_process.env_manager, "get", return_value=True), \
                 mock.patch.object(payment_process, "sc") as sc:
             with self.assertRaises(Exception):
-                payment_process.generate_deposit_token(client_id="c1")
+                payment_process.generate_deposit_token(account_id="c1")
         sc.add_deposit_token.assert_not_called()
 
     def test_no_token_is_issued_when_the_operator_closed_new_deposits(self):
@@ -44,7 +44,7 @@ class DepositGenerationPauseTests(unittest.TestCase):
         with mock.patch.object(payment_process.env_manager, "get", return_value=False), \
                 mock.patch.object(payment_process, "sc") as sc:
             with self.assertRaises(Exception):
-                payment_process.generate_deposit_token(client_id="c1")
+                payment_process.generate_deposit_token(account_id="c1")
         sc.add_deposit_token.assert_not_called()
 
     def test_the_drain_clears_once_the_pending_tokens_settle(self):
@@ -97,7 +97,7 @@ class DepositTokenExpiryTests(unittest.TestCase):
 
     def _insert(self, token_id: str, status: str, created_at: str):
         self.conn.execute(
-            f"INSERT INTO deposit_tokens (id, client_id, status, created_at) "
+            f"INSERT INTO deposit_tokens (id, account_id, status, created_at) "
             f"VALUES (?, 'c1', ?, {created_at})",
             (token_id, status),
         )
@@ -125,7 +125,7 @@ class DepositTokenExpiryTests(unittest.TestCase):
     def test_a_token_add_deposit_token_just_issued_is_not_expirable(self):
         # `add_deposit_token` names no created_at, so this is what proves the column
         # default stamps one. Were it ever NULL, every token would be born expired.
-        token = self.sc.add_deposit_token(client_id="c1", status="pending")
+        token = self.sc.add_deposit_token(account_id="c1", status="pending")
         self.assertEqual(self.sc.expire_pending_deposit_tokens(3600), 0)
         self.assertEqual(self._status(token), "pending")
 

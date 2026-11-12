@@ -98,7 +98,7 @@ pub fn get_client_detail(database: &Path, client_id: &str) -> SqlResult<ClientDe
 fn get_deposit_tokens(connection: &Connection, client_id: &str) -> SqlResult<Vec<DepositToken>> {
     let mut statement = connection.prepare(
         "SELECT id, status, created_at FROM deposit_tokens
-         WHERE client_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+         WHERE account_id = ?1 ORDER BY created_at DESC LIMIT ?2",
     )?;
     let tokens = statement
         .query_map(
@@ -412,7 +412,7 @@ mod tests {
                                     deposit_token TEXT, ledger TEXT, contract_hash TEXT,
                                     address TEXT, amount_mu TEXT NOT NULL,
                                     created_at DATETIME);
-                 CREATE TABLE deposit_tokens (id TEXT PRIMARY KEY, client_id TEXT,
+                 CREATE TABLE deposit_tokens (id TEXT PRIMARY KEY, account_id TEXT,
                                     status TEXT, created_at DATETIME);
                  CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, father_id TEXT);
                  INSERT INTO clients VALUES ('client-1', '500', NULL, 1);

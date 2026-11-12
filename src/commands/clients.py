@@ -42,7 +42,7 @@ def _client_detail(connection, client_id, limit):
     if catalogue.table_exists(connection, "deposit_tokens"):
         detail["deposit_tokens"] = [dict(row) for row in connection.execute(
             "SELECT id, status, created_at FROM deposit_tokens "
-            "WHERE client_id = ? ORDER BY created_at DESC LIMIT ?", (client_id, limit))]
+            "WHERE account_id = ? ORDER BY created_at DESC LIMIT ?", (client_id, limit))]
     if catalogue.table_exists(connection, "local_instances"):
         # `father_id` holds the client id for a top-level instance: the only link
         # between a client and anything it runs.

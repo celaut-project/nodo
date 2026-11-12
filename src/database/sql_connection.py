@@ -996,6 +996,26 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('SELECT COUNT(*) FROM clients')
         return int(result.fetchone()[0])
 
+    def payable_account(self, account_id: str) -> Optional[str]:
+        """The account that a payment for ``account_id`` credits (#630), or None.
+
+        The account itself while it exists. An instance that stopped after its token was
+        issued has no account any more, so the payment goes to its father, as the balance
+        that it left does (``refund``): the father of a father, if that stopped too.
+        """
+        for _ in range(16):
+            if self.account_exists(account_id):
+                return account_id
+            father_id = self.father_of(account_id, with_dead=True)
+            if not father_id:
+                return None
+            account_id = father_id
+        return None
+
+    def account_exists(self, account_id: str) -> bool:
+        """True if ``account_id`` is a client or a live local instance (#630)."""
+        return self.client_exists(client_id=account_id) or self.internal_instance_exists(id=account_id)
+
     def client_exists(self, client_id: str) -> bool:
         """
         Checks if a client exists in the database.
@@ -4704,12 +4724,13 @@ class SQLConnection(metaclass=Singleton):
         return 0
 
     # Payment system
-    def add_deposit_token(self, client_id: str, status: str) -> str:
+    def add_deposit_token(self, account_id: str, status: str) -> str:
         """
         Adds a deposit token to the database.
 
         Args:
-            client_id (str): The ID of the client associated with the deposit token.
+            account_id (str): The client_id or the instance token that the deposit
+                token pays into.
             status (str): The status of the deposit token (pending, payed, or rejected).
         """
         if status not in ('pending', 'payed', 'rejected'):
@@ -4717,9 +4738,9 @@ class SQLConnection(metaclass=Singleton):
 
         token_id = str(uuid.uuid4())
         self._execute('''
-            INSERT INTO deposit_tokens (id, client_id, status)
+            INSERT INTO deposit_tokens (id, account_id, status)
             VALUES (?, ?, ?)
-        ''', (token_id, client_id, status))
+        ''', (token_id, account_id, status))
 
         return token_id
 
@@ -5340,7 +5361,7 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             List[dict]: A list of dictionaries containing deposit token details.
         """
-        query = "SELECT id, client_id, status FROM deposit_tokens"
+        query = "SELECT id, account_id, status FROM deposit_tokens"
         params = []
 
         if status:
@@ -5350,7 +5371,7 @@ class SQLConnection(metaclass=Singleton):
             params.append(status)
 
         result = self._execute(query, tuple(params))
-        tokens = [{'id': row['id'], 'client_id': row['client_id'], 'status': row['status']} for row in result.fetchall()]
+        tokens = [{'id': row['id'], 'account_id': row['account_id'], 'status': row['status']} for row in result.fetchall()]
 
         return tokens
 
@@ -5374,27 +5395,27 @@ class SQLConnection(metaclass=Singleton):
 
         return result.rowcount
 
-    def client_id_from_deposit_token(self, token_id: str) -> str:
+    def account_id_from_deposit_token(self, token_id: str) -> str:
         """
-        Retrieves the client ID associated with a given deposit token ID.
+        Retrieves the account id (a client_id or an instance token) that a deposit token pays into.
 
         Args:
             token_id (str): The ID of the deposit token.
 
         Returns:
-            str: The client ID associated with the deposit token.
+            str: The account id of the deposit token.
 
         Raises:
             ValueError: If the deposit token ID does not exist.
         """
-        query = "SELECT client_id FROM deposit_tokens WHERE id = ?"
+        query = "SELECT account_id FROM deposit_tokens WHERE id = ?"
         result = self._execute(query, (token_id,))
 
         row = result.fetchone()
         if row is None:
             raise ValueError(f"Deposit token with ID '{token_id}' does not exist.")
 
-        return row['client_id']
+        return row['account_id']
 
     def update_deposit_token(self, token_id: str, status: Optional[str] = None):
         """

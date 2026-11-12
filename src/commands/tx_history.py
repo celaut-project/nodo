@@ -357,7 +357,7 @@ def _counterparty_lines(row: Dict, payments: Dict[str, Dict],
         for token in row.get("deposit_tokens") or []:
             client_id = clients_by_token.get(token)
             if client_id:
-                lines.append(f"From: client {client_id} (deposit token {token})")
+                lines.append(f"From: account {client_id} (deposit token {token})")
             else:
                 lines.append(f"From: an unknown deposit token {token}")
             break
@@ -407,9 +407,9 @@ def _clients_by_deposit_token() -> Dict[str, str]:
         from src.database.sql_connection import SQLConnection
 
         return {
-            token['id']: token['client_id']
+            token['id']: token['account_id']
             for token in SQLConnection().get_deposit_tokens()
-            if token.get('client_id')
+            if token.get('account_id')
         }
     except Exception as e:
         LOGGER(f"Could not read deposit tokens: {str(e)}")

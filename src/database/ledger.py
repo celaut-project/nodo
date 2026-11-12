@@ -36,7 +36,11 @@ env_manager = ConfigManager()
 # What a movement is. Stable strings: they are signed in every statement, and a peer
 # checks each one against its own rule.
 DEPOSIT = "deposit"
-"""A payment on a ledger, credited to a client (``Payable``)."""
+"""A payment on a ledger (``Payable``), credited to the account of the deposit token:
+a client, or an instance that pays for its own MU (#630). A top-up of the father is a
+``top_up``, never a ``deposit``. If the instance stopped before the payment was proved,
+the row is on its father, ``instance_ref`` names the instance and ``detail.reason`` is
+``instance_stopped``."""
 CREDIT = "credit"
 """MU that nobody paid in: the free credit of a new client, the funding of a dev
 client, or the operator with ``nodo credit_client``. ``detail.reason`` says which."""

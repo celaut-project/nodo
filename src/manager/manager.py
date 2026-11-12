@@ -765,17 +765,30 @@ def accept_peer_refresh(peer: celaut_pb2.Peer, peer_id: str) -> bool:
 def get_internal_service_id_by_uri(uri: str) -> str:
     return sc.get_local_instance_id_by_uri(uri=uri)
 
-def increase_local_balance_for_client(client_id: str, amount_mu: int,
+def increase_local_balance_for_client(account_id: str, amount_mu: int,
                                       detail: Optional[dict] = None) -> bool:
-    """Credit a payment to a client: a ``deposit`` row, with ``detail`` as its cause."""
-    log.LOGGER(f"Credit client {client_id} with {format_mu(amount_mu)}")
-    if not sc.client_exists(client_id=client_id):
-        raise Exception('Client ' + client_id + ' does not exists.')
+    """Credit a payment to a client or to a local instance: a ``deposit`` row, with
+    ``detail`` as its cause. ``account_id`` is the account that the deposit token names,
+    and an instance can be that account (#630): a service pays for its own MU. If that
+    instance stopped meanwhile, its father is credited (``detail.reason`` says so)."""
+    log.LOGGER(f"Credit account {account_id} with {format_mu(amount_mu)}")
+    credited = sc.payable_account(account_id)
+    if not credited:
+        raise Exception('Account ' + account_id + ' does not exists.')
+    instance_token = None
+    if credited != account_id:
+        # The instance stopped before the payment was proved: its father gets the MU, as
+        # it got the balance that the instance left. The row names the instance.
+        log.LOGGER(f"Account {account_id} stopped: credit its father {credited} instead.")
+        instance_token = account_id
+        detail = {**(detail or {}), "reason": "instance_stopped"}
+        account_id = credited
     try:
-        sc.move_balance(client_id, amount_mu, ledger.DEPOSIT, detail=detail)
+        sc.move_balance(account_id, amount_mu, ledger.DEPOSIT, instance_token=instance_token,
+                        detail=detail)
     except Exception as e:
         raise Exception(
-            f"Manager error: cannot credit client {client_id} with {format_mu(amount_mu)}: {e}"
+            f"Manager error: cannot credit account {account_id} with {format_mu(amount_mu)}: {e}"
         )
     return True
 

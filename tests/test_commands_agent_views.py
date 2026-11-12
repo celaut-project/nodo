@@ -151,7 +151,7 @@ class ClientViewTests(unittest.TestCase):
         with connection:
             connection.execute("INSERT INTO clients (id, balance_mu, unlimited) VALUES ('client-1', '500', 1)")
             connection.execute(
-                "INSERT INTO deposit_tokens (id, client_id, status, created_at) "
+                "INSERT INTO deposit_tokens (id, account_id, status, created_at) "
                 "VALUES ('tok-1', 'client-1', 'payed', '2026-01-03 09:59:00')")
             connection.execute(
                 "INSERT INTO payments (direction, status, client_id, amount_mu, created_at) "

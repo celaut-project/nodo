@@ -265,7 +265,7 @@ class PaymentCreditTests(unittest.TestCase):
         manager_module.increase_local_balance_for_client.return_value = True
 
         with patch.object(payment_process.sc, "deposit_token_exists", return_value=True), \
-             patch.object(payment_process.sc, "client_id_from_deposit_token", return_value="client-1"), \
+             patch.object(payment_process.sc, "account_id_from_deposit_token", return_value="client-1"), \
              patch.object(payment_process.sc, "update_deposit_token") as update_token, \
              patch.object(payment_process.sc, "get_deposit_tokens", return_value=[]), \
              patch.object(payment_process, "_manager_module", return_value=manager_module), \
@@ -279,7 +279,7 @@ class PaymentCreditTests(unittest.TestCase):
             )
 
         manager_module.increase_local_balance_for_client.assert_called_once_with(
-            client_id="client-1", amount_mu=5_000,
+            account_id="client-1", amount_mu=5_000,
             detail={"deposit_token": "deposit-token", "ledger": ""},
         )
         self.assertTrue(credited)

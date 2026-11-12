@@ -185,7 +185,7 @@ class IncomingPaymentRecordTests(unittest.TestCase):
         ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo chain", formal=b"")
         connection = mock.MagicMock()
         connection.deposit_token_exists.return_value = True
-        connection.client_id_from_deposit_token.return_value = "client-1"
+        connection.account_id_from_deposit_token.return_value = "client-1"
         connection.get_deposit_tokens.return_value = []
         manager = mock.MagicMock()
         manager.increase_local_balance_for_client.return_value = True

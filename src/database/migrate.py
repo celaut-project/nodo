@@ -385,10 +385,9 @@ TABLES = {
     "deposit_tokens": '''
         CREATE TABLE IF NOT EXISTS deposit_tokens (
             id TEXT PRIMARY KEY,
-            client_id TEXT,
+            account_id TEXT,
             status TEXT CHECK( status IN ('pending', 'payed', 'rejected') ) NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (client_id) REFERENCES clients (id)
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''',
     # Node energy samples (issue #258). Energy for the interval plus the tariff

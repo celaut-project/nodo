@@ -944,7 +944,8 @@ message BalanceMovement {
     Amount amount = 3;
     // The balance after the movement, in MU.
     Amount balance_after = 4;
-    // What the movement is: "deposit" (a payment), "credit" (MU that nobody paid in),
+    // What the movement is: "deposit" (a payment on a ledger: of a client, or of the
+    // instance for its own balance), "credit" (MU that nobody paid in),
     // "debit" (the operator took MU), "start" (the initial_mu that the instance got),
     // "build", "maintenance" (one period), "child_start" (the account paid the start of a child), "child_bound" (the
     // child of a child_start exists; moves nothing), "top_up", "withdrawal", "refund"
@@ -1740,6 +1741,9 @@ service Gateway {
     rpc AssociateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Returns a TokenMessage with a new deposit token for the client. The payer writes
     // this token in its ledger transaction. The payment contract gives where and how.
+    // A local instance of the node can call it with an empty client_id: the token then
+    // pays into the balance of the caller, so a service that earns money recharges its
+    // own MU. The node proves the payment on the ledger as always.
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Tells the node about a payment. The Payment gives the deposit token, the contract
     // and the amount. The node examines the ledger. Then it adds the amount to the

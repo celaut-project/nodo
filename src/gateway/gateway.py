@@ -19,7 +19,7 @@ from src.tunneling.rpc_tunnel import (
     service_tunnel,
 )
 from src.gateway.utils import generate_full_node_peer_info
-from src.gateway.client_gate import ClientRequired, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
+from src.gateway.client_gate import ClientRequired, deposit_account, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
 from src.manager import balance_statement, hibernation, stopping
 from src.manager.manager import ALLOW_DEBT, add_peer_instance, descends_from_dev_client, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
@@ -396,10 +396,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
             request_iterator, indices=rpc_input("GenerateDepositToken"), timeout=simple_rpc_timeout_seconds(),
         )
         client_id = request.client_id if request else ""
-        require_caller(context, client_id)
+        caller = require_caller(context, client_id)
+        # A client_id, or the token of the calling instance (#630): the account.
+        account_id = deposit_account(caller, client_id)
         yield from BeeClient.respond(
                 message_iterator=celaut_pb2.TokenMessage(
-                    token=generate_deposit_token(client_id=client_id)
+                    token=generate_deposit_token(account_id=account_id)
                 )
         )
 

@@ -169,13 +169,14 @@ def _address_of(script) -> Optional[str]:
     return script or None
 
 
-def generate_deposit_token(client_id: str) -> str:
+def generate_deposit_token(account_id: str) -> str:
+    """``account_id`` is a client_id or the token of a local instance (#630)."""
     if not env_manager.get("client.ACCEPT_NEW_DEPOSITS", True):
         raise Exception("This node is not accepting new deposits.")
     if deposit_generation_locked:
         raise Exception("Deposit generation locked. Try later.")
     _l.LOGGER("Generate deposit token.")
-    deposit_token = sc.add_deposit_token(client_id=client_id, status='pending')
+    deposit_token = sc.add_deposit_token(account_id=account_id, status='pending')
     _l.LOGGER(f"Deposit token {deposit_token} generated.")
     return deposit_token
 
@@ -925,16 +926,16 @@ def _validate_claimed_payment(amount: int, ledger: celaut_pb2.Contract.Ledger, c
     # Resolved once, up front, because the payment record needs it whichever way the
     # validation goes -- a deposit we refused is exactly the one a client will ask about.
     try:
-        client_id: Optional[str] = sc.client_id_from_deposit_token(token_id=token)
+        account_id: Optional[str] = sc.account_id_from_deposit_token(token_id=token)
     except Exception:
-        client_id = None
+        account_id = None
 
     try:
-        _r = bool(client_id) and __check_payment_process(
+        _r = bool(account_id) and __check_payment_process(
             amount=amount, ledger=ledger_tag, token=token,
             contract=contract, script=script, asset=asset,
         ) and _manager_module().increase_local_balance_for_client(
-            client_id=client_id, amount_mu=amount,
+            account_id=account_id, amount_mu=amount,
             detail={"deposit_token": token, "ledger": ledger_tag},
         )  # TODO allow for containers too.
     except: _r = False
@@ -956,7 +957,7 @@ def _validate_claimed_payment(amount: int, ledger: celaut_pb2.Contract.Ledger, c
         direction='in',
         status='accepted' if _r else 'rejected',
         amount_mu=amount,
-        client_id=client_id,
+        client_id=account_id,
         deposit_token=token,
         ledger=ledger_tag,
         contract_hash=contract_hash,
@@ -973,9 +974,10 @@ def __check_payment_process(amount: int, ledger: str, token: str,
         _l.LOGGER(f"No token {token} in pending deposit_tokens")
         return False
 
-    client_id = sc.client_id_from_deposit_token(token_id=token)
-    if not sc.client_exists(client_id=client_id):
-        _l.LOGGER(f"Client id {client_id} not in clients.")
+    account_id = sc.account_id_from_deposit_token(token_id=token)
+    # The account is a client or a local instance (#630).
+    if not sc.payable_account(account_id):
+        _l.LOGGER(f"Account {account_id} is neither a client nor a local instance.")
         return False
 
     from src.payment_system.contracts.registry import MethodKey

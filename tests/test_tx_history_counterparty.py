@@ -96,7 +96,7 @@ class CounterpartyLineTests(unittest.TestCase):
             clients_by_token={"deposit-token-1": "client-1"},
         )
 
-        self.assertTrue(any("From: client client-1" in line for line in lines))
+        self.assertTrue(any("From: account client-1" in line for line in lines))
         self.assertIn("From address: 9payerADDRESS", lines)
 
     def test_a_deposit_token_this_node_never_issued_is_still_reported(self):
