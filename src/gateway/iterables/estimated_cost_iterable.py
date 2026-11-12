@@ -201,6 +201,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             ask=lambda: quotes_from_peers(
                 resources=service.container.resources, metadata=self.metadata,
                 configuration=configuration, peer_arch=peer_arch, timeout=budget,
+                devices=list(service.container.devices),
             ),
         )
         if not quotes:

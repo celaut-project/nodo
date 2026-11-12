@@ -54,7 +54,7 @@ these hypothetical ones. It only proves existence: that a shape this big fits
 *somewhere* right now, exactly as confident as the single-service admission check it
 reuses and no more.
 """
-from typing import Final, List, Optional, Tuple
+from typing import Final, List, Optional, Sequence, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.utils import logger as log
@@ -163,7 +163,7 @@ def _timeout() -> Optional[int]:
 
 def check_resource_availability_on_peer(
         peer_id: str,
-        request: celaut.ArchitectureResources,
+        request,
 ) -> Optional[bool]:
     """Ask exactly one peer whether it could run an instance of this architecture
     shaped like `request` right now. None means the peer could not be asked
@@ -235,19 +235,33 @@ def group_request(workload: celaut.Service.Workload) -> celaut.ArchitectureResou
     return request
 
 
-def _local_resource_availability(request: celaut.ArchitectureResources) -> dict:
-    """Whether this host could take one instance of ``request``'s architecture and shape.
+def group_devices(workload: celaut.Service.Workload) -> List[celaut.Device]:
+    """The devices that each descendant of ``workload`` needs (#536)."""
+    if not (workload.HasField("dependency") and workload.dependency.HasField("service")):
+        return []
+    return list(workload.dependency.service.container.devices)
+
+
+def _local_resource_availability(request: celaut.ArchitectureResources,
+                                 devices: Sequence[celaut.Device] = ()) -> dict:
+    """Whether this host could take one instance of ``request``'s architecture and shape
+    (and its ``devices``, #536).
 
     Its own function rather than a call inlined into
     :func:`_workload_group_is_satisfiable` so a test can replace exactly this step and
     drive the peer half of the decision on its own.
     """
+    if devices:
+        from src.devices.admission import request_availability
+
+        return request_availability(request, list(devices))
     return get_architecture_availability(request)
 
 
 def _workload_group_is_satisfiable(
         request: celaut.ArchitectureResources,
         ignore_network: Optional[str],
+        devices: Sequence[celaut.Device] = (),
 ) -> bool:
     from src.utils.cost_functions.architecture_resources import executes_locally
 
@@ -255,7 +269,9 @@ def _workload_group_is_satisfiable(
     # `network.EXECUTE_LOCALLY: false` the room it has is not on offer, and a group
     # admitted on its strength would be refused at launch for want of a local
     # candidate.
-    if executes_locally() and _local_resource_availability(request)["can_execute"]:
+    if executes_locally() and (
+            _local_resource_availability(request, devices) if devices
+            else _local_resource_availability(request))["can_execute"]:
         return True
 
     if not env_manager.get("network.DELEGATE_EXECUTION", True):
@@ -269,9 +285,13 @@ def _workload_group_is_satisfiable(
     arch = arch_from_tags(request.architecture.tags)
     for peer_id in peers_id_iterator(ignore_network=ignore_network):
         # Skipped when the peer's own announcement already rules it out (#454, #459).
-        if should_skip_peer(peer_id, arch, request.resources, "GetResourceAvailability"):
+        if should_skip_peer(peer_id, arch, request.resources, "GetResourceAvailability",
+                            devices=devices):
             continue
-        if check_resource_availability_on_peer(peer_id, request) is True:
+        # With devices, the question carries them (ResourceAvailabilityRequest, #536).
+        asked = celaut.ResourceAvailabilityRequest(main=request, devices=list(devices)) \
+            if devices else request
+        if check_resource_availability_on_peer(peer_id, asked) is True:
             return True
     return False
 
@@ -303,10 +323,13 @@ def _unsatisfiable_workloads(
     failures: List[str] = []
     for workload_index, workload in enumerate(group.workloads):
         request = group_request(workload)
-        if workload.count == 0 or not request.resources.ListFields():
+        devices = group_devices(workload)
+        if workload.count == 0 or (not request.resources.ListFields() and not devices):
             continue  # No resource requirement declared; trivially satisfiable.
 
-        if _workload_group_is_satisfiable(request, ignore_network):
+        satisfiable = _workload_group_is_satisfiable(request, ignore_network, devices) \
+            if devices else _workload_group_is_satisfiable(request, ignore_network)
+        if satisfiable:
             continue
 
         failures.append(

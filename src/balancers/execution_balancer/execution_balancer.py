@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, wait
-from typing import Dict, Generator, List, Optional
+from typing import Dict, Generator, List, Optional, Sequence
 
 import grpc
 
@@ -179,6 +179,7 @@ def quotes_from_peers(
         peer_arch: Optional[str] = None,
         ignore_network: str = None,
         timeout: Optional[float] = None,
+        devices: Sequence[celaut.Device] = (),
 ) -> Dict[str, celaut_pb2.EstimatedCost]:
     """The price of each peer that answers, in local MU.
 
@@ -192,7 +193,10 @@ def quotes_from_peers(
         # The peer's own announcement already says it could never take this:
         # it does not run the architecture, or the request exceeds what it
         # announced (#454, #459). A peer that announced nothing is asked.
-        if should_skip_peer(peer_id, peer_arch, ask_of(resources), "GetServiceEstimatedCost"):
+        # The devices of the service (#536) too: a peer that announced none of them,
+        # or fewer than the service needs, is not asked.
+        if should_skip_peer(peer_id, peer_arch, ask_of(resources), "GetServiceEstimatedCost",
+                            devices=devices):
             continue
         candidates.append(peer_id)
     if not candidates:
@@ -337,6 +341,7 @@ def execution_balancer(
             peers.update(quotes_from_peers(
                 resources=resources, metadata=metadata, configuration=configuration,
                 peer_arch=peer_arch, ignore_network=ignore_network,
+                devices=list(service.container.devices) if service else (),
             ))
         except Exception as e:
             log.LOGGER('Error iterating peers on service balancer:' + str(e))

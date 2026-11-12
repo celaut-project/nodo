@@ -243,14 +243,49 @@ def stored_announcement(peer_id: str) -> List[celaut.ArchitectureResources]:
         return []
 
 
+def stored_devices(peer_id: str) -> List[celaut.Device]:
+    """``Peer.devices`` of the last signed announcement of ``peer_id`` (#536); [] if none."""
+    try:
+        from src.database.sql_connection import SQLConnection
+
+        blob = SQLConnection().get_peer_advertisement(peer_id)
+        if not blob:
+            return []
+        peer = celaut.Peer()
+        peer.ParseFromString(blob)
+        return list(peer.devices)
+    except Exception:
+        return []
+
+
+def devices_misfit(peer_id: str, devices: Sequence[celaut.Device]) -> Optional[str]:
+    """Why ``peer_id`` could never give ``devices``, by its announcement (#536).
+
+    By tag and count only; GetResourceAvailability is the real answer. A peer that
+    announced no devices is skipped: a node from before devices would ignore
+    Container.devices and run the service without them.
+    """
+    if not devices:
+        return None
+    from src.devices import spec
+
+    reason = spec.announced_misfit(list(devices), stored_devices(peer_id))
+    return f"it cannot give the devices ({reason})" if reason else None
+
+
 def should_skip_peer(
         peer_id: str,
         arch: Optional[str],
         ask: celaut.Sysresources,
         rpc: str,
+        devices: Sequence[celaut.Device] = (),
 ) -> bool:
-    """True when ``peer_id``'s own announcement says the ``rpc`` call is pointless. Logs why."""
+    """True when ``peer_id``'s own announcement says the ``rpc`` call is pointless. Logs why.
+
+    ``devices``: the devices that the instance needs (#536), matched by tag and count
+    against the peer's ``Peer.devices``."""
     reason = request_misfit(stored_announcement(peer_id), arch, ask) \
+        or devices_misfit(peer_id, devices) \
         or schedule_closed_reason(stored_activity_window(peer_id))
     if reason:
         log.LOGGER(f"Skipping {rpc} on peer {peer_id}: by its own announcement, {reason}.")
