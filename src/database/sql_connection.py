@@ -110,7 +110,13 @@ TRACEABILITY_COLUMNS = {
         "last_revived_at": "DATETIME DEFAULT NULL",
         # Written by every failed revive, read by the reaper.
         "revive_failing_since": "DATETIME DEFAULT NULL",
+        # The rate of the devices of the instance at its first tick (#536): what the
+        # price bound of its devices is measured from. NULL: no devices.
+        "launch_device_mu_per_second": "INTEGER DEFAULT NULL",
     },
+    # The rate of each held device (#536). Ensured on the table that test nodes of
+    # the first version of the table already have.
+    "device_assignments": {"mu_per_second": "INTEGER NOT NULL DEFAULT 0"},
     # Read by every delegated tick (issue #594).
     "delegated_instances": {"suspended_at": "DATETIME DEFAULT NULL"},
     # `peer` is a base table every install already has, so unlike a wholly new table

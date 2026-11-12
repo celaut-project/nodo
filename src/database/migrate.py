@@ -197,6 +197,7 @@ TABLES = {
             launch_disk_bp INTEGER DEFAULT NULL,
             launch_volatility REAL DEFAULT NULL,
             launch_period_seconds INTEGER DEFAULT NULL,
+            launch_device_mu_per_second INTEGER DEFAULT NULL,
             launch_on_close TEXT DEFAULT NULL,
             launch_closes_at INTEGER DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
@@ -878,7 +879,8 @@ TABLES = {
             instance_id TEXT NOT NULL,
             chip TEXT NOT NULL,
             kernel_hash TEXT NOT NULL,
-            assigned_at INTEGER NOT NULL
+            assigned_at INTEGER NOT NULL,
+            mu_per_second INTEGER NOT NULL DEFAULT 0
         )
     '''
 }
@@ -1025,6 +1027,8 @@ def create_tables(cursor):
         "launch_disk_bp": "INTEGER DEFAULT NULL",
         "launch_volatility": "REAL DEFAULT NULL",
         "launch_period_seconds": "INTEGER DEFAULT NULL",
+        # The rate of the devices at the first tick of the instance (#536).
+        "launch_device_mu_per_second": "INTEGER DEFAULT NULL",
         "launched_at": "DATETIME DEFAULT NULL",
         # NULL on every row written before this column existed: none of them is
         # suspended.

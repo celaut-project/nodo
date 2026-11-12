@@ -34,33 +34,36 @@ def assigned() -> Dict[str, str]:
 def of_instance(instance_id: str) -> List[dict]:
     try:
         rows = _db()._execute(
-            f"SELECT address, chip, kernel_hash, assigned_at FROM {TABLE} "
+            f"SELECT address, chip, kernel_hash, assigned_at, mu_per_second FROM {TABLE} "
             f"WHERE instance_id = ? ORDER BY address",
             (instance_id,),
         ).fetchall()
     except sqlite3.Error:
         return []
     return [
-        {"address": r[0], "chip": r[1], "kernel_hash": r[2], "assigned_at": r[3]}
+        {"address": r[0], "chip": r[1], "kernel_hash": r[2], "assigned_at": r[3],
+         "mu_per_second": r[4]}
         for r in rows
     ]
 
 
-def reserve(instance_id: str, entries: Sequence[NodeDevice]) -> bool:
-    """Hold all ``entries`` for ``instance_id`` in one transaction, or none.
+def reserve(instance_id: str, entries: Sequence[NodeDevice], rates: Sequence[int] = ()) -> bool:
+    """Hold all ``entries`` for ``instance_id`` in one transaction, or none, each at
+    the rate of the same index in ``rates`` (MU per second; 0 when absent).
 
     False when another instance holds one of the addresses.
     """
     if not entries:
         return True
     now = int(time.time())
+    rates = list(rates) + [0] * (len(entries) - len(rates))
     queries = [
         (
-            f"INSERT INTO {TABLE} (address, instance_id, chip, kernel_hash, assigned_at) "
-            f"VALUES (?, ?, ?, ?, ?)",
-            (e.address, instance_id, e.chip, e.kernel_hash, now),
+            f"INSERT INTO {TABLE} (address, instance_id, chip, kernel_hash, assigned_at, "
+            f"mu_per_second) VALUES (?, ?, ?, ?, ?, ?)",
+            (e.address, instance_id, e.chip, e.kernel_hash, now, int(rate)),
         )
-        for e in entries
+        for e, rate in zip(entries, rates)
     ]
     try:
         _db()._execute2(queries)

@@ -45,7 +45,9 @@ def acquire(vmachine_id: str, service: Optional[celaut_pb2.Service]) -> List[spe
         found, reason = spec.assign(asked, inventory.free_devices())
         if found is None:
             raise admission.UnsupportedDevicesException(reason)
-        if assignments.reserve(vmachine_id, found):
+        from src.devices import pricing
+
+        if assignments.reserve(vmachine_id, found, [pricing.entry_rate(e) for e in found]):
             log.LOGGER(
                 f"[devices][{vmachine_id}] reserved "
                 + ", ".join(f"{e.address} ({e.chip})" for e in found)

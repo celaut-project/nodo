@@ -112,7 +112,9 @@ class SuspensionRowTests(unittest.TestCase):
             {"suspended_at": "DATETIME DEFAULT NULL", "suspended_reason": "TEXT DEFAULT NULL",
              "revive_count": "INTEGER NOT NULL DEFAULT 0", "last_revive_reason": "TEXT DEFAULT NULL",
              "last_revived_at": "DATETIME DEFAULT NULL",
-             "revive_failing_since": "DATETIME DEFAULT NULL"})
+             "revive_failing_since": "DATETIME DEFAULT NULL",
+             # Read by every tick of an instance with devices (#536).
+             "launch_device_mu_per_second": "INTEGER DEFAULT NULL"})
 
     def test_an_old_database_gets_the_column(self):
         connection = sqlite3.connect(":memory:")

@@ -180,9 +180,9 @@ class GuestUserspaceTests(unittest.TestCase):
         self.assertIn("bash bash/guest-kernel/build-initramfs.sh", workflow)
         self.assertIn("artifacts/initramfs-linux-arm64", workflow)
         self.assertIn("artifacts/initramfs-linux-amd64", workflow)
-        # Six assets now, not four: a wrong count is how an arch silently not
-        # building would otherwise reach a release.
-        self.assertIn('test "$(wc -l < SHA256SUMS)" -eq 6', workflow)
+        # Nine assets now (six, and the three of the device kernel of #536): a wrong
+        # count is how an arch silently not building would otherwise reach a release.
+        self.assertIn('test "$(wc -l < SHA256SUMS)" -eq 9', workflow)
 
         # One unversioned, mutable tag, so publishing must update in place: `create`
         # alone would fail on every run after the first. What makes the mutable tag

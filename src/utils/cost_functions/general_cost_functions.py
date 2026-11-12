@@ -146,4 +146,13 @@ def node_advertised_rates() -> Dict[str, int]:
             int(price_mu_per_gib_hour) // HOUR_SECONDS
         )
 
+    # The flat rate of each device chip that the node offers (#536), per second:
+    # `device_mu_per_second:<pci:vendor:device>`, an open key like the per-arch one.
+    try:
+        from src.devices import pricing as device_pricing
+
+        rates.update(device_pricing.advertised_rates())
+    except Exception:
+        pass
+
     return {key: int(value) for key, value in rates.items() if int(value) > 0}

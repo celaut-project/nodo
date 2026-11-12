@@ -409,7 +409,43 @@ def _sample(elapsed_seconds: float) -> None:
         busy_cores=_busy_cores(cpu_percent),
         idle_watts=idle,
     )
+    reading, attributed = _with_device_watts(reading, attributed, elapsed_seconds)
     _persist(reading, tariff, attributed, elapsed_seconds)
+
+
+def _with_device_watts(reading, attributed, elapsed_seconds: float):
+    """Add the configured watts of the devices that instances hold (#536).
+
+    A device bound to vfio-pci has no host driver, so no backend reads it (not RAPL,
+    not the CPU model, not nvidia-smi): its ``devices.BY_CHIP.<chip>.watts`` is added
+    to the node and to the instance that holds it."""
+    try:
+        from src.devices.pricing import device_watts
+
+        extra = device_watts()
+    except Exception:
+        extra = {}
+    if not extra:
+        return reading, attributed
+    import dataclasses
+
+    from src.manager.energy.attribution import Attribution, _shares
+
+    added = sum(extra.values())
+    reading = dataclasses.replace(
+        reading, watts=reading.watts + added,
+        joules=reading.joules + added * max(0.0, float(elapsed_seconds)),
+    )
+    instance_watts = dict(attributed.instance_watts)
+    for instance_id, watts in extra.items():
+        instance_watts[instance_id] = instance_watts.get(instance_id, 0.0) + watts
+    node = reading.watts
+    return reading, Attribution(
+        instance_watts=instance_watts,
+        instance_share=_shares(instance_watts, node),
+        other_watts=attributed.other_watts,
+        other_share=(attributed.other_watts / node) if node > 0 else 1.0,
+    )
 
 
 def energy_tick() -> None:

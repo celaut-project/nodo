@@ -100,6 +100,14 @@ def generate_estimated_cost(
     # ``P * (1 + v)^k``. A free node quotes the anchor of a launch while free (1x), not 0.
     bound = price_bound.current_bound()
 
+    # The devices that the node would give (#536): a flat rate per second, part of
+    # every maintenance period, so the funding of the instance covers them and the
+    # father holds the ticks to a figure that includes them.
+    from src.devices import pricing as device_pricing
+
+    device_period_mu = device_pricing.charge_mu(
+        device_pricing.quote_rate(service), MANAGER_ITERATION_TIME)
+
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(
 
@@ -113,7 +121,7 @@ def generate_estimated_cost(
             ),
             seconds=MANAGER_ITERATION_TIME,
             arch=arch,
-        )) if resources.HasField('at_init') else to_amount(0),
+        ) + device_period_mu) if resources.HasField('at_init') else to_amount(device_period_mu),
 
         # Maintenance cost per manager iteration, at the most it may grow to, at the same
         # price. Not a limit: the limit is this figure times (1 + v)^k when the quote is
@@ -124,7 +132,7 @@ def generate_estimated_cost(
             ),
             seconds=MANAGER_ITERATION_TIME,
             arch=arch,
-        )) if resources.HasField('at_most') else to_amount(0),
+        ) + device_period_mu) if resources.HasField('at_most') else to_amount(device_period_mu),
 
         # Maintenance frecuency in seconds.
         maintenance_seconds_loop=MANAGER_ITERATION_TIME,

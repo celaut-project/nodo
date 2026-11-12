@@ -88,6 +88,33 @@ def _row_launch_bp(sys_req):
     return {resource: int(value) for resource, value in found.items()}
 
 
+def _device_rate(vmachine_id: str, sys_req) -> int:
+    """The rate (MU per second) of the devices that the instance holds now, held to
+    the price bound of its launch (#536). The first tick records the launch rate."""
+    try:
+        from src.devices import pricing as device_pricing
+
+        try:
+            launch_rate = sys_req["launch_device_mu_per_second"]
+        except (KeyError, IndexError, TypeError):
+            launch_rate = None
+        if launch_rate is None:
+            held = device_pricing.held_rate(vmachine_id)
+            if held <= 0:
+                return 0
+            sc._execute(
+                "UPDATE local_instances SET launch_device_mu_per_second = ? "
+                "WHERE id = ? AND launch_device_mu_per_second IS NULL AND killed_at IS NULL",
+                (held, vmachine_id),
+            )
+            return held
+        return device_pricing.tick_rate(
+            vmachine_id, launch_rate, _row_launch_bound(sys_req), _row_elapsed(sys_req))
+    except Exception as e:
+        log.LOGGER(f"Could not price the devices of {vmachine_id}: {e}")
+        return 0
+
+
 def _row_launch_bound(sys_req):
     """The price bound that the instance was launched with (#636), or None.
 
@@ -520,7 +547,7 @@ def tick_price_mu(token: str, scarcity=None) -> Optional[int]:
             launch_bp=_row_launch_bp(sys_req),
             bound=_row_launch_bound(sys_req),
             elapsed_seconds=_row_elapsed(sys_req),
-        ))
+        )) + MANAGER_ITERATION_TIME * _device_rate(token, sys_req)
     except Exception as e:
         log.LOGGER(f"Could not price a tick for {token}: {e}")
         return None
@@ -756,6 +783,9 @@ def maintain_vmachines(debug_mode: bool=False):
             bound=_row_launch_bound(sys_req),
             elapsed_seconds=_row_elapsed(sys_req),
         )
+        # The devices that it holds (#536): a flat rate, held to its launch bound.
+        device_rate = _device_rate(vmachine_id, sys_req)
+        charge_mu += int(device_rate * seconds)
         if debug_mode:
             log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {seconds}s")
 
@@ -763,7 +793,7 @@ def maintain_vmachines(debug_mode: bool=False):
                         kind=ledger.MAINTENANCE,
                         # What the father checks this charge against (#570): the
                         # resources and the seconds it priced.
-                        detail=statement_check.tick_detail(sys_req, seconds)):
+                        detail=statement_check.tick_detail(sys_req, seconds, device_rate)):
             _local_charged_at.pop(vmachine_id, None)
             # No penalty for the service here. The father holds the balance of the
             # instance, and he can empty it on purpose with small top-ups (see

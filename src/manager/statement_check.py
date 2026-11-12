@@ -99,15 +99,21 @@ class Mark:
 NO_MARK = Mark(None, "", 0)
 
 
-def tick_detail(sys_req, seconds: int) -> dict:
-    """The cause of a maintenance period: what it was priced for, and for how long."""
-    return {
+def tick_detail(sys_req, seconds: int, device_mu_per_second: int = 0) -> dict:
+    """The cause of a maintenance period: what it was priced for, and for how long.
+
+    ``device_mu_per_second``: the rate of the devices that the period charged (#536);
+    only present when the instance held devices."""
+    detail = {
         "seconds": int(seconds),
         "mem_limit": int(sys_req["mem_limit"] or 0),
         "disk_space": int(sys_req["disk_space"] or 0),
         "cpu_period": int(sys_req["cpu_period"] or 0),
         "cpu_quota": int(sys_req["cpu_quota"] or 0),
     }
+    if device_mu_per_second:
+        detail["device_mu_per_second"] = int(device_mu_per_second)
+    return detail
 
 
 def _detail(text: str) -> Mapping:
