@@ -368,6 +368,29 @@ provision_guest_assets_for_arch() {
     test -x "$busybox_target" || fail "Guest busybox download failed at ${busybox_target}."
 }
 
+provision_device_kernel() {
+    # The device variant of the guest kernel (#536, EXPERIMENTAL): loadable modules,
+    # for services that drive a device given with VFIO. Into the store only: it is
+    # never the kernel of new builds, so no build gets it by default; the operator offers it in
+    # devices.KERNELS. Optional: skipped while the pin has no digest for it.
+    local asset="vmlinuz-dev-linux-amd64"
+    local digest kernel_store target
+    digest="$(awk -v name="$asset" '$2 == name { print $1; exit }' "$PINNED_GUEST_SUMS" 2>/dev/null)"
+    if [ -z "$digest" ]; then
+        echo "No pinned digest for ${asset}; the device kernel is not installed."
+        return 0
+    fi
+    kernel_store="$(read_config_path_or_default '.virtualizers.ch.KERNEL_STORE' "$TARGET_DIR/cloud_hypervisor/kernels/store")"
+    target="${kernel_store}/${digest}/vmlinuz"
+    if [ -f "$target" ] && [ "$(sha256sum "$target" | awk '{print $1}')" = "$digest" ]; then
+        echo "Device kernel ${digest} is already in the kernel store."
+        return 0
+    fi
+    mkdir -p "$(dirname "$target")"
+    download_guest_asset "$asset" "$target" 0444
+    echo "Device kernel ${digest} added to the kernel store (offer it in devices.KERNELS)."
+}
+
 provision_cloud_hypervisor_assets() {
     local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
 
@@ -395,6 +418,7 @@ provision_cloud_hypervisor_assets() {
     # one, which QEMU boots under TCG.
     provision_guest_assets_for_arch "$CH_ARCH_TAG"
     provision_guest_assets_for_arch "$FOREIGN_ARCH_TAG"
+    provision_device_kernel
 }
 
 echo "Detecting package manager..."

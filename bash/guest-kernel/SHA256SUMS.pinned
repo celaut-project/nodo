@@ -11,7 +11,8 @@
 # tarball instead of trusting cdn.kernel.org.
 #
 # When bumping GUEST_KERNEL_VERSION in install.sh, update TAG and all six digests
-# here, and check them against the CI artifacts of the run that built them
+# here (and the line of vmlinuz-dev-linux-amd64, the device kernel of #536, which is
+# optional: without it the installer skips that kernel), and check them against the CI artifacts of the run that built them
 # (`gh run download <run-id>`) and not only against the release assets -- the
 # artifact store and the release are two independent copies of the same build.
 #

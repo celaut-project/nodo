@@ -436,6 +436,13 @@ device, bound to `vfio-pci`, with the guest kernel that the device tag names.
 | `devices.KERNELS` | `[]` | The guest kernels (SHA-256 hashes in `virtualizers.ch.KERNEL_STORE`) that a device service may boot. Each device is announced once per kernel, with one tag per hash algorithm (SHA-256 and SHA3-256), plus the older hashes that the kernel claims in `KERNEL_ABI_ALIASES`. Empty: the kernel of new builds for the host architecture. |
 | `devices.BY_CHIP.<pci:vendor:device>` | — | Per chip, as sysfs gives it: `mu_per_second` (the price; a chip with none is not offered), `mem_limit` (the device memory in bytes, announced as `at_most.mem_limit`), `benchmark` (scores of the device, for example `fp32_flops`) and `watts` (its power draw for the energy report: a device bound to `vfio-pci` has no host driver to ask). |
 
+A device driver is a kernel module, and the default guest kernel has no module
+support. The device kernel `vmlinuz-dev-linux-amd64` (`bash/guest-kernel/build.sh
+x86_64 <out> dev`, published with the guest-kernel release next to the modules that
+it builds and the tree that a service builds its own modules against) has it; the
+installer puts it in the kernel store when `SHA256SUMS.pinned` names it, and the
+operator offers it by listing its hash in `devices.KERNELS`.
+
 `nodo devices` lists each address with its chip, its checks and its state (free,
 assigned, quarantined, or why it is not offered); `--json` is what the TUI reads. A
 device whose reset fails, or that stops answering, is quarantined until

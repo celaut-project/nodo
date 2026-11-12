@@ -93,8 +93,32 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+  # The device variant of the x86_64 kernel (#536, EXPERIMENTAL): loadable modules,
+  # with the modules built in the tree and the tree that a service builds its own
+  # modules against. Installed into the kernel store only, never as the default.
+  build-dev:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc libelf-dev libssl-dev dwarves \
+            xz-utils bzip2 curl ca-certificates
+
+      - name: Build the device guest kernel
+        run: bash bash/guest-kernel/build.sh x86_64 "$GITHUB_WORKSPACE/out" dev
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-assets-linux-amd64-dev
+          path: out/*
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, build-dev]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -110,9 +134,9 @@ jobs:
           cat ./*.sha256 | sort -k2 > SHA256SUMS
           rm -f ./*.sha256
           cat SHA256SUMS
-          # Six assets (kernel, busybox, initramfs x 2 arches), or something
-          # silently did not build.
-          test "$(wc -l < SHA256SUMS)" -eq 6
+          # Six assets (kernel, busybox, initramfs x 2 arches) and the three of the
+          # device kernel, or something silently did not build.
+          test "$(wc -l < SHA256SUMS)" -eq 9
 
       # Updates the release in place when it already exists, because with a single
       # unversioned tag there is nowhere else to publish. `create` alone would fail
@@ -131,6 +155,9 @@ jobs:
             artifacts/busybox-linux-amd64
             artifacts/initramfs-linux-arm64
             artifacts/initramfs-linux-amd64
+            artifacts/vmlinuz-dev-linux-amd64
+            artifacts/kernel-dev-modules-linux-amd64.tar.xz
+            artifacts/kernel-dev-build-linux-amd64.tar.xz
             artifacts/SHA256SUMS
           )
 
@@ -144,5 +171,5 @@ jobs:
               --title "Nodo guest $TAG" --notes "$NOTES" "${ASSETS[@]}"
           fi
 
-          echo "Published. Record all six digests in bash/guest-kernel/SHA256SUMS.pinned:"
+          echo "Published. Record the digests in bash/guest-kernel/SHA256SUMS.pinned (the device kernel's line is optional):"
           cat artifacts/SHA256SUMS

@@ -1,9 +1,15 @@
 #!/bin/bash
 # Build the Nodo guest kernel for one architecture.
 #
-#   bash/guest-kernel/build.sh <arm64|x86_64> <output-dir>
+#   bash/guest-kernel/build.sh <arm64|x86_64> <output-dir> [dev]
 #
-# Produces <output-dir>/vmlinuz-linux-{arm64,amd64} plus its .sha256. This is the
+# Produces <output-dir>/vmlinuz-linux-{arm64,amd64} plus its .sha256.
+#
+# With "dev" (x86_64 only, EXPERIMENTAL, #536): the device variant, with loadable
+# modules (nodo-guest-dev.config). It produces vmlinuz-dev-linux-amd64, the modules
+# built in the tree (kernel-dev-modules-linux-amd64.tar.xz) and the tree that a
+# service builds its own modules against (kernel-dev-build-linux-amd64.tar.xz:
+# headers, .config, Module.symvers), each with its .sha256. This is the
 # kernel every service microVM boots: it is downloaded from the guest-kernel
 # release at install time, never taken from the host's /boot (a distro kernel is
 # large, unpredictable, and — with CONFIG_EFI_ZBOOT — not even loadable by
@@ -22,7 +28,13 @@ fail() { echo "Error: $1" >&2; exit 1; }
 
 TARGET_ARCH="${1:-}"
 OUTPUT_DIR="${2:-}"
-[ -n "$TARGET_ARCH" ] && [ -n "$OUTPUT_DIR" ] || fail "Usage: $0 <arm64|x86_64> <output-dir>"
+VARIANT="${3:-}"
+[ -n "$TARGET_ARCH" ] && [ -n "$OUTPUT_DIR" ] || fail "Usage: $0 <arm64|x86_64> <output-dir> [dev]"
+case "$VARIANT" in
+    "") ;;
+    dev) [ "$TARGET_ARCH" = "x86_64" ] || fail "The dev (device) kernel is built for x86_64 only." ;;
+    *) fail "Unknown variant '$VARIANT' (expected nothing or dev)." ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -81,9 +93,9 @@ cd "$SRC"
 echo "Configuring (defconfig + kvm_guest.config + Nodo fragments)..."
 make ARCH="$KBUILD_ARCH" defconfig >/dev/null
 make ARCH="$KBUILD_ARCH" kvm_guest.config >/dev/null
-ARCH="$KBUILD_ARCH" scripts/kconfig/merge_config.sh -m .config \
-    "$SCRIPT_DIR/nodo-guest.config" \
-    "$SCRIPT_DIR/nodo-guest-${TARGET_ARCH}.config" >/dev/null
+FRAGMENTS=("$SCRIPT_DIR/nodo-guest.config" "$SCRIPT_DIR/nodo-guest-${TARGET_ARCH}.config")
+[ "$VARIANT" = "dev" ] && FRAGMENTS+=("$SCRIPT_DIR/nodo-guest-dev.config")
+ARCH="$KBUILD_ARCH" scripts/kconfig/merge_config.sh -m .config "${FRAGMENTS[@]}" >/dev/null
 make ARCH="$KBUILD_ARCH" olddefconfig >/dev/null
 
 # A fragment entry is a request, not a guarantee: Kconfig drops any symbol whose
@@ -106,7 +118,14 @@ for symbol in CONFIG_VIRTIO_BLK CONFIG_VIRTIO_NET CONFIG_VIRTIO_PCI CONFIG_VIRTI
               CONFIG_IP_NF_RAW; do
     assert_config "$symbol" y
 done
-assert_config CONFIG_MODULES n
+if [ "$VARIANT" = "dev" ]; then
+    assert_config CONFIG_MODULES y
+    assert_config CONFIG_DRM m
+    assert_config CONFIG_FW_LOADER y
+    assert_config CONFIG_MODULE_SIG n
+else
+    assert_config CONFIG_MODULES n
+fi
 # CMA would reserve 32 MiB of every guest — fatal at MIN_MEM_MIB-sized microVMs.
 assert_config CONFIG_CMA n
 if [ "$TARGET_ARCH" = "arm64" ]; then
@@ -132,6 +151,27 @@ if [ "$TARGET_ARCH" = "arm64" ]; then
 fi
 
 mkdir -p "$OUTPUT_DIR"
+if [ "$VARIANT" = "dev" ]; then
+    ASSET="vmlinuz-dev-linux-amd64"
+    echo "Building the modules..."
+    make ARCH="$KBUILD_ARCH" -j"$(nproc)" modules >/dev/null
+    # Fixed owner and times, so a tarball differs only when its files do.
+    TAR_OPTS=(--sort=name --owner=0 --group=0 --numeric-owner --mtime=@0)
+    STAGE="$WORKDIR/stage"
+    make ARCH="$KBUILD_ARCH" INSTALL_MOD_PATH="$STAGE/modules" INSTALL_MOD_STRIP=1 \
+        modules_install >/dev/null
+    rm -f "$STAGE"/modules/lib/modules/*/build "$STAGE"/modules/lib/modules/*/source
+    tar "${TAR_OPTS[@]}" -C "$STAGE/modules" -cJf "$OUTPUT_DIR/kernel-dev-modules-linux-amd64.tar.xz" lib
+    # The external-module build tree: what `make -C <tree> M=<dir> modules` needs.
+    # Normally run by the packaging targets of the kernel Makefile, which export these.
+    srctree="$SRC" SRCARCH=x86 KCONFIG_CONFIG=.config ARCH="$KBUILD_ARCH" MAKE=make \
+        CC="${CC:-gcc}" HOSTCC="${HOSTCC:-gcc}" HOSTCXX="${HOSTCXX:-g++}" \
+        scripts/package/install-extmod-build "$STAGE/build" >/dev/null
+    cp .config Module.symvers "$STAGE/build/"
+    tar "${TAR_OPTS[@]}" -C "$STAGE" -cJf "$OUTPUT_DIR/kernel-dev-build-linux-amd64.tar.xz" build
+    ( cd "$OUTPUT_DIR" && for f in kernel-dev-modules-linux-amd64.tar.xz kernel-dev-build-linux-amd64.tar.xz; do
+        sha256sum "$f" > "$f.sha256"; done )
+fi
 install -m 0644 "$KBUILD_IMAGE" "$OUTPUT_DIR/$ASSET"
 ( cd "$OUTPUT_DIR" && sha256sum "$ASSET" > "$ASSET.sha256" )
 
