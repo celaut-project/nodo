@@ -62,7 +62,7 @@ class _Node:
             os.chmod(path, 0o644)
         path.write_bytes(data)
 
-    def old_bundle(self, service_id="s" * 64, arch="x86_64"):
+    def old_bundle(self, service_id="s" * 64, arch="linux/amd64"):
         """A bundle.json as builds wrote it before the store: a path, no hash."""
         bdir = self.cache / "microvm" / service_id / arch
         bdir.mkdir(parents=True)
@@ -138,7 +138,7 @@ class BundleMigrationTests(unittest.TestCase):
         with _Node() as node:
             node.write_kernel(node.legacy, b"kernel-A")
             bundle_path = node.old_bundle()
-            loaded = microvm_bundle.load_bundle("s" * 64, "x86_64")
+            loaded = microvm_bundle.load_bundle("s" * 64, "linux/amd64")
             h = _sha(b"kernel-A")
             self.assertEqual(loaded["kernel_hash"], h)
             self.assertEqual(loaded["kernel_path"], str(kernel_store.store_path(h)))
@@ -147,7 +147,7 @@ class BundleMigrationTests(unittest.TestCase):
             self.assertEqual(on_disk["kernel_hash_algorithm"], kernel_store.STORE_ALGORITHM_HEX)
             # An update (the old installer's fixed path rewritten) does not move it.
             node.write_kernel(node.legacy, b"kernel-B")
-            again = microvm_bundle.load_bundle("s" * 64, "x86_64")
+            again = microvm_bundle.load_bundle("s" * 64, "linux/amd64")
             self.assertEqual(again["kernel_path"], str(kernel_store.store_path(h)))
             self.assertEqual(Path(again["kernel_path"]).read_bytes(), b"kernel-A")
 
@@ -159,7 +159,7 @@ class BundleMigrationTests(unittest.TestCase):
             manifest["kernel_hash"] = _sha(b"gone")
             bundle_path.write_text(json.dumps(manifest))
             with self.assertRaises(kernel_store.KernelNotFound) as ctx:
-                microvm_bundle.load_bundle("s" * 64, "x86_64")
+                microvm_bundle.load_bundle("s" * 64, "linux/amd64")
             self.assertIn(_sha(b"gone"), str(ctx.exception))
 
     def test_migrate_all_bundles_is_idempotent(self):
@@ -186,7 +186,7 @@ class BundleMigrationTests(unittest.TestCase):
             manifest["kernel_hash"] = _sha(b"gone")
             bundle_path.write_text(json.dumps(manifest))
             report = kernel_store.bundle_kernel_report()
-            self.assertIn(_sha(b"gone"), report["unresolved"])
+            self.assertEqual(report["unresolved"], {_sha(b"gone"): ["s" * 16 + "/linux/amd64"]})
 
 
 class InstallerTests(unittest.TestCase):

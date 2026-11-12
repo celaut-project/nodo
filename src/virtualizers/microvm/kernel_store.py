@@ -278,8 +278,10 @@ def iter_bundle_files() -> Iterable[Path]:
     for service_dir in sorted(root.iterdir()):
         if service_dir.name in paths.NON_BUNDLE_ENTRIES or not service_dir.is_dir():
             continue
-        for arch_dir in sorted(service_dir.iterdir()):
-            candidate = arch_dir / "bundle.json"
+        # paths.bundle_dir is <service>/<arch>, and an arch is "<os>/<cpu>"
+        # (linux/amd64): two levels. One level is kept for any older layout.
+        candidates = set(service_dir.glob("*/bundle.json")) | set(service_dir.glob("*/*/bundle.json"))
+        for candidate in sorted(candidates):
             if candidate.is_file():
                 yield candidate
 
@@ -326,6 +328,19 @@ def store_listing() -> List[Dict[str, object]]:
     return out
 
 
+def _bundle_name(bundle_path: Path) -> str:
+    """``<service id prefix>/<arch>`` for a bundle.json, for doctor lines."""
+    from src.virtualizers.microvm import paths
+
+    root = paths.optional_family_root()
+    try:
+        rel = bundle_path.parent.relative_to(root)
+    except (TypeError, ValueError):
+        return str(bundle_path.parent)
+    service, _, arch = str(rel).partition("/")
+    return f"{service[:16]}/{arch}"
+
+
 def bundle_kernel_report() -> Dict[str, object]:
     """For doctor: bundles per kernel hash, and the ones that cannot boot."""
     by_hash: Dict[str, int] = {}
@@ -337,7 +352,7 @@ def bundle_kernel_report() -> Dict[str, object]:
                 bundle = json.load(f)
         except (OSError, ValueError):
             continue
-        name = f"{bundle_path.parent.parent.name[:16]}/{bundle_path.parent.name}"
+        name = _bundle_name(bundle_path)
         kernel_hash = str(bundle.get("kernel_hash") or "")
         if not _valid_hash(kernel_hash):
             unstamped.append(name)
