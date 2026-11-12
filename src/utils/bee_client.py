@@ -426,12 +426,16 @@ class BeeClient:
     @staticmethod
     def get_resource_availability(
             channel,
-            request: celaut_pb2.ArchitectureResources,
+            request: Union[celaut_pb2.ResourceAvailabilityRequest, celaut_pb2.ArchitectureResources],
             timeout: Optional[float] = None,
             client_id: str = "",
     ) -> Optional[celaut_pb2.ResourceAvailability]:
         """``Client & ArchitectureResources -> ResourceAvailability``: could the peer run
         one instance of this shape, of this architecture (#459)?"""
+        # The wire message is a ResourceAvailabilityRequest (#536). A bare
+        # ArchitectureResources is the `main` of one, with no devices.
+        if isinstance(request, celaut_pb2.ArchitectureResources):
+            request = celaut_pb2.ResourceAvailabilityRequest(main=request)
         input_messages = [request, celaut_pb2.Client(client_id=client_id)] if client_id else request
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetResourceAvailability,

@@ -431,6 +431,13 @@ message Service {
         // Where the service reads the notices of the node. Optional. With no value, the
         // node stops the service at once, with no notice.
         optional NoticeDeclaration notice_declaration = 8;
+        // The devices that the node attaches directly to the instance. Repeat the entry
+        // for each device that the service needs. If the list is not empty, the
+        // resources of the instance must have the same at_init and at_most, because the
+        // node cannot change the memory of an instance that has devices. A node that has
+        // no free devices of these architectures refuses to start the service. A device
+        // is available only with the native architecture of the node.
+        repeated Device devices = 9;
 
     }
 
@@ -555,6 +562,11 @@ message ConfigurationFile {
     repeated NetworkResolution network_resolution = 3;
     // The resources of the instance at the start.
     Sysresources initial_sysresources = 4;
+    // The devices that the node attached to the instance at the start, each with its id
+    // and its PCI address in the guest. Empty if the instance has no devices. A device
+    // that the node attaches after the start is not here: the answer of
+    // ModifyServiceSystemResources gives it.
+    repeated AttachedDevice devices = 5;
 }
 
 // -----------------------
@@ -591,8 +603,10 @@ message Sysresources {
     // score of the smallest larger size that it measured. If it has no such score, it
     // does not apply that minimum. In Service.Container.Resources.at_init (also in the
     // service of a Service.Workload) and in a GetResourceAvailability
-    // request, the values are the minimum. In Peer.resources, they are the scores that the node
-    // measured. In Service.Container.Resources.at_most, they have no meaning.
+    // request, the values are the minimum. In Device.resources.at_init, they are
+    // the minimum score of the device. In Peer.resources and in the at_most of Peer.devices,
+    // they are the scores that the node measured. In the at_most of a service
+    // (Service.Container.Resources and Device.resources), they have no meaning.
     repeated Uint64KeyValue benchmark = 99;
 }
 
@@ -750,6 +764,58 @@ message ActivityWindow {
 // `benchmark`, since the same "1.0 core" is native silicon under one virtualizer and
 // software emulation under another (#448).
 
+// A device that the node attaches directly to the instance, for example a GPU. The
+// node attaches the device to the virtual machine, and the service brings the
+// kernel module, the firmware and the userspace driver. One Device is one
+// physical device. A service that needs two devices has two Device entries. The
+// node gives one device to one instance only, and keeps it exclusive until the
+// instance stops or hibernates.
+message Device {
+    // When the node attaches the device to the instance.
+    enum Attach {
+        // The node attaches the device before the instance starts, and the
+        // instance has it until it stops or hibernates. This is the only value
+        // that a node must support.
+        ATTACH_AT_START = 0;
+        // The node attaches the device when the instance asks for it with
+        // ModifyServiceSystemResources, and the entry only gives the most that
+        // the instance can ask for. A node that cannot do this refuses to start
+        // the service. It never attaches the device at the start instead.
+        ATTACH_ON_REQUEST = 1;
+    }
+
+    // The architecture of the device. A device has one architecture. The tags are
+    // synonyms of that one architecture, never alternatives. A device matches when
+    // its tags and the tags of the architecture of the entry have at least one
+    // tag in common. A tag is the chip and the guest kernel together:
+    // "pci:<vendor>:<device>+<algorithm>:<hash>". <vendor> and <device> are the
+    // PCI identifiers of the chip, in lowercase hexadecimal. <algorithm> is the
+    // identifier of a hash algorithm: the lowercase hexadecimal output of that
+    // algorithm for an empty input. <hash> is the output of that algorithm for the
+    // file of the guest kernel, in lowercase hexadecimal. One kernel can have more
+    // than one tag, one for each algorithm. A service that must run on more than
+    // one architecture is a set of services, one for each architecture. A Device
+    // with no tags is not valid. Here an empty architecture does not mean the
+    // native architecture.
+    Service.Container.Architecture architecture = 1;
+    // The resources that the service needs from the device, with the same meaning
+    // as in Container.resources. The at_init mem_limit is the memory of the device
+    // that the instance needs at the start, and the at_most mem_limit is the most
+    // that it can grow to. Its benchmark gives the minimum score of the device,
+    // with keys for the device, for example "fp32_flops". The other fields have no
+    // meaning here. A node can give a device whose memory cannot change. Then it
+    // gives the at_most memory, and at_init must not be more than at_most.
+    Service.Container.Resources resources = 2;
+    // The ways in which the node can attach the device. In a service: the ways
+    // that the service accepts. The node uses the first one in the list that it
+    // supports, and refuses the service if it supports none. With
+    // ATTACH_ON_REQUEST the node does not attach the device at the start. In
+    // Peer.devices: all the ways that the node can attach that device. If the list
+    // is empty, it is the same as only ATTACH_AT_START. A reader keeps a value
+    // that it does not know, and does not use it.
+    repeated Attach attach = 3;
+}
+
 // The resources for one architecture. In Peer.resources: the most that the node
 // supports for that architecture, with its measured benchmark scores. In a
 // GetResourceAvailability request: the resources asked about. In that request, the
@@ -761,6 +827,18 @@ message ArchitectureResources {
     Service.Container.Architecture architecture = 1;
     // The resources. There is no start and maximum pair here.
     Sysresources resources = 2;
+}
+
+// The request of GetResourceAvailability: the resources asked about.
+message ResourceAvailabilityRequest {
+    // The main architecture and its resources, as in Container.architecture and
+    // Container.resources.
+    ArchitectureResources main = 1;
+    // The devices that the instance needs, one entry for each device, with the same
+    // meaning as in Container.devices, also the attach value. A node that cannot attach
+    // a device as the entry says answers that it cannot run the instance. The
+    // architecture of each entry must have tags.
+    repeated Device devices = 2;
 }
 
 // The answer of GetResourceAvailability.
@@ -1196,6 +1274,20 @@ message Peer {
     // higher ts. It is not a promise. The quote (EstimatedCost.closes_at and on_close)
     // is the authority for one instance.
     ActivityWindow activity_window = 9;
+    // The devices that the node can attach directly to an instance. One entry is one
+    // device, with its architecture. The node repeats an entry for each device that it
+    // has. The number of entries with the same architecture is the maximum number of
+    // devices that the node can give at the same time with that architecture. A reader
+    // does not add the numbers of different architectures: one device with two kernels
+    // is one device. If the list is empty, the node has no devices to give. In the
+    // resources of an entry, only at_most has a value. Its limits are the most that the
+    // device can give, and its benchmark has the scores that the node measured. If the
+    // node did not measure a score, the score is absent, never 0. The attach list has
+    // all the ways that the node can attach that device. The values are a limit of
+    // capacity, not the free capacity now. GetResourceAvailability gives the real answer. This list is not
+    // Peer.resources: a reader does not read a device architecture as a main
+    // architecture.
+    repeated Device devices = 10;
     // The unix time of the announcement, in seconds. A reader accepts a Peer only if its
     // ts is more than the ts of the last Peer that it accepted for the same public_key.
     int64 ts = 99;
@@ -1353,12 +1445,38 @@ message AssociateClientOutput {
     string reason = 2;
 }
 
+// A device that is attached to an instance now.
+message AttachedDevice {
+    // The identifier of the device for this instance. The node makes it when it
+    // attaches the device. It stays the same until the node detaches the device. An id
+    // is not valid for another instance.
+    string id = 1;
+    // The architecture and the resources of the device.
+    ArchitectureResources device = 2;
+    // The PCI address of the device in the guest. The service finds the device with it.
+    string guest_address = 3;
+}
+
+// A change of the devices of an instance. The node never changes a device that the
+// change does not name.
+message DeviceChange {
+    // Devices to attach. One entry is one new device. The limits are the most that the
+    // instance can grow to, as in ArchitectureResources.
+    repeated ArchitectureResources attach = 1;
+    // The ids (AttachedDevice.id) of the devices to detach. The service must have
+    // released each device in the guest before it asks. An unknown id is an error.
+    repeated string detach = 2;
+}
+
 // The answer of ModifyServiceSystemResources.
 message ModifyServiceSystemResourcesOutput {
     // The resources of the instance now.
     Sysresources sysreq = 1;
     // The balance of the instance, in MU.
     Amount balance = 2;
+    // The devices that the instance has now, also the ones that the node attached at
+    // the start. Empty if the instance has none.
+    repeated AttachedDevice devices = 3;
 }
 
 // The request of ModifyServiceSystemResources.
@@ -1379,6 +1497,12 @@ message ModifyServiceSystemResourcesInput {
     // is not set, the node changes the local instance that sends the request, which it
     // finds by the address of the caller.
     string service_token = 3;
+    // A change of the devices of the instance. It is only for the entries of
+    // Container.devices that have ATTACH_ON_REQUEST. If it is not set, the instance
+    // keeps all its devices. The node never detaches a device that has ATTACH_AT_START
+    // while the instance runs. A node that cannot attach a device after the start
+    // refuses a request that sets this field, and never ignores it.
+    DeviceChange devices = 4;
 }
 
 // The request of ModifyDeposit.
@@ -1633,8 +1757,8 @@ service Gateway {
     // with the reason. If the node does not have the service and the caller does not
     // send it, the node refuses with an error. The node ignores a RecursionGuard here.
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Asks if the node can run one instance with the given architecture and resources
-    // now. The resources do not need to be those of a known service.
+    // Asks if the node can run one instance with the given architecture, resources and
+    // devices now. The resources do not need to be those of a known service.
     rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes a content hash. Returns the hashes at index 4, the Metadata at index 5 and
     // the Service at index 6. These are the StartService indices, so the caller can send

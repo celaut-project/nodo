@@ -575,6 +575,26 @@ def _canonical_architecture_resources(entry) -> str:
     ])
 
 
+def _canonical_device(entry) -> str:
+    """Deterministic encoding of one announced ``Device`` (#536).
+
+    The ``Resources`` pair keeps the presence of each half: an absent ``at_init`` is not
+    an empty one.
+    """
+    halves = "~".join(
+        _canonical_sysresources(half) if entry.resources.HasField(name) else "-"
+        for name, half in (
+            ("at_init", entry.resources.at_init),
+            ("at_most", entry.resources.at_most),
+        )
+    )
+    return "~".join([
+        _canonical_protocol(entry.architecture),
+        halves if entry.HasField("resources") else "-",
+        ",".join(str(int(m)) for m in sorted(entry.attach)),
+    ])
+
+
 def canonical_peer_content_digest(peer) -> str:
     """A stable digest of everything a peer advertises about itself.
 
@@ -639,6 +659,9 @@ def canonical_peer_content_digest(peer) -> str:
         f"{key}={amount.n}" for key, amount in keyvalue.items(peer.mu_per_call)
     )
     resources = sorted(_canonical_architecture_resources(r) for r in peer.resources)
+    # `devices` (#536): the same encoding. An entry repeated is a device repeated, so
+    # the count of an architecture is part of what the signature covers.
+    devices = sorted(_canonical_device(r) for r in peer.devices)
     # `activity_window` (#344): an absent message ("no schedule") and an empty one
     # ("always open") are different claims, so presence is part of the encoding.
     if peer.HasField("activity_window"):
@@ -656,6 +679,7 @@ def canonical_peer_content_digest(peer) -> str:
         scheme,
         "/".join(resources),
         activity_window,
+        "/".join(devices),
     ])
     # Blake2b-256. Nothing outside this function reads the value -- a verifier
     # recomputes it from the peer's own advertisement, and it is never stored or

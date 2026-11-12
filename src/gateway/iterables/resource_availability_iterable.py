@@ -46,7 +46,11 @@ class GetResourceAvailabilityIterable:
             )
             require_caller(self.context, client_id)
             if request is None:
-                request = celaut_pb2.ArchitectureResources()
+                request = celaut_pb2.ResourceAvailabilityRequest()
+            # Devices (#536) are not attached by this node yet: a request that asks for
+            # one is a no with the reason, never an answer about the main resources only.
+            devices_asked = len(request.devices) > 0
+            request = request.main
 
             # A node that runs nothing itself has no room to report. `get_architecture_
             # availability` answers for this machine, and saying "yes" would get a
@@ -56,6 +60,11 @@ class GetResourceAvailabilityIterable:
             # served, and the hours need no overlay: the reason is not about them.
             if not executes_locally():
                 availability = {"can_execute": False, "reason": NOT_EXECUTING_REASON}
+            elif devices_asked:
+                availability = {
+                    "can_execute": False,
+                    "reason": "This node does not attach devices.",
+                }
             else:
                 availability = QueryCache().get_or_compute(
                     canonical_key("GetResourceAvailability", request),

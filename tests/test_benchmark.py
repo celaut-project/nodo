@@ -569,8 +569,10 @@ class DelegationCarryThroughTests(unittest.TestCase):
 
         with_client, without_client = (call.kwargs["input"] for call in call_one.call_args_list)
         for sent in (with_client[0], without_client):
-            on_the_peer = celaut.ArchitectureResources()
-            on_the_peer.ParseFromString(sent.SerializeToString())
+            wire = celaut.ResourceAvailabilityRequest()
+            wire.ParseFromString(sent.SerializeToString())
+            self.assertEqual(len(wire.devices), 0)
+            on_the_peer = wire.main
             self.assertEqual(list(on_the_peer.architecture.tags), ["linux/amd64"])
             self.assertEqual(
                 keyvalue.to_dict(on_the_peer.resources.benchmark),

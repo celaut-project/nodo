@@ -142,8 +142,8 @@ class AvailabilityWhileNotExecutingTests(unittest.TestCase):
         self.window_open = True
 
     def _ask(self):
-        request = celaut.ArchitectureResources()
-        request.resources.mem_limit = 100
+        request = celaut.ResourceAvailabilityRequest()
+        request.main.resources.mem_limit = 100
         it = avail_mod.GetResourceAvailabilityIterable(iter([]), MagicMock())
         answers = []
         with patch.object(avail_mod, "executes_locally", side_effect=lambda: self.executes), \

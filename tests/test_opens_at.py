@@ -19,7 +19,7 @@ class OpensAtTests(unittest.TestCase):
         answers = []
         iterable = avail_mod.GetResourceAvailabilityIterable(iter([]), MagicMock())
         with patch.object(avail_mod, "parse_with_client",
-                          return_value=(celaut.ArchitectureResources(), "c")), \
+                          return_value=(celaut.ResourceAvailabilityRequest(), "c")), \
                 patch.object(avail_mod, "require_caller"), \
                 patch.object(avail_mod, "executes_locally", return_value=executes), \
                 patch.object(avail_mod.QueryCache, "get_or_compute",

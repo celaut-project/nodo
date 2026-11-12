@@ -41,6 +41,37 @@ before this change reads field 8 of a new `Peer` as the wrong type, and a new no
 reading a `Peer` stored before it (`peer.advertisement`) finds no `resources` there,
 which the peer pre-filter treats as "announced nothing" and calls as before.
 
+## Devices with a direct connection (#536)
+
+The wire format for devices (a GPU, for example) is in `celaut.proto`. A node does not
+attach devices yet: this is only the protocol, so a node that is released later does not
+break compatibility.
+
+- `Device { Container.Architecture architecture = 1; Container.Resources resources = 2;
+  repeated Attach attach = 3; }`
+  and `Container.devices = 9` (a service repeats an entry for each device it needs).
+  A device has one architecture. Its tags are synonyms, never alternatives.
+  `resources` is a `Container.Resources`, with `at_init` and `at_most` like the main one.
+- `Device.attach = 3` (a list of `ATTACH_AT_START` and `ATTACH_ON_REQUEST`; empty is
+  `ATTACH_AT_START`),
+  `ModifyServiceSystemResourcesInput.devices = 4` (a `DeviceChange` with `attach` and
+  `detach` by id) and `ModifyServiceSystemResourcesOutput.devices = 3` (a list of
+  `AttachedDevice`, with the id and the guest PCI address) are reserved for a
+  device that an instance asks for during its run. A node today supports only
+  `ATTACH_AT_START`. It refuses a service with `ATTACH_ON_REQUEST` and a request that
+  sets `devices`, and never ignores them.
+- `ConfigurationFile.devices = 5` is a list of `AttachedDevice`: the devices that the
+  node attached at the start, with their ids and guest PCI addresses. The service reads
+  them in `__config__`, as it reads its networks.
+- `Peer.devices = 10` is `repeated Device`. An entry repeated is a device
+  repeated, so the number of entries of one architecture is the count. Only `at_most`
+  has a value (the limits and the measured benchmark), and `attach` lists all the ways
+  that the node can attach that device. It is covered by the `Peer` signature.
+- `GetResourceAvailability` takes `Client & ResourceAvailabilityRequest { main = 1;
+  devices = 2; }`, where `devices` is a list of `Device` (it took `Client & ArchitectureResources`).
+
+**Not wire compatible** with the request of #459, deliberately (alpha).
+
 ## Key/value lists (no `map<>` fields)
 
 `xattrs`, `mu_per_call`, `environment_variables` and `benchmark` are

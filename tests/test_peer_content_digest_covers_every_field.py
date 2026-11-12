@@ -48,6 +48,8 @@ def _censused_messages():
         "ContractRate": celaut_pb2.ContractRate.DESCRIPTOR,
         "Amount": celaut_pb2.Amount.DESCRIPTOR,
         "ArchitectureResources": celaut_pb2.ArchitectureResources.DESCRIPTOR,
+        "Device": celaut_pb2.Device.DESCRIPTOR,
+        "Service.Container.Resources": celaut_pb2.Service.Container.Resources.DESCRIPTOR,
         "Service.Container.Architecture": celaut_pb2.Service.Container.Architecture.DESCRIPTOR,
         "ActivityWindow": celaut_pb2.ActivityWindow.DESCRIPTOR,
         "ActivityWindow.Span": celaut_pb2.ActivityWindow.Span.DESCRIPTOR,
@@ -102,6 +104,11 @@ def _announcement():
     keyvalue.set_value(at_most.benchmark, "int_ops_per_sec", 900000)
     peer.activity_window.spans.add(start_minute=1320, end_minute=360)
     peer.activity_window.on_close = celaut_pb2.ON_CLOSE_STOP
+    device = peer.devices.add()
+    device.architecture.tags.append("pci:10de:2509+aa:bb")
+    device.resources.at_init.mem_limit = 6 * 1024 ** 3
+    device.resources.at_most.mem_limit = 12 * 1024 ** 3
+    device.attach.append(celaut_pb2.Device.ATTACH_AT_START)
     peer.public_key = "ab" * 32
     peer.signature = "cd" * 64
     peer.ts = 1700000000
@@ -139,6 +146,12 @@ MUTATIONS = {
     "ActivityWindow.Span.start_minute": lambda p: setattr(p.activity_window.spans[0], "start_minute", 1321),
     "ActivityWindow.Span.end_minute": lambda p: setattr(p.activity_window.spans[0], "end_minute", 361),
     "Peer.resources": lambda p: p.resources.add().architecture.tags.append("linux/arm64"),
+    "Peer.devices": lambda p: p.devices.add().architecture.tags.append("pci:10de:2204+aa:bb"),
+    "Device.architecture": lambda p: p.devices[0].architecture.tags.append("pci:10de:2509+cc:dd"),
+    "Device.resources": lambda p: p.devices[0].ClearField("resources"),
+    "Device.attach": lambda p: p.devices[0].attach.append(celaut_pb2.Device.ATTACH_ON_REQUEST),
+    "Service.Container.Resources.at_init": lambda p: p.devices[0].resources.ClearField("at_init"),
+    "Service.Container.Resources.at_most": lambda p: setattr(p.devices[0].resources.at_most, "mem_limit", 1),
     "ArchitectureResources.architecture": lambda p: p.resources[0].architecture.tags.append("amd64"),
     "ArchitectureResources.resources": lambda p: p.resources[0].ClearField("resources"),
     "Service.Container.Architecture.tags": lambda p: p.resources[0].architecture.tags.append("x64"),

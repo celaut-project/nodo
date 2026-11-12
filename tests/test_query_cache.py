@@ -471,8 +471,8 @@ class ResourceAvailabilityRpcTests(unittest.TestCase):
         self.window_open = True
 
     def _ask(self, mem=100):
-        request = celaut.ArchitectureResources()
-        request.resources.mem_limit = mem
+        request = celaut.ResourceAvailabilityRequest()
+        request.main.resources.mem_limit = mem
         it = avail_mod.GetResourceAvailabilityIterable(iter([]), MagicMock())
         answers = []
         with patch.object(avail_mod, "parse_with_client", return_value=(request, "c")), \

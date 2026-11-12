@@ -143,7 +143,7 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         auth="client",
     ),
     "GetResourceAvailability": GatewayRpc(
-        input={1: celaut_pb2.ArchitectureResources, 2: celaut_pb2.Client},
+        input={1: celaut_pb2.ResourceAvailabilityRequest, 2: celaut_pb2.Client},
         output={1: celaut_pb2.ResourceAvailability},
         auth="client",
     ),
