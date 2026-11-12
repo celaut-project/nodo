@@ -364,12 +364,15 @@ CH_BINARY_PATH="$CH_BINARY_PATH" "$YQ_BIN" -i '.virtualizers.ch.BINARY_PATH = st
 # is what used to make an arm64 launch on x86_64 die inside the CH build.
 for ARCH_TAG in linux/amd64 linux/arm64; do
   SUFFIX="${ARCH_TAG/\//-}"   # linux/arm64 -> linux-arm64
-  KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${ARCH_TAG}/vmlinuz"
+  # The kernel goes to the store, by its pinned SHA-256, never to a fixed path: an
+  # update adds a kernel and never replaces the one that a built service boots (#536).
+  KERNEL_DIGEST="$(awk -v n="vmlinuz-${SUFFIX}" '$2 == n { print $1; exit }' "$GUEST_SUMS")"
+  KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/store/${KERNEL_DIGEST}/vmlinuz"
   INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${ARCH_TAG}/initramfs"
   BUSYBOX_TARGET="$TARGET_DIR/cloud_hypervisor/busybox/${ARCH_TAG}/busybox"
   mkdir -p "$(dirname "$KERNEL_TARGET")" "$(dirname "$INITRAMFS_TARGET")" "$(dirname "$BUSYBOX_TARGET")"
 
-  fetch_guest_asset "vmlinuz-${SUFFIX}" "$KERNEL_TARGET" 0644
+  fetch_guest_asset "vmlinuz-${SUFFIX}" "$KERNEL_TARGET" 0444
   fetch_guest_asset "initramfs-${SUFFIX}" "$INITRAMFS_TARGET" 0644
   fetch_guest_asset "busybox-${SUFFIX}" "$BUSYBOX_TARGET" 0755
 
@@ -570,7 +573,7 @@ Cloud Hypervisor checks:
 test -x "$CH_BINARY_PATH"
 # Both arches, since both were provisioned above.
 for ARCH_TAG in linux/amd64 linux/arm64; do
-  test -f "$TARGET_DIR/cloud_hypervisor/kernels/${ARCH_TAG}/vmlinuz"
+  test -f "$("$YQ_BIN" -r ".virtualizers.ch.KERNEL_PATHS[\"${ARCH_TAG}\"]" "$TARGET_DIR/config.yaml")"
   test -f "$TARGET_DIR/cloud_hypervisor/initramfs/${ARCH_TAG}/initramfs"
 done
 ```

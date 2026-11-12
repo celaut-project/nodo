@@ -136,6 +136,17 @@ virtualizers:
     INITRAMFS_PATHS:
       linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/amd64/initramfs"
       linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/arm64/initramfs"
+    # Guest kernels indexed by hash: <KERNEL_STORE>/<sha256>/vmlinuz (#536). A file
+    # here never changes. The installer writes each new kernel to a new directory
+    # and points KERNEL_PATHS at it; KERNEL_PATHS is only the kernel that a NEW
+    # build gets. Each bundle names its kernel by hash in bundle.json, and the node
+    # never boots it with another kernel.
+    KERNEL_STORE: "${main.MAIN_DIR}/cloud_hypervisor/kernels/store"
+    # The operator's claim that a kernel has the same ABI as older ones:
+    # {<sha256 of a kernel on this node>: [<sha256 of an older kernel>, ...]}. A
+    # bundle (or a device tag) that names an older hash then boots this kernel.
+    # The operator is responsible for the claim.
+    KERNEL_ABI_ALIASES: {}
     CACHE_DIR: "${main.CACHE}/ch"
     # Keep this path short to avoid Unix socket SUN_LEN limits.
     API_SOCKET_DIR: "/run/nodo/ch"

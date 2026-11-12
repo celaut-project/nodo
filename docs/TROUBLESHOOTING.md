@@ -50,7 +50,7 @@ request for it is refused up front — it never accepts work it cannot boot.
 ```bash
 grep -A3 -e ENABLE -e KERNEL_PATHS -e INITRAMFS_PATHS /nodo/config.yaml
 command -v qemu-system-aarch64 qemu-system-x86_64
-ls -l /nodo/cloud_hypervisor/kernels/linux/*/vmlinuz /nodo/cloud_hypervisor/initramfs/linux/*/initramfs
+ls -l /nodo/cloud_hypervisor/kernels/store/*/vmlinuz /nodo/cloud_hypervisor/initramfs/linux/*/initramfs
 ```
 
 Missing guest assets are release artifacts: re-running the installer downloads

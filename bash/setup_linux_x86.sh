@@ -325,7 +325,15 @@ provision_guest_assets_for_arch() {
     # x86_64 hosts that nothing ever downloaded.
     local arch_tag="$1"
     local asset_suffix="${arch_tag//\//-}"
-    local kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${arch_tag}/vmlinuz"
+    # The kernel goes to the store, indexed by its SHA-256 (the pinned digest), and
+    # never to a fixed path: an update adds a kernel and never replaces the one that
+    # an existing bundle boots (#536). See src/virtualizers/microvm/kernel_store.py.
+    local kernel_store kernel_digest kernel_target
+    kernel_store="$(read_config_path_or_default '.virtualizers.ch.KERNEL_STORE' "$TARGET_DIR/cloud_hypervisor/kernels/store")"
+    if ! kernel_digest="$(pinned_guest_digest "vmlinuz-${asset_suffix}")" || [ -z "$kernel_digest" ]; then
+        fail "Refusing to install vmlinuz-${asset_suffix}: no usable pinned digest (see above)."
+    fi
+    kernel_target="${kernel_store}/${kernel_digest}/vmlinuz"
     local initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${arch_tag}/initramfs"
     local busybox_target="$TARGET_DIR/cloud_hypervisor/busybox/${arch_tag}/busybox"
 
@@ -338,7 +346,11 @@ provision_guest_assets_for_arch() {
     # make the guest depend on the host's cpio, gzip and umask, which is the thing
     # a node must never vary by.
     echo "Provisioning guest kernel, initramfs and busybox ${GUEST_KERNEL_VERSION} for ${arch_tag}..."
-    download_guest_asset "vmlinuz-${asset_suffix}" "$kernel_target" 0644
+    if [ -f "$kernel_target" ] && [ "$(sha256sum "$kernel_target" | awk '{print $1}')" = "$kernel_digest" ]; then
+        echo "Guest kernel ${kernel_digest} is already in the kernel store."
+    else
+        download_guest_asset "vmlinuz-${asset_suffix}" "$kernel_target" 0444
+    fi
     download_guest_asset "initramfs-${asset_suffix}" "$initramfs_target" 0644
     # Kept on disk so an operator can rebuild the initramfs from this commit and
     # diff it against the shipped one; build_ch_initramfs.sh is byte-reproducible.
