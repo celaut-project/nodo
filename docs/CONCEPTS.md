@@ -153,6 +153,25 @@ See [`PRICING.md`](PRICING.md).
 - If the request has no `initial_mu`, the node uses `cost` plus its default balance
   (`deposits.DEFAULT_INITIAL_PERIODS` periods).
 
+### An instance pays for its own MU
+
+A service that earns money can turn it into MU, and so stay alive without a client. A
+local instance calls `GenerateDepositToken` and sends no `client_id` (or its own token).
+The node gives a token that pays into the balance of the caller, which it knows by its
+address. The instance then pays on the ledger like a client, with the token in the
+transaction, and calls `Payable`. The node proves the payment on the ledger, converts it
+with the same rate as for a client, and credits the instance.
+
+- It is a real payment: the node credits only what it finds on the ledger, and each token
+  works once. An instance cannot credit itself with a transfer that did not happen.
+- Only the instance itself. A token for another instance is refused, and a client keeps
+  recharging an instance with `ModifyDeposit` (its father).
+- If the instance stops before the node proves the payment, its father gets the MU, as it
+  gets the balance that the instance left.
+- In the statement of the instance the two ways are two kinds of movement: a `top_up` is
+  the father, a `deposit` is the instance itself. A node that delegated the instance does
+  not count a `deposit` as consumption.
+
 ### Read where a balance went
 
 Every change of a balance is one movement in the ledger of the node, written with the
