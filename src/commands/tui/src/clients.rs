@@ -90,7 +90,7 @@ pub fn get_client_detail(database: &Path, client_id: &str) -> SqlResult<ClientDe
         client_id: client_id.to_string(),
         deposits: get_deposit_tokens(&connection, client_id)?,
         instances: get_client_instances(&connection, client_id)?,
-        payments: crate::app::get_payments(&connection, "client_id", client_id)?,
+        payments: crate::app::get_payments(&connection, "account_id", client_id)?,
         bound_peer_id: crate::peers::get_peer_id_for_client(database, client_id)?,
     })
 }
@@ -408,7 +408,7 @@ mod tests {
                  CREATE TABLE clients (id TEXT PRIMARY KEY, balance_mu TEXT,
                                     last_usage FLOAT, unlimited INTEGER NOT NULL DEFAULT 0);
                  CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
-                                    direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
+                                    direction TEXT, status TEXT, peer_id TEXT, account_id TEXT,
                                     deposit_token TEXT, ledger TEXT, contract_hash TEXT,
                                     address TEXT, amount_mu TEXT NOT NULL,
                                     created_at DATETIME);
@@ -416,7 +416,7 @@ mod tests {
                                     status TEXT, created_at DATETIME);
                  CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, father_id TEXT);
                  INSERT INTO clients VALUES ('client-1', '500', NULL, 1);
-                 INSERT INTO payments (direction, status, client_id, deposit_token, amount_mu, created_at)
+                 INSERT INTO payments (direction, status, account_id, deposit_token, amount_mu, created_at)
                     VALUES ('in', 'accepted', 'client-1', 'token-1', '750', '2026-01-03 10:00:00');
                  INSERT INTO deposit_tokens VALUES ('token-1', 'client-1', 'payed', '2026-01-03 09:59:00');
                  INSERT INTO local_instances VALUES ('instance-1', 'demo', 'client-1');

@@ -217,14 +217,14 @@ LOCAL_PEER_ID = "LOCAL"
 
 PAYMENT_INSERT = """
     INSERT INTO payments (
-        tx_id, direction, status, peer_id, client_id, deposit_token,
+        tx_id, direction, status, peer_id, account_id, deposit_token,
         ledger, contract_hash, token_id, address, amount_mu, peer_amount_mu, purpose
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
 def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
-                          peer_id=None, client_id=None, deposit_token=None,
+                          peer_id=None, account_id=None, deposit_token=None,
                           ledger=None, contract_hash=None, token_id=None, address=None,
                           peer_amount_mu=None, purpose=None) -> tuple:
     """Bind one payment row for :data:`PAYMENT_INSERT`, in its column order.
@@ -237,7 +237,7 @@ def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
     say what money moved: ``amount_mu`` is deliberately ledger-neutral, so two rows of
     one tick paying two assets on one contract would otherwise be indistinguishable.
     """
-    return (tx_id, direction, status, peer_id, client_id, deposit_token,
+    return (tx_id, direction, status, peer_id, account_id, deposit_token,
             ledger, contract_hash, token_id, address, str(int(amount_mu)),
             None if peer_amount_mu is None else str(int(peer_amount_mu)), purpose)
 
@@ -4756,7 +4756,7 @@ class SQLConnection(metaclass=Singleton):
 
     def record_payment(self, direction: str, status: str, amount_mu: int,
                        tx_id: Optional[str] = None, peer_id: Optional[str] = None,
-                       client_id: Optional[str] = None, deposit_token: Optional[str] = None,
+                       account_id: Optional[str] = None, deposit_token: Optional[str] = None,
                        ledger: Optional[str] = None, contract_hash: Optional[str] = None,
                        token_id: Optional[str] = None, address: Optional[str] = None,
                        peer_amount_mu: Optional[int] = None,
@@ -4778,7 +4778,7 @@ class SQLConnection(metaclass=Singleton):
         try:
             self._execute(PAYMENT_INSERT, payment_insert_params(
                 tx_id=tx_id, direction=direction, status=status, peer_id=peer_id,
-                client_id=client_id, deposit_token=deposit_token, ledger=ledger,
+                account_id=account_id, deposit_token=deposit_token, ledger=ledger,
                 contract_hash=contract_hash, token_id=token_id, address=address,
                 amount_mu=amount_mu, peer_amount_mu=peer_amount_mu, purpose=purpose,
             ))
@@ -5312,7 +5312,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute(f'''
-                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                SELECT id, tx_id, direction, status, peer_id, account_id, deposit_token,
                        ledger, contract_hash, token_id, address, amount_mu, purpose,
                        created_at
                 FROM payments WHERE {clause} ORDER BY created_at DESC, id DESC LIMIT ?
@@ -5327,8 +5327,8 @@ class SQLConnection(metaclass=Singleton):
         return self._payments_where("peer_id = ?", (peer_id,), limit)
 
     def get_payments_from_client(self, client_id: str, limit: int = 20) -> List[dict]:
-        """Every deposit ``client_id`` paid us, newest first, accepted or not."""
-        return self._payments_where("client_id = ?", (client_id,), limit)
+        """Every deposit ``client_id`` paid us (its account_id in the row), newest first, accepted or not."""
+        return self._payments_where("account_id = ?", (client_id,), limit)
 
     def get_payments_by_tx_ids(self, tx_ids: List[str]) -> dict:
         """Map ``tx_id`` -> payment row, for the ids given.
@@ -5342,7 +5342,7 @@ class SQLConnection(metaclass=Singleton):
         placeholders = ','.join('?' * len(ids))
         try:
             result = self._execute(f'''
-                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                SELECT id, tx_id, direction, status, peer_id, account_id, deposit_token,
                        ledger, contract_hash, token_id, address, amount_mu, created_at
                 FROM payments WHERE tx_id IN ({placeholders})
             ''', tuple(ids))

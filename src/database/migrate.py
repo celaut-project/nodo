@@ -539,7 +539,9 @@ TABLES = {
             direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
             status TEXT CHECK( status IN ('signed', 'broadcast', 'confirmed', 'communicated', 'unacknowledged', 'failed', 'accepted', 'rejected') ) NOT NULL,
             peer_id TEXT DEFAULT NULL,
-            client_id TEXT DEFAULT NULL,
+            -- The account that an incoming payment credited: a client_id or, for the
+            -- self-recharge of a service, an instance token (#630).
+            account_id TEXT DEFAULT NULL,
             deposit_token TEXT DEFAULT NULL,
             ledger TEXT DEFAULT NULL,
             contract_hash TEXT DEFAULT NULL,
@@ -889,7 +891,7 @@ INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_delegated_instances_killed "
     "ON delegated_instances (killed_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_peer ON payments (peer_id, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (client_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (account_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_tx ON payments (tx_id)",
     # Reputation events are only ever read for one subject at a time, newest first.
     "CREATE INDEX IF NOT EXISTS idx_reputation_events_subject "

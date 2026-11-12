@@ -957,7 +957,7 @@ def _validate_claimed_payment(amount: int, ledger: celaut_pb2.Contract.Ledger, c
         direction='in',
         status='accepted' if _r else 'rejected',
         amount_mu=amount,
-        client_id=account_id,
+        account_id=account_id,
         deposit_token=token,
         ledger=ledger_tag,
         contract_hash=contract_hash,

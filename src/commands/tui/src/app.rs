@@ -7924,7 +7924,7 @@ fn get_service_detail(database: &Path, service_id: &str) -> SqlResult<ServiceDet
 
 /// Payment rows for one counterparty, newest first.
 ///
-/// `column` is the caller's choice of `peer_id` or `client_id` and is interpolated,
+/// `column` is the caller's choice of `peer_id` or `account_id` and is interpolated,
 /// which is safe only because both are literals in this file — the *value* is bound.
 pub(crate) fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Vec<PaymentRow>> {
     let mut statement = connection.prepare(&format!(

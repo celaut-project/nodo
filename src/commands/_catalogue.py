@@ -47,10 +47,10 @@ def payments(connection: sqlite3.Connection, column: str, value: str,
              limit: int = DEFAULT_DETAIL_ROWS) -> List[Dict[str, Any]]:
     """Payment rows for one counterparty, newest first (``get_payments`` in the TUI).
 
-    ``column`` is ``peer_id`` or ``client_id`` and is interpolated -- both are
+    ``column`` is ``peer_id`` or ``account_id`` and is interpolated -- both are
     literals at every call site; the value is bound.
     """
-    if column not in ("peer_id", "client_id"):
+    if column not in ("peer_id", "account_id"):
         raise ValueError(f"unsupported payment column: {column}")
     if not table_exists(connection, "payments"):
         return []

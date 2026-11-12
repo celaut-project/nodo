@@ -208,7 +208,7 @@ class IncomingPaymentRecordTests(unittest.TestCase):
         self.assertTrue(credited)
         self.assertEqual(row["direction"], "in")
         self.assertEqual(row["status"], "accepted")
-        self.assertEqual(row["client_id"], "client-1")
+        self.assertEqual(row["account_id"], "client-1")
         self.assertEqual(row["deposit_token"], "deposit-token-1")
         self.assertEqual(row["amount_mu"], 1000)
 
@@ -218,7 +218,7 @@ class IncomingPaymentRecordTests(unittest.TestCase):
 
         self.assertFalse(credited)
         self.assertEqual(row["status"], "rejected")
-        self.assertEqual(row["client_id"], "client-1")
+        self.assertEqual(row["account_id"], "client-1")
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ def _client_detail(connection, client_id, limit):
         row = connection.execute(
             "SELECT id FROM peer WHERE local_client_id = ?", (client_id,)).fetchone()
         detail["bound_peer_id"] = row[0] if row else None
-    detail["payments"] = catalogue.payments(connection, "client_id", client_id, limit)
+    detail["payments"] = catalogue.payments(connection, "account_id", client_id, limit)
     return detail
 
 
