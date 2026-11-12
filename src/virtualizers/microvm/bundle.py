@@ -19,6 +19,7 @@ from protos import celaut_pb2 as celaut
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.virtualizers.entry_path import resolve_entrypoint_path
 from src.virtualizers.microvm import initramfs as microvm_initramfs
+from src.virtualizers.microvm import kernel_store
 from src.virtualizers.microvm import paths
 from src.virtualizers.microvm.bundle_formats import (
     SUPPORTED_ROOTFS_FORMATS,
@@ -59,8 +60,21 @@ def load_bundle(service_id: str, arch: str) -> Dict[str, str]:
     with open(bundle_path, "r", encoding="utf-8") as f:
         bundle = json.load(f)
 
+    # A bundle from before the kernel store names only a path: pin it now to the
+    # hash of the kernel that the path holds, so a later update cannot change it.
+    if kernel_store.stamp(bundle):
+        try:
+            kernel_store._write_in_place(bundle_path, bundle)
+        except OSError:
+            pass
+
     rootfs_path = Path(bundle.get("rootfs_path", ""))
-    kernel_path = Path(bundle.get("kernel_path", ""))
+    kernel_hash = str(bundle.get("kernel_hash") or "")
+    if kernel_hash:
+        # The hash decides, never the path. KernelNotFound names the hash.
+        kernel_path = kernel_store.resolve(kernel_hash)
+    else:
+        kernel_path = Path(bundle.get("kernel_path", ""))
     initramfs_path = Path(bundle.get("initramfs_path", ""))
 
     if not rootfs_path.is_file():
@@ -86,6 +100,7 @@ def load_bundle(service_id: str, arch: str) -> Dict[str, str]:
         "rootfs_path": str(rootfs_path),
         "rootfs_format": rootfs_format,
         "kernel_path": str(kernel_path),
+        "kernel_hash": kernel_hash or None,
         "initramfs_path": str(initramfs_path),
         "arch": bundle.get("arch", arch),
     }

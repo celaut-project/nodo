@@ -1244,6 +1244,20 @@ def migrate():
         conn.commit()
         print("Database schema created and saved.")
 
+    # Not a table, but `migrate` is what the installer runs (as root) after an
+    # update: name every bundle's kernel by hash and copy the configured kernels
+    # into the store, which the daemon may not be able to write (#536).
+    try:
+        from src.virtualizers.microvm import kernel_store
+
+        counts = kernel_store.migrate_all_bundles()
+        print(
+            f"Kernel store: {counts['bundles']} bundle(s), {counts['migrated']} pinned "
+            f"to a kernel hash, {counts['kernels_ingested']} kernel(s) added."
+        )
+    except Exception as e:
+        print(f"Kernel store: could not pin the bundle kernels: {e}")
+
     conn.close()
     print("Database connection closed.")
 

@@ -68,6 +68,11 @@ def qemu_system_binary(arch: str) -> Optional[str]:
     return shutil.which(name)
 
 
+def qemu_kernel_override(arch: str) -> Optional[str]:
+    """The operator's QEMU kernel for ``arch`` (``virtualizers.qemu.KERNEL_PATHS``), or None."""
+    return (env_manager.get("virtualizers.qemu.KERNEL_PATHS", {}) or {}).get(arch) or None
+
+
 def qemu_kernel_path(arch: str) -> Optional[str]:
     """Guest kernel image for ``arch``: QEMU override first, else the CH asset."""
     override = (env_manager.get("virtualizers.qemu.KERNEL_PATHS", {}) or {}).get(arch)
