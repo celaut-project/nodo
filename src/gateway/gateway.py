@@ -21,7 +21,7 @@ from src.tunneling.rpc_tunnel import (
 from src.gateway.utils import generate_full_node_peer_info
 from src.gateway.client_gate import ClientRequired, deposit_account, parse_with_client, require_caller, require_father, simple_rpc_timeout_seconds
 from src.manager import balance_statement, hibernation, stopping
-from src.manager.manager import ALLOW_DEBT, add_peer_instance, descends_from_dev_client, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
+from src.manager.manager import ALLOW_DEBT, actor_of, add_peer_instance, descends_from_dev_client, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
 from src.manager.chat import ChatError, get_client_thread, receive_chat_message
 from src.manager.metrics import get_client_metrics, get_metrics
@@ -96,7 +96,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
             success, message = modify_deposit(
                         amount_mu=from_amount(_input.difference),
-                        service_token=_input.service_token
+                        service_token=_input.service_token,
                     )
 
             log.LOGGER(f"Message on modify deposit: {message}")
@@ -335,6 +335,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 reason = activity_window.closed_reason()
                 log.LOGGER(f'Refusing to resize {token}: {reason}')
                 raise Exception(reason)
+        # Who asked: the father when the request names the instance by its token, the
+        # instance itself when it asks from inside (no token).
+        resize_actor = actor_of(sc.father_of(token) or "") if request.service_token \
+            else ledger.ACTOR_INSTANCE
         # The instance that changes pays, not the caller: the holder of a token may be a
         # client with no instance of its own, and the cost of waking stays with the
         # instance that gets it.
@@ -344,6 +348,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 amount_mu=prices().modify_resources_mu,
                 refund_function_container=refund_container,
                 kind=ledger.RESOURCE_CHANGE,
+                detail={"actor": resize_actor},
         ): raise Exception('Error charging for the resource change of ' + context.peer())
 
         def refuse(message: str):

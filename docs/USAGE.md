@@ -56,7 +56,7 @@ These are the most commonly used commands for daily tasks:
   `nodo execute --no-input -e BLOCK_ID 9a3f… my_service_tag`
 
 - **statement `[<account>]` `[--from SEQ]` `[--limit N]` `[--kind KIND]` `[--json]`**  
-  The balance statements of this node, read from its own database (free). Without an account, it lists the clients, the instances and the instances that this node delegated, with the balance, the head of the chain and the number of rows. With one (a client_id, the name of an instance, or the start of its reference, six characters at least), it prints its movements, oldest first, and whether the chain holds together: each row hangs from the one before, its hash is the hash of its fields, and the balance adds up. Nothing it prints is a token. The exit code is 1 when a chain is broken.  
+  The balance statements of this node, read from its own database (free). Each movement has a `BY` column, and `actor` in `--json`: `operator` (the operator of the node: `credit_client`, `debit_client`, `increase_deposit`, `decrease_deposit`, `hibernate`), `client` or `instance` (the party that asked through the gateway), or `node` (the node wrote it by its own rule: maintenance, tunnel, refund). Without an account, it lists the clients, the instances and the instances that this node delegated, with the balance, the head of the chain and the number of rows. With one (a client_id, the name of an instance, or the start of its reference, six characters at least), it prints its movements, oldest first, and whether the chain holds together: each row hangs from the one before, its hash is the hash of its fields, and the balance adds up. Nothing it prints is a token. The exit code is 1 when a chain is broken.  
   `nodo statement faults` lists the faults of peers that this node scored from their statements. `nodo statement hops` lists what the node keeps of each peer and descendant that it reached: the link, the head, the failures of the tunnel and the last receipt of the peer. `nodo statement check-receipts <file> <account>` checks receipts against the rows of an account.  
   **Example:**  
   `nodo statement web --kind tunnel --json`
@@ -340,8 +340,18 @@ These are the most commonly used commands for daily tasks:
   `nodo tunnel_close 3f9a0c12`  
   `nodo tunnel_close --all`
 
+- **hibernate `<instance id> [--json]`** (requires root)  
+  Puts a local instance in hibernation: its VM stops, and its disk, address and account are
+  kept. A service that declared a notice gets it first, as for `nodo kill`. Only a resize
+  that gives it CPU and RAM again wakes it: a top-up does not. The operator pays nothing and
+  the instance is not charged. The statement of the instance gets a `resource_change` row that
+  moves nothing, with `actor` `operator`. Exits `1` when the instance cannot be hibernated.
+  JSON: `{"hibernated": "<id>", "already": false}`.  
+  **Example:**  
+  `sudo nodo hibernate abcdef1234567890`
+
 - **increase_deposit `<instance id> <amount>`**  
-  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (MU by default).  
+  Adds to a service instance's deposit, out of the balance of its father. The amount is in `ui.DISPLAY_UNIT` (MU by default). The rows of the statement have `actor` `operator`.  
   **Example:**  
   `nodo increase_deposit abcdef1234567890 10000000`
 
@@ -1297,6 +1307,8 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | CLIENTS: table | — | `nodo clients [--json]` (new `--json`) |
 | CLIENTS: payments / tokens / instances / bound peer card | — | `nodo clients <client> [--json]` (new) |
 | CLIENTS: credit / debit | `+` / `-` | `nodo credit_client` / `nodo debit_client <client> <amount>` |
+| INSTANCES: hibernate (y/N) | `h` | `nodo hibernate <instance>` |
+| INSTANCES: increase / decrease the balance | `+` / `-` | `nodo increase_deposit` / `nodo decrease_deposit <instance> <amount>` |
 | CHAT: threads (ours / theirs) | `←` / `→` | `nodo chat_threads [<peer>] [--json]` (`opened_by_us`) |
 | CHAT: thread messages | — | `nodo chat_thread <id> [--json]` |
 | CHAT: open / reply / close / reopen | `o` / Enter / `c` / `R` | `nodo chat_open`, `chat_reply`, `chat_close`, `chat_reopen` |
@@ -1397,6 +1409,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `submit_reputation` / `sync_reputation_proof` | publish / reconcile this node's proof |
 | `earnings [--json]` | money taken in, per network and window |
 | `donations [--json]` | who we fund, who we count |
+| `hibernate <instance>` | stop the VM of an instance and keep its disk |
 | `increase_deposit` / `decrease_deposit <instance> <amount>` | fund / defund a running instance |
 | `increase_peer_deposit <peer> <amount>` | top up what a peer holds for us |
 | `credit_client` / `debit_client <client> <amount>` | change a client's balance here |

@@ -27,6 +27,7 @@ another node's descendant is read by a service, with ``GetBalanceStatement``.
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.database import ledger
 from src.commands import _catalogue as catalogue
 
 USAGE = (
@@ -145,6 +146,13 @@ def _decode(detail) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def actor(detail: Dict[str, Any]) -> str:
+    """Who asked for a movement: the operator, a client or an instance (``detail.actor``).
+    A row with none is the node's own: a period of maintenance, a tunnel, a refund."""
+    given = detail.get("actor")
+    return given if given in ledger.ACTORS else "node"
+
+
 def movements(connection, account_id: str, from_seq: int = 1, limit: int = DEFAULT_MOVEMENTS,
               kind: Optional[str] = None) -> Tuple[List[Dict[str, Any]], bool]:
     """The rows of one account from ``from_seq`` on, oldest first, with ``kind`` if given.
@@ -164,6 +172,7 @@ def movements(connection, account_id: str, from_seq: int = 1, limit: int = DEFAU
         "seq": int(r["seq"]), "ts": int(r["ts"]), "kind": r["kind"],
         "amount_mu": r["amount_mu"], "balance_after_mu": r["balance_after_mu"],
         "instance_ref": r["instance_ref"] or "", "detail": _decode(r["detail"]),
+        "actor": actor(_decode(r["detail"])),
         "hash": r["hash"], "prev_hash": r["prev_hash"],
     } for r in rows[:limit]], more
 
@@ -352,11 +361,12 @@ def _print_movements(document: Dict[str, Any]) -> None:
     state = "holds together" if chain["ok"] else f"BROKEN at {chain['seq']}: {chain['problem']}"
     partial = " (checked from the first row that is held)" if chain["partial"] else ""
     print(f"Chain: {state}{partial}. {chain['checked']} rows checked.", flush=True)
-    print(f"{'SEQ':>5} {'WHEN':19} {'KIND':14} {'AMOUNT':>12} {'BALANCE':>12}  DETAIL", flush=True)
+    print(f"{'SEQ':>5} {'WHEN':19} {'KIND':14} {'BY':9} {'AMOUNT':>12} {'BALANCE':>12}  DETAIL",
+          flush=True)
     for m in document["movements"]:
-        detail = " ".join(f"{k}={str(v)[:24]}" for k, v in m["detail"].items())
-        print(f"{m['seq']:>5} {_when(m['ts']):19} {m['kind']:14} {m['amount_mu']:>12} "
-              f"{m['balance_after_mu']:>12}  {detail}", flush=True)
+        detail = " ".join(f"{k}={str(v)[:24]}" for k, v in m["detail"].items() if k != "actor")
+        print(f"{m['seq']:>5} {_when(m['ts']):19} {m['kind']:14} {m['actor']:9} "
+              f"{m['amount_mu']:>12} {m['balance_after_mu']:>12}  {detail}", flush=True)
     if document["has_more"]:
         print(f"More rows follow: --from {document['movements'][-1]['seq'] + 1}.", flush=True)
 

@@ -776,6 +776,7 @@ def increase_local_balance_for_client(account_id: str, amount_mu: int,
     if not credited:
         raise Exception('Account ' + account_id + ' does not exists.')
     instance_token = None
+    payer = actor_of(account_id)
     if credited != account_id:
         # The instance stopped before the payment was proved: its father gets the MU, as
         # it got the balance that the instance left. The row names the instance.
@@ -785,7 +786,7 @@ def increase_local_balance_for_client(account_id: str, amount_mu: int,
         account_id = credited
     try:
         sc.move_balance(account_id, amount_mu, ledger.DEPOSIT, instance_token=instance_token,
-                        detail=detail)
+                        detail={**(detail or {}), "actor": payer})
     except Exception as e:
         raise Exception(
             f"Manager error: cannot credit account {account_id} with {format_mu(amount_mu)}: {e}"
@@ -1660,7 +1661,13 @@ def forget_delegation_locks(alive: Iterable[str]) -> int:
     return dropped
 
 
-def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
+def actor_of(account_id: str) -> str:
+    """Who an account is, for ``detail.actor``: a client, or else an instance."""
+    return ledger.ACTOR_CLIENT if sc.client_exists(client_id=account_id) else ledger.ACTOR_INSTANCE
+
+
+def modify_deposit(amount_mu: int, service_token: str,
+                   actor: Optional[str] = None) -> Tuple[bool, str]:
     from src.manager.statement_check import peer_call_timeout
 
     lock = delegation_lock(service_token)
@@ -1669,12 +1676,13 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     if not lock.acquire(timeout=4 * peer_call_timeout()):
         return False, "The deposit of this instance is being charged. Try again."
     try:
-        return _modify_deposit(amount_mu, service_token)
+        return _modify_deposit(amount_mu, service_token, actor)
     finally:
         lock.release()
 
 
-def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
+def _modify_deposit(amount_mu: int, service_token: str,
+                    actor: Optional[str] = None) -> Tuple[bool, str]:
     """Move ``amount_mu`` between an instance and its father: a positive figure tops the
     instance up out of the father's balance, a negative one gives it back.
 
@@ -1685,6 +1693,10 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     No MU moves before the instance is known to keep a balance of 0 or more. On a
     delegated instance the father is credited only after the peer has moved its side,
     and a top-up the peer refuses is given back to the father.
+
+    ``actor`` is who asked (``ledger.ACTORS``), and goes in ``detail.actor`` of every row.
+    ``None`` is the father of the instance: a client or an instance asking through the
+    gateway. The operator passes ``ledger.ACTOR_OPERATOR``.
     """
     log.LOGGER(f"Modify deposit of {service_token} by {format_mu(abs(amount_mu))}")
 
@@ -1708,6 +1720,8 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         log.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
 
+    detail = {"actor": actor or actor_of(father_id)}
+
     # Before any MU moves: crediting the father first and finding afterwards that the
     # instance had less than asked for made MU out of nothing.
     current = sc.get_instance_balance(id=service_token) if is_internal \
@@ -1721,10 +1735,10 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         try:
             if amount_mu > 0:
                 sc.transfer(father_id, service_token, amount_mu, ledger.TOP_UP,
-                            child=service_token, allow_debt=ALLOW_DEBT)
+                            child=service_token, allow_debt=ALLOW_DEBT, detail=detail)
             else:
                 sc.transfer(service_token, father_id, -amount_mu, ledger.WITHDRAWAL,
-                            child=service_token)
+                            child=service_token, detail=detail)
         except ledger.InsufficientBalance:
             return False, 'Error charging the father'
         except ledger.NoSuchAccount:
@@ -1741,6 +1755,7 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
                 refund_function_container=top_up_refunds,
                 kind=ledger.TOP_UP,
                 instance_token=service_token,
+                detail=detail,
         ):
             return False, 'Error charging the father'
 
@@ -1818,7 +1833,8 @@ def _modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         if amount_mu < 0:
             log.LOGGER(f"Credit father {father_id}")
         sc.move_delegated_deposit(
-            service_token, father_id, amount_mu, -peer_amount if amount_mu < 0 else peer_amount)
+            service_token, father_id, amount_mu, -peer_amount if amount_mu < 0 else peer_amount,
+            detail=detail)
     except ledger.NoSuchAccount:
         return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
     return True, _output.message or "Deposit modified correctly"

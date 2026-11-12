@@ -97,6 +97,18 @@ KINDS = (
     CHILD_BOUND, TOP_UP, WITHDRAWAL, REFUND, TUNNEL, RESOURCE_CHANGE, STATEMENT_QUERY, STOP,
 )
 
+# Who asked for a movement: ``detail.actor``. Written on every row that a party causes on
+# purpose -- a deposit, a credit or debit, a top-up or withdrawal, a resource change or a
+# hibernation. A row that the node writes by itself (a maintenance period, a tunnel, a
+# refund at a stop) has no actor: the rule that priced it is its cause.
+ACTOR_OPERATOR = "operator"
+"""The operator of the node, with ``nodo`` or the TUI."""
+ACTOR_CLIENT = "client"
+"""A client of the node, through the gateway."""
+ACTOR_INSTANCE = "instance"
+"""An instance, for its own account or for a child of it, through the gateway."""
+ACTORS = (ACTOR_OPERATOR, ACTOR_CLIENT, ACTOR_INSTANCE)
+
 _MOVEMENT_PREFIX = "celaut-balance-movement:"
 _GENESIS_PREFIX = "celaut-balance-genesis:"
 _INSTANCE_PREFIX = "celaut-ledger-instance:"

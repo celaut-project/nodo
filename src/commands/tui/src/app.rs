@@ -705,6 +705,9 @@ fn parse_custom_unit(input: &str, existing: &[String]) -> Result<(String, String
 pub enum PendingAction {
     DeleteService { id: String, label: String },
     KillInstance { id: String, label: String },
+    /// Put an instance in hibernation: `nodo hibernate`. Confirmed because its VM stops
+    /// and its memory and processes are lost, and only a resize wakes it again.
+    HibernateInstance { id: String, label: String },
     /// Start an instance of a service. Confirmed like the destructive ones because
     /// what it does is spend: the instance is funded out of this node's balance the
     /// moment it launches, and goes on burning MU until something stops it.
@@ -760,6 +763,10 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         PendingAction::KillInstance { id, label } => {
             Some((format!("Kill instance {label}"), vec!["kill".to_string(), id]))
         }
+        PendingAction::HibernateInstance { id, label } => Some((
+            format!("Hibernate instance {label}"),
+            vec!["hibernate".to_string(), id],
+        )),
         PendingAction::ExecuteService { id, label } => Some((
             format!("Execute service {label}"),
             crate::env_form::execute_args(&id, &[]),
@@ -3490,6 +3497,10 @@ pub struct App {
     /// Client id and direction (true = debit) for the open `CreditClient` amount modal.
     pub credit_client_id: Option<String>,
     pub credit_client_decrement: bool,
+    /// True when the open `CreditClient` modal moves the balance of an instance, not of
+    /// a client: `nodo increase_deposit` / `decrease_deposit` instead of
+    /// `credit_client` / `debit_client`.
+    pub credit_is_instance: bool,
     /// The new-chat wizard's state (issue: TUI chat/peers/clients redesign): typed
     /// filter and highlighted index for `PickChatPeer`, the peer it settled on, the
     /// topics offered by `PickChatTopic`, and its own highlighted index.
@@ -3687,6 +3698,7 @@ impl Default for App {
             pending_action: None,
             credit_client_id: None,
             credit_client_decrement: false,
+            credit_is_instance: false,
             chat_wizard_peer_filter: String::new(),
             chat_wizard_peer_index: 0,
             chat_wizard_peer_id: None,
@@ -6432,6 +6444,43 @@ impl App {
         self.input_mode = InputMode::Confirm;
         self.input_title = format!("Kill instance {label}?{also} (y/N)");
         self.pending_action = Some(PendingAction::KillInstance {
+            id: instance.id.clone(),
+            label,
+        });
+    }
+
+    /// Ask for confirmation before hibernating the selected instance. The statement of
+    /// the instance says that the operator did it (`detail.actor`).
+    pub fn open_hibernate_instance_confirm(&mut self) {
+        if self.page() != Page::Instances {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(instance) = self.instances.selected().cloned() else {
+            self.status = "Select an instance first".to_string();
+            return;
+        };
+        if instance.location != "local" {
+            self.status = "Only an instance that runs on this node can be hibernated".to_string();
+            return;
+        }
+        if instance.revive.suspended.is_some() {
+            self.status = "That instance is already suspended or hibernated".to_string();
+            return;
+        }
+        let label = if instance.name.trim().is_empty() {
+            shorten(&instance.id, 18)
+        } else {
+            instance.name.clone()
+        };
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!(
+            "Hibernate instance {label}? Its VM stops and its disk is kept (y/N)"
+        );
+        self.pending_action = Some(PendingAction::HibernateInstance {
             id: instance.id.clone(),
             label,
         });

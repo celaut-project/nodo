@@ -178,6 +178,42 @@ impl App {
         );
         self.credit_client_id = Some(client.id);
         self.credit_client_decrement = decrement;
+        self.credit_is_instance = false;
+        self.edit_kind = crate::app::EditKind::Text;
+    }
+
+    /// Open the same amount modal for the selected instance: `+` adds to its deposit and
+    /// `-` takes from it (`nodo increase_deposit` / `decrease_deposit`). The MU come from
+    /// the father of the instance, or go back to it, and the rows of the statement say
+    /// that the operator asked.
+    pub fn open_credit_instance(&mut self, decrement: bool) {
+        if self.page() != crate::app::Page::Instances {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(instance) = self.instances.selected().cloned() else {
+            self.status = "Select an instance first".to_string();
+            return;
+        };
+        let name = if instance.name.trim().is_empty() {
+            shorten(&instance.id, 18)
+        } else {
+            instance.name.clone()
+        };
+        self.input_mode = crate::app::InputMode::CreditClient;
+        self.input.clear();
+        self.input_title = format!(
+            "{} balance of instance {} (amount, {})",
+            if decrement { "Decrease" } else { "Increase" },
+            name,
+            self.money.symbol
+        );
+        self.credit_client_id = Some(instance.id);
+        self.credit_client_decrement = decrement;
+        self.credit_is_instance = true;
         self.edit_kind = crate::app::EditKind::Text;
     }
 
@@ -195,13 +231,15 @@ impl App {
             self.status = "Amount must be a positive number".to_string();
             return;
         }
+        let instance = self.credit_is_instance;
         self.close_input();
-        let label = format!(
-            "{} client {}",
-            if decrement { "Debit" } else { "Credit" },
-            shorten(&client_id, 18)
-        );
-        let command = if decrement { "debit_client" } else { "credit_client" };
+        let (verb, subject, command) = match (instance, decrement) {
+            (false, false) => ("Credit", "client", "credit_client"),
+            (false, true) => ("Debit", "client", "debit_client"),
+            (true, false) => ("Increase", "instance", "increase_deposit"),
+            (true, true) => ("Decrease", "instance", "decrease_deposit"),
+        };
+        let label = format!("{verb} {subject} {}", shorten(&client_id, 18));
         self.spawn_command(
             crate::app::CommandKind::Generic,
             label,
@@ -482,5 +520,94 @@ mod tests {
         assert!(clients[0].unlimited, "a dev client is kept funded");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn app_on_instances(location: &str, suspended: Option<&str>) -> crate::app::App {
+        use crate::app::{App, Instance, InstanceRevive, Page, StatefulList};
+        let mut app = App::default();
+        app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Instances).unwrap();
+        let instance = Instance {
+            id: "inst-1".to_string(),
+            name: "demo".to_string(),
+            ip: String::new(),
+            service: String::new(),
+            balance: "0".to_string(),
+            virtualizer: "ch".to_string(),
+            memory_limit: 0,
+            disk_limit: 0,
+            vcpus: None,
+            usage: crate::app::InstanceUsage::default(),
+            location: location.to_string(),
+            father_id: String::new(),
+            mu_per_minute: None,
+            mu_per_hour: None,
+            consumption_samples: None,
+            consumption_age_secs: None,
+            energy_watts: None,
+            energy_share: None,
+            revive: InstanceRevive { suspended: suspended.map(str::to_string), ..Default::default() },
+            age_secs: None,
+            client: crate::app::InstanceClient::None,
+        };
+        app.instances = StatefulList::with_items(vec![instance]);
+        app.instances.next();
+        app
+    }
+
+    #[test]
+    fn the_balance_of_an_instance_goes_through_increase_and_decrease_deposit() {
+        let mut app = app_on_instances("local", None);
+        app.open_credit_instance(false);
+        assert_eq!(app.input_mode, crate::app::InputMode::CreditClient);
+        assert!(app.credit_is_instance);
+        assert!(app.input_title.starts_with("Increase balance of instance demo"));
+
+        app.open_credit_instance(true);
+        assert!(app.input_title.starts_with("Decrease balance of instance demo"));
+        assert!(app.credit_client_decrement);
+    }
+
+    #[test]
+    fn a_client_modal_after_an_instance_one_is_a_client_modal_again() {
+        let mut app = app_on_instances("local", None);
+        app.open_credit_instance(false);
+        app.close_input();
+        app.tabs.index = crate::app::Page::ALL
+            .iter()
+            .position(|page| *page == crate::app::Page::Clients)
+            .unwrap();
+        app.clients = crate::app::StatefulList::with_items(vec![Client {
+            id: "c1".to_string(),
+            balance: "0".to_string(),
+            last_usage: String::new(),
+            unlimited: false,
+        }]);
+        app.clients.next();
+        app.open_credit_client(false);
+        assert!(!app.credit_is_instance);
+    }
+
+    #[test]
+    fn hibernating_asks_first_and_names_the_nodo_command() {
+        let mut app = app_on_instances("local", None);
+        app.open_hibernate_instance_confirm();
+        assert_eq!(app.input_mode, crate::app::InputMode::Confirm);
+        let action = app.pending_action.clone().unwrap();
+        let (label, args) = crate::app::pending_command(action).unwrap();
+        assert_eq!(label, "Hibernate instance demo");
+        assert_eq!(args, vec!["hibernate".to_string(), "inst-1".to_string()]);
+    }
+
+    #[test]
+    fn a_remote_or_suspended_instance_is_not_offered_for_hibernation() {
+        let mut remote = app_on_instances("some-peer", None);
+        remote.open_hibernate_instance_confirm();
+        assert_eq!(remote.input_mode, crate::app::InputMode::Normal);
+        assert!(remote.pending_action.is_none());
+
+        let mut down = app_on_instances("local", Some("hibernated"));
+        down.open_hibernate_instance_confirm();
+        assert_eq!(down.input_mode, crate::app::InputMode::Normal);
+        assert!(down.status.contains("already"));
     }
 }

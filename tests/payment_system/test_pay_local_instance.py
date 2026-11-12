@@ -69,11 +69,12 @@ class PayableAccountTests(unittest.TestCase):
         from src.database import ledger
         sc = mock.MagicMock()
         sc.payable_account.return_value = "c1"
+        sc.client_exists.return_value = False  # i1 is an instance: it is the payer
         with mock.patch.object(manager, "sc", sc):
             manager.increase_local_balance_for_client("i1", 500, detail={"ledger": "ergo"})
         sc.move_balance.assert_called_once_with(
             "c1", 500, ledger.DEPOSIT, instance_token="i1",
-            detail={"ledger": "ergo", "reason": "instance_stopped"})
+            detail={"ledger": "ergo", "reason": "instance_stopped", "actor": "instance"})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

@@ -233,6 +233,10 @@ every ancestor can read and reach its descendants:
   session holds. One check (`receipt_statement.check`) does it for the node, for the CLI
   (`nodo statement check-receipts`, `nodo receipt verify --statement`) and for the TUI. A
   peer whose statement contradicts its own receipt is scored `statement_contradicts_receipt`.
+- **Who asked.** A movement that a party asked for has `detail.actor`: `operator`, `client`
+  or `instance`. A row without it is the node's own rule. A reader sees if the operator
+  changed a balance or put an instance in hibernation, and does not confuse it with a
+  charge that came from the rules.
 - **Read it.** `nodo statement` lists the accounts of this node and their movements, checks
   each chain, and shows the faults and the receipts kept of peers; the TUI has the same in
   its LEDGER and RECEIPTS pages.

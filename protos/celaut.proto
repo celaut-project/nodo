@@ -971,7 +971,11 @@ message BalanceMovement {
     // carry. For a tunnel: "open" or "bytes", "execution_name", and "session", the
     // receipt stream of the tunnel when the caller asked for receipts. For a stop:
     // "reason", the death reason of the instance, and "leftover", the MU that the
-    // refund took out of the account.
+    // refund took out of the account. A movement that a party asked for has "actor":
+    // "operator" (the operator of the node), "client" or "instance". For a top_up or a withdrawal, the
+    // actor is the father of the instance. A resource_change that hibernates an instance
+    // has "action": "hibernate". A movement with no "actor" is one that the node wrote
+    // by its own rule.
     string detail = 7;
     // The hash of the movement before this one. For the first movement, the genesis
     // hash of the account: blake2b-256 hex of "celaut-balance-genesis:" followed by the

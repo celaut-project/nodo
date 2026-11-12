@@ -296,6 +296,8 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 | `a` | All: append an element to the selected list |
 | `d` | Delete the selected service, forget the selected peer on Peers, close the selected tunnel on Tunnels, remove the selected All list element, or show how this node deviates from its closest profile on Policies |
 | `k` | Kill the selected instance (`nodo kill`, which also closes the tunnels to it; the confirmation says how many) |
+| `h` | Instances: hibernate the selected instance (`nodo hibernate`; asks first, VM stops and disk is kept) |
+| `+` / `-` | Instances: increase / decrease the balance of the selected instance (amount modal, `nodo increase_deposit` / `decrease_deposit`); Clients: credit / debit |
 | `t` | Instances: open a tunnel to the selected instance (`nodo tunnel … --detach`) |
 | `g` | Instances: dependency tree / flat list |
 | `i` | Service details, the selected tunnel with its log on Tunnels, or the selected pack with its log on Packs |
@@ -324,6 +326,14 @@ stale — notably one that reinstalled and came back under a new identity key, s
 `+`/`-` on Clients opens an amount modal (typed in `ui.DISPLAY_UNIT`, same as the balance
 column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
 `nodo debit_client <client id> <amount>` in the background.
+
+`+`/`-` on Instances open the same modal for the selected instance and run
+`nodo increase_deposit <instance> <amount>` or `nodo decrease_deposit <instance> <amount>`.
+`h` asks first, then runs `nodo hibernate <instance>`.
+
+Every movement in a statement says who asked for it: the LEDGER page has a `By` column
+(`operator`, `client`, `instance`, or `node` for a row that the node wrote by its own rule).
+What the TUI does is `operator`, because it runs the `nodo` command of the operator.
 
 ## Terminal size
 

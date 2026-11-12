@@ -38,10 +38,10 @@ def credit_client(client_id: str, amount: str, decrement: bool = False):
                 f"{format_mu(current_mu)} available, needed {format_mu(amount_mu)}."
             )
             return
-        sc.move_balance(client_id, -amount_mu, ledger.DEBIT, detail={"reason": "operator"})
+        sc.move_balance(client_id, -amount_mu, ledger.DEBIT, detail={"reason": "operator", "actor": ledger.ACTOR_OPERATOR})
         verb = "debited"
     else:
-        sc.move_balance(client_id, amount_mu, ledger.CREDIT, detail={"reason": "operator"})
+        sc.move_balance(client_id, amount_mu, ledger.CREDIT, detail={"reason": "operator", "actor": ledger.ACTOR_OPERATOR})
         verb = "credited"
 
     print(f"Client {client_id} {verb} {format_mu(amount_mu)}.")

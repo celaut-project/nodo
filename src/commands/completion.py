@@ -41,7 +41,7 @@ SERVICE_COMMANDS = [
 ]
 
 # Commands whose first positional argument is an instance id.
-INSTANCE_COMMANDS = ["kill", "observe", "increase_deposit", "decrease_deposit", "tunnel"]
+INSTANCE_COMMANDS = ["kill", "hibernate", "observe", "increase_deposit", "decrease_deposit", "tunnel"]
 
 # Commands whose first positional argument is a dead local instance (its saved
 # logs). `logs` takes no argument otherwise, so the instance is optional.
@@ -108,6 +108,7 @@ COMMANDS = sorted(
         "update",
         "uninstall",
         "kill",
+        "hibernate",
         "burnall",
         "observe",
         "tunnel",

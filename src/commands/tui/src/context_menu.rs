@@ -53,6 +53,9 @@ pub fn page_actions(page: Page) -> Vec<MenuItem> {
     match page {
         Page::Instances => vec![
             MenuItem::new("Open a tunnel…", 't'),
+            MenuItem::new("Hibernate", 'h'),
+            MenuItem::new("Increase balance…", '+'),
+            MenuItem::new("Decrease balance…", '-'),
             MenuItem::new("Kill", 'k'),
             MenuItem::new("Tree / flat view", 'g'),
         ],

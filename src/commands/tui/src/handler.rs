@@ -527,6 +527,17 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('k')) if app.page() == Page::Instances => {
             app.open_kill_instance_confirm()
         }
+        (KeyModifiers::NONE, KeyCode::Char('h')) if app.page() == Page::Instances => {
+            app.open_hibernate_instance_confirm()
+        }
+        // Instances' +/- open the amount modal, as Clients' do: the deposit of an
+        // instance has no natural step either.
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Instances => {
+            app.open_credit_instance(false)
+        }
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Instances => {
+            app.open_credit_instance(true)
+        }
         // Tunnels: `t` opens one to the selected instance, the TUNNELS page lists them
         // (`n` opens one to any instance, `d` closes, `i` shows the log). Every action
         // is the `nodo tunnel` / `nodo tunnel_close` an operator would type.

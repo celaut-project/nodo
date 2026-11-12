@@ -679,6 +679,15 @@ if __name__ == '__main__':
                 from src.commands.kill import kill
                 _exit(0 if kill(instance=args[0], as_json=as_json) else 1)
 
+            case "hibernate":
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                if len(args) != 1:
+                    print("Usage: nodo hibernate <instance id> [--json]", flush=True)
+                    _exit(1)
+                from src.commands.hibernate import hibernate
+                _exit(0 if hibernate(instance=args[0], as_json=as_json) else 1)
+
             case "burnall":
                 from src.commands.burnall import burnall
                 burnall(argv=sys.argv[2:])

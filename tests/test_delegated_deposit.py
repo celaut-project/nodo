@@ -1402,7 +1402,7 @@ class DelegatedDepositModificationTests(unittest.TestCase):
         self.assertEqual(sc.move_balance.call_args_list[0].kwargs["instance_token"], OUR_ALIAS)
         # The rows here and the net sent to the peer (+1 000 000 of its MU) are one write.
         sc.move_delegated_deposit.assert_called_once_with(
-            OUR_ALIAS, FATHER_CLIENT, 500_000, 1_000_000)
+            OUR_ALIAS, FATHER_CLIENT, 500_000, 1_000_000, detail={'actor': 'client'})
         self.assertEqual(int(sent[0].difference.n), 1_000_000)
 
     def test_a_top_up_does_not_move_the_mark_the_tick_measures_against(self):
@@ -1417,7 +1417,7 @@ class DelegatedDepositModificationTests(unittest.TestCase):
 
         self.assertTrue(ok)
         sc.move_delegated_deposit.assert_called_once_with(
-            OUR_ALIAS, FATHER_CLIENT, -400_000, -800_000)
+            OUR_ALIAS, FATHER_CLIENT, -400_000, -800_000, detail={'actor': 'client'})
         self.assertEqual(int(sent[0].difference.n), -800_000)
 
     def test_a_peer_that_refuses_leaves_the_local_row_alone(self):
@@ -1491,7 +1491,8 @@ class LocalDepositModificationTests(unittest.TestCase):
 
         self.assertTrue(ok)
         sc.transfer.assert_called_once_with("instance-token", FATHER_CLIENT, 400_000,
-                                            ledger.WITHDRAWAL, child="instance-token")
+                                            ledger.WITHDRAWAL, child="instance-token",
+                                            detail={"actor": "client"})
 
     def test_a_top_up_moves_the_balance_from_the_father(self):
         ok, _, sc = self._modify(500_000)
@@ -1499,7 +1500,30 @@ class LocalDepositModificationTests(unittest.TestCase):
         self.assertTrue(ok)
         sc.transfer.assert_called_once_with(FATHER_CLIENT, "instance-token", 500_000,
                                             ledger.TOP_UP, child="instance-token",
-                                            allow_debt=manager.ALLOW_DEBT)
+                                            allow_debt=manager.ALLOW_DEBT,
+                                            detail={"actor": "client"})
+
+    def test_the_row_says_that_the_operator_asked(self):
+        """``nodo increase_deposit`` is the operator, not the father of the instance."""
+        sc = MagicMock()
+        sc.internal_instance_exists.side_effect = lambda id: id == "instance-token"
+        sc.get_internal_father_id.return_value = FATHER_CLIENT
+        sc.get_instance_balance.return_value = 1_000_000
+        sc.client_exists.return_value = True
+        with patch.object(manager, "sc", sc), patch.object(manager, "format_mu", str):
+            manager.modify_deposit(amount_mu=-1, service_token="instance-token",
+                                   actor=ledger.ACTOR_OPERATOR)
+        self.assertEqual(sc.transfer.call_args.kwargs["detail"], {"actor": "operator"})
+
+    def test_a_father_that_is_an_instance_is_the_actor_instance(self):
+        sc = MagicMock()
+        sc.internal_instance_exists.side_effect = lambda id: id == "instance-token"
+        sc.get_internal_father_id.return_value = "parent-instance"
+        sc.get_instance_balance.return_value = 1_000_000
+        sc.client_exists.return_value = False
+        with patch.object(manager, "sc", sc), patch.object(manager, "format_mu", str):
+            manager.modify_deposit(amount_mu=5, service_token="instance-token")
+        self.assertEqual(sc.transfer.call_args.kwargs["detail"], {"actor": "instance"})
 
     def test_a_father_that_cannot_pay_tops_up_nothing(self):
         sc = MagicMock()

@@ -111,6 +111,16 @@ impl Movement {
             .map(|(_, value)| value.as_str())
     }
 
+    /// Who asked for the movement: `operator`, `client` or `instance`, from
+    /// `detail.actor`. A row with none is the node's own rule at work (maintenance, a
+    /// tunnel, a refund), and reads `node`.
+    pub fn actor(&self) -> &str {
+        match self.detail_value("actor") {
+            Some(actor @ ("operator" | "client" | "instance")) => actor,
+            _ => "node",
+        }
+    }
+
     /// A `tunnel` row that closes a stream: it moves 0 MU and anchors a signed
     /// execution receipt, whose digest its detail holds.
     pub fn is_close_anchor(&self) -> bool {
@@ -642,14 +652,17 @@ const ACCOUNT_COLUMNS: [Column; 8] = [
 ];
 
 /// The movements table's columns.
-const MOVEMENT_COLUMNS: [Column; 7] = [
+const MOVEMENT_COLUMNS: [Column; 8] = [
     Column::new("Seq", Constraint::Length(6), 3, 0),
     Column::new("Kind", Constraint::Length(13), 6, 1),
-    Column::new("Amount MU", Constraint::Length(16), 6, 2),
-    Column::new("Balance after", Constraint::Min(14), 8, 3),
-    Column::new("When (UTC)", Constraint::Length(19), 19, 4),
-    Column::new("Receipt", Constraint::Length(12), 8, 5),
-    Column::new("Instance", Constraint::Length(12), 8, 6),
+    // Who asked: the operator, the client, the instance, or the node's own rule. It
+    // drops after every column but Seq and Kind, as a statement has to say it.
+    Column::new("By", Constraint::Length(8), 2, 2),
+    Column::new("Amount MU", Constraint::Length(16), 6, 3),
+    Column::new("Balance after", Constraint::Min(14), 8, 4),
+    Column::new("When (UTC)", Constraint::Length(19), 19, 5),
+    Column::new("Receipt", Constraint::Length(12), 8, 6),
+    Column::new("Instance", Constraint::Length(12), 8, 7),
 ];
 
 fn account_row(account: &Account) -> (Vec<TextCell>, Style) {
@@ -677,6 +690,9 @@ fn movement_row(movement: &Movement) -> (Vec<TextCell>, Style) {
     let cells = vec![
         movement.seq.to_string().into(),
         kind.into(),
+        TextCell::from(movement.actor().to_string()).style(Style::default().fg(
+            if movement.actor() == "operator" { warn() } else { muted() },
+        )),
         TextCell::from(movement.amount_mu.clone())
             .style(Style::default().fg(amount_colour(&movement.amount_mu))),
         movement.balance_after_mu.clone().into(),
@@ -867,6 +883,16 @@ mod tests {
             detail: detail.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             ..Movement::default()
         }
+    }
+
+    #[test]
+    fn a_movement_says_who_asked_for_it() {
+        assert_eq!(movement(1, "credit", &[("actor", "operator")]).actor(), "operator");
+        assert_eq!(movement(2, "top_up", &[("actor", "client")]).actor(), "client");
+        assert_eq!(movement(3, "deposit", &[("actor", "instance")]).actor(), "instance");
+        // The node's own rule, and anything that is not one of the three.
+        assert_eq!(movement(4, "maintenance", &[]).actor(), "node");
+        assert_eq!(movement(5, "credit", &[("actor", "root")]).actor(), "node");
     }
 
     #[test]

@@ -76,6 +76,7 @@ GROUPS: List[Group] = [
             ("tunnels [<tunnel>]", "list/inspect tunnels (--instance <i>, --inbound)"),
             ("tunnel_close <tunnel>", "stop a tunnel (--all: every one)"),
             ("kill <instance>", "stop one instance and its tunnels (--json)"),
+            ("hibernate <instance>", "put it in hibernation: VM stopped, disk kept (--json)"),
             ("burnall", "stop every instance, parents first (--yes)"),
             ("prune", "reclaim orphaned runtime dirs (--all, --dry-run)"),
         ],

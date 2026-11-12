@@ -510,7 +510,8 @@ class SQLConnection(metaclass=Singleton):
 
     def move_balance(self, account_id: str, amount_mu: int, kind: str, *,
                      allow_debt: bool = True, instance_token: Optional[str] = None,
-                     detail: Optional[Mapping] = None) -> Optional[int]:
+                     detail: Optional[Mapping] = None,
+                     write_zero: bool = False) -> Optional[int]:
         """Add ``amount_mu`` (signed) to the balance of a client or an instance.
 
         ``kind``, ``instance_token`` and ``detail`` are the row of the ledger that says
@@ -519,7 +520,7 @@ class SQLConnection(metaclass=Singleton):
         """
         return self._transaction(lambda cursor: self._move(
             cursor, account_id, amount_mu, kind, allow_debt=allow_debt,
-            instance_token=instance_token, detail=detail,
+            instance_token=instance_token, detail=detail, write_zero=write_zero,
         ))
 
     def record_tunnel_close(self, account_id: str, detail: Mapping) -> Optional[int]:
@@ -536,7 +537,8 @@ class SQLConnection(metaclass=Singleton):
             return None
 
     def transfer(self, source_id: str, target_id: str, amount_mu: int, kind: str, *,
-                 child: str, allow_debt: bool = False) -> None:
+                 child: str, allow_debt: bool = False,
+                 detail: Optional[Mapping] = None) -> None:
         """Move ``amount_mu`` from one account to another: two rows, one transaction.
 
         For ``ModifyDeposit`` between an instance and its father. ``child`` is the
@@ -545,9 +547,9 @@ class SQLConnection(metaclass=Singleton):
         """
         def work(cursor):
             self._move(cursor, source_id, -int(amount_mu), kind, allow_debt=allow_debt,
-                       instance_token=None if source_id == child else child)
+                       instance_token=None if source_id == child else child, detail=detail)
             self._move(cursor, target_id, int(amount_mu), kind,
-                       instance_token=None if target_id == child else child)
+                       instance_token=None if target_id == child else child, detail=detail)
 
         self._transaction(work)
 
@@ -4005,7 +4007,7 @@ class SQLConnection(metaclass=Singleton):
         return self._transaction(work)
 
     def move_delegated_deposit(self, alias: str, father_id: str, amount_mu: int,
-                               peer_mu: int) -> None:
+                               peer_mu: int, detail: Optional[Mapping] = None) -> None:
         """A ``ModifyDeposit`` of a delegated instance, once the peer has moved its side:
         the rows here and the net that this node has sent, in one transaction.
 
@@ -4018,11 +4020,11 @@ class SQLConnection(metaclass=Singleton):
         """
         def work(cursor):
             if int(amount_mu) < 0:
-                self._move(cursor, alias, int(amount_mu), ledger.WITHDRAWAL)
+                self._move(cursor, alias, int(amount_mu), ledger.WITHDRAWAL, detail=detail)
                 self._move(cursor, father_id, -int(amount_mu), ledger.WITHDRAWAL,
-                           instance_token=alias)
+                           instance_token=alias, detail=detail)
             else:
-                self._move(cursor, alias, int(amount_mu), ledger.TOP_UP)
+                self._move(cursor, alias, int(amount_mu), ledger.TOP_UP, detail=detail)
             row = cursor.execute(
                 'SELECT father_net_peer_mu FROM delegated_instances '
                 'WHERE id = ? AND killed_at IS NULL', (alias,)

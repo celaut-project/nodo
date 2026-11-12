@@ -5457,7 +5457,7 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 pub(crate) fn page_controls(page: Page) -> &'static str {
     match page {
         Page::Overview => "r refresh  \u{2022}  q quit",
-        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  t tunnel  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  q quit",
+        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  t tunnel  \u{2022}  g tree/flat  \u{2022}  h hibernate  \u{2022}  +/- balance  \u{2022}  k kill  \u{2022}  q quit",
         Page::Tunnels => {
             "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  q quit"
         }
