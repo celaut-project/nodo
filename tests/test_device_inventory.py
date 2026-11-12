@@ -11,7 +11,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from protos import celaut_pb2 as celaut
+from tests.config_bootstrap import load_example_config
+
+load_example_config()
+
+from protos import celaut_pb2 as celaut  # noqa: E402
+# Imported before any test patches the config: its import chain reads it (logger).
+import src.utils.cost_functions.resource_availability  # noqa: E402,F401
 from src.commands import devices as devices_command
 from src.database.migrate import TABLES
 from src.devices import admission, assignments, host, inventory, spec
@@ -109,7 +115,9 @@ class _Host:
         return self
 
     def __exit__(self, *exc):
-        for p in self.patches:
+        # Last in, first out: several of these patch the same ConfigManager singleton,
+        # and stopping them in order would leave a mock of this node behind.
+        for p in reversed(self.patches):
             p.stop()
         self.tmp.cleanup()
 

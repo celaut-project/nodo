@@ -101,6 +101,28 @@ def hibernate_instance(token: str, reason: str = dead_instances.HIBERNATED) -> b
         return True
 
 
+# Why the last wake of an instance failed, for the caller's answer (#536: a device
+# instance with no free device stays hibernated, and is told why). Process-local.
+_LAST_WAKE_ERROR: dict = {}
+
+
+def _caller_reason(error: BaseException) -> str:
+    """The part of a failed wake that the caller may read: a device refusal, never a
+    host path or a hypervisor log."""
+    from src.devices.admission import UnsupportedDevicesException
+
+    seen = error
+    while seen is not None:
+        if isinstance(seen, UnsupportedDevicesException):
+            return str(seen)
+        seen = seen.__cause__
+    return ""
+
+
+def last_wake_error(token: str) -> str:
+    return _LAST_WAKE_ERROR.pop(token, "")
+
+
 def wake_instance(token: str, sysreq: celaut_pb2.Sysresources) -> bool:
     """Start a hibernated instance again on its own disk, with the resources of ``sysreq``.
 
@@ -117,11 +139,15 @@ def wake_instance(token: str, sysreq: celaut_pb2.Sysresources) -> bool:
                 setattr(wanted, field, getattr(sysreq, field))
         if not modify_sysreq(id=token, sys_req=wanted):
             return False
+        _LAST_WAKE_ERROR.pop(token, None)
         try:
             if _revive_locked(token):
                 return True
         except Exception as e:
             log.LOGGER(f"Could not wake {token}: {e}")
+            reason = _caller_reason(e)
+            if reason:
+                _LAST_WAKE_ERROR[token] = reason
         _zero_row(token)
         return False
 

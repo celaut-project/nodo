@@ -363,6 +363,17 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
         sysreq = request.max_sysreq
         action = hibernation.plan(token, sysreq)
+        # An instance with devices (#536) keeps the resources it started with: VFIO
+        # pins all of its memory, and cloud-hypervisor resizes through the cgroup.
+        # Only hibernate (0) and a wake change it.
+        if action == hibernation.RESIZE:
+            from src.devices import assignments as device_assignments
+
+            if device_assignments.of_instance(token):
+                refuse(
+                    'An instance with devices keeps the resources it started with: it can '
+                    'only hibernate (CPU or memory 0) and wake.'
+                )
         if action == hibernation.HIBERNATE:
             try:
                 hibernation.check_can_hibernate(token)
@@ -386,7 +397,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
             return
         if action == hibernation.WAKE:
             if not hibernation.wake_instance(token, sysreq):
-                refuse('The instance could not be woken: it stays hibernated.')
+                why = hibernation.last_wake_error(token)
+                refuse('The instance could not be woken: it stays hibernated.'
+                       + (f' {why}' if why else ''))
         elif action == hibernation.STAY:
             log.LOGGER(f'{token} is hibernated and the request leaves it without CPU or RAM.')
         elif not hotplug(vmachine_id=token, system_requeriments_range=request):

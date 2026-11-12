@@ -377,6 +377,19 @@ def _pin_bundle_kernels():
         log.LOGGER(f"[kernel-store] could not pin the bundle kernels: {e}")
 
 
+def _reconcile_devices():
+    """Free the devices of instances whose hypervisor is gone (#536): a node that
+    stopped hard never released them. Best effort, and nothing to do without devices."""
+    try:
+        from src.devices import attach
+
+        stale = attach.reconcile()
+        if stale:
+            log.LOGGER(f"[devices] released the devices of {len(stale)} instance(s) with no hypervisor.")
+    except Exception as e:
+        log.LOGGER(f"[devices] could not reconcile the device assignments: {e}")
+
+
 def serve():
     # Resolved before anything else: a node whose gateway port is unassigned or
     # unreachable cannot serve a single request, and every service it accepted
@@ -394,6 +407,7 @@ def serve():
     _sweep_leaked_probes()
     _ensure_guest_bridge()
     _pin_bundle_kernels()
+    _reconcile_devices()
     if not hidden_mode():
         # A hidden node opens nothing: its TLS port listens on loopback, and the only way
         # in from outside is the onion service.

@@ -121,6 +121,14 @@ def kill(hypervisor: Hypervisor, vmachine_id: str, archive: bool = False,
     _kill_pid(
         hypervisor=hypervisor, vmachine_id=vmachine_id, pid=pid, process_name=process_name
     )
+    # The hypervisor is gone, so its devices (#536) are free: reset, checked and
+    # given back. Stop, kill, hibernate and a suspend all pass here.
+    try:
+        from src.devices import attach as device_attach
+
+        device_attach.release(vmachine_id, pid=pid)
+    except Exception as e:
+        log.LOGGER(hypervisor.log(vmachine_id, f"could not release the devices: {e}"))
     # Two paths on purpose. cleanup_rules is what pre-nftables versions recorded
     # and is empty for anything this version launched; the prefix sweep is what
     # removes the rules by the comment they carry, so a teardown cannot leave an

@@ -52,7 +52,9 @@ class _Node:
         return self
 
     def __exit__(self, *exc):
-        for p in self.patches:
+        # Last in, first out: several of these patch the same ConfigManager singleton,
+        # and stopping them in order would leave a mock of this node behind.
+        for p in reversed(self.patches):
             p.stop()
         self.tmp.cleanup()
 

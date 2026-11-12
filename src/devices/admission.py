@@ -42,7 +42,14 @@ def refusal(service: Optional[celaut_pb2.Service], virtualizer: Optional[str] = 
         return reason
     if virtualizer is not None and virtualizer != "ch":
         return NATIVE_ONLY_REASON
-    return NOT_ATTACHING_REASON
+    from src.devices import inventory
+
+    if not inventory.enabled():
+        return NOT_ATTACHING_REASON
+    # Free devices now. The launch reserves them (src/devices/attach.py), and refuses
+    # with the same reason if another start took them in between.
+    found, reason = spec.assign(list(service.container.devices), inventory.free_devices())
+    return None if found is not None else reason
 
 
 def enforce_supported(service: Optional[celaut_pb2.Service], virtualizer: Optional[str] = None) -> None:

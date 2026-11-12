@@ -929,12 +929,19 @@ def _daemon_limits_text():
             return None
         with open(f"/proc/{pid}/limits", "r", encoding="ascii") as f:
             return f.read()
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except Exception:
         return None
 
 
 def _doctor_devices(service_user: str, supplementary_groups=()):
     """The PCI devices given to guests with VFIO (#536). EXPERIMENTAL, off by default."""
+    try:
+        _doctor_devices_checks(service_user, supplementary_groups)
+    except Exception as e:
+        print(f"[WARN] Could not check the devices: {e}", flush=True)
+
+
+def _doctor_devices_checks(service_user: str, supplementary_groups=()):
     try:
         from src.devices import host, inventory
     except Exception as e:

@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
+from src.devices import attach as device_attach
 from src.utils import logger as log, notice
 from src.utils.config import ConfigManager
 from src.utils.firewall import policy as fw_policy
@@ -285,6 +286,8 @@ def execute(
     resolved_entrypoint: Optional[str] = None
     # What the failure path gives back if the launch fails after shares are up.
     shares = NO_SHARES
+    # The devices reserved for this guest (#536); the failure path frees them.
+    devices: list = []
 
     try:
         log.LOGGER(f"[CH][{vmachine_id}] event=start")
@@ -309,6 +312,17 @@ def execute(
             f"rootfs={bundle['rootfs_path']}, kernel={bundle['kernel_path']}, "
             f"initramfs={bundle['initramfs_path']}"
         )
+        # Devices (#536): reserved before anything is built for the guest, so a node
+        # with none free refuses at once. The guest boots the kernel of the device
+        # tag (its exact hash), not the one the bundle was built with.
+        devices = device_attach.acquire(vmachine_id, service)
+        guest_kernel_path = device_attach.kernel_path(devices) or bundle["kernel_path"]
+        if devices:
+            log.LOGGER(
+                f"[CH][{vmachine_id}] devices: "
+                + ", ".join(f"{d.address} ({d.chip})" for d in devices)
+                + f"; kernel {devices[0].kernel_hash} ({guest_kernel_path})"
+            )
         rootfs_format = bundle["rootfs_format"]
         rootfs_read_only = is_read_only_format(rootfs_format)
         rootfs_path = runtime_dir / ROOTFS_IMAGE_NAMES[rootfs_format]
@@ -548,7 +562,7 @@ def execute(
             "--api-socket",
             str(api_socket_path),
             "--kernel",
-            bundle["kernel_path"],
+            guest_kernel_path,
             "--initramfs",
             bundle["initramfs_path"],
             *_ch_disk_args(disk_arg, metadata_disk_path),
@@ -562,6 +576,7 @@ def execute(
             kernel_cmdline,
         ]
         start_command.extend(shares.fs_device_args)
+        start_command.extend(device_attach.ch_args(devices))
         start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
 
@@ -777,6 +792,12 @@ def execute(
         # The process is gone, so its daemons have no client left: release this VM's
         # shares, which no runtime state will hand to a kill.
         release_shares(vmachine_id, shares, log_prefix)
+        # And its devices (#536): reset, checked and freed for the next tenant.
+        if devices:
+            try:
+                device_attach.release(vmachine_id, pid=process.pid if process else 0)
+            except Exception as release_error:
+                log.LOGGER(f"[CH][{vmachine_id}] could not release the devices: {release_error}")
 
         if tap_name:
             log.LOGGER(f"[CH][{vmachine_id}] deleting TAP interface: {tap_name}")
