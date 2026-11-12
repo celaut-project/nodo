@@ -16,6 +16,7 @@ from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import WORKLOAD_FIELDS, populate_environment_workloads
 from src.utils import keyvalue, notice
+from src.identity import transport_stack
 from src.utils.benchmark import parse_benchmark, unrecognised_keys
 from src.utils.hashing import (
     BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
@@ -610,25 +611,28 @@ class ZipContainerPacker:
     def parseNodeProtocolStack(self):
         """The protocols that the service expects from the node (#648).
 
-        ``service.json`` gives them in ``node_protocol_stack``, a list of descriptors,
-        bottom layer first. With no key, the stack is empty: the service declares that
-        it does not use the gateway of the node, so it cannot request a dependency
-        execution or modify its resources, and the node gives it no access to it.
+        ``service.json`` gives ``uses_gateway``, a boolean. With ``true``, the packer
+        writes the stack of the gateway (http2, grpc, bee-rpc, celaut-gateway). This
+        declares that the service can use all the RPCs. With no key or ``false``, the
+        stack is empty: the service does not use the gateway of the node, so it does
+        not modify its resources and does not request a dependency execution. The node
+        gives it no access to the gateway.
         """
-        stack = self.json.get('node_protocol_stack')
-        if stack is None:
-            return
-        if not isinstance(stack, list):
+        if 'node_protocol_stack' in self.json:
             raise ValueError(
-                "service.json: 'node_protocol_stack' must be a list of protocol "
-                "descriptors (bottom layer first)."
+                "service.json: 'node_protocol_stack' is not a key. Use 'uses_gateway': "
+                "true or false."
             )
-        self.service.container.node_protocol_stack.extend(
-            self._parse_protocol_descriptor(
-                declaration, f"'node_protocol_stack'[{index}]",
+        uses_gateway = self.json.get('uses_gateway', False)
+        if not isinstance(uses_gateway, bool):
+            raise ValueError(
+                f"service.json: 'uses_gateway' must be true or false, got "
+                f"{type(uses_gateway).__name__} {uses_gateway!r}."
             )
-            for index, declaration in enumerate(stack)
-        )
+        if uses_gateway:
+            self.service.container.node_protocol_stack.extend(
+                transport_stack.gateway_protocol_stack()
+            )
 
     def parseContainer(self):
         def _normalize_path_segments(raw_path):

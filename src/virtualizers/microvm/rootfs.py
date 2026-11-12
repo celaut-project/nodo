@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
+from src.identity import transport_stack
 from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.network_templates import Missing, substitute
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
@@ -442,19 +443,20 @@ def build_network_resolution(
 
 
 def service_uses_gateway(service: celaut.Service) -> bool:
-    """True if the service declares a node protocol stack (#648).
+    """True if the service declares the ``celaut-gateway`` layer (#648).
 
     An empty ``node_protocol_stack`` declares that the service does not modify its
     resources and does not request a dependency execution, so the node gives it no
-    access to its gateway.
+    access to its gateway. The packer writes the layer when ``service.json`` has
+    ``uses_gateway: true``. The layer lists all the RPCs.
 
-    TODO: Only the presence of the stack counts now, not its content. The stack
-    should go down to bee-rpc, and the RPCs that it names should tell, from the spec
-    alone, whether the service will modify its resources and whether it will request
-    a dependency execution. Then the node can give each service only the part of the
-    gateway that it declares, and refuse a stack that it does not understand.
+    TODO: The layer gives all the RPCs now. The ``rpc.*`` keys of its ``formal`` field
+    can name a part of them. Then the spec alone tells if the service will modify its
+    resources and if it will request a dependency execution. The node can give each
+    service only the part of the gateway that it declares, and refuse a stack that it
+    does not understand.
     """
-    return len(service.container.node_protocol_stack) > 0
+    return transport_stack.declares_gateway_layer(service.container.node_protocol_stack)
 
 
 def build_configuration_file(

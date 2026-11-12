@@ -91,6 +91,9 @@ from src.identity.tls_identity import (
 # `formal` below is built from whatever the compiled proto says it contains.
 GATEWAY_SERVICE_NAME = "Gateway"
 
+# The tag of the layer on top of the stack: the RPCs of the gateway.
+GATEWAY_LAYER_TAG: Final[str] = "celaut-gateway"
+
 # Where the prose travels, decided per destination because the two destinations charge
 # for it differently: gRPC bytes are transient, a ledger register's are rented forever.
 SHARE_PROSE_ON_GET_PEER_INFO_KEY: Final[str] = (
@@ -631,6 +634,28 @@ def _layers() -> Tuple[Layer, ...]:
         bee_rpc_component(),
         gateway_component(),
     )
+
+
+def gateway_protocol_stack(*, prose: bool = False):
+    """The stack that a service speaks to the gateway of its node (#648).
+
+    It is the stack of the node without ``tls``: a service speaks plain gRPC to the
+    plaintext port. The ``celaut-gateway`` layer lists all the RPCs, so a service that
+    declares it declares that it can use all of them. ``prose`` is off by default:
+    the stack goes into the id of the service, and the text does not decide a
+    comparison.
+    """
+    return [
+        celaut_pb2.Service.Api.Protocol(
+            tags=list(tags), prose=description if prose else "", formal=formal
+        )
+        for tags, description, formal in _layers()[1:]
+    ]
+
+
+def declares_gateway_layer(protocol_stack: Iterable) -> bool:
+    """True if one layer of ``protocol_stack`` is the ``celaut-gateway`` layer."""
+    return any(GATEWAY_LAYER_TAG in layer.tags for layer in protocol_stack)
 
 
 def declare_transport(uri, *, prose: bool = True, tag: str = "tcp") -> None:

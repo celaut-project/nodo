@@ -5,6 +5,7 @@ from unittest.mock import patch
 from protos import celaut_pb2 as celaut
 
 try:
+    from src.identity import transport_stack
     from src.virtualizers.microvm import network, rootfs
 except ImportError as error:  # the environment lacks a matching bee_rpc
     raise unittest.SkipTest(f"microvm modules do not import: {error}")
@@ -16,10 +17,19 @@ class NodeProtocolStackTest(unittest.TestCase):
     def test_empty_stack_does_not_use_the_gateway(self):
         self.assertFalse(rootfs.service_uses_gateway(celaut.Service()))
 
-    def test_declared_stack_uses_the_gateway(self):
+    def test_gateway_stack_uses_the_gateway(self):
+        service = celaut.Service()
+        service.container.node_protocol_stack.extend(transport_stack.gateway_protocol_stack())
+        self.assertTrue(rootfs.service_uses_gateway(service))
+
+    def test_other_protocol_does_not_use_the_gateway(self):
         service = celaut.Service()
         service.container.node_protocol_stack.add(tags=["grpc"])
-        self.assertTrue(rootfs.service_uses_gateway(service))
+        self.assertFalse(rootfs.service_uses_gateway(service))
+
+    def test_gateway_stack_goes_from_http2_to_the_gateway_without_tls(self):
+        tags = [layer.tags[0] for layer in transport_stack.gateway_protocol_stack()]
+        self.assertEqual(tags, ["http2", "grpc", "bee-rpc", "celaut-gateway"])
 
     def test_config_names_the_gateway_only_if_used(self):
         with patch.object(rootfs, "generate_node_peer_info"), \

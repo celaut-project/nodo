@@ -1048,17 +1048,19 @@ The older `entrypoint` top-level field is still supported and will be automatica
 
 ---
 
-#### `node_protocol_stack`
-- **Type:** `array` of protocol descriptors, bottom layer first
+#### `uses_gateway`
+- **Type:** `boolean`
 - **Required:** No
-- **Default:** `[]`
-- **Description:** The protocols that the service expects from the node (issue #648). An empty stack declares that the service does not use the gateway of the node: it does not modify its resources and it does not request a dependency execution. The node gives such a service no access to the gateway: no firewall rule to its ports, and no `gateway` in its `__config__`. A service that talks to the gateway must declare the protocol. Each entry has the same shape as an `api` slot `protocol_stack` entry (`tags`, `prose`, `formal`).
+- **Default:** `false`
+- **Description:** Declares that the service uses the gateway of the node (issue #648). With `true`, the packer writes the stack of the gateway in `container.node_protocol_stack`: `http2`, `grpc`, `bee-rpc`, `celaut-gateway`. The last layer lists all the RPCs, so the service can use all of them. With no key or `false`, the stack is empty. The service does not modify its resources and does not request a dependency execution. The node gives it no access to the gateway: no firewall rule to its ports, and no `gateway` in its `__config__`. The key `node_protocol_stack` is not valid in `service.json`.
 
 ```json
 {
-    "node_protocol_stack": [{"tags": ["grpc"]}]
+    "uses_gateway": true
 }
 ```
+
+A later version can name only some RPCs. The key stays a boolean until then.
 
 ---
 
