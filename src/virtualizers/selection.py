@@ -22,6 +22,7 @@ from typing import Optional
 
 from protos import celaut_pb2
 from src.utils import notice
+from src.devices import admission as devices_admission
 from src.utils.arch_guard import host_arch_tag
 from src.virtualizers.architecture import (
     UnsupportedArchitectureException,
@@ -51,12 +52,16 @@ def select_virtualizer(
     # Unknown service arch or undetectable host arch: fall back to CH, whose own
     # arch resolution then raises the canonical UnsupportedArchitectureException.
     if not service_arch or not host_arch:
+        devices_admission.enforce_supported(service, CH)
         return CH
 
     if service_arch == host_arch:
+        devices_admission.enforce_supported(service, CH)
         return CH
 
     if emulation_ready(service_arch):
+        # A device is available only with the native architecture (#536).
+        devices_admission.enforce_supported(service, QEMU)
         return QEMU
 
     raise UnsupportedArchitectureException(arch=service_arch)
