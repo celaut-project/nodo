@@ -689,6 +689,30 @@ fn node_resources_lines(app: &App) -> Vec<Line<'static>> {
     if !own.error.is_empty() {
         lines.push(note(&own.error, bad()));
     }
+    // The devices this node gives with VFIO (#536): one line each, with its state.
+    // Nothing at all while none is listed, so a node without devices sees no change.
+    let devices = &app.own_devices;
+    if let Some(list) = &devices.devices {
+        for device in list {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:<6}", "dev"), Style::default().fg(label_colour())),
+                Span::styled(
+                    format!("{} {}", crate::peer_resources::short_chip(device), device.state),
+                    Style::default().fg(if device.state == "free" || device.state == "assigned" {
+                        text_colour()
+                    } else {
+                        warn()
+                    }),
+                ),
+            ]));
+        }
+        if !devices.enabled && !list.is_empty() {
+            lines.push(note("Devices off (devices.ENABLED).", muted()));
+        }
+    }
+    if !devices.error.is_empty() {
+        lines.push(note(&devices.error, bad()));
+    }
     lines
 }
 

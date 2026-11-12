@@ -89,6 +89,7 @@ GROUPS: List[Group] = [
             ("protocol [<peer>]", "ours, or compare a peer's (adds a client there)"),
             ("peer_reputation <peer> <N>", "move our local score of a peer (+/-)"),
             ("resources", "what this node announces it can run (--json)"),
+            ("devices [clear [<addr>]]", "VFIO devices this node gives (--json)"),
             ("connect <ip:port>", "introduce this node to a peer (--invite <f>)"),
             ("invite [--raw <file>]", "show this node's invitation as a QR code"),
             ("tor [install|status]", "reach .onion peers via nodo's own Tor"),

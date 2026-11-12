@@ -471,6 +471,16 @@ def _unsigned_peer(uris: List[celaut.Instance.Uri], *, quiet: bool = False) -> c
     except Exception as e:
         log.LOGGER(f'Could not work out the resources to announce: {e}')
 
+    # The devices this node gives with VFIO (#536): one entry per device and kernel,
+    # capacity rather than the free devices now, so it does not defeat the cache
+    # either. Empty unless devices.ENABLED. Covered by the signature (digest part).
+    try:
+        from src.devices.inventory import announced as announced_devices
+
+        peer.devices.extend(announced_devices())
+    except Exception as e:
+        log.LOGGER(f'Could not work out the devices to announce: {e}')
+
     # The hours of the node and what it does at closing time (#344), in UTC. Built on
     # every call from the current UTC offset, so a change of offset (daylight saving)
     # changes the content digest and `announcement_change_tick` announces it again.

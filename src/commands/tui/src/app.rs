@@ -3406,6 +3406,8 @@ pub struct App {
     /// What this node itself announces it can run, from `nodo resources --json`
     /// (issue #455): its own row of the Overview's total, and a card of its own.
     pub own_resources: crate::peer_resources::OwnResources,
+    /// This node's devices (#536), from `nodo devices --json`: lines of the same card.
+    pub own_devices: crate::peer_resources::OwnDevices,
     pub payment_report: serde_json::Value,
     pub payment_error: String,
     pub payment_rate_areas: Vec<(String, Rect)>,
@@ -3569,6 +3571,7 @@ pub struct App {
     donations_task: Option<JoinHandle<Result<NodeDonations, String>>>,
     last_own_resources_refresh: Instant,
     own_resources_task: Option<JoinHandle<Result<crate::peer_resources::Announced, String>>>,
+    own_devices_task: Option<JoinHandle<Result<(bool, Vec<crate::peer_resources::OwnDevice>), String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
     pub(crate) command_task: Option<JoinHandle<CommandOutcome>>,
     /// In-flight configuration transaction: write, restart, and revert on failure.
@@ -3646,6 +3649,7 @@ impl Default for App {
             receipts: Default::default(),
             donations: NodeDonations::default(),
             own_resources: Default::default(),
+            own_devices: Default::default(),
             payment_report: serde_json::Value::Null,
             payment_error: String::new(),
             payment_rate_areas: Vec::new(),
@@ -3733,6 +3737,7 @@ impl Default for App {
                 .checked_sub(OWN_RESOURCES_REFRESH_INTERVAL)
                 .unwrap_or(now),
             own_resources_task: None,
+            own_devices_task: None,
             command_task: None,
             config_task: None,
             config_follow_up: ConfigFollowUp::None,
@@ -6706,7 +6711,11 @@ impl App {
         {
             self.last_own_resources_refresh = Instant::now();
             self.own_resources_task = Some(tokio::spawn(fetch_own_resources()));
+            if self.own_devices_task.is_none() {
+                self.own_devices_task = Some(tokio::spawn(fetch_own_devices()));
+            }
         }
+        self.poll_own_devices_task().await;
     }
 
     /// Update the schedule marker on its own timer.
@@ -6956,6 +6965,28 @@ impl App {
         }
     }
 
+    /// Collect this node's devices (#536); a failed read keeps the last list.
+    async fn poll_own_devices_task(&mut self) {
+        if !self
+            .own_devices_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.own_devices_task.take().unwrap();
+        match task.await {
+            Ok(Ok((enabled, devices))) => {
+                self.own_devices.enabled = enabled;
+                self.own_devices.devices = Some(devices);
+                self.own_devices.error.clear();
+            }
+            Ok(Err(error)) => self.own_devices.error = error,
+            Err(error) => self.own_devices.error = format!("Devices read failed: {error}"),
+        }
+    }
+
     async fn poll_donations_task(&mut self) {
         if !self
             .donations_task
@@ -7099,6 +7130,29 @@ async fn fetch_own_resources() -> Result<crate::peer_resources::Announced, Strin
             let stderr = first_line(&String::from_utf8_lossy(&output.stderr));
             Err(if stderr.is_empty() {
                 "nodo resources produced no output".to_string()
+            } else {
+                stderr
+            })
+        }
+    }
+}
+
+/// Run `nodo devices --json` off the UI thread: this node's VFIO devices (#536).
+async fn fetch_own_devices() -> Result<(bool, Vec<crate::peer_resources::OwnDevice>), String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("nodo").args(["devices", "--json"]).output(),
+    )
+    .await
+    .map_err(|_| "nodo devices timed out after 30 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo devices: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match report_line(&stdout) {
+        Some(line) => crate::peer_resources::parse_own_devices(line),
+        None => {
+            let stderr = first_line(&String::from_utf8_lossy(&output.stderr));
+            Err(if stderr.is_empty() {
+                "nodo devices produced no output".to_string()
             } else {
                 stderr
             })

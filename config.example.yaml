@@ -1451,6 +1451,29 @@ benchmark:
       mem_bandwidth_1gib_bytes_per_sec: -1
       sha256_hashes_per_sec: -1
 
+# PCI devices (GPUs) given directly to a guest with VFIO (#536). EXPERIMENTAL and off
+# by default. The operator binds each device to vfio-pci (nodo never unbinds a host
+# driver) and lists its address here; `nodo doctor` and `nodo devices` check the IOMMU
+# group, the reset, /dev/vfio and RLIMIT_MEMLOCK. The chip is read from sysfs.
+devices:
+  ENABLED: false
+  # PCI addresses, for example "0000:0b:00.0". One address per IOMMU group.
+  ALLOW: []
+  # The guest kernels (hashes in virtualizers.ch.KERNEL_STORE) that a device service
+  # may boot; one Peer.devices entry per device and kernel. Empty: the kernel of new
+  # builds for the host architecture (virtualizers.ch.KERNEL_PATHS).
+  KERNELS: []
+  # Per chip, pci:<vendor>:<device> as in sysfs. A device whose chip has no
+  # mu_per_second is not offered. mem_limit: the device memory in bytes. benchmark:
+  # scores of the device (for example fp32_flops). watts: its power draw, for the
+  # energy report (a device bound to vfio-pci has no host driver to ask).
+  BY_CHIP: {}
+  #   pci:10de:2204:
+  #     mu_per_second: 1000
+  #     mem_limit: 25769803776
+  #     benchmark: {fp32_flops: 35000000000000}
+  #     watts: 350
+
 # Opportunistic low-demand fallback scheduler (WIP — see docs/design/low-demand-fallback.md).
 # When ENABLED and the node is under ALL per-resource thresholds AND not serving real
 # workloads, it opportunistically runs the "low-demand-fallback" core service; a real

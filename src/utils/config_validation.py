@@ -1284,3 +1284,85 @@ def validate_ergo_config(
             raise ConfigValidationError("Missing ledgers.ergo.reputation block.")
         _require_positive_int(reputation, "reputation", "LEDGER_REPUTATION_SUBMISSION_THRESHOLD")
         _require_positive_int(reputation, "reputation", "TOTAL_REPUTATION_TOKEN_AMOUNT")
+
+
+_DEVICE_KEYS = ("ENABLED", "ALLOW", "KERNELS", "BY_CHIP")
+_CHIP_KEYS = ("mu_per_second", "mem_limit", "benchmark", "watts")
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_devices_config(config: Dict[str, Any]) -> None:
+    """Validate ``devices``: the PCI devices given to guests with VFIO (#536).
+
+    Absent is valid and means off. A malformed block raises: an address that does not
+    parse would offer nothing while the operator believes it is offered, and a price
+    that does not parse would give a device away or refuse every service that asks.
+    """
+    import re
+
+    from src.devices.host import normalize_address
+
+    section = config.get("devices")
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        raise ConfigValidationError("Malformed 'devices' mapping.")
+    for key in section:
+        if key not in _DEVICE_KEYS:
+            raise ConfigValidationError(
+                f"devices.{key} is not a setting. Use: {', '.join(_DEVICE_KEYS)}."
+            )
+    if "ENABLED" in section and not isinstance(section["ENABLED"], bool):
+        raise ConfigValidationError("devices.ENABLED must be true or false.")
+    allow = section.get("ALLOW") or []
+    if not isinstance(allow, list):
+        raise ConfigValidationError("devices.ALLOW must be a list of PCI addresses.")
+    seen = set()
+    for value in allow:
+        address = normalize_address(str(value))
+        if not address:
+            raise ConfigValidationError(
+                f"devices.ALLOW: '{value}' is not a PCI address (0000:0b:00.0)."
+            )
+        if address in seen:
+            raise ConfigValidationError(f"devices.ALLOW lists {address} twice.")
+        seen.add(address)
+    kernels = section.get("KERNELS") or []
+    if not isinstance(kernels, list) or not all(
+        isinstance(k, str) and re.fullmatch(r"[0-9a-fA-F]{64}", k) for k in kernels
+    ):
+        raise ConfigValidationError(
+            "devices.KERNELS must be a list of kernel store hashes (64 hexadecimal digits)."
+        )
+    chips = section.get("BY_CHIP") or {}
+    if not isinstance(chips, dict):
+        raise ConfigValidationError("devices.BY_CHIP must map pci:<vendor>:<device> to settings.")
+    for chip, entry in chips.items():
+        if not re.fullmatch(r"pci:[0-9a-f]{4}:[0-9a-f]{4}", str(chip)):
+            raise ConfigValidationError(
+                f"devices.BY_CHIP.{chip} is not a chip: use pci:<vendor>:<device> in "
+                f"lowercase hexadecimal (as sysfs gives them)."
+            )
+        if not isinstance(entry, dict):
+            raise ConfigValidationError(f"devices.BY_CHIP.{chip} must be a mapping.")
+        for key, value in entry.items():
+            where = f"devices.BY_CHIP.{chip}.{key}"
+            if key not in _CHIP_KEYS:
+                raise ConfigValidationError(f"{where} is not a setting. Use: {', '.join(_CHIP_KEYS)}.")
+            if key in ("mu_per_second", "mem_limit") and (not _is_int(value) or value < 0):
+                raise ConfigValidationError(f"{where} must be a non-negative integer.")
+            if key == "watts" and (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or value < 0 or not math.isfinite(value)
+            ):
+                raise ConfigValidationError(f"{where} must be a non-negative number.")
+            if key == "benchmark":
+                if not isinstance(value, dict) or not all(
+                    isinstance(k, str) and k and _is_int(v) and v >= 0 for k, v in value.items()
+                ):
+                    raise ConfigValidationError(
+                        f"{where} must map score names to non-negative integers."
+                    )

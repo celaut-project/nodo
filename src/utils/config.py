@@ -820,6 +820,7 @@ class ConfigManager(metaclass=Singleton):
                 validate_balancers_config,
                 validate_benchmark_config,
                 validate_bitcoin_config,
+                validate_devices_config,
                 validate_host_policy_config,
                 validate_instances_config,
                 validate_pricing_config,
@@ -874,6 +875,10 @@ class ConfigManager(metaclass=Singleton):
             # The routing backends (Tor). A mistyped ENABLED would read as "off" in one
             # place and "on" in another, so it stops here.
             validate_routing_config(self._config)
+
+            # The devices given to guests with VFIO (#536). An address or a price that
+            # does not parse stops here rather than offering something else.
+            validate_devices_config(self._config)
 
             # Note what is NOT here: the gateway port. Picking one writes a rule
             # into the host's firewall and a value into this file, and that used to

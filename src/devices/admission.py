@@ -55,9 +55,25 @@ def request_availability(main: celaut_pb2.ArchitectureResources, devices) -> dic
     """The GetResourceAvailability answer for a request that names devices.
 
     The main resources and the devices are answered together: a "yes" means that one
-    instance with both fits now.
+    instance with both fits now. Devices go only with the native architecture, and
+    each asked device needs a free physical device of its own, all with one kernel.
     """
     reason = spec.devices_reason(devices)
     if reason:
         return {"can_execute": False, "reason": reason}
-    return {"can_execute": False, "reason": NOT_ATTACHING_REASON}
+    from src.devices import inventory
+
+    if not inventory.enabled():
+        return {"can_execute": False, "reason": NOT_ATTACHING_REASON}
+    tags = list(main.architecture.tags)
+    if tags:
+        from src.utils.arch_guard import arch_from_tags, host_arch_tag
+
+        if arch_from_tags(tags) != host_arch_tag():
+            return {"can_execute": False, "reason": NATIVE_ONLY_REASON}
+    found, reason = spec.assign(devices, inventory.free_devices())
+    if found is None:
+        return {"can_execute": False, "reason": reason}
+    from src.utils.cost_functions.resource_availability import get_architecture_availability
+
+    return get_architecture_availability(main)

@@ -84,6 +84,9 @@ TRACEABILITY_TABLES = (
     # The support thread of a client with the operator (no peer needed). Without it,
     # `Chat` from such a client would fail on the insert, and `GetChatThread` on the read.
     "client_chat_messages",
+    # Which instance holds which device (#536). Without it, a node upgraded in place
+    # could not reserve a device, and would offer every device as free.
+    "device_assignments",
 )
 
 # Columns on an existing table that a database created before them will not have.

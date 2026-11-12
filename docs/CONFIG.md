@@ -423,6 +423,27 @@ is up, so it never holds up startup or billing; a failure is logged (`[BENCHMARK
 the `-1`s stay for the next start. With `core_services.benchmark` unset, nothing is
 measured and nothing changes.
 
+## `devices` — PCI devices given to guests (VFIO, experimental)
+
+EXPERIMENTAL and off by default (#536). A service declares the devices that it needs
+in `Container.devices` (celaut.proto `Device`); a node gives each one a whole physical
+device, bound to `vfio-pci`, with the guest kernel that the device tag names.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `devices.ENABLED` | `false` | Offer the devices below. Off: the node announces none and refuses every service with devices. |
+| `devices.ALLOW` | `[]` | PCI addresses (`0000:0b:00.0`) that the operator bound to `vfio-pci`. nodo never unbinds a host driver. One address per IOMMU group: the whole group goes to one guest, and every other device of the group must be on `vfio-pci` too (a PCI bridge excepted). |
+| `devices.KERNELS` | `[]` | The guest kernels (SHA-256 hashes in `virtualizers.ch.KERNEL_STORE`) that a device service may boot. Each device is announced once per kernel, with one tag per hash algorithm (SHA-256 and SHA3-256), plus the older hashes that the kernel claims in `KERNEL_ABI_ALIASES`. Empty: the kernel of new builds for the host architecture. |
+| `devices.BY_CHIP.<pci:vendor:device>` | — | Per chip, as sysfs gives it: `mu_per_second` (the price; a chip with none is not offered), `mem_limit` (the device memory in bytes, announced as `at_most.mem_limit`), `benchmark` (scores of the device, for example `fp32_flops`) and `watts` (its power draw for the energy report: a device bound to `vfio-pci` has no host driver to ask). |
+
+`nodo devices` lists each address with its chip, its checks and its state (free,
+assigned, quarantined, or why it is not offered); `--json` is what the TUI reads. A
+device whose reset fails, or that stops answering, is quarantined until
+`nodo devices clear <address>`. `nodo doctor` checks the IOMMU, the `vfio-pci` driver,
+the IOMMU group, the reset (FLR), `/dev/vfio/<group>` for the service user and
+`RLIMIT_MEMLOCK` (VFIO pins all the guest memory: `LimitMEMLOCK=infinity` in
+`--service-user` mode).
+
 ## `hashing`
 
 | Key | Default | Meaning |

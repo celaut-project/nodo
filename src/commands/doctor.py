@@ -917,6 +917,96 @@ def _doctor_cloud_hypervisor(main_dir: str):
     _doctor_virtiofsd(cfg.get("virtiofsd_binary", ""))
 
 
+def _daemon_limits_text():
+    """/proc/<MainPID of nodo.service>/limits, or None when the daemon is not running."""
+    try:
+        out = subprocess.run(
+            ["systemctl", "show", "-p", "MainPID", "--value", "nodo.service"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        pid = int(out or "0")
+        if pid <= 0:
+            return None
+        with open(f"/proc/{pid}/limits", "r", encoding="ascii") as f:
+            return f.read()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _doctor_devices(service_user: str, supplementary_groups=()):
+    """The PCI devices given to guests with VFIO (#536). EXPERIMENTAL, off by default."""
+    try:
+        from src.devices import host, inventory
+    except Exception as e:
+        print(f"\n[WARN] Could not load the device checks: {e}", flush=True)
+        return
+    addresses = inventory.allowed()
+    if not inventory.enabled() and not addresses:
+        return
+    print("\nDevices (VFIO, experimental):", flush=True)
+    if not inventory.enabled():
+        print("[INFO] devices.ENABLED is false: the devices below are not offered.", flush=True)
+    uid, gids = None, list(supplementary_groups or ())
+    if service_user and service_user != "root":
+        try:
+            info = pwd.getpwnam(service_user)
+            uid = info.pw_uid
+            gids = [info.pw_gid] + [g.gr_gid for g in grp.getgrall() if service_user in g.gr_mem]
+            for name in supplementary_groups or ():
+                try:
+                    gids.append(grp.getgrnam(name).gr_gid)
+                except KeyError:
+                    pass
+        except KeyError:
+            uid = None
+    else:
+        uid = 0
+    if not host.iommu_enabled():
+        print("[FAIL] The host has no IOMMU groups: the IOMMU is off.", flush=True)
+        print("  Suggestion: turn on VT-d/AMD-Vi in the firmware and boot with intel_iommu=on "
+              "or amd_iommu=on.", flush=True)
+    if not host.vfio_pci_loaded():
+        print("[FAIL] The vfio-pci driver is not loaded.", flush=True)
+        print("  Suggestion: modprobe vfio-pci (and list it in /etc/modules-load.d).", flush=True)
+    try:
+        rep = inventory.report(uid=uid, gids=gids)
+    except Exception as e:
+        print(f"[WARN] Could not check the devices: {e}", flush=True)
+        return
+    for problem in rep["problems"]:
+        print(f"[FAIL] {problem}", flush=True)
+    if not rep["kernels"]:
+        print("[FAIL] No kernel to offer the devices with (devices.KERNELS).", flush=True)
+    for d in rep["devices"]:
+        for f in d["findings"]:
+            print(f"[{f['level']}] {f['message']}", flush=True)
+            if f["suggestion"]:
+                print(f"  Suggestion: {f['suggestion']}", flush=True)
+        if d["state"] == "no price":
+            print(f"[FAIL] {d['address']}: devices.BY_CHIP.{d['chip']}.mu_per_second is not "
+                  f"set, so the node does not offer it.", flush=True)
+        elif d["state"] == "quarantined":
+            print(f"[WARN] {d['address']} is quarantined: {d['quarantine'].get('reason', '')}", flush=True)
+            print(f"  Suggestion: check the device, then 'nodo devices clear {d['address']}'.", flush=True)
+        elif d["state"] in ("free", "assigned"):
+            print(f"[OK] {d['address']} ({d['chip']}) is offered with "
+                  f"{len(d['kernels'])} kernel(s).", flush=True)
+    if addresses:
+        try:
+            from src.utils.cost_functions.architecture_resources import announced_resources
+
+            largest = max(
+                (e.resources.mem_limit for e in announced_resources() if e.resources.HasField("mem_limit")),
+                default=0,
+            )
+        except Exception:
+            largest = 0
+        finding = host.memlock_finding(uid, _daemon_limits_text(), largest)
+        print(f"[{finding.level}] {finding.message}", flush=True)
+        if finding.suggestion:
+            print(f"  Suggestion: {finding.suggestion}", flush=True)
+
+
 def _doctor_network_checks():
     """Report what can be checked about inbound reachability, from here.
 
@@ -1697,4 +1787,5 @@ def doctor_command(main_dir):
         _doctor_network_checks()
         return
     _doctor_cloud_hypervisor(main_dir)
+    _doctor_devices(current_service_user, supplementary_groups)
     _doctor_network_checks()

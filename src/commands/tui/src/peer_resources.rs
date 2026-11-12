@@ -202,6 +202,63 @@ pub fn parse_own_resources(line: &str) -> Result<Announced, String> {
     Ok(decode_advertisement(Some(&bytes)))
 }
 
+/// One device of `nodo devices --json` (#536): what the NODE · ANNOUNCED card shows.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OwnDevice {
+    pub address: String,
+    /// `pci:<vendor>:<device>`, read from sysfs; empty when the address is not a device.
+    pub chip: String,
+    /// free, assigned, quarantined, unusable, no price or no kernel.
+    pub state: String,
+}
+
+/// This node's devices, as `nodo devices --json` last reported them.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OwnDevices {
+    /// `devices.ENABLED`.
+    pub enabled: bool,
+    /// `None` until the first report lands.
+    pub devices: Option<Vec<OwnDevice>>,
+    /// Why the last read failed; the previous list, if any, stays.
+    pub error: String,
+}
+
+/// The report line of `nodo devices --json`: `{"enabled", "devices": [...]}`, or
+/// `{"error": ...}`.
+pub fn parse_own_devices(line: &str) -> Result<(bool, Vec<OwnDevice>), String> {
+    let report: serde_json::Value =
+        serde_json::from_str(line).map_err(|error| format!("Unreadable devices report: {error}"))?;
+    if let Some(error) = report.get("error").and_then(|error| error.as_str()) {
+        return Err(error.to_string());
+    }
+    let text = |value: &serde_json::Value, key: &str| {
+        value.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+    };
+    let enabled = report.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    let devices = report
+        .get("devices")
+        .and_then(|v| v.as_array())
+        .map(|rows| {
+            rows.iter()
+                .map(|row| OwnDevice {
+                    address: text(row, "address"),
+                    chip: text(row, "chip"),
+                    state: text(row, "state"),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok((enabled, devices))
+}
+
+/// `pci:10de:2204` -> `10de:2204`; the address when the chip is unknown.
+pub fn short_chip(device: &OwnDevice) -> String {
+    match device.chip.strip_prefix("pci:") {
+        Some(chip) if !chip.is_empty() => chip.to_string(),
+        _ => device.address.trim_start_matches("0000:").to_string(),
+    }
+}
+
 /// One architecture's row of the total.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ArchTotal {
@@ -561,5 +618,25 @@ pub(crate) mod tests {
         assert_eq!(format_benchmark("sha256_hashes_per_sec", 950), ("sha256/s".to_string(), "950".to_string()));
         // An unknown key is shown verbatim, not dropped.
         assert_eq!(format_benchmark("gpu_tflops", 7), ("gpu_tflops".to_string(), "7".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod own_devices_tests {
+    use super::*;
+
+    #[test]
+    fn a_devices_report_is_read() {
+        let line = r#"{"enabled": true, "devices": [{"address": "0000:0b:00.0", "chip": "pci:10de:2204", "state": "free"}], "read_at": 1}"#;
+        let (enabled, devices) = parse_own_devices(line).unwrap();
+        assert!(enabled);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(short_chip(&devices[0]), "10de:2204");
+        assert_eq!(devices[0].state, "free");
+    }
+
+    #[test]
+    fn an_error_report_is_an_error() {
+        assert_eq!(parse_own_devices(r#"{"error": "boom"}"#), Err("boom".to_string()));
     }
 }

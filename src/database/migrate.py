@@ -869,6 +869,17 @@ TABLES = {
             hash TEXT NOT NULL,
             PRIMARY KEY (account_id, seq)
         )
+    ''',
+    # Which instance holds which physical device (#536). The address is the primary
+    # key, so two instances can never hold one device: see src/devices/assignments.py.
+    "device_assignments": '''
+        CREATE TABLE IF NOT EXISTS device_assignments (
+            address TEXT PRIMARY KEY,
+            instance_id TEXT NOT NULL,
+            chip TEXT NOT NULL,
+            kernel_hash TEXT NOT NULL,
+            assigned_at INTEGER NOT NULL
+        )
     '''
 }
 

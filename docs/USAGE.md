@@ -1263,6 +1263,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | OVERVIEW: storage size | — | `nodo status --storage` (new) |
 | OVERVIEW: wallet balances | — | `nodo status --wallet` (new); bare `nodo` |
 | OVERVIEW: peers' announced resources / own announcement | — | `nodo resources --json`; `nodo peers --json` |
+| OVERVIEW: this node's devices (NODE · ANNOUNCED card) | — | `nodo devices --json`; `nodo devices clear [<address>]` |
 | OVERVIEW: earnings / donations summary | — | `nodo earnings`, `nodo donations --json` |
 | OVERVIEW: energy / schedule summary | — | `nodo energy`, `nodo schedule` (new) |
 | INSTANCES: table, live CPU/RAM/net | — | `nodo instances --json` (new `--json`, live counters); `nodo observe <id>` (interactive stream) |

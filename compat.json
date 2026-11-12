@@ -77,6 +77,10 @@
     "deposits.DEFAULT_INITIAL_PERIODS",
     "deposits.MAX_FEE_OVERHEAD",
     "deposits.REFILL_BELOW",
+    "devices.ALLOW",
+    "devices.BY_CHIP",
+    "devices.ENABLED",
+    "devices.KERNELS",
     "energy.CURRENCY",
     "energy.ENABLED",
     "energy.EXTERNAL_TIMEOUT_SECONDS",
@@ -350,6 +354,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "a98a7444b25c166b0c2e0fdbc2eba2e300607eaa8d987c3ffd731f49095ebadc",
+  "database": "b841eccf0b7d030386ca4ef94a4b357742059559f860893ea3756922d9e2afff",
   "storage_format": 1
 }
