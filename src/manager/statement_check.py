@@ -343,11 +343,19 @@ def opens_account(row: Row) -> bool:
     return row.kind in (ledger.START, ledger.BUILD)
 
 
+def paid_in(row: Row) -> bool:
+    """A payment on a ledger that the instance made for its own balance (#630). The MU
+    came from the instance, not from its father, and they are not consumption."""
+    return row.kind == ledger.DEPOSIT and row.amount > 0
+
+
 def consumption(rows: Iterable[Row]) -> int:
     """What the child spent in ``rows``, in the MU of the peer: every movement but
-    those of its father and those that opened its account. Never below 0."""
+    those of its father, those that opened its account and its own payments. Never
+    below 0."""
     return max(0, -sum(row.amount for row in rows
-                       if not caused_by_father(row) and not opens_account(row)))
+                       if not caused_by_father(row) and not opens_account(row)
+                       and not paid_in(row)))
 
 
 def father_net(rows: Iterable[Row]) -> int:
