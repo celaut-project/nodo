@@ -1114,6 +1114,12 @@ read from here) and `core_services.bitcoin-node`. `PRUNE_MIB` sizes the chain it
 `0` is the whole ~700 GB with a `txindex`, anything else prunes to about that many MiB.
 All of it is checked at startup.
 
+`payments.MIN_CONFIRMATIONS` (`1`) is how many confirmations a payment needs before it
+counts. The node states it to payers as `payment.min_confirmations` in its ledger
+declaration, and a node that pays waits for the payee's number, not this one. A
+`Payable` that comes before the number keeps its deposit token pending and answers
+"not confirmed yet", so the payer can call again (#626).
+
 Payers are sent to the node's own wallet; `payments.COLD_WALLET` is only where the
 excess is swept. `WALLET_KEYS_EXTERNAL`, which used to switch the mnemonic off, is gone:
 the backend decides, and a config that still has it is refused at load.
