@@ -484,9 +484,12 @@ def gateway_component() -> Layer:
                           "hex(initial_mu.n)|hex(plane)|session|hex(slot)|seq|in_events|"
                           "in_bytes|in_head|out_events|out_bytes|out_head|"
                           "hex(mu_charged.n)|hex(coverage)|hex(capture_mode)|"
-                          "hex(degraded_reason)|scheme",
+                          "hex(degraded_reason)|cpu_period|cpu_quota|mem_limit|disk_space|"
+                          "kernel|hex(devices)|scheme",
         "receipt.digest.hex": "lowercase hex of UTF-8; empty for an empty text; numbers "
                               "decimal; an unused field empty or 0",
+        "receipt.digest.devices": "the chips sorted, each in lowercase hex of UTF-8, "
+                                  "joined by '/'; empty when there is none",
         "receipt.digest.scheme": "blake2b-256 hex of UTF-8 of peer.digest.scheme of "
                                  "signature_scheme",
         "receipt.execution_name": "blake2b-256 hex of UTF-8(instance token) || the 32 raw "

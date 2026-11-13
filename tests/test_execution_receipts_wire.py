@@ -515,6 +515,10 @@ class DelegatedStartReceiptTests(unittest.TestCase):
         self.assertEqual(bytes(receipt.service_id.value), bytes.fromhex("ab" * 32))
         # The credit that this node gives to the client: the `start` movement.
         self.assertEqual(receipt.initial_mu.n, "1000000")
+        # The peer reserved the resources, the kernel and the devices: this node does not
+        # attest what it did not do.
+        self.assertEqual((receipt.cpu_quota, receipt.mem_limit, receipt.disk_space,
+                          receipt.kernel, list(receipt.devices)), (0, 0, 0, "", []))
         # The envs of the request, without the reserved instance name.
         self.assertEqual(receipt.envs_digest,
                          er.envs_digest({"GREETING": b"hola"}, receipt.envs_salt))
@@ -544,6 +548,23 @@ class StartReceiptTests(unittest.TestCase):
         self.assertEqual(receipt.envs_digest, er.envs_digest(
             {"SOURCE_MNEMONIC": b"secret words"}, receipt.envs_salt))
         self.assertNotIn(b"secret words", receipt.SerializeToString())
+
+    def test_the_start_receipt_names_what_the_node_reserved(self):
+        """#419: the resolved resources, the guest kernel and the chips go in the receipt."""
+        from src.gateway.launcher.local_execution import local_execution as le
+        resolved = celaut_pb2.Sysresources(
+            cpu_period=100000, cpu_quota=150000, mem_limit=1 << 29, disk_space=1 << 30)
+        with _node_identity():
+            receipt = le._start_receipt(
+                token=TOKEN, service_id="ab" * 32, config=celaut_pb2.Configuration(),
+                initial_mu=1000, resources=resolved, kernel="CD" * 32,
+                devices=["vendor:b", "vendor:a"])
+        self.assertEqual(er.problems(receipt, peer_id=_peer_id(), token=TOKEN), [])
+        self.assertTrue(er.verify(receipt, peer_id=_peer_id(), token=TOKEN))
+        self.assertEqual((receipt.cpu_period, receipt.cpu_quota, receipt.mem_limit,
+                          receipt.disk_space), (100000, 150000, 1 << 29, 1 << 30))
+        self.assertEqual(receipt.kernel, "cd" * 32)             # one spelling: lowercase
+        self.assertEqual(list(receipt.devices), ["vendor:a", "vendor:b"])
 
     def test_no_identity_key_means_no_start_receipt(self):
         from src.gateway.launcher.local_execution import local_execution as le

@@ -26,6 +26,10 @@ VECTOR_SERVICE_VALUE = hashlib.sha3_256(b"service").digest()
 VECTOR_ENVS = {"B": b"\xff\x00", "A": b"1"}
 VECTOR_SALT = bytes(range(16))
 VECTOR_INITIAL_MU = 12345678
+VECTOR_RESOURCES = dict(cpu_period=100000, cpu_quota=200000, mem_limit=536870912,
+                        disk_space=1073741824)
+VECTOR_KERNEL = hashlib.sha256(b"kernel").hexdigest()
+VECTOR_DEVICES = ["10de:2204", "10de:1ad0"]  # given unsorted: the receipt sorts them
 VECTOR_TS = 1798329600
 VECTOR_SESSION = "00112233445566778899aabbccddeeff"
 
@@ -44,20 +48,23 @@ VECTOR_START_CANONICAL = (
     "~63e5b5a4137cfa77cb9d10adae081d0df082a826d8441721460d5933f5800056"   # service_id.value
     "|e684ff3022c2a14c62addd0129cd4a5d3dc95b2d13a924ce4fc57aa7e9842a45"   # envs_digest
     "|3132333435363738"                                                   # hex("12345678")
-    "||||0|0|0||0|0||||||"                                                # stream fields
-    "94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"    # scheme digest
+    "||||0|0|0||0|0|||||"                                                 # stream fields
+    "|100000|200000|536870912|1073741824"                                 # what it reserved
+    "|6923dd1bc0460082c5d55a831908c24a282860b7f1cd6c2b79cf1bc8857c639c"   # kernel
+    "|313064653a31616430/313064653a32323034"                              # hex of each chip, sorted
+    "|94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"   # scheme digest
 )
-VECTOR_START_DIGEST = "59ecb3f5e113da7bb9f76d41059a183bfd7d355e9ba32a53d848826be5502531"
+VECTOR_START_DIGEST = "dce17112c8c183eb1dc8382b253f395154b9bd3e64c3001d00276b1c59036cf8"
 VECTOR_START_SIGNATURE = (
-    "f79ac345e0d9290dd803edf6b90cf16ef2680ba4353cf44f9a825b38b47be96c"
-    "de20b2d09453e24c965a25bbe1b846b7256fbc53fe79f921e88e70d967aa3d0b"
+    "131d085e3bc65c4cebd27fd2a98fec40bc1be0488c9ef559c0038364c53973ba"
+    "ed6b095473b1a725e100ca2989df1be7aa104f3a3ac468082ece67a0afddc60e"
 )
 VECTOR_IN_HEAD = "4cc36e6c5ce771828a06755610180b0db14686b7b88ec9aca2d94dc67cb82b58"
 VECTOR_OUT_HEAD = "721ba2dbda02e1f8d3f9bf151175163f77ece18af91d85a2357a438d36f2ed85"
-VECTOR_CHECKPOINT_DIGEST = "94157eae3e1f9aef97bd3347e33e9ed85db5b8c515253881a55e5763f8f2b840"
+VECTOR_CHECKPOINT_DIGEST = "9b70d9fc991f69e5cc3a06e39d860ad00abefc55bba3e42f4b5e08a621f5f0a4"
 VECTOR_CHECKPOINT_SIGNATURE = (
-    "98bbc219739d19bc7663f99ae68e46d198795cad15d2e9fc5ddd9a8c6b47aef7"
-    "a4320777ed11f2d9ffd6fb43c40520e32f14be82193ab64b6cdc6ab74ee6900b"
+    "3bc5472ebb40bbb1d1aef20d811a481873b9828c517c07040189f7237ed90176"
+    "c646748d6a82f8274e37560ed9ff30f7280ec82ea50d60630cc022e8de35ad03"
 )
 VECTOR_CHECKPOINT_CANONICAL = (
     "636865636b706f696e74"                                                # hex("checkpoint")
@@ -74,6 +81,7 @@ VECTOR_CHECKPOINT_CANONICAL = (
     "|37"                                                                 # hex("7")
     "|636c69656e742d74756e6e656c"                                         # hex("client-tunnel")
     "||"                                                                  # capture, degraded
+    "|0|0|0|0||"                                                          # no start fields
     "|94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"
 )
 
@@ -94,6 +102,8 @@ def _start():
         VECTOR_ENVS,
         VECTOR_INITIAL_MU,
         signer=_signer(), peer_id=VECTOR_PEER_ID, ts=VECTOR_TS, salt=VECTOR_SALT,
+        resources=celaut_pb2.Sysresources(**VECTOR_RESOURCES),
+        kernel=VECTOR_KERNEL, devices=VECTOR_DEVICES,
     )
 
 
@@ -253,6 +263,8 @@ class TamperTests(unittest.TestCase):
                 value.n = str(int(value.n or 0) + 1)
             else:
                 value.value = bytes(value.value) + b"x"
+        elif field == "devices":
+            getattr(receipt, field).append("x")
         elif descriptor.type == descriptor.TYPE_STRING:
             current = getattr(receipt, field)
             if er._is_hex(current, 64):
@@ -286,6 +298,50 @@ class TamperTests(unittest.TestCase):
 
     def test_each_field_of_a_checkpoint(self):
         self._each_field(_checkpoint)
+
+    def test_a_start_that_reserved_nothing_has_zero_and_empty_fields(self):
+        """A start that the node gave to a peer: it does not attest what it did not do."""
+        receipt = er.start_receipt(
+            VECTOR_TOKEN,
+            celaut_pb2.Metadata.HashTag.Hash(type=VECTOR_SERVICE_TYPE, value=VECTOR_SERVICE_VALUE),
+            VECTOR_ENVS, VECTOR_INITIAL_MU,
+            signer=_signer(), peer_id=VECTOR_PEER_ID, ts=VECTOR_TS, salt=VECTOR_SALT,
+        )
+        self.assertEqual(
+            (receipt.cpu_period, receipt.cpu_quota, receipt.mem_limit, receipt.disk_space,
+             receipt.kernel, list(receipt.devices)), (0, 0, 0, 0, "", []))
+        self.assertTrue(er.canonical_receipt(receipt).endswith("|0|0|0|0|||94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"))
+        self.assertEqual(er.problems(receipt), [])
+
+    def test_the_start_receipt_names_the_resources_the_kernel_and_the_sorted_devices(self):
+        receipt = _start()
+        self.assertEqual(
+            (receipt.cpu_period, receipt.cpu_quota, receipt.mem_limit, receipt.disk_space),
+            (100000, 200000, 536870912, 1073741824))
+        self.assertEqual(receipt.kernel, VECTOR_KERNEL)
+        self.assertEqual(list(receipt.devices), ["10de:1ad0", "10de:2204"])
+        self.assertEqual(er.problems(receipt), [])
+
+    def test_a_device_list_that_is_not_sorted_or_has_a_repeat_is_refused(self):
+        for devices in (["b", "a"], ["a", "a"], ["a", ""]):
+            receipt = _start()
+            del receipt.devices[:]
+            receipt.devices.extend(devices)
+            er.sign_with(receipt, _key())
+            self.assertTrue(er.problems(receipt), devices)
+
+    def test_a_kernel_that_is_not_a_hash_is_refused(self):
+        receipt = _start()
+        receipt.kernel = "not-hex"
+        er.sign_with(receipt, _key())
+        self.assertIn("kernel is not a 64-hex digest", er.problems(receipt))
+
+    def test_a_checkpoint_with_a_start_resource_is_refused(self):
+        for field, value in (("mem_limit", 1), ("kernel", VECTOR_KERNEL)):
+            receipt = _checkpoint()
+            setattr(receipt, field, value)
+            er.sign_with(receipt, _key())
+            self.assertTrue(any("no start fields" in p for p in er.problems(receipt)), field)
 
     def test_a_changed_salt_no_longer_opens_the_envs(self):
         receipt = _start()

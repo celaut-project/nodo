@@ -281,10 +281,12 @@ def canonical_receipt(receipt: celaut_pb2.ExecutionReceipt) -> str:
         | hex(plane) | session | hex(slot) | seq
         | in_events | in_bytes | in_head | out_events | out_bytes | out_head
         | hex(mu_charged.n) | hex(coverage) | hex(capture_mode) | hex(degraded_reason)
+        | cpu_period | cpu_quota | mem_limit | disk_space | kernel | hex(device)/hex(device)...
         | blake2b_256(UTF-8(canonical_scheme(signature_scheme)))
 
     hex() of a text is the lowercase hex of its UTF-8; numbers are decimal; a field
-    the kind does not use is empty (``""``, ``0``, an empty ``~``).
+    the kind does not use is empty (``""``, ``0``, an empty ``~``). ``devices`` is
+    sorted (:func:`problems` refuses another order), each chip in hex, joined by ``/``.
     """
     r = receipt
     return "|".join((
@@ -296,6 +298,8 @@ def canonical_receipt(receipt: celaut_pb2.ExecutionReceipt) -> str:
         str(int(r.out_events)), str(int(r.out_bytes)), r.out_head,
         _hex_text(r.mu_charged.n), _hex_text(r.coverage), _hex_text(r.capture_mode),
         _hex_text(r.degraded_reason),
+        str(int(r.cpu_period)), str(int(r.cpu_quota)), str(int(r.mem_limit)),
+        str(int(r.disk_space)), r.kernel, "/".join(_hex_text(d) for d in r.devices),
         _blake2b_256(canonical_scheme(r.signature_scheme).encode("utf-8")).hex(),
     ))
 
@@ -392,12 +396,21 @@ def start_receipt(
         peer_id: Optional[str] = None,
         ts: Optional[int] = None,
         salt: Optional[bytes] = None,
+        resources: Optional[celaut_pb2.Sysresources] = None,
+        kernel: str = "",
+        devices: Iterable[str] = (),
 ) -> Optional[celaut_pb2.ExecutionReceipt]:
     """The signed ``start`` receipt of an instance, or None with no identity key.
 
     ``envs`` is the map the service got (``Configuration.environment_variables`` after
     the node took out the reserved ``__nodo_instance_name``, which is a name for the
     instance and not a variable of the service).
+
+    ``resources`` is what the node reserved (the resolved figures, floors applied): its
+    CPU period and quota, memory and disk go into the receipt. ``kernel`` is the store
+    hash of the guest kernel, and ``devices`` the chips attached at the start. All three
+    are left out (zero, empty) when this node did not reserve them itself, that is, when
+    it gave the start to a peer: it does not attest what it did not do.
     """
     if signer is None:
         signer, peer_id = node_signer(), node_peer_id()
@@ -412,7 +425,14 @@ def start_receipt(
         envs_digest=envs_digest(envs, salt, origins),
         envs_salt=salt,
         initial_mu=celaut_pb2.Amount(n=str(int(initial_mu))),
+        kernel=str(kernel or "").lower(),
+        devices=sorted(str(d) for d in devices),
     )
+    if resources is not None:
+        receipt.cpu_period = int(resources.cpu_period)
+        receipt.cpu_quota = int(resources.cpu_quota)
+        receipt.mem_limit = int(resources.mem_limit)
+        receipt.disk_space = int(resources.disk_space)
     signer(receipt)
     return receipt
 
@@ -604,7 +624,8 @@ def _scheme_is_ours(scheme) -> bool:
 # The signed fields that only some kinds or planes use. A field that a receipt does not
 # use must be empty or zero (docs/EXECUTION_RECEIPTS.md), and problems() checks it:
 # a value there is signed, so a reader could take it for a claim.
-_START_FIELDS = ("service_id", "envs_digest", "initial_mu")
+_START_FIELDS = ("service_id", "envs_digest", "initial_mu", "cpu_period", "cpu_quota",
+                 "mem_limit", "disk_space", "kernel", "devices")
 _STREAM_FIELDS = ("plane", "session", "slot", "seq", "in_events", "in_bytes", "in_head",
                   "out_events", "out_bytes", "out_head", "mu_charged", "coverage",
                   "capture_mode", "degraded_reason")
@@ -643,10 +664,14 @@ def problems(receipt: celaut_pb2.ExecutionReceipt, *, peer_id: Optional[str] = N
         found.append("peer_id is not a lowercase 64-hex public key")
     if not _is_hex(r.execution_name, _DIGEST_HEX_LENGTH):
         found.append("execution_name is not a 64-hex digest")
-    for field in ("envs_digest", "in_head", "out_head"):
+    for field in ("envs_digest", "in_head", "out_head", "kernel"):
         value = getattr(r, field)
         if value and not _is_hex(value, _DIGEST_HEX_LENGTH):
             found.append(f"{field} is not a 64-hex digest")
+    if list(r.devices) != sorted(set(r.devices)):
+        found.append("devices is not sorted and without repeats")
+    if any(not d for d in r.devices):
+        found.append("devices has an empty chip")
     if r.session and not _is_hex(r.session):
         found.append("session is not lowercase hex")
     # bytes.fromhex reads uppercase and spaces too: one spelling only, as the proto says.

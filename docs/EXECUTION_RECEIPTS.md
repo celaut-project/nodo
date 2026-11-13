@@ -342,9 +342,23 @@ One message, `celaut.ExecutionReceipt`, for three kinds:
 
 | Kind | Where the client gets it | What it says |
 | --- | --- | --- |
-| `start` | `ServiceInstance.receipt`, in the answer of `StartService` | `service_id`, `envs_digest` (and `envs_salt`), `initial_mu` |
+| `start` | `ServiceInstance.receipt`, in the answer of `StartService` | `service_id`, `envs_digest` (and `envs_salt`), `initial_mu`, what the node reserved (`cpu_period`, `cpu_quota`, `mem_limit`, `disk_space`), the guest `kernel` and the attached `devices` |
 | `checkpoint` | `ServiceTunnel` index 2, or an `Observe` event of kind `receipt` | the stream: `plane`, `session`, `seq`, the two chains, `coverage`; a tunnel also `slot` and `mu_charged`; Observe also `capture_mode` and `degraded_reason` |
 | `close` | the same place, as the last message of the stream | the same fields as a checkpoint; the stream stopped normally |
+
+The `start` receipt also says what the node reserved for the instance:
+
+- `cpu_period`, `cpu_quota`, `mem_limit` and `disk_space` are the resolved figures,
+  with the floors of the node applied. They are not the figures of the manifest. The
+  maintenance charge uses these figures.
+- `kernel` is the store hash (SHA-256, lowercase hex) of the guest kernel that the
+  instance boots.
+- `devices` is the list of chips that the node attached at the start. It is sorted
+  and has no repeat.
+
+A node that gives the start to a peer does not reserve these things. Its `start`
+receipt has zero in the four figures, an empty `kernel` and no `devices`. A reader must
+not take this for "no limit" or "no device".
 
 A field that the kind or the plane does not use is empty or zero. The signature covers
 it too, so a verifier refuses a receipt that sets one (see
@@ -365,6 +379,7 @@ Blake2b-256 over the UTF-8 of this text, with the fields in this order:
     | hex(plane) | session | hex(slot) | seq
     | in_events | in_bytes | in_head | out_events | out_bytes | out_head
     | hex(mu_charged.n) | hex(coverage) | hex(capture_mode) | hex(degraded_reason)
+    | cpu_period | cpu_quota | mem_limit | disk_space | kernel | hex(device)/hex(device)...
     | blake2b_256_hex(UTF-8(scheme))
 
 - `hex()` of a text is the lowercase hex of its UTF-8. Every free text goes through
@@ -600,7 +615,7 @@ never a traceback.
 Each receipt must have the fields of its kind and plane, and no other signed field:
 
 - `start`: `service_id` (type and value), `envs_digest` and `initial_mu`, and no
-  stream field.
+  stream field. `kernel`, if set, is a 64-hex hash; `devices` is sorted and has no repeat.
 - `checkpoint` and `close`: `plane`, `session`, `seq` ≥ 1, `in_head`, `out_head`, a
   `coverage` of its plane, and no start field.
   - `tunnel`: `slot` and `mu_charged`; coverage `client-tunnel`; no `capture_mode`

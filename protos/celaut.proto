@@ -1135,6 +1135,28 @@ message ExecutionReceipt {
     // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
     // that the node signs. A receipt without a valid signature is not valid.
     string signature = 24;
+
+    // Only in "start". What the node reserved for the instance at the start: the
+    // resolved figures, with the floors of the node applied, and not what the manifest
+    // declared. They are what the maintenance charge prices. The values are those of
+    // Sysresources, with the same units. Zero in a start that the node gave to a peer:
+    // the executor reserved them and this node does not attest them. This is the CFS CPU
+    // period that the node reserved, in microseconds.
+    uint64 cpu_period = 25;
+    // Only in "start". The CFS CPU quota that the node reserved, in microseconds.
+    uint64 cpu_quota = 26;
+    // Only in "start". The memory limit that the node reserved, in bytes.
+    uint64 mem_limit = 27;
+    // Only in "start". The disk space that the node reserved, in bytes.
+    uint64 disk_space = 28;
+    // Only in "start". The guest kernel that the instance boots, as the SHA-256 hex
+    // with which the kernel store of the node keeps it. A device tag fixes it. Empty
+    // if the node does not know it (a start that the node gave to a peer).
+    string kernel = 29;
+    // Only in "start". The chip of each device that the node attached at the start,
+    // sorted. Empty if the instance has no devices, and in a start that the node gave to a
+    // peer.
+    repeated string devices = 30;
 }
 
 // The answer of StartService.
