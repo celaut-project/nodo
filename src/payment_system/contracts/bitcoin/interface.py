@@ -20,10 +20,16 @@ account's whole receiving history to anyone on the network. Not for a first vers
 
 **The payer waits for confirmations, exactly as it does on Ergo.** No new deposit-token
 state and no change to the pending/payed/rejected machine: `process_payment` polls until
-`MIN_CONFIRMATIONS`, and only then does the orchestrator call `Payable`. The receiver
-therefore validates against a transaction that is already final and answers in one call.
-That also disposes of RBF for free -- a confirmed transaction cannot be replaced -- so
-the only residual risk is a shallow reorg, which is what `MIN_CONFIRMATIONS` is for.
+the *payee's* `payment.min_confirmations` (#626), and only then does the orchestrator
+call `Payable`. The receiver therefore validates against a transaction that is already
+final and answers in one call. That also disposes of RBF for free -- a confirmed
+transaction cannot be replaced -- so the only residual risk is a shallow reorg, which is
+what `MIN_CONFIRMATIONS` is for.
+
+A `Payable` that comes too early is not a refusal: when a transaction carries the token
+and pays enough but has fewer confirmations than `MIN_CONFIRMATIONS`, the validator raises
+`PaymentNotConfirmed`, the deposit token stays 'pending' and the payer is told "not
+confirmed yet", so it can call again before the token expires (#626).
 
 What is genuinely different is only *how long* the wait is, and that breaks two
 Ergo-shaped constants rather than the state machine: this contract declares its own
@@ -42,7 +48,10 @@ from time import sleep
 from typing import Optional, Tuple
 
 from protos import celaut_pb2
+from src.payment_system import payee
+from src.payment_system.exceptions import PaymentNotConfirmed
 from src.utils.ledger_descriptors import bitcoin_payment_ledger as _bitcoin_ledger
+from src.utils.ledger_descriptors import bitcoin_min_confirmations, declared_min_confirmations
 from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
 from src.payment_system.contracts.bitcoin import backend as core_backend
@@ -144,7 +153,9 @@ payment_lock = Lock()  # Ensures the same UTXO is not spent for more than it hol
 NETWORK = lambda: str(env_manager.get("ledgers.bitcoin.NETWORK") or "mainnet")
 COLD_WALLET_KEY = "ledgers.bitcoin.payments.COLD_WALLET"
 COLD_WALLET = lambda: env_manager.get(COLD_WALLET_KEY) or ""
-MIN_CONFIRMATIONS = lambda: max(1, int(env_manager.get("ledgers.bitcoin.payments.MIN_CONFIRMATIONS", 1) or 1))
+# What this node needs before it accepts a payment. It is also in this node's ledger
+# declaration, as `payment.min_confirmations` (#626), read by the same function.
+MIN_CONFIRMATIONS = lambda: bitcoin_min_confirmations()
 TARGET_CONF = lambda: max(1, int(env_manager.get("ledgers.bitcoin.payments.TARGET_CONF", 6) or 6))
 MAX_FEE_RATE_SAT_VB = lambda: float(env_manager.get("ledgers.bitcoin.payments.MAX_FEE_RATE_SAT_VB", 100) or 100)
 # Where the address Core gave us is kept. A *cache*, not configuration: nothing asks
@@ -598,9 +609,10 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
                     script: bytes) -> celaut_pb2.Contract:
     """Pay ``amount`` MU to ``script``, carrying ``deposit_token`` in an `OP_RETURN`.
 
-    Returns only once the transaction has ``MIN_CONFIRMATIONS``, so the peer's validator
-    sees something final and can answer accepted/rejected in one call. That is the same
-    shape Ergo already has; only the wait is longer.
+    Returns only once the transaction has the confirmations the **payee** declared
+    (`payee_min_confirmations`), so the peer's validator sees something final and can
+    answer accepted/rejected in one call. That is the same shape Ergo already has; only
+    the wait is longer.
     """
     with payment_lock:
         amount_sat = rate.mu_to_satoshi(amount)
@@ -655,8 +667,37 @@ def process_payment(amount: int, deposit_token: str, ledger: str,
     return await_payment(tx_id=tx_id, script=script, chain=chain)
 
 
+def payee_min_confirmations() -> int:
+    """How many confirmations to wait for before the payee is told about a payment.
+
+    The payee's number, not ours (#626): it is the payee that validates, against its own
+    `MIN_CONFIRMATIONS`, and it states that number in its ledger declaration as
+    `payment.min_confirmations`. The payment process gives that declaration
+    (`payee.paying`). Waiting for our own number instead made a payee that needs more
+    refuse the payment, with the money already paid.
+
+    A payee that does not state it -- a node from before #626, or a payment with no
+    known payee -- gets our own `MIN_CONFIRMATIONS`, which is what every payer did
+    before. An unusable value never reaches here: `manager._accept_contract` does not
+    store a contract with one. If it does arrive, our own number is used too.
+    """
+    declaration = payee.ledger()
+    if declaration is not None:
+        try:
+            declared = declared_min_confirmations(declaration)
+        except ValueError as e:
+            LOGGER(f"The payee's declaration cannot be used ({e}); waiting for this "
+                   f"node's own {MIN_CONFIRMATIONS()} confirmation(s).")
+            declared = None
+        if declared is not None:
+            return declared
+        LOGGER(f"The payee does not declare payment.min_confirmations; waiting for this "
+               f"node's own {MIN_CONFIRMATIONS()} confirmation(s).")
+    return MIN_CONFIRMATIONS()
+
+
 def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
-    """Wait until ``tx_id`` has ``MIN_CONFIRMATIONS``; return the contract the peer is told.
+    """Wait until ``tx_id`` has the payee's confirmations; return the contract the peer is told.
 
     The second half of `process_payment`, kept apart so a payment the daemon stopped in
     the middle of can be finished from its transaction id alone (#523). It spends
@@ -664,7 +705,7 @@ def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
     """
     if chain is None:
         chain = backend()
-    wanted = MIN_CONFIRMATIONS()
+    wanted = payee_min_confirmations()
     failed = 0  # Checks in a row the backend could not answer.
     for _ in range(WAIT_TX_ATTEMPTS):
         sleep(WAIT_TX_SLEEP_TIME)
@@ -741,6 +782,9 @@ def payment_process_validator(amount: int, token: str, ledger: str,
                               script: bytes) -> bool:
     """Whether a confirmed transaction paid us ``amount`` MU carrying ``token``.
 
+    Raises `PaymentNotConfirmed` when the transaction exists and pays enough but does not
+    have `MIN_CONFIRMATIONS` yet: that is "not yet", not "no" (#626).
+
     Four things have to hold, and the fourth is the one worth stating: the ledger is
     ours, the script is *our* receiving script, a confirmed transaction carries the
     deposit token in an `OP_RETURN`, and it paid **at least** the expected amount.
@@ -763,8 +807,10 @@ def payment_process_validator(amount: int, token: str, ledger: str,
         expected = rate.mu_to_satoshi(amount)
         min_conf = MIN_CONFIRMATIONS()
 
+        confirmed = set()
         for entry in chain.list_received(address, min_conf):
             for tx_id in entry.get("txids") or []:
+                confirmed.add(tx_id)
                 try:
                     transaction = chain.raw_transaction(tx_id)
                 except BackendUnavailable as e:
@@ -793,11 +839,75 @@ def payment_process_validator(amount: int, token: str, ledger: str,
                 # payment another transaction covers in full.
                 continue
 
+        if _accept_early_payment(chain, address, token, script_hex, expected,
+                                 min_conf, skip=confirmed):
+            return True
         LOGGER(f"No confirmed bitcoin transaction carries the token {token}.")
         return False
+    except PaymentNotConfirmed as e:
+        # Not a "no": the deposit token stays pending (#626).
+        LOGGER(str(e))
+        raise
     except Exception as e:
         LOGGER(f"Error validating bitcoin payment process: {e}")
         return False
+
+
+def _accept_early_payment(chain, address: str, token: str, script_hex: str,
+                          expected: int, min_conf: int, skip: set) -> bool:
+    """Look for a payment of ``token`` that does not have ``min_conf`` confirmations yet.
+
+    Called only when no transaction with ``min_conf`` confirmations paid the token, so
+    the payer called `Payable` too early, or never paid. Before #626 both were the same
+    "no", and the deposit token was set to 'rejected': a payer that called too early
+    lost the payment, with the money already in this node's wallet.
+
+    Raises `PaymentNotConfirmed` for a transaction that carries the token and pays
+    **at least** ``expected`` to our script, with fewer than ``min_conf`` confirmations
+    (the mempool included). Then the caller keeps the token pending and the payer can
+    call again. A transaction that pays too little is not a reason to wait: more
+    confirmations do not make it pay more.
+
+    Returns True in one case: the transaction got its confirmations between the two
+    reads. It carries the token, pays enough and is confirmed enough, so it is the
+    payment. Returns False when there is nothing to wait for; the caller then answers
+    "no", as before. A read that fails is the same "no" as before, too.
+    """
+    try:
+        entries = chain.list_received(address, 0)
+    except BackendUnavailable as e:
+        LOGGER(f"Could not read the unconfirmed payments to {address}: {e}")
+        return False
+    for entry in entries:
+        for tx_id in entry.get("txids") or []:
+            if tx_id in skip:
+                continue
+            try:
+                transaction = chain.raw_transaction(tx_id)
+            except BackendUnavailable as e:
+                LOGGER(f"Could not read bitcoin tx {tx_id}: {e}")
+                continue
+            if token not in _op_return_tokens(transaction):
+                continue
+            if _paid_to_script(transaction, script_hex) < expected:
+                continue
+            try:
+                confirmations = int(chain.tx_status(tx_id).get("confirmations", 0) or 0)
+            except Exception:
+                # It carries the token and pays enough; only the number is unknown.
+                confirmations = None
+            if confirmations is not None and confirmations < 0:
+                # Replaced or reorged out: it will never be confirmed.
+                continue
+            if confirmations is not None and confirmations >= min_conf:
+                LOGGER(
+                    f"Bitcoin payment for token {token} verified: {tx_id} reached "
+                    f"{confirmations} confirmation(s) during the validation."
+                )
+                return True
+            raise PaymentNotConfirmed(token=token, tx_id=tx_id,
+                                      confirmations=confirmations, wanted=min_conf)
+    return False
 
 
 def manager():

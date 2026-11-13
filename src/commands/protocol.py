@@ -91,23 +91,29 @@ def _compare_ledgers(peer) -> List[Dict]:
     """
     from src.identity.node_identity import same_declaration
     from src.identity.transport_stack import formal_difference
-    from src.utils.ledger_descriptors import payment_ledger, reputation_ledger
+    from src.utils.ledger_descriptors import (
+        payment_ledger,
+        reputation_ledger,
+        same_payment_ledger,
+    )
 
+    # A payment declaration is compared without its payee parameters (#626), as the
+    # node compares it when it stores a peer's contract.
     declared = [
-        (f"payment_contracts[{i}]", rate.contract.ledger, payment_ledger)
+        (f"payment_contracts[{i}]", rate.contract.ledger, payment_ledger, same_payment_ledger)
         for i, rate in enumerate(peer.payment_contracts)
     ] + [
-        (f"reputation_proofs[{i}]", proof.ledger, reputation_ledger)
+        (f"reputation_proofs[{i}]", proof.ledger, reputation_ledger, same_declaration)
         for i, proof in enumerate(peer.reputation_proofs)
     ]
     report: List[Dict] = []
-    for where, ledger, local_ledger in declared:
+    for where, ledger, local_ledger, same in declared:
         tags = list(ledger.tags)
         ours = local_ledger(tags[0]) if tags else None
         entry = {"where": where, "tags": tags}
         if ours is None:
             entry["status"] = "unknown"
-        elif same_declaration(ledger, ours):
+        elif same(ledger, ours):
             entry["status"] = "match"
         else:
             entry["status"] = "differs"
