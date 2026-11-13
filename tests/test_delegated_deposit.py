@@ -1267,7 +1267,7 @@ class _StopHarness:
                 patch.object(manager.BeeClient, "call_one", side_effect=self._stop_service), \
                 patch.object(manager.delegated_endpoints, "close") as close:
             self.close = close
-            return manager.stop_instance(token=OUR_ALIAS, credit=credit)
+            return manager.stop_instance(token=OUR_ALIAS, credit=credit, reason="father_stop")
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -1555,7 +1555,7 @@ class StopByTokenOnlyTests(unittest.TestCase):
         sc.get_delegated_token_by_id.return_value = None
         with patch.object(manager, "sc", sc):
             try:
-                manager.stop_instance(token="my-instance-name")
+                manager.stop_instance(token="my-instance-name", reason="father_stop")
             except Exception:
                 pass
         sc.resolve_local_instance_reference.assert_not_called()

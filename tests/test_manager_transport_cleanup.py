@@ -45,7 +45,7 @@ class ManagerTransportCleanupTests(unittest.TestCase):
         ), patch.object(
             manager, "remove_firewall_rule", return_value=True
         ) as remove_rule_mock:
-            refund = manager.stop_instance("svc")
+            refund = manager.stop_instance("svc", reason="father_stop")
 
         self.assertEqual(refund, 42)
         remove_rule_mock.assert_called_once_with(

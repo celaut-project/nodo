@@ -644,7 +644,7 @@ stop costs more. The delegating node reads both in the signed statement of the c
 - A **stop** is a `stop` row with the reason `activity_window`. `process_lost` and
   `guest_panic` are failures, `out_of_balance` is the balance (the reason
   `instance_out_of_balance` is retired, #562, and an instance that runs out of balance
-  scores nothing), and `manual_kill` can be a stop that this node or its client asked for.
+  scores nothing), and `father_stop` and `operator_kill` can be a stop that this node or its client asked for.
 - A **hibernation** is a `maintenance` row that charges no memory (`mem_limit` 0) after one
   that charged memory, with no `resource_change` row between them. A resize that the
   instance asked for leaves a `resource_change` row, so a hibernation without one was not
@@ -674,8 +674,11 @@ These are decisions for the alpha. Each one is a known limit, not a defect that 
   A VM that went down is started again, for as long as the instance has MU. A failure of
   the machine that ends it with MU left is the fault of its operator. Only an
   `out_of_balance` with less MU than the price of one tick is not scored.
-- **A stop with the father alive cannot be told from a stop of the operator.** `StopService`
-  and `nodo kill` both call `stop_instance` with the reason `manual_kill`. No MU are lost
+- **A stop with the father alive is not proof of who asked for it.** `StopService` records
+  the reason `father_stop`, and `nodo kill` run with root records `operator_kill`. The
+  reason is written by the node that stops the instance, so a peer can write the one that
+  it likes. `nodo kill` without root goes through the daemon as a `StopService` call, and
+  records `father_stop`. No MU are lost
   in this case (the leftover goes to the father, and its statement shows the `refund`), but
   the father loses the service, and only the father can say "I did not ask for this stop".
   Ideas for later, not done:

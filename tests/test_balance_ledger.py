@@ -438,7 +438,7 @@ class ClientExpiryTests(_Database):
 
     def test_a_client_with_only_killed_children_is_deleted(self):
         self.add_instance("i1", "c1", 0)
-        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+        self.sc.settle_stop("i1", "father_stop", father_id="c1")
 
         self.maintain()
 
@@ -467,7 +467,7 @@ class ClientExpiryTests(_Database):
         self.add_instance("i1", "c1", 400, movements=(ledger.Movement(ledger.START, 400),))
 
         self.maintain()
-        self.assertEqual(self.sc.settle_stop("i1", "manual_kill", father_id="c1"), 400)
+        self.assertEqual(self.sc.settle_stop("i1", "father_stop", father_id="c1"), 400)
 
         self.assertEqual(self.sc.get_balance_by_client_id("c1"), 400)
         self.assertNotEqual(self.rows("i1")[-2]["detail"], '{"lost":"father_gone"}')
@@ -493,10 +493,10 @@ class SettleStopTests(_Database):
         self.assert_adds_up("i1", 0)
 
     def test_an_instance_with_no_leftover_still_gets_a_stop_row(self):
-        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+        self.sc.settle_stop("i1", "father_stop", father_id="c1")
         self.add_instance("i2", "c1", 0)
 
-        self.sc.settle_stop("i2", "manual_kill", father_id="c1")
+        self.sc.settle_stop("i2", "father_stop", father_id="c1")
 
         self.assertEqual([r["kind"] for r in self.rows("i2")], [ledger.STOP])
         self.assertEqual(json.loads(self.rows("i2")[0]["detail"])["leftover"], "0")
@@ -504,19 +504,19 @@ class SettleStopTests(_Database):
     def test_a_debt_stays_on_the_stop_row(self):
         self.add_instance("i3", "c1", -30)
 
-        self.sc.settle_stop("i3", "manual_kill", father_id="c1")
+        self.sc.settle_stop("i3", "father_stop", father_id="c1")
 
         last = self.rows("i3")[-1]
         self.assertEqual((last["kind"], int(last["balance_after_mu"])), (ledger.STOP, -30))
 
     def test_a_second_stop_writes_no_second_stop_row(self):
-        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
-        self.assertIsNone(self.sc.settle_stop("i1", "manual_kill", father_id="c1"))
+        self.sc.settle_stop("i1", "father_stop", father_id="c1")
+        self.assertIsNone(self.sc.settle_stop("i1", "father_stop", father_id="c1"))
 
         self.assertEqual([r["kind"] for r in self.rows("i1")].count(ledger.STOP), 1)
 
     def test_the_leftover_goes_to_the_father_in_one_step_and_the_child_dies_empty(self):
-        self.assertEqual(self.sc.settle_stop("i1", "manual_kill", father_id="c1"), 400)
+        self.assertEqual(self.sc.settle_stop("i1", "father_stop", father_id="c1"), 400)
 
         child, father = self.rows("i1"), self.rows("c1")
         self.assertEqual((child[-2]["kind"], int(child[-2]["amount_mu"])), (ledger.REFUND, -400))
@@ -531,22 +531,22 @@ class SettleStopTests(_Database):
         self.assert_chained("c1")
 
     def test_a_stop_that_repeats_does_nothing(self):
-        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+        self.sc.settle_stop("i1", "father_stop", father_id="c1")
 
-        self.assertIsNone(self.sc.settle_stop("i1", "manual_kill", father_id="c1"))
+        self.assertIsNone(self.sc.settle_stop("i1", "father_stop", father_id="c1"))
         self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1400)
 
     def test_a_dead_instance_cannot_be_charged(self):
-        self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+        self.sc.settle_stop("i1", "father_stop", father_id="c1")
 
         with self.assertRaises(ledger.NoSuchAccount):
             self.sc.move_balance("i1", -1, ledger.MAINTENANCE)
 
     def test_an_unknown_instance_is_not_settled(self):
-        self.assertIsNone(self.sc.settle_stop("nobody", "manual_kill", father_id="c1"))
+        self.assertIsNone(self.sc.settle_stop("nobody", "father_stop", father_id="c1"))
 
     def test_a_father_that_is_gone_loses_nothing_that_the_books_do_not_say(self):
-        self.assertEqual(self.sc.settle_stop("i1", "manual_kill", father_id="gone"), 400)
+        self.assertEqual(self.sc.settle_stop("i1", "father_stop", father_id="gone"), 400)
 
         refund = self.rows("i1")[-2]
         self.assertEqual(refund["detail"], '{"lost":"father_gone"}')
@@ -573,7 +573,7 @@ class SettleStopTests(_Database):
     def test_an_instance_father_is_credited_too(self):
         self.add_instance("i2", "i1", 100, movements=(ledger.Movement(ledger.START, 100),))
 
-        self.sc.settle_stop("i2", "manual_kill", father_id="i1")
+        self.sc.settle_stop("i2", "father_stop", father_id="i1")
 
         self.assertEqual(self.sc.get_instance_balance("i1"), 500)
         self.assert_adds_up("i1", 500)
@@ -588,7 +588,7 @@ class SettleStopTests(_Database):
         )
 
         self.assertEqual(
-            self.sc.settle_stop("alias", "manual_kill", delegated=True, father_id="c1"), 60)
+            self.sc.settle_stop("alias", "father_stop", delegated=True, father_id="c1"), 60)
 
         self.assertEqual(self.rows("alias")[-2]["kind"], ledger.REFUND)
         self.assertEqual(self.rows("alias")[-1]["kind"], ledger.STOP)
@@ -615,7 +615,7 @@ class SettleStopTests(_Database):
         threads = [threading.Thread(target=charge) for _ in range(4)]
         for thread in threads:
             thread.start()
-        refund = self.sc.settle_stop("i1", "manual_kill", father_id="c1")
+        refund = self.sc.settle_stop("i1", "father_stop", father_id="c1")
         for thread in threads:
             thread.join()
 
@@ -1231,7 +1231,7 @@ class DescendantReadTests(_Database):
         self.assertEqual(statement.account_ref, ledger.account_ref("d"))
 
     def test_the_parent_dies_and_a_grandparent_reads_the_stop_of_the_child(self):
-        self.sc.settle_stop("p", "manual_kill", father_id="g")
+        self.sc.settle_stop("p", "father_stop", father_id="g")
         self.sc.settle_stop("c", "process_lost", father_id="p", credit=False)
 
         statement = self.read(ref=ledger.instance_ref("c"))
@@ -1414,7 +1414,7 @@ class DescendantReadTests(_Database):
 
     def test_a_stopped_delegated_parent_is_still_asked(self):
         self.delegate()
-        self.sc.settle_stop("alias", "manual_kill", delegated=True, father_id="p")
+        self.sc.settle_stop("alias", "father_stop", delegated=True, father_id="p")
         answer = balance_statement.celaut_pb2.BalanceStatement(head_seq=3)
         with patch("src.manager.statement_check.read", return_value=answer) as read, \
                 patch("src.manager.manager.get_client_id_on_other_peer", return_value="x"):
@@ -1448,7 +1448,7 @@ class DescendantReadTests(_Database):
         self.assertTrue(statement.relayed)
         self.assertTrue(balance_statement.verify(statement, self.peer_id))
 
-    def stop_statement(self, leftover, ts, lost=True, reason="manual_kill", period=0):
+    def stop_statement(self, leftover, ts, lost=True, reason="father_stop", period=0):
         """A statement of a descendant that ends with its refund and its stop row."""
         statement = balance_statement.celaut_pb2.BalanceStatement(head_seq=3)
         seq = 1
@@ -1536,7 +1536,7 @@ class DescendantReadTests(_Database):
         # operator, and a VM that went down is to be started again.
         self.delegate()
         for reason in ("process_lost", "guest_panic", "activity_window", "launch_failed",
-                       "peer_stopped", "manual_kill"):
+                       "peer_stopped", "father_stop"):
             with self.subTest(reason=reason):
                 self.sc.record_descendant_links("peer-1", [ledger.instance_ref(reason)])
                 self.assertEqual(
@@ -1603,7 +1603,7 @@ class DescendantReadTests(_Database):
 
     def test_a_stopped_descendant_below_a_stopped_parent_gives_its_service(self):
         self.set_service("c", "ab12")
-        self.sc.settle_stop("p", "manual_kill", father_id="g")
+        self.sc.settle_stop("p", "father_stop", father_id="g")
         self.sc.settle_stop("c", "process_lost", father_id="p", credit=False)
         statement = self.read(ref=ledger.instance_ref("c"))
         self.assertEqual(statement.service_id, "ab12")
@@ -1773,7 +1773,7 @@ class DescendantReadTests(_Database):
         self.assertNotIsInstance(raised.exception, ledger.NoSuchAccount)
 
     def test_the_instance_ref_of_the_token_itself_reads_that_account(self):
-        self.sc.settle_stop("c", "manual_kill", father_id="p")
+        self.sc.settle_stop("c", "father_stop", father_id="p")
         statement = balance_statement.answer(
             caller="p", token="c", instance_ref=ledger.instance_ref("c"), from_seq=1)
         self.assertEqual(statement.account_ref, ledger.account_ref("c"))
@@ -1799,7 +1799,7 @@ class DescendantReadTests(_Database):
             statement.movements.add(
                 seq=seq - 1, ts=stop_ts, kind=ledger.STOP, amount={"n": "0"},
                 balance_after={"n": "10"},
-                detail=json.dumps({"reason": "manual_kill", "leftover": "0"}))
+                detail=json.dumps({"reason": "father_stop", "leftover": "0"}))
         statement.movements.add(
             seq=seq, ts=ts, kind=ledger.MAINTENANCE, amount={"n": "-3"},
             balance_after={"n": "7"}, detail=json.dumps(detail))

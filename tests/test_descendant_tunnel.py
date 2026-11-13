@@ -245,13 +245,13 @@ class DescendantTunnelTests(_Tree):
         self.assertNotIn("ghost", str(raised.exception))
 
     def test_a_stopped_descendant_is_unavailable(self):
-        self.sc.settle_stop("d", "manual_kill", father_id="c")
+        self.sc.settle_stop("d", "father_stop", father_id="c")
         with self.assertRaises(rpc_tunnel.TunnelUnavailable):
             self.open()
 
     def test_a_stopped_parent_still_opens_the_tunnel_to_its_child(self):
         # That is the case of the issue: the parent is dead, the ancestor is the witness.
-        self.sc.settle_stop("c", "manual_kill", father_id="p")
+        self.sc.settle_stop("c", "father_stop", father_id="p")
         conn, relay = self.open()
         self.assertEqual(b"".join(r for r in relay if isinstance(r, bytes)), b"ping")
         conn.close()
@@ -259,8 +259,8 @@ class DescendantTunnelTests(_Tree):
     def test_a_stopped_grandparent_still_opens_the_tunnel_to_its_grandchild(self):
         # The holder of the token of p keeps the right to reach the tree below p, also
         # when p and c both stopped. The grandchild pays the traffic.
-        self.sc.settle_stop("c", "manual_kill", father_id="p")
-        self.sc.settle_stop("p", "manual_kill", father_id="g")
+        self.sc.settle_stop("c", "father_stop", father_id="p")
+        self.sc.settle_stop("p", "father_stop", father_id="g")
         conn, relay = self.open()
         self.assertEqual(b"".join(r for r in relay if isinstance(r, bytes)), b"ping")
         conn.close()

@@ -187,7 +187,7 @@ class StartServiceStopsAnInstanceNobodyReceivedTests(unittest.TestCase):
     def test_an_ended_call_stops_the_instance_and_sends_nothing(self):
         out, stop, respond, error = self._generate(call_is_active=False)
 
-        stop.assert_called_once_with(token="instance-token")
+        stop.assert_called_once_with(token="instance-token", reason="call_abandoned")
         respond.assert_not_called()
         self.assertIsNone(out)
         self.assertIn("The instance is stopped", str(error))

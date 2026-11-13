@@ -132,7 +132,7 @@ class FatherGatedGatewayTests(unittest.TestCase):
     def test_the_father_stops_its_instance(self):
         result, stop_instance = self.stop(FATHER)
 
-        stop_instance.assert_called_once_with(token=TOKEN)
+        stop_instance.assert_called_once_with(token=TOKEN, reason="father_stop")
         self.assertEqual(len(result), 1)
 
     def test_another_client_does_not_stop_it_with_the_token(self):

@@ -276,8 +276,9 @@ def fetch(endpoint: Tuple[str, int], working_set: int) -> bytes:
 
 def stop(service_instance) -> None:
     from src.manager.manager import stop_instance
+    from src.utils import dead_instances
 
-    stop_instance(token=service_instance.token)
+    stop_instance(token=service_instance.token, reason=dead_instances.BENCHMARK_DONE)
 
 
 # --- The startup step ----------------------------------------------------------------

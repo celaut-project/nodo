@@ -7,7 +7,7 @@ from src.gateway.client_gate import require_caller
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.manager.manager import stop_instance
-from src.utils import logger as log
+from src.utils import dead_instances, logger as log
 from protos.gateway_bee import rpc_output
 from src.utils.bee_client import BeeClient, Buffer
 from src.database.sql_connection import SQLConnection
@@ -152,7 +152,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 f"The StartService call for {self.service_hash} ended before the answer. "
                 f"Stop the instance that nobody received."
             )
-            stop_instance(token=instance.token)
+            stop_instance(token=instance.token, reason=dead_instances.CALL_ABANDONED)
             raise Exception(
                 f"The call ended before the instance of {self.service_hash} was sent. "
                 f"The instance is stopped."

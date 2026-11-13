@@ -39,7 +39,12 @@ DEFAULT_MAX_SUSPENDED_PER_FATHER = 10
 DEFAULT_MAX_SUSPENDED_DISK_GIB_PER_FATHER = 20
 
 # Reasons recorded in `death_reason`. One name for one cause.
-MANUAL_KILL = "manual_kill"
+# Who asked for a stop is part of the reason: the `stop` row of the ledger says only this.
+FATHER_STOP = "father_stop"  # StopService: the father of the instance asked for it
+OPERATOR_KILL = "operator_kill"  # `nodo kill`, run by the operator of this node
+CALL_ABANDONED = "call_abandoned"  # StartService ended before the token reached the caller
+LOW_DEMAND_PREEMPTED = "low_demand_preempted"  # the node stopped its fallback service
+BENCHMARK_DONE = "benchmark_done"  # the node stopped the instance of its own benchmark
 OUT_OF_BALANCE = "out_of_balance"
 PROCESS_LOST = "process_lost"
 GUEST_PANIC = "guest_panic"

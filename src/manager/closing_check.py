@@ -6,7 +6,7 @@ statement of the child, signed by the peer, shows what the peer did:
 
 * A **stop**: the `stop` row with `detail.reason` `activity_window`. Other reasons are not
   a decision of the peer about its hours: `process_lost` and `guest_panic` are failures,
-  `out_of_balance` is the balance, and `manual_kill` can be the stop that this node or its
+  `out_of_balance` is the balance, and `father_stop` and `operator_kill` can be the stop that this node or its
   client asked for.
 * A **hibernation**: a `maintenance` row that charges no memory (`detail.mem_limit` 0)
   after one that charged memory, with no `resource_change` row between them. A

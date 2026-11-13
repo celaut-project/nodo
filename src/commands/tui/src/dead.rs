@@ -342,7 +342,8 @@ fn display_name(row: &DeadInstance) -> String {
 /// A death somebody asked for or that the rules cause is quiet. A failure is not.
 fn reason_color(reason: &str) -> Color {
     match reason {
-        "manual_kill" | "burnall" | "peer_stopped" | "activity_window" => muted(),
+        "father_stop" | "operator_kill" | "call_abandoned" | "low_demand_preempted"
+        | "benchmark_done" | "burnall" | "peer_stopped" | "activity_window" => muted(),
         "out_of_balance" => warn(),
         "" => muted(),
         _ => bad(),
@@ -446,7 +447,7 @@ mod tests {
                  INSERT INTO local_instances VALUES ('live', 'alive', '', 's1', '5',
                         '2026-01-01 10:00:00', NULL, NULL);
                  INSERT INTO local_instances VALUES ('old', 'older', 'c1', 's1', '0',
-                        '2026-01-01 10:00:00', '2026-01-01 11:00:00', 'manual_kill');
+                        '2026-01-01 10:00:00', '2026-01-01 11:00:00', 'father_stop');
                  INSERT INTO local_instances VALUES ('new', NULL, 'c1', 's2', '7',
                         '2026-01-02 10:00:00', '2026-01-02 10:30:00', 'guest_panic');
                  INSERT INTO delegated_instances VALUES ('t', 'remote-live', 'p1', 'c1', 's1', '1',

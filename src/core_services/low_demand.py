@@ -339,7 +339,7 @@ def _record_running_token(service_id: str) -> None:
 
 
 def _stop_running_fallback() -> None:
-    """STOP (never pause) the running fallback instance, if any (Josemi decision #2).
+    """STOP (never pause) the running fallback instance, if any.
 
     There is no suspend/pause primitive in Celaut, so preemption is always a full
     ``stop_instance(token=...)`` (``src/manager/manager.py:531``). Uses the token we
@@ -365,8 +365,9 @@ def _stop_running_fallback() -> None:
 
     try:
         from src.manager.manager import stop_instance
+        from src.utils import dead_instances
 
-        stop_instance(token=token)
+        stop_instance(token=token, reason=dead_instances.LOW_DEMAND_PREEMPTED)
     except Exception:
         # Stop failed (no daemon, already gone, …) — nothing else we can safely do.
         pass

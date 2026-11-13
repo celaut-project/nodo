@@ -83,7 +83,7 @@ class StartReferenceTests(unittest.TestCase):
                 patch.object(ssi, "get_service_hex_main_hash", return_value="service"),
                 patch.object(ssi, "launch_service", side_effect=self._launch),
                 patch.object(ssi, "stop_instance",
-                             side_effect=lambda token: self.stopped.append(token))):
+                             side_effect=lambda token, reason: self.stopped.append(token))):
             patcher.start()
             self.addCleanup(patcher.stop)
 

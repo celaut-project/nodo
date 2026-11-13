@@ -1408,7 +1408,7 @@ def _revive_locked(token: str) -> bool:
     return True
 
 
-def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.MANUAL_KILL) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+def stop_instance(token: str, reason: str, credit: bool = True) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     """Stop an instance and hand its unspent deposit back, returning that figure.
 
     Both kinds of instance settle the same way, and the figure is always in this
@@ -1434,7 +1434,8 @@ def stop_instance(token: str, credit: bool = True, reason: str = dead_instances.
     instance whose father is still there, and wants the default. A father that is gone
     anyway leaves ``lost: father_gone`` in the ``refund`` row.
 
-    ``reason`` says why the instance dies. It is recorded in `death_reason`. The
+    ``reason`` says why the instance dies, and who asked for it (a name of
+    `dead_instances`, never a default). It is recorded in `death_reason`. The
     row stays in the database with `killed_at` set, and a dead instance never
     becomes alive again. A stop on an instance that is already dead does nothing.
 
@@ -1465,7 +1466,7 @@ def _tick_of_a_stop(token: str, reason: str) -> Optional[int]:
 
 
 def _stop_instance(token: str, credit: bool, reason: str) -> Optional[int]:
-    log.LOGGER('Kill service ' + token)
+    log.LOGGER(f'Kill service {token} ({reason})')
     father_id, serialized_instance = None, None
     reserved_mem_limit = 0
     

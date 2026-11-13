@@ -27,7 +27,7 @@ from src.manager.chat import ChatError, get_client_thread, receive_chat_message
 from src.manager.metrics import get_client_metrics, get_metrics
 from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
-from src.utils import activity_window
+from src.utils import activity_window, dead_instances
 from src.utils import logger as log
 from src.utils.bee_client import BeeClient
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
@@ -72,7 +72,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
             require_father(context, token, client_id)
             # A service that declared a notice is marked to stop at its limit and the tick
             # ends it: this call does not wait, and its refund is 0 (#645).
-            refunded_amount = stopping.request_stop(token=token)
+            refunded_amount = stopping.request_stop(token=token, reason=dead_instances.FATHER_STOP)
             if not refunded_amount: refunded_amount = 0
 
             log.LOGGER(f'Stop of instance {token} accepted.')

@@ -102,7 +102,7 @@ class StopInstanceMemoryAccountingTests(unittest.TestCase):
         ), patch.object(
             manager_module.IOBigData(), "unlock_ram"
         ) as mock_unlock:
-            refund = manager_module.stop_instance(token="vm-1")
+            refund = manager_module.stop_instance(token="vm-1", reason="father_stop")
 
         self.assertEqual(refund, 123)
         mock_unlock.assert_not_called()

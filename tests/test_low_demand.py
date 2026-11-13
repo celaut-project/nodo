@@ -219,8 +219,9 @@ def test_stop_running_fallback_calls_stop_instance(monkeypatch):
 
     calls = {}
 
-    def _fake_stop(token):
+    def _fake_stop(token, reason):
         calls["token"] = token
+        calls["reason"] = reason
         return 0
 
     # Inject a fake src.manager.manager so we don't import the heavy real module and
@@ -232,7 +233,7 @@ def test_stop_running_fallback_calls_stop_instance(monkeypatch):
     low_demand._state.running_token = "tok-123"
     low_demand._stop_running_fallback()
 
-    assert calls == {"token": "tok-123"}
+    assert calls == {"token": "tok-123", "reason": "low_demand_preempted"}
     # Token cleared after stopping so we don't try to stop it again.
     assert low_demand._state.running_token is None
 

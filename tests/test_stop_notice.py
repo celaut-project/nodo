@@ -555,47 +555,47 @@ class StoppingTestCase(unittest.TestCase):
 class BeginNoticeTests(StoppingTestCase):
     def test_a_notice_marks_the_row_and_writes_the_line(self):
         with mock.patch.object(stopping.time, "time", return_value=1000.0):
-            deadline = stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
+            deadline = stopping.begin_notice("a", stopping.STOP, dead_instances.FATHER_STOP)
         self.assertEqual(deadline, 1015.0)
         self.assertEqual(self.sent, [("STOP", 1015)])
         row = self.sc.get_local_stopping("a")
         self.assertEqual(row["until"], 1015.0)
         self.assertEqual(row["kind"], "stop")
-        self.assertEqual(row["reason"], dead_instances.MANUAL_KILL)
+        self.assertEqual(row["reason"], dead_instances.FATHER_STOP)
 
     def test_a_second_request_joins_the_first_and_writes_nothing(self):
-        first = stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
+        first = stopping.begin_notice("a", stopping.STOP, dead_instances.FATHER_STOP)
         second = stopping.begin_notice("a", stopping.STOP, dead_instances.ACTIVITY_WINDOW)
         self.assertEqual(first, second)
         self.assertEqual(len(self.sent), 1)
 
     def test_no_notice_when_the_wait_is_zero(self):
         with mock.patch.object(stopping.notice, "stop_grace_seconds", return_value=0):
-            self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "manual_kill"))
+            self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "father_stop"))
         self.assertEqual(self.sent, [])
         self.assertIsNone(self.sc.get_local_stopping("a"))
 
     def test_no_notice_when_the_vm_has_no_device(self):
         with mock.patch.object(stopping.notice, "has_device", return_value=False):
-            self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "manual_kill"))
+            self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "father_stop"))
         self.assertEqual(self.sent, [])
         self.assertIsNone(self.sc.get_local_stopping("a"))
 
     def test_no_notice_for_an_instance_that_is_not_a_local_one(self):
-        self.assertIsNone(stopping.begin_notice("delegated", stopping.STOP, "manual_kill"))
+        self.assertIsNone(stopping.begin_notice("delegated", stopping.STOP, "father_stop"))
 
     def test_a_line_that_cannot_be_written_still_gives_the_whole_wait(self):
         """The service declared a notice: a line that did not arrive is no reason to stop it
         before the limit. The row stays marked, and the caller waits."""
         with mock.patch.object(stopping.time, "time", return_value=1000.0), \
                 mock.patch.object(stopping.notice, "deliver", return_value=False):
-            deadline = stopping.begin_notice("a", stopping.STOP, "manual_kill")
+            deadline = stopping.begin_notice("a", stopping.STOP, "father_stop")
         self.assertEqual(deadline, 1015.0)
         self.assertEqual(self.sc.get_local_stopping("a")["until"], 1015.0)
 
     def test_a_failure_of_the_notice_never_keeps_the_node_from_stopping(self):
         with mock.patch.object(stopping.notice, "has_device", side_effect=RuntimeError("x")):
-            self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "manual_kill"))
+            self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "father_stop"))
         self.assertIsNone(self.sc.get_local_stopping("a"))
 
     def test_the_hibernation_writes_its_own_verb(self):
@@ -604,7 +604,7 @@ class BeginNoticeTests(StoppingTestCase):
 
     def test_a_suspended_instance_gets_no_notice(self):
         self.sc.hibernate_local_instance("a")
-        self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "manual_kill"))
+        self.assertIsNone(stopping.begin_notice("a", stopping.STOP, "father_stop"))
 
 
 @skip
@@ -618,11 +618,11 @@ class StopWithNoticeTests(StoppingTestCase):
         with mock.patch.object(stopping.time, "time", side_effect=lambda: clock["now"]), \
                 mock.patch.object(stopping.time, "sleep", side_effect=sleep), \
                 mock.patch.object(stopping, "stop_instance", return_value=42) as stop:
-            refund = stopping.stop_with_notice("a", reason="manual_kill")
+            refund = stopping.stop_with_notice("a", reason="operator_kill")
         self.assertEqual(refund, 42)
         self.assertGreaterEqual(clock["now"], 1015.0)
         self.assertEqual(self.sent, [("STOP", 1015)])
-        stop.assert_called_once_with(token="a", reason="manual_kill")
+        stop.assert_called_once_with(token="a", reason="operator_kill")
 
     def test_a_line_that_cannot_be_written_does_not_stop_it_before_the_limit(self):
         clock = {"now": 1000.0}
@@ -704,7 +704,7 @@ class RequestTests(StoppingTestCase):
         with mock.patch.object(stopping.time, "time", return_value=1000.0), \
                 mock.patch.object(stopping.time, "sleep") as sleep, \
                 mock.patch.object(stopping, "stop_instance") as stop:
-            self.assertEqual(stopping.request_stop("a", reason="manual_kill"), 0)
+            self.assertEqual(stopping.request_stop("a", reason="father_stop"), 0)
         sleep.assert_not_called()
         stop.assert_not_called()
         self.assertEqual(self.sent, [("STOP", 1015)])
@@ -713,11 +713,11 @@ class RequestTests(StoppingTestCase):
 
     def test_the_tick_ends_the_stop_that_a_request_marked(self):
         with mock.patch.object(stopping.time, "time", return_value=1000.0):
-            stopping.request_stop("a", reason="manual_kill")
+            stopping.request_stop("a", reason="father_stop")
         with mock.patch.object(stopping, "stop_instance") as stop:
             self.assertEqual(stopping.finish_due_stops(now=1014.0), 0)
             self.assertEqual(stopping.finish_due_stops(now=1015.0), 1)
-        stop.assert_called_once_with(token="a", reason="manual_kill")  # the father is credited
+        stop.assert_called_once_with(token="a", reason="father_stop")  # the father is credited
 
     def test_a_second_stop_joins_the_first_and_writes_nothing(self):
         stopping.request_stop("a")
@@ -727,8 +727,8 @@ class RequestTests(StoppingTestCase):
     def test_a_stop_with_no_declaration_is_at_once_and_returns_the_refund(self):
         with mock.patch.object(stopping.notice, "has_device", return_value=False), \
                 mock.patch.object(stopping, "stop_instance", return_value=42) as stop:
-            self.assertEqual(stopping.request_stop("a", reason="manual_kill"), 42)
-        stop.assert_called_once_with(token="a", reason="manual_kill")
+            self.assertEqual(stopping.request_stop("a", reason="father_stop"), 42)
+        stop.assert_called_once_with(token="a", reason="father_stop")
         self.assertEqual(self.sent, [])
 
     def test_a_hibernation_marks_the_instance_and_returns_at_once(self):
@@ -779,7 +779,7 @@ class TickTests(StoppingTestCase):
     def test_a_stop_always_credits_the_father(self):
         """No row says otherwise: only ``nodo burnall`` stops with ``credit=False``, and it
         gives no notice."""
-        stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
+        stopping.begin_notice("a", stopping.STOP, dead_instances.FATHER_STOP)
         columns = [r["name"] for r in self.sc._execute("PRAGMA table_info(local_instances)").fetchall()]
         self.assertNotIn("stopping_credit", columns)
         with mock.patch.object(stopping, "stop_instance") as stop:
@@ -822,14 +822,14 @@ class TickTests(StoppingTestCase):
         stop.assert_called_once_with(token="a", reason=dead_instances.ACTIVITY_WINDOW)
 
     def test_a_failure_does_not_take_the_tick_down(self):
-        stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
+        stopping.begin_notice("a", stopping.STOP, dead_instances.FATHER_STOP)
         with mock.patch.object(stopping, "stop_instance", side_effect=RuntimeError("busy")):
             self.assertEqual(stopping.finish_due_stops(now=10 ** 12), 1)
 
     def test_a_stopping_instance_is_not_scored_as_lost_and_is_not_revived(self):
         """The VM ends by itself (PID 1 exits and the guest panics): the stop ends, with no
         penalty and no revive."""
-        stopping.begin_notice("a", stopping.STOP, dead_instances.MANUAL_KILL)
+        stopping.begin_notice("a", stopping.STOP, dead_instances.FATHER_STOP)
 
         def vm_maintain(vmachine_id, debug_mode, remove_and_penalize):
             remove_and_penalize(vmachine_id=vmachine_id, reason=dead_instances.GUEST_PANIC)
@@ -1003,7 +1003,7 @@ class CallerTableTests(unittest.TestCase):
                     mock.patch.object(gateway.BeeClient, "respond",
                                       side_effect=lambda message_iterator: iter([message_iterator])):
                 out = list(gateway.Gateway.StopService(mock.Mock(), iter(()), mock.Mock()))
-            req.assert_called_once_with(token="a")
+            req.assert_called_once_with(token="a", reason="father_stop")
             wait.assert_not_called()
             self.assertEqual(len(out), 1)
             self.assertEqual(out[0], pb.Refund(amount=gateway.to_amount(refund)))
@@ -1011,3 +1011,23 @@ class CallerTableTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StopReasonTests(StoppingTestCase):
+    """Who asked for a stop is in its reason, so `nodo kill` and a father are told apart."""
+
+    def test_a_father_request_records_father_stop(self):
+        with mock.patch.object(stopping, "stop_instance", return_value=7) as stop:
+            stopping.request_stop("nonlocal")
+        stop.assert_called_once_with(token="nonlocal", reason="father_stop")
+
+    def test_the_operator_kill_records_operator_kill(self):
+        with mock.patch.object(stopping, "stop_instance", return_value=7) as stop:
+            stopping.stop_with_notice("nonlocal")
+        stop.assert_called_once_with(token="nonlocal", reason="operator_kill")
+
+    def test_stop_instance_has_no_default_reason(self):
+        import inspect
+        from src.manager import manager
+        self.assertIs(inspect.signature(manager.stop_instance).parameters["reason"].default,
+                      inspect.Parameter.empty)

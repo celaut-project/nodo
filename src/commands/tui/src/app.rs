@@ -13010,7 +13010,7 @@ ergo: Cold Wallet: 9cold\n";
                      INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
                      VALUES ('alive', 'w', '10', NULL, NULL);
                      INSERT INTO local_instances (id, name, balance_mu, killed_at, death_reason)
-                     VALUES ('dead', 'x', '10', '2026-01-01 10:00:00', 'manual_kill');
+                     VALUES ('dead', 'x', '10', '2026-01-01 10:00:00', 'father_stop');
                      CREATE TABLE delegated_instances (token_delegation TEXT, id TEXT,
                         peer_id TEXT, father_id TEXT, service_id TEXT, launched_at DATETIME,
                         killed_at DATETIME, death_reason TEXT);

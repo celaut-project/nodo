@@ -47,7 +47,7 @@ class DeadInstanceTests(unittest.TestCase):
     def test_killed_instance_is_not_alive(self):
         self._add_local("a")
         self.assertTrue(self.sc.internal_instance_exists("a"))
-        self.assertTrue(self.sc.mark_local_killed("a", "manual_kill"))
+        self.assertTrue(self.sc.mark_local_killed("a", "father_stop"))
         self.assertFalse(self.sc.internal_instance_exists("a"))
         self.assertEqual(self.sc.get_all_internal_containers_ids(), [])
         self.assertEqual(self.sc.get_committed_resources(), [])
@@ -55,13 +55,13 @@ class DeadInstanceTests(unittest.TestCase):
 
     def test_kill_is_idempotent(self):
         self._add_local("a")
-        self.assertTrue(self.sc.mark_local_killed("a", "manual_kill"))
+        self.assertTrue(self.sc.mark_local_killed("a", "father_stop"))
         self.assertFalse(self.sc.mark_local_killed("a", "out_of_balance"))
-        self.assertEqual(self.sc.get_dead_local_instances()[0]["death_reason"], "manual_kill")
+        self.assertEqual(self.sc.get_dead_local_instances()[0]["death_reason"], "father_stop")
 
     def test_dead_row_cannot_be_revived(self):
         self._add_local("a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         with self.assertRaises(sqlite3.Error):
             self.sc._execute("UPDATE local_instances SET killed_at = NULL WHERE id = 'a'")
         with self.assertRaises(sqlite3.Error):
@@ -69,13 +69,13 @@ class DeadInstanceTests(unittest.TestCase):
 
     def test_balance_of_dead_instance_is_not_spent(self):
         self._add_local("a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         with self.assertRaises(ledger.NoSuchAccount):
             self.sc.move_balance("a", -1, ledger.MAINTENANCE, allow_debt=False)
 
     def test_name_of_dead_instance_can_be_used_again(self):
         self._add_local("a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         self._add_local("b")
         with self.assertRaises(sqlite3.IntegrityError):
             self._add_local("c")
@@ -89,7 +89,7 @@ class DeadInstanceTests(unittest.TestCase):
 
     def test_dead_reference_resolves_to_newest_death(self):
         self._add_local("a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         self._add_local("b")
         self.sc.mark_local_killed("b", "out_of_balance")
         self._date_death("a", "2026-01-01 00:00:00")
@@ -100,7 +100,7 @@ class DeadInstanceTests(unittest.TestCase):
     def test_prune_by_count_keeps_the_newest(self):
         for index in range(4):
             self._add_local(f"id{index}", name=f"n{index}")
-            self.sc.mark_local_killed(f"id{index}", "manual_kill")
+            self.sc.mark_local_killed(f"id{index}", "father_stop")
             self._date_death(f"id{index}", f"2026-01-0{index + 1} 00:00:00")
         # The policy by count. The default keeps a row whose account has movements.
         self.assertEqual(self.sc.prune_dead_local_instances(max_age_days=0, max_rows=2), [])
@@ -114,7 +114,7 @@ class DeadInstanceTests(unittest.TestCase):
     def test_prune_by_age_ignores_live_instances(self):
         self._add_local("live", name="live")
         self._add_local("old", name="old")
-        self.sc.mark_local_killed("old", "manual_kill")
+        self.sc.mark_local_killed("old", "father_stop")
         self._date_death("old", "2000-01-01 00:00:00")
         self.assertEqual(self.sc.prune_dead_local_instances(
             max_age_days=14, max_rows=0, keep_statements=False), ["old"])
@@ -122,7 +122,7 @@ class DeadInstanceTests(unittest.TestCase):
 
     def test_prune_dry_run_deletes_nothing(self):
         self._add_local("a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         would = self.sc.prune_dead_local_instances(
             max_age_days=0, max_rows=0, dry_run=True, delete_all=True
         )
@@ -132,7 +132,7 @@ class DeadInstanceTests(unittest.TestCase):
     def test_prune_all_deletes_every_dead_row_and_no_live_row(self):
         self._add_local("live", name="live")
         self._add_local("a", name="a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         deleted = self.sc.prune_dead_local_instances(max_age_days=0, max_rows=0, delete_all=True)
         self.assertEqual(deleted, ["a"])
         self.assertTrue(self.sc.internal_instance_exists("live"))

@@ -135,7 +135,7 @@ def wait_until(token: str, deadline: float) -> None:
 
 def stop_with_notice(
     token: str,
-    reason: str = dead_instances.MANUAL_KILL,
+    reason: str = dead_instances.OPERATOR_KILL,
 ) -> Optional[int]:
     """``stop_instance``, after a notice when the service has one. Returns the refund.
 
@@ -156,7 +156,7 @@ def stop_with_notice(
 
 def request_stop(
     token: str,
-    reason: str = dead_instances.MANUAL_KILL,
+    reason: str = dead_instances.FATHER_STOP,
 ) -> Optional[int]:
     """The stop that a father asks for through ``StopService``. It never waits.
 
@@ -209,7 +209,7 @@ def finish_stop(token: str, stopping: dict) -> None:
                 return
         stop_instance(
             token=token,
-            reason=stopping["reason"] or dead_instances.MANUAL_KILL,
+            reason=stopping["reason"],
         )
     except Exception as e:
         log.LOGGER(f"Error ending the stop of {token}: {e}")

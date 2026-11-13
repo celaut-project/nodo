@@ -71,6 +71,7 @@ class _Harness:
                 patch.object(manager.dead_instances, "write_death_record"), \
                 patch.object(manager, "resolve_instance_token", return_value=None), \
                 patch.object(manager.IOBigData, "log_snapshot", lambda *a, **k: None):
+            kwargs.setdefault("reason", "father_stop")
             return manager.stop_instance(token=CHILD, credit=credit, **kwargs)
 
 

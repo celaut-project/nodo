@@ -103,7 +103,7 @@ class WhatIsNotScoredTests(unittest.TestCase):
 
     def test_failures_and_manual_stops_are_not_stops_of_the_hours(self):
         for reason in (dead_instances.PROCESS_LOST, dead_instances.GUEST_PANIC,
-                       dead_instances.MANUAL_KILL, dead_instances.PEER_STOPPED):
+                       dead_instances.FATHER_STOP, dead_instances.PEER_STOPPED):
             self.assertEqual(closing_check.judge([_stop(3, BEFORE, reason)], "refuse", 0), [], reason)
 
     def test_a_hibernation_that_the_instance_asked_for_is_not_the_peers(self):

@@ -428,7 +428,7 @@ class ResumeRowTests(unittest.TestCase):
     def test_resuming_a_running_or_dead_instance_does_nothing(self):
         self.assertFalse(self.sc.resume_local_instance("a"))
         self.sc.suspend_local_instance("a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         self.assertFalse(self.sc.resume_local_instance("a"))
 
     def test_the_instance_keeps_its_address_through_a_suspension(self):

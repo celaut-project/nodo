@@ -65,7 +65,7 @@ class SuspensionRowTests(unittest.TestCase):
 
     def test_a_dead_instance_cannot_be_suspended(self):
         self._add_local("a")
-        self.sc.mark_local_killed("a", "manual_kill")
+        self.sc.mark_local_killed("a", "father_stop")
         self.assertFalse(self.sc.suspend_local_instance("a"))
 
     def test_the_tick_only_sees_the_instances_that_should_be_running(self):
@@ -101,7 +101,7 @@ class SuspensionRowTests(unittest.TestCase):
     def test_a_kill_still_ends_a_suspended_instance_for_good(self):
         self._add_local("a")
         self.sc.suspend_local_instance("a")
-        self.assertTrue(self.sc.mark_local_killed("a", "manual_kill"))
+        self.assertTrue(self.sc.mark_local_killed("a", "father_stop"))
         self.assertEqual(self.sc.get_suspended_local_instances(), [])
         self.assertEqual(self.sc.get_all_internal_containers_ids(), [])
 

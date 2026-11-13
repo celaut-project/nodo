@@ -130,7 +130,7 @@ class ReviveAgainstStopTests(unittest.TestCase):
         reviver = threading.Thread(target=manager.revive_instance, args=("vm",))
         reviver.start()
         self.assertTrue(self.booting.wait(5))
-        manager.stop_instance(token="vm")
+        manager.stop_instance(token="vm", reason="father_stop")
         reviver.join(5)
         # The stop came after the boot, so it is the one that takes down the new VM.
         self.assertEqual([e for e in self.events if not isinstance(e, tuple)],
