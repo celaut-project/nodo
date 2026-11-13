@@ -1,6 +1,6 @@
 import json
 import traceback
-from typing import Optional, Callable, List, Dict
+from typing import Optional, Callable, List, Dict, Sequence
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database import ledger
@@ -378,10 +378,15 @@ def local_execution(
             vmachine_id: str,
             vmachine_ip: str,
             resolved_resources: celaut_pb2.Sysresources,
+            kernel_hash: str = "",
+            device_chips: Sequence[str] = (),
     ) -> None:
         nonlocal registered_id
+        # The receipt names what the node reserved: the resolved resources, the guest
+        # kernel and the chips attached at the start (#419).
         start_receipts[vmachine_id] = _start_receipt(
             token=vmachine_id, service_id=service_id, config=config, initial_mu=initial_mu,
+            resources=resolved_resources, kernel=kernel_hash, devices=device_chips,
         )
         # Disk follows the resolved figure: the manifest has to declare it, but what
         # gets persisted is the size of the image the virtualizer actually handed the
@@ -581,7 +586,10 @@ def execution_cause(token: str, receipt=None) -> Optional[dict]:
 
 def _start_receipt(token: str, service_id: Optional[str],
                    config: celaut_pb2.Configuration,
-                   initial_mu: int) -> Optional[celaut_pb2.ExecutionReceipt]:
+                   initial_mu: int,
+                   resources: Optional[celaut_pb2.Sysresources] = None,
+                   kernel: str = "",
+                   devices: Sequence[str] = ()) -> Optional[celaut_pb2.ExecutionReceipt]:
     """The signed start receipt (#419), or None.
 
     ``config`` is the Configuration the service got, after ``extract_instance_name``
@@ -589,7 +597,10 @@ def _start_receipt(token: str, service_id: Optional[str],
     value, secrets too: it is salted, and the values never leave the node in it.
 
     ``delegate_execution`` uses it too, with the alias as the token: the client does
-    not know about the delegation, so this node signs as the executor.
+    not know about the delegation, so this node signs as the executor. It gives no
+    ``resources``, ``kernel`` or ``devices``: the peer reserved them, and this node does
+    not attest what it did not do.
+
 
     A ``service_id`` that is empty or not hex gives no receipt and a warning: a signed
     receipt with no service in it fails every check. A receipt that cannot be built
@@ -614,6 +625,7 @@ def _start_receipt(token: str, service_id: Optional[str],
             ),
             envs=keyvalue.to_dict(config.environment_variables),
             initial_mu=initial_mu,
+            resources=resources, kernel=kernel, devices=devices,
         )
     except Exception as e:
         log.LOGGER(f"WARNING: no start receipt for {token}: {e}")

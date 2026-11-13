@@ -232,7 +232,7 @@ def execute(
     config: Optional[celaut.Configuration],
     system_resources: celaut.Service.Container.Resources,
     father_id: str,
-    register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
+    register_instance: Optional[Callable[..., None]] = None,
     revive_id: Optional[str] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
     """Boot ``service`` as a microVM and return (vmachine_id, vm_ip, resolved).
@@ -247,8 +247,10 @@ def execute(
     manifest declared. A failed revive tears the guest down but never touches the disk:
     the instance is still there to be tried again, and the disk is all it has.
 
-    ``register_instance`` is called once, with those same three values, the instant
-    the hypervisor process exists -- not when this function returns. A guest starts
+    ``register_instance`` is called once, with those same three values and, by keyword,
+    the ``kernel_hash`` the guest boots and the ``device_chips`` attached to it (for the
+    start receipt, #419), the instant the hypervisor process exists -- not when this
+    function returns. A guest starts
     running code while the rest of this function is still waiting for its network,
     applying firewall rules and recording DNAT, and a service's first act is often
     a call back to the node: an observed one asked for ModifyServiceSystemResources
@@ -625,7 +627,12 @@ def execute(
             exported_shares=shares.exported_share_ids,
         )
         if register_instance:
-            register_instance(vmachine_id, vm_ip, resolved_resources)
+            register_instance(
+                vmachine_id, vm_ip, resolved_resources,
+                kernel_hash=(devices[0].kernel_hash if devices
+                             else str(bundle.get("kernel_hash") or "")),
+                device_chips=[d.chip for d in devices],
+            )
             log.LOGGER(f"[CH][{vmachine_id}] instance registered before the guest could call in")
 
         time.sleep(1.0)
