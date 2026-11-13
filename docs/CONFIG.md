@@ -58,6 +58,7 @@ the same second get a snapshot each instead of the second overwriting the first'
 |---|---|---|
 | `nodo tui` | whatever you edit, in one `yq` invocation | Restarts the node, and reverts the file if it does not come back. |
 | A CLI command — `nodo sync_reputation_proof`, `nodo submit_reputation` | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | Restarts a serving node once it sees the file changed. Needs root; if the restart cannot happen the command says so and names the fix. |
+| `ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG` | `"0.1"` | ERG (decimal string) that a proof must hold for the ledger peer search (`communication.DISCOVER_PEERS_ON_LEDGERS`) to take the node that announced itself with it. The ERG cannot be taken out of the proof. A value that is not a number gives the default. |
 | The daemon itself | `ledgers.ergo.NODE_URL` when the configured Ergo node stops answering, the proof id when it submits one, and the `-1`s of `benchmark.BY_ARCH` once the benchmark core service has measured them | None needed — the process that wrote the value is the one running on it, and the value is live in memory the moment it is set. |
 | First load, on any process | resolves `auto` values (`network.GATEWAY_PORT`, `identity.MNEMONIC`, `ledgers.ergo.WALLET_MNEMONIC`) and interpolated paths | None — this happens before the node serves. |
 
@@ -267,6 +268,9 @@ the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
 | `communication.SHARE_KNOWN_PEERS` | `true` | Answer `Gateway.ListPeers` with known peers and periodically push their announcements with `IntroducePeer`. Off returns an empty list and disables push. |
 | `communication.DISCOVER_PEERS_VIA_GOSSIP` | `true` | Periodically pull advertisements from one randomly selected known peer. Each is registered through normal signature verification and anti-replay checks. |
 | `communication.MAX_PEERS_PER_GOSSIP_RESPONSE` | `100` | Maximum advertisements served per list request; also the local cap on messages consumed from a remote list, including rejected ones. Zero disables list/pull work. |
+| `communication.DISCOVER_PEERS_ON_LEDGERS` | `true` | At the start, read the reputation ledgers for nodes that announced themselves and register them as known peers (#494). See [`ERGO.md`](ERGO.md#finding-peers-on-the-ledger). |
+| `communication.MAX_PEERS_FROM_LEDGERS` | `10` | The most new peers that one run adds. Zero switches the search off. |
+| `communication.LEDGER_DISCOVERY_TIMEOUT_SECONDS` | `60` | Time for all the reads of one run. Each request to the explorer has its own deadline of 30 s. |
 | `communication.MAX_PEERS_PER_GOSSIP_PUSH` | `20` | Maximum other peers introduced to one random target per tick. Zero disables push work. |
 | `communication.GOSSIP_INTERVAL_SECONDS` | `300` | Independent pull/push intervals, measured with a monotonic clock. Invalid or nonpositive values use 300 seconds. |
 

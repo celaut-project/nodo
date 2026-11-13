@@ -208,3 +208,19 @@ def _opinion_readers() -> dict:
     from src.reputation_system.envs import LEDGER
 
     return {LEDGER: opinions_about}
+
+
+def _peer_readers() -> dict:
+    """Ledger tag -> the function that lists the well-reputed peers that it holds (#494).
+
+    The same shape as :func:`_opinion_readers`, and the startup code reads only this: a
+    second ledger is one more entry here. A reader is called as
+    ``reader(limit, deadline, exclude)``. ``deadline`` is a ``time.monotonic()`` value,
+    ``exclude`` is the set of peer ids that the node already has. It returns at most
+    ``limit`` signed ``celaut_pb2.Peer`` claims from the proofs that pass the minimum of
+    that ledger, and raises when the ledger cannot be read.
+    """
+    from src.reputation_system.contracts.ergo.peers import well_reputed_peers
+    from src.reputation_system.envs import LEDGER
+
+    return {LEDGER: well_reputed_peers}

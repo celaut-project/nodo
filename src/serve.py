@@ -513,6 +513,18 @@ def serve():
     else:
         _verify_gateway_ports(server, port, plaintext_port)
 
+    # A first set of peers from the reputation ledgers (#494). After the server is up, so
+    # that the peers we introduce ourselves to can reach us; on a daemon thread, because
+    # it reads an explorer. It never raises, and it has a deadline.
+    try:
+        from src.manager.ledger_discovery import startup_discovery
+
+        threading.Thread(
+            target=startup_discovery, name='ledger-peer-discovery', daemon=True,
+        ).start()
+    except Exception as e:
+        log.LOGGER(f'Could not start the ledger peer discovery: {e}')
+
     # Measure any per-core benchmark score still at -1 (#459). After the server is up,
     # because the benchmark core service is launched through it; on a daemon thread
     # and fully guarded, so it can neither hold up nor break startup or billing. A node

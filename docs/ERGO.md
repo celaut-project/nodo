@@ -206,6 +206,57 @@ not verify against it, is refused: `add_peer_instance` returns nothing and store
 and `accept_peer_refresh` rejects a `GetPeerInfo` response not signed by the peer whose
 address it was fetched from. Every peer id in the database is therefore a public key.
 
+### Finding peers on the ledger
+
+A node needs at least one peer to start. The reputation contract holds the signed
+announcement of every node that published a proof with a network address, so a node reads
+them at its start and does not need a peer that the operator knows (issue #494).
+
+**Where the data is.** The box that declares a node has R4 = the CELAUT node type
+(`ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID`), R5 = the identity public key of the
+node, and R9 = its signed `Peer` message (JSON). The reader is
+`src/reputation_system/contracts/ergo/peers.py`. A box whose R9 is not a `Peer`, or whose
+`Peer.public_key` is not R5, is not read.
+
+**What the node does.** `src/manager/ledger_discovery.py`, on a daemon thread after the
+gateway is up:
+
+1. The explorer search for boxes of the node type. The nodes found are put in a random
+   order, so that new nodes do not all choose the same peers.
+2. A proof must hold at least `ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG`. Minting
+   a proof costs nothing, and the ERG in it cannot be taken out, so this is the cost of a
+   fake peer. A proof below it is ignored. At most `communication.MAX_PEERS_FROM_LEDGERS`
+   new peers are taken. A peer that the node already has costs no request.
+3. A claim with an address that is not global is refused. The signature covers every
+   address, so an address cannot be removed from a claim. Not global: private, loopback,
+   link-local, shared CGNAT space, or a local name. `.onion` names and public DNS names
+   pass.
+4. `manager.add_peer_instance(..., learned_via_gossip=True)` registers it. It checks the
+   signature and that the id is the key, as for every peer. The peer is **a claim, not a
+   proof**: it starts with the same local score as any new peer, `ô` applies from the next
+   index refresh, and the automatic refill does not fund it until the operator chooses it
+   (`nodo connect`, or a payment).
+5. If `communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS` is true, the node sends its own
+   announcement to the peer with `IntroducePeer`. This is also the test that the peer
+   answers. If nobody answers (no channel, no `client_id`, no reply, a timeout), the peer
+   that this run registered is **removed**, as `nodo disconnect` does: an address on a
+   ledger can be old, and a dead peer would be tried by the maintenance loop for ever and
+   lose reputation for nothing. A peer that answers `REFUSED` is alive and stays. A
+   failure on this side (the node cannot make its own announcement) says nothing about the
+   peer, so it stays too. A peer that was already known is never removed. With
+   `SELF_ANNOUNCE_TO_CONNECTING_PEERS` false there is no test, and every peer that passes
+   the checks stays.
+
+**Failure is not fatal.** An explorer that does not answer, a deadline
+(`communication.LEDGER_DISCOVERY_TIMEOUT_SECONDS`, and 30 s for each request), a peer that
+refuses the introduction: each is a line in the log, and the node starts as before. Off:
+`communication.DISCOVER_PEERS_ON_LEDGERS: false`. In hidden mode the explorer is read
+through Tor (`routing.tor.LEDGER_VIA_TOR`).
+
+The second ledger is one more entry in `interface._peer_readers()`. The search is one
+function, `ledger_discovery.discover_peers_from_ledgers()`, so a CLI command or a button of
+the TUI can call it later.
+
 ### Sharing Information Between Celaut Nodes
 
 When a node shares information with another, it provides two key elements:

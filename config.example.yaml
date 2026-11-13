@@ -1291,6 +1291,16 @@ communication:
   MAX_PEERS_PER_GOSSIP_RESPONSE: 100  # Also bounds how many replies a pull consumes.
   MAX_PEERS_PER_GOSSIP_PUSH: 20
   GOSSIP_INTERVAL_SECONDS: 300
+
+  # At the start, read the reputation ledgers (Ergo today) for nodes that announced
+  # themselves with a proof, register the ones that pass, and introduce this node to them
+  # (issue #494). It needs no peer that you know. A node found this way is a claim: it is
+  # registered like a gossip peer (the signature is checked, the local score starts at
+  # zero, the automatic refill does not fund it until you choose it). A claim with an
+  # address that is not global is refused. A failure only writes a line to the log.
+  DISCOVER_PEERS_ON_LEDGERS: true
+  MAX_PEERS_FROM_LEDGERS: 10  # New peers per run. Zero switches it off.
+  LEDGER_DISCOVERY_TIMEOUT_SECONDS: 60  # For all the reads of a run together.
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
 
@@ -1633,6 +1643,10 @@ ledgers:
       REPUTATION_PROOF_ID: ""
       PLAIN_TEXT_TYPE_NFT_ID: "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
       CELAUT_NODE_TYPE_NFT_ID: "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
+      # ERG (decimal string) that a proof must hold for `communication.DISCOVER_PEERS_ON_LEDGERS`
+      # to take the node that announced itself with it. The ERG cannot be taken out of the
+      # proof, and minting a proof is free: this is the cost of a fake peer.
+      DISCOVERY_MIN_LOCKED_ERG: "0.1"
     payments:
       # What one nanoERG buys, in MU. This is the ONE place the node's unit of account
       # meets real money; it is what peers are told as ContractRate.mu_per_unit, so they
