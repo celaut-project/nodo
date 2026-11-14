@@ -3,9 +3,15 @@
 A ledger is declared the way every replaceable component in celaut is -- ``tags``,
 ``prose``, ``formal`` -- and, like a protocol layer (``src/identity/transport_stack.py``),
 it has to state everything two nodes must have agreed on to use it together, and nothing
-that each one chooses for itself. A wallet's derivation path, a payee's confirmation
-count, its deposit-token lifetime or the supply of a reputation proof are each node's
-own choice and are not here.
+that each one chooses for itself. A wallet's derivation path, a payee's deposit-token
+lifetime or the supply of a reputation proof are each node's own choice and are not here.
+
+One kind of own choice *is* here, because a payer cannot pay correctly without it: a
+**payee parameter** (``PAYEE_PARAMETERS``). It is a value the payee selects and states
+for the payer -- today only ``payment.min_confirmations`` on Bitcoin (#626). It is not
+part of what two nodes must agree on, so a comparison of two payment declarations
+(``same_payment_ledger``) ignores it: two nodes that wait for a different number of
+confirmations still settle on the same ledger.
 
 A descriptor has two parts:
 
@@ -36,6 +42,21 @@ _CELAUT_NODE_TYPE_NFT_KEY = "ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID"
 _PLAIN_TEXT_TYPE_NFT_KEY = "ledgers.ergo.reputation.PLAIN_TEXT_TYPE_NFT_ID"
 
 Part = Tuple[Dict[str, str], str]
+
+# The confirmations a Bitcoin payee needs before it accepts a payment (#626).
+MIN_CONFIRMATIONS_KEY = "payment.min_confirmations"
+_BITCOIN_MIN_CONFIRMATIONS_CONFIG = "ledgers.bitcoin.payments.MIN_CONFIRMATIONS"
+
+# Keys of a payment declaration that the payee selects for itself and states for the
+# payer. They are not part of the ledger's identity: `same_payment_ledger` ignores them.
+PAYEE_PARAMETERS = frozenset({MIN_CONFIRMATIONS_KEY})
+
+# The largest ``payment.min_confirmations`` a payer accepts from a payee. A Bitcoin block
+# comes about every 10 minutes and a deposit token lives 6 hours
+# (``contracts.bitcoin.interface.DEPOSIT_TOKEN_TTL``), so a payee that wants more than 36
+# confirmations wants more than the token usually lives for: the payer would pay and the
+# token would expire before the payer can tell the payee. The same limit as chatui.
+MAX_PAYEE_MIN_CONFIRMATIONS = 36
 
 
 def _ledger(tag: str, *parts: Part) -> celaut_pb2.Contract.Ledger:
@@ -224,7 +245,22 @@ def _bitcoin_network() -> Part:
     )
 
 
+def bitcoin_min_confirmations() -> int:
+    """``ledgers.bitcoin.payments.MIN_CONFIRMATIONS``: 1 or more, 1 when it is not set.
+
+    The one place this value is read. The Bitcoin contract validates with it
+    (``contracts.bitcoin.interface.MIN_CONFIRMATIONS``) and the declaration states it, so
+    the two cannot be different.
+    """
+    try:
+        value = int(ConfigManager().get(_BITCOIN_MIN_CONFIRMATIONS_CONFIG, 1) or 1)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, value)
+
+
 def _bitcoin_payment() -> Part:
+    min_confirmations = bitcoin_min_confirmations()
     return {
         "payment.rate.unit": "ContractRate.mu_per_unit is MU per satoshi",
         "payment.xattr.script": "scriptPubKey bytes that receive the payment",
@@ -236,8 +272,12 @@ def _bitcoin_payment() -> Part:
                           "in satoshi",
         "payment.deposit_token": "an OP_RETURN output of the same transaction; its data "
                                  "is the UTF-8 deposit token, at most 80 bytes",
+        # Unchanged from before #626, so a node with this declaration and one from
+        # before it still match: the number is the payee parameter below, and
+        # `same_payment_ledger` does not compare it.
         "payment.accepted": "the transaction is confirmed; the payee selects how many "
                             "confirmations",
+        MIN_CONFIRMATIONS_KEY: str(min_confirmations),
     }, (
         "PAYMENT. ContractRate.mu_per_unit gives the MU for one satoshi. The script "
         "attribute is the scriptPubKey that receives the payment. The token_id attribute "
@@ -247,14 +287,91 @@ def _bitcoin_payment() -> Part:
         "To pay, make one transaction. It must have one output to the script attribute "
         "with the amount or more, in satoshi. It must also have one OP_RETURN output. The "
         "data of the OP_RETURN output is the deposit token in UTF-8, 80 bytes or less. "
-        "The payee accepts the payment when the transaction is confirmed. The payee "
-        "selects how many confirmations it needs."
+        "The payee accepts the payment when the transaction has "
+        f"{min_confirmations} confirmations or more (payment.min_confirmations). The "
+        "payee selects this number. Wait for this number of confirmations, then call "
+        "Payable. If you call Payable too early, the payee does not refuse the deposit "
+        "token. It keeps the token pending and gives the error \"not confirmed yet\". "
+        "Call Payable again before the token expires."
     )
 
 
 def bitcoin_payment_ledger() -> celaut_pb2.Contract.Ledger:
     """Bitcoin, as a payment contract carries it."""
     return _ledger(BITCOIN, _bitcoin_network(), _bitcoin_payment())
+
+
+# ---------------------------------------------------------------------------------
+# Payee parameters
+# ---------------------------------------------------------------------------------
+
+def _formal_lines(formal: bytes):
+    return bytes(formal).split(b"\n")
+
+
+def _without_payee_parameters(formal: bytes) -> bytes:
+    """``formal`` less its payee-parameter lines, every other byte as it was."""
+    return b"\n".join(
+        line for line in _formal_lines(formal)
+        if line.split(b"=", 1)[0].decode("utf-8", "replace") not in PAYEE_PARAMETERS
+    )
+
+
+def same_payment_ledger(a, b) -> bool:
+    """Whether two payment declarations name the same ledger.
+
+    ``node_identity.same_declaration`` (a non-empty ``formal`` on both sides, equal byte
+    for byte), but without the payee-parameter lines: a payee states them for the payer,
+    and two nodes that select different values are still on the same ledger. Each other
+    line stays compared byte for byte, so this is as strict as before for everything two
+    nodes must agree on.
+    """
+    formal_a, formal_b = bytes(a.formal), bytes(b.formal)
+    if not formal_a or not formal_b:
+        return False
+    return _without_payee_parameters(formal_a) == _without_payee_parameters(formal_b)
+
+
+def payee_parameter(ledger, key: str) -> Optional[str]:
+    """The value of the payee parameter ``key`` in ``ledger``, or None if it is not there."""
+    if ledger is None:
+        return None
+    prefix = f"{key}=".encode("utf-8")
+    for line in _formal_lines(getattr(ledger, "formal", b"") or b""):
+        if line.startswith(prefix):
+            return line[len(prefix):].decode("utf-8", "replace")
+    return None
+
+
+def declared_min_confirmations(ledger) -> Optional[int]:
+    """``payment.min_confirmations`` of a payee's declaration, or None if it gives none.
+
+    Raises ValueError for a value that is not an integer from 1 to
+    ``MAX_PAYEE_MIN_CONFIRMATIONS``. Such a payee cannot be paid correctly, and the
+    payer must not guess a number for it.
+    """
+    value = payee_parameter(ledger, MIN_CONFIRMATIONS_KEY)
+    if value is None:
+        return None
+    try:
+        number = int(value.strip())
+    except ValueError:
+        raise ValueError(f"{MIN_CONFIRMATIONS_KEY}={value!r} is not an integer")
+    if not 1 <= number <= MAX_PAYEE_MIN_CONFIRMATIONS:
+        raise ValueError(
+            f"{MIN_CONFIRMATIONS_KEY}={number} is not from 1 to "
+            f"{MAX_PAYEE_MIN_CONFIRMATIONS}"
+        )
+    return number
+
+
+def payee_parameters_reason(ledger) -> Optional[str]:
+    """Why the payee parameters of ``ledger`` cannot be used, or None when they can."""
+    try:
+        declared_min_confirmations(ledger)
+    except ValueError as e:
+        return str(e)
+    return None
 
 
 # ---------------------------------------------------------------------------------

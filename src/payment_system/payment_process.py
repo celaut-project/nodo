@@ -6,7 +6,12 @@ from threading import Lock
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from contextlib import nullcontext
-from src.payment_system.exceptions import DoubleSpendingAttempt
+from src.payment_system.exceptions import (
+    NOT_CONFIRMED_YET,
+    DoubleSpendingAttempt,
+    PaymentNotConfirmed,
+)
+from src.payment_system import payee
 from src.payment_system.ledger_balancer import ledger_balancer
 
 from protos import celaut_pb2
@@ -40,6 +45,13 @@ MIN_MANAGER_QUANTUM = 60
 
 sc = SQLConnection()
 deposit_generation_locked = False
+
+# A payee that answers `Payable` with "not confirmed yet" (#626) has kept the deposit
+# token pending: its view of the chain is behind ours, or it needs more confirmations
+# than it declared. That is not a failed attempt. The payer asks again this many times,
+# this many seconds apart -- about two Bitcoin blocks -- before it gives up.
+NOT_CONFIRMED_RETRIES = 20
+NOT_CONFIRMED_RETRY_DELAY = 60
 
 # How long a sweep waits for in-flight deposits before giving up on this iteration.
 DEPOSIT_DRAIN_TIMEOUT = 300
@@ -142,18 +154,19 @@ def _ledger_tag(ledger) -> Optional[str]:
 
     None unless the message declares the same ledger this node settles on
     (``ledger_descriptors.payment_ledger``, compared on a non-empty `formal` by
-    ``node_identity.same_declaration``): a payer that means another network, other
-    units or another way to bind a deposit token -- or that does not say -- is not
-    paying into this node's ledger, whatever its tag says.
+    ``ledger_descriptors.same_payment_ledger``): a payer that means another network,
+    other units or another way to bind a deposit token -- or that does not say -- is not
+    paying into this node's ledger, whatever its tag says. The payer's own payee
+    parameters (its ``payment.min_confirmations``) are not compared: they say how the
+    payer is paid, not how it pays (#626).
     """
-    from src.identity.node_identity import same_declaration
-    from src.utils.ledger_descriptors import payment_ledger
+    from src.utils.ledger_descriptors import payment_ledger, same_payment_ledger
 
     tags = getattr(ledger, "tags", None)
     if not tags:
         return None
     ours = payment_ledger(tags[0])
-    return tags[0] if ours is not None and same_declaration(ledger, ours) else None
+    return tags[0] if ours is not None and same_payment_ledger(ledger, ours) else None
 
 
 def _address_of(script) -> Optional[str]:
@@ -352,7 +365,12 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         if callable(report_id)
                         else nullcontext()
                     )
-                    with reporting_context, id_context:
+                    # The payee's own declaration of this ledger, so the contract
+                    # waits for the confirmations the payee needs, not ours (#626).
+                    payee_ledger = None if plan.is_demo else payee.declared_ledger(
+                        peer_id, ledger or plan.ledger_tag, contract_hash, connection=sc,
+                    )
+                    with reporting_context, id_context, payee.paying(payee_ledger):
                         contract_ledger = process_payment(
                             amount=amount,
                             deposit_token=deposit_token,
@@ -561,10 +579,16 @@ def _resume_outgoing_payment(row: dict) -> None:
             return
 
         script = bytes.fromhex(row.get('address') or "")
+        # As in a payment made now: wait for the payee's confirmations (#626).
+        payee_ledger = payee.declared_ledger(
+            row.get('peer_id') or "", row.get('ledger') or "", row.get('contract_hash') or "",
+            connection=sc,
+        )
         contract_ledger = None
         while contract_ledger is None:
             try:
-                contract_ledger = awaiter(tx_id=tx_id, script=script)
+                with payee.paying(payee_ledger):
+                    contract_ledger = awaiter(tx_id=tx_id, script=script)
             except JavaDependencyMissing:
                 log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
                 return
@@ -603,6 +627,7 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
     a peer is told has to be on its own scale (see ``__deposit_amounts``).
     """
     attempt = 0
+    not_confirmed = 0
     while attempt < COMMUNICATION_ATTEMPTS:
         try:
             channel = __get_channel(peer_id)
@@ -626,6 +651,18 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
             _l.LOGGER(f"Payment of {peer_amount} (peer MU) to {peer_id} communicated successfully.")
             return True
         except Exception as e:
+            if NOT_CONFIRMED_YET in str(e) and not_confirmed < NOT_CONFIRMED_RETRIES:
+                # The payee kept the deposit token pending (#626): ask again later. Not
+                # an attempt and not a fault of the peer -- its view of the chain can
+                # be a block behind ours.
+                not_confirmed += 1
+                _l.LOGGER(
+                    f"{peer_id} says the payment is {NOT_CONFIRMED_YET} "
+                    f"({not_confirmed}/{NOT_CONFIRMED_RETRIES}); asking again in "
+                    f"{NOT_CONFIRMED_RETRY_DELAY}s."
+                )
+                sleep(NOT_CONFIRMED_RETRY_DELAY)
+                continue
             # A peer that will not take our `Payable` call is the peer failing us, so
             # this is a peer penalty and is written as one. It used to be handed to
             # `update_vmachine_reputation` with a peer id in the vmachine argument,
@@ -938,6 +975,13 @@ def _validate_claimed_payment(amount: int, ledger: celaut_pb2.Contract.Ledger, c
             account_id=account_id, amount_mu=amount,
             detail={"deposit_token": token, "ledger": ledger_tag},
         )  # TODO allow for containers too.
+    except PaymentNotConfirmed:
+        # The payment exists and is not confirmed enough yet (#626). That is not a
+        # refusal: the token stays 'pending', nothing is recorded, and the payer can
+        # call again before the token expires. Before, the token was set to 'rejected'
+        # here and the money stayed with this node with no credit for anybody.
+        _l.LOGGER(f"Deposit token {token} stays pending: its payment is {NOT_CONFIRMED_YET}.")
+        raise
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
     contract_hash = sha3_256(contract).hexdigest() if contract else None

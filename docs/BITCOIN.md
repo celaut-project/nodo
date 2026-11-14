@@ -195,7 +195,7 @@ ledgers:
     WALLET_NAME: "nodo"
     payments:
       MU_PER_SATOSHI: 1400000        # $0.50/ERG, $70,000/BTC -- set your own, see below
-      MIN_CONFIRMATIONS: 1
+      MIN_CONFIRMATIONS: 1           # also declared to payers as payment.min_confirmations
       TARGET_CONF: 6
       MAX_FEE_RATE_SAT_VB: 100
       HOT_WALLET_LIMITS: "0.05"
@@ -271,7 +271,8 @@ peer that reads `GetPeerInfo`. Not in this version.
 
 A payment is accepted when a transaction with at least `MIN_CONFIRMATIONS`
 confirmations carries the deposit token in an `OP_RETURN` and pays **at least** the
-expected amount to this node's script.
+expected amount to this node's script. The number is in this node's ledger declaration
+(see [The payer knows the number](#the-payer-knows-the-number)).
 
 At least, not exactly: the payer converts our MU figure from its own scale and has to
 round down to a whole MU of ours, so a correct payment routinely carries a little more
@@ -297,14 +298,58 @@ nothing, and nothing revisits that answer later.
 
 ## Confirmations, and the two Ergo-shaped constants around them
 
-The payer waits, exactly as it does on Ergo: `process_payment` polls until
-`MIN_CONFIRMATIONS` and only then tells the peer. The receiver therefore validates
-something already final and answers accepted-or-rejected in one call, with no
+The payer waits, exactly as it does on Ergo: `process_payment` polls until the
+**payee's** number of confirmations and only then tells the peer. The receiver therefore
+validates something already final and answers accepted-or-rejected in one call, with no
 intermediate deposit-token state. That also disposes of RBF for free — a confirmed
 transaction cannot be replaced — leaving only a shallow reorg, which is what
 `MIN_CONFIRMATIONS` is the knob for. A transaction Core reports with *negative*
 confirmations has been replaced or reorged out; that is not "not yet", and `nodo` stops
 rather than polling until the deposit token expires.
+
+### The payer knows the number
+
+The Bitcoin part of the ledger declaration states
+`payment.min_confirmations=<MIN_CONFIRMATIONS>` (#626). A payer waits for that number
+before it calls `Payable`:
+
+- **A wallet or an app** reads it from the node's `GetPeerInfo` (chatui does, and waits
+  for 6, never more than 36, for a node that does not give it).
+- **Another nodo** reads it from the payee's announcement it stored, and
+  `process_payment` (and the resume of a payment after a restart) waits for it — not
+  for its own `MIN_CONFIRMATIONS`. Before #626 a payer waited for its own number, so a
+  payee that needs more refused the payment with the money already paid. A payee that
+  does not state the number (a node from before #626) gets the payer's own number, as
+  before.
+
+`payment.min_confirmations` is a **payee parameter**: each payee selects it for itself,
+so it is not part of what two nodes must agree on. Two nodes that wait for different
+numbers still declare the same ledger — the comparison
+(`ledger_descriptors.same_payment_ledger`) leaves this one line out and compares every
+other line byte for byte, as before. A node whose declaration does not have the line
+(from before #626) matches too. A payee contract that states a number a payer cannot
+wait for — not an integer, below 1, or above 36 (six hours of blocks, the deposit
+token's lifetime) — is not stored, so this node never pays it.
+
+### Too early is "not yet", not "no"
+
+When `Payable` comes before the transaction has `MIN_CONFIRMATIONS`, the deposit token
+is **not** rejected (#626). If a transaction carries the token and pays at least the
+amount, but has fewer confirmations (the mempool included), the node:
+
+- keeps the deposit token `pending`, records no payment and credits nothing;
+- answers `Payable` with gRPC `FAILED_PRECONDITION` and a message that starts with
+  `Payment not confirmed yet`, with the confirmations it has and the number it needs.
+
+The payer calls `Payable` again, with the same deposit token, before the token expires
+(six hours). A nodo payer does this itself: a "not confirmed yet" answer is not a failed
+attempt and costs the peer no reputation; it asks again every 60 s, up to 20 times
+(about two blocks), which covers a payee whose view of the chain is a block behind.
+
+What is still "no", and rejects the token as before: no transaction carries the token,
+or the transaction pays too little (more confirmations will not make it pay more), or it
+was replaced. Before #626 a `Payable` that came too early was also "no": the token was
+rejected for good and the BTC stayed with the node, with no credit for anybody.
 
 What is genuinely different is only how *long* the wait is, and that broke two constants
 sized for Ergo:

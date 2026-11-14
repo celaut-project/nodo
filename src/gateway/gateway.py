@@ -26,6 +26,7 @@ from src.manager.manager import ALLOW_DEBT, actor_of, add_peer_instance, descend
 from src.manager.chat import ChatError, get_client_thread, receive_chat_message
 from src.manager.metrics import get_client_metrics, get_metrics
 from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
+from src.payment_system.exceptions import PaymentNotConfirmed
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import activity_window, dead_instances
 from src.utils import logger as log
@@ -418,7 +419,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # Select the payment validator by the stable, wallet-independent contract_type; the
         # raw ErgoTree/propositionBytes travels as ``script`` (never a textual address).
         contract_type = get_contract_type(payment.contract) or raw_script
-        if not validate_payment_process(
+        try:
+            valid = validate_payment_process(
                 amount=from_amount(payment.amount),
                 ledger=payment.contract.ledger,
                 contract=contract_type,
@@ -429,7 +431,13 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 # one contract can be paid in a chain's native unit and in a token, and
                 # inferring the asset from the ledger cannot tell those apart.
                 asset=get_token_id(payment.contract),
-        ):
+            )
+        except PaymentNotConfirmed as e:
+            # Too early, not invalid (#626): the deposit token stays pending, and the
+            # message starts with "Payment not confirmed yet" so the payer can tell.
+            context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(e))
+            return
+        if not valid:
             raise Exception('Error: payment not valid.')
         log.LOGGER('Payment is valid.')
         yield from BeeClient.respond()

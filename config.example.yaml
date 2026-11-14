@@ -1828,7 +1828,9 @@ ledgers:
       # in step with MU_PER_NANOERG if you change that. Set it to "" to not offer Bitcoin.
       MU_PER_SATOSHI: 1400000
       # Confirmations before a payment counts. 1 is enough at these amounts; raise it if
-      # you are being paid enough that a shallow reorg would matter.
+      # you are being paid enough that a shallow reorg would matter. Payers are told
+      # this number (payment.min_confirmations in the ledger declaration) and wait for
+      # it; a Payable that comes earlier keeps its deposit token pending (#626).
       MIN_CONFIRMATIONS: 1
       TARGET_CONF: 6                 # blocks, for the fee estimate
       # Refuse to pay above this rather than paying it. A fee spike must not be able to
