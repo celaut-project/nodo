@@ -824,8 +824,12 @@ These are intended for development or advanced maintenance environments:
   a node with no peers assigns its whole supply to it — but only the proofs it announced
   can be recognised as its own, so this separates the honest case and does not defend
   against a proof kept off its advertisement (issue #353).  
+  `nodo reputation lock <ERG>` keeps `<ERG>` locked in this node's own proof
+  (`ledgers.ergo.reputation.LOCKED_ERG`) and publishes it, so other nodes find this node
+  on the ledger (`ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG`). The ERG cannot be
+  taken back out.  
   **Example:**  
-  `nodo reputation`
+  `nodo reputation`, `nodo reputation lock 0.1`
 
 - **pay**  
   Pays a peer from this node's wallet, in **the asset's own unit** — ERG, BTC, whole

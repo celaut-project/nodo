@@ -168,6 +168,7 @@
     "ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID",
     "ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG",
     "ledgers.ergo.reputation.LEDGER_REPUTATION_SUBMISSION_THRESHOLD",
+    "ledgers.ergo.reputation.LOCKED_ERG",
     "ledgers.ergo.reputation.PLAIN_TEXT_TYPE_NFT_ID",
     "ledgers.ergo.reputation.REPUTATION_PROOF_ID",
     "ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT",

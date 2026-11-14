@@ -58,7 +58,6 @@ the same second get a snapshot each instead of the second overwriting the first'
 |---|---|---|
 | `nodo tui` | whatever you edit, in one `yq` invocation | Restarts the node, and reverts the file if it does not come back. |
 | A CLI command — `nodo sync_reputation_proof`, `nodo submit_reputation` | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | Restarts a serving node once it sees the file changed. Needs root; if the restart cannot happen the command says so and names the fix. |
-| `ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG` | `"0.1"` | ERG (decimal string) that a proof must hold for the ledger peer search (`communication.DISCOVER_PEERS_ON_LEDGERS`) to take the node that announced itself with it. The ERG cannot be taken out of the proof. A value that is not a number gives the default. |
 | The daemon itself | `ledgers.ergo.NODE_URL` when the configured Ergo node stops answering, the proof id when it submits one, and the `-1`s of `benchmark.BY_ARCH` once the benchmark core service has measured them | None needed — the process that wrote the value is the one running on it, and the value is live in memory the moment it is set. |
 | First load, on any process | resolves `auto` values (`network.GATEWAY_PORT`, `identity.MNEMONIC`, `ledgers.ergo.WALLET_MNEMONIC`) and interpolated paths | None — this happens before the node serves. |
 
@@ -1083,6 +1082,8 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
 | `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit` (MU per base unit). A whole number. ERG↔nanoERG is fixed in code, not here. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
+| `ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG` | `"0.1"` | ERG (decimal string) that a proof must have locked behind its opinions for the ledger peer search (`communication.DISCOVER_PEERS_ON_LEDGERS`) to take the node that announced itself with it: the ERG of the proof's boxes at the contract, times the share of its tokens that is not in a self-opinion. A value that is not a number gives the default. |
+| `ledgers.ergo.reputation.LOCKED_ERG` | `"0"` | ERG (decimal string) that this node keeps locked in its own proof, in the box that declares it. `nodo reputation lock <ERG>` sets it and publishes the proof. The ERG cannot be taken out of the proof, so a lower value takes nothing back. |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |
 | `ledgers.ergo.payments.DONATION_PERCENTAGE` | `"0.02"` | Share of **incoming payments** donated to the people who write this software. Applies to earnings, not to the sweep below, and works with no cold wallet. The transaction fee comes out of this share, never on top of it. Set it to `0` to opt out. |

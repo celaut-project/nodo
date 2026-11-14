@@ -221,17 +221,33 @@ node, and R9 = its signed `Peer` message (JSON). The reader is
 **What the node does.** `src/manager/ledger_discovery.py`, on a daemon thread after the
 gateway is up:
 
-1. The explorer search for boxes of the node type. The nodes found are put in a random
-   order, so that new nodes do not all choose the same peers.
-2. A proof must hold at least `ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG`. Minting
-   a proof costs nothing, and the ERG in it cannot be taken out, so this is the cost of a
-   fake peer. A proof below it is ignored. At most `communication.MAX_PEERS_FROM_LEDGERS`
-   new peers are taken. A peer that the node already has costs no request.
-3. A claim with an address that is not global is refused. The signature covers every
-   address, so an address cannot be removed from a claim. Not global: private, loopback,
-   link-local, shared CGNAT space, or a local name. `.onion` names and public DNS names
-   pass.
-4. `manager.add_peer_instance(..., learned_via_gossip=True)` registers it. It checks the
+1. The explorer search for boxes of the node type, at the reputation contract (the box
+   must have its `ergoTree`). A box that cannot be read is skipped; it does not stop the
+   others. **One peer per proof**: a proof gives only its newest declaration, so one proof
+   cannot fill every slot of a new node. The nodes found are put in a random order, so
+   that new nodes do not all choose the same peers.
+2. A claim that is expired, this node's own, or that has an address that is not global is
+   refused before any request about it. The signature covers every address, so an
+   address cannot be removed from a claim. Not global: private, loopback, link-local,
+   shared CGNAT space, an IPv4 address inside an IPv6 one that is not global (NAT64,
+   IPv4-compatible, 6to4), a short IPv4 form such as `127.1`, or a local name. `.onion`
+   names and public DNS names pass.
+3. A proof must have at least `ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG` locked
+   behind its opinions:
+
+   ```
+   SUM(ERG in the proof's boxes at the contract)
+       × tokens not in a self-opinion / all the proof's tokens at the contract
+   ```
+
+   Only boxes at the contract count: a box in a wallet can be spent by its owner. A
+   self-opinion is a box whose R5 is the proof's own token id. The ERG can be in any box
+   of the proof at the contract. Minting a proof costs nothing, and the ERG cannot be
+   taken out, so this is the cost of a fake peer. If more than one proof declares the
+   same node (anyone can copy a signed `Peer`), the node is taken when one of them
+   passes. At most `communication.MAX_PEERS_FROM_LEDGERS` new peers are taken. A peer
+   that the node already has costs no request.
+4. `manager.register_peer_instance(..., learned_via_gossip=True)` registers it. It checks the
    signature and that the id is the key, as for every peer. The peer is **a claim, not a
    proof**: it starts with the same local score as any new peer, `ô` applies from the next
    index refresh, and the automatic refill does not fund it until the operator chooses it
@@ -243,9 +259,19 @@ gateway is up:
    ledger can be old, and a dead peer would be tried by the maintenance loop for ever and
    lose reputation for nothing. A peer that answers `REFUSED` is alive and stays. A
    failure on this side (the node cannot make its own announcement) says nothing about the
-   peer, so it stays too. A peer that was already known is never removed. With
+   peer, so it stays too. Only a row that this run inserted is removed, and only while it
+   is still a peer learned from the network: a peer that `nodo connect`, `IntroducePeer`
+   or gossip added during the run stays. Each RPC of the introduction has a timeout of
+   10 s, and no introduction starts after the deadline of the run. With
    `SELF_ANNOUNCE_TO_CONNECTING_PEERS` false there is no test, and every peer that passes
    the checks stays.
+
+**Being found.** nodo writes 0.001 ERG in each box of its proof, which is below the
+default minimum. `nodo reputation lock 0.1` sets `ledgers.ergo.reputation.LOCKED_ERG`
+and publishes the proof with that ERG in the box that declares the node. The ERG stays
+in the proof for ever: the contract does not let the owner take it out, and every later
+publication keeps at least what the proof held. A nodo proof has no self-opinion box, so
+all its ERG counts.
 
 **Failure is not fatal.** An explorer that does not answer, a deadline
 (`communication.LEDGER_DISCOVERY_TIMEOUT_SECONDS`, and 30 s for each request), a peer that
@@ -387,10 +413,13 @@ taken back out (`sacrifice_assets` in the reference library is the deliberate ac
 adding to it, and anyone may top a box up without a signature). That sunk cost is the
 system's only Sybil resistance.
 
-So every opinion also carries the total ERG burned into the proof that published it —
-`total_burned` in the reference library, the sum of `value` over the proof's unspent
-boxes — and `nodo reputation` reports **`share × burned`**: the portion of that
-unrecoverable value standing behind this node. A proof that sacrificed 10 ERG and
+So every opinion also carries the ERG burned into the proof that published it, and
+`nodo reputation` reports **`share × burned`**: the portion of that unrecoverable value
+standing behind this node. `burned` is not `total_burned` of the reference library (the
+`value` of every unspent box that holds the token, at any address). It is the ERG of the
+proof's boxes **at the contract** only, times the share of its tokens that is not in a
+self-opinion: a box in a wallet can be spent, so its ERG is not burned, and ERG behind a
+reserve that the proof keeps for itself is not behind its opinions. A proof that sacrificed 10 ERG and
 commits half of itself puts 5 ERG behind you; one sitting at the min-box value each of
 its boxes needs to exist has had *nothing* sacrificed into it, and 100 % of it is worth
 0.001 ERG. Read the two figures together: the share says how much of a proof is

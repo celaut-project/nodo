@@ -34,6 +34,7 @@ the TUI can all call it. Only the start of the node calls it today
   next one. Every read has a deadline.
 """
 import ipaddress
+import socket
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -71,21 +72,34 @@ class DiscoveryResult:
 def acceptable_address(host: str) -> bool:
     """Whether ``host`` may be an address of a peer that comes from a ledger.
 
-    An IP literal must be global. A ``.onion`` name is accepted. A DNS name is accepted
-    unless it is plainly local (one label, or a suffix of a local network).
+    An IP literal must be public, also an IPv4 address inside an IPv6 one (NAT64,
+    IPv4-compatible, 6to4: ``source_download.is_public_address``). A ``.onion`` name is
+    accepted. A DNS name is accepted unless it is plainly local (one label, or a suffix of
+    a local network), or unless the resolver reads it as an IPv4 address in a short or
+    numeric form (``127.1``, ``0x7f.1``, ``10.1``): ``ipaddress`` does not, but
+    ``getaddrinfo`` does.
     """
+    from src.core_services.source_download import is_public_address
     from src.routing import registry as routing
 
     name = str(host or "").strip().lower().rstrip(".")
     if not name:
         return False
     try:
-        address = ipaddress.ip_address(name)
+        ipaddress.ip_address(name.split("%")[0])
     except ValueError:
-        if routing.routed_host(name):
-            return True
-        return "." in name and not name.endswith(_LOCAL_NAME_SUFFIXES)
-    return address.is_global and not address.is_multicast
+        pass
+    else:
+        return is_public_address(name)
+    if routing.routed_host(name):
+        return True
+    try:
+        socket.inet_aton(name)
+    except OSError:
+        pass
+    else:
+        return False
+    return "." in name and not name.endswith(_LOCAL_NAME_SUFFIXES)
 
 
 def acceptable_claim(peer, own_key: str) -> bool:
@@ -113,10 +127,12 @@ class Introduction(Enum):
     ERROR = "error"
 
 
-def _introduce_self(peer_id: str) -> Introduction:
+def _introduce_self(peer_id: str, timeout: float = RPC_TIMEOUT_SECONDS) -> Introduction:
     """``IntroducePeer`` to a registered peer, with the announcement of this node.
 
     Never raises. The steps are the ones of ``connect.connect`` after the handshake.
+    ``timeout`` bounds each RPC (``GenerateClient`` and its PoW retry, ``IntroducePeer``):
+    a peer that accepts the connection and never answers must not hold the thread.
     """
     from src.gateway.utils import generate_full_node_peer_info
     from src.identity.grpc_transport import peer_channel
@@ -129,14 +145,14 @@ def _introduce_self(peer_id: str) -> Introduction:
         LOGGER(f"[ledger-discovery] cannot make the announcement of this node: {e}")
         return Introduction.ERROR
     try:
-        client_id = get_client_id_on_other_peer(peer_id=peer_id)
+        client_id = get_client_id_on_other_peer(peer_id=peer_id, timeout=timeout)
         if not client_id:
             LOGGER(f"[ledger-discovery] no client_id at {peer_id}: it did not answer.")
             return Introduction.UNREACHABLE
         channel = peer_channel(peer_id=peer_id)
         try:
             result = BeeClient.introduce_peer(
-                channel, announcement, client_id=client_id, timeout=RPC_TIMEOUT_SECONDS,
+                channel, announcement, client_id=client_id, timeout=timeout,
             )
             if result is None:
                 LOGGER(f"[ledger-discovery] {peer_id} sent no answer to the introduction.")
@@ -184,20 +200,26 @@ def discover_peers_from_ledgers(
 
         from src.database.sql_connection import SQLConnection
         from src.identity.node_identity import get_node_public_key_hex
-        from src.manager.manager import add_peer_instance
+        from src.manager.manager import register_peer_instance
         from src.reputation_system.interface import _peer_readers
 
         sc = SQLConnection()
-        known_before = frozenset(sc.get_peers_id())
         own_key = (get_node_public_key_hex() or "").lower()
+        # Our own key too: our own box is on the chain, and it must not use a slot.
+        known_before = frozenset(sc.get_peers_id()) | ({own_key} if own_key else set())
         introduce = bool(config.get("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", True))
+
+        def accept(peer) -> bool:
+            # Local and cheap, so the reader runs it before it reads the ERG of a proof:
+            # a claim that cannot be used takes no request and no slot.
+            return acceptable_claim(peer, own_key)
 
         for ledger, reader in _peer_readers().items():
             remaining = limit - result.added
             if remaining <= 0:
                 break
             try:
-                claims = reader(remaining, deadline, known_before)
+                claims = reader(remaining, deadline, known_before, accept=accept)
             except Exception as e:
                 LOGGER(f"[ledger-discovery] could not read the peers of {ledger}: {e}")
                 result.errors[ledger] = str(e)
@@ -212,9 +234,11 @@ def discover_peers_from_ledgers(
                         LOGGER(f"[ledger-discovery] refused {peer.public_key} from {ledger}: "
                                "not intact, expired, this node, or an address that is not global.")
                         continue
-                    peer_id = add_peer_instance(peer=peer, learned_via_gossip=True)
+                    peer_id, inserted = register_peer_instance(
+                        peer=peer, learned_via_gossip=True
+                    )
                 except Exception as e:
-                    peer_id = None
+                    peer_id, inserted = None, False
                     LOGGER(f"[ledger-discovery] could not register {peer.public_key}: {e}")
                 if not peer_id:
                     result.refused += 1
@@ -223,15 +247,25 @@ def discover_peers_from_ledgers(
                 LOGGER(f"[ledger-discovery] added {peer_id} from {ledger}.")
                 if not introduce:
                     continue
-                outcome = _introduce_self(peer_id)
+                remaining_time = deadline - time.monotonic()
+                if remaining_time <= 0:
+                    # Out of time: the peer stays registered, not introduced. The
+                    # maintenance loop tests it as any other peer.
+                    result.introduction_errors += 1
+                    LOGGER(f"[ledger-discovery] out of time before the introduction to {peer_id}.")
+                    continue
+                outcome = _introduce_self(
+                    peer_id, timeout=min(RPC_TIMEOUT_SECONDS, remaining_time)
+                )
                 if outcome is Introduction.ACCEPTED:
                     result.introduced += 1
                 elif outcome is Introduction.REFUSED:
                     result.refused_introduction += 1
                 elif outcome is Introduction.ERROR:
                     result.introduction_errors += 1
-                elif peer_id in known_before:
-                    # Not this run's row: the operator or another path put it there.
+                elif not inserted or not sc.peer_learned_via_gossip(peer_id):
+                    # Not this run's row (another path inserted it while the explorer
+                    # was read), or the operator has chosen the peer since: keep it.
                     result.introduction_errors += 1
                 else:
                     # Nobody answered, so there is no peer at this address now.

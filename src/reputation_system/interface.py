@@ -215,8 +215,10 @@ def _peer_readers() -> dict:
 
     The same shape as :func:`_opinion_readers`, and the startup code reads only this: a
     second ledger is one more entry here. A reader is called as
-    ``reader(limit, deadline, exclude)``. ``deadline`` is a ``time.monotonic()`` value,
-    ``exclude`` is the set of peer ids that the node already has. It returns at most
+    ``reader(limit, deadline, exclude, accept=...)``. ``deadline`` is a
+    ``time.monotonic()`` value, ``exclude`` is the set of peer ids that the node already
+    has (and its own key), and ``accept`` is the caller's local check of a claim, run
+    before any request about it. It returns at most
     ``limit`` signed ``celaut_pb2.Peer`` claims from the proofs that pass the minimum of
     that ledger, and raises when the ledger cannot be read.
     """

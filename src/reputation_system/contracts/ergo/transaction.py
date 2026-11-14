@@ -118,13 +118,62 @@ def _build_unsigned_transaction(ergo, input_boxes, outputs, fee: int, sender_add
     return tx_builder.build()
 
 
+LOCKED_ERG_KEY = "ledgers.ergo.reputation.LOCKED_ERG"
+NANOERG_PER_ERG = 10 ** 9
+
+
+def locked_target_nanoerg() -> int:
+    """``ledgers.ergo.reputation.LOCKED_ERG`` in nanoERG: the ERG this node keeps locked in
+    its own proof. 0 when it is not set or not a number of ERG."""
+    from decimal import Decimal, InvalidOperation
+
+    raw = env_manager.get(LOCKED_ERG_KEY, "0")
+    try:
+        value = Decimal(str(raw if raw not in (None, "") else "0").strip())
+        if not value.is_finite() or value < 0:
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        LOGGER(f"{LOCKED_ERG_KEY} is {raw!r}, not a number of ERG; locking nothing more.")
+        return 0
+    return int(value * NANOERG_PER_ERG)
+
+
+def proof_box_values(count: int, self_index: int, proof_in: int, target: int) -> List[int]:
+    """The nanoERG of each of the ``count`` proof boxes that a transaction writes.
+
+    Each box has ``SAFE_MIN_BOX_VALUE``. The box at ``self_index`` (the node's own
+    declaration) also keeps the ERG that is locked:
+
+    * at least ``target`` (``LOCKED_ERG``);
+    * at least what the proof's boxes held before (``proof_in``) less the other boxes.
+      The contract requires ``totalNativeOut >= totalNativeIn`` across the proof's
+      boxes, so the locked ERG can only stay or grow. A lower ``LOCKED_ERG`` does not
+      take any ERG back.
+    """
+    if count <= 0:
+        return []
+    others = (count - 1) * SAFE_MIN_BOX_VALUE
+    values = [SAFE_MIN_BOX_VALUE] * count
+    values[min(max(self_index, 0), count - 1)] = max(
+        SAFE_MIN_BOX_VALUE, int(target), int(proof_in) - others
+    )
+    return values
+
+
+def wallet_need(values: List[int], proof_in: int, fee: int) -> int:
+    """The nanoERG that the wallet must put in: the proof boxes and the fee, less what
+    the proof's own boxes bring in."""
+    return max(0, int(fee) + sum(values) - int(proof_in))
+
+
 def __build_proof_box(
     ergo,
     proof_id: str,
     sender_address,
     token_amount: int = DEFAULT_TOKEN_AMOUNT,
     assigned_object: Optional[ProofObject] = None,
-    data: str = ""
+    data: str = "",
+    value: int = SAFE_MIN_BOX_VALUE,
 ):
     jpype = require_java_module("jpype", feature="Ergo reputation")
     org_appkit = jpype.JPackage("org").ergoplatform.appkit
@@ -140,7 +189,7 @@ def __build_proof_box(
 
     return ergo._ctx.newTxBuilder() \
             .outBoxBuilder() \
-                .value(SAFE_MIN_BOX_VALUE) \
+                .value(int(value)) \
                 .tokens([ergo_token_cls(proof_id, jpype.JLong(abs(int(token_amount))))]) \
                 .registers([
                     org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(type_nft_id))),            # R4: typeNftTokenId (raw bytes)
@@ -285,19 +334,28 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     ergo = appkit.ErgoAppKit(node_url=node_url)
     fee = DEFAULT_FEE
-    safe_min_out_box = (len(objects) + 1) * SAFE_MIN_BOX_VALUE
+    target = locked_target_nanoerg()
+    self_index = next((i for i, obj in enumerate(objects) if not obj[0]), 0)
 
     sender_address = get_public_key(wallet_mnemonic)
     LOGGER(f"Sender address -> {sender_address.toString()}")
 
-    wallet_input_boxes = ergo.getInputBoxCovering(amount_list=[fee], sender_address=sender_address)
+    # The most the wallet can have to put in: a new proof (nothing comes in from the
+    # proof's boxes), plus one change box and the minimum left to the change of AppKit.
+    most_needed = wallet_need(
+        proof_box_values(len(objects), self_index, 0, target), 0, fee
+    ) + 2 * SAFE_MIN_BOX_VALUE
+    wallet_input_boxes = ergo.getInputBoxCovering(amount_list=[most_needed], sender_address=sender_address)
     selected_input_box = min(
-        (input_box for input_box in wallet_input_boxes if __input_box_to_dict(input_box)["value"] > safe_min_out_box),
+        (input_box for input_box in wallet_input_boxes if __input_box_to_dict(input_box)["value"] >= most_needed),
         key=lambda ib: __input_box_to_dict(ib)["value"],
         default=None
     )
     if not selected_input_box:
-        raise Exception("No input box available.")
+        raise Exception(
+            f"No input box available: one wallet box must hold {most_needed / 10**9} ERG "
+            f"(the proof boxes, {LOCKED_ERG_KEY} and the fee)."
+        )
 
     external_token_value = int(sum([obj[1] for obj in objects if obj[0]]))
     expected_total_reputation = int(env_manager.get('ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT'))
@@ -350,7 +408,16 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     java_input_boxes = jpype.java.util.ArrayList(input_boxes)
     proof_id = proof_id or str(java_input_boxes.get(0).getId().toString())
 
-    value_in_nanoergs = (__input_box_to_dict(selected_input_box)["value"] - fee - safe_min_out_box)
+    # The ERG in the proof's boxes that are spent. It stays in the proof (see
+    # `proof_box_values`).
+    proof_in = sum(int(__input_box_to_dict(box)["value"]) for box in input_boxes[1:])
+    box_values = proof_box_values(len(objects), self_index, proof_in, target)
+    # One SAFE_MIN_BOX_VALUE is left over, for the change that AppKit adds, as before.
+    value_in_nanoergs = (
+        __input_box_to_dict(selected_input_box)["value"]
+        - wallet_need(box_values, proof_in, fee)
+        - SAFE_MIN_BOX_VALUE
+    )
     assert value_in_nanoergs >= SAFE_MIN_BOX_VALUE, (
         f"Value in nanoergs ({value_in_nanoergs}) must be greater than SAFE_MIN_BOX_VALUE ({SAFE_MIN_BOX_VALUE})")
     value_in_ergs = value_in_nanoergs / 10**9
@@ -378,7 +445,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             "cannot address a reputation opinion."
         )
 
-    for obj in objects:
+    for index, obj in enumerate(objects):
         self_info = not obj[0]
         if self_info:
             data = _self_network_data()
@@ -394,7 +461,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
                 value=node_public_key if self_info else obj[0]
             ),
             token_amount=int(obj[1]),
-            data=data or ""
+            data=data or "",
+            value=box_values[index],
         )
         outputs.append(proof_box)
 
