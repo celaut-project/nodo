@@ -196,7 +196,8 @@ def _print_report(data: dict) -> None:
 def reputation(argv: Optional[List[str]] = None) -> bool:
     """Print this node's on-chain reputation. ``True`` when the chain answered.
 
-    ``nodo reputation [<node id>] [--json]``. The optional id is a node's identity
+    ``nodo reputation [<node id>] [--json]``, or ``nodo reputation lock <ERG>`` (see
+    :func:`lock`). The optional id is a node's identity
     public key -- a peer id, so a peer can be asked about with the same command and the
     same shell completion.
     """
@@ -205,6 +206,8 @@ def reputation(argv: Optional[List[str]] = None) -> bool:
     argv = list(argv or [])
     as_json = "--json" in argv
     positional = [argument for argument in argv if not argument.startswith("--")]
+    if positional[:1] == ["lock"]:
+        return _flushed(lock(positional[1:]))
     node_id = positional[0] if positional else None
 
     try:
@@ -226,6 +229,50 @@ def reputation(argv: Optional[List[str]] = None) -> bool:
     else:
         _print_report(data)
     return _flushed(not data["errors"])
+
+
+def lock(args: List[str]) -> bool:
+    """``nodo reputation lock <ERG>``: keep ``<ERG>`` locked in this node's proof.
+
+    Sets ``ledgers.ergo.reputation.LOCKED_ERG`` and publishes the proof now. The ERG goes
+    into the box that declares this node, at the reputation contract. Nobody can take it
+    out, the owner too: the contract requires ``totalNativeOut >= totalNativeIn`` across
+    the proof's boxes. So a later, lower value takes nothing back.
+
+    A peer finds this node on the ledger (``communication.DISCOVER_PEERS_ON_LEDGERS``)
+    when the ERG locked behind its opinions is at least
+    ``ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG``.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    from src.commands.daemon import config_digest, restart_after_config_write
+    from src.reputation_system.contracts.ergo.transaction import LOCKED_ERG_KEY
+    from src.reputation_system.interface import submit_reputation
+    from src.utils.config import ConfigManager
+
+    if len(args) != 1:
+        print("Usage: nodo reputation lock <ERG>   (for example: nodo reputation lock 0.1)")
+        return False
+    try:
+        amount = Decimal(args[0])
+        if not amount.is_finite() or amount <= 0:
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        print(f"{args[0]!r} is not a positive number of ERG.")
+        return False
+
+    before = config_digest()
+    ConfigManager().set(LOCKED_ERG_KEY, str(amount))
+    print(f"{LOCKED_ERG_KEY} is {amount}. Publishing the reputation proof with it...")
+    published = submit_reputation(force_submit=True)
+    if published:
+        print(f"Published. The proof keeps at least {amount} ERG locked, and no ERG it "
+              "held before is taken out.")
+    else:
+        print("The proof was not published (see the log). The value is kept, and the "
+              "next publication of the proof locks it.")
+    restart_after_config_write(before)
+    return bool(published)
 
 
 def _flushed(result: bool) -> bool:

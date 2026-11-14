@@ -259,13 +259,15 @@ class BeeClient:
             pow_solution: str = "",
             peer_id: str = "",
             signature: str = "",
+            timeout: Optional[float] = None,
     ) -> Optional[Union[celaut_pb2.Client, celaut_pb2.PoWRequired]]:
         """``client_id`` is the caller's proposed UUID4 (or "" for "mint me one");
         ``challenge``/``pow_solution`` are only set on the retry that answers a
         ``PoWRequired`` (issue #361); ``peer_id``/``signature`` optionally prove the
         caller is also a known peer, over that same ``client_id``, so this node can
         bind the two the moment it creates it (or, once known, via
-        ``associate_client``).
+        ``associate_client``). ``timeout`` (seconds) bounds the wait for the answer;
+        None waits as long as the peer does.
         """
         message = celaut_pb2.Client(client_id=client_id)
         if challenge:
@@ -281,6 +283,7 @@ class BeeClient:
             input=message,
             indices_parser=rpc_output("GenerateClient"),
             indices_serializer=rpc_input("GenerateClient"),
+            timeout=timeout,
         )
 
     @staticmethod

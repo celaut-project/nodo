@@ -189,24 +189,36 @@ def iter_unspent_boxes_by_registers(
 
 
 def iter_unspent_boxes_by_token(
-    api_url: str, token_id: str, page_size: int = 100, max_boxes: int = 2000
+    api_url: str, token_id: str, page_size: int = 100, max_boxes: int = 2000,
+    deadline: Optional[float] = None,
 ) -> Iterator[dict]:
     """
     Yield the unspent boxes holding ``token_id``, via the Explorer
     `GET /api/v1/boxes/unspent/byTokenId/{token_id}`, paginated.
 
-    For a reputation proof that is every box it currently holds, which is what its sunk
-    ERG has to be summed over (see :func:`burned_nanoerg`).
+    For a reputation proof that is every box it currently holds, at any address. The
+    caller selects the boxes at the contract (see :func:`proof_standing`).
+
+    ``deadline`` is a ``time.monotonic()`` value. No request starts after it, and no
+    request waits past it (or past 30 s).
     """
+    import time
+
     api_url = str(api_url).rstrip("/")
     offset = 0
     fetched = 0
     while fetched < max_boxes:
+        timeout = 30.0
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Out of time while reading the boxes of token {token_id}.")
+            timeout = min(timeout, remaining)
         url = (
             f"{api_url}/api/v1/boxes/unspent/byTokenId/{token_id}"
             f"?limit={page_size}&offset={offset}"
         )
-        response = ledger_http.get(url, timeout=30)
+        response = ledger_http.get(url, timeout=timeout)
         if response.status_code != 200:
             raise ValueError(
                 f"Box lookup for token {token_id} failed: HTTP {response.status_code}"
@@ -229,56 +241,81 @@ def iter_unspent_boxes_by_token(
 class ProofStanding(NamedTuple):
     """What a reputation proof has put where, read from its own boxes in one pass.
 
-    Both figures come off the same page of boxes because both are properties of the
-    proof rather than of any one opinion, and fetching them apart would double the
-    round trips for no new information.
+    Only the boxes at the reputation contract that hold the proof's token count. A box
+    elsewhere (a wallet) can be spent by its owner at any time, so its ERG is not locked
+    and its tokens are not opinions.
     """
 
-    #: Tokens the proof has assigned to opinions: everything it holds *except* what
-    #: sits in boxes pointing at itself. See :func:`proof_standing`.
+    #: Tokens the proof has assigned to opinions: everything it holds at the contract
+    #: *except* what sits in self-opinions. See :func:`proof_standing`.
     assigned_amount: int
-    #: Tokens held in reserve, in self-pointing boxes (R5 = the proof's own token id).
+    #: Tokens in self-opinions: boxes whose R5 is the proof's own token id.
     reserved_amount: int
-    #: nanoERG irrecoverably sunk into the proof, across all of its boxes.
+    #: The ERG locked behind the opinions of the proof, in nanoERG:
+    #: ``contract_nanoerg * assigned_amount / (assigned_amount + reserved_amount)``.
     burned_nanoerg: int
+    #: All the nanoERG in the proof's boxes at the contract, before that share.
+    contract_nanoerg: int = 0
 
 
-def proof_standing(api_url: str, token_id: str) -> ProofStanding:
-    """What the reputation proof ``token_id`` has assigned, reserved and burned.
+def proof_standing(
+    api_url: str, token_id: str, deadline: Optional[float] = None,
+) -> ProofStanding:
+    """What the reputation proof ``token_id`` has assigned, reserved and locked.
+
+    **Only the boxes at the reputation contract** (``ergoTree`` is
+    ``REPUTATION_PROOF_ERGO_TREE``) whose first asset is the proof count. The explorer
+    gives every box that holds the token, at any address. A box in a wallet is not
+    locked: its owner can spend it, and one wallet box that holds one unit each of N
+    tokens would otherwise back all N proofs with the same ERG.
 
     **Assigned** is the denominator a stake on this proof is a share of. A proof keeps
-    its unassigned tokens in a box whose R5 is its own token id -- the ecosystem's
-    self-pointing "profile" box, which is how a proof declares itself and which
-    ``profileFetch``'s ``is_self_defined`` filter selects on. That reserve is not a
-    judgement about anything, and on mainnet it is nearly the whole supply: every live
-    profile parks ~99,999,9xx of its 99,999,999 tokens there and spends one token per
-    opinion. Divide by the minted supply and every real opinion in the system reads
-    0.000001%; divide by what the proof actually deployed and it reads what it means.
+    its unassigned tokens in a self-opinion: a box whose R5 is its own token id -- the
+    ecosystem's self-pointing "profile" box, which ``profileFetch``'s
+    ``is_self_defined`` filter selects on. That reserve is not a judgement about
+    anything. On mainnet it is nearly the whole supply of every live profile.
 
-    Summed from the boxes rather than as ``emissionAmount - reserved``, so tokens parked
-    outside the contract cannot dilute the opinions either. On the live proofs the two
-    agree exactly (99,999,904 reserved + 95 assigned = 99,999,999 minted).
+    **Locked** (``burned_nanoerg``) is the ERG behind the opinions of the proof::
 
-    **Burned** is the ERG sunk into the proof, unrecoverably: the contract's owner path
-    requires ``totalNativeOut >= totalNativeIn`` across the proof's boxes, so the owner
-    cannot take it back out, and the public top-up path lets anybody add to it without a
-    signature. One-way in both directions. Its floor is the min-box value each box needs
-    to exist, so a proof reading 0.001 ERG has had nothing sacrificed into it -- which is
-    what makes it the figure to read a share against: minting a proof is free, this is not.
+        SUM(ERG in the proof's boxes at the contract)
+            * tokens not in a self-opinion / all the proof's tokens at the contract
+
+    The ERG can be in the box of any opinion, or in any other box of the proof at the
+    contract. The contract's owner path requires ``totalNativeOut >= totalNativeIn``
+    across the proof's boxes, so the owner cannot take it back out, and the public
+    top-up path lets anybody add to it. A proof that keeps nearly all its tokens in a
+    self-opinion puts nearly none of its ERG behind its opinions.
+
+    ``deadline`` is a ``time.monotonic()`` value for all the requests together.
     """
+    from src.reputation_system.envs import REPUTATION_PROOF_ERGO_TREE
+
+    tree = REPUTATION_PROOF_ERGO_TREE.lower()
+    token = token_id.lower()
     assigned = 0
     reserved = 0
-    burned = 0
-    for box in iter_unspent_boxes_by_token(api_url, token_id):
-        burned += int(box.get("value") or 0)
+    contract = 0
+    for box in iter_unspent_boxes_by_token(api_url, token_id, deadline=deadline):
+        if str(box.get("ergoTree") or "").lower() != tree:
+            continue
         assets = box.get("assets") or []
-        amount = int(assets[0].get("amount") or 0) if assets else 0
+        if not assets or str(assets[0].get("tokenId") or "").lower() != token:
+            continue
+        contract += int(box.get("value") or 0)
+        amount = int(assets[0].get("amount") or 0)
         pointer = (decode_coll_byte_hex(str(box_register(box, "R5") or "")) or "").lower()
-        if pointer == token_id.lower():
+        if pointer == token:
             reserved += amount
         else:
             assigned += amount
-    return ProofStanding(assigned_amount=assigned, reserved_amount=reserved, burned_nanoerg=burned)
+    total = assigned + reserved
+    locked = contract * assigned // total if total > 0 else 0
+    return ProofStanding(
+        assigned_amount=assigned,
+        reserved_amount=reserved,
+        burned_nanoerg=locked,
+        contract_nanoerg=contract,
+    )
 
 
 def decode_coll_byte_hex(register_value: str) -> Optional[str]:

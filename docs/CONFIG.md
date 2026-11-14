@@ -267,6 +267,9 @@ the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
 | `communication.SHARE_KNOWN_PEERS` | `true` | Answer `Gateway.ListPeers` with known peers and periodically push their announcements with `IntroducePeer`. Off returns an empty list and disables push. |
 | `communication.DISCOVER_PEERS_VIA_GOSSIP` | `true` | Periodically pull advertisements from one randomly selected known peer. Each is registered through normal signature verification and anti-replay checks. |
 | `communication.MAX_PEERS_PER_GOSSIP_RESPONSE` | `100` | Maximum advertisements served per list request; also the local cap on messages consumed from a remote list, including rejected ones. Zero disables list/pull work. |
+| `communication.DISCOVER_PEERS_ON_LEDGERS` | `true` | At the start, read the reputation ledgers for nodes that announced themselves and register them as known peers (#494). See [`ERGO.md`](ERGO.md#finding-peers-on-the-ledger). |
+| `communication.MAX_PEERS_FROM_LEDGERS` | `10` | The most new peers that one run adds. Zero switches the search off. |
+| `communication.LEDGER_DISCOVERY_TIMEOUT_SECONDS` | `60` | Time for all the reads of one run. Each request to the explorer has its own deadline of 30 s. |
 | `communication.MAX_PEERS_PER_GOSSIP_PUSH` | `20` | Maximum other peers introduced to one random target per tick. Zero disables push work. |
 | `communication.GOSSIP_INTERVAL_SECONDS` | `300` | Independent pull/push intervals, measured with a monotonic clock. Invalid or nonpositive values use 300 seconds. |
 
@@ -1079,6 +1082,8 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
 | `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit` (MU per base unit). A whole number. ERG↔nanoERG is fixed in code, not here. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
+| `ledgers.ergo.reputation.DISCOVERY_MIN_LOCKED_ERG` | `"0.1"` | ERG (decimal string) that a proof must have locked behind its opinions for the ledger peer search (`communication.DISCOVER_PEERS_ON_LEDGERS`) to take the node that announced itself with it: the ERG of the proof's boxes at the contract, times the share of its tokens that is not in a self-opinion. A value that is not a number gives the default. |
+| `ledgers.ergo.reputation.LOCKED_ERG` | `"0"` | ERG (decimal string) that this node keeps locked in its own proof, in the box that declares it. `nodo reputation lock <ERG>` sets it and publishes the proof. The ERG cannot be taken out of the proof, so a lower value takes nothing back. |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |
 | `ledgers.ergo.payments.DONATION_PERCENTAGE` | `"0.02"` | Share of **incoming payments** donated to the people who write this software. Applies to earnings, not to the sweep below, and works with no cold wallet. The transaction fee comes out of this share, never on top of it. Set it to `0` to opt out. |

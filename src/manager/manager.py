@@ -549,7 +549,17 @@ def _passes_anti_replay(peer_id: str, ts: int) -> bool:
 # Insert the instance if it does not exist, refresh it otherwise.
 def add_peer_instance(peer: celaut_pb2.Peer,
                       learned_via_gossip: bool = False) -> Optional[str]:
+    """The id of the peer, as :func:`register_peer_instance` gives it."""
+    return register_peer_instance(peer=peer, learned_via_gossip=learned_via_gossip)[0]
+
+
+def register_peer_instance(peer: celaut_pb2.Peer,
+                           learned_via_gossip: bool = False) -> Tuple[Optional[str], bool]:
     """Register or refresh a peer, identified by the key it signed its announcement with.
+
+    Returns ``(peer id, inserted)``: the id, or None when the announcement is refused,
+    and whether this call inserted the row. A caller that may undo its own registration
+    (ledger discovery) must not remove a row that another path inserted (#653).
 
     An identity is mandatory: a ``Peer`` that carries no public key, or whose signature
     does not verify against it, is refused outright. A peer's id IS its public key, so
@@ -572,7 +582,7 @@ def add_peer_instance(peer: celaut_pb2.Peer,
             "Refusing a peer announcement with no verifiable identity: a peer is "
             "identified by the key that signed it."
         )
-        return None
+        return None, False
 
     from src.identity.node_identity import get_node_public_key_hex
 
@@ -581,22 +591,22 @@ def add_peer_instance(peer: celaut_pb2.Peer,
     # in its own peer table would have it delegating to, and paying, itself.
     if peer_id.lower() == (get_node_public_key_hex() or '').lower():
         log.LOGGER("Refusing a peer announcement carrying this node's own identity.")
-        return None
+        return None, False
 
     if sc.peer_exists(peer_id=peer_id):
         if not _passes_anti_replay(peer_id, peer.ts):
             log.LOGGER(f"Peer {peer_id} sent a stale ts; ignoring the update.")
-            return peer_id
+            return peer_id, False
         stored = update_peer_instance(peer=peer, peer_id=peer_id)
         # Only a strictly-newer announcement may drop addresses, so a replayed message
         # can never prune a peer's real ones.
         sc.prune_peer_uris(peer_id=peer_id, keep=stored)
         sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
-        return peer_id
+        return peer_id, False
 
     if not sc.add_peer(peer_id=peer_id, advertisement=_peer_advertisement(peer),
                        learned_via_gossip=learned_via_gossip):
-        return None
+        return None, False
 
     sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
 
@@ -626,7 +636,7 @@ def add_peer_instance(peer: celaut_pb2.Peer,
         except Exception as e:
             log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
 
-    return peer_id
+    return peer_id, True
 
 def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
     """Whether a payment contract a peer advertises is on a ledger this node settles on.
@@ -1081,7 +1091,8 @@ def associate_client_with_peer(client_id: str, peer_id: str, signature: str) -> 
 
 
 def _mint_client_over_channel(
-        channel, proposed_id: str, binding: Optional[dict] = None
+        channel, proposed_id: str, binding: Optional[dict] = None,
+        timeout: Optional[float] = None,
 ) -> Optional[str]:
     """Mint a client_id at whatever peer ``channel`` reaches, solving PoW if asked.
 
@@ -1100,7 +1111,11 @@ def _mint_client_over_channel(
     """
     binding = binding or {}
 
-    client_msg = BeeClient.generate_client(channel, client_id=proposed_id, **binding)
+    # ``timeout`` bounds each GenerateClient call, the PoW retry too. None waits as long
+    # as the peer does.
+    client_msg = BeeClient.generate_client(
+        channel, client_id=proposed_id, timeout=timeout, **binding
+    )
 
     if isinstance(client_msg, celaut_pb2.PoWRequired):
         # The peer has given away its free clients. Its `difficulty` field only says what
@@ -1117,6 +1132,7 @@ def _mint_client_over_channel(
             pow_solution=solve_pow(
                 challenge=client_msg.challenge, difficulty=client_msg.difficulty
             ),
+            timeout=timeout,
             **binding,
         )
 
@@ -1161,7 +1177,7 @@ def associate_client_id_on_channel(channel, client_id: str) -> bool:
     return bool(response and response.bound)
 
 
-def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
+def get_client_id_on_other_peer(peer_id: str, timeout: Optional[float] = None) -> Optional[str]:
     """
     Retrieves or generates a client ID for a given peer. If the peer already has an associated client ID for our client,
     it returns that ID. If not, it checks if the peer is available. If the peer is available, it generates a new client ID,
@@ -1189,6 +1205,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
         peer_channel(peer_id=peer_id),
         proposed_id=proposed_id,
         binding=_peer_identity_binding(proposed_id),
+        timeout=timeout,
     )
     if not new_client_id:
         # Preserved from before this shared the minting code with
