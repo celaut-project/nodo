@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "5a7b1eb44ae946b7e368af4629ddd2ecdf877fe73c031497fb9cf6b2b7a4e844",
+  "celaut_proto": "ea0a73152b2e13a755aa239feb616e0fa868c6addea2ccfa4b4d5628bf410bdc",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",
@@ -10,6 +10,8 @@
     "balancers.DONATION_HALF_CREDIT",
     "balancers.DONATION_WEIGHT",
     "balancers.LOCAL_BIAS",
+    "balancers.OFFCHAIN_REPUTATION_PRIOR",
+    "balancers.OFFCHAIN_REPUTATION_WEIGHT",
     "balancers.ONCHAIN_PUBLISHER_CAP",
     "balancers.ONCHAIN_REPUTATION_HALF_CREDIT",
     "balancers.ONCHAIN_REPUTATION_WEIGHT",
@@ -272,6 +274,14 @@
     "publisher.TOKEN_ENV_VAR",
     "receipts.CHECKPOINT_BYTES",
     "receipts.CHECKPOINT_SECONDS",
+    "reputation.FAULT_EVIDENCE_RETENTION_DAYS",
+    "reputation.MAX_FAULT_REPORTS",
+    "reputation.MAX_FAULT_REPORTS_ON_LEDGER",
+    "reputation.MAX_OFFCHAIN_PROOFS_PER_RESPONSE",
+    "reputation.MAX_OFFCHAIN_PROOF_BYTES",
+    "reputation.OFFCHAIN_PULL_INTERVAL_SECONDS",
+    "reputation.PULL_OFFCHAIN_PROOFS",
+    "reputation.SHARE_OFFCHAIN_PROOFS",
     "routing.HIDDEN",
     "routing.LOCAL_NETWORKS",
     "routing.tor.ANNOUNCE",
@@ -353,6 +363,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "9ebf32587b35362022036dadbcbfb439501c54a76591a7d5fa398acf73bf0431",
+  "database": "bfe0fd9b5b56f8c4d2a9820498e3d3e37ad5dcd85891a55b29d8ee664b9c887d",
   "storage_format": 1
 }

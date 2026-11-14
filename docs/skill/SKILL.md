@@ -84,6 +84,10 @@ Understand these before running anything. Full glossary:
   through `ListPeers` pulls and `IntroducePeer` pushes. A relay sends each signed
   advertisement exactly as its peer signed it (see
   [`../CONFIG.md`](../CONFIG.md#transitive-peer-discovery-gossip)).
+  Nodes also pull the signed off-chain reputation proofs of their peers with
+  `GetReputationProofs`: scores, and fault reports with evidence that any node checks
+  with the key of the accused (see
+  [`../REPUTATION.md`](../REPUTATION.md#off-chain-reputation)).
   **This is a different layer from `Service.Network`
   below.** `Gateway.ResolveNetwork` (and `network_discovery.py`'s
   `ask_peers`/`ask_peer`) asks a peer you are *already* connected to for the

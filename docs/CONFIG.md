@@ -247,6 +247,25 @@ does not ask gets none, and nothing is hashed for it.
 | `receipts.CHECKPOINT_BYTES` | `1048576` | Sign a checkpoint when this many bytes passed in the stream since the last one. |
 | `receipts.CHECKPOINT_SECONDS` | `5` | Sign a checkpoint when this many seconds passed since the last one, if there was new traffic. An idle stream gets none. |
 
+## `reputation` — off-chain reputation
+
+The node signs its opinions about its peers with its identity key, in a
+`ReputationProof`, and other nodes get it with `GetReputationProofs` (#652). A proof has a
+score for each peer and a report for each fault that the node found in the statements of
+a peer. A report holds the signed statements and receipts that prove the fault, when they
+prove it alone. See [`REPUTATION.md`](REPUTATION.md#off-chain-reputation).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `reputation.SHARE_OFFCHAIN_PROOFS` | `true` | Answer `GetReputationProofs`: the proof of this node, then the proofs of other nodes that it keeps. When false, the answer is empty. |
+| `reputation.PULL_OFFCHAIN_PROOFS` | `true` | Ask one random peer for its proofs at each interval. |
+| `reputation.OFFCHAIN_PULL_INTERVAL_SECONDS` | `300` | The time between two pulls. |
+| `reputation.MAX_OFFCHAIN_PROOFS_PER_RESPONSE` | `100` | The most proofs in one answer, and in one pull. A proof that is refused counts too. |
+| `reputation.MAX_OFFCHAIN_PROOF_BYTES` | `1048576` | A received proof above this size is refused. |
+| `reputation.MAX_FAULT_REPORTS` | `64` | The most fault reports in the proof of this node. Reports with evidence come first. |
+| `reputation.MAX_FAULT_REPORTS_ON_LEDGER` | `8` | The most fault reports in the proof of this node on Ergo. Each one is a box of one token against the accused peer. The evidence stays off the chain. |
+| `reputation.FAULT_EVIDENCE_RETENTION_DAYS` | `90` | The days that the evidence of a fault is kept. `0` keeps it for ever. |
+
 ## `builder` — build tuning
 
 | Key | Default | Meaning |
@@ -828,7 +847,7 @@ A candidate is ranked by an effective cost in log space:
 
 ```
 score(peer)  = −ln(cost_mu) + SOCIALIZATION_FACTOR · r̂ + ONCHAIN_REPUTATION_WEIGHT · ô
-                            + DONATION_WEIGHT · d̂
+                            + OFFCHAIN_REPUTATION_WEIGHT · ŝ + DONATION_WEIGHT · d̂
 score(local) = −ln(cost_mu) + LOCAL_BIAS              + DONATION_WEIGHT · d̂
 
 r̂ = r / (|r| + REPUTATION_HALF_CREDIT)   ∈ (−1, 1)   sign-preserving: a peer that
@@ -838,6 +857,9 @@ r̂ = r / (|r| + REPUTATION_HALF_CREDIT)   ∈ (−1, 1)   sign-preserving: a pe
     v_p     = the share of its own proof p stakes on this peer, netted
     cred(p) = max(0, cos(v_p, r̂))  — how far p's opinions about peers agree
                                       with ours, over the peers we both rate
+ŝ = Σ_p w(p) · v(p) / (Σ_p w(p) + OFFCHAIN_REPUTATION_PRIOR)  ∈ (−1, 1)
+    v(p) = the score that the off-chain proof of p gives this peer, as r̂
+    w(p) = cred(p) · max(0, r̂(p))  — p agrees with us, and p did good work for us
 d̂ = C / (C + DONATION_HALF_CREDIT)       ∈ [ 0, 1)   bonus only, never a penalty
 ```
 
@@ -894,6 +916,8 @@ ties.
 | `balancers.ONCHAIN_REPUTATION_WEIGHT` | `0.3` | Weight of what the **ledgers** say about a peer (`e^0.3` ≈ 35 % premium at most). Equal to `DONATION_WEIGHT`, with a matching half-credit, so **a burned ERG is worth a donated ERG** at every point on the curve. An operator may weight either system higher; the node **warns** (it does not refuse) when the first ERG burned is worth more than the first ERG donated, comparing `W_o / H_o` against `W_d / H_d`. See [`REPUTATION.md`](REPUTATION.md), [`DONATIONS.md`](DONATIONS.md) and issue #353. |
 | `balancers.ONCHAIN_REPUTATION_HALF_CREDIT` | `5.0` | Agreed, burn-weighted ERG (`S`) at which half that weight is earned. `5` ERG is `DONATION_HALF_CREDIT` in the same units (`5000000000` nanoERG at `MU_PER_NANOERG: 1`): the two curves share a scale, not only a ceiling. |
 | `balancers.ONCHAIN_PUBLISHER_CAP` | `5.0` | The most any one proof may contribute to `S`, in ERG. It binds a single honest publisher and nothing else — minting a proof is free, so a burn split across several never meets it. Above 5 ERG behind one proof, burning earns less than donating the same; at or below, the two are identical. |
+| `balancers.OFFCHAIN_REPUTATION_WEIGHT` | `1.0` | Weight of what the signed **off-chain** proofs of other nodes say about a peer (`e^1` ≈ 2.7× premium at most). Below `SOCIALIZATION_FACTOR`: what this node saw itself comes first. A proof costs nothing, so a publisher has a voice only when it agrees with us and did good work for us (#652). See [`REPUTATION.md`](REPUTATION.md#off-chain-reputation). |
+| `balancers.OFFCHAIN_REPUTATION_PRIOR` | `1.0` | The voice that `ŝ` starts from. One weak voice does not move a peer far. |
 | `balancers.COST_AVERAGE_VARIATION` | `1` | How much the `price_volatility` of a bounded quote inflates its cost when candidates are compared (`cost * (1 + v * k)`). Bounded candidates are always ranked ahead of unbounded ones (#636). |
 | `balancers.DONATION_WEIGHT` | `0.3` | Weight of a peer's donation credit (`e^0.3` ≈ 35 % premium at most). **The safety parameter** — a high value closes the network to newcomers; see [`DONATIONS.md`](DONATIONS.md). |
 | `balancers.DONATION_HALF_CREDIT` | `"5000000000"` | Donation credit, in MU, at which half that weight is earned. |

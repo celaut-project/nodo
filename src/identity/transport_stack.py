@@ -76,6 +76,7 @@ from src.identity.node_identity import (
     parse_component_formal,
     same_component,
     receipt_payload,
+    reputation_proof_payload,
     statement_payload,
 )
 from src.identity import protocol_doc
@@ -510,6 +511,33 @@ def gateway_component() -> Layer:
                           "when the stream stops normally",
         "receipt.ledger": "detail.execution_name on start and tunnel movements; "
                           "detail.session on tunnel movements of a receipt stream",
+        "reputation_proof.signature": "Peer.signature_scheme over UTF-8 of payload, "
+                                      "lowercase hex",
+        "reputation_proof.signature.payload": reputation_proof_payload(
+            peer_id, "<proof_digest>"),
+        "reputation_proof.digest": "blake2b-256 hex of UTF-8 of publisher|ts|scheme|"
+                                   "'/'.join(opinion)",
+        "reputation_proof.digest.opinion": "hex(type)~hex(object)~amount~1 or 0~"
+                                           "hex(content)~evidence digest or empty",
+        "reputation_proof.digest.scheme": "peer.digest.scheme of signature_scheme",
+        "reputation_proof.ts": "unix seconds; accepted only if greater than the last "
+                               "accepted ts for that publisher",
+        "reputation_proof.amount": "the score of the publisher for the object, as the "
+                                   "absolute value; 0 for a fault report",
+        "reputation_proof.fault_content": "UTF-8 JSON with the keys reason, account_ref "
+                                          "and seq",
+        "fault_evidence.digest": "blake2b-256 hex of UTF-8 of reason|accused|"
+                                 "statement digest of each statement|receipt digest of "
+                                 "each receipt",
+        "fault_evidence.reasons": "statement_inconsistent,killed_with_mu,"
+                                  "statement_contradicts_receipt,maintenance_overcharged,"
+                                  "instance_hibernated_unannounced,"
+                                  "instance_stopped_unannounced",
+        "statement.start.quote": "detail.quote of movement 1 of kind start: "
+                                 "init_maintenance_cost,max_maintenance_cost,"
+                                 "maintenance_seconds_loop,price_bounded,price_volatility,"
+                                 "volatility_period_seconds,on_close,closes_at and base "
+                                 "(mem_limit,disk_space,cpu_period,cpu_quota)",
         "client_binding.payload": client_binding_payload(peer_id, client_id),
         "client_binding.signature": "Peer.signature_scheme, lowercase hex",
         "ledger_attestation.payload": attestation_payload(peer_id),
@@ -602,6 +630,30 @@ def gateway_component() -> Layer:
         "prove that the node "
         "lied. A receipt is evidence against the node only: it is never evidence for "
         "it. A receipt with no valid signature is not valid.\n"
+        "\n"
+        "REPUTATION PROOFS. GetReputationProofs gives the ReputationProof of the node "
+        "and the proofs of other nodes that it holds. A proof holds the opinions of its "
+        "publisher about other nodes, as a reputation proof on a ledger. The publisher "
+        "signs it with the key and the scheme of its Peer. The signed text is \"" +
+        reputation_proof_payload("<public_key>", "<proof_digest>") + "\". The proof "
+        "digest is a BLAKE2b-256 hash of a text that the formal field specifies. A node "
+        "relays a proof as its publisher signed it, and keeps only the newest proof of "
+        "each publisher. A proof costs nothing to make, so a receiver gives a publisher "
+        "only the weight that its own experience of that publisher gives.\n"
+        "\n"
+        "FAULT EVIDENCE. A fault report in a proof can hold a FaultEvidence: balance "
+        "statements and execution receipts that the accused node signed. A receiver "
+        "checks the evidence with the public key of the accused node only, and does "
+        "not need to trust the publisher. For statement_inconsistent, one statement "
+        "whose chain does not hold, or two statements of one account with two hashes "
+        "for one seq or with a head that went back. For killed_with_mu, a stop row "
+        "with MU left after a refund with lost father_gone. For "
+        "statement_contradicts_receipt, statements and receipts of one execution that "
+        "do not agree. For maintenance_overcharged and the closing faults, the page "
+        "with movement 1 of the account and a page with the charges: the node writes "
+        "its quote for an instance in detail.quote of its start movement, so the "
+        "statement signs it. The charges are judged after the first movement of their "
+        "page.\n"
         "\n"
         "OTHER SIGNATURES. To bind a client_id to its identity, a peer signs the "
         "text \"" + client_binding_payload("<peer_id>", "<client_id>") + "\". The wallet "

@@ -166,6 +166,31 @@ def wallet_need(values: List[int], proof_in: int, fee: int) -> int:
     return max(0, int(fee) + sum(values) - int(proof_in))
 
 
+def add_fault_boxes(objects: List[Tuple[Optional[str], float, Optional[str]]],
+                    faults: List[Tuple[str, str]]) -> List[Tuple[Optional[str], float, Optional[str]]]:
+    """``objects`` with one box for each fault report (#652): one token against the
+    accused (R8 false), with the reason and the digest of the evidence in R9. The
+    evidence stays off the chain: a reader gets it with ``GetReputationProofs``.
+
+    The tokens come from the largest opinion for a peer, so the proof keeps its supply.
+    When no opinion holds more tokens than the faults need, the faults are not
+    published, and ``objects`` does not change.
+    """
+    if not faults:
+        return list(objects)
+    largest = max((i for i, obj in enumerate(objects) if obj[0] and obj[1] > 0),
+                  key=lambda i: objects[i][1], default=None)
+    if largest is None or objects[largest][1] <= len(faults):
+        LOGGER(f"No opinion holds enough tokens for {len(faults)} fault reports; "
+               "they are not published on the ledger.")
+        return list(objects)
+    out = list(objects)
+    peer, amount, data = out[largest]
+    out[largest] = (peer, amount - len(faults), data)
+    out.extend((accused, -1, report) for accused, report in faults)
+    return out
+
+
 def __build_proof_box(
     ergo,
     proof_id: str,
@@ -324,7 +349,8 @@ def _self_network_data() -> str:
     return message_to_json(peer)
 
 
-def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]]):
+def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]],
+                                 faults: Optional[List[Tuple[str, str]]] = None):
     ensure_ergpy_jvm(feature="Ergo reputation")
     appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
     jpype = require_java_module("jpype", feature="Ergo reputation")
@@ -343,7 +369,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # The most the wallet can have to put in: a new proof (nothing comes in from the
     # proof's boxes), plus one change box and the minimum left to the change of AppKit.
     most_needed = wallet_need(
-        proof_box_values(len(objects), self_index, 0, target), 0, fee
+        proof_box_values(len(objects) + len(faults or ()), self_index, 0, target), 0, fee
     ) + 2 * SAFE_MIN_BOX_VALUE
     wallet_input_boxes = ergo.getInputBoxCovering(amount_list=[most_needed], sender_address=sender_address)
     selected_input_box = min(
@@ -369,7 +395,10 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             for obj in objects
         ]
 
-    total_token_value = int(sum([obj[1] for obj in objects]))
+    # The fault reports after the split: each one is a box of one token, against (#652).
+    objects = add_fault_boxes(objects, list(faults or ()))
+    # Tokens, whatever the polarity: a box against holds its tokens as one for.
+    total_token_value = int(sum([abs(obj[1]) for obj in objects]))
     assert expected_total_reputation == total_token_value, (
         f"The sum of the values to be spent must equal the total reputation token amount ({expected_total_reputation}) and not {total_token_value}")
 
@@ -495,7 +524,8 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     return tx_id
 
 
-def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
+def submit_reputation_proof(objects: List[Tuple[str, int, str]],
+                            faults: Optional[List[Tuple[str, str]]] = None) -> bool:
     try:
         from src.payment_system.contracts.ergo.interface import get_amount_by_addr
 
@@ -522,6 +552,7 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
             wallet_mnemonic=mnemonic,
             proof_id=proof_id,
             objects=objects,
+            faults=list(faults or ()),
         )
         LOGGER(f"Submitted tx -> {tx_id}")
         return tx_id is not None

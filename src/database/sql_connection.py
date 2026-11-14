@@ -13,6 +13,7 @@ from src.utils.keyvalue import message_to_json
 
 from protos import celaut_pb2
 from src.database import ledger
+from src.database.migrate import SIGNED_PAGE_COLUMNS
 from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
@@ -84,6 +85,12 @@ TRACEABILITY_TABLES = (
     # The support thread of a client with the operator (no peer needed). Without it,
     # `Chat` from such a client would fail on the insert, and `GetChatThread` on the read.
     "client_chat_messages",
+    # Off-chain reputation (#652): the evidence of faults, the proofs of other nodes and
+    # their scores. Without them a fault is still scored, but it is not published, and
+    # the balancer reads no off-chain opinion.
+    "fault_evidence",
+    "offchain_proofs",
+    "offchain_opinions",
 )
 
 # Columns on an existing table that a database created before them will not have.
@@ -108,8 +115,11 @@ TRACEABILITY_COLUMNS = {
         # Written by every failed revive, read by the reaper.
         "revive_failing_since": "DATETIME DEFAULT NULL",
     },
-    # Read by every delegated tick (issue #594).
-    "delegated_instances": {"suspended_at": "DATETIME DEFAULT NULL"},
+    # Read by every delegated tick (issue #594), and the signed pages of a child (#652).
+    "delegated_instances": {"suspended_at": "DATETIME DEFAULT NULL",
+                            **SIGNED_PAGE_COLUMNS["delegated_instances"]},
+    # The last page that gave the head of a descendant (#652).
+    "descendant_peers": dict(SIGNED_PAGE_COLUMNS["descendant_peers"]),
     # `peer` is a base table every install already has, so unlike a wholly new table
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
     # upgraded in place would raise "no such column: local_client_id" on the first
@@ -5263,6 +5273,167 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to read the donation scan tip for {ledger}: {e}')
             return 0
         return _as_int(row['tip']) if row else 0
+
+    # -- Off-chain reputation (#652) ---------------------------------------------------
+
+    def record_fault_evidence(self, accused: str, reason: str, account_ref: str, seq: int,
+                              digest: str, evidence: bytes, source: str) -> bool:
+        """Keep the evidence of a fault. True if the fault had no evidence yet: that is
+        the one time that a received evidence is scored."""
+        cursor = self._execute(
+            'INSERT OR IGNORE INTO fault_evidence '
+            '(accused, reason, account_ref, seq, digest, evidence, source, ts) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (accused, reason, account_ref, int(seq), digest, bytes(evidence), source,
+             int(time.time())))
+        return cursor.rowcount > 0
+
+    def fault_evidence_exists(self, accused: str, reason: str, account_ref: str,
+                              seq: int) -> bool:
+        return self._execute(
+            'SELECT 1 FROM fault_evidence WHERE accused = ? AND reason = ? '
+            'AND account_ref = ? AND seq = ?',
+            (accused, reason, account_ref, int(seq))).fetchone() is not None
+
+    def get_fault_evidence(self, limit: int) -> List[dict]:
+        """The newest ``limit`` evidences: ``accused``, ``reason``, ``account_ref``,
+        ``seq``, ``evidence`` (serialized ``FaultEvidence``) and ``ts``."""
+        rows = self._execute(
+            'SELECT accused, reason, account_ref, seq, evidence, ts FROM fault_evidence '
+            'ORDER BY ts DESC LIMIT ?', (int(limit),)).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_statement_faults(self, limit: int) -> List[dict]:
+        """The newest ``limit`` faults that this node scored in statements of its peers:
+        ``peer_id``, ``account_ref``, ``reason``, ``seq`` and ``ts``."""
+        rows = self._execute(
+            'SELECT peer_id, account_ref, reason, seq, ts FROM statement_faults '
+            'ORDER BY ts DESC LIMIT ?', (int(limit),)).fetchall()
+        return [dict(row) for row in rows]
+
+    def prune_fault_evidence(self, max_age_days: int) -> int:
+        """Delete the evidence older than ``max_age_days``. Returns how many."""
+        cutoff = int(time.time()) - int(max_age_days) * 86400
+        return self._execute('DELETE FROM fault_evidence WHERE ts < ?', (cutoff,)).rowcount
+
+    def store_offchain_proof(self, publisher: str, ts: int, proof: bytes) -> bool:
+        """Keep the proof of ``publisher`` when it is newer than the kept one. True if it
+        was kept. The check and the write are one statement, so two pulls at the same time
+        cannot put an older proof back."""
+        cursor = self._execute(
+            'INSERT INTO offchain_proofs (publisher, ts, proof, received_at) '
+            'VALUES (?, ?, ?, ?) '
+            'ON CONFLICT(publisher) DO UPDATE SET ts = excluded.ts, proof = excluded.proof, '
+            'received_at = excluded.received_at WHERE excluded.ts > offchain_proofs.ts',
+            (publisher, int(ts), bytes(proof), int(time.time())))
+        return cursor.rowcount > 0
+
+    def offchain_proof_ts(self, publisher: str) -> Optional[int]:
+        row = self._execute('SELECT ts FROM offchain_proofs WHERE publisher = ?',
+                            (publisher,)).fetchone()
+        return None if row is None else int(row['ts'])
+
+    def get_offchain_proofs(self, limit: Optional[int] = None) -> List[dict]:
+        """``publisher``, ``ts`` and ``proof`` (serialized) of the kept proofs, in a random
+        order: a caller that takes the first ``limit`` gets a different part each time."""
+        query = 'SELECT publisher, ts, proof FROM offchain_proofs ORDER BY RANDOM()'
+        params: tuple = ()
+        if limit is not None:
+            query += ' LIMIT ?'
+            params = (int(limit),)
+        return [dict(row) for row in self._execute(query, params).fetchall()]
+
+    def delete_offchain_proofs_except(self, publishers: Iterable[str]) -> int:
+        """Delete the proofs of publishers that are not in ``publishers`` (not peers any
+        more). Returns how many."""
+        keep = list(publishers)
+        if not keep:
+            return self._execute('DELETE FROM offchain_proofs').rowcount
+        marks = ", ".join("?" for _ in keep)
+        return self._execute(
+            f'DELETE FROM offchain_proofs WHERE publisher NOT IN ({marks})', tuple(keep)
+        ).rowcount
+
+    def replace_offchain_opinions(self, rows: List[Tuple[str, str, float, float]]) -> bool:
+        """Set the off-chain opinions to exactly ``rows``: ``(subject, publisher, verdict,
+        weight)``. One transaction, so a reader never sees half of them. A failure keeps
+        the rows before it."""
+        statements: List[Tuple[str, tuple]] = [("DELETE FROM offchain_opinions", ())]
+        for subject, publisher, verdict, weight in rows:
+            statements.append((
+                "INSERT INTO offchain_opinions (subject_id, publisher, verdict, weight) "
+                "VALUES (?, ?, ?, ?)",
+                (str(subject), str(publisher), float(verdict), float(weight))))
+        try:
+            self._execute2(statements)
+            return True
+        except Exception as e:
+            logger.LOGGER(f'Failed to store the off-chain opinions: {e}')
+            return False
+
+    def get_offchain_opinions(self) -> List[dict]:
+        """Every off-chain opinion: ``subject_id``, ``publisher``, ``verdict``, ``weight``.
+        ``[]`` when the table cannot be read."""
+        try:
+            rows = self._execute(
+                'SELECT subject_id, publisher, verdict, weight FROM offchain_opinions'
+            ).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the off-chain opinions: {e}')
+            return []
+        return [dict(row) for row in rows]
+
+    def set_delegated_signed_start(self, token: str, quote_columns: Mapping,
+                                   start_statement: bytes) -> None:
+        """Keep the quote that the peer signed in the ``start`` movement of the child, and
+        the page that holds it (#652). The quote replaces the one that the peer sent
+        before the start: the signed one is what the peer is held to."""
+        columns = {key: quote_columns.get(key) for key in (
+            "quote_init_maintenance_cost", "quote_max_maintenance_cost",
+            "quote_maintenance_seconds_loop", "quote_price_bounded",
+            "quote_price_volatility", "quote_volatility_period_seconds",
+            "quote_on_close", "quote_closes_at", "quote_launch_ts",
+            "peer_base_mem_limit", "peer_base_disk_space", "peer_base_cpu_period",
+            "peer_base_cpu_quota")}
+        for key in ("quote_init_maintenance_cost", "quote_max_maintenance_cost"):
+            columns[key] = _mu_text(columns[key])
+        if columns["quote_price_bounded"] is not None:
+            columns["quote_price_bounded"] = int(bool(columns["quote_price_bounded"]))
+        # A start shape that the peer did not sign keeps the one read from its metrics.
+        columns = {key: value for key, value in columns.items()
+                   if value is not None or not key.startswith("peer_base_")}
+        assignments = ", ".join(f"{key} = ?" for key in columns)
+        self._execute(
+            f'UPDATE delegated_instances SET {assignments}, start_statement = ? '
+            'WHERE token_delegation = ?',
+            tuple(columns.values()) + (bytes(start_statement), token))
+
+    def set_delegated_statement_raw(self, token: str, statement: bytes) -> None:
+        """Keep the last page that set the mark of the child (#652)."""
+        self._execute('UPDATE delegated_instances SET peer_statement_raw = ? '
+                      'WHERE token_delegation = ?', (bytes(statement), token))
+
+    def delegated_signed_pages(self, token: str) -> Tuple[Optional[bytes], Optional[bytes]]:
+        """``(start_statement, peer_statement_raw)`` of the child, None where none."""
+        row = self._execute(
+            'SELECT start_statement, peer_statement_raw FROM delegated_instances '
+            'WHERE token_delegation = ?', (token,)).fetchone()
+        if row is None:
+            return None, None
+        return row['start_statement'], row['peer_statement_raw']
+
+    def set_descendant_head_statement(self, peer_id: str, instance_ref: str,
+                                      statement: bytes) -> None:
+        """Keep the last page of a descendant that gave its kept head (#652)."""
+        self._execute('UPDATE descendant_peers SET head_statement = ? '
+                      'WHERE peer_id = ? AND instance_ref = ?',
+                      (bytes(statement), peer_id, instance_ref))
+
+    def descendant_head_statement(self, peer_id: str, instance_ref: str) -> Optional[bytes]:
+        row = self._execute('SELECT head_statement FROM descendant_peers '
+                            'WHERE peer_id = ? AND instance_ref = ?',
+                            (peer_id, instance_ref)).fetchone()
+        return None if row is None else row['head_statement']
 
     def replace_onchain_opinions(self, ledger: str, subject_id: str,
                                  rows: List[Tuple[str, float, int, float]]) -> bool:

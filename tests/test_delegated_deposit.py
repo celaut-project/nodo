@@ -100,7 +100,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         ) as start, patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(
-            delegate_mod, "_check_start", return_value=(child_balance, mark)
+            delegate_mod, "_check_start", return_value=(child_balance, mark, None)
         ) as check_start, patch.object(delegate_mod, "SQLConnection") as sql_connection, patch.object(
             delegate_mod.BeeClient, "stop_service", side_effect=stop_error
         ) as stop_service:
@@ -935,7 +935,7 @@ class CheckStartTests(unittest.TestCase):
         self.assertEqual(self.fetch.call_args.kwargs["rows"], 4)
 
     def test_a_balance_that_pays_for_nothing_reads_no_statement_and_scores_nothing(self):
-        (balance, mark), penalise = self._check(_book((100, "start")), held=99)
+        (balance, mark, _), penalise = self._check(_book((100, "start")), held=99)
 
         self.fetch.assert_not_called()
         penalise.assert_not_called()
@@ -944,14 +944,14 @@ class CheckStartTests(unittest.TestCase):
     def test_a_start_marks_its_last_movement(self):
         book = _book((100, "start"), (-30, "build"))
 
-        (balance, mark), penalise = self._check(book)
+        (balance, mark, _), penalise = self._check(book)
 
         self.assertEqual(balance, 70)
         self.assertEqual((mark["seq"], mark["hash"]), (2, book.rows[1]["hash"]))
         penalise.assert_not_called()
 
     def test_what_the_peer_took_for_the_build_is_not_judged(self):
-        (balance, mark), penalise = self._check(_book((100, "start"), (-90, "build")))
+        (balance, mark, _), penalise = self._check(_book((100, "start"), (-90, "build")))
 
         self.assertEqual((balance, mark["seq"]), (10, 2))
         penalise.assert_not_called()
@@ -960,20 +960,20 @@ class CheckStartTests(unittest.TestCase):
         def tamper(statement):
             statement.movements.pop(0)
 
-        (balance, mark), penalise = self._check(
+        (balance, mark, _), penalise = self._check(
             _book((100, "start"), (-30, "build")), tamper=tamper)
 
         self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
         self.assertEqual((balance, mark), (55, None))
 
     def test_a_start_that_hangs_from_another_account_does_not_add_up(self):
-        (balance, mark), penalise = self._check(
+        (balance, mark, _), penalise = self._check(
             _book((100, "start"), (-30, "build"), account="another-account"))
 
         self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
 
     def test_no_statement_from_the_peer_that_just_started_the_child(self):
-        (balance, mark), penalise = self._check(fetch_error=RuntimeError("refused"))
+        (balance, mark, _), penalise = self._check(fetch_error=RuntimeError("refused"))
 
         self.assertEqual(penalise.call_args.args[2], "statement_inconsistent")
         self.assertEqual((balance, mark), (55, None))

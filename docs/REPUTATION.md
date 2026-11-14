@@ -11,6 +11,7 @@ in [`CONFIG.md`](CONFIG.md#balancers); the donation economics are in
 ```
 score(peer)  = −ln(cost_mu) + SOCIALIZATION_FACTOR · r̂
                             + ONCHAIN_REPUTATION_WEIGHT · ô
+                            + OFFCHAIN_REPUTATION_WEIGHT · ŝ
                             + DONATION_WEIGHT · d̂
 
 score(local) = −ln(cost_mu) + LOCAL_BIAS + DONATION_WEIGHT · d̂
@@ -22,8 +23,9 @@ price up to `e^W` higher, and never more. `local` — this node running the work
 gets neither reputation term, because a node holds no evidence about itself and what the
 chain says about it is what it published.
 
-`r̂`, `ô` and `d̂` are all bounded. `r̂` and `ô` are in `(−1, 1)` and sign-preserving;
-`d̂` is in `[0, 1)` and a bonus only.
+`r̂`, `ô`, `ŝ` and `d̂` are all bounded. `r̂`, `ô` and `ŝ` are in `(−1, 1)` and
+sign-preserving; `d̂` is in `[0, 1)` and a bonus only. `local` does not get `ŝ` either.
+`ŝ` is in [Off-chain reputation](#off-chain-reputation).
 
 ## `r̂` — what we saw ourselves
 
@@ -110,6 +112,8 @@ first ERG burned is worth more than the first ERG donated — comparing `W_o / H
   is computed on that same tick and stored beside each row, so a peer that failed us is
   reflected in its vouchers' credibility at the next tick.
 - **`d̂`**: the `donations` table, refreshed hourly from the same explorer.
+- **`ŝ`**: the `offchain_opinions` table, written when the node pulls the proofs of a
+  peer (`reputation.OFFCHAIN_PULL_INTERVAL_SECONDS`).
 
 **A routing decision does no network I/O at all.** Every term is a read of SQLite. If an
 index has never been filled, that term is zero for *every* candidate — never for some of
@@ -220,11 +224,14 @@ the mark is an interval:
   when it grew past it. So a hotplug up to the most is not an overcharge.
 - `k = floor((t - launch) / volatility_period_seconds) + 1` (1 when the period is 0), with
   `t` the date of the movement, which is the end of the time that it charges: an interval
-  that spans a change of period has the higher `k`. `launch` is the launch of the delegated
-  row, and the 120 s of clock margin count in favour of the peer.
-- The quote is the one that the peer signed for this instance. A peer that raises its
-  prices after the delegation is held to the price that it signed, not to its rates of
-  today.
+  that spans a change of period has the higher `k`. `launch` is the date of the signed
+  `start` movement of the child, or the launch of the delegated row when the peer signed
+  no quote. The 120 s of clock margin count in favour of the peer.
+- The quote is the one that the peer signed for this instance in the `start` movement
+  of the child (see [The quote in the `start` movement](#the-quote-in-the-start-movement)).
+  A peer from before #652 signs none, and the quote is then the one that it sent before
+  the start. A peer that raises its prices after the delegation is held to the price that
+  it signed, not to its rates of today.
 - A row with no quote, an unbounded quote, a quote with no figure for the resources that
   the child holds or no period, or a period with no known launch, is not checked. A
   `price_volatility` that is NaN, infinite or negative is read as 0, and a negative period
@@ -662,6 +669,119 @@ Limits of this judgement:
   scored for the refusal (`statement_inconsistent`), not for the stop.
 - A node that promises to resume (`ON_CLOSE: hibernate`) and does not is a separate case.
   It is not scored.
+
+## Off-chain reputation
+
+A node signs its opinions about its peers with its identity key (#652). This is the same
+model as a reputation proof on Ergo (see [`ERGO.md`](ERGO.md)), but it is not on a chain:
+a `ReputationProof` has the `peer_id` of its publisher, a `ts`, and its opinions. Each
+opinion has a type (R4), an object (R5), an amount, a polarity (R8) and a content (R9).
+The proof costs nothing to publish. The design is in
+[`proposals/652-offchain-reputation.md`](proposals/652-offchain-reputation.md).
+
+### What the proof of a node holds
+
+- A **score** for each peer: the amount is `|r|`, and the polarity is the sign of `r`.
+- A **fault report** for each fault that the node scored in the statements of a peer
+  (see [What costs a peer reputation](#what-costs-a-peer-reputation)). Its amount is 0,
+  because the score already counts the fault. Its content is the reason, the account and
+  the seq as JSON. When the signed messages of the accused peer prove the fault alone, the
+  report holds them as a `FaultEvidence`.
+
+The node builds its proof again every 5 minutes. `GetReputationProofs` gives it, and
+then the proofs of other nodes that the node keeps, as their publishers signed them. Each
+node pulls from one random peer every `reputation.OFFCHAIN_PULL_INTERVAL_SECONDS`. It keeps
+the newest proof of each publisher that is one of its peers, and only that one.
+
+### Evidence that needs no trust
+
+`fault_proofs.check` proves a fault from a `FaultEvidence` with the public key of the
+accused peer only. It needs no state of the node that reads it.
+
+| Reason | Evidence | Check |
+|---|---|---|
+| `statement_inconsistent` | 1 statement | the chain of the page does not hold by itself |
+| `statement_inconsistent` | 2 statements of one account | one seq with two hashes, or a head that went back |
+| `killed_with_mu` | 1 statement | a `stop` row with MU left after a `refund` with `lost = father_gone` |
+| `statement_contradicts_receipt` | statements and receipts of one execution | `receipt_statement.check` |
+| `maintenance_overcharged` | the page with movement 1, and a page with the charges | the charges against the quote in the `start` movement |
+| `instance_hibernated_unannounced`, `instance_stopped_unannounced` | the same pages | `closing_check.judge` against the same quote |
+
+A fault that rests on what only the reporter knows is not provable. These faults are
+`statement_overcharged`, `maintenance_while_unreachable`, a refusal and a clock that is
+far off. Their reports have no evidence.
+
+The reporter runs the same check on the evidence before it attaches it. The evidence
+alone can show less than the reporter saw: for example, the reporter judged from a mark
+that is not in the pages. In that case the report goes without evidence.
+
+A node that gets valid evidence scores the fault against the accused peer, with the
+same penalty as when it sees the fault itself. It does this once for each peer, reason,
+account and seq (`fault_evidence`), whoever sends the evidence first, and also when it
+found the same fault itself before. It checks the evidence of every proof that it gets,
+also from a node that is not its peer. It scores only a fault of one of its peers, and
+never a fault of itself. A fault with evidence goes into the proof of the node that
+checked it, so the evidence travels on.
+
+### The quote in the `start` movement
+
+A maintenance charge is judged against the quote of the peer. Before #652, the quote
+was the `EstimatedCost` that the peer sent before the start. That message has no
+signature. Now each node writes its quote for an instance in `detail.quote` of the
+`start` movement of the instance. The statement signature covers that movement, so the
+node signs its quote and binds it to the account of the instance:
+
+- `init_maintenance_cost`, `max_maintenance_cost` and `maintenance_seconds_loop`;
+- `price_bounded`, `price_volatility` and `volatility_period_seconds`;
+- `on_close` and `closes_at`;
+- `base`: the start shape that the node reserved.
+
+A local start writes the figures that its ticks charge: the reserved resources at the
+price of the launch, with the bound of the launch. A delegated start writes the price of
+the node for the child, with no volatility (#577). The delegating node reads the quote
+from the `start` row of the child (`_check_start`). It then uses that quote, and the date
+of that row as the launch, in place of the quote that the peer sent. A signed figure above
+the figure that the peer sent is logged, and is not a fault. A peer from before #652
+signs no quote: the node uses the quote that the peer sent, as before, and the fault is
+not provable.
+
+The node keeps the page with movement 1 of each child, and the last page that set its
+mark (`delegated_instances.start_statement`, `peer_statement_raw`), and the last page of
+each descendant (`descendant_peers.head_statement`). These pages are the evidence.
+
+### `ŝ` — what other nodes signed
+
+```
+v(p, s) = sign · amount / (amount + REPUTATION_HALF_CREDIT)     the score of p, as r̂
+w(p)    = cred(p) · max(0, r̂(p))
+ŝ(s)    = Σ_p w(p) · v(p, s) / (Σ_p w(p) + OFFCHAIN_REPUTATION_PRIOR)
+```
+
+`cred(p)` is the same cosine as for `ô`: how far the scores of `p` agree with our `r̂`.
+`r̂(p)` is our own score of the publisher. A publisher that did no work for us, or that
+failed us, has no voice. So a new identity costs nothing and gives nothing, and a proof
+that only copies our scores also needs good work for us. The opinion of a node about
+itself does not count. The prior keeps one weak voice from moving a peer far.
+
+At `OFFCHAIN_REPUTATION_WEIGHT: 1.0`, a peer that all voices rate perfectly can beat a
+price `e¹` ≈ 2.7 times higher. That is less than `SOCIALIZATION_FACTOR: 2`: what this
+node saw itself comes first.
+
+### On Ergo
+
+`submit_to_ledger` also publishes the faults that the node can prove, at most
+`reputation.MAX_FAULT_REPORTS_ON_LEDGER`. Each one is a box of one token against the
+accused (R8 false). R9 is JSON with the reason, the account, the seq and the digest of
+the evidence (`fault_proofs.digest`). The token comes from the largest opinion of the
+proof, so the proof keeps its supply. The evidence stays off the chain, because a box
+pays rent for each byte: a reader gets it with `GetReputationProofs`.
+
+### Limits
+
+- The evidence shows the account of the reporter on the peer by its `account_ref`, and
+  its movements: what the reporter paid and when. It shows no credential.
+- A proof is only as new as the last pull.
+- `cred` can be copied, as for `ô`. Here a copy also needs `r̂(p) > 0`.
 
 ## Known limits of this version
 

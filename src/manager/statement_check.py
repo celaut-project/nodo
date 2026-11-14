@@ -380,6 +380,47 @@ def _within(shape: Mapping, limit: Mapping) -> bool:
             and _vcpus(shape) <= _vcpus(limit))
 
 
+# The key of the quote in ``detail`` of a ``start`` movement (#652).
+START_QUOTE_KEY = "quote"
+# The keys of a quote in ``detail.quote``: those of ``peer_quotes.maintenance_terms``.
+QUOTE_TERMS = ("init_maintenance_cost", "max_maintenance_cost", "maintenance_seconds_loop",
+               "price_bounded", "price_volatility", "volatility_period_seconds",
+               "on_close", "closes_at")
+
+
+def start_quote_detail(terms: Optional[Mapping], base_shape: Optional[Mapping]) -> dict:
+    """``detail`` of a ``start`` movement that holds the quote of the node for the
+    instance (#652): ``{"quote": {...}}``, with the maintenance terms
+    (``peer_quotes.maintenance_terms``) and the start shape that the node reserved
+    (``base``). The statement signature covers it, so the node signs the quote and binds
+    it to the account of the instance. Empty when there are no terms."""
+    if not terms:
+        return {}
+    quote = {key: terms.get(key) for key in QUOTE_TERMS}
+    if base_shape:
+        quote["base"] = {key: int(base_shape.get(key) or 0) for key in _SHAPE_KEYS}
+    return {START_QUOTE_KEY: quote}
+
+
+def signed_quote_row(row: Row) -> Optional[dict]:
+    """The quote in a ``start`` movement as the columns of a delegated row (``quote_*``,
+    ``quote_launch_ts``, ``peer_base_*``), or None when the movement is not the first
+    ``start`` of its account or holds no quote. ``MaintenanceQuote.of_row`` and
+    ``closing_check.judge`` read these columns."""
+    if row.kind != ledger.START or row.seq != 1:
+        return None
+    quote = row.detail.get(START_QUOTE_KEY)
+    if not isinstance(quote, Mapping):
+        return None
+    columns = {f"quote_{key}": quote.get(key) for key in QUOTE_TERMS}
+    columns["quote_launch_ts"] = int(row.ts)
+    base = quote.get("base")
+    if isinstance(base, Mapping):
+        for key in _SHAPE_KEYS:
+            columns[f"peer_base_{key}"] = base.get(key)
+    return columns
+
+
 @dataclass(frozen=True)
 class MaintenanceQuote:
     """The bound that the peer promised for the maintenance of a child, in its MU (#567,
@@ -408,7 +449,11 @@ class MaintenanceQuote:
             max_mu = int(row.get("quote_max_maintenance_cost") or 0)
             init_mu = int(row.get("quote_init_maintenance_cost") or 0)
             seconds = int(row.get("quote_maintenance_seconds_loop") or 0)
-            launch_ts = row.get("launched_ts")
+            # The date of the signed ``start`` movement when the peer signed its quote
+            # there (#652), else the launch on the clock of this node.
+            launch_ts = row.get("quote_launch_ts")
+            if launch_ts is None:
+                launch_ts = row.get("launched_ts")
             launch_ts = None if launch_ts is None else int(launch_ts)
         except (TypeError, ValueError):
             return None
@@ -421,6 +466,13 @@ class MaintenanceQuote:
         base_shape = None if any(value is None for value in base.values()) else base
         return MaintenanceQuote(max(max_mu, 0), seconds, bound, max(init_mu, 0), launch_ts,
                                 base_shape)
+
+    @staticmethod
+    def of_start(row: Row) -> Optional["MaintenanceQuote"]:
+        """The quote that the peer signed in the ``start`` movement of the account
+        (``detail.quote``, #652), or None when the movement has none. The launch is the
+        date of that movement, and the start shape is the one that the peer signed."""
+        return MaintenanceQuote.of_row(signed_quote_row(row) or {})
 
     def figure_for(self, detail: Mapping) -> Optional[int]:
         """The figure of one period for the resources of a ``maintenance`` movement:
@@ -1071,16 +1123,79 @@ def penalise_no_statement(peer_id: str, account: str, error: Exception, seq: int
                   f"no valid statement: {error}", seq, window=FAULT_WINDOW_SECONDS)
 
 
-def penalise_chain(peer_id: str, account: str, chain: Chain, seq: int) -> None:
+def penalise_chain(peer_id: str, account: str, chain: Chain, seq: int,
+                   statement: Optional[celaut_pb2.BalanceStatement] = None,
+                   before: Optional[bytes] = None) -> None:
     """Score a statement that ``verify_chain`` did not accept, at its ``fault_seq``, or
     at ``seq``. A statement dated far from our clock shows no movement, and the clock
-    that is wrong can be ours. It is scored once in a window, not at each read."""
+    that is wrong can be ours. It is scored once in a window, not at each read.
+
+    ``statement`` is the page, and ``before`` the last page of the same account that the
+    peer signed before (serialized), when this node kept it. They are the evidence of the
+    fault (#652): the page alone when it does not hold together by itself, else the two
+    pages when they disagree."""
     if chain.clock:
         penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT, chain.problem,
                       CLOCK_FAULT_SEQ, window=FAULT_WINDOW_SECONDS)
     else:
         penalise_once(peer_id, account, Reason.STATEMENT_INCONSISTENT, chain.problem,
-                      chain.fault_seq if chain.fault_seq is not None else seq)
+                      chain.fault_seq if chain.fault_seq is not None else seq,
+                      evidence=inconsistency_evidence(peer_id, statement, before))
+
+
+def parse_statement(raw: Optional[bytes]) -> Optional[celaut_pb2.BalanceStatement]:
+    """A serialized statement, or None when there is none or it cannot be read."""
+    if not raw:
+        return None
+    statement = celaut_pb2.BalanceStatement()
+    try:
+        statement.ParseFromString(raw)
+    except Exception:
+        return None
+    return statement
+
+
+def quote_evidence(reason: str, row: Mapping,
+                   statement: Optional[celaut_pb2.BalanceStatement]
+                   ) -> Optional[celaut_pb2.FaultEvidence]:
+    """The evidence of a fault against the quote of the delegated child of ``row``
+    (#652): the page with the ``start`` movement where the peer signed its quote, and
+    ``statement``. None when ``fault_proofs`` cannot prove the fault from them: the peer
+    did not sign its quote, or the page does not show the fault by itself."""
+    from src.database.sql_connection import SQLConnection
+    from src.reputation_system import fault_proofs
+
+    if statement is None:
+        return None
+    try:
+        start = parse_statement(SQLConnection().delegated_signed_pages(row["token"])[0])
+    except Exception as e:
+        log.LOGGER(f"Cannot read the signed start of the child {str(row.get('token'))[:8]}: {e}")
+        return None
+    if start is None:
+        return None
+    pages = [start] if start.SerializeToString() == statement.SerializeToString() \
+        else [start, statement]
+    return fault_proofs.attach(fault_proofs.evidence_of(reason, row.get("peer_id"), pages))
+
+
+def inconsistency_evidence(peer_id: str, statement: Optional[celaut_pb2.BalanceStatement],
+                           before: Optional[bytes] = None
+                           ) -> Optional[celaut_pb2.FaultEvidence]:
+    """The evidence of ``statement_inconsistent`` that ``fault_proofs`` can prove: the
+    page alone, or the page with the page before it. None when neither proves it."""
+    from src.reputation_system import fault_proofs
+
+    if statement is None:
+        return None
+    alone = fault_proofs.evidence_of(Reason.STATEMENT_INCONSISTENT, peer_id, [statement])
+    if fault_proofs.check(alone) is not None:
+        return alone
+    earlier = parse_statement(before)
+    if earlier is None:
+        return None
+    return fault_proofs.attach(fault_proofs.evidence_of(
+        Reason.STATEMENT_INCONSISTENT, peer_id, [earlier, statement]))
 
 
 def _invalid_statement():
@@ -1090,7 +1205,8 @@ def _invalid_statement():
 
 def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: int = 0,
                   window: int = 0, per_account: bool = False,
-                  amount: int = STATEMENT_PENALTY) -> None:
+                  amount: int = STATEMENT_PENALTY,
+                  evidence: Optional[celaut_pb2.FaultEvidence] = None) -> None:
     """Score a fault of a peer, once: the same fault read again costs it nothing.
 
     A fault is the peer, the account (by ``account_ref``, never the credential), the
@@ -1103,13 +1219,42 @@ def penalise_once(peer_id: str, account: str, reason: str, problem: str, seq: in
     ``per_account``: the ``window`` is the one of the account and the reason, at any
     movement. A fault that goes on over many movements, as a price above the quote does
     at every period, is then scored once in the window, and a movement only once.
+
+    ``evidence``: the signed pages (and receipts) that show the fault (#652). They are
+    kept, and published in the reputation proof of this node, only when
+    ``fault_proofs.check`` proves the fault from them alone. A fault that another node
+    already proved to this node with its evidence (``fault_evidence``) is recorded and
+    not scored again.
     """
     from src.database.sql_connection import SQLConnection
     from src.reputation_system import interface
 
+    sql = SQLConnection()
     account_ref = ledger.account_ref(account)
     log.LOGGER(f"Statement of {account_ref[:8]} on {peer_id}: {problem}")
-    if not SQLConnection().record_statement_fault(peer_id, account_ref, reason, seq, window,
-                                                  any_seq=per_account):
+    if not sql.record_statement_fault(peer_id, account_ref, reason, seq, window,
+                                      any_seq=per_account):
+        return
+    if evidence is not None and not keep_evidence(evidence, "own"):
+        # The same fault came with the evidence of another node, and it was scored then.
         return
     interface.update_peer_reputation(peer_id=peer_id, amount=amount, reason=reason)
+
+
+def keep_evidence(evidence: celaut_pb2.FaultEvidence, source: str) -> bool:
+    """Keep ``evidence`` when it proves its fault (``fault_proofs.check``). False only when
+    the same fault already has evidence: the fault was scored then. Evidence that proves
+    nothing is not kept, and gives True: it changes nothing. Never raises."""
+    from src.database.sql_connection import SQLConnection
+    from src.reputation_system import fault_proofs
+
+    try:
+        proven = fault_proofs.check(evidence)
+        if proven is None:
+            return True
+        return SQLConnection().record_fault_evidence(
+            proven.accused, proven.reason, proven.account_ref, proven.seq,
+            fault_proofs.digest(evidence), evidence.SerializeToString(), source)
+    except Exception as e:
+        log.LOGGER(f"Cannot keep the evidence of a fault of {evidence.accused}: {e}")
+        return True

@@ -87,6 +87,7 @@ class _Network(unittest.TestCase):
         self.current = None
         self.nodes = {}
         self.faults = []
+        self.evidences = []
         self.lie = {}
         for target, kwargs in (
             ((node_identity, "get_identity_mnemonic"),
@@ -160,8 +161,9 @@ class _Network(unittest.TestCase):
                 raise _PeerError(grpc.StatusCode.RESOURCE_EXHAUSTED, str(e))
 
     def _penalise(self, peer_id, account, reason, problem, seq=0, window=0,
-                  per_account=False):
+                  per_account=False, amount=None, evidence=None):
         self.faults.append((self.current.name, self.nodes[peer_id].name, reason))
+        self.evidences.append(evidence)
 
     def add_instance(self, token, father, mu):
         self.sc.add_local_instance(
@@ -338,6 +340,14 @@ class KeptHeadTests(_Network):
             self.read(self.ref)
 
         self.assertIn(("A", "B", "statement_inconsistent"), self.faults)
+        # The two pages that B signed are the evidence: any node proves the fault from
+        # them with the key of B alone (#652).
+        from src.reputation_system import fault_proofs
+        evidence = self.evidences[self.faults.index(("A", "B", "statement_inconsistent"))]
+        self.assertIsNotNone(evidence)
+        self.assertEqual(len(evidence.statements), 2)
+        proven = fault_proofs.check(evidence)
+        self.assertEqual(proven.accused, self.b.peer_id)
 
     def test_a_longer_chain_that_does_not_follow_the_head_is_scored(self):
         self.other_history(rows=6, mu=1)

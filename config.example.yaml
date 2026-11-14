@@ -409,6 +409,29 @@ receipts:
   CHECKPOINT_BYTES: 1048576
   CHECKPOINT_SECONDS: 5
 
+# Off-chain reputation (issue #652). The node signs its opinions about its peers with its
+# identity key (a ReputationProof): a score for each peer, and a report for each fault
+# that it found in their statements. A report holds the signed statements and receipts
+# that prove the fault, when they prove it alone. Other nodes check that evidence with
+# the key of the accused node, and score the fault as if they had seen it. See
+# docs/REPUTATION.md.
+reputation:
+  # Answer GetReputationProofs: the proof of this node, and the proofs of others.
+  SHARE_OFFCHAIN_PROOFS: true
+  # Ask one random peer for the proofs that it holds, every interval.
+  PULL_OFFCHAIN_PROOFS: true
+  OFFCHAIN_PULL_INTERVAL_SECONDS: 300
+  # The most proofs in one answer, and in one pull.
+  MAX_OFFCHAIN_PROOFS_PER_RESPONSE: 100
+  # A received proof above this size is refused.
+  MAX_OFFCHAIN_PROOF_BYTES: 1048576
+  # The most fault reports in the proof of this node, and in its proof on the ledger.
+  # A box on the ledger pays rent for each byte, so the evidence stays off the chain.
+  MAX_FAULT_REPORTS: 64
+  MAX_FAULT_REPORTS_ON_LEDGER: 8
+  # The days that the evidence of a fault is kept. 0 keeps it for ever.
+  FAULT_EVIDENCE_RETENTION_DAYS: 90
+
 builder:
   WAIT_FOR_CONTAINER: 60
   WAIT_FOR_UNLOCK_MEMORY: 60
@@ -1033,6 +1056,15 @@ balancers:
   # proofs never meets it. Above 5 ERG, a single proof earns less than the same ERG
   # donated; at or below it the two are identical.
   ONCHAIN_PUBLISHER_CAP: 5.0
+  # Weight of what the signed off-chain proofs of other nodes say about a peer (#652).
+  # A proof costs nothing to publish, so a publisher has a voice only when it agrees
+  # with our own scores (the same cosine as above) and when our own score of it is
+  # above 0: it did good work for us. A new identity has no voice. Lower than
+  # SOCIALIZATION_FACTOR: what we saw ourselves comes first. See docs/REPUTATION.md.
+  OFFCHAIN_REPUTATION_WEIGHT: 1.0
+  # The voice that the term starts from: the sum of the voices of the publishers is
+  # divided by this plus itself, so one weak voice does not move a peer far.
+  OFFCHAIN_REPUTATION_PRIOR: 1.0
   COST_AVERAGE_VARIATION: 1
   # Weight of a peer's donation credit. Bonus only, never a penalty: penalising
   # non-donors is exactly what would make patching this out rational.

@@ -58,6 +58,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.GetReputationProofs = channel.stream_stream(
+                '/celaut.Gateway/GetReputationProofs',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
         self.ResolveNetwork = channel.stream_stream(
                 '/celaut.Gateway/ResolveNetwork',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -224,6 +229,16 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetReputationProofs(self, request_iterator, context):
+        """Returns a stream of ReputationProof: first the proof of the node, then proofs of
+        other nodes that the node holds. The node sends each proof as its publisher
+        signed it, never changed. The number of proofs has a limit. If the node does not
+        share reputation proofs, the stream is empty.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ResolveNetwork(self, request_iterator, context):
         """Any Service.Network, not one kind of it. If the caller must know the kind first,
         the caller does the resolution itself. A `pow:` network has no name to look up,
@@ -284,6 +299,9 @@ class GatewayServicer(object):
     def GenerateDepositToken(self, request_iterator, context):
         """Returns a TokenMessage with a new deposit token for the client. The payer writes
         this token in its ledger transaction. The payment contract gives where and how.
+        A local instance of the node can call it with an empty client_id: the token then
+        pays into the balance of the caller, so a service that earns money recharges its
+        own MU. The node proves the payment on the ledger as always.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -321,8 +339,8 @@ class GatewayServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetResourceAvailability(self, request_iterator, context):
-        """Asks if the node can run one instance with the given architecture and resources
-        now. The resources do not need to be those of a known service.
+        """Asks if the node can run one instance with the given architecture, resources and
+        devices now. The resources do not need to be those of a known service.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -441,6 +459,11 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'ListPeers': grpc.stream_stream_rpc_method_handler(
                     servicer.ListPeers,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'GetReputationProofs': grpc.stream_stream_rpc_method_handler(
+                    servicer.GetReputationProofs,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -643,6 +666,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ListPeers',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetReputationProofs(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetReputationProofs',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

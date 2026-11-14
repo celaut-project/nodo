@@ -335,7 +335,10 @@ The registers of an opinion box itself:
 - **R6** — `isLocked`
 - **R7** — the owner's `propositionBytes` (`0008cd` + the *author's* public key)
 - **R8** — `customFlag`, carrying the sign of the amount
-- **R9** — free-form content; for a self-opinion, the node's signed `Peer` message
+- **R9** — free-form content; for a self-opinion, the node's signed `Peer` message; for a
+  fault report (R8 false, one token), JSON with `reason`, `account_ref`, `seq` and
+  `evidence`, the digest of the signed evidence that `GetReputationProofs` gives (#652, see
+  [`REPUTATION.md`](REPUTATION.md#on-ergo))
 
 ###### Reading the reputation held on a node
 

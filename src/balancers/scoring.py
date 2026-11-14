@@ -62,6 +62,8 @@ def score(
     donation_weight: float = 0.0,
     onchain_reputation: float = 0.0,
     onchain_weight: float = 0.0,
+    offchain_reputation: float = 0.0,
+    offchain_weight: float = 0.0,
     local_bias: Optional[float] = None,
 ) -> float:
     """Rank one candidate. Higher is better.
@@ -82,6 +84,11 @@ def score(
     be bought is added to it here; the saturation it went through is what makes the
     weight a ceiling.
 
+    ``offchain_reputation`` is the off-chain term (#652), bounded in ``(-1, 1)``: what
+    other nodes signed about the candidate, each one weighed by how far it agrees with
+    us and by our own score of it (:mod:`src.reputation_system.offchain_credit`). It
+    goes with the other reputation terms, so the local candidate does not get it.
+
     ``cost_mu == 0`` is ``+inf``: a peer giving its capacity away is the best offer
     there is, not a math domain error. ``log(0)`` used to raise here, and a price of
     zero became reachable when a node could serve a free tier.
@@ -93,6 +100,7 @@ def score(
     if local_bias is None:
         total += float(reputation_weight) * reputation_factor(reputation, reputation_half_credit)
         total += float(onchain_weight) * float(onchain_reputation)
+        total += float(offchain_weight) * float(offchain_reputation)
     else:
         total += float(local_bias)
     # Bonus only: donation weights are refused if negative (config validation), so this
