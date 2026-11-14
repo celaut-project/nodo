@@ -125,16 +125,20 @@ def judge(rows, on_close: Optional[str], closes_at: Optional[int],
     return faults
 
 
-def check(row: Mapping, rows) -> None:
+def check(row: Mapping, rows, statement=None) -> None:
     """Score the peer of the delegated ``row`` for the changes in ``rows`` that its quote
-    did not say. Once for each change: the same row read again costs nothing. Never raises."""
+    did not say. Once for each change: the same row read again costs nothing. Never raises.
+
+    ``statement`` is the page of ``rows``: with the page where the peer signed its quote,
+    it is the evidence of the fault (#652)."""
     try:
         mem = row.get("mem_limit")
         for fault in judge(rows, row.get("quote_on_close"), row.get("quote_closes_at"),
                            None if mem is None else int(mem)):
             statement_check.penalise_once(
                 row.get("peer_id"), row["token"], fault.reason, fault.problem, fault.seq,
-                amount=fault.amount)
+                amount=fault.amount,
+                evidence=statement_check.quote_evidence(fault.reason, row, statement))
     except Exception as e:
         from src.utils import logger as log
         log.LOGGER(f"Could not check the closing terms of {row.get('id')}: {e}")

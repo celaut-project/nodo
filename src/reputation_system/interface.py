@@ -95,8 +95,13 @@ def compute_reputation(peer_id) -> float:
 def submit_reputation(force_submit: bool = False) -> bool:
     from src.reputation_system.contracts.ergo.transaction import submit_reputation_proof
 
+    from src.reputation_system.offchain_proof import ledger_fault_reports
+
+    # The faults that this node can prove go on the ledger too, as opinions against the
+    # accused (#652). Their evidence stays off the chain.
     return sc.submit_to_ledger(
-        submit=lambda objects: submit_reputation_proof(objects=objects),
+        submit=lambda objects: submit_reputation_proof(
+            objects=objects, faults=ledger_fault_reports()),
         force_submit=force_submit
     )
 
@@ -142,6 +147,15 @@ def get_node_reputation(node_id: Optional[str] = None) -> NodeReputation:
         except Exception as e:
             LOGGER(f"Could not read {ledger} reputation for {node_id}: {e}")
             errors[ledger] = str(e)
+
+    # The signed off-chain proofs that this node holds (#652). Not in
+    # `_opinion_readers`: those are the ledgers, which the on-chain indexer reads too.
+    try:
+        from src.reputation_system.offchain_proof import opinions_about
+        collected.extend(opinions_about(node_id))
+    except Exception as e:
+        LOGGER(f"Could not read the off-chain reputation for {node_id}: {e}")
+        errors["offchain"] = str(e)
 
     own_proof_ids = _own_proof_ids(node_id)
     opinions, own = split_own(collected, own_proof_ids)

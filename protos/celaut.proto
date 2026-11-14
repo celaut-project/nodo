@@ -1159,6 +1159,64 @@ message ExecutionReceipt {
     repeated string devices = 30;
 }
 
+// Signed messages of one node that show a fault of that node. A receiver checks them
+// with the public key of that node only, and does not trust the node that sends them.
+message FaultEvidence {
+    // The reason of the fault, as the reasons of the reputation events: for example
+    // "killed_with_mu" or "maintenance_overcharged".
+    string reason = 1;
+    // The peer_id of the node that the evidence accuses: its public key, in lowercase
+    // hexadecimal. That node signed each statement and each receipt.
+    string accused = 2;
+    // Pages of balance statements of the accused node, in the order of their seqs. The
+    // celaut-gateway layer gives which pages each reason needs.
+    repeated BalanceStatement statements = 3;
+    // Execution receipts of the accused node, for "statement_contradicts_receipt".
+    repeated ExecutionReceipt receipts = 4;
+}
+
+// One opinion of a ReputationProof. It has the same parts as an opinion box of a
+// reputation proof on a ledger.
+message ReputationOpinion {
+    // What kind of object the opinion is about, as R4 on the ledger. A node is the
+    // CELAUT_NODE_TYPE_NFT_ID that the celaut-gateway layer gives.
+    string type = 1;
+    // The object of the opinion, as R5 on the ledger. For a node, its peer_id.
+    string object = 2;
+    // How much of its opinion the publisher puts on the object, on the scale of the
+    // reputation of the publisher. A fault report has 0: the score of the same object
+    // already counts the fault.
+    uint64 amount = 3;
+    // True for an opinion for the object, false for an opinion against it, as R8 on
+    // the ledger.
+    bool positive = 4;
+    // Free content, as R9 on the ledger. For a fault report, UTF-8 JSON with the key
+    // "reason".
+    bytes content = 5;
+    // Only in a fault report: the signed messages that prove the fault. Absent when
+    // the fault rests on what only the publisher knows.
+    FaultEvidence evidence = 6;
+}
+
+// The opinions of a node about other nodes, signed with its identity key. It is the
+// off-chain form of a reputation proof on a ledger. A receiver keeps only the newest
+// proof of each publisher.
+message ReputationProof {
+    // The peer_id of the node that signs: its public key, in lowercase hexadecimal. It
+    // is the id of the proof.
+    string publisher = 1;
+    // When the publisher signed, in unix seconds. A receiver refuses a proof that is
+    // not newer than the last proof that it accepted from the same publisher.
+    int64 ts = 2;
+    // The opinions. The signature covers them in this order.
+    repeated ReputationOpinion opinions = 3;
+    // The scheme of the signature, as on the Peer, without the prose.
+    Peer.SignatureScheme signature_scheme = 4;
+    // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
+    // that the node signs.
+    string signature = 5;
+}
+
 // The answer of StartService.
 message ServiceInstance {
     // The instance token. It is the credential for StopService, ModifyDeposit,
@@ -1732,6 +1790,11 @@ service Gateway {
     // with a non-global address or a DNS name, and the number of Peers has a limit. If
     // the node does not share its known peers, the stream is empty.
     rpc ListPeers(stream buffer.Buffer) returns (stream buffer.Buffer) {}
+    // Returns a stream of ReputationProof: first the proof of the node, then proofs of
+    // other nodes that the node holds. The node sends each proof as its publisher
+    // signed it, never changed. The number of proofs has a limit. If the node does not
+    // share reputation proofs, the stream is empty.
+    rpc GetReputationProofs(stream buffer.Buffer) returns (stream buffer.Buffer) {}
 
     // Any Service.Network, not one kind of it. If the caller must know the kind first,
     // the caller does the resolution itself. A `pow:` network has no name to look up,

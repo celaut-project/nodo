@@ -8,6 +8,7 @@ from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCos
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
 from src.gateway.iterables.list_peers_iterable import ListPeersIterable
+from src.gateway.iterables.reputation_proofs_iterable import ReputationProofsIterable
 from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
@@ -124,6 +125,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def ListPeers(self, request_iterator, context, **kwargs):
         yield from ListPeersIterable(request_iterator, context)
+
+    def GetReputationProofs(self, request_iterator, context, **kwargs):
+        yield from ReputationProofsIterable(request_iterator, context)
 
     def ResolveNetwork(self, request_iterator, context, **kwargs):
         """Answer with the peers this node knows in the communication domain asked for.

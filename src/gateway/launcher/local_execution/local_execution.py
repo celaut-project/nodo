@@ -15,6 +15,9 @@ from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
 from src.utils.cost_functions.price_bound import current_bound
+from src.utils.cost_functions import start_quote
+from src.manager.statement_check import start_quote_detail
+from src.virtualizers.interface import resolve_billable_resources
 from src.utils.cost_functions.start_funding import (
     StartAmountTooSmall,
     balance_after_build,
@@ -374,6 +377,29 @@ def local_execution(
     # answer gives.
     start_receipts: dict = {}
 
+    def _local_quote(resolved_resources: celaut_pb2.Sysresources, disk_space: int,
+                     on_close: str, closes_at: int) -> dict:
+        """``detail.quote`` of the ``start`` movement: the terms that the ticks of this
+        instance charge, and the start shape that the node reserved (#652). Empty when it
+        cannot be priced: the start goes on, with a quote that nobody can check."""
+        try:
+            reserved = celaut_pb2.Sysresources()
+            reserved.CopyFrom(resolved_resources)
+            reserved.disk_space = int(disk_space)
+            declared = resolve_billable_resources(resources.at_most, service_id, service=service) \
+                if resources.HasField("at_most") else reserved
+            # Never below what the node reserved: the floors can raise the start above
+            # what the manifest declares as its most.
+            most = celaut_pb2.Sysresources(**{
+                key: max(int(getattr(reserved, key)), int(getattr(declared, key)))
+                for key in start_quote.SHAPE_KEYS})
+            terms = start_quote.local_terms(reserved, most, launch_bp, launch_bound,
+                                            service_arch, on_close, closes_at)
+            return start_quote_detail(terms, start_quote.shape_of(reserved))
+        except Exception as e:
+            log.LOGGER(f"Cannot write the quote of the start of {service_id}: {e}")
+            return {}
+
     def _register_instance(
             vmachine_id: str,
             vmachine_ip: str,
@@ -405,6 +431,8 @@ def local_execution(
         # memory figures come from `resolved_resources` -- what the virtualizer
         # actually reserved, floors applied -- never from a second, defaults-free
         # re-read of the manifest (#249).
+        launch_on_close = activity_window.effective_on_close()
+        launch_closes_at = activity_window.next_close()
         sc.add_local_instance(
             father_id=father_id,
             container_id=vmachine_id,
@@ -424,14 +452,18 @@ def local_execution(
             launch_bound=launch_bound,
             # What this node does at closing time, read from its own configuration at the
             # launch and kept for the life of the instance (#344).
-            launch_on_close=activity_window.effective_on_close(),
-            launch_closes_at=activity_window.next_close(),
+            launch_on_close=launch_on_close,
+            launch_closes_at=launch_closes_at,
             # What the father paid, and the build taken from it (#570). The start
-            # names the execution as its receipt does (#419).
+            # names the execution as its receipt does (#419), and holds the quote of
+            # this node for the instance, which the statement then signs (#652).
             movements=(
                 ledger.Movement(ledger.START, initial_mu,
-                                detail=execution_cause(vmachine_id,
-                                                       start_receipts[vmachine_id])),
+                                detail={**(execution_cause(vmachine_id,
+                                                           start_receipts[vmachine_id]) or {}),
+                                        **_local_quote(resolved_resources, disk_space,
+                                                       launch_on_close, launch_closes_at)}
+                                or None),
                 ledger.Movement(ledger.BUILD, -build_mu),
             ),
         )

@@ -77,6 +77,10 @@ _STATEMENT_PREFIX: Final[str] = "celaut-balance-statement:"
 # this node signs about one execution it runs, which a client can hold up against it.
 _RECEIPT_PREFIX: Final[str] = "celaut-execution-receipt:"
 
+# Domain separation for an off-chain reputation proof (#652): the opinions of this node
+# about other nodes, which any node can relay and check.
+_REPUTATION_PROOF_PREFIX: Final[str] = "celaut-reputation-proof:"
+
 
 def component_formal(pairs: Dict[str, str]) -> bytes:
     """``key=value`` lines, sorted by key, UTF-8: the canonical body of a ``formal``.
@@ -756,6 +760,16 @@ def receipt_payload(peer_id: str, receipt_digest: str) -> str:
     :func:`statement_payload`, with a prefix of its own.
     """
     return f"{_RECEIPT_PREFIX}{peer_id}|{receipt_digest}"
+
+
+def reputation_proof_payload(peer_id: str, proof_digest: str) -> str:
+    """The exact string a node signs for its off-chain reputation proof (#652).
+
+    ``proof_digest`` is ``offchain_proof.proof_digest``, which covers every field of the
+    proof but the signature. The same shape as :func:`statement_payload`, with a prefix
+    of its own.
+    """
+    return f"{_REPUTATION_PROOF_PREFIX}{peer_id}|{proof_digest}"
 
 
 def client_binding_payload(peer_id: str, client_id: str) -> str:
