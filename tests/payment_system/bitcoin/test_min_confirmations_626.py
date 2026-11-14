@@ -46,6 +46,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 TOKEN = "deposit-token-626"
 KEY = "payment.min_confirmations"
+TOO_EARLY = "payment.too_early"
 
 
 def _with_min_confirmations(value):
@@ -79,6 +80,16 @@ def _with_formal_line(ledger, line):
     out.CopyFrom(ledger)
     # Sorted by key, as `component_formal` sorts (not by the whole line).
     out.formal = b"\n".join(sorted(lines, key=lambda l: l.split(b"=", 1)[0]))
+    return out
+
+
+def _without_line(ledger, key):
+    """``ledger`` without the formal line ``key``."""
+    out = celaut_pb2.Contract.Ledger()
+    out.CopyFrom(ledger)
+    out.formal = b"\n".join(
+        l for l in bytes(ledger.formal).split(b"\n") if not l.startswith(key.encode() + b"=")
+    )
     return out
 
 
@@ -118,6 +129,31 @@ class DeclarationTests(unittest.TestCase):
         self.assertNotIn(KEY, _formal(old))
         self.assertTrue(ledger_descriptors.same_payment_ledger(old, _declaration(3)))
         self.assertIsNone(ledger_descriptors.declared_min_confirmations(old))
+
+    def test_the_too_early_rule_is_a_formal_payee_parameter(self):
+        declaration = _declaration(3)
+        self.assertIn(TOO_EARLY, _formal(declaration))
+        self.assertIn(NOT_CONFIRMED_YET, _formal(declaration)[TOO_EARLY])
+        self.assertIn(TOO_EARLY, ledger_descriptors.PAYEE_PARAMETERS)
+        self.assertNotIn(TOO_EARLY, _formal(ledger_descriptors.ergo_payment_ledger()))
+
+    def test_a_node_without_the_too_early_line_is_the_same_ledger(self):
+        # A node from the first #626 release states the number but not this line.
+        without = _without_line(_declaration(3), TOO_EARLY)
+        self.assertNotIn(TOO_EARLY, _formal(without))
+        self.assertIn(KEY, _formal(without))
+        self.assertTrue(ledger_descriptors.same_payment_ledger(without, _declaration(1)))
+        self.assertTrue(ledger_descriptors.same_payment_ledger(_declaration(1), without))
+        # A node from before #626 has neither line.
+        old = _without_line(without, KEY)
+        self.assertTrue(ledger_descriptors.same_payment_ledger(old, _declaration(3)))
+
+    def test_another_too_early_text_is_still_the_same_ledger(self):
+        other = _declaration(3)
+        other.formal = bytes(other.formal).replace(b"keeps the deposit token pending",
+                                                   b"keeps the token")
+        self.assertNotEqual(other.formal, _declaration(3).formal)
+        self.assertTrue(ledger_descriptors.same_payment_ledger(other, _declaration(3)))
 
     def test_every_other_line_is_still_compared_byte_for_byte(self):
         other = _declaration(3)

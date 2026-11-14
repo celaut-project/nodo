@@ -322,11 +322,13 @@ before it calls `Payable`:
   does not state the number (a node from before #626) gets the payer's own number, as
   before.
 
-`payment.min_confirmations` is a **payee parameter**: each payee selects it for itself,
-so it is not part of what two nodes must agree on. Two nodes that wait for different
+`payment.min_confirmations` and `payment.too_early` are **payee parameters**: each payee
+selects them for itself, so they are not part of what two nodes must agree on.
+`payment.too_early` states the rule of the next section: a `Payable` that comes before
+the number keeps the deposit token pending and answers "not confirmed yet". Two nodes that wait for different
 numbers still declare the same ledger — the comparison
-(`ledger_descriptors.same_payment_ledger`) leaves this one line out and compares every
-other line byte for byte, as before. A node whose declaration does not have the line
+(`ledger_descriptors.same_payment_ledger`) leaves these two lines out and compares every
+other line byte for byte, as before. A node whose declaration does not have the lines
 (from before #626) matches too. A payee contract that states a number a payer cannot
 wait for — not an integer, below 1, or above 36 (six hours of blocks, the deposit
 token's lifetime) — is not stored, so this node never pays it.

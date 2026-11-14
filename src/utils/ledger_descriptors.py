@@ -8,10 +8,11 @@ lifetime or the supply of a reputation proof are each node's own choice and are 
 
 One kind of own choice *is* here, because a payer cannot pay correctly without it: a
 **payee parameter** (``PAYEE_PARAMETERS``). It is a value the payee selects and states
-for the payer -- today only ``payment.min_confirmations`` on Bitcoin (#626). It is not
-part of what two nodes must agree on, so a comparison of two payment declarations
-(``same_payment_ledger``) ignores it: two nodes that wait for a different number of
-confirmations still settle on the same ledger.
+for the payer -- today ``payment.min_confirmations`` and ``payment.too_early`` on
+Bitcoin (#626). They are not part of what two nodes must agree on, so a comparison of two
+payment declarations (``same_payment_ledger``) ignores them: two nodes that wait for a
+different number of confirmations, and a node from before these lines, still settle on
+the same ledger.
 
 A descriptor has two parts:
 
@@ -45,11 +46,13 @@ Part = Tuple[Dict[str, str], str]
 
 # The confirmations a Bitcoin payee needs before it accepts a payment (#626).
 MIN_CONFIRMATIONS_KEY = "payment.min_confirmations"
+# What a payee does with a `Payable` that comes before that number (#626).
+TOO_EARLY_KEY = "payment.too_early"
 _BITCOIN_MIN_CONFIRMATIONS_CONFIG = "ledgers.bitcoin.payments.MIN_CONFIRMATIONS"
 
 # Keys of a payment declaration that the payee selects for itself and states for the
 # payer. They are not part of the ledger's identity: `same_payment_ledger` ignores them.
-PAYEE_PARAMETERS = frozenset({MIN_CONFIRMATIONS_KEY})
+PAYEE_PARAMETERS = frozenset({MIN_CONFIRMATIONS_KEY, TOO_EARLY_KEY})
 
 # The largest ``payment.min_confirmations`` a payer accepts from a payee. A Bitcoin block
 # comes about every 10 minutes and a deposit token lives 6 hours
@@ -273,11 +276,15 @@ def _bitcoin_payment() -> Part:
         "payment.deposit_token": "an OP_RETURN output of the same transaction; its data "
                                  "is the UTF-8 deposit token, at most 80 bytes",
         # Unchanged from before #626, so a node with this declaration and one from
-        # before it still match: the number is the payee parameter below, and
-        # `same_payment_ledger` does not compare it.
+        # before it still match: the number and the too-early rule are payee
+        # parameters below, and `same_payment_ledger` does not compare them.
         "payment.accepted": "the transaction is confirmed; the payee selects how many "
                             "confirmations",
         MIN_CONFIRMATIONS_KEY: str(min_confirmations),
+        TOO_EARLY_KEY: "if the transaction pays the amount and has fewer confirmations, "
+                       "the payee keeps the deposit token pending and answers "
+                       "\"not confirmed yet\"; the payer calls Payable again before "
+                       "the token expires",
     }, (
         "PAYMENT. ContractRate.mu_per_unit gives the MU for one satoshi. The script "
         "attribute is the scriptPubKey that receives the payment. The token_id attribute "
