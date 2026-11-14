@@ -182,7 +182,7 @@ class PaymentSelectionTests(unittest.TestCase):
         asked = []
         ledger = "ergo"
 
-        def rows(contract_hash, peer_id, asset=None):
+        def rows(contract_hash, peer_id, asset=None, **_kwargs):
             asked.append((contract_hash, asset))
             return iter([(SCRIPT, ledger, asset or "")])
 

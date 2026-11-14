@@ -126,7 +126,7 @@ def advertised(instances, offered=None):
             if len(row) < 3 or row[2] == module.CONTRACT_HASH
         ]
 
-    def rows(contract_hash, peer_id="LOCAL", asset=None):
+    def rows(contract_hash, peer_id="LOCAL", asset=None, **_kwargs):
         stored = by_method.get((contract_hash, asset or ""), [])
         if not stored:
             # A method whose asset was not named in the fixture still gets its rows,

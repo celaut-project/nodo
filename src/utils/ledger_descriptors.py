@@ -26,6 +26,14 @@ A descriptor has two parts:
   a reputation proof says how its boxes are laid out and how its owner attests a peer.
   A payment contract carries no reputation rules, and a proof no payment rules.
 
+**The tag names the chain and the network**: ``bitcoin-mainnet``, ``bitcoin-regtest``,
+``ergo-mainnet``, ``ergo-<16 hex of the genesis block>``. One interface module (Bitcoin,
+Ergo) settles on several networks, and each network is a different ledger. The tag is
+the identity of the ledger in the database and on the wire, so a row or a key written
+on one network is never read as one of another. The *chain* (``bitcoin``, ``ergo``,
+``chain_of``) stays the name of the config block (``ledgers.<chain>``) and of the
+command line.
+
 ``formal`` is canonical ``key=value`` lines (``node_identity.component_formal``) and is
 what a comparison reads (``node_identity.same_component``). ``prose`` is the same in
 ASD-STE100 Simplified Technical English, for a reader.
@@ -36,8 +44,15 @@ from protos import celaut_pb2
 from src.identity.node_identity import component_formal
 from src.utils.config import ConfigManager
 
+# Chain names: the config block (`ledgers.<chain>`) and the first part of each tag.
 ERGO = "ergo"
 BITCOIN = "bitcoin"
+
+# The genesis block of Ergo mainnet. Also in `reputation_system.contracts.ergo.utils`,
+# which needs a JVM to import; this module must not.
+ERGO_MAINNET_GENESIS_BLOCK_ID = (
+    "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
+)
 
 _CELAUT_NODE_TYPE_NFT_KEY = "ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID"
 _PLAIN_TEXT_TYPE_NFT_KEY = "ledgers.ergo.reputation.PLAIN_TEXT_TYPE_NFT_ID"
@@ -83,12 +98,26 @@ def _ergo_network_name() -> str:
     itself: two nodes on the same testnet or private chain declare the same network,
     and neither declares mainnet.
     """
-    from src.reputation_system.contracts.ergo.utils import MAINNET_GENESIS_BLOCK_ID
-
-    genesis = str(ConfigManager().get("ledgers.ergo.GENESIS_BLOCK_ID") or "").strip().lower()
-    if genesis == MAINNET_GENESIS_BLOCK_ID:
+    genesis = _ergo_genesis()
+    if genesis == ERGO_MAINNET_GENESIS_BLOCK_ID:
         return "mainnet"
     return f"genesis {genesis or 'unset'}"
+
+
+def _ergo_genesis() -> str:
+    return str(ConfigManager().get("ledgers.ergo.GENESIS_BLOCK_ID") or "").strip().lower()
+
+
+def ergo_tag() -> str:
+    """``ergo-mainnet``, or ``ergo-`` and the first 16 hex characters of the genesis block.
+
+    16 hex characters (64 bits) are enough to tell two Ergo chains apart, and keep the
+    tag short. A node with no genesis block set gives ``ergo-unset``.
+    """
+    genesis = _ergo_genesis()
+    if genesis == ERGO_MAINNET_GENESIS_BLOCK_ID:
+        return f"{ERGO}-mainnet"
+    return f"{ERGO}-{genesis[:16] or 'unset'}"
 
 
 def _ergo_network() -> Part:
@@ -209,12 +238,12 @@ def _ergo_reputation() -> Part:
 
 def ergo_payment_ledger() -> celaut_pb2.Contract.Ledger:
     """Ergo, as a payment contract carries it: the network and how a payment is made."""
-    return _ledger(ERGO, _ergo_network(), _ergo_payment())
+    return _ledger(ergo_tag(), _ergo_network(), _ergo_payment())
 
 
 def ergo_reputation_ledger() -> celaut_pb2.Contract.Ledger:
     """Ergo, as a reputation proof carries it: the network and how a proof is laid out."""
-    return _ledger(ERGO, _ergo_network(), _ergo_reputation())
+    return _ledger(ergo_tag(), _ergo_network(), _ergo_reputation())
 
 
 # ---------------------------------------------------------------------------------
@@ -230,6 +259,11 @@ def _bitcoin_network_name() -> str:
     mainnet payer from paying a signet node real BTC it will never see.
     """
     return str(ConfigManager().get("ledgers.bitcoin.NETWORK") or "mainnet").strip().lower()
+
+
+def bitcoin_tag() -> str:
+    """``bitcoin-`` and the network: ``bitcoin-mainnet``, ``bitcoin-regtest``, ..."""
+    return f"{BITCOIN}-{_bitcoin_network_name()}"
 
 
 def _bitcoin_network() -> Part:
@@ -305,7 +339,7 @@ def _bitcoin_payment() -> Part:
 
 def bitcoin_payment_ledger() -> celaut_pb2.Contract.Ledger:
     """Bitcoin, as a payment contract carries it."""
-    return _ledger(BITCOIN, _bitcoin_network(), _bitcoin_payment())
+    return _ledger(bitcoin_tag(), _bitcoin_network(), _bitcoin_payment())
 
 
 # ---------------------------------------------------------------------------------
@@ -387,18 +421,51 @@ def payee_parameters_reason(ledger) -> Optional[str]:
 
 _PAYMENT_LEDGERS = {ERGO: ergo_payment_ledger, BITCOIN: bitcoin_payment_ledger}
 _REPUTATION_LEDGERS = {ERGO: ergo_reputation_ledger}
+_TAGS = {ERGO: ergo_tag, BITCOIN: bitcoin_tag}
+
+
+def chain_of(tag: str) -> str:
+    """The chain of a ledger tag: ``bitcoin-regtest`` -> ``bitcoin``.
+
+    The name of the config block (``ledgers.<chain>``). A chain name gives itself, and a
+    tag of no known chain (``simulated``) gives itself too.
+    """
+    tag = str(tag or "")
+    chain = tag.split("-", 1)[0]
+    return chain if chain in _TAGS else tag
+
+
+def ledger_tag(chain: str) -> str:
+    """The tag of the network this node is configured on for ``chain``.
+
+    ``chain`` may also be a tag: the tag of its chain *now* is given back. A name that is
+    not a known chain (``simulated``) is given back as it is.
+    """
+    tag_of = _TAGS.get(chain_of(chain))
+    return tag_of() if tag_of else str(chain or "")
+
+
+def _by_tag(builders, tag: str) -> Optional[celaut_pb2.Contract.Ledger]:
+    """This node's declaration on ``tag``, or None when ``tag`` is not its network now.
+
+    A tag of the same chain on another network (``bitcoin-mainnet`` on a regtest node)
+    gives None: this node does not settle there.
+    """
+    build = builders.get(chain_of(tag))
+    if build is None:
+        return None
+    ledger = build()
+    return ledger if list(ledger.tags) == [tag] else None
 
 
 def payment_ledger(tag: str) -> Optional[celaut_pb2.Contract.Ledger]:
     """This node's declaration of ``tag`` for a payment contract, or None."""
-    build = _PAYMENT_LEDGERS.get(tag)
-    return build() if build else None
+    return _by_tag(_PAYMENT_LEDGERS, tag)
 
 
 def reputation_ledger(tag: str) -> Optional[celaut_pb2.Contract.Ledger]:
     """This node's declaration of ``tag`` for a reputation proof, or None."""
-    build = _REPUTATION_LEDGERS.get(tag)
-    return build() if build else None
+    return _by_tag(_REPUTATION_LEDGERS, tag)
 
 
 def payment_ledgers():

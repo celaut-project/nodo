@@ -79,6 +79,12 @@ def _share(key: str, default: float, *, ledger_tag: Optional[str] = None,
     # on Bitcoin the same 2 % demands a deposit worth years of runtime up front (§5).
     config = ConfigManager()
     value = None
+    if ledger_tag:
+        # The config block is the chain's (`ledgers.bitcoin`), the tag is the network's
+        # (`bitcoin-regtest`).
+        from src.utils.ledger_descriptors import chain_of
+
+        ledger_tag = chain_of(ledger_tag)
     # Per *method* first: on Ergo a token settling through the same contract as ERG
     # declares its own share, because what is right for a chain's native unit can be
     # absurd for a token priced orders of magnitude away from it.

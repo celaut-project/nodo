@@ -261,7 +261,7 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None,
         return False
 
     # Snapshot the pre-payment balance so we can show the credited delta.
-    before = _read_peer_balance(peer_id, contract_hash, contract.LEDGER)
+    before = _read_peer_balance(peer_id, contract_hash, contract.key.ledger)
 
     # Pay via the existing single-wallet flow. On success the receiving peer has
     # accepted + validated the deposit with payment_process_validator (see module
@@ -297,7 +297,7 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None,
     # deposit was credited. increase_deposit_on_peer already updated the local
     # peer row (add_balance_to_peer) after the Payable exchange, so this is the
     # post-payment, locally-recorded balance.
-    after = _read_peer_balance(peer_id, contract_hash, contract.LEDGER)
+    after = _read_peer_balance(peer_id, contract_hash, contract.key.ledger)
     if after is None:
         print(
             f"(Payment succeeded, but no local peer row was found for {peer_id} "

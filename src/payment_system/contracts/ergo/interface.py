@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Optional, Tuple
 from protos import celaut_pb2
+from src.utils import ledger_descriptors
 from src.utils.ledger_descriptors import ergo_payment_ledger as _ergo_ledger
 import requests
 from src.routing import ledger_http
@@ -47,6 +48,8 @@ SAFE_MIN_BOX_VALUE = 1_000_000
 # `MethodKey` carries. The full declaration peers receive -- chain, units, attributes,
 # how a payment is bound to its deposit token -- is `ledger()`, shared with the
 # reputation proofs (src/utils/ledger_descriptors.py).
+# The chain: the config block (`ledgers.ergo`) and the `--ledger` of the command line.
+# The ledger's identity is `ledger_tag()`.
 LEDGER = "ergo"
 
 # Stable, wallet-independent identity of the Ergo P2PK payment contract TYPE. Its sha3 is
@@ -215,6 +218,12 @@ def mu_per_unit() -> int:
     is told: ``ContractRate.mu_per_unit`` is per base unit (:func:`mu_per_base_unit`).
     """
     return rate.mu_per_erg()
+
+
+def ledger_tag() -> str:
+    """The tag of the network this node is on: what a `contract_instance` row is keyed
+    by and what `MethodKey` carries (``ergo-mainnet``, ``ergo-<genesis>``)."""
+    return ledger_descriptors.ergo_tag()
 
 
 def ledger() -> celaut_pb2.Contract.Ledger:
@@ -531,7 +540,7 @@ def _pay_accrued_donations():
         return True
 
     pay_accrued_together(
-        ledger=LEDGER,
+        ledger=ledger_tag(),
         contract_hash=CONTRACT_HASH,
         debts=debts,
         send=send,
@@ -876,7 +885,7 @@ def _settle(amount: int, deposit_token: str, ledger: str,
                     id_reporter(tx_id, sent=True)
             except Exception as e:
                 if "Double spending attempt" in str(e):
-                    raise DoubleSpendingAttempt(LEDGER)
+                    raise DoubleSpendingAttempt(ledger_tag())
                 else:
                     raise e
 
@@ -1038,7 +1047,7 @@ def _validate(amount: int, token: str, ledger: str, script: bytes,
     node's own balance.
     """
     try:
-        assert ledger == LEDGER, "Ledger does not match"
+        assert ledger == ledger_tag(), "Ledger does not match"
 
         # ``script`` is the raw propositionBytes; derive the readable address only here.
         from src.payment_system.contracts.ergo.ergo_tree import address_from_proposition_bytes

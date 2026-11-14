@@ -20,8 +20,17 @@ from src.reputation_system.contracts.ergo.utils import explorer_api_url
 from src.utils.ergo_units import p2pk_public_key_from_address
 from src.utils.logger import LOGGER
 
+# The chain: the config block (`ledgers.ergo`). The rows this scanner writes are keyed
+# by `ledger_tag()`, the network's tag.
 LEDGER = "ergo"
 NATIVE_ASSET = "ERG"
+
+
+def ledger_tag() -> str:
+    """``ergo-mainnet`` or ``ergo-<genesis>``: the network this node scans."""
+    from src.utils.ledger_descriptors import ergo_tag
+
+    return ergo_tag()
 
 # Ergo's target block time. In code, not config: it is a property of the chain, and the
 # only thing an operator could do with it is describe a different Ergo. Donation age is

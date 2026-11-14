@@ -23,6 +23,7 @@ from pathlib import Path
 IMPORT_ERROR = None
 try:
     from src.payment_system.contracts import envs
+    from src.utils import ledger_descriptors
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     envs = None  # type: ignore[assignment]
@@ -74,7 +75,10 @@ class DonationScannerTests(unittest.TestCase):
         self.assertIsInstance(scanners, dict)
         for tag, scanner in scanners.items():
             self.assertIsInstance(tag, str)
-            self.assertEqual(getattr(scanner, "LEDGER", None), tag)
+            # Keyed by the network's tag (`ergo-mainnet`), as the donation rows are; the
+            # module's LEDGER is the chain, the config block.
+            self.assertEqual(scanner.ledger_tag(), tag)
+            self.assertTrue(tag.startswith(f"{scanner.LEDGER}-"))
             # What the indexer actually calls on it. A module missing one of these is
             # not a scanner, and would fail on the hourly tick rather than here.
             for call in ("chain_height", "scan_address", "instance_values_for",
@@ -85,7 +89,7 @@ class DonationScannerTests(unittest.TestCase):
     def test_ergo_contributes_a_scanner_when_its_light_module_imports(self):
         # The scanning module is light on purpose -- indexing is a read, and must not
         # need a wallet, a signature or a JVM -- so it is present in this environment.
-        self.assertIn("ergo", envs.donation_scanners())
+        self.assertIn(ledger_descriptors.ergo_tag(), envs.donation_scanners())
 
     def test_a_scanner_that_will_not_import_takes_nothing_else_down(self):
         # One try per module: a node whose second ledger's scanner is broken still
@@ -94,13 +98,13 @@ class DonationScannerTests(unittest.TestCase):
             envs, "DONATION_SCAN_MODULES",
             ("src.payment_system.contracts.ergo.donation_scan", "nodo.no.such.module"),
         ), unittest.mock.patch.object(envs, "LOGGER", lambda _m: None):
-            self.assertEqual(list(envs.donation_scanners()), ["ergo"])
+            self.assertEqual(list(envs.donation_scanners()), [ledger_descriptors.ergo_tag()])
 
     def test_block_time_is_answered_in_seconds_and_zero_when_unknown(self):
         # Donation age is measured in seconds because an Ergo block is ~120 s and a
         # Bitcoin block ~600 s: in blocks, the same old donation would weigh five times
         # differently depending on the chain it was paid on.
-        self.assertGreater(envs.seconds_per_block("ergo"), 0)
+        self.assertGreater(envs.seconds_per_block(ledger_descriptors.ergo_tag()), 0)
         self.assertEqual(envs.seconds_per_block("no-such-ledger"), 0)
 
 

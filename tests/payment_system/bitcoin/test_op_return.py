@@ -20,8 +20,9 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 OTHER = "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"
-# The payment path passes the ledger TAG, not the advertised message (issue #82).
-LEDGER = "bitcoin"
+# The payment path passes the ledger TAG (chain and network), not the advertised
+# message (issue #82).
+LEDGER = None if IMPORT_ERROR else btc.ledger_tag()
 TOKEN = "deposit-token-1"
 
 

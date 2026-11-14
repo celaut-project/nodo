@@ -140,7 +140,11 @@ def _rate_for_a_person(contract) -> str:
     rate = contract.get("mu_per_unit")
     if rate is None:
         return "N/A"
-    asset = contract.get("token_id") or _NATIVE_OF_LEDGER.get(contract.get("ledger_tag"), "")
+    from src.utils.ledger_descriptors import chain_of
+
+    asset = contract.get("token_id") or _NATIVE_OF_LEDGER.get(
+        chain_of(contract.get("ledger_tag") or ""), ""
+    )
     decimals = _NATIVE_DECIMALS.get(asset)
     if decimals is None:
         return f"{rate} MU per base unit"

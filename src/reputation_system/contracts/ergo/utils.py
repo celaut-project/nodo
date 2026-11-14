@@ -17,7 +17,7 @@ TESTNET_EXPLORER = "https://api-testnet.ergoplatform.com"
 # already uses to say which chain this node belongs on -- `manager.ergo` refuses an
 # Ergo node whose `/info` reports a different one -- so the two together are what
 # names the network here.
-MAINNET_GENESIS_BLOCK_ID = "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
+from src.utils.ledger_descriptors import ERGO_MAINNET_GENESIS_BLOCK_ID as MAINNET_GENESIS_BLOCK_ID
 
 
 def explorer_api_url() -> str:

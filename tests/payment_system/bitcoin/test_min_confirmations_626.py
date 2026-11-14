@@ -159,7 +159,7 @@ class DeclarationTests(unittest.TestCase):
         other = _declaration(3)
         other.formal = bytes(other.formal).replace(b"network=mainnet", b"network=signet")
         self.assertFalse(ledger_descriptors.same_payment_ledger(other, _declaration(3)))
-        empty = celaut_pb2.Contract.Ledger(tags=["bitcoin"])
+        empty = celaut_pb2.Contract.Ledger(tags=[ledger_descriptors.bitcoin_tag()])
         self.assertFalse(ledger_descriptors.same_payment_ledger(empty, _declaration(3)))
 
     def test_a_number_a_payer_cannot_wait_for_is_refused(self):
@@ -196,7 +196,8 @@ class DeclarationMatchingTests(unittest.TestCase):
     def test_a_payer_with_another_number_pays_into_our_ledger(self):
         # On a node that needs 3, a Payable from a payer that needs 1 for itself.
         with _with_min_confirmations(3):
-            self.assertEqual(payment_process._ledger_tag(_declaration(1)), "bitcoin")
+            self.assertEqual(payment_process._ledger_tag(_declaration(1)),
+                             ledger_descriptors.bitcoin_tag())
 
     def test_nodo_protocol_reports_a_match(self):
         from src.commands import protocol
@@ -264,7 +265,7 @@ class ValidatorTests(unittest.TestCase):
                 mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
                 mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: min_conf):
             return btc.payment_process_validator(
-                amount=amount_mu, token=TOKEN, ledger="bitcoin",
+                amount=amount_mu, token=TOKEN, ledger=ledger_descriptors.bitcoin_tag(),
                 script=script_pubkey_from_address(ADDRESS),
             )
 
@@ -418,7 +419,7 @@ class DepositTokenTests(unittest.TestCase):
         from src.payment_system.contracts.registry import MethodKey
 
         chain = _Chain({"tx-1": {"confirmations": 0, "body": _tx(token=self.token)}})
-        key = MethodKey("bitcoin", sha3_256(b"p2wpkh").hexdigest(), "BTC")
+        key = MethodKey(ledger_descriptors.bitcoin_tag(), sha3_256(b"p2wpkh").hexdigest(), "BTC")
         envs = mock.MagicMock()
         envs.payment_process_validators.return_value = {key: btc.payment_process_validator}
         manager_module = mock.MagicMock()
@@ -539,14 +540,14 @@ class PayerWaitTests(unittest.TestCase):
         connection = mock.MagicMock()
         connection.get_peer_advertisement.return_value = \
             _peer_announcing(_declaration(3)).SerializeToString()
-        found = payee.declared_ledger("peer-1", "bitcoin",
+        found = payee.declared_ledger("peer-1", ledger_descriptors.bitcoin_tag(),
                                       sha3_256(b"p2wpkh").hexdigest(), connection=connection)
         self.assertEqual(ledger_descriptors.declared_min_confirmations(found), 3)
         self.assertIsNone(payee.declared_ledger("peer-1", "ergo", "", connection=connection))
-        self.assertIsNone(payee.declared_ledger("peer-1", "bitcoin", "00" * 32,
+        self.assertIsNone(payee.declared_ledger("peer-1", ledger_descriptors.bitcoin_tag(), "00" * 32,
                                                 connection=connection))
         connection.get_peer_advertisement.return_value = None
-        self.assertIsNone(payee.declared_ledger("peer-1", "bitcoin", "", connection=connection))
+        self.assertIsNone(payee.declared_ledger("peer-1", ledger_descriptors.bitcoin_tag(), "", connection=connection))
 
 
 @unittest.skipIf(
@@ -561,7 +562,7 @@ class PayerFlowTests(unittest.TestCase):
         from src.payment_system.contracts.registry import MethodKey
 
         contract_hash = sha3_256(b"p2wpkh").hexdigest()
-        method = MethodKey("bitcoin", contract_hash, "BTC")
+        method = MethodKey(ledger_descriptors.bitcoin_tag(), contract_hash, "BTC")
         seen = []
 
         def process_payment(amount, deposit_token, ledger, script):
@@ -580,7 +581,7 @@ class PayerFlowTests(unittest.TestCase):
         with mock.patch.object(payment_process, "_payment_envs", return_value=envs), \
                 mock.patch.object(payment_process, "sc", connection), \
                 mock.patch.object(payment_process, "get_peer_contract_instances",
-                                  return_value=iter([(script, "bitcoin", "BTC")])), \
+                                  return_value=iter([(script, ledger_descriptors.bitcoin_tag(), "BTC")])), \
                 mock.patch.object(payment_process, "ledger_balancer",
                                   side_effect=lambda ledger_generator: ledger_generator), \
                 mock.patch.object(payment_process, "_reputation_interface"), \
@@ -591,7 +592,7 @@ class PayerFlowTests(unittest.TestCase):
             plan = getattr(payment_process, "__peer_payment_process")(
                 peer_id="peer-min-3",
                 plans=[payment_process.SettlementPlan(
-                    contract_hash=contract_hash, ledger_tag="bitcoin", asset="BTC",
+                    contract_hash=contract_hash, ledger_tag=ledger_descriptors.bitcoin_tag(), asset="BTC",
                     amount=1000, peer_amount=1000,
                 )],
             )

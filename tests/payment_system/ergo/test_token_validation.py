@@ -71,7 +71,7 @@ def _explorer(boxes, mempool=(), calls=None):
 class TokenValidationTests(unittest.TestCase):
     def setUp(self):
         # The payment path passes the ledger TAG, not the message (issue #82).
-        self.ledger = "ergo"
+        self.ledger = interface.ledger_tag()
         # The JVM and the explorer session are not what is under test; the decision is.
         wallet = mock.patch.object(interface, "get_wallet_address", return_value=WALLET)
         wallet.start()

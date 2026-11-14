@@ -125,8 +125,8 @@ class ForeignLedgerTests(unittest.TestCase):
     def test_a_proof_ledger_declaring_only_its_tag_does_not_match(self):
         from src.identity.node_identity import same_component, same_declaration
 
-        legacy = celaut_pb2.Contract.Ledger(tags=["ergo"], formal=b"")
-        ours = ledger_descriptors.reputation_ledger("ergo")
+        legacy = celaut_pb2.Contract.Ledger(tags=[ledger_descriptors.ergo_tag()], formal=b"")
+        ours = ledger_descriptors.reputation_ledger(ledger_descriptors.ergo_tag())
         self.assertTrue(same_component(legacy, ours))  # the loose rule, kept elsewhere
         self.assertFalse(same_declaration(legacy, ours))
         self.assertFalse(same_declaration(legacy, legacy))  # two empty formals agree on nothing
@@ -142,11 +142,12 @@ class ForeignLedgerTests(unittest.TestCase):
             return contract
 
         legacy = proof_validation.explain_contract_ledger(
-            proof(celaut_pb2.Contract.Ledger(tags=["ergo"], formal=b"")), "00"
+            proof(celaut_pb2.Contract.Ledger(tags=[ledger_descriptors.ergo_tag()], formal=b"")),
+            "00"
         )
         self.assertEqual(legacy, "Contract ledger not compatible: ledger=False script=True")
         declared = proof_validation.explain_contract_ledger(
-            proof(ledger_descriptors.reputation_ledger("ergo")), "00"
+            proof(ledger_descriptors.reputation_ledger(ledger_descriptors.ergo_tag())), "00"
         )
         self.assertNotIn("ledger=False", declared or "")
 
@@ -156,7 +157,7 @@ class ForeignLedgerTests(unittest.TestCase):
 
     def test_an_incoming_payment_on_another_ledger_has_no_tag(self):
         ledger = ledger_descriptors.bitcoin_payment_ledger()
-        self.assertEqual(payment_process._ledger_tag(ledger), "bitcoin")
+        self.assertEqual(payment_process._ledger_tag(ledger), ledger_descriptors.bitcoin_tag())
         ledger.formal = bytes(ledger.formal).replace(b"satoshi", b"millisatoshi")
         self.assertIsNone(payment_process._ledger_tag(ledger))
 
@@ -215,8 +216,9 @@ class ProtocolCommandLedgerTests(unittest.TestCase):
         from src.commands import protocol
 
         declared = protocol.own_declaration(prose=False)
-        self.assertEqual([d["tags"] for d in declared["payment_ledgers"]], [["ergo"], ["bitcoin"]])
-        self.assertEqual([d["tags"] for d in declared["reputation_ledgers"]], [["ergo"]])
+        ergo, bitcoin = ledger_descriptors.ergo_tag(), ledger_descriptors.bitcoin_tag()
+        self.assertEqual([d["tags"] for d in declared["payment_ledgers"]], [[ergo], [bitcoin]])
+        self.assertEqual([d["tags"] for d in declared["reputation_ledgers"]], [[ergo]])
 
     def test_a_peer_ledger_that_differs_is_reported_with_the_key(self):
         from src.commands import protocol

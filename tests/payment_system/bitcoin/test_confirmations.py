@@ -20,7 +20,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     btc = None  # type: ignore[assignment]
 
 ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
-LEDGER = None if IMPORT_ERROR else celaut_pb2.Contract.Ledger(tags=["bitcoin"])
+LEDGER = None if IMPORT_ERROR else celaut_pb2.Contract.Ledger(tags=[btc.ledger_tag()])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -58,7 +58,7 @@ class ConfirmationTests(unittest.TestCase):
     def test_it_returns_only_once_the_transaction_is_confirmed_enough(self):
         contract, chain = self._pay(statuses=(0, 0, 2), min_conf=2)
         self.assertEqual(chain.tx_status.call_count, 3)
-        self.assertEqual(list(contract.ledger.tags), ["bitcoin"])
+        self.assertEqual(list(contract.ledger.tags), [btc.ledger_tag()])
 
     def test_a_replaced_transaction_is_not_treated_as_pending(self):
         """Core reports negative confirmations for a replaced or reorged transaction.

@@ -177,7 +177,7 @@ class UnderpaidCandidateTests(unittest.TestCase):
         from src.payment_system.contracts.bitcoin import interface
 
         # The payment path passes the ledger TAG, not the message (issue #82).
-        ledger = interface.LEDGER
+        ledger = interface.ledger_tag()
 
         chain = mock.MagicMock()
         chain.list_received.return_value = [{"txids": list(transactions)}]

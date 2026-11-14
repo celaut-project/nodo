@@ -92,12 +92,17 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
             LOGGER(f"Not advertising {contract.LEDGER}: its MU rate is not positive.")
             continue
 
+        # Only the rows of the ledger this node is on now. A row written on another
+        # network of the same chain (the config changed `NETWORK` or the genesis block)
+        # has a script this node no longer watches, and must not be announced under
+        # this network's declaration.
+        declaration = contract.ledger()
         for script, _ledger_tag, _asset in get_peer_contract_instances(
-            contract.CONTRACT_HASH, asset=contract.asset
+            contract.CONTRACT_HASH, asset=contract.asset, ledger=declaration
         ):
 
             contract_ledger = celaut.Contract()
-            contract_ledger.ledger.CopyFrom(contract.ledger())
+            contract_ledger.ledger.CopyFrom(declaration)
             set_script(contract_ledger, script)
             set_contract_type(contract_ledger, contract.CONTRACT.encode("utf-8"))
             # The asset this method settles in, which is the whole reason a peer can

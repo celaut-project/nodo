@@ -99,8 +99,16 @@ class PaymentMethod:
         self.unit_name = unit_name or ""
 
     @property
+    def ledger_tag(self) -> str:
+        """The tag of the ledger this method settles on: the network's (``bitcoin-regtest``),
+        not the chain's (``LEDGER``, ``bitcoin``). A contract on no network (the simulated
+        one) has no ``ledger_tag()`` and its ``LEDGER`` is its tag."""
+        tag_of = getattr(self.contract, "ledger_tag", None)
+        return tag_of() if callable(tag_of) else self.contract.LEDGER
+
+    @property
     def key(self) -> MethodKey:
-        return MethodKey(self.contract.LEDGER, self.contract.CONTRACT_HASH, self.asset)
+        return MethodKey(self.ledger_tag, self.contract.CONTRACT_HASH, self.asset)
 
     def __getattr__(self, name: str):
         """The bound call if this method has one, else the contract's own attribute.
@@ -138,8 +146,11 @@ class PaymentContract(Protocol):
     #: ``contract_hash`` peers match on; the per-instance wallet script travels apart.
     CONTRACT: str
     CONTRACT_HASH: str
-    #: The ledger's TAG: what a `contract_instance` row is keyed by, what `MethodKey`
-    #: carries, and what a contract checks a payment against.
+    #: The chain: the config block (`ledgers.<LEDGER>`) and the `--ledger` of the
+    #: command line. A contract that settles on a network also has `ledger_tag()`, the
+    #: tag of that network (`bitcoin-regtest`): what a `contract_instance` row is keyed
+    #: by, what `MethodKey` carries and what a contract checks a payment against
+    #: (`PaymentMethod.ledger_tag`). A contract without it uses `LEDGER` as its tag.
     LEDGER: str
 
     #: The full message peers receive: everything two nodes must agree on to settle on

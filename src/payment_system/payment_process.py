@@ -146,7 +146,7 @@ def _donation_accrual():
 
 
 def _ledger_tag(ledger) -> Optional[str]:
-    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire, if it is ours.
+    """The tag ("ergo-mainnet") of a `Contract.Ledger` as it arrives on the wire, if it is ours.
 
     Only for the incoming side, where a peer sends the whole advertised message. The
     payer's own side already works in tags: that is what a `contract_instance` row
@@ -279,9 +279,17 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
             # This method's instances only: on Ergo the assets of one contract share
             # a script and an address, so paying in one asset against another's rows
             # would build the output at the right address for the wrong money.
-            scripts = get_peer_contract_instances(contract_hash, peer_id, plan.asset)
-            # ``ledger`` below is the chain's TAG, which is what the stored instance
-            # carries and all a contract reads off it.
+            # And only the rows of the ledger this node is on: the peer's tag and
+            # declaration must be this node's (a row stored while this node was on
+            # another network of the chain is not one it can pay into).
+            from src.utils.ledger_descriptors import payment_ledger
+
+            declaration = None if plan.is_demo else payment_ledger(plan.ledger_tag or "")
+            scripts = get_peer_contract_instances(
+                contract_hash, peer_id, plan.asset, ledger=declaration
+            )
+            # ``ledger`` below is the ledger's TAG (chain and network), which is what
+            # the stored instance carries and all a contract reads off it.
             ledgers = [(b"", "", "")] if plan.is_demo else ledger_balancer(ledger_generator=scripts)
             
             for script, ledger, _asset in ledgers:

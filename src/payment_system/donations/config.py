@@ -51,7 +51,10 @@ class Wallet:
 
 
 def _payments_block(ledger: str) -> Dict[str, Any]:
-    block = ConfigManager().get(f"ledgers.{ledger}.payments")
+    """``ledgers.<chain>.payments``. ``ledger`` is a tag (``bitcoin-regtest``) or a chain."""
+    from src.utils.ledger_descriptors import chain_of
+
+    block = ConfigManager().get(f"ledgers.{chain_of(ledger)}.payments")
     return block if isinstance(block, dict) else {}
 
 

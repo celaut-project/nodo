@@ -285,6 +285,7 @@ def _ensure_traceability_tables(connection) -> None:
             ensure_columns,
             ensure_tables,
             forget_peer_rates_per_whole_unit,
+            name_the_network_in_ledger_tags,
             retire_unmetered_column,
         )
 
@@ -299,6 +300,7 @@ def _ensure_traceability_tables(connection) -> None:
         # The restart after pulling new code is the only upgrade path (see above), so
         # the one-shot rate migration runs here too, not only from `migrate`.
         forget_peer_rates_per_whole_unit(cursor)
+        name_the_network_in_ledger_tags(cursor)
         connection.commit()
     except Exception as e:
         # A read-only or otherwise unusable database is the node's problem to report
@@ -310,6 +312,22 @@ def _local_capacity_changed() -> None:
     """A local instance started, stopped or was resized: the room this node reported is stale."""
     from src.utils.tools.query_cache import QueryCache
     QueryCache().invalidate("GetResourceAvailability")
+
+
+def _same_stored_ledger(stored_formal, ledger) -> bool:
+    """Whether a row's stored ``formal`` declares ``ledger``.
+
+    A row with no ``formal`` (a contract with no declaration, as the simulated one)
+    matches when ``ledger`` has none either.
+    """
+    if isinstance(stored_formal, str):
+        stored_formal = stored_formal.encode("utf-8")
+    stored = bytes(stored_formal or b"")
+    if not stored and not bytes(ledger.formal or b""):
+        return True
+    from src.utils.ledger_descriptors import same_payment_ledger
+
+    return same_payment_ledger(celaut_pb2.Contract.Ledger(formal=stored), ledger)
 
 
 class SQLConnection(metaclass=Singleton):
@@ -2711,15 +2729,22 @@ class SQLConnection(metaclass=Singleton):
         # `mu_per_unit` at whatever it announced the first time we ever saw it.
         # Converting MU with a stale rate misprices delegation and, on the
         # payment path, gets a deposit rejected with the money already on-chain.
+        # The whole declaration of the ledger, kept so a reader can check that the row
+        # is on the ledger it means (`get_peer_contract_instances(ledger=...)`), not
+        # only on a ledger with the same tag.
+        formal: bytes = bytes(contract.ledger.formal or b"")
         self._execute("INSERT INTO contract_instance "
-                    "(address, ledger, contract_hash, token_id, peer_id, mu_per_unit) "
-                    "VALUES (?,?,?,?,?,?) "
+                    "(address, ledger, contract_hash, token_id, peer_id, mu_per_unit, formal) "
+                    "VALUES (?,?,?,?,?,?,?) "
                     "ON CONFLICT (address, ledger, contract_hash, token_id, peer_id) "
-                    "DO UPDATE SET mu_per_unit = excluded.mu_per_unit",
-                    (instance_value, ledger_tag, contract_hash, asset, peer_id, gas_str))
+                    "DO UPDATE SET mu_per_unit = excluded.mu_per_unit, "
+                    "formal = excluded.formal",
+                    (instance_value, ledger_tag, contract_hash, asset, peer_id, gas_str,
+                     formal))
 
     def get_peer_contract_instances(self, contract_hash: str, peer_id: str = LOCAL_PEER_ID,
-                                    asset: Optional[str] = None
+                                    asset: Optional[str] = None,
+                                    ledger: Optional["celaut_pb2.Contract.Ledger"] = None,
                                     ) -> Generator[Tuple[bytes, str, str], None, None]:
         """
         Retrieves all contract instances for a given contract hash and peer ID.
@@ -2731,6 +2756,10 @@ class SQLConnection(metaclass=Singleton):
                 payment method is ledger + contract + asset, so a caller paying in one
                 asset must not be handed another's rows -- on Ergo they share a
                 contract, a script and an address, and differ only here.
+            ledger (Contract.Ledger): Only the instances on this ledger, when given: the
+                same tag, and a stored ``formal`` that declares the same ledger
+                (``ledger_descriptors.same_payment_ledger``). A row written on another
+                network of the same chain is not given back.
 
         Yields:
             Tuple[bytes, str, str]: the raw script, the ledger TAG, and the asset.
@@ -2741,14 +2770,19 @@ class SQLConnection(metaclass=Singleton):
         rate from the message, those come from this node's own config), and it is what
         the row now holds.
         """
-        query = ("SELECT address, ledger, token_id FROM contract_instance "
+        query = ("SELECT address, ledger, token_id, formal FROM contract_instance "
                  "WHERE contract_hash = ? AND peer_id = ?")
         params: tuple = (contract_hash, peer_id)
         if asset is not None:
             query += " AND token_id = ?"
             params = params + (asset,)
+        if ledger is not None:
+            query += " AND ledger = ?"
+            params = params + ((ledger.tags[0] if ledger.tags else ""),)
         cursor = self._execute(query, params)
         for row in cursor.fetchall():
+            if ledger is not None and not _same_stored_ledger(row['formal'], ledger):
+                continue
             stored = row['address'] or ""
             try:
                 # Ergo instances store the raw ErgoTree/propositionBytes as hex.

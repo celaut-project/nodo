@@ -240,7 +240,9 @@ message Contract {
 ##### Reputation System
 The reputation system utilizes the following fields:
 - `contract`: Contains the sigma script of the box that holds each proof
-- `ledger`: Specifies the ledger system in use, which is set to `"ergo"`
+- `ledger`: The ledger. Its tag names the chain and the network: `"ergo-mainnet"`, or
+  `"ergo-"` and the first 16 hex characters of `ledgers.ergo.GENESIS_BLOCK_ID` on another
+  Ergo chain
 - `token_id`: Maps to the reputation proof ID, corresponding to the `token_id` in Ergo
 
 A `Peer` carries these as `repeated Contract reputation_proofs` — repeated because the
@@ -395,7 +397,7 @@ publishes are exactly its normalised internal reputation.
 ##### Payment System
 The payment system implements these fields:
 - `contract`/`script` xattr: the raw ErgoTree/propositionBytes of the box that receives each payment
-- `ledger`: Identifies the ledger system as `"ergo"`
+- `ledger`: The ledger, with the tag `"ergo-mainnet"` (or `"ergo-<genesis>"`, as above)
 - `script`: the raw **ErgoTree / propositionBytes** of the wallet's P2PK payment box
 - `token_id`: which asset this method settles in — the reserved symbol `"ERG"` for
   native-ERG payments, or a token's 64-hex id. This is the third dimension of a payment

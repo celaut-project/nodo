@@ -204,6 +204,15 @@ ledgers:
       MAX_FEE_OVERHEAD: 0.25
 ```
 
+`NETWORK` selects the ledger. The tag of the ledger is `bitcoin-` and the network:
+`bitcoin-mainnet`, `bitcoin-testnet`, `bitcoin-signet` or `bitcoin-regtest`. Each network
+is a different ledger. A node on regtest and a node on mainnet do not match, and do not
+pay each other. The database keys each payment contract by this tag, and keeps the
+`formal` of the declaration with it. When you change `NETWORK`, the node does not
+announce or pay through a contract of the old network: it reads only the rows of the
+network it is on now. The config block stays `ledgers.bitcoin`, and `nodo pay --ledger`
+stays `bitcoin`.
+
 There is no receiving-address setting. On `core` and `service` the address lives in
 Core's wallet under the label `nodo`, and that label is how it is found again; on
 `explorer` it is derived from the mnemonic and is the same on every call. Nothing about

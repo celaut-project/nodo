@@ -209,7 +209,9 @@ def donation_scanners() -> Dict[ledger, Any]:
         except Exception as exc:
             LOGGER(f"No donation scanner from {path}: {exc}")
             continue
-        tag = getattr(module, "LEDGER", "")
+        # Keyed by the network's tag, as the rows of donations are.
+        tag_of = getattr(module, "ledger_tag", None)
+        tag = tag_of() if callable(tag_of) else getattr(module, "LEDGER", "")
         if tag:
             scanners[tag] = module
     return scanners

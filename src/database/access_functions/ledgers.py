@@ -5,12 +5,13 @@ from src.database.sql_connection import SQLConnection
 
 
 def get_peer_contract_instances(contract_hash: str, peer_id: str = "LOCAL",
-                                asset: typing.Optional[str] = None) \
+                                asset: typing.Optional[str] = None,
+                                ledger=None) \
         -> Generator[typing.Tuple[bytes, str, str], None, None]:
     """``(script, ledger_tag, asset)`` per stored instance of ``contract_hash``.
 
-    The ledger is its tag (``"ergo"``), which is the whole of its identity here: the
-    contract interfaces check it against their own ``LEDGER`` constant, and everything
+    The ledger is its tag (``"ergo-mainnet"``), which names the chain and the network:
+    the contract interfaces check it against their own ``ledger_tag()``, and everything
     else a chain needs -- a node URL, an explorer, a rate -- comes from this node's
     config, never from what a peer said about the chain.
 
@@ -20,4 +21,4 @@ def get_peer_contract_instances(contract_hash: str, peer_id: str = "LOCAL",
     output against the right address for the wrong money.
     """
     db_connection = SQLConnection()
-    yield from db_connection.get_peer_contract_instances(contract_hash, peer_id, asset)
+    yield from db_connection.get_peer_contract_instances(contract_hash, peer_id, asset, ledger)

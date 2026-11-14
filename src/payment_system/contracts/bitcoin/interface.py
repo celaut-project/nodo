@@ -50,6 +50,7 @@ from typing import Optional, Tuple
 from protos import celaut_pb2
 from src.payment_system import payee
 from src.payment_system.exceptions import PaymentNotConfirmed
+from src.utils import ledger_descriptors
 from src.utils.ledger_descriptors import bitcoin_payment_ledger as _bitcoin_ledger
 from src.utils.ledger_descriptors import bitcoin_min_confirmations, declared_min_confirmations
 from src.database import sql_connection
@@ -78,12 +79,10 @@ env_manager = ConfigManager()
 # per-instance as the raw ``script`` xattr, exactly as Ergo carries propositionBytes.
 CONTRACT = "p2wpkh"
 CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
+# The chain: the config block (`ledgers.bitcoin`) and the `--ledger` of the command
+# line. The ledger's identity is `ledger_tag()`.
 LEDGER = "bitcoin"
 NATIVE_ASSET = "BTC"
-
-# The ledger tag: what a `contract_instance` row is keyed by and what `MethodKey`
-# carries. The full declaration peers receive is `ledger()`
-# (src/utils/ledger_descriptors.py).
 
 # The proof of an incoming payment is a *confirmed transaction*, not an unspent output,
 # so nothing here breaks if the receiving outputs are spent. That is what keeps this
@@ -361,6 +360,12 @@ def unavailable_reason() -> Optional[str]:
         return _backend_module().configuration_reason()
     except BackendUnavailable as exc:
         return str(exc)
+
+
+def ledger_tag() -> str:
+    """The tag of the network this node is on: what a `contract_instance` row is keyed
+    by and what `MethodKey` carries (``bitcoin-mainnet``, ``bitcoin-regtest``, ...)."""
+    return ledger_descriptors.bitcoin_tag()
 
 
 def ledger() -> celaut_pb2.Contract.Ledger:
@@ -796,7 +801,7 @@ def payment_process_validator(amount: int, token: str, ledger: str,
     was asked for, and the rest is simply kept.
     """
     try:
-        assert ledger == LEDGER, "Ledger does not match"
+        assert ledger == ledger_tag(), "Ledger does not match"
 
         script_hex = bytes(script).hex().lower()
         assert script_hex == get_wallet_script().hex().lower(), \
@@ -983,7 +988,7 @@ def _pay_accrued_donations():
         return backend().get_balance(MIN_CONFIRMATIONS()) >= total_sat
 
     pay_accrued(
-        ledger=LEDGER,
+        ledger=ledger_tag(),
         contract_hash=CONTRACT_HASH,
         asset=NATIVE_ASSET,
         fee=fee,

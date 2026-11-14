@@ -136,10 +136,11 @@ TABLES = {
     # would overwrite its own ERG rate with the SigUSD one, in the same row, and every
     # peer would convert ERG amounts at the SigUSD rate. Nothing would raise.
     #
-    # `ledger` is the chain's TAG ("ergo", "bitcoin"), not a hash of a description of
-    # it. The tag is what every caller already holds and the only field of the
+    # `ledger` is the ledger's TAG ("ergo-mainnet", "bitcoin-regtest"): the chain and
+    # the network, not a hash of a description of it. The tag is what every caller already holds and the only field of the
     # advertised `Contract.Ledger` anything ever reads, so keying the row by anything
-    # else only meant translating back.
+    # else only meant translating back. `formal` is the whole declaration the row was
+    # announced with, so a reader can check that the row is on the ledger it means.
     "contract_instance": '''
         CREATE TABLE IF NOT EXISTS contract_instance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,6 +150,7 @@ TABLES = {
             token_id TEXT NOT NULL DEFAULT '',
             peer_id TEXT NOT NULL,
             mu_per_unit TEXT,
+            formal BLOB DEFAULT NULL,
             FOREIGN KEY (peer_id) REFERENCES peer (id),
             UNIQUE (address, ledger, contract_hash, token_id, peer_id)
         )
@@ -1084,6 +1086,7 @@ def create_tables(cursor):
     retire_unmetered_column(cursor)
     ensure_peer_address_uniqueness(cursor)
     forget_peer_rates_per_whole_unit(cursor)
+    name_the_network_in_ledger_tags(cursor)
 
 
 def retire_unmetered_column(cursor) -> None:
@@ -1212,6 +1215,79 @@ def forget_peer_rates_per_whole_unit(cursor) -> None:
                   "peers announce them again per base unit.")
     except sqlite3.Error as e:
         print(f"Error clearing peer rates stored per whole unit: {e}")
+
+
+# Tables whose `ledger` column held a chain name ("ergo", "bitcoin") before the tag named
+# the network too. `contract_instance` is not here: its rows are deleted, not renamed.
+_LEDGER_COLUMNS = (
+    ("payments", "ledger"),
+    ("donation_accrual", "ledger"),
+    ("donation_payouts", "ledger"),
+    ("donations", "ledger"),
+    ("donation_scan_state", "ledger"),
+    ("ledger", "tag"),
+)
+
+
+def name_the_network_in_ledger_tags(cursor) -> None:
+    """Move every stored ledger tag from the chain (``bitcoin``) to the network
+    (``bitcoin-mainnet``), once.
+
+    A ledger tag names the chain and the network now (``ledger_descriptors``). Before,
+    it named only the chain, so a row could not say which network it was written on.
+
+    * ``contract_instance``: the rows with the old tags are deleted. This node writes
+      its own again when it starts (each contract's ``init()``), and each peer's come
+      back with its next announcement. A row kept with a guessed network could be a
+      script of another network, announced or paid as one of this one.
+    * The history and the debts (payments, donations, the double-spending cooldown)
+      get the tag of the network this node is configured on now. That is the network
+      they were most probably written on, and a debt must not be lost.
+
+    Also adds ``contract_instance.formal`` to a database from before it. Recorded in
+    ``applied_migrations``.
+    """
+    name = "ledger_tags_name_the_network"
+    try:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        tables = {row[0] for row in cursor.fetchall()}
+        if "contract_instance" not in tables:
+            # A new database: `create_tables` makes it with the column and new tags.
+            return
+        ensure_columns(cursor, "contract_instance", {"formal": "BLOB DEFAULT NULL"})
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS applied_migrations "
+            "(name TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+        )
+        cursor.execute("SELECT 1 FROM applied_migrations WHERE name = ?", (name,))
+        if cursor.fetchone():
+            return
+        from src.utils import ledger_descriptors
+
+        renames = {
+            ledger_descriptors.ERGO: ledger_descriptors.ergo_tag(),
+            ledger_descriptors.BITCOIN: ledger_descriptors.bitcoin_tag(),
+        }
+        cursor.execute(
+            "DELETE FROM contract_instance WHERE ledger IN (?, ?)", tuple(renames)
+        )
+        deleted = cursor.rowcount
+        for table, column in _LEDGER_COLUMNS:
+            if table not in tables:
+                continue
+            for old, new in renames.items():
+                # OR IGNORE: a row that already exists with the new tag keeps its value,
+                # and the old one stays as it was rather than stop the migration.
+                cursor.execute(
+                    f"UPDATE OR IGNORE {table} SET {column} = ? WHERE {column} = ?",
+                    (new, old),
+                )
+        cursor.execute("INSERT INTO applied_migrations (name) VALUES (?)", (name,))
+        if deleted:
+            print(f"Deleted {deleted} contract instance(s) whose ledger tag did not name "
+                  "the network; they are announced again.")
+    except sqlite3.Error as e:
+        print(f"Error moving the ledger tags to name the network: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:

@@ -61,7 +61,7 @@ class MethodFactoryTests(unittest.TestCase):
             built = interface.methods()
         self.assertEqual(
             [(m.key.ledger, m.key.contract_hash) for m in built],
-            [("ergo", interface.CONTRACT_HASH)] * 2,
+            [(interface.ledger_tag(), interface.CONTRACT_HASH)] * 2,
         )
 
     def test_each_method_advertises_its_own_rate(self):
