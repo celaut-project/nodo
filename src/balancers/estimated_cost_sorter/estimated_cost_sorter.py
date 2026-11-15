@@ -10,6 +10,7 @@ from src.reputation_system.onchain_credit import (
     DEFAULT_ONCHAIN_WEIGHT,
     standing_by_peer,
 )
+from src.reputation_system import offchain_credit
 from src.utils.cost_functions import price_bound
 from src.utils.cost_functions.volatility_cost_normalization import volatility_cost_normalization as vcnorm
 from src.utils.config import ConfigManager
@@ -61,6 +62,7 @@ def estimated_cost_sorter(
     donation_weight: float = _parameter("DONATION_WEIGHT", 0.3)
     local_bias: float = _parameter("LOCAL_BIAS", 1.0)
     onchain_weight: float = _parameter("ONCHAIN_REPUTATION_WEIGHT", DEFAULT_ONCHAIN_WEIGHT)
+    offchain_weight: float = offchain_credit.weight()
 
     # One read of the donation index for the whole sort, out of SQLite. Zero network
     # I/O in a routing decision: an unreachable explorer, or an index that has never
@@ -80,6 +82,11 @@ def estimated_cost_sorter(
     # DONATION_WEIGHT and the half-credits match, so a burned ERG and a donated ERG are
     # worth the same; the operator may tilt it either way.
     onchain_standings: Dict[str, float] = standing_by_peer()
+
+    # And what the signed off-chain proofs of other nodes say (#652), read the same way:
+    # one table, scored on the tick. A publisher has a voice only when it agrees with us
+    # and did good work for us, so nobody can buy this term with new identities.
+    offchain_standings: Dict[str, float] = offchain_credit.standing_by_peer()
 
     def __compute_score(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> float:
 
@@ -140,6 +147,7 @@ def estimated_cost_sorter(
         # about itself, and what the chain says about us is what we published. Counting
         # it here would let a node raise its own rank against its peers by burning.
         onchain: float = 0.0 if is_local else onchain_standings.get(peer_id, 0.0)
+        offchain: float = 0.0 if is_local else offchain_standings.get(peer_id, 0.0)
 
         candidate_score = score(
             cost_mu=cost_mu,
@@ -150,6 +158,8 @@ def estimated_cost_sorter(
             donation_weight=donation_weight,
             onchain_reputation=onchain,
             onchain_weight=onchain_weight,
+            offchain_reputation=offchain,
+            offchain_weight=offchain_weight,
             local_bias=local_bias if is_local else None,
         )
 
@@ -162,6 +172,7 @@ def estimated_cost_sorter(
             standing = (
                 f"reputation {reputation:+.2f} -> {reputation_weight * reputation_factor(reputation, reputation_half):+.4f}"
                 f", on-chain {onchain:+.4f} -> {onchain_weight * onchain:+.4f}"
+                f", off-chain {offchain:+.4f} -> {offchain_weight * offchain:+.4f}"
             )
         logger(
             f"Estimated cost score for peer {peer_id}: cost {format_mu(cost_mu)}/h, "

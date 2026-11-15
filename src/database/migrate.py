@@ -63,6 +63,23 @@ def connect_to_database(db_file):
 #
 # A new `remote_client_id` is a new account, which starts from its genesis: the mark and
 # the counters are set again with it, so the mark is never older than the account.
+# Signed pages that a peer gave, kept as evidence of its faults (#652):
+# - `delegated_instances.start_statement`: the page with movement 1 of the child, whose
+#   `start` holds the quote that the peer signed. `quote_launch_ts` is the date of that
+#   movement: the launch on the clock of the peer.
+# - `delegated_instances.peer_statement_raw`: the last page that set the mark.
+# - `descendant_peers.head_statement`: the last page that gave the kept head.
+SIGNED_PAGE_COLUMNS = {
+    "delegated_instances": {
+        "quote_launch_ts": "INTEGER DEFAULT NULL",
+        "start_statement": "BLOB DEFAULT NULL",
+        "peer_statement_raw": "BLOB DEFAULT NULL",
+    },
+    "descendant_peers": {
+        "head_statement": "BLOB DEFAULT NULL",
+    },
+}
+
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
@@ -840,6 +857,49 @@ TABLES = {
     # - `linked_ts`: when a statement that the peer signed last linked it (child_bound).
     # - `read_failed_at`: the first read of it that failed in transport, after the last
     #   read that worked.
+    # The signed messages that prove a fault of a peer (#652): a serialized
+    # `FaultEvidence` that `fault_proofs.check` proves from itself alone. One row for each
+    # fault: the accused, the reason, the account (`account_ref`) and the seq where it
+    # shows. `source` is `own` when this node found the fault, `received` when it got the
+    # evidence in the reputation proof of another node. A fault is scored once, whoever
+    # found it first. `digest` is `fault_proofs.digest` of the evidence.
+    "fault_evidence": '''
+        CREATE TABLE IF NOT EXISTS fault_evidence (
+            accused TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            account_ref TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            digest TEXT NOT NULL,
+            evidence BLOB NOT NULL,
+            source TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            PRIMARY KEY (accused, reason, account_ref, seq)
+        )
+    ''',
+    # The newest signed `ReputationProof` of each publisher (#652), as it was received,
+    # so that this node can relay it unchanged. Only publishers that are peers of this
+    # node are kept.
+    "offchain_proofs": '''
+        CREATE TABLE IF NOT EXISTS offchain_proofs (
+            publisher TEXT PRIMARY KEY,
+            ts INTEGER NOT NULL,
+            proof BLOB NOT NULL,
+            received_at INTEGER NOT NULL
+        )
+    ''',
+    # The scores of the off-chain proofs, read on the periodic tick (#652): what the
+    # proof of `publisher` says of `subject_id` (`verdict`, in -1..1), and the voice of
+    # the publisher for this node (`weight`: cred times our score of the publisher).
+    "offchain_opinions": '''
+        CREATE TABLE IF NOT EXISTS offchain_opinions (
+            subject_id TEXT NOT NULL,
+            publisher TEXT NOT NULL,
+            verdict REAL NOT NULL,
+            weight REAL NOT NULL DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (subject_id, publisher)
+        )
+    ''',
     "descendant_peers": '''
         CREATE TABLE IF NOT EXISTS descendant_peers (
             peer_id TEXT NOT NULL,
@@ -906,6 +966,9 @@ INDEXES = (
     # and the indexer replaces one subject's rows at a time.
     "CREATE INDEX IF NOT EXISTS idx_onchain_opinions_subject "
     "ON onchain_opinions (ledger, subject_id)",
+    # The reputation proof of this node lists the faults by date, and the retention
+    # deletes them by date (#652).
+    "CREATE INDEX IF NOT EXISTS idx_fault_evidence_ts ON fault_evidence (ts)",
     # A conversation is always read for one peer, newest last (get_chat_messages);
     # the prune on insert is the same query with the direction reversed.
     "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_peer "
@@ -1009,6 +1072,8 @@ def create_tables(cursor):
     ensure_columns(cursor, "descendant_peers", {
         "first_linked_ts": "INTEGER DEFAULT NULL",
     })
+    ensure_columns(cursor, "descendant_peers", SIGNED_PAGE_COLUMNS["descendant_peers"])
+    ensure_columns(cursor, "delegated_instances", SIGNED_PAGE_COLUMNS["delegated_instances"])
     ensure_columns(cursor, "local_instances", {
         "envs": "TEXT DEFAULT NULL",
         "arch": "TEXT DEFAULT NULL",

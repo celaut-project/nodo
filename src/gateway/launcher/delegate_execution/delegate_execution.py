@@ -1,3 +1,4 @@
+import math
 import time
 import secrets
 from typing import Callable, List, Optional, Tuple
@@ -21,6 +22,7 @@ from src.payment_system.mu_conversion import (
     convert_mu,
     matching_payment_system,
 )
+from src.utils.cost_functions import start_quote
 from src.utils.cost_functions.delegated_price import priced_shape
 from src.utils.cost_functions.peer_quotes import maintenance_terms
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
@@ -101,15 +103,19 @@ def _child_balance_on_peer(peer: str, external_token: str) -> Optional[int]:
 
 
 def _check_start(peer: str, client_id: str, external_token: str,
-                 started_at: Optional[float] = None) -> Tuple[Optional[int], Optional[dict]]:
+                 started_at: Optional[float] = None
+                 ) -> Tuple[Optional[int], Optional[dict], Optional[tuple]]:
     """Read the statement of the new child on ``peer`` and check its chain (#570).
 
     ``started_at`` is when this node asked the peer to start the child: the account was
     written after that, and a build may take minutes before ``StartService`` answers.
 
-    Returns the balance of the child there, in the MU of the peer, and the mark that the
-    maintenance tick goes on from: ``seq``, ``hash`` and ``ts``. The mark is None when
-    the statement could not be used, and the balance then comes from ``GetMetrics``.
+    Returns the balance of the child there, in the MU of the peer, the mark that the
+    maintenance tick goes on from: ``seq``, ``hash`` and ``ts``, and the quote that the
+    peer signed in the ``start`` movement of the child (#652): ``(columns, page)``, the
+    columns of the row (``statement_check.signed_quote_row``) and the serialized page.
+    The mark is None when the statement could not be used, and the balance then comes
+    from ``GetMetrics``. The quote is None when the peer signed none.
 
     A statement that does not start from the genesis of the account, or that does not
     come from a peer that just answered ``StartService``, costs the peer the penalty for
@@ -131,7 +137,7 @@ def _check_start(peer: str, client_id: str, external_token: str,
         log.LOGGER(f'Cannot read our balance on {peer} to read the statement of the child: {e}')
         rows_asked = 0
     if rows_asked <= 0:
-        return _child_balance_on_peer(peer, external_token), None
+        return _child_balance_on_peer(peer, external_token), None, None
     try:
         statement = statement_check.read(
             peer, client_id, token=external_token, from_seq=1, rows=rows_asked)
@@ -140,7 +146,7 @@ def _check_start(peer: str, client_id: str, external_token: str,
             peer, external_token, e, seq=1, child=True,
             pays=lambda: statement_check.still_pays(
                 peer, rows_asked, statement_check.floor_on(peer, SQLConnection())))
-        return _child_balance_on_peer(peer, external_token), None
+        return _child_balance_on_peer(peer, external_token), None, None
 
     # A new account: its movement 1 hangs from its genesis.
     now = time.time()
@@ -148,12 +154,96 @@ def _check_start(peer: str, client_id: str, external_token: str,
         external_token, ts=now if started_at is None else started_at)
     chain = statement_check.verify_chain(statement, start, now=now, from_seq=1)
     if chain.rows is None:
-        statement_check.penalise_chain(peer, external_token, chain, 1)
-        return _child_balance_on_peer(peer, external_token), None
+        statement_check.penalise_chain(peer, external_token, chain, 1, statement=statement)
+        return _child_balance_on_peer(peer, external_token), None, None
 
     new = statement_check.mark_after(chain, statement, start)
     mark = {"seq": new.seq, "hash": new.hash, "ts": new.ts} if chain.rows else None
-    return from_amount(statement.balance), mark
+    columns = statement_check.signed_quote_row(chain.rows[0]) if chain.rows else None
+    signed = (columns, statement.SerializeToString()) if columns else None
+    return from_amount(statement.balance), mark, signed
+
+
+_FIGURES = ("init_maintenance_cost", "max_maintenance_cost")
+
+
+def stricter_quote(offered: Optional[dict], signed: dict) -> tuple:
+    """``(columns, notes)``: the ``quote_*`` columns that the maintenance of the child is
+    checked against, from the offer that the peer made before the start (``offered``,
+    ``peer_quotes.maintenance_terms``) and the quote that it signed in the ``start``
+    movement (``signed``, ``statement_check.signed_quote_row``).
+
+    The signed quote must never loosen the offer: the peer won the sort on the offer, so a
+    peer that signs ``price_bounded`` false, a higher figure or an earlier close would turn
+    off the check against itself. Each term keeps the stricter value:
+
+    * bounded when either is bounded, with the smaller volatility of the two;
+    * each figure is the signed one, but at most the offered one times ``1 + v`` (the price
+      can move between the quote and the launch, and ``v`` is that room). With another loop
+      length the figures are not comparable, and the offered terms stay;
+    * the close is the later ``closes_at`` of the two, and its ``on_close``.
+
+    The evidence of a fault can still be the signed quote, because the signed ``start``
+    page holds it and binds the peer. ``notes`` says what was made stricter."""
+    columns = dict(signed)
+    notes: List[str] = []
+    if not offered or not offered.get("price_bounded"):
+        return columns, notes
+
+    if not signed.get("quote_price_bounded"):
+        notes.append("signed price_bounded false after a bounded offer")
+    signed_v = signed.get("quote_price_volatility")
+    offered_v = offered.get("price_volatility")
+    if signed.get("quote_price_bounded") and signed_v is not None and offered_v is not None \
+            and float(signed_v) <= float(offered_v):
+        pass  # The signed bound is the stricter.
+    else:
+        columns["quote_price_volatility"] = offered_v
+        columns["quote_volatility_period_seconds"] = offered.get("volatility_period_seconds")
+    columns["quote_price_bounded"] = 1
+
+    same_loop = signed.get("quote_maintenance_seconds_loop") == offered.get("maintenance_seconds_loop")
+    room = 1.0 + float(offered_v or 0.0)
+    for key in _FIGURES:
+        before, now = offered.get(key), signed.get(f"quote_{key}")
+        if before is None:
+            continue
+        if not same_loop or now is None:
+            columns[f"quote_{key}"] = before
+            continue
+        cap = math.ceil(int(before) * room)
+        if int(now) > cap:
+            notes.append(f"signed {key} {now}, above the {before} that it quoted "
+                         f"(held to {cap})")
+        columns[f"quote_{key}"] = min(int(now), cap)
+    if not same_loop:
+        columns["quote_maintenance_seconds_loop"] = offered.get("maintenance_seconds_loop")
+        notes.append("signed another loop length than it quoted")
+
+    offered_close = int(offered.get("closes_at") or 0)
+    signed_close = int(signed.get("quote_closes_at") or 0)
+    if offered_close and signed_close < offered_close:
+        columns["quote_closes_at"] = offered_close
+        columns["quote_on_close"] = offered.get("on_close")
+        notes.append("signed an earlier close than it quoted")
+    return columns, notes
+
+
+def _keep_signed_start(peer: str, external_token: str,
+                       peer_quote: Optional[celaut_pb2.EstimatedCost],
+                       columns: dict, page: bytes) -> None:
+    """Keep the quote that ``peer`` signed in the ``start`` movement of the child, and its
+    page (#652). The signed page binds the peer, so a fault against it can be proved to
+    other nodes. The maintenance of the child is checked against the stricter of that quote
+    and the offer that the peer sent before the start (``stricter_quote``), so the signed
+    quote cannot turn off the check against the peer. Never raises."""
+    try:
+        kept, notes = stricter_quote(maintenance_terms(peer_quote), columns)
+        for note in notes:
+            log.LOGGER(f"{peer}, child {external_token[:8]}: {note}.")
+        SQLConnection().set_delegated_signed_start(external_token, kept, page)
+    except Exception as e:
+        log.LOGGER(f"Cannot keep the signed quote of the child {external_token[:8]} on {peer}: {e}")
 
 
 def delegate_execution(
@@ -280,7 +370,8 @@ def delegate_execution(
         # What the peer says the child holds now: the amount that we sent, less the build
         # that it took. Read, not computed: the peer sets its own build, and the tick
         # below measures the consumption from this very figure.
-        child_balance_peer, mark = _check_start(peer, client_id, external_token, started_at)
+        child_balance_peer, mark, signed_start = _check_start(
+            peer, client_id, external_token, started_at)
         if child_balance_peer is None:
             # The peer could not be read: use what its quote says. The tick corrects the
             # mark at the next reading, and the instance is not lost over a failed read.
@@ -316,6 +407,14 @@ def delegate_execution(
             config=extract_instance_name(config)[1] or celaut_pb2.Configuration(),
             initial_mu=initial_mu,
         )
+        # What the ticks of the child charge its father, and the quote of this node for
+        # it, which the ``start`` movement holds and the statement signs (#652).
+        shape = priced_shape(service, metadata, service_id,
+                             get_arch_tag(service=service, metadata=metadata)
+                             if service is not None else None)
+        own_quote = statement_check.start_quote_detail(
+            start_quote.delegated_terms(shape),
+            {key: shape.get(f"base_{key}") for key in start_quote.SHAPE_KEYS} if shape else None)
         SQLConnection().add_delegated_instance(
             father_id=father_id,
             peer_id=peer,  # Add node_uri.
@@ -337,17 +436,18 @@ def delegate_execution(
             peer_balance_mu=peer_balance_mu,
             movements=(
                 ledger.Movement(ledger.START, initial_mu,
-                                detail=execution_cause(alias, receipt)),
+                                detail={**(execution_cause(alias, receipt) or {}),
+                                        **own_quote} or None),
                 ledger.Movement(ledger.BUILD, -int(own_build_mu)),
             ),
             sent_peer_mu=sent_peer_mu,
             mark=mark,
-            shape=priced_shape(service, metadata, service_id,
-                               get_arch_tag(service=service, metadata=metadata)
-                               if service is not None else None),
+            shape=shape,
             # What the peer signed for one maintenance period, in its MU (#567).
             quote=maintenance_terms(peer_quote),
         )
+        if signed_start is not None:
+            _keep_signed_start(peer, external_token, peer_quote, *signed_start)
         service_instance.token = alias
         service_instance.instance.CopyFrom(published_instance)
         if receipt is not None:

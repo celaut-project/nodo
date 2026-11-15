@@ -580,31 +580,32 @@ class TheOverchargeTests(unittest.TestCase):
 
     def test_bounded_is_scored_above_the_exact_ceiling(self):
         quote = MaintenanceQuote.of_row(self.QUOTE)
-        # First period: 100 * 1.1 = 110, plus 1 MU of rounding.
-        self.assertIsNone(statement_check.maintenance_overcharge(self._rows(111), quote, 1000))
-        self.assertIsNotNone(statement_check.maintenance_overcharge(self._rows(112), quote, 1000))
+        # First period: 100 * 1.1 = 110, plus 1 MU of rounding and 3 MU for the truncated
+        # terms of one loop.
+        self.assertIsNone(statement_check.maintenance_overcharge(self._rows(114), quote, 1000))
+        self.assertIsNotNone(statement_check.maintenance_overcharge(self._rows(115), quote, 1000))
 
     def test_the_period_of_the_movement_counts(self):
         quote = MaintenanceQuote.of_row(self.QUOTE)
         # Dated 1880 s after the launch, with the 120 s of clock margin: k = 3, so
-        # 100 * 1.331 + 1 MU.
+        # 100 * 1.331 + 1 MU + 3 MU.
         self.assertIsNone(statement_check.maintenance_overcharge(
-            self._rows(134, start_ts=2870), quote, 2870))
+            self._rows(137, start_ts=2870), quote, 2870))
         self.assertIsNotNone(statement_check.maintenance_overcharge(
-            self._rows(135, start_ts=2870), quote, 2870))
+            self._rows(138, start_ts=2870), quote, 2870))
 
     def test_the_figure_of_the_resources_held(self):
         row = dict(self.QUOTE, **{f"peer_base_{k}": v for k, v in self.START.items()})
         quote = MaintenanceQuote.of_row(row)
-        # At the start shape: 60 * 1.1 = 66, + 1.
-        self.assertIsNone(statement_check.maintenance_overcharge(self._rows(67), quote, 1000))
-        self.assertIsNotNone(statement_check.maintenance_overcharge(self._rows(68), quote, 1000))
-        # Grown past it: the figure at the most, 110 + 1.
+        # At the start shape: 60 * 1.1 = 66, + 1 + 3.
+        self.assertIsNone(statement_check.maintenance_overcharge(self._rows(70), quote, 1000))
+        self.assertIsNotNone(statement_check.maintenance_overcharge(self._rows(71), quote, 1000))
+        # Grown past it: the figure at the most, 110 + 1 + 3.
         grown = dict(self.START, mem_limit=2 * GIB)
         self.assertIsNone(statement_check.maintenance_overcharge(
-            self._rows(111, shape=grown), quote, 1000))
+            self._rows(114, shape=grown), quote, 1000))
         self.assertIsNotNone(statement_check.maintenance_overcharge(
-            self._rows(112, shape=grown), quote, 1000))
+            self._rows(115, shape=grown), quote, 1000))
 
     def test_no_launch_time_with_a_period_is_not_checked(self):
         quote = MaintenanceQuote.of_row(dict(self.QUOTE, launched_ts=None))

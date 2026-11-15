@@ -42,6 +42,8 @@ class RegistrationOrderTests(unittest.TestCase):
             "network.CONSIDER_DEV_AS_INTERNAL": True,
             "network.DISABLE_EXPOSE_OUTSIDE": False,
             "network.FREE_PORTS_RANGE": [],
+            # The period that the quote of the start prices (#652).
+            "MANAGER_ITERATION_TIME": 10,
         }
         self.resolved = celaut.Sysresources(
             mem_limit=1_000_000_000,
@@ -167,8 +169,12 @@ class RegistrationOrderTests(unittest.TestCase):
 
         start = dict(self.events[0][1])["movements"][0]
         self.assertEqual(start.kind, "start")
-        self.assertEqual(start.detail, {"execution_name": "ab" * 32,
-                                        "receipt_digest": er.receipt_digest(receipt)})
+        self.assertEqual({k: v for k, v in start.detail.items() if k != "quote"},
+                         {"execution_name": "ab" * 32,
+                          "receipt_digest": er.receipt_digest(receipt)})
+        # The quote of this node for the instance, which the statement signs (#652).
+        self.assertTrue(start.detail["quote"]["price_bounded"] in (True, False))
+        self.assertIn("base", start.detail["quote"])
         self.assertEqual(signed.call_count, 1)
         self.assertEqual(instance.receipt, receipt)
 
@@ -179,7 +185,8 @@ class RegistrationOrderTests(unittest.TestCase):
             instance = self._run(self._successful_execute)
 
         start = dict(self.events[0][1])["movements"][0]
-        self.assertEqual(start.detail, {"execution_name": "ab" * 32})
+        self.assertEqual({k: v for k, v in start.detail.items() if k != "quote"},
+                         {"execution_name": "ab" * 32})
         self.assertFalse(instance.HasField("receipt"))
 
     def test_a_launch_that_fails_after_registering_purges_the_row(self):

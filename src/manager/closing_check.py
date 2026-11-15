@@ -116,7 +116,11 @@ def judge(rows, on_close: Optional[str], closes_at: Optional[int],
     for row in rows:
         if row.kind != ledger.STOP or str(row.detail.get("reason", "")) != dead_instances.ACTIVITY_WINDOW:
             continue
-        if on_close == STOP and scheduled and row.ts >= closes_at - skew:
+        # A `hibernate` quote means hibernate when it can: an instance that cannot (no
+        # revivable disk, a shared filesystem) is stopped at the close with this reason
+        # (`maintain._hibernate_for_window`). That is what the quote said, not a fault.
+        # A stop before the close is one in both cases.
+        if scheduled and row.ts >= closes_at - skew:
             continue
         faults.append(Fault(
             Reason.INSTANCE_STOPPED_UNANNOUNCED, STOPPED_UNANNOUNCED_PENALTY, row.seq,
@@ -125,16 +129,20 @@ def judge(rows, on_close: Optional[str], closes_at: Optional[int],
     return faults
 
 
-def check(row: Mapping, rows) -> None:
+def check(row: Mapping, rows, statement=None) -> None:
     """Score the peer of the delegated ``row`` for the changes in ``rows`` that its quote
-    did not say. Once for each change: the same row read again costs nothing. Never raises."""
+    did not say. Once for each change: the same row read again costs nothing. Never raises.
+
+    ``statement`` is the page of ``rows``: with the page where the peer signed its quote,
+    it is the evidence of the fault (#652)."""
     try:
         mem = row.get("mem_limit")
         for fault in judge(rows, row.get("quote_on_close"), row.get("quote_closes_at"),
                            None if mem is None else int(mem)):
             statement_check.penalise_once(
                 row.get("peer_id"), row["token"], fault.reason, fault.problem, fault.seq,
-                amount=fault.amount)
+                amount=fault.amount,
+                evidence=statement_check.quote_evidence(fault.reason, row, statement))
     except Exception as e:
         from src.utils import logger as log
         log.LOGGER(f"Could not check the closing terms of {row.get('id')}: {e}")

@@ -21,6 +21,7 @@ from src.manager.metrics import balance_on_other_peer, instance_metrics_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
 from src.reputation_system.onchain_indexer import tick as onchain_reputation_tick
+from src.reputation_system.offchain_indexer import tick as offchain_reputation_tick
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.payment_system.mu_conversion import matching_payment_system
@@ -987,7 +988,8 @@ def _check_our_account(peer_id: str, debug_mode: bool = False) -> None:
 
         chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=from_seq)
         if chain.rows is None:
-            statement_check.penalise_chain(peer_id, client_id, chain, from_seq)
+            statement_check.penalise_chain(peer_id, client_id, chain, from_seq,
+                                           statement=statement)
             if not chain.clock:
                 _save_our_mark(peer_id, statement_check.anchor_at_head(statement))
             return
@@ -1059,12 +1061,29 @@ def _signed_balance(peer_id: str, client_id: str, mark: statement_check.Mark, ba
         return None
     chain = statement_check.verify_chain(statement, mark, now=read_at, from_seq=0)
     if chain.rows is None:
-        statement_check.penalise_chain(peer_id, client_id, chain, 0)
+        statement_check.penalise_chain(peer_id, client_id, chain, 0, statement=statement)
         return None
     return from_amount(statement.balance)
 
 
-def _check_maintenance_quote(row: dict, rows, since_ts: Optional[int]) -> None:
+def _signed_pages(token: str):
+    """``(start page, last page)`` of the child, serialized; None where none (#652)."""
+    try:
+        return sc.delegated_signed_pages(token)
+    except Exception as e:
+        log.LOGGER(f"Cannot read the signed pages of the child {token[:8]}: {e}")
+        return None, None
+
+
+def _keep_page(token: str, statement) -> None:
+    try:
+        sc.set_delegated_statement_raw(token, statement.SerializeToString())
+    except Exception as e:
+        log.LOGGER(f"Cannot keep the last page of the child {token[:8]}: {e}")
+
+
+def _check_maintenance_quote(row: dict, rows, since_ts: Optional[int],
+                             statement=None) -> None:
     """Score the peer of ``row`` when ``rows``, the movements of the child that were just
     checked after the mark dated ``since_ts``, charge more maintenance than the peer
     quoted for the child (#567, ``statement_check.maintenance_overcharge``).
@@ -1090,7 +1109,9 @@ def _check_maintenance_quote(row: dict, rows, since_ts: Optional[int]) -> None:
         seq, problem = fault
         statement_check.penalise_once(
             row.get('peer_id'), row['token'], Reason.MAINTENANCE_OVERCHARGED, problem, seq,
-            window=statement_check.FAULT_WINDOW_SECONDS, per_account=True)
+            window=statement_check.FAULT_WINDOW_SECONDS, per_account=True,
+            evidence=statement_check.quote_evidence(
+                Reason.MAINTENANCE_OVERCHARGED, row, statement))
     except Exception as e:
         log.LOGGER(f"Could not check the maintenance of {row.get('id')} against its quote: {e}")
 
@@ -1200,12 +1221,18 @@ def _read_child(row: dict, debug_mode: bool = False, force_statement: bool = Fal
             checked = True
             rows = tuple(chain.rows)
             statement_check.settle_failed_reads(peer_id, token, chain.rows, statement.head_seq)
-            _check_maintenance_quote(row, chain.rows, start.ts)
+            _check_maintenance_quote(row, chain.rows, start.ts, statement)
             # What the peer did about closing time, against what its quote said (#344).
-            closing_check.check(row, chain.rows)
+            closing_check.check(row, chain.rows, statement)
+            if chain.rows:
+                # The page that sets the mark: the evidence if the peer later shows
+                # other movements for the same seqs (#652).
+                _keep_page(token, statement)
         else:
             if chain.problem:
-                statement_check.penalise_chain(peer_id, token, chain, from_seq)
+                statement_check.penalise_chain(peer_id, token, chain, from_seq,
+                                               statement=statement,
+                                               before=_signed_pages(token)[1])
             new = statement_check.anchor_at_head(statement)
             balance_now = new.balance
             # What cannot be checked is taken from the balance. Never below 0: a reading
@@ -2390,6 +2417,10 @@ def _manager_pass(short_interval_count: int) -> int:
     # promise: self-gates to its own hourly interval, never raises, and is the only
     # place the reputation contract is read from a network -- the balancer reads rows.
     onchain_reputation_tick()
+
+    # The off-chain reputation proofs of the peers (#652): one pull from one peer, its
+    # evidence checked, and the scores for the balancer. Self-gates, never raises.
+    offchain_reputation_tick()
 
     # Bounded third-party peer discovery; each tick gates itself on live config.
     gossip_pull_tick()

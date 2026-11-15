@@ -70,9 +70,14 @@ class EveryCellOfTheTableTests(unittest.TestCase):
         self.assertEqual(self.judge(_hibernation_at(AFTER), "hibernate", T), [])
         self.assertEqual(self.judge(_hibernation_at(T), "hibernate", T), [])
 
-    def test_hibernate_quote_stop_is_unannounced_at_any_time(self):
-        for ts in (BEFORE, AFTER):
-            self.assertEqual(_reasons(self.judge([_stop(3, ts)], "hibernate", T)), [STO])
+    def test_hibernate_quote_stop_before_t_is_unannounced(self):
+        self.assertEqual(_reasons(self.judge([_stop(3, BEFORE)], "hibernate", T)), [STO])
+
+    def test_hibernate_quote_stop_from_t_is_a_hibernation_that_was_not_possible(self):
+        # An instance that cannot hibernate (shares, no revivable disk) is stopped at the
+        # close (`maintain._hibernate_for_window`). That is what a `hibernate` quote says.
+        self.assertEqual(self.judge([_stop(3, AFTER)], "hibernate", T), [])
+        self.assertEqual(self.judge([_stop(3, T)], "hibernate", T), [])
 
     # STOP at T
     def test_stop_quote_hibernation_before_t_is_unannounced(self):

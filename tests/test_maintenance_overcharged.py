@@ -207,7 +207,9 @@ class ReadChildAgainstTheQuoteTests(unittest.TestCase):
         self.assertEqual(args[:2], (PEER_ID, PEER_TOKEN))
         self.assertEqual(args[4], 3)  # the first period of the interval
         self.assertEqual(kwargs, {"window": statement_check.FAULT_WINDOW_SECONDS,
-                                  "per_account": True})
+                                  "per_account": True,
+                                  # The row holds no quote that the peer signed (#652).
+                                  "evidence": None})
 
     def test_what_the_tick_gets_is_the_same_with_or_without_the_check(self):
         book = _book((100, _period()), (180, _period()), (180, _period()))
@@ -498,7 +500,7 @@ class TheQuoteIsStoredUnconvertedTests(_Database):
                              return_value=celaut.ServiceInstance(token=PEER_TOKEN)), \
                 patch.object(delegate_mod.delegated_endpoints, "should_tunnel",
                              return_value=False), \
-                patch.object(delegate_mod, "_check_start", return_value=(19_000, None)):
+                patch.object(delegate_mod, "_check_start", return_value=(19_000, None, None)):
             delegate_mod.delegate_execution(
                 service_id="service-a", peer=PEER_ID, father_id=FATHER,
                 metadata=celaut.Metadata(), config=config, recursion_guard_token="t",

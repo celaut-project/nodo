@@ -16,7 +16,6 @@ protobuf serialization is not canonical (docs/EXECUTION_RECEIPTS.md). The celaut
 layer announces the same encoding (``statement.digest`` in transport_stack), so any
 reader can check a statement without this code.
 """
-import hashlib
 import time
 from typing import Optional
 
@@ -27,7 +26,10 @@ from src.identity.node_identity import (
     get_node_public_key_hex,
     sign_peer_payload,
     statement_payload,
-    verify_peer_payload,
+)
+# The digest and the check have no database, for readers of signed evidence (#652).
+from src.identity.statement_signature import (  # noqa: F401
+    _hex, movement_hash, statement_digest, verify,
 )
 from src.reputation_system.reasons import Reason
 from src.utils import logger as log
@@ -45,42 +47,6 @@ class StatementInvalid(Exception):
     """A peer answered with no statement, or with one that its key did not sign."""
 
 
-def _hex(text: str) -> str:
-    return text.encode("utf-8").hex()
-
-
-def movement_hash(movement: celaut_pb2.BalanceMovement) -> str:
-    """The hash of a movement of a statement, from its fields."""
-    return ledger.movement_hash(
-        movement.prev_hash, movement.seq, movement.ts, movement.amount.n,
-        movement.balance_after.n, movement.kind, movement.instance_ref, movement.detail,
-    )
-
-
-def statement_digest(statement: celaut_pb2.BalanceStatement) -> str:
-    """Blake2b-256 hex of the canonical text of every field but the signature.
-
-    ``service_id`` is in the text only when it is not empty (``|service_id:`` and its
-    hex, after the movements). ``instance_ref`` is in the text only when it is not empty
-    (``|instance_ref:`` and its hex, after ``service_id``). ``relayed`` is in the text
-    only when it is true (``|relayed`` at the end). So the digest of a statement without
-    them does not change (#631).
-    """
-    text = "|".join((
-        statement.account_ref, str(statement.from_seq), str(statement.to_seq),
-        str(statement.ts), str(statement.retention_days), str(statement.oldest_seq),
-        str(statement.head_seq), statement.head_hash, _hex(statement.balance.n),
-        "/".join(movement_hash(m) for m in statement.movements),
-    ))
-    if statement.service_id:
-        text += "|service_id:" + _hex(statement.service_id)
-    if statement.instance_ref:
-        text += "|instance_ref:" + _hex(statement.instance_ref)
-    if statement.relayed:
-        text += "|relayed"
-    return hashlib.blake2b(text.encode("utf-8"), digest_size=32).hexdigest()
-
-
 def _sign(statement: celaut_pb2.BalanceStatement) -> celaut_pb2.BalanceStatement:
     """Sign ``statement`` with the key of this node, in place, and return it."""
     public_key = get_node_public_key_hex()
@@ -91,13 +57,6 @@ def _sign(statement: celaut_pb2.BalanceStatement) -> celaut_pb2.BalanceStatement
     # and its reader refuses it, as it refuses any unsigned one.
     statement.signature = signature or ""
     return statement
-
-
-def verify(statement: celaut_pb2.BalanceStatement, peer_id: str) -> bool:
-    """Whether ``peer_id`` signed exactly this statement."""
-    return verify_peer_payload(
-        peer_id, statement_payload(peer_id, statement_digest(statement)), statement.signature,
-    )
 
 
 def statement_price_mu(rows: int) -> int:
@@ -220,7 +179,6 @@ _BELOW_FAILED = "A node below gave no statement."
 _NO_BUDGET = "The hop budget of this read is used up."
 _MANY_BELOW = "More than one node below gave a statement of that descendant."
 
-_OUT_OF_BALANCE = frozenset(("out_of_balance", "hibernated_out_of_balance"))
 
 
 def locate(root: str, instance_ref: str) -> dict:
@@ -477,6 +435,8 @@ def _keep_head(peer_id: str, ask_ref: str, statement: celaut_pb2.BalanceStatemen
     try:
         sc.record_descendant_head(peer_id, ask_ref, statement.head_seq, statement.head_hash,
                                   ts=statement.ts or None)
+        # The page itself: the evidence if the peer later signs another chain (#652).
+        sc.set_descendant_head_statement(peer_id, ask_ref, statement.SerializeToString())
     except Exception as e:
         log.LOGGER(f"Cannot keep the head of descendant {ask_ref[:12]} on {peer_id}: {e}")
 
@@ -569,7 +529,9 @@ def _ask_peer(row: dict, client_id: str, ask_ref: str, from_seq: int, to_seq: in
             statement_check.penalise_once(
                 peer_id, ask_ref, Reason.STATEMENT_INCONSISTENT,
                 f"a statement of a descendant that does not agree with the one it signed "
-                f"before: {conflict}", window=statement_check.FAULT_WINDOW_SECONDS)
+                f"before: {conflict}", window=statement_check.FAULT_WINDOW_SECONDS,
+                evidence=statement_check.inconsistency_evidence(
+                    peer_id, statement, sc.descendant_head_statement(peer_id, ask_ref)))
         except Exception as e:
             log.LOGGER(f"Cannot score {peer_id} for descendant {ask_ref[:12]}: {e}")
         raise StatementUnavailable(_BELOW_FAILED)
@@ -659,12 +621,6 @@ def _relay(statement: celaut_pb2.BalanceStatement,
     return _sign(relayed)
 
 
-# A stop row whose ``detail.tick`` is more than this many times the largest maintenance
-# row of the statement uses this limit in place of ``tick``. The scarcity of a node can
-# make a tick cost more than its past rows, but not without a limit.
-_MAX_TICK_FACTOR = 10
-
-
 def _judge_stop(peer_id: str, statement: celaut_pb2.BalanceStatement,
                 instance_ref: str) -> None:
     """Score the peer that killed an orphan descendant while it had MU (#631).
@@ -682,7 +638,7 @@ def _judge_stop(peer_id: str, statement: celaut_pb2.BalanceStatement,
 
     - ``out_of_balance`` with less MU left than the price of the tick that the
       instance could not pay. The stop row gives that price (``detail.tick``), at the
-      scarcity of the node at that time. A ``tick`` above ``_MAX_TICK_FACTOR`` times the
+      scarcity of the node at that time. A ``tick`` above ``fault_proofs.MAX_TICK_FACTOR`` times the
       largest maintenance row is not believed: that limit is used. A stop row with no
       ``tick`` uses the largest maintenance row, and with no maintenance row in the
       statement it is not judged.
@@ -691,32 +647,14 @@ def _judge_stop(peer_id: str, statement: celaut_pb2.BalanceStatement,
     show the refund row is not judged.
     """
     from src.manager import statement_check
+    from src.reputation_system import fault_proofs
 
     rows = statement_check.rows_of(statement)
-    lost = {row.seq for row in rows
-            if row.kind == ledger.REFUND and row.amount < 0
-            and row.detail.get("lost") == "father_gone"}
-    period = max((-row.amount for row in rows
-                  if row.kind == ledger.MAINTENANCE and row.amount < 0), default=0)
-    for row in rows:
-        if row.kind != ledger.STOP or (row.seq - 1) not in lost:
-            continue
-        leftover = _int_of(row.detail.get("leftover"))
-        reason = str(row.detail.get("reason", ""))
-        if leftover <= 0:
-            continue
-        if reason in _OUT_OF_BALANCE:
-            tick = _int_of(row.detail.get("tick")) if "tick" in row.detail else None
-            if tick is None:
-                tick = period
-            elif period:
-                tick = min(tick, period * _MAX_TICK_FACTOR)
-            if not tick or leftover < tick:
-                continue
+    for seq, problem in fault_proofs.killed_with_mu(rows):
         statement_check.penalise_once(
-            peer_id, instance_ref, Reason.KILLED_WITH_MU,
-            f"stop row {row.seq} ({reason}) with {leftover} MU left and the father gone",
-            row.seq)
+            peer_id, instance_ref, Reason.KILLED_WITH_MU, problem, seq,
+            evidence=fault_proofs.attach(fault_proofs.evidence_of(
+                Reason.KILLED_WITH_MU, peer_id, [statement])))
 
 
 def _int_of(value) -> int:
@@ -806,10 +744,16 @@ def _judge_receipt(peer_id: str, statement: celaut_pb2.BalanceStatement,
     receipt.ParseFromString(stored)
     report = receipt_statement.check(
         [receipt], statement_check.rows_of(statement), peer_id=peer_id)
+    if not report["findings"]:
+        return
+    from src.reputation_system import fault_proofs
+    evidence = fault_proofs.attach(fault_proofs.evidence_of(
+        Reason.STATEMENT_CONTRADICTS_RECEIPT, peer_id, [statement], [receipt]))
     for finding in report["findings"]:
         statement_check.penalise_once(
             peer_id, instance_ref, Reason.STATEMENT_CONTRADICTS_RECEIPT,
-            f"{finding['kind']}: {finding['detail']}", int(finding["seq"]))
+            f"{finding['kind']}: {finding['detail']}", int(finding["seq"]),
+            evidence=evidence)
 
 
 def _no_memory(row) -> bool:
