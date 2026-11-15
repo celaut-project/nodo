@@ -140,6 +140,11 @@ def _equivocation(first: celaut_pb2.BalanceStatement,
         if a[seq] != b[seq]:
             return seq, f"movement {seq} has two hashes: {a[seq][:12]} and {b[seq][:12]}"
     early, late = sorted((first, second), key=lambda s: s.ts)
+    if late.head_seq == 0 and not late.movements:
+        # An account that retention deleted whole (``prune_balance_movements``) is answered
+        # with head 0 and no movements. That is not a head that went back, as
+        # ``balance_statement.head_conflict`` says too.
+        return None
     if late.ts > early.ts and late.head_seq < early.head_seq:
         return int(late.head_seq), (f"the head went back from movement {early.head_seq} "
                                     f"to {late.head_seq}")
@@ -227,7 +232,7 @@ def check(evidence: celaut_pb2.FaultEvidence) -> Optional[Proven]:
     """The fault that ``evidence`` proves against ``evidence.accused``, or None.
 
     Every statement and every receipt must be signed by the accused, and all the
-    statements must be of one account. Never raises.
+    statements must be of one account. A relayed statement is refused. Never raises.
     """
     try:
         if evidence.reason not in PROVABLE:
@@ -241,6 +246,13 @@ def check(evidence: celaut_pb2.FaultEvidence) -> Optional[Proven]:
         if not account_ref or any(s.account_ref != account_ref for s in statements):
             return None
         if any(s.instance_ref != statements[0].instance_ref for s in statements):
+            return None
+        if any(s.relayed for s in statements):
+            # A relayed page holds the rows of a descendant, signed again by the node that
+            # relays them (``balance_statement._relay``). Its signature says that the relayer
+            # passed the rows on, not that it wrote them, so it proves nothing against the
+            # relayer, and the node that wrote the rows signed none of it. The reporter keeps
+            # the local penalty, without evidence.
             return None
         if not all(statement_signature.verify(s, accused) for s in statements):
             return None

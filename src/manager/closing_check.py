@@ -116,7 +116,11 @@ def judge(rows, on_close: Optional[str], closes_at: Optional[int],
     for row in rows:
         if row.kind != ledger.STOP or str(row.detail.get("reason", "")) != dead_instances.ACTIVITY_WINDOW:
             continue
-        if on_close == STOP and scheduled and row.ts >= closes_at - skew:
+        # A `hibernate` quote means hibernate when it can: an instance that cannot (no
+        # revivable disk, a shared filesystem) is stopped at the close with this reason
+        # (`maintain._hibernate_for_window`). That is what the quote said, not a fault.
+        # A stop before the close is one in both cases.
+        if scheduled and row.ts >= closes_at - skew:
             continue
         faults.append(Fault(
             Reason.INSTANCE_STOPPED_UNANNOUNCED, STOPPED_UNANNOUNCED_PENALTY, row.seq,

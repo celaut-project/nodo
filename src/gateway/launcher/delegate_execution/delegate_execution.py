@@ -1,3 +1,4 @@
+import math
 import time
 import secrets
 from typing import Callable, List, Optional, Tuple
@@ -163,22 +164,84 @@ def _check_start(peer: str, client_id: str, external_token: str,
     return from_amount(statement.balance), mark, signed
 
 
+_FIGURES = ("init_maintenance_cost", "max_maintenance_cost")
+
+
+def stricter_quote(offered: Optional[dict], signed: dict) -> tuple:
+    """``(columns, notes)``: the ``quote_*`` columns that the maintenance of the child is
+    checked against, from the offer that the peer made before the start (``offered``,
+    ``peer_quotes.maintenance_terms``) and the quote that it signed in the ``start``
+    movement (``signed``, ``statement_check.signed_quote_row``).
+
+    The signed quote must never loosen the offer: the peer won the sort on the offer, so a
+    peer that signs ``price_bounded`` false, a higher figure or an earlier close would turn
+    off the check against itself. Each term keeps the stricter value:
+
+    * bounded when either is bounded, with the smaller volatility of the two;
+    * each figure is the signed one, but at most the offered one times ``1 + v`` (the price
+      can move between the quote and the launch, and ``v`` is that room). With another loop
+      length the figures are not comparable, and the offered terms stay;
+    * the close is the later ``closes_at`` of the two, and its ``on_close``.
+
+    The evidence of a fault can still be the signed quote, because the signed ``start``
+    page holds it and binds the peer. ``notes`` says what was made stricter."""
+    columns = dict(signed)
+    notes: List[str] = []
+    if not offered or not offered.get("price_bounded"):
+        return columns, notes
+
+    if not signed.get("quote_price_bounded"):
+        notes.append("signed price_bounded false after a bounded offer")
+    signed_v = signed.get("quote_price_volatility")
+    offered_v = offered.get("price_volatility")
+    if signed.get("quote_price_bounded") and signed_v is not None and offered_v is not None \
+            and float(signed_v) <= float(offered_v):
+        pass  # The signed bound is the stricter.
+    else:
+        columns["quote_price_volatility"] = offered_v
+        columns["quote_volatility_period_seconds"] = offered.get("volatility_period_seconds")
+    columns["quote_price_bounded"] = 1
+
+    same_loop = signed.get("quote_maintenance_seconds_loop") == offered.get("maintenance_seconds_loop")
+    room = 1.0 + float(offered_v or 0.0)
+    for key in _FIGURES:
+        before, now = offered.get(key), signed.get(f"quote_{key}")
+        if before is None:
+            continue
+        if not same_loop or now is None:
+            columns[f"quote_{key}"] = before
+            continue
+        cap = math.ceil(int(before) * room)
+        if int(now) > cap:
+            notes.append(f"signed {key} {now}, above the {before} that it quoted "
+                         f"(held to {cap})")
+        columns[f"quote_{key}"] = min(int(now), cap)
+    if not same_loop:
+        columns["quote_maintenance_seconds_loop"] = offered.get("maintenance_seconds_loop")
+        notes.append("signed another loop length than it quoted")
+
+    offered_close = int(offered.get("closes_at") or 0)
+    signed_close = int(signed.get("quote_closes_at") or 0)
+    if offered_close and signed_close < offered_close:
+        columns["quote_closes_at"] = offered_close
+        columns["quote_on_close"] = offered.get("on_close")
+        notes.append("signed an earlier close than it quoted")
+    return columns, notes
+
+
 def _keep_signed_start(peer: str, external_token: str,
                        peer_quote: Optional[celaut_pb2.EstimatedCost],
                        columns: dict, page: bytes) -> None:
     """Keep the quote that ``peer`` signed in the ``start`` movement of the child, and its
-    page (#652). The maintenance of the child is then checked against the signed quote,
-    and a fault against it can be proved to other nodes. A signed figure above the one
-    that the peer sent before the start is not a fault (the price can move between the
-    two), and it is logged. Never raises."""
+    page (#652). The signed page binds the peer, so a fault against it can be proved to
+    other nodes. The maintenance of the child is checked against the stricter of that quote
+    and the offer that the peer sent before the start (``stricter_quote``), so the signed
+    quote cannot turn off the check against the peer. Never raises."""
     try:
-        offered = maintenance_terms(peer_quote) or {}
-        for key in ("init_maintenance_cost", "max_maintenance_cost"):
-            signed, before = columns.get(f"quote_{key}"), offered.get(key)
-            if signed is not None and before is not None and int(signed) > int(before):
-                log.LOGGER(f"{peer} signed {key} {signed} for the child "
-                           f"{external_token[:8]}, above the {before} that it quoted.")
-        SQLConnection().set_delegated_signed_start(external_token, columns, page)
+        kept, notes = stricter_quote(maintenance_terms(peer_quote), columns)
+        for note in notes:
+            log.LOGGER(f"{peer}, child {external_token[:8]}: {note}.")
+        SQLConnection().set_delegated_signed_start(external_token, kept, page)
     except Exception as e:
         log.LOGGER(f"Cannot keep the signed quote of the child {external_token[:8]} on {peer}: {e}")
 

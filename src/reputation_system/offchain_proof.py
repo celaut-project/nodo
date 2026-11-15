@@ -137,12 +137,21 @@ def verify(proof: celaut_pb2.ReputationProof) -> bool:
         publisher = normalize_public_key_hex(proof.publisher)
     except Exception:
         return False
-    if publisher != proof.publisher or not proof.signature:
+    # The proto says lowercase hex, as for a receipt (#593): a second spelling of the same
+    # signature would be a second proof.
+    if publisher != proof.publisher or not proof.signature \
+            or proof.signature != proof.signature.lower():
         return False
     if not execution_receipt._scheme_is_ours(proof.signature_scheme):
         return False
-    return verify_peer_payload(
-        publisher, reputation_proof_payload(publisher, proof_digest(proof)), proof.signature)
+    try:
+        digest = proof_digest(proof)
+    except Exception:
+        # For example an ``Amount.n`` of an evidence that is not a number: a proof that
+        # cannot be read is refused, and it does not stop the pull that holds it.
+        return False
+    return verify_peer_payload(publisher, reputation_proof_payload(publisher, digest),
+                               proof.signature)
 
 
 # -- The proof of this node -------------------------------------------------------------
@@ -291,9 +300,16 @@ def apply_evidence(evidence: celaut_pb2.FaultEvidence, me: str, known: set) -> b
     proven = fault_proofs.check(evidence)
     if proven is None:
         return False
-    if not SQLConnection().record_fault_evidence(
+    sql = SQLConnection()
+    # A fault that this node scored itself (``statement_faults``, with no evidence then)
+    # is not scored again when the same fault comes with its evidence.
+    scored_here = sql.statement_fault_exists(
+        proven.accused, proven.account_ref, proven.reason, proven.seq)
+    if not sql.record_fault_evidence(
             proven.accused, proven.reason, proven.account_ref, proven.seq,
             fault_proofs.digest(evidence), evidence.SerializeToString(), "received"):
+        return False
+    if scored_here:
         return False
     log.LOGGER(f"[REPUTATION] A received proof shows that {accused} did {proven.reason} "
                f"at movement {proven.seq}: {proven.problem}")
@@ -372,7 +388,7 @@ def fault_reports(proof: celaut_pb2.ReputationProof) -> List[dict]:
             continue
         try:
             content = json.loads(bytes(opinion.content).decode("utf-8") or "{}")
-        except ValueError:
+        except Exception:
             content = {}
         reason = content.get("reason") if isinstance(content, dict) else None
         if not reason:

@@ -4499,6 +4499,14 @@ class SQLConnection(metaclass=Singleton):
 
         return self._transaction(work)
 
+    def statement_fault_exists(self, peer_id: str, account_ref: str, reason: str,
+                               seq: int) -> bool:
+        """Whether this node already scored this fault itself (``record_statement_fault``)."""
+        return self._execute(
+            'SELECT 1 FROM statement_faults WHERE peer_id = ? AND account_ref = ? '
+            'AND reason = ? AND seq = ?',
+            (peer_id, account_ref, reason, int(seq))).fetchone() is not None
+
     def prune_statement_faults(self, max_age_days: int) -> int:
         """Delete the faults older than ``max_age_days``. Returns how many."""
         cutoff = int(time.time()) - int(max_age_days) * 86400
@@ -5399,8 +5407,9 @@ class SQLConnection(metaclass=Singleton):
     def set_delegated_signed_start(self, token: str, quote_columns: Mapping,
                                    start_statement: bytes) -> None:
         """Keep the quote that the peer signed in the ``start`` movement of the child, and
-        the page that holds it (#652). The quote replaces the one that the peer sent
-        before the start: the signed one is what the peer is held to."""
+        the page that holds it (#652). ``quote_columns`` are the terms that the child is
+        checked against: the caller makes them the stricter of the signed quote and the
+        offer (``delegate_execution.stricter_quote``)."""
         columns = {key: quote_columns.get(key) for key in (
             "quote_init_maintenance_cost", "quote_max_maintenance_cost",
             "quote_maintenance_seconds_loop", "quote_price_bounded",

@@ -495,6 +495,10 @@ class MaintenanceQuote:
         return self.bound.period_index(int(ts) - self.launch_ts + CLOCK_SKEW_SECONDS)
 
 
+# The terms of a maintenance charge that are truncated one by one: memory, disk and CPU.
+RESOURCE_TERMS = 3
+
+
 def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote],
                            since_ts: Optional[int] = None) -> Optional[Tuple[int, str]]:
     """Whether the ``maintenance`` movements in ``rows`` charge more than the bound of
@@ -511,7 +515,8 @@ def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote
     of the resources that it charged for (``MaintenanceQuote.figure_for``), and the
     period ``k`` at its date, which is the end of the time that it charges, so an
     interval that spans a change of period has the higher ``k``. Each movement can round
-    up by 1 MU. The seconds count up to the time from ``since_ts`` to the last movement,
+    up by 1 MU, and by 3 MU for each loop that it charges, a part of a loop pro rata
+    (``RESOURCE_TERMS`` truncated terms). The seconds count up to the time from ``since_ts`` to the last movement,
     one period, and ``CLOCK_SKEW_SECONDS`` for the difference between the clocks of the
     two nodes: a peer cannot lower its cost per second with seconds that did not pass,
     beyond that margin. A movement with no seconds charges for no time. ``quote`` None
@@ -534,7 +539,7 @@ def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote
         passed = int(periods[-1].ts) - int(since_ts) + quote.seconds + CLOCK_SKEW_SECONDS
         seconds = min(total, max(0, passed))
     scale = Fraction(seconds, total) if total else Fraction(0)
-    allowed = Fraction(len(periods))
+    allowed = Fraction(0)
     ks = []
     for row, row_seconds in zip(periods, each):
         figure = quote.figure_for(row.detail)
@@ -544,7 +549,14 @@ def maintenance_overcharge(rows: Iterable[Row], quote: Optional[MaintenanceQuote
             # No figure for these resources, or no limit that can be known: not checked.
             return None
         ks.append(k)
-        allowed += Fraction(figure) * row_seconds * scale * factor / quote.seconds
+        # Each of the 3 resource terms of a charge is truncated, and the figure is the
+        # truncated price of ONE loop. A charge for several loops (a tick that lagged) can
+        # so exceed ``figure * seconds / loop`` by up to 3 MU per loop (``RESOURCE_TERMS * seconds / loop``), also at a factor of
+        # 1 (no volatility, or the price at its bound). One more MU is the rounding of the
+        # charge itself.
+        loops = Fraction(row_seconds) * scale / quote.seconds
+        allowed += (Fraction(figure) * row_seconds * scale * factor / quote.seconds
+                    + 1 + RESOURCE_TERMS * loops)
     if cost <= allowed:
         return None
     k_text = str(ks[0]) if ks[0] == ks[-1] else f"{ks[0]} to {ks[-1]}"
