@@ -80,9 +80,9 @@ def max_fault_reports() -> int:
 
 def max_proofs() -> int:
     try:
-        return max(0, int(_setting("MAX_OFFCHAIN_PROOFS_PER_RESPONSE", 100)))
+        return max(0, int(_setting("MAX_OFFCHAIN_PROOFS_PER_RESPONSE", 25)))
     except (TypeError, ValueError):
-        return 100
+        return 25
 
 
 def share_proofs() -> bool:
@@ -237,30 +237,44 @@ def forget_own_proof() -> None:
 
 # -- Proofs of other nodes --------------------------------------------------------------
 
-def serve() -> Iterable[celaut_pb2.ReputationProof]:
+def serve(max_bytes: Optional[int] = None) -> Iterable[celaut_pb2.ReputationProof]:
     """What ``GetReputationProofs`` sends: the proof of this node, then the kept proofs of
     other nodes as they were received, at most ``MAX_OFFCHAIN_PROOFS_PER_RESPONSE`` in
-    all. Nothing when ``SHARE_OFFCHAIN_PROOFS`` is false."""
+    all, and at most ``max_bytes`` bytes (default ``MAX_OFFCHAIN_BYTES_PER_RESPONSE``).
+    The proof of this node always goes first, and a proof that does not fit is skipped, not
+    cut. Nothing when ``SHARE_OFFCHAIN_PROOFS`` is false."""
     from src.database.sql_connection import SQLConnection
+    from src.reputation_system import offchain_limits
 
     if not share_proofs():
         return
     limit = max_proofs()
     if limit <= 0:
         return
-    sent = 0
+    if max_bytes is None:
+        max_bytes = offchain_limits.setting("MAX_OFFCHAIN_BYTES_PER_RESPONSE")
+    sent = used = 0
     own = own_proof()
     if own is not None:
         yield own
         sent += 1
+        used += own.ByteSize()
     if sent >= limit:
         return
-    for row in SQLConnection().get_offchain_proofs(limit - sent):
+    sql = SQLConnection()
+    # Sizes first: the proofs are read only when they fit, so a call costs what it sends.
+    for sample in sql.get_offchain_proof_samples(limit - sent):
+        if used + int(sample["size"] or 0) > max_bytes:
+            continue
+        raw = sql.get_offchain_proof(sample["publisher"])
+        if raw is None or used + len(raw) > max_bytes:
+            continue
         proof = celaut_pb2.ReputationProof()
         try:
-            proof.ParseFromString(row["proof"])
+            proof.ParseFromString(raw)
         except Exception:
             continue
+        used += len(raw)
         yield proof
 
 

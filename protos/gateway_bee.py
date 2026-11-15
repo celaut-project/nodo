@@ -102,6 +102,11 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
         output={1: celaut_pb2.ReputationProof},
         auth="client",
     ),
+    "PushReputationProof": GatewayRpc(
+        input={1: celaut_pb2.ReputationProof, 2: celaut_pb2.Client},
+        output={1: celaut_pb2.ReputationProofAck},
+        auth="client",
+    ),
     "ResolveNetwork": GatewayRpc(
         input={1: celaut_pb2.Service.Network, 2: celaut_pb2.Client},
         output={1: celaut_pb2.ConfigurationFile.NetworkResolution},

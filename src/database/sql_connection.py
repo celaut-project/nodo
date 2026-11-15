@@ -5343,6 +5343,19 @@ class SQLConnection(metaclass=Singleton):
             params = (int(limit),)
         return [dict(row) for row in self._execute(query, params).fetchall()]
 
+    def get_offchain_proof_samples(self, limit: int) -> List[dict]:
+        """``publisher`` and ``size`` (bytes) of up to ``limit`` kept proofs, in a random
+        order, without reading any proof: a caller with a byte budget picks from these and
+        then reads only the proofs that it sends (``get_offchain_proof``)."""
+        return [dict(row) for row in self._execute(
+            'SELECT publisher, LENGTH(proof) AS size FROM offchain_proofs '
+            'ORDER BY RANDOM() LIMIT ?', (int(limit),)).fetchall()]
+
+    def get_offchain_proof(self, publisher: str) -> Optional[bytes]:
+        row = self._execute('SELECT proof FROM offchain_proofs WHERE publisher = ?',
+                            (publisher,)).fetchone()
+        return None if row is None else bytes(row['proof'])
+
     def delete_offchain_proofs_except(self, publishers: Iterable[str]) -> int:
         """Delete the proofs of publishers that are not in ``publishers`` (not peers any
         more). Returns how many."""

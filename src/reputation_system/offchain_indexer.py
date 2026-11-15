@@ -4,6 +4,11 @@
   proofs that it holds (``GetReputationProofs``), and take each one
   (``offchain_proof.receive``): its evidence is checked, and the proof is kept when its
   publisher is a peer of this node.
+* Push: when the fault reports of this node changed, give the proof of this node to a few
+  random peers (``PushReputationProof``), so a fault that this node proved reaches them
+  before their next pull. It is bounded by ``reputation.PUSH_OFFCHAIN_FANOUT`` and
+  ``reputation.PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS``, and each receiver limits it too
+  (``offchain_limits``).
 * Score: work out the voice of each kept publisher and its scores, and store them for the
   balancer (``offchain_opinions``, read by ``offchain_credit``).
 * Retention: delete the proofs of publishers that are not peers any more, and the
@@ -23,8 +28,13 @@ DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_EVIDENCE_RETENTION_DAYS = 90
 RPC_TIMEOUT_SECONDS = 10
 
+DEFAULT_PUSH_FANOUT = 3
+DEFAULT_PUSH_MIN_INTERVAL_SECONDS = 300
+
 _last_pull = None
 _last_refresh = None
+_last_push = None
+_pushed_faults = None
 
 
 def _interval(config) -> float:
@@ -98,6 +108,80 @@ def pull_tick() -> bool:
         return True
 
 
+def _fault_key(proof: celaut_pb2.ReputationProof) -> str:
+    """A digest of the fault reports in ``proof``: it changes when a fault is added."""
+    import hashlib
+
+    digest = hashlib.blake2b(digest_size=16)
+    for opinion in proof.opinions:
+        if not opinion.amount and not opinion.positive:
+            digest.update(opinion.object.encode("utf-8") + bytes(opinion.content))
+    return digest.hexdigest()
+
+
+def push_once(target: str, proof: celaut_pb2.ReputationProof) -> bool:
+    """Give ``proof`` to ``target``. True if it took it."""
+    from src.identity.grpc_transport import peer_channel
+    from src.manager.manager import get_client_id_on_other_peer
+    from src.utils.bee_client import BeeClient
+
+    client_id = get_client_id_on_other_peer(peer_id=target)
+    if not client_id:
+        return False
+    channel = peer_channel(peer_id=target)
+    try:
+        ack = BeeClient.push_reputation_proof(
+            channel, proof, client_id=client_id, timeout=RPC_TIMEOUT_SECONDS)
+    finally:
+        channel.close()
+    if ack is not None and not ack.accepted:
+        LOGGER(f"[REPUTATION] {target[:12]} did not take the pushed proof: {ack.reason}")
+    return bool(ack is not None and ack.accepted)
+
+
+def push_tick() -> int:
+    """Push the proof of this node to a few peers when its fault reports changed since the
+    last push, and at most once each interval. Returns how many peers took it."""
+    global _last_push, _pushed_faults
+    try:
+        config = ConfigManager()
+        if not config.get("reputation.PUSH_OFFCHAIN_PROOFS", True):
+            return 0
+        try:
+            gap = float(config.get("reputation.PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS",
+                                   DEFAULT_PUSH_MIN_INTERVAL_SECONDS))
+            fanout = int(config.get("reputation.PUSH_OFFCHAIN_FANOUT", DEFAULT_PUSH_FANOUT))
+        except (TypeError, ValueError, OverflowError):
+            gap, fanout = DEFAULT_PUSH_MIN_INTERVAL_SECONDS, DEFAULT_PUSH_FANOUT
+        if fanout <= 0 or not math.isfinite(gap):
+            return 0
+        if _last_push is not None and time.monotonic() - _last_push < max(0.0, gap):
+            return 0
+        from src.database.sql_connection import SQLConnection
+        from src.reputation_system import offchain_proof
+
+        proof = offchain_proof.own_proof()
+        if proof is None:
+            return 0
+        key = _fault_key(proof)
+        if key == _pushed_faults:
+            return 0
+        _last_push = time.monotonic()
+        ids = SQLConnection().get_peers_id()
+        taken = 0
+        for target in random.sample(ids, min(fanout, len(ids))):
+            try:
+                taken += 1 if push_once(target, proof) else 0
+            except Exception as e:
+                LOGGER(f"[REPUTATION] push of the proof to {target[:12]} failed: {e}")
+        _pushed_faults = key
+        LOGGER(f"[REPUTATION] pushed the proof to {taken} of {min(fanout, len(ids))} peers")
+        return taken
+    except Exception as e:
+        LOGGER(f"[REPUTATION] push of off-chain proofs failed: {e}")
+        return 0
+
+
 def opinion_rows(proofs: List[celaut_pb2.ReputationProof], local: Dict[str, float],
                  half: float) -> List[Tuple[str, str, float, float]]:
     """``(subject, publisher, verdict, weight)`` of each score in ``proofs``.
@@ -154,6 +238,7 @@ def tick() -> None:
     from src.reputation_system.offchain_credit import forget_cached_standings
 
     pulled = pull_tick()
+    push_tick()
     now = time.monotonic()
     if not pulled and _last_refresh is not None \
             and now - _last_refresh < _interval(ConfigManager()):

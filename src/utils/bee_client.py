@@ -239,6 +239,22 @@ class BeeClient:
         )
 
     @staticmethod
+    def push_reputation_proof(
+            channel, proof: celaut_pb2.ReputationProof, client_id: str = "",
+            timeout: Optional[float] = None,
+    ) -> Optional[celaut_pb2.ReputationProofAck]:
+        """Give a peer one signed off-chain reputation proof (#652). Its answer says if it
+        took the proof and, if not, why."""
+        input_messages = [proof, celaut_pb2.Client(client_id=client_id)] if client_id else proof
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).PushReputationProof,
+            input=input_messages,
+            indices_serializer=rpc_input("PushReputationProof"),
+            indices_parser=rpc_output("PushReputationProof"),
+            timeout=timeout,
+        )
+
+    @staticmethod
     def list_peers(channel, client_id: str = "", timeout: float = 10):
         """Stream signed third-party advertisements; the caller bounds their count."""
         return BeeClient.call(

@@ -63,6 +63,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.PushReputationProof = channel.stream_stream(
+                '/celaut.Gateway/PushReputationProof',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
         self.ResolveNetwork = channel.stream_stream(
                 '/celaut.Gateway/ResolveNetwork',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -234,6 +239,19 @@ class GatewayServicer(object):
         other nodes that the node holds. The node sends each proof as its publisher
         signed it, never changed. The number of proofs has a limit. If the node does not
         share reputation proofs, the stream is empty.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PushReputationProof(self, request_iterator, context):
+        """Gives the node one ReputationProof, in place of the node taking it with
+        GetReputationProofs. The proof is the proof of its publisher, signed as for
+        GetReputationProofs, and the node checks it in the same way. The node can refuse
+        the call before it reads the proof: it can accept the call only from a peer, and
+        it limits the calls and the bytes of each client and of all clients together. The
+        answer is a ReputationProofAck. A node that does not accept pushed proofs refuses
+        every call.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -467,6 +485,11 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
+            'PushReputationProof': grpc.stream_stream_rpc_method_handler(
+                    servicer.PushReputationProof,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
             'ResolveNetwork': grpc.stream_stream_rpc_method_handler(
                     servicer.ResolveNetwork,
                     request_deserializer=buffer__pb2.Buffer.FromString,
@@ -683,6 +706,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetReputationProofs',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def PushReputationProof(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/PushReputationProof',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

@@ -422,9 +422,33 @@ reputation:
   PULL_OFFCHAIN_PROOFS: true
   OFFCHAIN_PULL_INTERVAL_SECONDS: 300
   # The most proofs in one answer, and in one pull.
-  MAX_OFFCHAIN_PROOFS_PER_RESPONSE: 100
+  MAX_OFFCHAIN_PROOFS_PER_RESPONSE: 25
   # A received proof above this size is refused.
   MAX_OFFCHAIN_PROOF_BYTES: 1048576
+  # Limits on who may take proofs from this node (GetReputationProofs) and who may give
+  # it proofs (PushReputationProof). They come on top of the call limit of every client
+  # (communication.CLIENT_RATE_LIMIT_*), which counts calls and not bytes. All are in memory
+  # (a restart clears them), and 0 refuses all: a limit is never "no limit".
+  # The most bytes in one answer. The proof of this node always goes first.
+  MAX_OFFCHAIN_BYTES_PER_RESPONSE: 4194304
+  # What one client may take: calls and bytes in an hour. The default pull of another node
+  # is 12 calls an hour.
+  PULL_CALLS_PER_CLIENT_PER_HOUR: 24
+  PULL_BYTES_PER_CLIENT_PER_HOUR: 16777216
+  # The calls in a minute of all clients together. Making a client costs little at first
+  # (free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY), so one operator can hold many.
+  PULL_GLOBAL_CALLS_PER_MINUTE: 60
+  # Take proofs that other nodes give with PushReputationProof.
+  ACCEPT_OFFCHAIN_PUSH: true
+  # Only from a peer of this node (a client that a peer bound to its key).
+  PUSH_ONLY_FROM_PEERS: true
+  PUSH_CALLS_PER_CLIENT_PER_HOUR: 12
+  PUSH_BYTES_PER_CLIENT_PER_DAY: 2097152
+  PUSH_GLOBAL_CALLS_PER_MINUTE: 60
+  # Give the proof of this node to a few random peers when its fault reports change.
+  PUSH_OFFCHAIN_PROOFS: true
+  PUSH_OFFCHAIN_FANOUT: 3
+  PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS: 300
   # The most fault reports in the proof of this node, and in its proof on the ledger.
   # A box on the ledger pays rent for each byte, so the evidence stays off the chain.
   MAX_FAULT_REPORTS: 64

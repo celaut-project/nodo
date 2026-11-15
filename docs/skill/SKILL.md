@@ -85,7 +85,7 @@ Understand these before running anything. Full glossary:
   advertisement exactly as its peer signed it (see
   [`../CONFIG.md`](../CONFIG.md#transitive-peer-discovery-gossip)).
   Nodes also pull the signed off-chain reputation proofs of their peers with
-  `GetReputationProofs`: scores, and fault reports with evidence that any node checks
+  `GetReputationProofs` (and give them with `PushReputationProof`, within per-client byte and call limits): scores, and fault reports with evidence that any node checks
   with the key of the accused (see
   [`../REPUTATION.md`](../REPUTATION.md#off-chain-reputation)).
   **This is a different layer from `Service.Network`

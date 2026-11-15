@@ -260,8 +260,20 @@ prove it alone. See [`REPUTATION.md`](REPUTATION.md#off-chain-reputation).
 | `reputation.SHARE_OFFCHAIN_PROOFS` | `true` | Answer `GetReputationProofs`: the proof of this node, then the proofs of other nodes that it keeps. When false, the answer is empty. |
 | `reputation.PULL_OFFCHAIN_PROOFS` | `true` | Ask one random peer for its proofs at each interval. |
 | `reputation.OFFCHAIN_PULL_INTERVAL_SECONDS` | `300` | The time between two pulls. |
-| `reputation.MAX_OFFCHAIN_PROOFS_PER_RESPONSE` | `100` | The most proofs in one answer, and in one pull. A proof that is refused counts too. |
+| `reputation.MAX_OFFCHAIN_PROOFS_PER_RESPONSE` | `25` | The most proofs in one answer, and in one pull. A proof that is refused counts too. |
 | `reputation.MAX_OFFCHAIN_PROOF_BYTES` | `1048576` | A received proof above this size is refused. |
+| `reputation.MAX_OFFCHAIN_BYTES_PER_RESPONSE` | `4194304` | The most bytes in one answer of `GetReputationProofs`. The proof of this node goes first and always; a kept proof that does not fit is skipped. |
+| `reputation.PULL_CALLS_PER_CLIENT_PER_HOUR` | `24` | The calls of `GetReputationProofs` that one client may make in an hour. The pull of another node is 12 an hour by default. Over it, the call is refused. `0` refuses all. |
+| `reputation.PULL_BYTES_PER_CLIENT_PER_HOUR` | `16777216` | The bytes of proofs that one client may take in an hour. |
+| `reputation.PULL_GLOBAL_CALLS_PER_MINUTE` | `60` | The calls of `GetReputationProofs` of all clients together in a minute. A client costs little to make at first, so this bounds an operator with many. |
+| `reputation.ACCEPT_OFFCHAIN_PUSH` | `true` | Take the proofs that other nodes give with `PushReputationProof`. When false, every call is refused. |
+| `reputation.PUSH_ONLY_FROM_PEERS` | `true` | Take a pushed proof only from a client that a peer of this node bound to its key. |
+| `reputation.PUSH_CALLS_PER_CLIENT_PER_HOUR` | `12` | The pushes that one client may make in an hour. |
+| `reputation.PUSH_BYTES_PER_CLIENT_PER_DAY` | `2097152` | The bytes that one client may push in a day, refused proofs included. |
+| `reputation.PUSH_GLOBAL_CALLS_PER_MINUTE` | `60` | The pushes of all clients together in a minute. |
+| `reputation.PUSH_OFFCHAIN_PROOFS` | `true` | Give the proof of this node to a few random peers when its fault reports change. |
+| `reputation.PUSH_OFFCHAIN_FANOUT` | `3` | The most peers that get a push. |
+| `reputation.PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS` | `300` | The least time between two pushes. |
 | `reputation.MAX_FAULT_REPORTS` | `64` | The most fault reports in the proof of this node. Reports with evidence come first. |
 | `reputation.MAX_FAULT_REPORTS_ON_LEDGER` | `8` | The most fault reports in the proof of this node on Ergo. Each one is a box of one token against the accused peer. The evidence stays off the chain. |
 | `reputation.FAULT_EVIDENCE_RETENTION_DAYS` | `90` | The days that the evidence of a fault is kept. `0` keeps it for ever. |

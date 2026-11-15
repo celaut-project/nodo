@@ -1217,6 +1217,16 @@ message ReputationProof {
     string signature = 5;
 }
 
+// The answer of PushReputationProof.
+message ReputationProofAck {
+    // True if the node checked the proof and took it: it keeps the proof when the
+    // publisher is a peer of the node, and it scores the faults that the evidence in it
+    // proves. False if it refused the proof.
+    bool accepted = 1;
+    // Why the node refused the proof. Empty if accepted is true.
+    string reason = 2;
+}
+
 // The answer of StartService.
 message ServiceInstance {
     // The instance token. It is the credential for StopService, ModifyDeposit,
@@ -1795,6 +1805,14 @@ service Gateway {
     // signed it, never changed. The number of proofs has a limit. If the node does not
     // share reputation proofs, the stream is empty.
     rpc GetReputationProofs(stream buffer.Buffer) returns (stream buffer.Buffer) {}
+    // Gives the node one ReputationProof, in place of the node taking it with
+    // GetReputationProofs. The proof is the proof of its publisher, signed as for
+    // GetReputationProofs, and the node checks it in the same way. The node can refuse
+    // the call before it reads the proof: it can accept the call only from a peer, and
+    // it limits the calls and the bytes of each client and of all clients together. The
+    // answer is a ReputationProofAck. A node that does not accept pushed proofs refuses
+    // every call.
+    rpc PushReputationProof(stream buffer.Buffer) returns (stream buffer.Buffer) {}
 
     // Any Service.Network, not one kind of it. If the caller must know the kind first,
     // the caller does the resolution itself. A `pow:` network has no name to look up,

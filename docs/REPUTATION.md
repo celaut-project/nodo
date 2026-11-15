@@ -693,6 +693,25 @@ then the proofs of other nodes that the node keeps, as their publishers signed t
 node pulls from one random peer every `reputation.OFFCHAIN_PULL_INTERVAL_SECONDS`. It keeps
 the newest proof of each publisher that is one of its peers, and only that one.
 
+A node can also give a proof: `PushReputationProof` gives one `ReputationProof` to a peer,
+which checks it with the same `offchain_proof.receive` as a pulled proof and answers with a
+`ReputationProofAck`. A node does this when its fault reports change, to
+`reputation.PUSH_OFFCHAIN_FANOUT` random peers, at most once in
+`reputation.PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS`, so that a proved fault does not wait for
+the next pull of each node.
+
+**Limits.** Both RPCs sit behind `client_gate.require_caller`, whose limit counts calls and
+not bytes. So each has its own limits (`src/reputation_system/offchain_limits.py`, all in
+`reputation.*`, see [`CONFIG.md`](CONFIG.md)): the bytes and the proofs of one answer; the
+calls and the bytes of one client over time; and the calls of all clients together in a
+minute, because a client costs little to make at first
+(`free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY`). A push is accepted by default only from
+a client that a peer bound to its key (`PUSH_ONLY_FROM_PEERS`). A node refuses a call over a
+limit before it reads a proof from its database (pull) or checks one (push). The bytes of a
+refused proof count against the client. The limits are in memory: a restart clears them.
+A push call is parsed before it is limited, because the `client_id` is in the call: what
+bounds that step is the size limit of the gRPC message and `SIMPLE_RPC_TIMEOUT_SECONDS`.
+
 ### Evidence that needs no trust
 
 `fault_proofs.check` proves a fault from a `FaultEvidence` with the public key of the
