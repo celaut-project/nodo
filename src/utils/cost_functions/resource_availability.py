@@ -50,10 +50,13 @@ def _requested_cores(at_most: celaut.Sysresources) -> float:
 
 
 def _sysreq_shortfalls(
+        at_init: celaut.Sysresources,
         at_most: celaut.Sysresources,
         *,
         disk_free: int,
+        disk_total: int,
         cpu_total: int,
+        ram_total: int,
         pool_total: int,
         pool_available: int,
 ) -> List[str]:
@@ -62,61 +65,98 @@ def _sysreq_shortfalls(
     All of them, not the first: a service asking for more memory *and* more disk than
     exists should be told both, or it fixes one and comes back for the other.
 
-    The three limits are not checked against the same thing, deliberately:
+    The two ends of the range are held against different things, because they are
+    different promises:
 
-    * **Memory and disk are exclusive.** Bytes handed to one instance are bytes no
-      other instance can have, so they are checked against what is *free right now*.
-    * **A CPU quota is a share of time.** Every instance on the host already shares
-      the same cores, so "free right now" is not the question -- the question is
-      whether the machine has that many cores at all. Checking it against
-      instantaneous load would make admission flap with every spike, and would refuse
-      a service the host can perfectly well run a moment later.
-    * **blkio_weight is neither**; it is a relative priority, so the only thing that
-      can be wrong with it is being outside the range cgroups accept.
+    * **``at_init`` is what the node hands over at the start**, so memory and disk are
+      checked against what is *free right now*. The disk is reserved whole, at the size
+      ``at_init`` declares.
+    * **``at_most`` is where the instance may grow**, with no promise about when, so it
+      is checked against what the machine *has at all*: its total RAM and total disk, and
+      the operator's ceiling for one instance. An instance that could never fit even on
+      an empty machine is refused now; one that fits only once others leave is not.
+      Growth is paid for when it is asked (`modify_resources`).
 
-    On top of all three sits the operator's own ceiling (`host_limits`), which asks a
+    A CPU quota is a share of time, not an exclusive amount: every instance on the host
+    shares the same cores, so "free right now" is not the question for either end -- the
+    question is whether the machine has that many cores at all. Checking it against
+    instantaneous load would make admission flap with every spike, and would refuse a
+    service the host can perfectly well run a moment later.
+
+    ``blkio_weight`` is a relative priority; the only thing that can be wrong with it is
+    being outside the range cgroups accept.
+
+    On top of both sits the operator's own ceiling (`host_limits`), which asks a
     different question: not "does the machine have this?" but "may this node take it?".
     A PC with 32 GiB free refuses a 16 GiB instance when its owner has said nodo may
-    hold 8. It is checked here, in the one place all three admission callers go through,
-    so a peer probing this node's capacity is told the same thing a local launch is.
+    hold 8. What an instance starts with is added to what the node already holds; its
+    maximum is held against the ceiling alone. It is checked here, in the one place all
+    admission callers go through, so a peer probing this node's capacity is told the same
+    thing a local launch is.
     """
     shortfalls: List[str] = []
 
-    if not could_ve_this_sysreq(at_most):
+    # --- At the start: against what is free now. ---
+    if not could_ve_this_sysreq(at_init):
         shortfalls.append(
-            "Insufficient memory for resources.at_most.mem_limit. "
-            f"Requested: {int(at_most.mem_limit)} bytes, "
+            "Insufficient memory for resources.at_init.mem_limit. "
+            f"Requested: {int(at_init.mem_limit)} bytes, "
             f"available in service memory pool: {pool_available} bytes, "
             f"total service memory pool: {pool_total} bytes."
             f"\n Try `{sudo_nodo('daemon restart')}` to free up memory or increase the memory pool size if possible."
         )
 
-    if at_most.disk_space and int(at_most.disk_space) > disk_free:
+    if at_init.disk_space and int(at_init.disk_space) > disk_free:
         shortfalls.append(
-            "Insufficient disk for resources.at_most.disk_space. "
-            f"Requested: {int(at_most.disk_space)} bytes, free on the filesystem: {disk_free} bytes."
+            "Insufficient disk for resources.at_init.disk_space. "
+            f"Requested: {int(at_init.disk_space)} bytes, free on the filesystem: {disk_free} bytes."
         )
 
-    requested_cores = _requested_cores(at_most)
-    # cpu_total is 0 when psutil cannot count physical cores; an unknown capacity is
-    # not evidence of an insufficient one, so the check is skipped rather than failed.
-    if requested_cores and cpu_total and requested_cores > cpu_total:
+    # --- At the most: against what the machine has at all. ---
+    # A total that psutil could not read is 0, and an unknown capacity is not evidence
+    # of an insufficient one, so the check is skipped rather than failed.
+    if ram_total and int(at_most.mem_limit) > ram_total:
         shortfalls.append(
-            "Insufficient CPU for resources.at_most.cpu_quota/cpu_period. "
-            f"Requested: {requested_cores:.2f} cores "
-            f"(quota {int(at_most.cpu_quota)}us / period {int(at_most.cpu_period) or _DEFAULT_CPU_PERIOD_US}us), "
-            f"this host has {cpu_total}."
+            "Insufficient memory for resources.at_most.mem_limit. "
+            f"Requested: {int(at_most.mem_limit)} bytes, total memory of this host: {ram_total} bytes."
         )
+
+    if disk_total and int(at_most.disk_space) > disk_total:
+        # Not worded "Insufficient disk": `short_of_disk_only` reads that as "freeing
+        # disk would admit it", and no amount of freed disk makes a disk bigger.
+        shortfalls.append(
+            "Disk too small for resources.at_most.disk_space. "
+            f"Requested: {int(at_most.disk_space)} bytes, total on the filesystem: {disk_total} bytes."
+        )
+
+    init_cores = _requested_cores(at_init)
+    most_cores = _requested_cores(at_most)
+    for where, requested, sysreq in (("at_init", init_cores, at_init), ("at_most", most_cores, at_most)):
+        # cpu_total is 0 when psutil cannot count physical cores; see above.
+        if requested and cpu_total and requested > cpu_total:
+            shortfalls.append(
+                f"Insufficient CPU for resources.{where}.cpu_quota/cpu_period. "
+                f"Requested: {requested:.2f} cores "
+                f"(quota {int(sysreq.cpu_quota)}us / period {int(sysreq.cpu_period) or _DEFAULT_CPU_PERIOD_US}us), "
+                f"this host has {cpu_total}."
+            )
 
     low, high = _BLKIO_WEIGHT_RANGE
-    if at_most.blkio_weight and not (low <= int(at_most.blkio_weight) <= high):
-        shortfalls.append(
-            f"resources.at_most.blkio_weight is {int(at_most.blkio_weight)}, outside the "
-            f"accepted range {low}-{high}."
-        )
+    for where, sysreq in (("at_init", at_init), ("at_most", at_most)):
+        if sysreq.blkio_weight and not (low <= int(sysreq.blkio_weight) <= high):
+            shortfalls.append(
+                f"resources.{where}.blkio_weight is {int(sysreq.blkio_weight)}, outside the "
+                f"accepted range {low}-{high}."
+            )
 
+    # --- The operator's ceiling. ---
     shortfalls.extend(host_limits.ceiling_shortfalls(
-        cores=requested_cores,
+        cores=init_cores,
+        ram_bytes=int(at_init.mem_limit or 0),
+        disk_bytes=int(at_init.disk_space or 0),
+    ))
+    shortfalls.extend(host_limits.maximum_shortfalls(
+        cores=most_cores,
         ram_bytes=int(at_most.mem_limit or 0),
         disk_bytes=int(at_most.disk_space or 0),
     ))
@@ -230,13 +270,21 @@ def get_resource_availability(
     requested_mem_limit = 0
     if resources and resources.HasField("at_most") and resources.at_most.HasField("mem_limit"):
         requested_mem_limit = int(resources.at_most.mem_limit)
+    elif resources and resources.HasField("at_init") and resources.at_init.HasField("mem_limit"):
+        requested_mem_limit = int(resources.at_init.mem_limit)
 
     shortfalls: List[str] = []
-    if resources and resources.HasField("at_most"):
+    # Either end alone is a declaration: an absent one is an empty Sysresources, which
+    # asks for nothing and so has nothing to fall short of (but see `ceiling_shortfalls`
+    # on why asking for nothing is still held against a node at its ceiling).
+    if resources and (resources.HasField("at_init") or resources.HasField("at_most")):
         shortfalls = _sysreq_shortfalls(
+            resources.at_init,
             resources.at_most,
             disk_free=int(disk.free),
+            disk_total=int(disk.total),
             cpu_total=int(cpu_total),
+            ram_total=int(memory.total),
             pool_total=service_memory_pool_total,
             pool_available=service_memory_pool_available,
         )

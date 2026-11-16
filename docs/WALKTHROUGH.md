@@ -81,7 +81,7 @@ For a service that declares `initial_environment_workload`, "To start" includes 
 of its initial children: a start with no `initial_mu` pays it (see `docs/PRICING.md`).
 
 If it prints `Execution feasibility: NO`, the `reason` line names the failing guard
-(usually `resources.at_most.mem_limit` vs the node's memory pool). Fix the service
+(usually `resources.at_init.mem_limit` vs the memory that is free now, or `resources.at_most.mem_limit` vs the total memory of the node). Fix the service
 or free resources before executing.
 
 ## 4. Execute — creates a running instance

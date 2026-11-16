@@ -29,10 +29,14 @@ This generalizes the exact same boolean admission gate
 `resource_availability.get_resource_availability` already runs for a service's own
 `at_most` resources, applied instead to each descendant workload.
 
-Every limit a workload declares is checked, not only `mem_limit`: memory and disk
-against what is free right now, a CPU quota against the number of cores the host has
-at all (a quota is a share of time, so refusing on instantaneous load would make
-admission flap), and `blkio_weight` against the range cgroups accept. See
+Every limit a workload declares is checked, not only `mem_limit`. A workload is asked
+with one shape -- the wire request has no start and maximum pair -- which the node reads as
+an ``at_most``: memory and disk against what the machine has in total and the operator's
+ceiling for one instance (not against what is free now, because a maximum promises nothing
+about when), a CPU quota against the number of cores the host has at all (a quota is a
+share of time, so refusing on instantaneous load would make admission flap), and
+`blkio_weight` against the range cgroups accept. What is free now is the question of the
+start (``at_init``), which a real launch asks. See
 `resource_availability._sysreq_shortfalls`.
 
 Two policies govern the rest, both in `config.yaml` under `workload_admission` and both

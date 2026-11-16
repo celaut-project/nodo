@@ -264,6 +264,43 @@ class BreachTests(HostLimitsTestCase):
         self.assertIn("MAX_RAM_SHARE", shortfalls[0])
 
 
+class MaximumTests(HostLimitsTestCase):
+    """`maximum_shortfalls`: a declared maximum is held against the ceiling alone."""
+
+    def _shortfalls(self, **request):
+        with self._configured(ENABLED=True, MAX_CPU_SHARE=0.5, MAX_RAM_SHARE=0.5,
+                              MAX_DISK_SHARE=0.5), self._machine():
+            return host_limits.maximum_shortfalls(**request)
+
+    def test_a_maximum_under_every_ceiling_is_admitted(self):
+        self.assertEqual(self._shortfalls(cores=2, ram_bytes=8 * GIB, disk_bytes=100 * GIB), [])
+
+    def test_a_maximum_over_a_ceiling_is_reported_whatever_the_node_holds(self):
+        # Half of 16 GiB is 8: 12 could not fit on an empty node either.
+        shortfalls = self._shortfalls(ram_bytes=12 * GIB)
+        self.assertEqual(len(shortfalls), 1)
+        self.assertIn("host_limits.MAX_RAM_SHARE", shortfalls[0])
+
+    def test_what_the_node_holds_now_is_not_part_of_the_question(self):
+        held = host_limits.Committed(cores=0.0, ram_bytes=7 * GIB, disk_bytes=0, instances=1)
+        with mock.patch.object(host_limits, "committed_resources", return_value=held):
+            self.assertEqual(self._shortfalls(ram_bytes=8 * GIB), [])
+
+    def test_a_maximum_over_the_disk_ceiling_is_not_cured_by_freeing_disk(self):
+        from src.utils.cost_functions.resource_availability import short_of_disk_only
+
+        reason = " | ".join(self._shortfalls(disk_bytes=400 * GIB))
+        self.assertTrue(reason)
+        self.assertFalse(short_of_disk_only({"can_execute": False, "reason": reason}))
+
+    def test_a_resource_nobody_asked_about_is_not_judged(self):
+        self.assertEqual(self._shortfalls(), [])
+
+    def test_nothing_is_refused_while_the_section_is_off(self):
+        with self._configured(MAX_RAM_SHARE=0.5), self._machine():
+            self.assertEqual(host_limits.maximum_shortfalls(ram_bytes=1024 * GIB), [])
+
+
 class DailyTrafficTests(HostLimitsTestCase):
     """The day's relayed volume, which has to outlive the process counting it."""
 

@@ -458,6 +458,7 @@ class AdmissionTests(unittest.TestCase):
         resources = _resources(int_ops_per_sec=10)
         with patch.object(ra, "could_ve_this_sysreq", return_value=False), \
                 patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                patch.object(ra.host_limits, "maximum_shortfalls", return_value=[]), \
                 patch.object(ra.benchmark, "node_scores", return_value=_scores(int_ops_per_sec=1)), \
                 patch.object(ra.log, "LOGGER"):
             reason = ra.get_resource_availability(resources, arch="linux/amd64")["reason"]

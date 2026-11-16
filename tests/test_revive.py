@@ -356,7 +356,10 @@ class ReviveInstanceTests(unittest.TestCase):
                 mock.patch.object(manager, "kill"), \
                 mock.patch.object(manager, "vm_execute", return_value=("vm", "192.168.200.7", None)):
             self.assertTrue(manager.revive_instance("vm"))
-        self.assertFalse(seen["resources"].at_most.HasField("disk_space"))
+        # The start's disk is the one already on the machine; the maximum is only held
+        # against the machine's total, which this instance does not change.
+        self.assertFalse(seen["resources"].at_init.HasField("disk_space"))
+        self.assertEqual(seen["resources"].at_most.disk_space, 10 ** 9)
 
     def test_an_instance_that_is_not_suspended_is_left_alone(self):
         result, calls = self._revive(suspended=False)

@@ -33,13 +33,14 @@ The ceilings themselves come from the config the node booted with, so an edit re
 them through the restart `nodo tui` performs. 0 lifts that one ceiling; the section
 switched off lifts all of them.
 
-What admission compares is the service's declared `resources.at_most`, which is where a
-service says how large it may become. A service that declares no `at_most` at all is not
-measured here -- it is not measured by the memory pool or the free-disk check either, for
-the same reason: there is no figure to measure. Such an instance still lands in
-`local_instances` with the floors the virtualizer gave it, so it counts against the next
-launch, and being over the ceiling is enough on its own to refuse one (see
-:func:`ceiling_shortfalls` on why zero is a figure and None is not).
+Admission reads the two ends of the service's declared range differently. What it starts
+with, `resources.at_init`, is what the node promises, so it is added to what the node
+already holds and must fit under the ceiling (:func:`ceiling_shortfalls`). Where it may
+grow, `resources.at_most`, promises nothing about when, so it is held against the ceiling
+alone (:func:`maximum_shortfalls`): refused only if it could not fit on an empty node.
+An instance still lands in `local_instances` with the floors the virtualizer gave it, so
+it counts against the next launch, and being over the ceiling is enough on its own to
+refuse one (see :func:`ceiling_shortfalls` on why zero is a figure and None is not).
 """
 import threading
 import time
@@ -293,6 +294,56 @@ def ceiling_shortfalls(
             bounds.disk_bytes / BYTES_PER_GIB, "GiB",
         ))
     return shortfalls
+
+
+def maximum_shortfalls(
+        *,
+        cores: Optional[float] = None,
+        ram_bytes: Optional[int] = None,
+        disk_bytes: Optional[int] = None,
+) -> List[str]:
+    """Every ceiling a *single* instance of this declared maximum would be above on its own.
+
+    The other half of :func:`ceiling_shortfalls`. That one adds what an instance starts
+    with to what the node already holds, because the start is what the node promises and
+    what it has to find room for now. This one asks about ``at_most``, which promises
+    nothing about when: the instance may never get there, and it may get there once other
+    instances have left. So it is held against the ceiling alone, never against what is
+    held at this moment -- only an instance that could not fit even on an empty node is
+    refused for its maximum. Growth that finds no room later is refused when it is
+    asked for (`modify_resources`).
+
+    None skips a resource, as in :func:`ceiling_shortfalls`.
+    """
+    bounds = ceilings()
+    if bounds is None:
+        return []
+
+    shortfalls: List[str] = []
+    if bounds.cores is not None and cores is not None and cores > bounds.cores:
+        shortfalls.append(_over_ceiling("CPU", "MAX_CPU_SHARE", cores, bounds.cores, "vCPU"))
+    if bounds.ram_bytes is not None and ram_bytes is not None and ram_bytes > bounds.ram_bytes:
+        shortfalls.append(_over_ceiling(
+            "Memory", "MAX_RAM_SHARE",
+            ram_bytes / BYTES_PER_GIB, bounds.ram_bytes / BYTES_PER_GIB, "GiB",
+        ))
+    if bounds.disk_bytes is not None and disk_bytes is not None and disk_bytes > bounds.disk_bytes:
+        shortfalls.append(_over_ceiling(
+            "Disk", "MAX_DISK_SHARE",
+            disk_bytes / BYTES_PER_GIB, bounds.disk_bytes / BYTES_PER_GIB, "GiB",
+        ))
+    return shortfalls
+
+
+def _over_ceiling(resource: str, key: str, maximum: float, ceiling: float, unit: str) -> str:
+    # Not worded like `_breach`, on purpose: `resource_availability.short_of_disk_only`
+    # reads "Disk ceiling reached" as "freeing disk would admit it", which is false for
+    # a maximum that is above the ceiling however empty the node is.
+    return (
+        f"{resource} maximum is above this node's ceiling ({SECTION}.{key}). "
+        f"This instance may grow to {maximum:.4g} {unit} and this node allows "
+        f"{ceiling:.4g} {unit} in total."
+    )
 
 
 # --- Network -------------------------------------------------------------------------

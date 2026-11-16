@@ -1407,9 +1407,11 @@ def _revive_locked(token: str) -> bool:
 
     # Its disk is already on this machine, and counted in what the node holds: asking
     # for it again would refuse a revive for room it already has, or delete others for it.
+    # The disk is the start's (`at_init`, reserved whole); the maximum is only held
+    # against the machine's total, which this instance's own disk does not change.
     admission = celaut_pb2.Service.Container.Resources()
     admission.CopyFrom(resources)
-    admission.at_most.ClearField("disk_space")
+    admission.at_init.ClearField("disk_space")
     availability = availability_reclaiming_disk(resources=admission, arch=sys_req['arch'])
     if not availability["can_execute"]:
         raise RuntimeError(

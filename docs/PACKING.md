@@ -812,10 +812,15 @@ neither.
   of the node asked when it is empty). `at_most.benchmark` has no meaning and is ignored. The
   node uses the same admission gate a service's own `resources.at_most` goes through: first
   locally, then, if `network.DELEGATE_EXECUTION` is on, by asking known peers
-  (`GetResourceAvailability`). Every limit is checked, not just memory: `mem_limit` and
-  `disk_space` against what is free right now, `cpu_quota`/`cpu_period` against how many
-  cores the host has at all (a quota is a share of time, so a momentary spike is not a reason
-  to refuse), and `blkio_weight` against the 10–1000 range cgroups accept.
+  (`GetResourceAvailability`). Every limit is checked, not just memory. The two ends of a
+  service's own `resources` are not held against the same thing: `at_init` (`mem_limit` and
+  `disk_space`, which the node reserves whole at the start) against what is free right now, and
+  `at_most` (where the instance may grow, with no promise about when) against what the machine
+  has in total — its RAM and disk, and the operator's ceiling for one instance. A workload
+  is asked with one shape, which is read as an `at_most`, so it is held against the total.
+  `cpu_quota`/`cpu_period` is held against how many cores the host has at all (a quota is a
+  share of time, so a momentary spike is not a reason to refuse), and `blkio_weight` against
+  the 10–1000 range cgroups accept.
 - A group fits if all its workloads fit.
 - A clause fits if at least one of its groups fits. The check stops at the first group that fits.
 - The service is admitted if all clauses of both fields fit.
