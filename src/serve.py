@@ -356,6 +356,27 @@ def _start_onion_server(virtual_port: int):
         return None
 
 
+def _start_routing(virtual_port: int):
+    """The onion service, then the routing backends (Tor). Returns the onion server.
+
+    In this order: Tor reads the onion service from the backend when it writes its
+    torrc, on the backend's own thread. Started first, an installed Tor gets a torrc
+    without ``HiddenServiceDir``, and the node announces an onion address it does not
+    host.
+
+    The backends start in the background: Tor takes a while to bootstrap, and with
+    routing.tor.ENABLED true on a node that does not have it yet this is also where it
+    is installed. Until a backend is ready its addresses are unreachable.
+    """
+    onion_server = _start_onion_server(virtual_port)
+    try:
+        from src.routing import registry as routing
+        routing.start_backends()
+    except Exception as e:
+        log.LOGGER(f'Could not start the routing backends: {e}')
+    return onion_server
+
+
 def serve():
     # Resolved before anything else: a node whose gateway port is unassigned or
     # unreachable cannot serve a single request, and every service it accepted
@@ -428,14 +449,8 @@ def serve():
     except Exception as e:
         log.LOGGER(f'Could not reset the inbound tunnel snapshot: {e}')
 
-    # The routing backends (Tor), in the background: Tor takes a while to bootstrap, and
-    # with routing.tor.ENABLED true on a node that does not have it yet this is also
-    # where it is installed. Until a backend is ready its addresses are unreachable.
-    try:
-        from src.routing import registry as routing
-        routing.start_backends()
-    except Exception as e:
-        log.LOGGER(f'Could not start the routing backends: {e}')
+    # The onion service, then the routing backends (Tor) in the background.
+    onion_server = _start_routing(port)
 
     # Run manager.
     threading.Thread(
@@ -501,7 +516,6 @@ def serve():
             )
 
     server.start()
-    onion_server = _start_onion_server(port)
 
     # Only now can the guest-side probe distinguish "the firewall drops this" from
     # "nothing answers on this port".

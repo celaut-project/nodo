@@ -479,6 +479,29 @@ class ServeOnionTests(unittest.TestCase):
                 mock.patch.object(module, "bind_onion_server", return_value=0):
             self.assertIsNone(self.serve._start_onion_server(8090))
 
+    def test_tor_starts_after_the_onion_service_is_configured(self):
+        # Tor writes its torrc from the backend on its own thread: an onion service
+        # configured after the backends started is one Tor never hosts, and the node
+        # would still announce it.
+        seen = []
+        with override(routing__HIDDEN=False, routing__tor__ENABLED=True,
+                      identity__MNEMONIC=MNEMONIC), \
+                mock.patch.object(registry, "start_backends",
+                                  side_effect=lambda: seen.append(registry.TOR._onion)):
+            server = self.serve._start_routing(8090)
+        self.assertIsNotNone(server)
+        self.addCleanup(server.stop, 0)
+        self.assertEqual(len(seen), 1)
+        self.assertIsNotNone(seen[0], "Tor was started before the onion service existed")
+        self.assertEqual(seen[0][0], onion_key.host_from_mnemonic(MNEMONIC))
+        self.assertEqual(seen[0][3], 8090)
+
+    def test_the_backends_start_when_the_node_announces_no_onion(self):
+        with override(routing__HIDDEN=False, routing__tor__ENABLED="auto"), \
+                mock.patch.object(registry, "start_backends") as start:
+            self.assertIsNone(self.serve._start_routing(8090))
+        start.assert_called_once_with()
+
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class HiddenConfigTests(unittest.TestCase):
