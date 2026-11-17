@@ -87,7 +87,7 @@ class QemuCommandTests(unittest.TestCase):
             argv[argv.index("-netdev") + 1],
             "tap,id=net0,ifname=tap0123456789,script=no,downscript=no",
         )
-        self.assertIn("virtio-net-pci,netdev=net0,mac=02:aa:bb:cc:dd:ee", argv)
+        self.assertIn("virtio-net-pci,netdev=net0,mac=02:aa:bb:cc:dd:ee,romfile=", argv)
 
     def test_serial_captured_to_file(self):
         argv = _argv()

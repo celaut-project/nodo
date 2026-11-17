@@ -328,7 +328,7 @@ def build_qemu_command(
             "-netdev",
             f"tap,id=net0,ifname={tap_name},script=no,downscript=no",
             "-device",
-            f"virtio-net-pci,netdev=net0,mac={mac}",
+            f"virtio-net-pci,netdev=net0,mac={mac},romfile=",
             "-display",
             "none",
             "-monitor",
