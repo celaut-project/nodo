@@ -12,6 +12,13 @@ def integrity_command(service_ref: Optional[str] = None, fix: bool = False):
         flush=True,
     )
 
+    if report.get("partial"):
+        print(
+            f"Partial services (no filesystem, not checked): {', '.join(report['partial'])}. "
+            "Get the complete service with `nodo download`.",
+            flush=True,
+        )
+
     if report["issues"]:
         print("Integrity issues found:", flush=True)
         for issue in report["issues"]:

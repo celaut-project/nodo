@@ -17,6 +17,7 @@ from src.utils.service_envs import env_specs
 from src.utils.utils import read_metadata_from_disk, load_service_from_disk
 from src.utils.registry_errors import ServiceRegistryError
 from src.utils.contract_xattrs import get_address, get_script, get_token_id
+from src.utils.partial_service import is_partial
 
 env_manager = ConfigManager()
 
@@ -76,8 +77,13 @@ def inspect(service: str):
     # Service Definition
     print_rule("📦 Service Definition", borders=True)
     service_path = os.path.join(REGISTRY, service)
-    service_size = getsize(service_path)
-    print(f"Size: {format_size(service_size)}")
+    if is_partial(service):
+        # The filesystem is not stored, and its blocks are not on disk to measure.
+        print("Partial: this node keeps the specification and not the filesystem.")
+        print("It cannot run the service itself. `nodo download` gets the complete service.")
+    else:
+        service_size = getsize(service_path)
+        print(f"Size: {format_size(service_size)}")
     try:
         service_obj = load_service_from_disk(service_hash=service)
     except ServiceRegistryError as e:

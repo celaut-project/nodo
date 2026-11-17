@@ -1,3 +1,4 @@
+import contextlib
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
 from time import sleep
@@ -37,6 +38,8 @@ from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_U
 from src.utils.cost_functions.general_cost_functions import RATE_STATEMENT_QUERY, RATE_STATEMENT_ROW, compute_maintenance_cost
 from src.utils.monetary import format_mu, prices
 from src.utils.hashing import get_configured_hash_id, get_configured_hash_spec, hash_stream
+from src.utils import partial_service
+from src.utils.omit_filesystem import OmitSession, omit_session
 from src.utils.service_content import read_service_content
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
@@ -244,6 +247,9 @@ def check_wanted_service(wanted: str, wait: bool = False):
     _retry_later(wanted)
 
 
+# The index of the Service in the answer of `GetService` (the envelope of `StartService`).
+GET_SERVICE_SERVICE_INDEX = 6
+
 # How long a peer's `GetService` may send nothing before it is given up on, in seconds
 # (0: never). A silence, not a deadline: a large service takes long to arrive from a
 # peer that is still sending, and must not read as one that stopped.
@@ -346,6 +352,8 @@ def fetch_service_from_peers(wanted: str) -> bool:
             type=CONFIGURED_HASH_ID,
             value=bytes.fromhex(wanted)
         )
+    omit_fs = partial_service.omit_fs_enabled()
+    verify_fs = omit_fs and bool(env_manager.get("VALIDATE_ON_IMPORT", True))
     for peer in peers_id_iterator():
         """  TODO if get_service cost amount > 0
 
@@ -366,22 +374,43 @@ def fetch_service_from_peers(wanted: str) -> bool:
             metadata = None
             service_dir = None
             channel, watchdog = _get_service_channel(peer)
-            for b in BeeClient.get_service(
-                    channel, _hash, client_id=client_id,
-                    timeout=GET_SERVICE_TIMEOUT if GET_SERVICE_TIMEOUT > 0 else None,
-            ):
-                if  type(b) == Dir:
-                    log.LOGGER(f"    type of dir {b.type}")
+            session = None
+            if omit_fs:
+                # The filesystem is not stored. With VALIDATE_ON_IMPORT it is read, and
+                # the session hashes it; without it, the peer is asked to skip it.
+                session = OmitSession(
+                    service_index=GET_SERVICE_SERVICE_INDEX,
+                    spec=get_configured_hash_spec(env_manager) if verify_fs else None,
+                )
+            with omit_session(session) if session else contextlib.nullcontext():
+                for b in BeeClient.get_service(
+                        channel, _hash, client_id=client_id,
+                        timeout=GET_SERVICE_TIMEOUT if GET_SERVICE_TIMEOUT > 0 else None,
+                        tap=session.tap if session else None,
+                        block_skip=not verify_fs,
+                ):
+                    if  type(b) == Dir:
+                        log.LOGGER(f"    type of dir {b.type}")
 
-                if type(b) == celaut_pb2.Metadata:
-                    metadata = b
-                elif type(b) == Dir and b.type == celaut_pb2.Service:
-                    service_dir = b.dir
+                    if type(b) == celaut_pb2.Metadata:
+                        metadata = b
+                    elif type(b) == Dir and b.type == celaut_pb2.Service:
+                        service_dir = b.dir
 
             if not service_dir:
                 log.LOGGER(f"Peer {peer} sent no service for {wanted}.")
                 continue
-            if not _peer_sent_wanted(service_dir, wanted):
+            if session is not None and not verify_fs:
+                log.LOGGER(
+                    f"The id of {wanted} is not checked over its filesystem, "
+                    f"which is not stored (misc.VALIDATE_ON_IMPORT is off)."
+                )
+                sent_wanted = True
+            elif session is not None:
+                sent_wanted = session.digest().hex() == wanted
+            else:
+                sent_wanted = _peer_sent_wanted(service_dir, wanted)
+            if not sent_wanted:
                 log.LOGGER(f"Peer {peer} sent a service that does not hash to {wanted}; dropped.")
                 _penalise_get_service_once(
                     peer, wanted, GET_SERVICE_WRONG_HASH_PENALTY, Reason.GET_SERVICE_WRONG_HASH
@@ -394,6 +423,8 @@ def fetch_service_from_peers(wanted: str) -> bool:
 
             log.LOGGER(f"Store the service {service_dir}")
             shutil.move(service_dir, f"{REGISTRY}{wanted}")
+            if session is not None and session.omitted:
+                partial_service.mark_partial(wanted, REGISTRY)
             if metadata is not None:
                 log.LOGGER("Store the metadata.")
                 with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:

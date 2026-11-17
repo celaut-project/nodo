@@ -8,6 +8,7 @@ from src.utils.service_content import read_service_content
 from src.commands.__by_tag import get_id
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_stream
+from src.utils.partial_service import NOFS_MARKER
 
 
 @dataclass
@@ -25,6 +26,9 @@ class IntegrityReport:
     checked: int = 0
     fixed: int = 0
     issues: List[IntegrityIssue] = field(default_factory=list)
+    # Services that the node keeps without their filesystem: their id cannot be
+    # checked, and it is not a damage.
+    partial: List[str] = field(default_factory=list)
 
     def as_dict(self) -> Dict:
         return {
@@ -32,6 +36,7 @@ class IntegrityReport:
             "hash_id": self.hash_id,
             "checked": self.checked,
             "fixed": self.fixed,
+            "partial": list(self.partial),
             "issues": [
                 {
                     "service": issue.service,
@@ -145,6 +150,11 @@ def check_integrity(service: Optional[str] = None, fix: bool = False) -> Dict:
                     detail=f"Service entry is missing at {service_entry}",
                 )
             )
+            continue
+
+        if (service_entry / NOFS_MARKER).is_file():
+            # `--fix` does not get the filesystem back: `nodo download` does.
+            report.partial.append(service_name)
             continue
 
         report.checked += 1

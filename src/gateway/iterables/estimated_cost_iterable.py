@@ -26,6 +26,7 @@ from src.utils.cost_functions.delegated_quote import (
 )
 from src.utils.cost_functions.delegated_price import covers, own_price
 from src.utils.logger import LOGGER as logger
+from src.utils.partial_service import is_partial
 from src.utils.utils import get_only_the_ip_from_context
 
 
@@ -129,6 +130,13 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         # prices nothing.
         if not executes_locally():
             return None, Exception(NOT_EXECUTING_REASON)
+
+        # A node that keeps the service without its filesystem cannot run it. It can
+        # still offer a peer's price (`_best_offer`).
+        if is_partial(self.service_hash):
+            return None, Exception(
+                f"The service {self.service_hash} is partial on this node: its filesystem is not stored."
+            )
 
         # The question as received: the configuration, and the metadata with its
         # hashes in a fixed order (the parser collects them in a set).

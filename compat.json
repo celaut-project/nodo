@@ -192,6 +192,7 @@
     "main.STORAGE",
     "misc.CONFIGURATION_REQUIRED",
     "misc.MEMSWAP_FACTOR",
+    "misc.OMIT_FS",
     "misc.USE_PRINT",
     "misc.VALIDATE_ON_IMPORT",
     "network.ADDRESS_VALIDITY_SECONDS",

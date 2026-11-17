@@ -140,7 +140,7 @@ GROUPS: List[Group] = [
             ("ggconf <repository path>", "gateway config for a local project"),
             ("force_execution <peer> <service>", "no balancer, no fallback: it must run there"),
             ("local_builder <buildctl args>", "talk to nodo's rootless BuildKit builder"),
-            ("storage:prune_blocks", "drop blocks nothing references"),
+            ("storage:prune_blocks", "drop blocks nothing references (and, with misc.OMIT_FS, filesystems)"),
             ("prune_containers", "sweep dead VMs without waiting"),
             ("refresh_clients", "settle client and peer deposits now"),
             ("refresh_ergo_nodes", "refresh the list of Ergo nodes"),

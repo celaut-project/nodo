@@ -8,6 +8,7 @@ from src.gateway.iterables.abstract_input_service_iterable import find_service_h
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.utils.bee_client import BeeClient, Buffer, StreamControl
 from src.utils.logger import LOGGER as logger
+from src.utils.partial_service import is_partial
 from src.utils.utils import service_extended, read_metadata_from_disk
 
 
@@ -76,6 +77,12 @@ class GetServiceIterable:
 
         if not service_hash:
             logger("Any service hash on the request input.")
+            return
+
+        # A partial service has no filesystem: what this node would send is not the
+        # service. The peer gets the same answer as for a service that this node lacks.
+        if is_partial(service_hash):
+            logger(f"The service {service_hash} is partial on this node, so it is not sent.")
             return
 
         # Our side of the request is fully parsed, but the peer's skip requests

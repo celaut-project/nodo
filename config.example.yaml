@@ -1416,6 +1416,20 @@ misc:
   USE_PRINT: false
   VALIDATE_ON_IMPORT: true
   CONFIGURATION_REQUIRED: false
+  # Keep a service without its filesystem (the block that holds its files). The node
+  # keeps the specification and the other blocks, and marks the service as partial
+  # (a `.nofs` file in its registry entry). A partial service cannot run on this node
+  # and cannot be sent to a peer, exported or published. The node can still price it
+  # and delegate it to a peer that holds the service in full. This saves the disk of a
+  # device that cannot store services of hundreds of gigabytes.
+  #   * With `misc.VALIDATE_ON_IMPORT: true` the filesystem is read, so the id of the
+  #     service is checked, and it is not stored.
+  #   * With `misc.VALIDATE_ON_IMPORT: false` a peer is asked to skip the filesystem,
+  #     and the id is not checked over it.
+  # Turning it on does not remove anything. `nodo storage:prune_blocks` removes the
+  # filesystem of the services that the node holds in full (but not of a service with a
+  # live instance). `nodo download` gets the complete service again, with this off.
+  OMIT_FS: false
 
 hashing:
   # Main hash selector for service/file identification.

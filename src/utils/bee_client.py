@@ -548,6 +548,8 @@ class BeeClient:
             hash_message: celaut_pb2.Metadata.HashTag.Hash,
             client_id: str = "",
             timeout: Optional[float] = None,
+            tap=None,
+            block_skip: bool = True,
     ):
         """Streamed, and the response can be large (a whole packed service), so this
         returns the raw generator -- iterate it -- rather than collapsing it into one
@@ -564,8 +566,17 @@ class BeeClient:
         """
         input_messages = [celaut_pb2.Client(client_id=client_id), hash_message] if client_id \
             else hash_message
+        method = celaut_pb2_grpc.GatewayStub(channel).GetService
+        if tap is not None:
+            # ``tap`` sees every buffer of the response before bee_rpc parses it. The
+            # filter that keeps a service without its filesystem is one
+            # (``omit_filesystem.OmitSession.tap``).
+            stub_method = method
+
+            def method(request_iterator, timeout=None):
+                return tap(stub_method(request_iterator, timeout=timeout))
         return BeeClient.call(
-            method=celaut_pb2_grpc.GatewayStub(channel).GetService,
+            method=method,
             input=input_messages,
             indices_serializer=rpc_input("GetService"),
             indices_parser=rpc_output("GetService"),
@@ -575,7 +586,9 @@ class BeeClient:
             # stops mid-block instead of us draining and discarding bytes it did
             # not need to send (issue #371). Ignored by a peer that does not
             # honour it, in which case the response arrives in full as before.
-            block_skip=True,
+            # Off when the caller reads the whole response to hash it, because a block
+            # that the peer skips cannot be hashed.
+            block_skip=block_skip,
             timeout=timeout,
         )
 

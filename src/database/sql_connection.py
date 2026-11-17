@@ -1481,6 +1481,18 @@ class SQLConnection(metaclass=Singleton):
             return row['service_id']
         raise Exception(f'No service found for container ID {id}')
 
+    def get_live_local_service_ids(self) -> List[str]:
+        """The ids of the services that have a local instance that is not dead.
+
+        A node that revives or rebuilds an instance needs the filesystem of its service,
+        so the removal of a filesystem (``nodo storage:prune_blocks`` with ``OMIT_FS``)
+        keeps these services complete.
+        """
+        result = self._execute('''
+            SELECT DISTINCT service_id FROM local_instances WHERE killed_at IS NULL
+        ''')
+        return [row['service_id'] for row in result.fetchall() if row['service_id']]
+
     def get_internal_virtualizer(self, id: str) -> Optional[str]:
         """
         Retrieves the virtualizer for a given container ID.
