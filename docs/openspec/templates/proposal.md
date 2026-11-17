@@ -1,5 +1,7 @@
 # Proposal
 
+Issue: #<!-- number, or "none" -->
+
 ## Why
 
 <!-- Explain the motivation for this change. What problem does this solve? Why now? -->
@@ -22,7 +24,7 @@
 ### Modified Capabilities
 <!-- Existing capabilities whose REQUIREMENTS are changing (not just implementation).
      Only list here if spec-level behavior changes. Each needs a delta spec file.
-     Use the exact existing path under openspec/specs/. Leave empty if no requirement
+     Use the exact existing path under docs/openspec/specs/. Leave empty if no requirement
      changes. A change with no capabilities at all (pure refactor, tooling, docs)
      must set `skip_specs: true` in its .openspec.yaml. Do not invent a requirement
      just to fill this section. -->

@@ -24,10 +24,10 @@ Think deeply. Follow the conversation. This is a stance, not a workflow: no fixe
 
 At the start, look at what exists:
 
-- `ls openspec/changes` for changes in progress (ignore `archive/`).
-- `ls -R openspec/specs` for what the system already specifies. Read related specs in full.
-- `openspec/config.yaml` for `context` and `rules`. Use them as constraints. Do not copy them out.
-- Read the artifacts of a relevant change (`proposal.md`, `specs/`, `design.md`, `tasks.md`) and refer to them in the talk.
+- `ls docs/openspec/changes` for changes in progress (ignore `archive/`).
+- `ls -R docs/openspec/specs` for what the system already specifies. Read related specs in full.
+- `docs/openspec/config.yaml` for `context` and `rules`. Use them as constraints. Do not copy them out.
+- Read the artifacts of a relevant change (`proposal.md`, `specs/`, `design.md`) and refer to them in the talk.
 
 Do not ask the user for facts you can check in the code or the specs. Ask one focused question at a time. Say why it matters.
 
@@ -43,7 +43,7 @@ Do not write files on your own. Before the first write, say which files you woul
   | New or changed requirement | `specs/<capability>/spec.md` |
   | Design decision | `design.md` |
   | Scope change | `proposal.md` |
-  | New work | `tasks.md` |
+  | New work | the GitHub issue, not a file here |
 
 The user decides. Offer once. Do not insist.
 

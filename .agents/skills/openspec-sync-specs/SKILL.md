@@ -1,18 +1,18 @@
 ---
 name: openspec-sync-specs
-description: Merge the delta specs of a change into the main specs in openspec/specs/, without archiving. Use when the user wants the main specs updated. Also use when the user says "openspec sync" or "opsx sync".
+description: Merge the delta specs of a change into the main specs in docs/openspec/specs/, without archiving. Use when the user wants the main specs updated. Also use when the user says "openspec sync" or "opsx sync".
 license: MIT
 metadata:
   author: openspec (adapted, no CLI)
   version: "1.0"
 ---
 
-Merge `openspec/changes/<name>/specs/**/spec.md` into `openspec/specs/**/spec.md`. Read `openspec/README.md` for both formats.
+Merge `docs/openspec/changes/<name>/specs/**/spec.md` into `docs/openspec/specs/**/spec.md`. Read `docs/openspec/README.md` for both formats.
 
 ## Steps
 
 1. **Select the change.** Use the given name, or the one in the conversation, or ask. Say: "Using change: <name>". If it has no `specs/` files, say so and stop.
-2. **For each delta spec**, read the delta and the main spec at the same path under `openspec/specs/` (it may not exist). Then apply it. Merge with judgment. Do not copy the delta over the main spec.
+2. **For each delta spec**, read the delta and the main spec at the same path under `docs/openspec/specs/` (it may not exist). Then apply it. Merge with judgment. Do not copy the delta over the main spec.
 
    | Delta section | Action |
    |---|---|

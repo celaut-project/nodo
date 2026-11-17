@@ -1,19 +1,36 @@
 # OpenSpec in this repository
 
-This repository uses the OpenSpec method (spec-driven development) **without the OpenSpec CLI**.
-The skills in `.agents/skills/` are guides. They tell the agent which files to write and how.
-No Node.js and no `openspec` binary are needed.
+This folder is the record of **what the node does and why**. It is part of `docs/`.
+It uses the OpenSpec method **without the OpenSpec CLI**. The skills in `.agents/skills/` are
+guides. No Node.js and no `openspec` binary are needed.
+
+## Scope: what lives where
+
+| Where | What |
+|---|---|
+| GitHub issue | What to do, who does it, progress. |
+| GitHub PR | The solution: code, tests, review. |
+| `docs/openspec/` | Behavior (specs) and decisions (proposal, design). No task lists. |
+
+- Use OpenSpec for changes with observable behavior: gRPC interface, admission, reputation,
+  pricing, networking. Small bugfixes and chores need only an issue and a PR.
+- The main specs in `specs/` are the normative part of `docs/`. Other `docs/*.md` pages explain
+  and link to them. Do not state the same behavior in two places.
+- `docs/proposals/` holds older design studies, named by issue number. Keep them as they are.
+  New changes go in `changes/`.
+- Link both sides: `Issue: #N` in `proposal.md`, and `Closes #N` in the PR.
+- If a PR departs from the spec, it updates the spec in the same PR.
 
 ## Layout
 
 ```
-openspec/
+docs/openspec/
   config.yaml          project context and per-artifact rules (read before writing)
   templates/           starting point for each artifact
   specs/<capability>/spec.md      main specs: what the system does now
   changes/<change>/               one folder per change in progress
     .openspec.yaml                metadata (see below)
-    proposal.md  design.md  tasks.md
+    proposal.md  design.md
     specs/<capability>/spec.md    delta specs: what this change adds or alters
   changes/archive/YYYY-MM-DD-<change>/   finished changes
 ```
@@ -26,6 +43,8 @@ Name a capability for a lasting behavior (`user-auth`), not for the work (`add-l
 ```yaml
 schema: spec-driven
 created: 2026-11-17
+issue: 123                # GitHub issue number
+# pr: 130                 # set at archive time
 # skip_specs: true        # only for changes with no behavior change (refactor, tooling, docs)
 # retire_capabilities: true  # only when a change removes a whole capability
 ```
@@ -33,13 +52,13 @@ created: 2026-11-17
 ## Workflow
 
 1. `openspec-explore`: think and investigate. No files are written without approval.
-2. `openspec-propose`: create the change and all planning artifacts. No code.
+2. `openspec-propose`: create the change and its artifacts. No code.
 3. `openspec-update-change`: revise the artifacts and keep them consistent.
-4. `openspec-apply-change`: implement `tasks.md` and tick the boxes.
+4. Implement in a PR (`Closes #N`). Keep the specs true to the code.
 5. `openspec-sync-specs`: merge delta specs into the main specs.
 6. `openspec-archive-change`: sync, then move the change to `changes/archive/`.
 
-Artifact order: `proposal` → `specs` and `design` → `tasks`.
+Artifact order: `proposal` → `specs` and `design`.
 An artifact is "done" when its file exists. `design.md` is optional.
 
 ## Spec format
@@ -75,17 +94,6 @@ The system SHALL ...
 #### Scenario: <name>
 - **WHEN** ...
 - **THEN** ...
-```
-
-## Tasks format
-
-`tasks.md` uses numbered groups and checkboxes: `- [ ] 1.1 Description and how to verify`.
-Only `x` or `X` in the box means done. Each group carries its own tests and docs.
-
-To count progress (optional helper):
-
-```bash
-python3 -c "import re,sys;t=open(sys.argv[1]).read();a=re.findall(r'^\s*- \[(.)\]',t,re.M);print(sum(c in 'xX' for c in a),'/',len(a))" openspec/changes/<change>/tasks.md
 ```
 
 ## Checks before archive (manual)
