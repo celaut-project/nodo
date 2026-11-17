@@ -14,6 +14,7 @@ from bee_rpc.client import Dir, write_to_file
 from protos import celaut_pb2
 from src.commands.__by_tag import get_id
 from src.commands.import_bee import import_bee
+from src.utils import partial_service
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_file
 from src.utils.service_content import compute_id
@@ -419,6 +420,10 @@ def _export_service_to_bee(service_ref: str) -> Tuple[str, Path]:
     service_id = get_id(service_ref)
     if not service_id:
         raise PublisherError(f"Service '{service_ref}' was not found by id or tag.")
+    try:
+        partial_service.require_complete(service_id, "publish it")
+    except partial_service.PartialServiceError as e:
+        raise PublisherError(str(e)) from e
 
     with tempfile.TemporaryDirectory(prefix="nodo_publish_") as temp_dir:
         output_file = write_to_file(

@@ -66,6 +66,29 @@ def _as_pointer(raw: bytes) -> Optional[buffer_pb2.Buffer.Block]:
     return block if block.hashes else None
 
 
+class FilesystemNotStored(Exception):
+    """The filesystem is a block that this node does not hold.
+
+    A node that keeps a service without its filesystem (``misc.OMIT_FS``) has the pointer
+    and not the block. The caller that needs the tree cannot have it here.
+    """
+
+
+def filesystem_pointer_id(
+        raw: bytes,
+        inherited: Optional[Sequence[bytes]] = None
+) -> Optional[str]:
+    """The block that this filesystem field names, held or not, or ``None`` if it is inline."""
+    block = _as_pointer(raw)
+    if block is None:
+        return None
+    block_id = block_id_from_pointer(block=block, inherited=inherited)
+    if not block_id:
+        # See `filesystem_block_id`: the old pointer with the empty hash type.
+        block_id = get_hash_from_block(block=block, internal_block=True)
+    return block_id or None
+
+
 def filesystem_block_id(
         raw: bytes,
         inherited: Optional[Sequence[bytes]] = None
@@ -136,6 +159,11 @@ def load_container_filesystem(service: celaut.Service) -> celaut.Service.Contain
 
     block_id = filesystem_block_id(raw)
     if block_id is None:
+        pointed = filesystem_pointer_id(raw)
+        if pointed is not None:
+            raise FilesystemNotStored(
+                f"The filesystem block {pointed} is not on this node (the service is partial)."
+            )
         filesystem.ParseFromString(raw)
         return filesystem
 

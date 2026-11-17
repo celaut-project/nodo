@@ -8,21 +8,32 @@ large to store.
 ## ADDED Requirements
 
 ### Requirement: Omit the filesystem on acquisition
-When `main.OMIT_FS` is `true`, the node SHALL NOT keep the filesystem of a service that it
+When `misc.OMIT_FS` is `true`, the node SHALL NOT keep the filesystem of a service that it
 imports, downloads or gets from a peer or from a source. The node SHALL keep the
-specification, the metadata and every block that is not part of the filesystem. The node
-SHALL mark the service as partial. When the option is `false`, the node keeps complete services.
+specification and the metadata, and SHALL mark the service as partial. A service that has no
+filesystem block (its filesystem is in its specification) SHALL stay complete. When the
+option is `false`, the node keeps complete services.
 
 #### Scenario: Import with the option on
-- **GIVEN** `main.OMIT_FS` is `true`
+- **GIVEN** `misc.OMIT_FS` is `true`
 - **WHEN** the operator imports a service
 - **THEN** the registry holds the specification of the service and the marker `.nofs`
 - **AND** the filesystem blocks of the service are not on the disk of the node
 
 #### Scenario: Import with the option off
-- **GIVEN** `main.OMIT_FS` is `false`
+- **GIVEN** `misc.OMIT_FS` is `false`
 - **WHEN** the operator imports a service
 - **THEN** the registry holds the complete service and no marker
+
+#### Scenario: A service with no filesystem block
+- **GIVEN** `misc.OMIT_FS` is `true`
+- **WHEN** the operator imports a service that has no block
+- **THEN** the registry holds the complete service and no marker
+
+#### Scenario: A service that the node holds in full
+- **GIVEN** the node holds a service in full and `misc.OMIT_FS` is `true`
+- **WHEN** the operator imports the same service again
+- **THEN** the service stays complete
 
 ### Requirement: Verify the service id when the filesystem is omitted
 When `misc.VALIDATE_ON_IMPORT` is on, the node SHALL read the complete service, including the
@@ -31,23 +42,23 @@ node SHALL NOT store the filesystem blocks. If the id is not the same, the node 
 the service and keep nothing of it.
 
 #### Scenario: Valid service
-- **GIVEN** `main.OMIT_FS` and `misc.VALIDATE_ON_IMPORT` are `true`
+- **GIVEN** `misc.OMIT_FS` and `misc.VALIDATE_ON_IMPORT` are `true`
 - **WHEN** the node acquires a service whose content has the requested id
 - **THEN** the node keeps the service as partial
 - **AND** the filesystem is not left on disk when the acquisition ends
 
 #### Scenario: Wrong id
-- **GIVEN** `main.OMIT_FS` and `misc.VALIDATE_ON_IMPORT` are `true`
+- **GIVEN** `misc.OMIT_FS` and `misc.VALIDATE_ON_IMPORT` are `true`
 - **WHEN** the content of the service does not have the requested id
 - **THEN** the node refuses the service and keeps no block of it
 
 ### Requirement: Skip the filesystem when the id is not verified
-When `main.OMIT_FS` is `true` and `misc.VALIDATE_ON_IMPORT` is off, the node SHALL NOT receive
+When `misc.OMIT_FS` is `true` and `misc.VALIDATE_ON_IMPORT` is off, the node SHALL NOT receive
 the filesystem block from the sender. The node SHALL keep the service as partial. The node
 cannot check the id of the content that it did not receive, and SHALL say this to the operator.
 
 #### Scenario: Acquisition from a peer without verification
-- **GIVEN** `main.OMIT_FS` is `true` and `misc.VALIDATE_ON_IMPORT` is `false`
+- **GIVEN** `misc.OMIT_FS` is `true` and `misc.VALIDATE_ON_IMPORT` is `false`
 - **WHEN** the node gets a service from a peer
 - **THEN** the peer does not send the filesystem body
 - **AND** the node keeps the service as partial
@@ -97,38 +108,49 @@ publish a partial service, and the command SHALL say why.
 
 ### Requirement: Download completes a partial service
 `nodo download` SHALL NOT treat a partial service as a service that the node already holds.
-When `main.OMIT_FS` is `false`, the command SHALL get the full service, check its id, and
-remove `.nofs`. When `main.OMIT_FS` is `true`, the service stays partial.
+When `misc.OMIT_FS` is `false`, the command SHALL get the full service, check its id, and
+remove `.nofs`. When `misc.OMIT_FS` is `true`, the service stays partial.
 
 #### Scenario: Complete a partial service
-- **GIVEN** the node holds a service as partial and `main.OMIT_FS` is `false`
+- **GIVEN** the node holds a service as partial and `misc.OMIT_FS` is `false`
 - **WHEN** the operator runs `nodo download` for that service
 - **THEN** the registry holds the complete service
 - **AND** `.nofs` does not exist
 
 ### Requirement: Prune the filesystems of existing services
-Setting `main.OMIT_FS` to `true` SHALL NOT remove any stored data. `nodo storage:prune_blocks`
-with `main.OMIT_FS` `true` SHALL remove the filesystem of each complete service, write
-`.nofs` for it, and keep its specification and other blocks. With the option `false`, the
+Setting `misc.OMIT_FS` to `true` SHALL NOT remove any stored data. `nodo storage:prune_blocks`
+with `misc.OMIT_FS` `true` SHALL remove the filesystem of each complete service that has a
+block, and write `.nofs` for it. A service with a live local instance SHALL stay complete,
+because the node builds the instance again from the filesystem. With the option `false`, the
 command SHALL NOT change the partial state of any service. A service that cannot be read
-SHALL NOT lose any block.
+SHALL NOT make the command remove any block.
 
 #### Scenario: Option set, no prune
 - **GIVEN** the node holds complete services
-- **WHEN** the operator sets `main.OMIT_FS` to `true`
+- **WHEN** the operator sets `misc.OMIT_FS` to `true`
 - **THEN** the services stay complete
 
 #### Scenario: Prune with the option on
-- **GIVEN** the node holds a complete service and `main.OMIT_FS` is `true`
+- **GIVEN** the node holds a complete service and `misc.OMIT_FS` is `true`
 - **WHEN** the operator runs `nodo storage:prune_blocks`
 - **THEN** the filesystem blocks of the service are removed
 - **AND** the service has `.nofs`
 - **AND** the specification of the service can still be read
 
 #### Scenario: Shared block
-- **GIVEN** a block is part of the filesystem of one service and of the specification of another
-- **WHEN** the operator runs `nodo storage:prune_blocks` with `main.OMIT_FS` `true`
+- **GIVEN** a block is part of the filesystem of two services, and one of them stays complete
+- **WHEN** the operator runs `nodo storage:prune_blocks` with `misc.OMIT_FS` `true`
 - **THEN** the block stays on disk
+
+#### Scenario: Live instance
+- **GIVEN** a complete service has a live local instance
+- **WHEN** the operator runs `nodo storage:prune_blocks` with `misc.OMIT_FS` `true`
+- **THEN** the service stays complete and its blocks stay on disk
+
+#### Scenario: Interrupted prune
+- **WHEN** a block cannot be removed during the prune
+- **THEN** the service already has `.nofs`
+- **AND** a later prune finishes the removal
 
 ### Requirement: Integrity of a partial service
 `nodo integrity` SHALL NOT report a partial service as damaged because its filesystem is not

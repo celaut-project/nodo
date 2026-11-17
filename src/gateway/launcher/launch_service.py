@@ -8,6 +8,7 @@ from src.gateway.launcher.local_execution.local_execution import local_execution
 from src.database import ledger
 from src.manager.manager import bind_child_token, descends_from_dev_client, spend_mu
 from src.utils import activity_window, demand_history, utils, logger as log
+from src.utils.partial_service import is_partial
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
@@ -559,6 +560,17 @@ def launch_service(
             if local_hidden_failure:
                 log.LOGGER(f"Service {service_id} cannot run on this node now: {local_hidden_failure}")
 
+        # A service that this node keeps without its filesystem cannot run here: the
+        # local candidate is skipped, as for a missing virtiofsd, and a peer that holds
+        # the service in full can run it. The delegation sends hashes only.
+        local_partial_failure = None
+        if is_partial(service_id):
+            local_partial_failure = (
+                f"the service {service_id} is partial on this node: its filesystem is "
+                f"not stored, so it cannot run here"
+            )
+            log.LOGGER(f"Service {service_id} cannot run on this node: {local_partial_failure}")
+
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
         # `father_id` -- dev client ids are drawn from a small reusable pool
@@ -574,6 +586,8 @@ def launch_service(
                 f"Unable to launch service {service_id}: it is pinned to the local node, "
                 f"but it is a member of a network share held on {', '.join(share_nodes)}."
             )
+        if pin_local and local_partial_failure:
+            raise Exception(f"Unable to launch service {service_id}: {local_partial_failure}.")
         if pin_local:
             log.LOGGER(f"Service {service_id} is pinned to the local node (no delegation).")
         elif forced_peer:
@@ -648,10 +662,12 @@ def launch_service(
                         f"Skipping peer {peer}: the network share is held on {', '.join(share_nodes)}."
                     )
                     continue
-                if peer == 'local' and (local_virtiofsd_failure or local_hidden_failure):
+                if peer == 'local' and (
+                        local_virtiofsd_failure or local_hidden_failure or local_partial_failure):
                     # Every reason, not the first: a node without virtiofsd that is
                     # also hidden has two, and the operator must fix both.
-                    for failure in (local_virtiofsd_failure, local_hidden_failure):
+                    for failure in (local_virtiofsd_failure, local_hidden_failure,
+                                    local_partial_failure):
                         if failure:
                             launch_failures.append(f"local: {failure}")
                     continue

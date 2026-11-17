@@ -3,6 +3,7 @@ from typing import Generator, Any
 from bee_rpc.client import write_to_file, Dir
 from src.commands.__by_tag import get_id
 from src.utils.config import ConfigManager
+from src.utils.partial_service import PartialServiceError, require_complete
 from protos import celaut_pb2
 
 # Initialize the environment manager and get the REGISTRY environment variable
@@ -57,7 +58,13 @@ def export_bee(service: str, path: str):
     
     # Get the service ID
     service_id = get_id(service)
-    
+
+    try:
+        require_complete(service_id, "export it")
+    except PartialServiceError as e:
+        print(f"Error: {e}")
+        return
+
     # Generate the output file name
     file_name = service if service != service_id else service_id[:6]
     file_name = file_name.replace("-", "_")  # Replace hyphens with underscores

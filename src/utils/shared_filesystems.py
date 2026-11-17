@@ -99,7 +99,7 @@ from typing import Dict, List, Mapping, Optional
 
 from protos import celaut_pb2 as celaut
 from src.manager.network_templates import Missing, substitute
-from src.utils.container_filesystem import load_container_filesystem
+from src.utils.container_filesystem import FilesystemNotStored, load_container_filesystem
 from src.utils import keyvalue
 
 # Reserved sharing xattr keys (distinct from the POSIX metadata keys in
@@ -375,7 +375,13 @@ def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     xattr, a non-directory, a nested declaration, two of them resolving to one
     share, or a ``share_network`` naming a network the service does not declare.
     """
-    declarations = declarations_for_filesystem(load_container_filesystem(service))
+    try:
+        filesystem = load_container_filesystem(service)
+    except FilesystemNotStored:
+        # A partial service: this node cannot read the tree, so it cannot judge the
+        # declarations. The node that runs the service reads its own copy and judges them.
+        return []
+    declarations = declarations_for_filesystem(filesystem)
     _reject_undeclared_networks(service, declarations)
     return declarations
 

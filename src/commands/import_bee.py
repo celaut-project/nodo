@@ -2,11 +2,14 @@ import os
 import shutil
 from typing import Optional, Set
 from protos import celaut_pb2
-from bee_rpc.client import read_from_file
+from bee_rpc.client import parse_from_buffer, read_from_file
+from bee_rpc.reader import read_bee_file
 
+from src.utils import partial_service
 from src.utils.block_tree import block_tree
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_stream
+from src.utils.omit_filesystem import OmitSession, omit_session
 from src.utils.service_content import read_service_content
 
 env_manager = ConfigManager()
@@ -83,14 +86,29 @@ def _discard(metadata_dir: Optional[str], service_dir: Optional[str], blocks_bef
             _remove_path(path)
 
 
-def import_bee(path: str, integrity_hash: Optional[str] = None, keep_metadata: bool = False) -> Optional[str]:
+#: The index of each message in a ``.celaut.bee`` file.
+_METADATA_INDEX, _SERVICE_INDEX = 1, 2
+
+
+def import_bee(
+    path: str,
+    integrity_hash: Optional[str] = None,
+    keep_metadata: bool = False,
+    omit_fs: Optional[bool] = None,
+) -> Optional[str]:
     """Import the ``.celaut.bee`` at ``path``; the id of the service, or None.
 
     ``integrity_hash``: the id that the service must have; another one is not imported.
     ``keep_metadata``: the metadata (the tags) of a service that the node has already are not
     replaced by the ones of the file. A source that anybody can register must not rename a
     service that the node holds (audit N3).
+    ``omit_fs``: keep the service without its filesystem (``misc.OMIT_FS``, the default).
+    With ``VALIDATE_ON_IMPORT`` the filesystem is read to check the id, and it is not
+    stored. A service that the node holds in full stays in full. A service that the node
+    holds without its filesystem is completed when ``omit_fs`` is off.
     """
+    if omit_fs is None:
+        omit_fs = partial_service.omit_fs_enabled()
     # Get the current directory (where the "nodo" command is executed from)
     current_directory = os.getcwd()
     
@@ -116,15 +134,37 @@ def import_bee(path: str, integrity_hash: Optional[str] = None, keep_metadata: b
     try:
         hash_spec = get_configured_hash_spec(env_manager)
 
-        # Read the file using bee_rpc.client
-        it = read_from_file(path=path, indices={
-            1: celaut_pb2.Metadata,
-            2: celaut_pb2.Service,
-        })
-        
-        # Extract the metadata directory and parse the metadata
-        metadata_dir = next(it).dir
-        service_dir = next(it).dir
+        indices = {
+            _METADATA_INDEX: celaut_pb2.Metadata,
+            _SERVICE_INDEX: celaut_pb2.Service,
+        }
+        session: Optional[OmitSession] = None
+        if omit_fs:
+            # The filesystem is read and not stored. With VALIDATE_ON_IMPORT the session
+            # hashes it, so the id is checked as if it were stored.
+            session = OmitSession(
+                service_index=_SERVICE_INDEX,
+                spec=hash_spec if VALIDATE_ON_IMPORT else None,
+            )
+            with omit_session(session):
+                it = parse_from_buffer(
+                    request_iterator=session.tap(read_bee_file(path)),
+                    indices=indices,
+                    partitions_message_mode=False,
+                )
+                metadata_dir = next(it).dir
+                service_dir = next(it).dir
+        else:
+            # Read the file using bee_rpc.client
+            it = read_from_file(path=path, indices=indices)
+
+            # Extract the metadata directory and parse the metadata
+            metadata_dir = next(it).dir
+            service_dir = next(it).dir
+        omitted = bool(session and session.omitted)
+        if omitted and not VALIDATE_ON_IMPORT:
+            print("The id of the service is not checked over its filesystem "
+                  "(misc.VALIDATE_ON_IMPORT is off).")
         metadata = celaut_pb2.Metadata()
         metadata.ParseFromString(open(metadata_dir, "rb").read())
         
@@ -136,7 +176,10 @@ def import_bee(path: str, integrity_hash: Optional[str] = None, keep_metadata: b
                 break
 
         if VALIDATE_ON_IMPORT:
-            calculated_hash = _compute_service_hash(service_path=service_dir, hash_spec=hash_spec)
+            if session is not None:
+                calculated_hash = session.digest().hex()
+            else:
+                calculated_hash = _compute_service_hash(service_path=service_dir, hash_spec=hash_spec)
 
             if service_hash != calculated_hash:
                 _upsert_metadata_hash(
@@ -171,7 +214,13 @@ def import_bee(path: str, integrity_hash: Optional[str] = None, keep_metadata: b
         if not service_saved:
             service_destination = os.path.join(REGISTRY, service_hash)
             shutil.move(service_dir, service_destination)
+            if omitted:
+                partial_service.mark_partial(service_hash, REGISTRY)
         else:
+            if not omitted and partial_service.is_partial(service_hash, REGISTRY):
+                # The node held the service without its filesystem and now has all the
+                # blocks: the entry that is there is the same specification.
+                partial_service.clear_partial(service_hash, REGISTRY)
             _remove_path(service_dir)
         
         print("\n\nService imported successfully.")

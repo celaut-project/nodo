@@ -1175,10 +1175,43 @@ for coarse node-to-node deposits rather than for a client topping up an instance
 > off-repo. Ergo and Bitcoin transactions are both **final and irreversible**
 > (see [`KyA.md`](KyA.md)).
 
+## Partial services (`misc.OMIT_FS`)
+
+A service can need hundreds of gigabytes, nearly all of it in its filesystem. With
+`misc.OMIT_FS: true`, the node keeps the specification and the other blocks of a service, and
+not its filesystem. The empty file `.nofs` next to `_.json` in the registry entry marks the
+service as partial. A service without it is complete.
+
+| Operation | On a partial service |
+|---|---|
+| Price it, delegate it to a peer | Works. A delegation sends hashes only. |
+| Run it on this node | Refused. The launch error says that the service is partial. |
+| `GetService` from a peer | Not sent. The peer gets the answer for a service that is not held. |
+| `nodo export`, `nodo publish` | Refused. |
+| `nodo integrity` | Shown as partial, not as damaged. |
+| `nodo download` (with `misc.OMIT_FS: false`) | Gets the filesystem and removes `.nofs`. |
+
+How the node gets a service with `misc.OMIT_FS: true`:
+
+- **`misc.VALIDATE_ON_IMPORT: true`.** The node reads the complete service, hashes it, checks the
+  id, and does not store the filesystem. The transfer costs the full bandwidth and no disk.
+- **`misc.VALIDATE_ON_IMPORT: false`.** The node asks the peer to skip the filesystem. The
+  bytes do not cross the network. The id cannot be checked over what the node does not
+  receive, and the node says so.
+
+A download from a source (`nodo download`) writes the artifact to disk before it imports it, so it
+needs the disk for that file for a short time.
+
+Turning the option on does not remove anything. `nodo storage:prune_blocks` drops the
+filesystem of each complete service and writes `.nofs`. A service with a live local instance
+stays complete, because the node builds the instance again from the filesystem when it
+revives it.
+
 ## `general_flags`, `misc`, `logs`, `low_demand`, `publisher`
 
 - `general_flags.SIMULATE_PAYMENTS` — dry-run payments (dev).
 - `misc.VALIDATE_ON_IMPORT` (`true`), `misc.CONFIGURATION_REQUIRED`.
+- `misc.OMIT_FS` (`false`) — keep services without their filesystem. See [Partial services](#partial-services-miscomit_fs).
 - `logs.DEBUG_MODE`, `logs.MEMORY_LOGS`.
 - `logs.TUNNEL_LOGS` — log every tunnel handshake, relay close and billing tick
   under `[TUNNEL]`. Off by default: one line per connection and per billed MiB
