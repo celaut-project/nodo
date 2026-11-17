@@ -345,9 +345,10 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  nodo execute -e workers 8 -e timeout 20 my_service_tag
  # signature: execute [--name <instance-name>] [-e key value]... [--no-input] <service id | tag | '.celaut.bee' path>
  ```
- A var that a network of the service uses as `${VAR}` is required. Without a
- terminal, or with `--no-input`, a missing required var stops the launch, and a
- missing optional var is only reported. In a terminal, `execute` asks for the
+ `execute` asks only for the vars the service declares in its container. A
+ `${VAR}` in a network is an open key, not a request: give it with `-e` if you
+ want the node to resolve that network at launch. Without a terminal, or with
+ `--no-input`, a missing var is only reported. In a terminal, `execute` asks for the
  missing vars, so an agent always passes `--no-input`.
  `execute` launches the instance; read its id (which is also its token) and API
  address from `nodo instances` — `execute` itself prints the `nodo inspect` dump

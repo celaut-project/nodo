@@ -46,13 +46,12 @@ class EnvSpecsTests(unittest.TestCase):
         self.assertEqual([s.name for s in specs], ["BLOCK", "LOG"])
         self.assertEqual(specs[0].prose, "chain tip")
 
-    def test_undeclared_placeholder_is_still_listed(self):
-        specs = service_envs.env_specs(_service(networks=[ERGO]))
-        self.assertEqual([s.name for s in specs], ["BLOCK"])
+    def test_undeclared_placeholder_is_not_listed(self):
+        self.assertEqual(service_envs.env_specs(_service(networks=[ERGO])), [])
 
-    def test_declared_vars_come_before_undeclared_placeholders(self):
+    def test_only_declared_vars_are_listed_when_a_placeholder_is_open(self):
         specs = service_envs.env_specs(_service(declared=[("A", [], ""), ("C", [], "")], networks=[ERGO]))
-        self.assertEqual([s.name for s in specs], ["A", "C", "BLOCK"])
+        self.assertEqual([s.name for s in specs], ["A", "C"])
 
     def test_missing_envs(self):
         specs = service_envs.env_specs(_service(declared=[("A", [], ""), ("B", [], "")]))
@@ -66,7 +65,7 @@ class EnvSpecsTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class CompleteEnvsTests(unittest.TestCase):
     def setUp(self):
-        self.service = _service(declared=[("LOG", [], "log level")], networks=[ERGO])
+        self.service = _service(declared=[("LOG", [], "log level"), ("BLOCK", [], "")], networks=[ERGO])
         loader = patch.object(execute_cmd, "load_service_from_disk", return_value=self.service)
         loader.start()
         self.addCleanup(loader.stop)
@@ -76,6 +75,15 @@ class CompleteEnvsTests(unittest.TestCase):
         with patch("builtins.input", side_effect=list(answers)) as ask, redirect_stdout(out):
             result = execute_cmd.complete_envs("svc", envs, interactive=interactive)
         return result, out.getvalue(), ask
+
+    def test_an_undeclared_placeholder_is_not_asked(self):
+        service = _service(declared=[("LOG", [], "")], networks=[ERGO])
+        with patch.object(execute_cmd, "load_service_from_disk", return_value=service):
+            out = io.StringIO()
+            with patch("builtins.input", side_effect=["x"]) as ask, redirect_stdout(out):
+                result = execute_cmd.complete_envs("svc", {}, interactive=True)
+        self.assertEqual(result, {"LOG": "x"})
+        self.assertEqual(ask.call_count, 1)
 
     def test_nothing_missing_asks_nothing(self):
         result, out, ask = self._complete({"BLOCK": "b", "LOG": "x"}, interactive=True)
@@ -103,8 +111,8 @@ class CompleteEnvsTests(unittest.TestCase):
 
     def test_enter_leaves_a_var_unset_and_says_so(self):
         result, out, _ = self._complete({}, interactive=True, answers=["", "debug"])
-        self.assertEqual(result, {"BLOCK": "debug"})
-        self.assertIn("Not set: LOG", out)
+        self.assertEqual(result, {"LOG": "debug"})
+        self.assertIn("Not set: BLOCK", out)
 
     def test_values_are_never_printed(self):
         _, out, _ = self._complete({}, interactive=True, answers=["s3cr3t", "t0k3n"])
