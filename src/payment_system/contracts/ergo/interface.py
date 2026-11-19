@@ -3,15 +3,16 @@ from typing import Optional, Tuple
 from protos import celaut_pb2
 from src.utils import ledger_descriptors
 from src.utils.ledger_descriptors import ergo_payment_ledger as _ergo_ledger
+from src.utils.ledger_descriptors import ergo_payment_protocol as _ergo_protocol
+from src.utils.payment_protocol import protocol_hash
 import requests
 from src.routing import ledger_http
-from hashlib import sha3_256
 from src.database import sql_connection
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.sweeps import compute_sweep_amount as _compute_sweep_amount
 from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
-from src.utils.contract_xattrs import set_address, set_script, set_token_id, set_contract_type
+from src.utils.contract_xattrs import set_address, set_script, set_token_id
 from src.utils.ergo_units import erg_to_nanoerg, is_valid_ergo_address, nanoerg_to_erg_str
 from src.utils.ergo_node_url import require_ergo_node_url
 # This ledger's MU rate and its conversions. A separate, light module on purpose: it is
@@ -52,11 +53,16 @@ SAFE_MIN_BOX_VALUE = 1_000_000
 # The ledger's identity is `ledger_tag()`.
 LEDGER = "ergo"
 
-# Stable, wallet-independent identity of the Ergo P2PK payment contract TYPE. Its sha3 is
-# the contract_hash used to match this kind of contract across nodes; the specific wallet
-# ErgoTree travels per-instance as the raw ``script`` xattr (propositionBytes).
-CONTRACT = "proveDlog(decodePoint())"
-CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
+# Stable, wallet-independent identity of the Ergo P2PK payment contract TYPE: the formal of
+# its payment protocol (#671). The sha3 of it is the contract_hash used to match this kind
+# of contract across nodes; the specific wallet ErgoTree travels per-instance as the raw
+# ``script`` xattr (propositionBytes).
+CONTRACT_HASH = protocol_hash(_ergo_protocol())
+
+
+def protocol() -> celaut_pb2.Contract.Protocol:
+    """The payment protocol of this contract, as peers receive it."""
+    return _ergo_protocol()
 # How this ledger names its own native unit on the wire and in the database. A reserved
 # symbol rather than an id: an EIP-4 token is named by its 64-hex id, which can never
 # collide with this. It is what `init()` already advertises as the `token_id` xattr.
@@ -347,12 +353,10 @@ def init():
         _warn_if_tokens_cannot_be_moved(assets)
     sql = sql_connection.SQLConnection()
     for asset in (NATIVE_ASSET, *(a.token_id for a in assets)):
-        contract = celaut_pb2.Contract(ledger=_ergo_ledger())
+        contract = celaut_pb2.Contract(ledger=_ergo_ledger(), protocol=_ergo_protocol())
         set_token_id(contract, asset)
         # Canonical value: raw ErgoTree/propositionBytes of the wallet's P2PK payment boxes.
         set_script(contract, proposition_bytes)
-        # Stable type identity for cross-node matching (its sha3 == CONTRACT_HASH).
-        set_contract_type(contract, CONTRACT.encode("utf-8"))
         # Derived address for local display/indexing only; never the source of truth.
         set_address(contract, address)
         sql.add_contract(contract=contract)
@@ -922,12 +926,11 @@ def _await_settlement(tx_id: str, script: bytes, asset, ergo=None) -> celaut_pb2
         obj = response.json()
         if obj["numConfirmations"] > 1:
             LOGGER(f"Tx {tx_id} verified.")
-            contract = celaut_pb2.Contract(ledger=_ergo_ledger())
+            contract = celaut_pb2.Contract(ledger=_ergo_ledger(), protocol=_ergo_protocol())
             # Which asset was paid, so the peer files the credit against the
             # method it advertised rather than against this contract's default.
             set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
             set_script(contract, script)
-            set_contract_type(contract, CONTRACT.encode("utf-8"))
             return contract
 
     raise TimeoutError(f"Can't verify the tx {tx_id}")

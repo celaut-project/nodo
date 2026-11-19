@@ -15,7 +15,8 @@ from protos import celaut_pb2
 from src.database import ledger
 from src.database.migrate import SIGNED_PAGE_COLUMNS
 from src.utils import logger as log, logger
-from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
+from src.utils.contract_xattrs import get_address, get_script, get_token_id
+from src.utils.payment_protocol import contract_protocol_id
 from src.utils.config import ConfigManager
 from src.utils.dead_instances import HIBERNATED, HIBERNATED_BY_WINDOW, HIBERNATED_OUT_OF_BALANCE
 from src.utils.singleton import Singleton
@@ -2714,11 +2715,17 @@ class SQLConnection(metaclass=Singleton):
         """
         # The per-instance value is the raw ErgoTree/propositionBytes (script xattr). It is
         # stored as hex so it round-trips as binary, never as a textual address. The
-        # contract_hash keys on the STABLE, wallet-independent contract_type so the same
-        # kind of contract matches across nodes (falling back to the script/shape when no
-        # explicit type is advertised, e.g. the simulator).
+        # contract_hash keys on the formal of the payment protocol (#671), which is STABLE
+        # and wallet-independent, so the same kind of contract matches across nodes. A
+        # contract with no protocol formal is not registered: this node cannot pay it.
         raw_script: bytes = get_script(contract)
-        type_bytes: bytes = get_contract_type(contract) or raw_script or contract_shape_bytes(contract)
+        type_bytes: bytes = contract_protocol_id(contract)
+        if not type_bytes:
+            logger.LOGGER(
+                f"Not registering a contract from {peer_id}: it has no payment protocol, "
+                "so this node cannot pay to it."
+            )
+            return
         instance_value: str = raw_script.hex() if raw_script else get_address(contract)
         # Which asset this method settles in. It has always been advertised and this was
         # the one place that dropped it -- so a node offering ERG and a token on the same

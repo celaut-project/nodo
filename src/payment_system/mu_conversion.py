@@ -98,15 +98,16 @@ def _local_rates() -> dict[tuple[str, str, str], int]:
     receives from us, so both sides key on the same numbers.
     """
     from src.payment_system.ledgers import local_payment_methods
-    from src.utils.contract_xattrs import get_contract_type, get_token_id
+    from src.utils.contract_xattrs import get_token_id
+    from src.utils.payment_protocol import contract_protocol_id
     from src.utils.utils import from_amount
 
     rates: dict[tuple[str, str, str], int] = {}
     for advertised in local_payment_methods():
         ledger = advertised.contract.ledger
         # Same derivation `add_contract` uses for the peer rows this is matched
-        # against: the stable, wallet-independent contract type.
-        type_bytes = get_contract_type(advertised.contract)
+        # against: the stable, wallet-independent protocol of the contract.
+        type_bytes = contract_protocol_id(advertised.contract)
         if not ledger.tags or not type_bytes:
             continue
         rate = from_amount(advertised.mu_per_unit)

@@ -8,11 +8,8 @@ from src.utils import keyvalue
 SCRIPT_KEY = "script"
 ADDRESS_KEY = "address"
 TOKEN_ID_KEY = "token_id"
-# Stable, wallet-independent contract-type identity used to match the same kind of
-# payment contract across nodes (its sha3 is the contract_hash). Distinct from the
-# per-instance ``script`` xattr, which holds the raw ErgoTree/propositionBytes of the
-# specific wallet box and varies per node.
-CONTRACT_TYPE_KEY = "contract_type"
+# The kind of payment contract is not an xattr. It is ``Contract.protocol``, and its
+# ``formal`` defines these keys (#671). See ``src/utils/payment_protocol.py``.
 # Who published this proof, and that owner proving it is the peer announcing it. The
 # ledger's own key, in the ledger's own encoding, plus its signature over the announcing
 # peer's id (node_identity.attestation_payload) -- see `attest_proof_ownership`.
@@ -74,21 +71,6 @@ def get_owner_attestation(contract: celaut_pb2.Contract) -> tuple:
         get_xattr_text(contract, OWNER_PUBLIC_KEY_KEY),
         get_xattr_text(contract, OWNER_SIGNATURE_KEY),
     )
-
-
-def set_contract_type(contract: celaut_pb2.Contract, contract_type: bytes) -> None:
-    keyvalue.set_value(contract.xattrs, CONTRACT_TYPE_KEY, contract_type)
-
-
-def get_contract_type(contract: celaut_pb2.Contract) -> bytes:
-    return keyvalue.get(contract.xattrs, CONTRACT_TYPE_KEY, b"")
-
-
-def contract_shape_bytes(contract: celaut_pb2.Contract) -> bytes:
-    normalized = celaut_pb2.Contract()
-    normalized.ledger.CopyFrom(contract.ledger)
-    keyvalue.from_dict(normalized.xattrs, keyvalue.to_dict(contract.xattrs))
-    return normalized.SerializeToString()
 
 
 def first_non_empty(*values: Optional[str]) -> str:

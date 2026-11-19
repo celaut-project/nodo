@@ -32,7 +32,8 @@ try:
     from src.payment_system.exceptions import NOT_CONFIRMED_YET, PaymentNotConfirmed
     from src.utils import ledger_descriptors
     from src.utils.bitcoin_units import script_pubkey_from_address
-    from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
+    from src.utils.contract_xattrs import set_script, set_token_id
+    from src.utils.payment_protocol import protocol_id, same_payment_protocol
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
@@ -63,8 +64,17 @@ def _with_min_confirmations(value):
 
 
 def _declaration(min_confirmations):
+    """The payment protocol of a payee that needs ``min_confirmations`` (#671)."""
     with _with_min_confirmations(min_confirmations):
-        return ledger_descriptors.bitcoin_payment_ledger()
+        return ledger_descriptors.bitcoin_payment_protocol()
+
+
+def _ledger():
+    return ledger_descriptors.bitcoin_payment_ledger()
+
+
+def _contract(protocol):
+    return celaut_pb2.Contract(ledger=_ledger(), protocol=protocol)
 
 
 def _formal(ledger):
@@ -76,7 +86,7 @@ def _with_formal_line(ledger, line):
     lines = [l for l in bytes(ledger.formal).split(b"\n") if not l.startswith(KEY.encode())]
     if line:
         lines.append(line)
-    out = celaut_pb2.Contract.Ledger()
+    out = celaut_pb2.Contract.Protocol()
     out.CopyFrom(ledger)
     # Sorted by key, as `component_formal` sorts (not by the whole line).
     out.formal = b"\n".join(sorted(lines, key=lambda l: l.split(b"=", 1)[0]))
@@ -85,7 +95,7 @@ def _with_formal_line(ledger, line):
 
 def _without_line(ledger, key):
     """``ledger`` without the formal line ``key``."""
-    out = celaut_pb2.Contract.Ledger()
+    out = celaut_pb2.Contract.Protocol()
     out.CopyFrom(ledger)
     out.formal = b"\n".join(
         l for l in bytes(ledger.formal).split(b"\n") if not l.startswith(key.encode() + b"=")
@@ -100,7 +110,7 @@ def _without_line(ledger, key):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DeclarationTests(unittest.TestCase):
 
-    def test_the_bitcoin_declaration_states_the_number(self):
+    def test_the_bitcoin_protocol_states_the_number(self):
         self.assertEqual(_formal(_declaration(1))[KEY], "1")
         self.assertEqual(_formal(_declaration(3))[KEY], "3")
         self.assertIn("3 confirmations or more", _declaration(3).prose)
@@ -109,7 +119,7 @@ class DeclarationTests(unittest.TestCase):
     def test_the_number_is_the_one_the_validator_uses(self):
         for configured, declared in ((None, "1"), ("", "1"), (0, "1"), (6, "6"), ("4", "4")):
             with _with_min_confirmations(configured):
-                self.assertEqual(_formal(ledger_descriptors.bitcoin_payment_ledger())[KEY],
+                self.assertEqual(_formal(ledger_descriptors.bitcoin_payment_protocol())[KEY],
                                  declared)
                 self.assertEqual(str(btc.MIN_CONFIRMATIONS()), declared)
 
@@ -118,16 +128,16 @@ class DeclarationTests(unittest.TestCase):
         self.assertEqual(keys, sorted(keys))
 
     def test_ergo_states_no_payee_parameter(self):
-        self.assertNotIn(KEY, _formal(ledger_descriptors.ergo_payment_ledger()))
+        self.assertNotIn(KEY, _formal(ledger_descriptors.ergo_payment_protocol()))
 
-    def test_two_numbers_are_the_same_ledger(self):
+    def test_two_numbers_are_the_same_protocol(self):
         self.assertNotEqual(_declaration(1).formal, _declaration(3).formal)
-        self.assertTrue(ledger_descriptors.same_payment_ledger(_declaration(1), _declaration(3)))
+        self.assertTrue(same_payment_protocol(_declaration(1), _declaration(3)))
 
-    def test_a_node_from_before_626_is_the_same_ledger(self):
+    def test_a_node_from_before_626_is_the_same_protocol(self):
         old = _with_formal_line(_declaration(1), b"")
         self.assertNotIn(KEY, _formal(old))
-        self.assertTrue(ledger_descriptors.same_payment_ledger(old, _declaration(3)))
+        self.assertTrue(same_payment_protocol(old, _declaration(3)))
         self.assertIsNone(ledger_descriptors.declared_min_confirmations(old))
 
     def test_the_too_early_rule_is_a_formal_payee_parameter(self):
@@ -135,32 +145,32 @@ class DeclarationTests(unittest.TestCase):
         self.assertIn(TOO_EARLY, _formal(declaration))
         self.assertIn(NOT_CONFIRMED_YET, _formal(declaration)[TOO_EARLY])
         self.assertIn(TOO_EARLY, ledger_descriptors.PAYEE_PARAMETERS)
-        self.assertNotIn(TOO_EARLY, _formal(ledger_descriptors.ergo_payment_ledger()))
+        self.assertNotIn(TOO_EARLY, _formal(ledger_descriptors.ergo_payment_protocol()))
 
-    def test_a_node_without_the_too_early_line_is_the_same_ledger(self):
+    def test_a_node_without_the_too_early_line_is_the_same_protocol(self):
         # A node from the first #626 release states the number but not this line.
         without = _without_line(_declaration(3), TOO_EARLY)
         self.assertNotIn(TOO_EARLY, _formal(without))
         self.assertIn(KEY, _formal(without))
-        self.assertTrue(ledger_descriptors.same_payment_ledger(without, _declaration(1)))
-        self.assertTrue(ledger_descriptors.same_payment_ledger(_declaration(1), without))
+        self.assertTrue(same_payment_protocol(without, _declaration(1)))
+        self.assertTrue(same_payment_protocol(_declaration(1), without))
         # A node from before #626 has neither line.
         old = _without_line(without, KEY)
-        self.assertTrue(ledger_descriptors.same_payment_ledger(old, _declaration(3)))
+        self.assertTrue(same_payment_protocol(old, _declaration(3)))
 
-    def test_another_too_early_text_is_still_the_same_ledger(self):
+    def test_another_too_early_text_is_still_the_same_protocol(self):
         other = _declaration(3)
         other.formal = bytes(other.formal).replace(b"keeps the deposit token pending",
                                                    b"keeps the token")
         self.assertNotEqual(other.formal, _declaration(3).formal)
-        self.assertTrue(ledger_descriptors.same_payment_ledger(other, _declaration(3)))
+        self.assertTrue(same_payment_protocol(other, _declaration(3)))
 
     def test_every_other_line_is_still_compared_byte_for_byte(self):
         other = _declaration(3)
-        other.formal = bytes(other.formal).replace(b"network=mainnet", b"network=signet")
-        self.assertFalse(ledger_descriptors.same_payment_ledger(other, _declaration(3)))
-        empty = celaut_pb2.Contract.Ledger(tags=[ledger_descriptors.bitcoin_tag()])
-        self.assertFalse(ledger_descriptors.same_payment_ledger(empty, _declaration(3)))
+        other.formal = bytes(other.formal).replace(b"satoshi", b"millisatoshi")
+        self.assertFalse(same_payment_protocol(other, _declaration(3)))
+        empty = celaut_pb2.Contract.Protocol(tags=["bitcoin-p2wpkh"])
+        self.assertFalse(same_payment_protocol(empty, _declaration(3)))
 
     def test_a_number_a_payer_cannot_wait_for_is_refused(self):
         for bad in (b"0", b"-1", b"abc", b"37", b""):
@@ -180,33 +190,33 @@ class DeclarationMatchingTests(unittest.TestCase):
     def test_a_payee_with_another_number_is_stored(self):
         with _with_min_confirmations(1):
             self.assertTrue(manager._accept_contract(
-                celaut_pb2.Contract(ledger=_declaration(3)), "peer-min-3"))
+                _contract(_declaration(3)), "peer-min-3"))
 
     def test_a_payee_from_before_626_is_stored(self):
         with _with_min_confirmations(1):
             self.assertTrue(manager._accept_contract(
-                celaut_pb2.Contract(ledger=_with_formal_line(_declaration(1), b"")), "old"))
+                _contract(_with_formal_line(_declaration(1), b"")), "old"))
 
     def test_a_payee_with_an_unusable_number_is_not_stored(self):
         with _with_min_confirmations(1):
             for bad in (b"0", b"abc", b"1000"):
                 ledger = _with_formal_line(_declaration(1), KEY.encode() + b"=" + bad)
-                self.assertFalse(manager._accept_contract(celaut_pb2.Contract(ledger=ledger), "p"))
+                self.assertFalse(manager._accept_contract(_contract(ledger), "p"))
 
     def test_a_payer_with_another_number_pays_into_our_ledger(self):
         # On a node that needs 3, a Payable from a payer that needs 1 for itself.
         with _with_min_confirmations(3):
-            self.assertEqual(payment_process._ledger_tag(_declaration(1)),
+            self.assertEqual(payment_process._ledger_tag(_ledger()),
                              ledger_descriptors.bitcoin_tag())
 
     def test_nodo_protocol_reports_a_match(self):
         from src.commands import protocol
 
         peer = celaut_pb2.Peer()
-        peer.payment_contracts.add().contract.ledger.CopyFrom(_declaration(3))
+        peer.payment_contracts.add().contract.CopyFrom(_contract(_declaration(3)))
         with _with_min_confirmations(1):
             report = protocol._compare_ledgers(peer)
-        self.assertEqual([r["status"] for r in report], ["match"])
+        self.assertEqual([r["status"] for r in report], ["match", "match"])
 
 
 # ---------------------------------------------------------------------------------
@@ -383,7 +393,7 @@ class DepositTokenTests(unittest.TestCase):
                 mock.patch.object(payment_process, "__check_payment_process",
                                   side_effect=check, create=True):
             return payment_process.validate_payment_process(
-                amount=1000, ledger=_declaration(3), contract=b"p2wpkh",
+                amount=1000, ledger=_ledger(), contract=protocol_id(_declaration(3)),
                 script=b"script", token=self.token,
             )
 
@@ -415,11 +425,10 @@ class DepositTokenTests(unittest.TestCase):
 
     def test_end_to_end_through_the_bitcoin_validator(self):
         """`validate_payment_process` → `__check_payment_process` → the Bitcoin validator."""
-        from hashlib import sha3_256
         from src.payment_system.contracts.registry import MethodKey
 
         chain = _Chain({"tx-1": {"confirmations": 0, "body": _tx(token=self.token)}})
-        key = MethodKey(ledger_descriptors.bitcoin_tag(), sha3_256(b"p2wpkh").hexdigest(), "BTC")
+        key = MethodKey(ledger_descriptors.bitcoin_tag(), btc.CONTRACT_HASH, "BTC")
         envs = mock.MagicMock()
         envs.payment_process_validators.return_value = {key: btc.payment_process_validator}
         manager_module = mock.MagicMock()
@@ -441,7 +450,7 @@ class DepositTokenTests(unittest.TestCase):
                     mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: 3), \
                     _with_min_confirmations(3):
                 return payment_process.validate_payment_process(
-                    amount=1000, ledger=_declaration(1), contract=b"p2wpkh",
+                    amount=1000, ledger=_ledger(), contract=protocol_id(_declaration(1)),
                     script=script_pubkey_from_address(ADDRESS), token=self.token,
                     asset="BTC",
                 )
@@ -473,7 +482,8 @@ class GatewayTests(unittest.TestCase):
         error = PaymentNotConfirmed(token=TOKEN, tx_id="tx-1", confirmations=0, wanted=3)
         from src.utils.utils import to_amount
 
-        payment = celaut_pb2.Payment(deposit_token=TOKEN, amount=to_amount(1000))
+        payment = celaut_pb2.Payment(deposit_token=TOKEN, amount=to_amount(1000),
+                                     contract=_contract(_declaration(1)))
         with mock.patch.object(gateway, "parse_with_client", return_value=(payment, "c")), \
                 mock.patch.object(gateway, "require_caller"), \
                 mock.patch.object(gateway, "validate_payment_process", side_effect=error):
@@ -488,11 +498,10 @@ class GatewayTests(unittest.TestCase):
 # 3. Node to node: the payer waits for the payee's number
 # ---------------------------------------------------------------------------------
 
-def _peer_announcing(ledger):
-    contract = celaut_pb2.Contract(ledger=ledger)
+def _peer_announcing(protocol):
+    contract = _contract(protocol)
     set_token_id(contract, "BTC")
     set_script(contract, script_pubkey_from_address(ADDRESS))
-    set_contract_type(contract, b"p2wpkh")
     peer = celaut_pb2.Peer()
     peer.payment_contracts.add(contract=contract)
     return peer
@@ -501,13 +510,13 @@ def _peer_announcing(ledger):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PayerWaitTests(unittest.TestCase):
 
-    def _await(self, payee_ledger, own=1, statuses=range(0, 10)):
+    def _await(self, payee_protocol, own=1, statuses=range(0, 10)):
         chain = mock.Mock()
         chain.tx_status.side_effect = [{"confirmations": c} for c in statuses]
         with mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: own), \
                 mock.patch.object(btc, "WAIT_TX_ATTEMPTS", len(list(statuses))), \
                 mock.patch.object(btc, "sleep", lambda _: None), \
-                payee.paying(payee_ledger):
+                payee.paying(payee_protocol):
             btc.await_payment(tx_id="tx-1", script=script_pubkey_from_address(ADDRESS),
                               chain=chain)
         return chain.tx_status.call_count - 1  # confirmations when it stopped
@@ -531,23 +540,22 @@ class PayerWaitTests(unittest.TestCase):
 
     def test_the_payee_is_only_in_force_inside_the_block(self):
         with payee.paying(_declaration(5)):
-            self.assertEqual(payee.ledger().formal, _declaration(5).formal)
-        self.assertIsNone(payee.ledger())
+            self.assertEqual(payee.protocol().formal, _declaration(5).formal)
+        self.assertIsNone(payee.protocol())
 
-    def test_the_payee_ledger_is_read_from_its_stored_announcement(self):
-        from hashlib import sha3_256
+    def test_the_payee_protocol_is_read_from_its_stored_announcement(self):
 
         connection = mock.MagicMock()
         connection.get_peer_advertisement.return_value = \
             _peer_announcing(_declaration(3)).SerializeToString()
-        found = payee.declared_ledger("peer-1", ledger_descriptors.bitcoin_tag(),
-                                      sha3_256(b"p2wpkh").hexdigest(), connection=connection)
+        found = payee.declared_protocol("peer-1", ledger_descriptors.bitcoin_tag(),
+                                      btc.CONTRACT_HASH, connection=connection)
         self.assertEqual(ledger_descriptors.declared_min_confirmations(found), 3)
-        self.assertIsNone(payee.declared_ledger("peer-1", "ergo", "", connection=connection))
-        self.assertIsNone(payee.declared_ledger("peer-1", ledger_descriptors.bitcoin_tag(), "00" * 32,
+        self.assertIsNone(payee.declared_protocol("peer-1", "ergo", "", connection=connection))
+        self.assertIsNone(payee.declared_protocol("peer-1", ledger_descriptors.bitcoin_tag(), "00" * 32,
                                                 connection=connection))
         connection.get_peer_advertisement.return_value = None
-        self.assertIsNone(payee.declared_ledger("peer-1", ledger_descriptors.bitcoin_tag(), "", connection=connection))
+        self.assertIsNone(payee.declared_protocol("peer-1", ledger_descriptors.bitcoin_tag(), "", connection=connection))
 
 
 @unittest.skipIf(
@@ -558,16 +566,15 @@ class PayerFlowTests(unittest.TestCase):
 
     def test_the_payment_process_gives_the_payee_declaration_to_the_contract(self):
         from contextlib import nullcontext
-        from hashlib import sha3_256
         from src.payment_system.contracts.registry import MethodKey
 
-        contract_hash = sha3_256(b"p2wpkh").hexdigest()
+        contract_hash = btc.CONTRACT_HASH
         method = MethodKey(ledger_descriptors.bitcoin_tag(), contract_hash, "BTC")
         seen = []
 
         def process_payment(amount, deposit_token, ledger, script):
-            seen.append(ledger_descriptors.declared_min_confirmations(payee.ledger()))
-            return celaut_pb2.Contract(ledger=_declaration(1))
+            seen.append(ledger_descriptors.declared_min_confirmations(payee.protocol()))
+            return _contract(_declaration(1))
 
         envs = mock.MagicMock()
         envs.available_payment_process.return_value = {method: process_payment}
@@ -598,7 +605,7 @@ class PayerFlowTests(unittest.TestCase):
             )
         self.assertIsNotNone(plan)
         self.assertEqual(seen, [3])
-        self.assertIsNone(payee.ledger())
+        self.assertIsNone(payee.protocol())
 
     def _communicate(self, answers, attempts=1):
         channel = mock.MagicMock()
@@ -623,7 +630,7 @@ class PayerFlowTests(unittest.TestCase):
                 mock.patch.object(payment_process, "sleep"), \
                 mock.patch.object(payment_process, "COMMUNICATION_ATTEMPTS", attempts):
             told = getattr(payment_process, "__attempt_payment_communication")(
-                "peer-1", 1000, TOKEN, celaut_pb2.Contract(ledger=_declaration(1)))
+                "peer-1", 1000, TOKEN, _contract(_declaration(1)))
         return told, len(calls), reputation
 
     def test_a_payee_one_block_behind_is_asked_again_without_a_penalty(self):

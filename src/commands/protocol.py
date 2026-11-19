@@ -60,7 +60,11 @@ def own_declaration(*, prose: bool = True) -> Dict:
     """
     from src.identity.node_identity import node_signature_scheme
     from src.identity.transport_stack import node_transport, node_transport_stack
-    from src.utils.ledger_descriptors import payment_ledgers, reputation_ledgers
+    from src.utils.ledger_descriptors import (
+        payment_ledgers,
+        payment_protocols,
+        reputation_ledgers,
+    )
 
     return {
         "signature_scheme": [
@@ -71,10 +75,14 @@ def own_declaration(*, prose: bool = True) -> Dict:
             _component(c, prose=prose) for c in node_transport_stack(prose=prose)
         ],
         # Every ledger this node declares, as each place carries it: a payment contract
-        # declares the network and how to pay; a reputation proof, the network and how
-        # a proof is laid out (ledger_descriptors).
+        # declares the network, and its payment protocol says the keys and how to pay
+        # (#671); a reputation proof, the network and how a proof is laid out
+        # (ledger_descriptors).
         "payment_ledgers": [
             _component(ledger, prose=prose) for ledger in payment_ledgers()
+        ],
+        "payment_protocols": [
+            _component(protocol, prose=prose) for protocol in payment_protocols()
         ],
         "reputation_ledgers": [
             _component(ledger, prose=prose) for ledger in reputation_ledgers()
@@ -93,14 +101,20 @@ def _compare_ledgers(peer) -> List[Dict]:
     from src.identity.transport_stack import formal_difference
     from src.utils.ledger_descriptors import (
         payment_ledger,
+        payment_protocol,
         reputation_ledger,
         same_payment_ledger,
     )
+    from src.utils.payment_protocol import same_payment_protocol
 
     # A payment declaration is compared without its payee parameters (#626), as the
     # node compares it when it stores a peer's contract.
     declared = [
         (f"payment_contracts[{i}]", rate.contract.ledger, payment_ledger, same_payment_ledger)
+        for i, rate in enumerate(peer.payment_contracts)
+    ] + [
+        (f"payment_contracts[{i}].protocol", rate.contract.protocol, payment_protocol,
+         same_payment_protocol)
         for i, rate in enumerate(peer.payment_contracts)
     ] + [
         (f"reputation_proofs[{i}]", proof.ledger, reputation_ledger, same_declaration)
@@ -236,6 +250,9 @@ def _print_declaration(declaration: Dict) -> None:
     print("Ledgers in payment_contracts (Contract.Ledger)")
     for component in declaration["payment_ledgers"]:
         _print_component("ledger", component)
+    print("Payment protocols in payment_contracts (Contract.Protocol)")
+    for component in declaration["payment_protocols"]:
+        _print_component("protocol", component)
     print("Ledgers in reputation_proofs (Contract.Ledger)")
     for component in declaration["reputation_ledgers"]:
         _print_component("ledger", component)

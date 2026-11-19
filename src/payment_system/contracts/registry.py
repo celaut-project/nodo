@@ -142,9 +142,9 @@ class PaymentContract(Protocol):
     it separately, by module path.
     """
 
-    #: Stable, wallet-independent identity of the contract TYPE. Its sha3 is the
-    #: ``contract_hash`` peers match on; the per-instance wallet script travels apart.
-    CONTRACT: str
+    #: Stable, wallet-independent identity of the contract TYPE: the formal of its payment
+    #: protocol (#671). Its sha3 is the ``contract_hash`` peers match on; the per-instance
+    #: wallet script travels apart.
     CONTRACT_HASH: str
     #: The chain: the config block (`ledgers.<LEDGER>`) and the `--ledger` of the
     #: command line. A contract that settles on a network also has `ledger_tag()`, the
@@ -157,6 +157,8 @@ class PaymentContract(Protocol):
     #: this ledger, in `formal` (src/utils/ledger_descriptors.py). A peer's contract
     #: whose ledger does not match this one is not stored (manager._accept_contract).
     def ledger(self) -> "celaut_pb2.Contract.Ledger": ...
+    #: The payment protocol peers receive: the keys of the contract and how to pay.
+    def protocol(self) -> "celaut_pb2.Contract.Protocol": ...
     def init(self) -> None: ...
     def manager(self) -> None: ...
     #: ``ledger`` is the TAG, not the message: it is what a stored contract instance
@@ -171,10 +173,10 @@ class PaymentContract(Protocol):
 # with `isinstance`, because a module is not an instance of a Protocol and because the
 # error worth printing names the missing member.
 REQUIRED_MEMBERS = (
-    "CONTRACT",
     "CONTRACT_HASH",
     "LEDGER",
     "ledger",
+    "protocol",
     "init",
     "manager",
     "process_payment",

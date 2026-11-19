@@ -42,7 +42,6 @@ import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import Decimal
-from hashlib import sha3_256
 from threading import Lock
 from time import sleep
 from typing import Optional, Tuple
@@ -52,6 +51,8 @@ from src.payment_system import payee
 from src.payment_system.exceptions import PaymentNotConfirmed
 from src.utils import ledger_descriptors
 from src.utils.ledger_descriptors import bitcoin_payment_ledger as _bitcoin_ledger
+from src.utils.ledger_descriptors import bitcoin_payment_protocol as _bitcoin_protocol
+from src.utils.payment_protocol import protocol_hash
 from src.utils.ledger_descriptors import bitcoin_min_confirmations, declared_min_confirmations
 from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
@@ -69,16 +70,21 @@ from src.utils.bitcoin_units import (
     script_pubkey_from_address,
 )
 from src.utils.config import ConfigManager
-from src.utils.contract_xattrs import set_address, set_contract_type, set_script, set_token_id
+from src.utils.contract_xattrs import set_address, set_script, set_token_id
 from src.utils.logger import LOGGER
 
 env_manager = ConfigManager()
 
-# Stable, wallet-independent identity of the contract TYPE. Its sha3 is the
-# ``contract_hash`` peers match on; the specific wallet's `scriptPubKey` travels
-# per-instance as the raw ``script`` xattr, exactly as Ergo carries propositionBytes.
-CONTRACT = "p2wpkh"
-CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
+# Stable, wallet-independent identity of the contract TYPE: the formal of its payment
+# protocol (#671). Its sha3 is the ``contract_hash`` peers match on; the specific wallet's
+# `scriptPubKey` travels per-instance as the raw ``script`` xattr, exactly as Ergo carries
+# propositionBytes.
+CONTRACT_HASH = protocol_hash(_bitcoin_protocol())
+
+
+def protocol() -> celaut_pb2.Contract.Protocol:
+    """The payment protocol of this contract, as peers receive it."""
+    return _bitcoin_protocol()
 # The chain: the config block (`ledgers.bitcoin`) and the `--ledger` of the command
 # line. The ledger's identity is `ledger_tag()`.
 LEDGER = "bitcoin"
@@ -572,12 +578,10 @@ def init():
     if script is None:
         raise ValueError(f"{address} is not a segwit address, so it has no scriptPubKey")
 
-    contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
+    contract = celaut_pb2.Contract(ledger=_bitcoin_ledger(), protocol=_bitcoin_protocol())
     set_token_id(contract, NATIVE_ASSET)
     # Canonical value: the raw scriptPubKey a payer builds its output against.
     set_script(contract, script)
-    # Stable type identity for cross-node matching (its sha3 == CONTRACT_HASH).
-    set_contract_type(contract, CONTRACT.encode("utf-8"))
     # Derived address for local display only; never the source of truth.
     set_address(contract, address)
     sql_connection.SQLConnection().add_contract(contract=contract)
@@ -686,7 +690,7 @@ def payee_min_confirmations() -> int:
     before. An unusable value never reaches here: `manager._accept_contract` does not
     store a contract with one. If it does arrive, our own number is used too.
     """
-    declaration = payee.ledger()
+    declaration = payee.protocol()
     if declaration is not None:
         try:
             declared = declared_min_confirmations(declaration)
@@ -734,10 +738,9 @@ def await_payment(tx_id: str, script: bytes, chain=None) -> celaut_pb2.Contract:
             )
         if confirmations >= wanted:
             LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
-            contract = celaut_pb2.Contract(ledger=_bitcoin_ledger())
+            contract = celaut_pb2.Contract(ledger=_bitcoin_ledger(), protocol=_bitcoin_protocol())
             set_token_id(contract, NATIVE_ASSET)
             set_script(contract, script)
-            set_contract_type(contract, CONTRACT.encode("utf-8"))
             return contract
 
     raise TimeoutError(

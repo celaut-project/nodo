@@ -46,9 +46,9 @@ ConfigManager(config_path=str(_CONFIG)).load_config()
 try:
     from protos import celaut_pb2 as celaut  # noqa: E402
     from src.payment_system import ledgers  # noqa: E402
+    from src.utils.payment_protocol import protocol_id  # noqa: E402
     from src.utils.contract_xattrs import (  # noqa: E402
         get_address,
-        get_contract_type,
         get_script,
         get_token_id,
     )
@@ -66,7 +66,7 @@ PROPOSITION_BYTES = bytes.fromhex("0008cd03927647d5fab8e2e718601177a3528468fc97b
 ERGO_LEDGER = "ergo"
 BITCOIN_LEDGER = "bitcoin"
 
-# The stable, wallet-independent type string Ergo's contract is identified by. Stated
+# The stable, wallet-independent formal Ergo's contract is identified by. Stated
 # here rather than imported: the point of the type is that it is a fixed value both
 # sides derive the same hash from, so a test that read it from the code under test
 # could not notice it changing.
@@ -83,7 +83,10 @@ def _contract(contract=ERGO_CONTRACT, ledger="ergo", asset="ERG", rate=1,
     the module.
     """
     module = mock.Mock()
-    module.CONTRACT = contract
+    # The formal of the payment protocol is the identity of the contract type (#671).
+    module.protocol.return_value = celaut.Contract.Protocol(
+        tags=[f"{ledger}-test"], formal=contract.encode("utf-8")
+    )
     module.CONTRACT_HASH = sha3_256(contract.encode("utf-8")).hexdigest()
     module.LEDGER = ledger
     module.PROSE = f"{ledger} chain"
@@ -162,13 +165,14 @@ class PaymentContractAdvertisementTests(unittest.TestCase):
         [method] = self._advertised([(PROPOSITION_BYTES, ERGO_LEDGER)])
         self.assertNotEqual(get_script(method.contract), ERGO_CONTRACT.encode("utf-8"))
 
-    def test_contract_type_carries_the_stable_identity(self):
-        # add_contract keys on sha3(contract_type), so the receiving peer must
+    def test_the_protocol_carries_the_stable_identity(self):
+        # add_contract keys on sha3(protocol formal), so the receiving peer must
         # derive the same CONTRACT_HASH this node looks its instances up by.
         [method] = self._advertised([(PROPOSITION_BYTES, ERGO_LEDGER)])
-        contract_type = get_contract_type(method.contract)
-        self.assertEqual(contract_type, ERGO_CONTRACT.encode("utf-8"))
-        self.assertEqual(sha3_256(contract_type).hexdigest(), ERGO_CONTRACT_HASH)
+        identity = protocol_id(method.contract.protocol)
+        self.assertEqual(identity, ERGO_CONTRACT.encode("utf-8"))
+        self.assertEqual(sha3_256(identity).hexdigest(), ERGO_CONTRACT_HASH)
+        self.assertNotIn("contract_type", [kv.key for kv in method.contract.xattrs])
 
     def test_no_textual_address_is_advertised(self):
         # A readable address is derived at the AppKit boundary, never exchanged.
@@ -227,7 +231,7 @@ class MultipleContractAdvertisementTests(unittest.TestCase):
             {get_script(m.contract) for m in methods}, {PROPOSITION_BYTES}
         )
         self.assertEqual(
-            {get_contract_type(m.contract) for m in methods},
+            {protocol_id(m.contract.protocol) for m in methods},
             {ERGO_CONTRACT.encode("utf-8")},
         )
 

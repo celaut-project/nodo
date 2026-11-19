@@ -12,7 +12,8 @@ from src.gateway.iterables.reputation_proofs_iterable import ReputationProofsIte
 from src.gateway.iterables.push_reputation_proof_iterable import PushReputationProofIterable
 from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
-from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
+from src.utils.contract_xattrs import get_script, get_token_id
+from src.utils.payment_protocol import contract_protocol_id
 from src.tunneling.rpc_tunnel import (
     TunnelError,
     TunnelExhausted,
@@ -424,14 +425,17 @@ class Gateway(celaut_pb2_grpc.Gateway):
         payment, client_id = parse_with_client(request_iterator, method="Payable")
         require_caller(context, client_id)
         raw_script = get_script(payment.contract)
-        # Select the payment validator by the stable, wallet-independent contract_type; the
+        # Select the payment validator by the formal of the payment protocol (#671); the
         # raw ErgoTree/propositionBytes travels as ``script`` (never a textual address).
-        contract_type = get_contract_type(payment.contract) or raw_script
+        # A node that does not know the formal has no validator for it, and refuses.
+        protocol_id = contract_protocol_id(payment.contract)
+        if not protocol_id:
+            raise Exception('Error: the payment contract has no payment protocol.')
         try:
             valid = validate_payment_process(
                 amount=from_amount(payment.amount),
                 ledger=payment.contract.ledger,
-                contract=contract_type,
+                contract=protocol_id,
                 script=raw_script,
                 token=payment.deposit_token,
                 # Which asset this payment settles in is on the wire and used to be

@@ -41,11 +41,13 @@ def legacy(full_name):
 # revision with maps: bytes and uint64 values, message values, and entries whose value
 # is empty / 0 (what a proto3 scalar would drop without `optional`). The order of the
 # entries in each is the one that implementation happened to emit.
+# The same bytes with `xattrs` at its new number: #671 moved it from 2 to 3, and every entry
+# tag below is 0x1a (field 3) where the previous module wrote 0x12 (field 2).
 GOLDEN_CONTRACT = bytes.fromhex(
-    "0a060a046572676f12090a05656d7074791200121c0a08746f6b656e5f69641210746f6b"
-    "656e5f6964746f6b656e5f6964122e0a0e72657075746174696f6e5f6b6579121c726570"
-    "75746174696f6e5f6b657972657075746174696f6e5f6b657912160a0673637269707412"
-    "0c73637269707473637269707412190a0761646472657373120e61646472657373616464"
+    "0a060a046572676f1a090a05656d70747912001a1c0a08746f6b656e5f69641210746f6b"
+    "656e5f6964746f6b656e5f69641a2e0a0e72657075746174696f6e5f6b6579121c726570"
+    "75746174696f6e5f6b657972657075746174696f6e5f6b65791a160a0673637269707412"
+    "0c7363726970747363726970741a190a0761646472657373120e61646472657373616464"
     "72657373"
 )
 GOLDEN_SYSRESOURCES = bytes.fromhex(
@@ -58,7 +60,7 @@ GOLDEN_CONFIGURATION = bytes.fromhex(
     "6d69640a0e0a055a4542524112057a65627261"
 )
 GOLDEN_PEER = bytes.fromhex(
-    "0a0f120d0a08746f6b656e5f69641201aa22200a166370755f6d755f7065725f76637075"
+    "0a0f1a0d0a08746f6b656e5f69641201aa22200a166370755f6d755f7065725f76637075"
     "5f7365636f6e6412060a043131313122160a086275696c645f6d75120a0a083130303030"
     "30303022120a0e6e65745f6d755f7065725f6769621200221e0a1572616d5f6d755f7065"
     "725f6769625f7365636f6e6412050a03323737"
@@ -146,7 +148,7 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(
             sorted(LEGACY_MAPS),
             sorted([
-                ("legacy_celaut", "Contract", "xattrs", 2),
+                ("legacy_celaut", "Contract", "xattrs", 3),
                 ("legacy_celaut", "Service.Api.Slot", "mu_per_call", 4),
                 ("legacy_celaut", "Service.Container", "environment_variables", 7),
                 ("legacy_celaut", "Service.Container.Filesystem.ItemBranch", "xattrs", 5),
@@ -334,7 +336,7 @@ class NewBytesReadByOldNodesTests(unittest.TestCase):
         # and so does the id of anything re-serialized from them.
         contract = celaut.Contract()
         keyvalue.set_value(contract.xattrs, "k", b"")
-        self.assertEqual(contract.SerializeToString(), bytes.fromhex("12050a016b1200"))
+        self.assertEqual(contract.SerializeToString(), bytes.fromhex("1a050a016b1200"))
 
         sysres = celaut.Sysresources()
         keyvalue.set_value(sysres.benchmark, "a", 0)

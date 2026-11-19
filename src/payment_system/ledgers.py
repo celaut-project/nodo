@@ -3,7 +3,7 @@ from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_peer_contract_instances
 from src.utils.utils import to_amount
 from src.utils.logger import LOGGER
-from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
+from src.utils.contract_xattrs import set_script, set_token_id
 
 
 def register_local_contracts() -> None:
@@ -62,9 +62,9 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     constants are declared. It used to be read back out of the database, which only
     ever held a copy of them.
 
-    ``contract_type`` carries the stable, wallet-independent identity instead, so
-    the receiving peer's ``add_contract`` derives the same ``contract_hash`` this
-    node looks the instance up by.
+    The payment protocol (``contract.protocol()``) carries the stable, wallet-independent
+    identity instead, so the receiving peer's ``add_contract`` derives the same
+    ``contract_hash`` this node looks the instance up by (#671).
 
     This is a plain read of what is registered; recovering a missing registration is
     the caller's job (see ``src.gateway.utils``), so answering GetPeerInfo never
@@ -103,8 +103,8 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
 
             contract_ledger = celaut.Contract()
             contract_ledger.ledger.CopyFrom(declaration)
+            contract_ledger.protocol.CopyFrom(contract.protocol())
             set_script(contract_ledger, script)
-            set_contract_type(contract_ledger, contract.CONTRACT.encode("utf-8"))
             # The asset this method settles in, which is the whole reason a peer can
             # tell two methods of one contract apart -- and what `add_contract` on the
             # receiving side keys its row by.

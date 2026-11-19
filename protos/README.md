@@ -6,8 +6,11 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
 
 - `Contract`
   - `ledger = 1`
-  - `xattrs = 2` (`script`, `address`, `token_id`, `contract_type`, and on a
-    reputation proof `owner_public_key` and `owner_signature`)
+  - `protocol = 2` (`Contract.Protocol`: `tags`, `prose`, `formal`): the kind of payment
+    contract. Its `formal` defines the keys of `xattrs`. It replaces the xattr
+    `contract_type` (#671). See `docs/payment_protocols`.
+  - `xattrs = 3` (`script`, `address`, `token_id`, and on a reputation proof
+    `owner_public_key` and `owner_signature`)
 - `Service.Container`
   - `init` (`entry_path`, `policies`)
   - `config_declaration`
