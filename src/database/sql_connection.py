@@ -1683,16 +1683,16 @@ class SQLConnection(metaclass=Singleton):
         asked to stay down, and a top-up must not start it. True if the row changed,
         False if it already was hibernated or is not alive.
 
-        With ``reason`` `hibernated_by_window` (issue #344) the row also keeps the CPU and
-        RAM it had in the same statement, so the node can give them back when it wakes the
-        instance. The right-hand sides read the old row, so the saved figures are the live
-        ones.
+        The row also keeps the CPU and RAM it had in the same statement, for every reason
+        (issue #669), so the node can give them back when it wakes the instance: at the
+        next opening of the activity window (issue #344), or by a tunnel connection to a
+        slot with ``wake=on_tunnel``. The right-hand sides read the old row, so the saved
+        figures are the live ones.
         """
-        saves = reason == HIBERNATED_BY_WINDOW
         saved = (
             "saved_mem_limit = mem_limit, saved_cpu_period = cpu_period, "
             "saved_cpu_quota = cpu_quota, "
-        ) if saves else ""
+        )
         cursor = self._execute(f'''
             UPDATE local_instances
             SET {saved}suspended_at = COALESCE(suspended_at, CURRENT_TIMESTAMP),
@@ -1726,6 +1726,23 @@ class SQLConnection(metaclass=Singleton):
             ORDER BY id
         ''', (HIBERNATED_BY_WINDOW,))
         return [dict(row) for row in result.fetchall()]
+
+    def get_saved_resources(self, id: str) -> Optional[dict]:
+        """The CPU and RAM that a hibernated instance had (issue #669): mem_limit,
+        cpu_period and cpu_quota. None if the instance is not hibernated by a request or
+        by the activity window, or if its row holds no saved figures (a row that was
+        hibernated by a request before they were saved). An instance hibernated for no
+        balance is not woken by this: it has to pay first."""
+        row = self._execute('''
+            SELECT saved_mem_limit AS mem_limit, saved_cpu_period AS cpu_period,
+                   saved_cpu_quota AS cpu_quota
+            FROM local_instances
+            WHERE id = ? AND killed_at IS NULL AND suspended_at IS NOT NULL
+              AND suspended_reason IN (?, ?)
+        ''', (id, HIBERNATED, HIBERNATED_BY_WINDOW)).fetchone()
+        if row is None or not row["mem_limit"] or not row["cpu_quota"]:
+            return None
+        return dict(row)
 
     def mark_hibernated_unpaid(self, id: str) -> bool:
         """A hibernated instance could not pay its disk: its grace period starts now.
