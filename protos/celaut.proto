@@ -570,8 +570,6 @@ message Configuration {
     // no NUL byte. The key "__nodo_instance_name" is reserved: the node removes it and
     // uses its value as the name of the instance.
     repeated BytesKeyValue environment_variables = 1;
-    // Not used. Senders do not set it, and receivers ignore it.
-    repeated int32 spec_slot = 2;
     // The most that the start can cost the caller, in MU. The node charges all of it to
     // the caller, and only this: no node charges the build of the service to the account
     // of the caller. The node takes the cost of the build from this amount. What is left
@@ -582,7 +580,7 @@ message Configuration {
     // EstimatedCost.cost plus a default balance. The node calculates the default balance
     // from the resources at the start, for its own default number of maintenance
     // periods.
-    optional Amount initial_mu = 3;
+    optional Amount initial_mu = 2;
 }
 
 // What the node gives to an instance when it starts it. The node writes it, serialized,

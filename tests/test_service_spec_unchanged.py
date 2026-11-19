@@ -13,7 +13,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 SERVICE = [("prose", 1), ("container", 2), ("api", 3), ("network", 4),
            ("possible_environment_workload", 5), ("initial_environment_workload", 6)]
-CONFIGURATION = [("environment_variables", 1), ("spec_slot", 2), ("initial_mu", 3)]
+CONFIGURATION = [("environment_variables", 1), ("initial_mu", 2)]
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

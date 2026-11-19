@@ -420,7 +420,13 @@ class GatewayServicer(object):
         the node has no traffic allowance left, UNAVAILABLE when the descendant does not
         answer or is not alive, and INVALID_ARGUMENT for a request that is not correct.
         When a node below refuses after the stream started, the stream stops with no
-        more bytes.
+        more bytes. A caller that has no token can send an Instance.Uri at index 3 in place
+        of the TokenMessage: the address that the node published for a slot. The node opens
+        the stream only if the slot declares the setting tunnel_auth=address (see Policy and
+        docs/policies/). If the slot declares wake=on_tunnel, the node wakes a hibernated
+        instance and waits for it. In this mode there are no receipts, and every failure is
+        UNAVAILABLE, with one text: the caller does not learn if the address is unknown, if
+        the slot is closed to this way, or if the instance is asleep.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
