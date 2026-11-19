@@ -3,7 +3,7 @@ from src.reputation_system.contracts.ergo import proof_validation, transaction, 
 
 
 # Canonical reputation-proof register spec — enforced by reputation_proof.es and shared
-# by every ecosystem reader (reputation-systems web app, Game of Prompts, skills, forum):
+# by every ecosystem reader (reputation-systems web app, Game of Prompts, registry, forum):
 #   R4 Coll[Byte] = typeNftTokenId          (raw token-id bytes)
 #   R5 Coll[Byte] = uniqueObjectData         (raw bytes; for a node, its identity public key)
 #   R7 Coll[Byte] = owner propositionBytes   (raw ErgoTree — NOT blake2b256(propositionBytes))

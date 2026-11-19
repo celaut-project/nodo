@@ -13,7 +13,7 @@ then revised after the [follow-up](https://github.com/celaut-project/nodo/pull/3
   the map was asked for does not come from the encoding, it comes from the *consumer*
   not refusing unknown keys, which is the change below. Sorted lines are canonical by
   construction where a map is explicitly not, they are the one convention this field
-  has, and `celaut-project/skills` reads them with no protobuf dependency.
+  has, and `celaut-project/registry` reads them with no protobuf dependency.
   `protos/network_formal.proto` and its gencode are deleted.
 - **Unrecognized keys are preserved, not refused** (`_KNOWN_KEYS`' strict rejection is
   gone). They ride in `PowRequirement.extensions` as text and are re-emitted by
@@ -49,12 +49,12 @@ then revised after the [follow-up](https://github.com/celaut-project/nodo/pull/3
    IP/port candidates; HTTPS-only suggestions remain a documented limitation.
 3. **Reputation endpoint type: dropped from this PR.** The reader keyed R5 on a
    `blake2b(sorted tags ‖ formal)` digest of the domain, which does not match how
-   `celaut-project/skills` identifies a network: there R5 is either empty (a
+   `celaut-project/registry` identifies a network: there R5 is either empty (a
    self-contained Strict Definition) or an existing box id, and the descriptor lives
    in R9. An exact content digest is also not enumerable — it finds only boxes
    published for one byte-identical ask. Rather than ship a reader against a schema
    under revision, the source is removed and the alignment tracked in
-   [`skills#72`](https://github.com/celaut-project/skills/issues/72).
+   [`registry#72`](https://github.com/celaut-project/registry/issues/72).
 
 Generic untrusted peer/reputation suggestions are deliberately not granted as
 members of arbitrary domains without a domain verifier. Operator default seeds

@@ -478,7 +478,7 @@ asking for different blocks or different work are not in the same domain.
 
 > **Reading endpoint lists off the reputation ledger is deliberately out of scope
 > here.** How a communication domain is formalized on-chain is still being settled
-> with [`celaut-project/skills`](https://github.com/celaut-project/skills/issues/72),
+> with [`celaut-project/registry`](https://github.com/celaut-project/registry/issues/72),
 > and wiring a reader against a schema that is about to change would bake in the
 > version we are least sure of.
 

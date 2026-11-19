@@ -306,7 +306,7 @@ and the first that needs `match_networks` to compare more than tags.
 
 Consistent with what the docs already use as the example whitelist entry
 (`NETWORKS.md` `service_networks` block, `config.example.yaml:393` and `:424`),
-and with `network:<slug>` in celaut-project/skills
+and with `network:<slug>` in celaut-project/registry
 (`src/lib/strictDefinition.ts`, `ConceptKind` → `<kind>:<slug>`). It survives the
 existing policy globs unchanged: `pow:*`, `pow:ergo`, `!pow:bitcoin` all work as
 written today, because the policy globs the tag and nothing else
@@ -344,7 +344,7 @@ Three properties, in order of weight:
 2. **One convention for one field.** A second encoding for `formal` would make this
    the only place in the protocol with one, and every reader would have to know which
    descriptor it was holding before it could read the field.
-3. **Readable with no dependency.** `celaut-project/skills` is TypeScript with no
+3. **Readable with no dependency.** `celaut-project/registry` is TypeScript with no
    protobuf in it; a `split('\n')`/`indexOf('=')` reads this. It is also diffable by
    eye in a service spec, which the bytes of a map are not.
 
@@ -771,7 +771,7 @@ endpoint lists on the reputation ledger (open question 4), re-resolution,
 cross-checking.
 
 **Follow-ups, in order:** (1) endpoint lists on the reputation ledger, once the
-on-chain formalization of a communication domain is settled with `skills`; (2) v2
+on-chain formalization of a communication domain is settled with `registry`; (2) v2
 cross-checking *k* of *n*; (3) `NetworkResolution.status`, so `[]` stops meaning three
 different things (§2.9); (4) v3 header verification. Each is independently
 revertible, which is the point of the order.
@@ -789,7 +789,7 @@ revertible, which is the point of the order.
    `formal` empty) enough, or do you want the field-by-field ladder after all?
 4. **Reading endpoints off the reputation ledger** — deliberately **out of scope for
    v1**. How a communication domain is formalized on-chain is still being settled with
-   [`celaut-project/skills`](https://github.com/celaut-project/skills/issues/72): what
+   [`celaut-project/registry`](https://github.com/celaut-project/registry/issues/72): what
    identifies a network in R5, and whether `formal` carries celaut's sorted
    `key=value` body rather than a shape of its own. Wiring a reader against a schema
    that is about to change would bake in the version we are least sure of, so the

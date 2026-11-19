@@ -12,7 +12,7 @@ in nodo that reads ``formal`` at all (see
 Not a shape invented here -- a signature scheme's curve and an address's transport
 already state their determinate parameters this way, and a PoW requirement is the
 same kind of statement about the same kind of field. It costs a reader nothing to
-parse (``celaut-project/skills`` is JS with no protobuf dependency), it is diffable
+parse (``celaut-project/registry`` is JS with no protobuf dependency), it is diffable
 by eye in a service spec, and it makes the bytes canonical by construction, which
 neither a JSON object nor a protobuf map is -- map serialization is explicitly not
 canonical, which is why this repo's own ``canonical_peer_content_digest`` refuses

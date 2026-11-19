@@ -589,16 +589,16 @@ What a node publishes about another node is an opinion, so it is only as strong 
 what backs it. An [execution receipt](EXECUTION_RECEIPTS.md) is what a client can back
 one with: a statement the accused node signed itself, about one execution it ran.
 
-## Coverage / Benchmark / Result / Skill
+## Coverage / Benchmark / Result / Objective
 
-The four on-chain entity types in the **Unstoppable Skills** registry
-([celaut-project/skills](https://github.com/celaut-project/skills)):
+The four on-chain entity types in the **Celaut Registry**
+([celaut-project/registry](https://github.com/celaut-project/registry)):
 
-- **Skill** — a *problem* marker (e.g. "Optimal XAU/BTC Performance").
-- **Coverage** — a service that addresses (covers) a Skill.
-- **Benchmark** — a deterministic spec for how to measure a Skill.
+- **Objective** — a *problem* marker (e.g. "Optimal XAU/BTC Performance").
+- **Coverage** — a service that addresses (covers) an Objective.
+- **Benchmark** — a deterministic spec for how to measure an Objective.
 - **Result** — a comparative measurement submitted against a Benchmark.
 
-Agents "search for problems, not servers": pick a Skill, then read its Coverages,
-Benchmarks and Results to choose a service. These are read via the Celaut Skills
+Agents "search for problems, not servers": pick an Objective, then read its Coverages,
+Benchmarks and Results to choose a service. These are read via the Celaut Registry
 MCP server; see the bridge skill in [`skill/SKILL.md`](skill/SKILL.md).

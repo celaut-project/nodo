@@ -1,7 +1,7 @@
 ---
 name: celaut-bridge-skill
-version: 1.6.0
-description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), develop services locally with `ggconf` and package them into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
+version: 1.7.0
+description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), develop services locally with `ggconf` and package them into content-addressed microVM services, execute and observe workloads, and discover on-chain objectives in the Celaut Registry via the read-only MCP server (publishing is via the reputation-system TypeScript library).
 author: Community Contribution
 license: MIT
 compatibility:
@@ -15,7 +15,7 @@ system_requirements:
  - sudo
  - iptables
  - bc
- # node + npm: required only to run the Celaut Skills MCP server (§5).
+ # node + npm: required only to run the Celaut Registry MCP server (§5).
  - node
  - npm
  # Note: docker and java are NOT host requirements. Nodo auto-provisions both
@@ -30,10 +30,10 @@ specification) enables any AI agent to interface with the Celaut ecosystem. It
 provides automated context to install the Celaut node (`nodo`), package project
 services into reproducible **content-addressed** specifications, execute
 deterministic decentralized workloads inside **microVMs**, and discover
-**Unstoppable Skills** (Celaut Skills). The only agent-accessible read path to
-Skills is the read-only **Model Context Protocol (MCP)** server; publishing is
+on-chain **objectives** in the **Celaut Registry**. The only agent-accessible read path to
+objectives is the read-only **Model Context Protocol (MCP)** server; publishing is
 done with the `reputation-system` TypeScript library (there is **no `nodo` CLI
-for Skills**).
+for objectives**).
 
 > **Verified against** celaut-project/nodo `dev` @ `ecf07b59` on 2026-10-30.
 > This file lives in the repo it documents (`docs/skill/SKILL.md`) and links to
@@ -378,35 +378,35 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
 
 ---
 
-## 4. Unstoppable Skills (Celaut Skills) & MCP Integration
+## 4. Celaut Registry & MCP Integration
 
 While the [agentskills.io](https://agentskills.io/) specification defines the
-structure of *this* bridge skill file (`SKILL.md`), **Unstoppable Skills** (Celaut
-Skills) are the decentralized, on-chain "problem store" for AI agents on the
+structure of *this* bridge skill file (`SKILL.md`), the **Celaut Registry** (on-chain
+objectives) is the decentralized, on-chain "problem store" for AI agents on the
 Celaut + Ergo ecosystem.
 
 ### Philosophy: Searching for Problems, Not Servers
 
 In traditional architectures, agents look for centralized MCP servers or specific
-endpoints. In Celaut, **agents search for problems (Skills)** (e.g., `"Optimal
-XAU/BTC Performance"`, `"Sat-sorter"`). Each on-chain Skill entity automatically
+endpoints. In Celaut, **agents search for problems (objectives)** (e.g., `"Optimal
+XAU/BTC Performance"`, `"Sat-sorter"`). Each on-chain Objective entity automatically
 bundles:
 * **Coverage:** Verifiable Celaut services that solve the problem (`celaut:coverage:v1`).
 * **Benchmarks:** Deterministic specifications on how to measure performance (`celaut:benchmark:v1`).
 * **Results:** Immutable comparative performance metrics submitted against benchmarks (`celaut:result:v1`).
 * **Community Forum:** On-chain discussions and skin-in-the-game reputation validation.
 
-### The two interface surfaces (there is no Skills CLI)
+### The two interface surfaces (there is no registry CLI)
 
 * **Read (agent-accessible):** the official **read-only MCP server**. This is the
-  **only** way an agent reads the Skills registry. It does not mutate chain state,
+  **only** way an agent reads the Celaut Registry. It does not mutate chain state,
   so it is safe to wire into any MCP client. Under the hood the server queries the
   Ergo **explorer API** (`CELAUT_EXPLORER_API`, default
   `https://api.ergoplatform.com`) — the agent never reads the chain directly.
-* **Publish (not agent-facing):** creating Skill/Coverage/Benchmark/Result
+* **Publish (not agent-facing):** creating Objective/Coverage/Benchmark/Result
   entities is done with the **`reputation-system` TypeScript library**
   (`createReputationBox({...})`), from an app with a connected wallet. There is
-  **no `nodo` CLI** and no MCP tool for publishing (`createSkill` etc. are
+  **no `nodo` CLI** and no MCP tool for publishing (`createObjective` etc. are
   explicitly *not* exposed by the server).
 
 ### Registering & Running the MCP Server
@@ -414,8 +414,8 @@ bundles:
 Requires `node` + `npm`. Clone and start the server (stdio transport):
 
 ```bash
-git clone https://github.com/celaut-project/skills.git
-cd skills
+git clone https://github.com/celaut-project/registry.git
+cd registry
 npm install
 npm run mcp
 # equivalently, run the server binary directly over stdio:
@@ -425,7 +425,7 @@ node mcp/server.mjs
 Register it with an MCP client. For Claude / the `claude` CLI:
 
 ```bash
-claude mcp add celaut-skills -- node /absolute/path/to/skills/mcp/server.mjs
+claude mcp add celaut-registry -- node /absolute/path/to/registry/mcp/server.mjs
 ```
 
 Or add it to any client's `mcpServers` config (set `CELAUT_EXPLORER_API` only to
@@ -434,9 +434,9 @@ override the default explorer):
 ```json
 {
   "mcpServers": {
-    "celaut-skills": {
+    "celaut-registry": {
       "command": "node",
-      "args": ["/absolute/path/to/skills/mcp/server.mjs"],
+      "args": ["/absolute/path/to/registry/mcp/server.mjs"],
       "env": { "CELAUT_EXPLORER_API": "https://api.ergoplatform.com" }
     }
   }
@@ -445,24 +445,24 @@ override the default explorer):
 
 ### Available MCP Tools (and the required call order)
 
-**Start with `load_skills` — it is the only tool that takes no arguments.** The
-other four need a `skillBoxId` (or a `benchmarkId`) that you can only obtain from
-`load_skills` first. Typical flow: `load_skills` → pick a `boxId` →
-`load_skill_tree` (or the individual `load_*` tools).
+**Start with `load_objectives` — it is the only tool that takes no arguments.** The
+other four need an `objectiveBoxId` (or a `benchmarkId`) that you can only obtain from
+`load_objectives` first. Typical flow: `load_objectives` → pick a `boxId` →
+`load_objective_tree` (or the individual `load_*` tools).
 
 | Tool | Args | Returns (shape) |
 |---|---|---|
-| `load_skills` | *none* | `[{ boxId, profileId, name, prose, formal, tags[], domain, extendedSkillBoxIds[], sourceHash? }]` |
-| `load_coverages` | `{ skillBoxId }` | `[{ boxId, profileId, serviceId? }]` (direct + indirect, deduped by serviceId) |
-| `load_benchmarks` | `{ skillBoxId }` | `[{ id, profileId, skillBoxId, name, description, caseDescriptors[], performanceMetrics[], sourceHash? }]` |
+| `load_objectives` | *none* | `[{ boxId, profileId, name, prose, formal, tags[], domain, extendedObjectiveBoxIds[], sourceHash? }]` |
+| `load_coverages` | `{ objectiveBoxId }` | `[{ boxId, profileId, serviceId? }]` (direct + indirect, deduped by serviceId) |
+| `load_benchmarks` | `{ objectiveBoxId }` | `[{ id, profileId, objectiveBoxId, name, description, caseDescriptors[], performanceMetrics[], sourceHash? }]` |
 | `load_results` | `{ benchmarkId }` | `[{ id, profileId, benchmarkId, serviceId, data[], notes, timestamp, sourceHash? }]` |
-| `load_skill_tree` | `{ skillBoxId }` | `{ skill, coverages[], benchmarks: (Benchmark & { results: Result[] })[] }` |
+| `load_objective_tree` | `{ objectiveBoxId }` | `{ objective, coverages[], benchmarks: (Benchmark & { results: Result[] })[] }` |
 
 > Note: the registry's Type NFT ids are placeholders until real Type NFTs are
 > minted, so these queries may currently return empty arrays.
 
-Reference: [Celaut Skills README](https://github.com/celaut-project/skills/blob/main/README.md)
-and [MCP specification](https://github.com/celaut-project/skills/blob/main/MCP.md).
+Reference: [Celaut Registry README](https://github.com/celaut-project/registry/blob/main/README.md)
+and [MCP specification](https://github.com/celaut-project/registry/blob/main/MCP.md).
 
 ---
 
@@ -517,7 +517,7 @@ sudo nodo update
 4. **Strict Environment Variable Declaration:** When preparing `nodo execute -e <key> <value>`, **never guess environment variables**. Always run `nodo service_envs <service> --json` first to get the exact environment variables that the service declares. The node does not mark any as required, and the service may not work without all of them: give a value for each.
 5. **MicroVM Execution Awareness:** Understand that services execute inside isolated microVMs (`ch`). Do not attempt to use Docker commands to inspect running service instances; Docker is used only for the `nodo pack` build phase (and only locally in the opt-in `packer.local` mode) — never for execution.
 6. **Pre-flight Estimation:** Always run `nodo estimate <service>` before deploying unknown workloads to verify memory guard limits (`resources.at_most.mem_limit`) and ensure a sufficient balance.
-7. **Problem-First Discovery:** When seeking AI capabilities, query Unstoppable Skills **through the read-only MCP server** (start with `load_skills`, then `load_skill_tree`) to evaluate comparative `Results` and verifiable `Coverage` before selecting a service id. There is no `nodo` CLI for Skills; publishing (if ever needed) uses the `reputation-system` library, not this agent path.
+7. **Problem-First Discovery:** When seeking AI capabilities, query the Celaut Registry **through the read-only MCP server** (start with `load_objectives`, then `load_objective_tree`) to evaluate comparative `Results` and verifiable `Coverage` before selecting a service id. There is no `nodo` CLI for the registry; publishing (if ever needed) uses the `reputation-system` library, not this agent path.
 8. **Networks Are Inherited, and Under-declaring Fails Silently:** When writing
    or reviewing the manifests of a service **and its dependencies**, check the
    parent's `network` against every child's before packing. A child can only reach
@@ -566,5 +566,5 @@ Provenance & upstream (web links = provenance only, never on the critical path):
 
 * Nodo repository → [github.com/celaut-project/nodo](https://github.com/celaut-project/nodo)
 * Celaut paradigm (conceptual source of truth) → [github.com/celaut-project/paradigm](https://github.com/celaut-project/paradigm)
-* Unstoppable Skills registry & MCP → [github.com/celaut-project/skills](https://github.com/celaut-project/skills)
+* Celaut Registry & MCP → [github.com/celaut-project/registry](https://github.com/celaut-project/registry)
 * Agent Skills format → [agentskills.io](https://agentskills.io/)

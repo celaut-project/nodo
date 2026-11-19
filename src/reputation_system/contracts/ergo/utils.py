@@ -489,7 +489,7 @@ def owner_proposition_bytes(address) -> bytes:
     reputation_proof.es contract authorises the admin/spend path with
     ``INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }`` — so R7 must
     hold the *raw* propositionBytes, NOT a hash, or the owner could never spend the
-    box (and the reputation-system web app, Game of Prompts, skills, forum, … all
+    box (and the reputation-system web app, Game of Prompts, registry, forum, … all
     read R7 as the raw propositionBytes too). Single source of truth reused by the
     reputation transaction builder and the proof-ownership lookup.
     """
