@@ -285,6 +285,12 @@ message Service {
             // ConfigurationFile.gateway, the keys are the names of the rates of the node.
             // Only for information: the node does not charge it.
             repeated AmountKeyValue mu_per_call = 4;
+            // The settings of the slot: how a third party reaches it, and if a tunnel
+            // connection wakes a hibernated instance. A node that does not know a
+            // setting, or does not understand its value, does not run the service. See
+            // Policy and docs/policies/. Nodes older than this field ignore it. In
+            // ConfigurationFile.gateway the node ignores these settings.
+            repeated Policy policies = 5;
         }
 
         // The ports of the service.
