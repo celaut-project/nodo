@@ -8,7 +8,7 @@ metadata:
 
 Write one GitHub issue that holds the whole plan of a change. The issue replaces the old `openspec/changes` folders (proposal, specs, design). Do not create planning files in the repository.
 
-**Planning only.** Do not edit project code. Create or edit the issue, then stop.
+**Planning only.** Do not edit project code. Create or edit the issue, then stop. The code comes later, in a PR (see "Implementation goes in a PR").
 
 ## Where things live
 
@@ -19,6 +19,15 @@ Write one GitHub issue that holds the whole plan of a change. The issue replaces
 | `docs/*.md` | How the node works now, for users. Update it in the PR that changes the behavior. |
 
 If a PR departs from the issue, edit the issue (or write a comment) in the same session. Do not let the two disagree.
+
+## Implementation goes in a PR
+
+Push the implementation of an issue in a pull request. Do not push it to the default branch directly.
+
+1. Make a branch for the issue. Commit the code, the tests and the docs on it.
+2. Open a PR to the default branch. Write `Closes #N` in the PR description, so the PR links the issue and GitHub closes the issue on merge.
+3. Merge the PR only when the user agrees. Do not close the issue by hand: the merge closes it.
+4. Do the same for a small bugfix. A commit that has no PR does not close an issue.
 
 ## Steps
 
@@ -67,3 +76,4 @@ Track the work in the issue, not in a file. A short checklist in the body or in 
 - Do not state the same behavior in two places. Link `docs/*.md` pages instead of copying them.
 - Do not paste secrets, tokens or private data in an issue. Issues are public.
 - Never create, edit or close an issue without the user's agreement.
+- Never push the implementation of an issue without a PR that has `Closes #N`.
