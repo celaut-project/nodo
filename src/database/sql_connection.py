@@ -51,6 +51,7 @@ CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER
 # roll its score back with the missing event, which is a worse outcome than the feature
 # simply not being there. Everything created here is `IF NOT EXISTS`.
 TRACEABILITY_TABLES = (
+    "uri_slot_index",  # the published address of each live instance (#669)
     "payments",
     "reputation_events",
     "service_reputation",
@@ -298,10 +299,12 @@ def _ensure_traceability_tables(connection) -> None:
             forget_peer_rates_per_whole_unit,
             name_the_network_in_ledger_tags,
             retire_unmetered_column,
+            backfill_uri_slot_index,
         )
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
+        backfill_uri_slot_index(cursor)
         # `clients.unmetered` became `clients.unlimited` (issue #594); like the rest of
         # this, it cannot wait for `nodo migrate` after an in-place upgrade. First, so
         # that it is the one that adds the new column and copies the old values into it.
@@ -1275,10 +1278,43 @@ class SQLConnection(metaclass=Singleton):
                 "UPDATE local_instances SET serialized_instance = ? WHERE id = ? AND killed_at IS NULL",
                 (serialized_instance, id),
             )
+            self._index_published_uris(id, serialized_instance)
             return True
         except Exception as e:
             log.LOGGER(f"Could not store the instance definition of {id}: {e}")
             return False
+
+    def _index_published_uris(self, id: str, serialized_instance) -> None:
+        """Write the published ``Uri`` of the instance ``id`` in ``uri_slot_index`` (#669),
+        in place of the rows it had. An instance that cannot be read gets no rows."""
+        instance = celaut_pb2.Instance()
+        try:
+            instance.ParseFromString(
+                serialized_instance if isinstance(serialized_instance, bytes)
+                else bytes(serialized_instance)
+            )
+        except Exception:
+            instance = celaut_pb2.Instance()
+        rows = [
+            (uri.ip, uri.port, id, uri_slot.internal_port)
+            for uri_slot in instance.uri_slot for uri in uri_slot.uri
+        ]
+        self._execute("DELETE FROM uri_slot_index WHERE instance_id = ?", (id,))
+        for row in rows:
+            self._execute(
+                "INSERT OR REPLACE INTO uri_slot_index (ip, port, instance_id, internal_port) "
+                "VALUES (?, ?, ?, ?)", row,
+            )
+
+    def find_instance_by_uri(self, ip: str, port: int) -> Optional[Tuple[str, int]]:
+        """The live local instance that published ``ip:port`` and the internal port that
+        it maps to (#669), or None. A hibernated instance keeps its address."""
+        row = self._execute('''
+            SELECT i.instance_id, i.internal_port
+            FROM uri_slot_index i JOIN local_instances l ON l.id = i.instance_id
+            WHERE i.ip = ? AND i.port = ? AND l.killed_at IS NULL
+        ''', (ip, port)).fetchone()
+        return None if row is None else (row["instance_id"], int(row["internal_port"]))
 
     def get_local_instance_envs(self, id: str) -> Optional[str]:
         """
@@ -1910,6 +1946,8 @@ class SQLConnection(metaclass=Singleton):
             WHERE id = ? AND killed_at IS NULL
         ''', (reason, id))
         killed = cursor.rowcount > 0
+        if killed:
+            self._execute("DELETE FROM uri_slot_index WHERE instance_id = ?", (id,))
         self._forget_consumption(id, killed)
         return killed
 
