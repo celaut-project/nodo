@@ -543,7 +543,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def ServiceTunnel(self, request_iterator, context, **kwargs):
         try:
             # The stream carries three message types: the leading handshake, a
-            # TokenMessage (index 1) or a DescendantTunnel (index 2, #631), and the raw
+            # TokenMessage (index 1), a DescendantTunnel (index 2, #631) or a Uri (index 3,
+            # #669), and the raw
             # payload (index 0). All are parsed in memory — `partitions_message_mode=False`
             # would spill every payload chunk to a temporary file, which no byte pipe
             # can afford.
@@ -551,7 +552,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 iterator=BeeClient.parse(
                     request_iterator,
                     indices=rpc_input("ServiceTunnel"),
-                    partitions_message_mode={1: True, 2: True, 0: True},
+                    partitions_message_mode={1: True, 2: True, 3: True, 0: True},
                 ),
                 is_active=context.is_active,
                 caller=context.peer(),

@@ -186,7 +186,10 @@ GATEWAY_RPCS: Final[Dict[str, GatewayRpc]] = {
     "ServiceTunnel": GatewayRpc(
         # Index 2 in place of index 1 for a tunnel to a descendant (#631). An older node
         # refuses an index that it does not know, so it never opens the wrong instance.
-        input={1: celaut_pb2.TokenMessage, 2: celaut_pb2.DescendantTunnel, 0: bytes},
+        # Index 3 is an `Instance.Uri` for a tunnel with no token (#669), to a slot that
+        # declares `tunnel_auth=address`.
+        input={1: celaut_pb2.TokenMessage, 2: celaut_pb2.DescendantTunnel,
+               3: celaut_pb2.Instance.Uri, 0: bytes},
         # Index 2 only for a caller that set TokenMessage.receipts (#419): an older
         # client refuses an index it does not know, so the node never sends it unasked.
         output={0: bytes, 2: celaut_pb2.ExecutionReceipt},

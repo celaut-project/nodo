@@ -118,13 +118,13 @@ import socket
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Generator, Iterator, List, Optional, Tuple
+from typing import Callable, Dict, Generator, Iterator, List, Optional, Tuple
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.identity import execution_receipt
 from src.tunneling import inbound, logger
-from src.utils import host_limits
+from src.utils import host_limits, policies
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.execution_cost import traffic_charge_mu
 from src.utils.monetary import format_mu, prices
@@ -144,6 +144,12 @@ MAX_DATAGRAM_SIZE = 65535
 
 # How long to wait for a TCP service to accept the connection.
 CONNECT_TIMEOUT_S = 10.0
+
+# How long a tunnel by `Uri` waits for a hibernated instance: the wake and then the first
+# connection (#669). Fallback when network.TUNNEL_WAKE_TIMEOUT_S is unset.
+DEFAULT_WAKE_TIMEOUT_S = 60.0
+# The pause between two tries to connect while the instance starts.
+WAKE_CONNECT_RETRY_S = 0.25
 
 # The reader blocks in select() at most this long, so a cancelled RPC is noticed
 # even while the service is idle.
@@ -212,6 +218,9 @@ _BELOW_FAILED = "A node below did not open the tunnel."
 _BELOW_REFUSED = "A node below refused the tunnel."
 _NO_BUDGET = "The hop budget of this tunnel is used up."
 _NO_BALANCE = "The instance has not enough balance to open a tunnel."
+# The only text of a failure of a tunnel by `Uri` (#669). It does not say if the address is
+# unknown, if the slot is closed to this way, or if the instance is asleep or cannot wake.
+_NOT_REACHABLE = "The address is not reachable."
 _READ_FIRST = ("More than one branch can hold that descendant. Read the statement of the "
                "descendant first.")
 _MANY_BELOW = "More than one node below gave a statement of that descendant."
@@ -513,10 +522,12 @@ class Handshake:
     receipts: bool
     instance_ref: str = ""
     hops: Optional[int] = None
+    # The published address, for a tunnel with no token (#669): then ``token`` is empty.
+    uri: Optional[Tuple[str, int]] = None
 
 
 def _handshake(iterator: Iterator) -> Handshake:
-    """Consume the leading ``TokenMessage`` or ``DescendantTunnel`` and return it."""
+    """Consume the leading ``TokenMessage``, ``DescendantTunnel`` or ``Uri`` and return it."""
     first = next(iterator, None)
 
     if first is None:
@@ -534,6 +545,11 @@ def _handshake(iterator: Iterator) -> Handshake:
             instance_ref=first.instance_ref,
             hops=first.remaining_hops if first.HasField("remaining_hops") else None,
         )
+
+    if isinstance(first, celaut_pb2.Instance.Uri):
+        if not first.ip or first.port <= 0:
+            raise TunnelError("Uri carries no address: the ip and the port are required.")
+        return Handshake(token="", slot="", receipts=False, uri=(first.ip, first.port))
 
     if not isinstance(first, celaut_pb2.TokenMessage):
         raise TunnelError(
@@ -614,11 +630,32 @@ def _resolve_target(token: str, slot: str) -> Tuple[str, int, TransportProtocol]
             f"Slot {port} of the instance declares no host-supported transport."
         )
 
+    # `access=direct` closes the tunnel to this slot, with a token or without (#669).
+    slot_settings = _slot_settings(instance, port)
+    if slot_settings is None or slot_settings.access == policies.ACCESS_DIRECT:
+        raise TunnelRefused(f"Slot {port} is not reachable through the tunnel.")
+
     ip = sc.get_internal_ip(id=token)
     if not ip:
         raise TunnelError("The instance has no internal IP recorded.")
 
     return ip, port, transport
+
+
+def _slot_settings(
+    instance: celaut_pb2.Instance, port: int
+) -> Optional[policies.SlotAccess]:
+    """The settings of the slot ``port`` of ``instance`` (#669). None if the instance has no
+    such slot, or the slot holds a policy that this node does not accept."""
+    for api_slot in instance.api.slot:
+        if api_slot.port != port:
+            continue
+        try:
+            return policies.slot_access(api_slot)
+        except policies.PolicyError as e:
+            logger(f"{LOG_PREFIX} Slot {port} has a policy that this node does not accept: {e}")
+            return None
+    return None
 
 
 def _ref_label(token: str) -> str:
@@ -654,6 +691,156 @@ def _connect(ip: str, port: int, transport: TransportProtocol) -> socket.socket:
     # gets its own cancellation check from select() instead.
     conn.settimeout(None)
     return conn
+
+
+def _connect_waiting(
+    ip: str,
+    port: int,
+    transport: TransportProtocol,
+    wait_s: float,
+    is_active: Callable[[], bool],
+) -> socket.socket:
+    """``_connect``, tried again until ``wait_s`` have passed while the service starts (#669).
+
+    Only a refused connection is tried again: the guest is up and its service is not yet
+    listening. A cancelled RPC stops the wait.
+    """
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            return _connect(ip, port, transport)
+        except TunnelUnavailable:
+            if wait_s <= 0 or time.monotonic() >= deadline or not is_active():
+                raise
+            time.sleep(WAKE_CONNECT_RETRY_S)
+
+
+def _wake_timeout() -> float:
+    """How long a tunnel by ``Uri`` waits for a hibernated instance, read at use time."""
+    try:
+        configured = env_manager.get("network.TUNNEL_WAKE_TIMEOUT_S", DEFAULT_WAKE_TIMEOUT_S)
+        timeout = float(configured)
+        return timeout if timeout > 0 else DEFAULT_WAKE_TIMEOUT_S
+    except (TypeError, ValueError):
+        logger(
+            f"{LOG_PREFIX} network.TUNNEL_WAKE_TIMEOUT_S is not a number; "
+            f"using {DEFAULT_WAKE_TIMEOUT_S}s."
+        )
+        return DEFAULT_WAKE_TIMEOUT_S
+
+
+def _wake_saved(token: str) -> bool:
+    """Wake the hibernated instance ``token`` with its saved resources. True if it runs."""
+    from src.manager import hibernation  # not at import: the manager imports this package
+    return hibernation.wake_saved_instance(token)
+
+
+class _Wake:
+    """One wake of one instance, shared by every tunnel that arrives while it runs."""
+
+    def __init__(self, token: str):
+        self.done = threading.Event()
+        self.woken = False
+        self._thread = threading.Thread(
+            target=self._run, args=(token,), name="tunnel-wake", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self, token: str) -> None:
+        try:
+            self.woken = bool(_wake_saved(token))
+        except Exception as e:
+            logger(f"{LOG_PREFIX} Could not wake {_ref_label(token)}: {e}")
+        finally:
+            with _wakes_lock:
+                _wakes.pop(token, None)
+            self.done.set()
+
+
+_wakes: Dict[str, _Wake] = {}
+_wakes_lock = threading.Lock()
+
+
+def _wake_and_wait(token: str, timeout_s: float) -> bool:
+    """Wake the instance ``token`` and wait at most ``timeout_s``. True if it is awake.
+
+    Many callers share one wake. A wake that outlasts the wait goes on in the background,
+    so a later call can find the instance awake.
+    """
+    with _wakes_lock:
+        wake = _wakes.get(token)
+        if wake is None:
+            wake = _wakes[token] = _Wake(token)
+    if not wake.done.wait(timeout_s):
+        return False
+    # A caller that came after a wake that had just ended finds the instance awake.
+    return wake.woken or not sc.is_local_instance_hibernated(id=token)
+
+
+def _open_by_uri(
+    iterator: Iterator,
+    uri: Tuple[str, int],
+    is_active: Callable[[], bool],
+    caller: str,
+) -> Tuple[socket.socket, Generator[bytes, None, None]]:
+    """Open the tunnel to the slot that published ``uri``, with no token (#669).
+
+    The node finds the instance in its index of published addresses. It goes on only if the
+    slot declares ``tunnel_auth=address`` and an ``access`` that allows the tunnel. A
+    hibernated instance is woken only if the slot declares ``wake=on_tunnel``. The instance
+    pays. There are no receipts: they are signed with material that comes from the token.
+
+    Every failure is ``TunnelUnavailable`` with one text, so the caller learns nothing about
+    the instance (that it exists, or that it sleeps).
+    """
+    try:
+        return _open_by_uri_or_fail(iterator, uri, is_active, caller)
+    except TunnelUnavailable:
+        raise TunnelUnavailable(_NOT_REACHABLE) from None
+    except TunnelError as e:
+        logger(f"{LOG_PREFIX} Tunnel by address refused: {e}")
+        raise TunnelUnavailable(_NOT_REACHABLE) from None
+
+
+def _open_by_uri_or_fail(
+    iterator: Iterator,
+    uri: Tuple[str, int],
+    is_active: Callable[[], bool],
+    caller: str,
+) -> Tuple[socket.socket, Generator[bytes, None, None]]:
+    found = sc.find_instance_by_uri(*uri)
+    if found is None:
+        raise TunnelUnavailable(_NOT_REACHABLE)
+    token, internal_port = found
+
+    serialized_instance = sc.get_internal_instance(id=token)
+    if not serialized_instance:
+        raise TunnelUnavailable(_NOT_REACHABLE)
+    instance = celaut_pb2.Instance()
+    try:
+        instance.ParseFromString(serialized_instance)
+    except Exception:
+        raise TunnelUnavailable(_NOT_REACHABLE) from None
+
+    settings = _slot_settings(instance, internal_port)
+    if (settings is None
+            or settings.tunnel_auth != policies.TUNNEL_AUTH_ADDRESS
+            or settings.access == policies.ACCESS_DIRECT):
+        raise TunnelUnavailable(_NOT_REACHABLE)
+
+    wait_s = 0.0
+    if sc.is_local_instance_hibernated(id=token):
+        if settings.wake != policies.WAKE_ON_TUNNEL:
+            raise TunnelUnavailable(_NOT_REACHABLE)
+        wait_s = _wake_timeout()
+        started = time.monotonic()
+        logger(f"{LOG_PREFIX} Waking {_ref_label(token)} for a tunnel by address.")
+        if not _wake_and_wait(token, wait_s):
+            raise TunnelUnavailable(_NOT_REACHABLE)
+        wait_s = max(0.0, wait_s - (time.monotonic() - started))
+
+    return _open_local(iterator, token, str(internal_port), False, is_active, caller,
+                       wait_s=wait_s)
 
 
 def _pump_to_service(
@@ -899,9 +1086,13 @@ def service_tunnel(
     ``caller`` (the gateway passes ``context.peer()``) is who the stream is relayed
     for, as ``nodo tunnels --inbound`` lists it.
 
-    A ``DescendantTunnel`` handshake goes to ``_descendant_tunnel`` (#631).
+    A ``DescendantTunnel`` handshake goes to ``_descendant_tunnel`` (#631). A ``Uri``
+    handshake goes to ``_open_by_uri`` (#669).
     """
     handshake = _handshake(iterator)
+    if handshake.uri is not None:
+        logger(f"{LOG_PREFIX} Handshake by address.")
+        return _open_by_uri(iterator, handshake.uri, is_active, caller)
     if handshake.instance_ref:
         logger(f"{LOG_PREFIX} Handshake for descendant {handshake.instance_ref[:12]} "
                f"slot={handshake.slot}")
@@ -919,8 +1110,12 @@ def _open_local(
     is_active: Callable[[], bool],
     caller: str,
     instance_ref: str = "",
+    wait_s: float = 0.0,
 ) -> Tuple[socket.socket, Generator[bytes, None, None]]:
     """Open the tunnel to a local instance ``token``, which pays for it.
+
+    ``wait_s`` is how long to try to connect to a service that starts (#669). With 0 the
+    first failure is the answer.
 
     ``instance_ref`` is set when an ancestor opens it (#631): the receipts and the
     ledger rows name the execution by it, and the operator list shows it in place of
@@ -945,7 +1140,7 @@ def _open_local(
     if not meter.charge_open():
         raise TunnelExhausted(_NO_BALANCE)
 
-    conn = _connect(ip, port, transport)
+    conn = _connect_waiting(ip, port, transport, wait_s, is_active)
     logger(f"{LOG_PREFIX} {target}: tunnel established.")
 
     relay = _relay(
