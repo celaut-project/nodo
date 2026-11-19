@@ -216,30 +216,40 @@ def _offer_local_packer() -> bool:
     return True
 
 
-def _pack_local(directory: str) -> Optional[str]:
+def _pack_local(directory: str, fast: bool = False) -> Optional[str]:
     from src.commands.packer.zip_with_dockerfile.local_pack import pack_local
-    return pack_local(directory)
+    return pack_local(directory, fast=fast)
 
 
-def pack(directory: str, local: bool = False) -> Optional[str]:
+def pack(directory: str, local: bool = False, fast: bool = False) -> Optional[str]:
     """Pack a project into a Celaut service.
 
     Dispatches to the local BuildKit packer when ``local`` is True (`--local`) or
     ``packer.local: true``. Otherwise it uses the packer-service HTTP client (the
     default). If the packer service is not available, the operator can enable
     the local packer and continue.
+
+    ``fast`` (`nodo pack --fast`, or ``packer.fast: true``) skips per-large-file
+    blocking and inlines the whole rootfs into a single filesystem block, trading
+    pack-time memory and block deduplication for pack speed. Only the local
+    packer implements it -- the packer-service builds inside its own external
+    microVM, which this repo does not control -- so ``fast`` is ignored (with a
+    warning) on that path, unless the operator falls back to the local packer.
     """
     global _local_for_this_run
     if local:
         _local_for_this_run = True
     if _local_packer_enabled():
-        return _pack_local(directory)
+        return _pack_local(directory, fast=fast)
 
+    if fast:
+        from src.commands.packs import FAST_IGNORED
+        print(FAST_IGNORED)
     result = _pack_via_service(directory)
     if result is _SERVICE_UNAVAILABLE:
         if _offer_local_packer():
             pack_registry.use_packer("local")
-            return _pack_local(directory)
+            return _pack_local(directory, fast=fast)
         return None
     return result
 
