@@ -449,7 +449,9 @@ def gateway_component() -> Layer:
         "peer.digest.contracts": "'/'.join(sorted(contract_message~mu_per_unit.n))",
         "peer.digest.proofs": "'/'.join(sorted(contract_message))",
         "peer.digest.contract_message": "hex(ledger.formal)~','.join(sorted(ledger.tags))"
-                                        "~ledger.prose~';'.join(key=hex(value) by key)",
+                                        "~ledger.prose~hex(protocol.formal)"
+                                        "~','.join(sorted(protocol.tags))~protocol.prose"
+                                        "~';'.join(key=hex(value) by key)",
         "peer.digest.rates": "';'.join(key=amount.n by key)",
         "peer.digest.scheme": "';'.join(sorted(protocol(component)))",
         "peer.digest.resources": "'/'.join(sorted(protocol(architecture)~sysresources or '-'))",

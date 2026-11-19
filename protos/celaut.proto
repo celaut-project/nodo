@@ -125,7 +125,8 @@ message Uint64KeyValue {
 // ledger published by different wallets. (src/utils/contract_xattrs.py has the keys.)
 
 // A payment contract or a reputation proof on a ledger. The ledger gives the chain and
-// its rules. The xattrs give all the values that are specific to the ledger.
+// its rules. The protocol gives the kind of payment contract on that ledger. The xattrs
+// give the values of this contract.
 //
 // Keys of xattrs:
 // "script": the script bytes that receive the payment (on Ergo, the propositionBytes;
@@ -135,8 +136,6 @@ message Uint64KeyValue {
 // not set it now. A reader uses it only if there is no script.
 // "token_id": the asset: the name of the native asset (for example "ERG" or "BTC"), or
 // the id of the token. On a reputation proof, the token id of the proof.
-// "contract_type": an identifier of the kind of payment contract, as UTF-8 text. It
-// does not depend on the wallet. A reputation proof does not have it.
 // "owner_public_key" and "owner_signature": on a reputation proof only, the owner
 // attestation. The public key is the key that published the proof, in the encoding
 // that the ledger declaration gives. The signature is by that key, on a text that
@@ -144,6 +143,10 @@ message Uint64KeyValue {
 // the text. The attestation proves only that the owner of the key accepts this peer as
 // the holder of the proof. If the attestation is missing or does not verify, the
 // reader does not credit the proof to the peer.
+//
+// The formal field of the protocol of a payment contract defines the keys of xattrs of
+// that contract: what they mean, how they are encoded and which of them are required.
+// A reputation proof has no protocol. Its ledger declaration defines its keys.
 message Contract {
     // A description of a ledger, with the same three parts as DataFormat. The tags name
     // the ledger. The prose explains it. The formal field gives the network, the units
@@ -158,8 +161,27 @@ message Contract {
     }
     // The ledger of the contract.
     Ledger ledger = 1;
+    // The kind of payment contract on the ledger, with the same three parts as
+    // DataFormat. A ledger can have more than one kind of contract. The formal field
+    // defines the keys of xattrs and the way to pay. Nodes compare it byte for byte,
+    // and never the tags or the prose. A node that does not know the formal cannot pay
+    // to the contract, and it does not use the contract. A payment contract has a
+    // protocol with a formal that is not empty. A reputation proof does not have one.
+    message Protocol {
+        // Names of the kind of contract, for a reader. A node does not use them to
+        // identify it.
+        repeated string tags = 1;
+        // A text that explains the kind of contract to an implementer. A node does not
+        // use it to identify it.
+        string prose = 2;
+        // The definition of the kind of contract. It is what nodes compare. A formal
+        // that was published never changes: a new meaning is a new formal.
+        bytes formal = 3;
+    }
+    // The payment protocol of the contract.
+    Protocol protocol = 2;
     // The values that are specific to the ledger. See the keys above.
-    repeated BytesKeyValue xattrs = 2;
+    repeated BytesKeyValue xattrs = 3;
 }
 
 // Why a string and not an integer: a balance has no limit. Ergo defaults to 1 MU = 1

@@ -373,12 +373,12 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         if callable(report_id)
                         else nullcontext()
                     )
-                    # The payee's own declaration of this ledger, so the contract
+                    # The payee's own declaration of its payment protocol, so the contract
                     # waits for the confirmations the payee needs, not ours (#626).
-                    payee_ledger = None if plan.is_demo else payee.declared_ledger(
+                    payee_protocol = None if plan.is_demo else payee.declared_protocol(
                         peer_id, ledger or plan.ledger_tag, contract_hash, connection=sc,
                     )
-                    with reporting_context, id_context, payee.paying(payee_ledger):
+                    with reporting_context, id_context, payee.paying(payee_protocol):
                         contract_ledger = process_payment(
                             amount=amount,
                             deposit_token=deposit_token,
@@ -588,14 +588,14 @@ def _resume_outgoing_payment(row: dict) -> None:
 
         script = bytes.fromhex(row.get('address') or "")
         # As in a payment made now: wait for the payee's confirmations (#626).
-        payee_ledger = payee.declared_ledger(
+        payee_protocol = payee.declared_protocol(
             row.get('peer_id') or "", row.get('ledger') or "", row.get('contract_hash') or "",
             connection=sc,
         )
         contract_ledger = None
         while contract_ledger is None:
             try:
-                with payee.paying(payee_ledger):
+                with payee.paying(payee_protocol):
                     contract_ledger = awaiter(tx_id=tx_id, script=script)
             except JavaDependencyMissing:
                 log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")

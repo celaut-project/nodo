@@ -512,7 +512,7 @@ def get_node_public_key_hex() -> Optional[str]:
 
 
 def _canonical_contract_message(contract) -> str:
-    """Deterministic encoding of one ``Contract`` (a ledger plus its xattrs)."""
+    """Deterministic encoding of one ``Contract`` (a ledger, a protocol and its xattrs)."""
     xattrs = ";".join(
         f"{key}={bytes(value).hex()}" for key, value in keyvalue.items(contract.xattrs)
     )
@@ -520,6 +520,9 @@ def _canonical_contract_message(contract) -> str:
         contract.ledger.formal.hex(),
         ",".join(sorted(contract.ledger.tags)),
         contract.ledger.prose,
+        contract.protocol.formal.hex(),
+        ",".join(sorted(contract.protocol.tags)),
+        contract.protocol.prose,
         xattrs,
     ])
 

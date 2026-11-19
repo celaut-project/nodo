@@ -21,7 +21,6 @@ try:
     from src.database.sql_connection import SQLConnection
     from src.utils.contract_xattrs import (
         set_address,
-        set_contract_type,
         set_script,
         set_token_id,
     )
@@ -57,7 +56,9 @@ class AssetKeyedMethodTests(unittest.TestCase):
         contract = celaut_pb2.Contract(ledger=self.ledger)
         set_token_id(contract, asset)
         set_script(contract, script)
-        set_contract_type(contract, CONTRACT.encode("utf-8"))
+        contract.protocol.CopyFrom(
+            celaut_pb2.Contract.Protocol(tags=["ergo-p2pk"], formal=CONTRACT.encode("utf-8"))
+        )
         set_address(contract, ADDRESS)
         self.sql.add_contract(contract=contract, peer_id=peer_id, mu_per_unit=rate)
         return contract

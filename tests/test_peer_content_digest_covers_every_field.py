@@ -45,6 +45,7 @@ def _censused_messages():
         "Peer.SignatureScheme": celaut_pb2.Peer.SignatureScheme.DESCRIPTOR,
         "Contract": celaut_pb2.Contract.DESCRIPTOR,
         "Contract.Ledger": celaut_pb2.Contract.Ledger.DESCRIPTOR,
+        "Contract.Protocol": celaut_pb2.Contract.Protocol.DESCRIPTOR,
         "ContractRate": celaut_pb2.ContractRate.DESCRIPTOR,
         "Amount": celaut_pb2.Amount.DESCRIPTOR,
         "ArchitectureResources": celaut_pb2.ArchitectureResources.DESCRIPTOR,
@@ -85,6 +86,9 @@ def _announcement():
     rate.contract.ledger.tags.append("ergo")
     rate.contract.ledger.prose = "Ergo mainnet"
     rate.contract.ledger.formal = b"\x02"
+    rate.contract.protocol.tags.append("ergo-p2pk")
+    rate.contract.protocol.prose = "Pay to key"
+    rate.contract.protocol.formal = b"\x05"
     keyvalue.set_value(rate.contract.xattrs, "token_id", b"\xaa")
     rate.mu_per_unit.n = "1000000000"
     proof = peer.reputation_proofs.add()
@@ -133,6 +137,10 @@ MUTATIONS = {
     "Peer.Uri.Protocol.formal": lambda p: setattr(p.uri[0].protocol_stack[0], "formal", b"\xfe"),
     "Peer.SignatureScheme.components": lambda p: p.signature_scheme.components.add(tags=["schnorr"]),
     "Contract.ledger": lambda p: p.reputation_proofs[0].ledger.tags.append("cardano"),
+    "Contract.protocol": lambda p: p.payment_contracts[0].contract.protocol.tags.append("other"),
+    "Contract.Protocol.tags": lambda p: p.payment_contracts[0].contract.protocol.tags.append("p2key"),
+    "Contract.Protocol.prose": lambda p: setattr(p.payment_contracts[0].contract.protocol, "prose", "other"),
+    "Contract.Protocol.formal": lambda p: setattr(p.payment_contracts[0].contract.protocol, "formal", b"\xfb"),
     "Contract.xattrs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "script", b"\x99"),
     "Contract.Ledger.tags": lambda p: p.payment_contracts[0].contract.ledger.tags.append("mainnet"),
     "Contract.Ledger.prose": lambda p: setattr(p.payment_contracts[0].contract.ledger, "prose", "other"),

@@ -10,13 +10,13 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from hashlib import sha3_256
 
 from protos import celaut_pb2
 from src.commands import verify_reputation as vr
 from src.payment_system.mu_conversion import MatchingPaymentSystem
 from src.utils.contract_xattrs import get_token_id, set_token_id
-from src.utils.ledger_descriptors import ergo_tag
+from src.utils.ledger_descriptors import ergo_payment_protocol, ergo_tag
+from src.utils.payment_protocol import protocol_hash
 
 
 from src.commands import pay as pv
@@ -176,7 +176,7 @@ class OneCheckTwoAudiencesTests(unittest.TestCase):
 # The peer shares Ergo with us, at the shipped rate on both sides.
 PAY_SYSTEM = MatchingPaymentSystem(
     ledger_tag=ergo_tag(),
-    contract_hash=sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest(),
+    contract_hash=protocol_hash(ergo_payment_protocol()),
     local_mu_per_unit=1_000_000_000,
     peer_mu_per_unit=1_000_000_000,
     asset="ERG",

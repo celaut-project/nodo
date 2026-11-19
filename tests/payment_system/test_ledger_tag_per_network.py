@@ -13,7 +13,6 @@ Only SQLite in memory and a mocked config here. Nothing is signed or sent.
 """
 import sqlite3
 import unittest
-from hashlib import sha3_256
 from unittest import mock
 
 IMPORT_ERROR = None
@@ -24,13 +23,12 @@ try:
     from src.payment_system.contracts.bitcoin import interface as btc
     from src.payment_system.contracts.registry import PaymentMethod
     from src.utils import ledger_descriptors
-    from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
+    from src.utils.contract_xattrs import set_script, set_token_id
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
 MAINNET_GENESIS = "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
 OTHER_GENESIS = "0123456789abcdef" + "00" * 24
-P2WPKH_HASH = sha3_256(b"p2wpkh").hexdigest()
 
 
 def _configured(**values):
@@ -123,10 +121,12 @@ class StoredRowTests(unittest.TestCase):
 
     def _store(self, network, script, peer_id="LOCAL"):
         with _on(network):
-            contract = celaut_pb2.Contract(ledger=ledger_descriptors.bitcoin_payment_ledger())
+            contract = celaut_pb2.Contract(
+                ledger=ledger_descriptors.bitcoin_payment_ledger(),
+                protocol=ledger_descriptors.bitcoin_payment_protocol(),
+            )
         set_token_id(contract, "BTC")
         set_script(contract, script)
-        set_contract_type(contract, b"p2wpkh")
         self.sql.add_contract(contract=contract, peer_id=peer_id)
         return contract
 
@@ -134,7 +134,7 @@ class StoredRowTests(unittest.TestCase):
         with _on(network):
             declaration = ledger_descriptors.bitcoin_payment_ledger()
         return [script for script, _tag, _asset in self.sql.get_peer_contract_instances(
-            P2WPKH_HASH, peer_id, "BTC", ledger=declaration
+            btc.CONTRACT_HASH, peer_id, "BTC", ledger=declaration
         )]
 
     def test_the_row_keeps_the_formal_it_was_announced_with(self):
@@ -154,7 +154,7 @@ class StoredRowTests(unittest.TestCase):
         self.assertEqual(self._scripts("mainnet"), [old])
         # Without a ledger, every row: the old behaviour, for a caller that asks so.
         self.assertEqual(
-            len(list(self.sql.get_peer_contract_instances(P2WPKH_HASH, "LOCAL", "BTC"))), 2
+            len(list(self.sql.get_peer_contract_instances(btc.CONTRACT_HASH, "LOCAL", "BTC"))), 2
         )
 
     def test_a_row_with_the_tag_but_another_declaration_is_not_read(self):
@@ -165,24 +165,30 @@ class StoredRowTests(unittest.TestCase):
         )
         self.assertEqual(self._scripts("regtest"), [])
 
-    def test_the_payee_parameters_do_not_hide_a_peer_row(self):
-        # A peer that waits for another number of confirmations is on the same ledger.
+    def test_the_payee_parameters_do_not_change_the_hash_of_a_peer_row(self):
+        # A peer that waits for another number of confirmations uses the same protocol:
+        # its row has the same contract hash, so it is found (#626, #671).
         with _on("regtest"), _configured(**{
             "ledgers.bitcoin.NETWORK": "regtest",
             "ledgers.bitcoin.payments.MIN_CONFIRMATIONS": 6,
         }):
-            contract = celaut_pb2.Contract(ledger=ledger_descriptors.bitcoin_payment_ledger())
+            contract = celaut_pb2.Contract(
+                ledger=ledger_descriptors.bitcoin_payment_ledger(),
+                protocol=ledger_descriptors.bitcoin_payment_protocol(),
+            )
+        self.assertEqual(ledger_descriptors.declared_min_confirmations(contract.protocol), 6)
         set_token_id(contract, "BTC")
         set_script(contract, b"\x00\x14" + b"\x33" * 20)
-        set_contract_type(contract, b"p2wpkh")
         self.sql.add_contract(contract=contract, peer_id="peer-1")
         with _on("regtest"), _configured(**{
             "ledgers.bitcoin.NETWORK": "regtest",
             "ledgers.bitcoin.payments.MIN_CONFIRMATIONS": 1,
         }):
             declaration = ledger_descriptors.bitcoin_payment_ledger()
+            ours = ledger_descriptors.bitcoin_payment_protocol()
+        self.assertEqual(ledger_descriptors.declared_min_confirmations(ours), 1)
         self.assertEqual(len(list(self.sql.get_peer_contract_instances(
-            P2WPKH_HASH, "peer-1", "BTC", ledger=declaration
+            btc.CONTRACT_HASH, "peer-1", "BTC", ledger=declaration
         ))), 1)
 
 

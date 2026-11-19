@@ -2,61 +2,22 @@ from typing import Tuple
 
 from protos import celaut_pb2
 from hashlib import sha3_256
-from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
+from src.utils.contract_xattrs import set_script, set_token_id
 from src.utils.logger import LOGGER
 
-CONTRACT = """
-    PAYMENT AGREEMENT
+# The payment protocol of a simulated payment. Nothing is paid, so it only names itself (#671).
+_PROTOCOL = celaut_pb2.Contract.Protocol(
+    tags=["simulated"],
+    prose="Simulated payments: nothing settles, nothing moves.",
+    formal=b"payment.kind=simulated",
+)
+CONTRACT_HASH = sha3_256(_PROTOCOL.formal).hexdigest()
 
-    This Payment Agreement ("Agreement") is made and entered into on [Date] by and between:
 
-    Party A: [Full Name/Company Name], with a business address at [Address], hereinafter referred to as the "Payee."
+def protocol() -> celaut_pb2.Contract.Protocol:
+    return _PROTOCOL
 
-    Party B: [Full Name/Company Name], with a business address at [Address], hereinafter referred to as the "Payer."
 
-    1. Payment Terms:
-
-    1.1. The Payer agrees to pay the Payee the total sum of [Amount] in exchange for [Description of Service/Product].
-
-    1.2. Payment shall be made in the following manner:
-
-        Amount: [Insert Amount]
-        Due Date: [Insert Date or Payment Schedule]
-        Payment Method: [Bank Transfer, Check, etc.]
-
-    2. Late Payments:
-
-    2.1. In the event that payment is not made by the due date specified in this Agreement, the Payer agrees to pay a late fee of [Percentage]% of the outstanding balance per [Week/Month] that the payment is delayed.
-
-    3. Termination:
-
-    3.1. This Agreement may be terminated by mutual written consent of both parties.
-
-    3.2. If the Payer fails to make the payment as outlined above, the Payee reserves the right to terminate this Agreement and seek legal remedies.
-
-    4. Dispute Resolution:
-
-    4.1. In the event of a dispute arising from this Agreement, both parties agree to resolve the issue amicably through mediation or arbitration before pursuing legal action.
-
-    5. Governing Law:
-
-    5.1. This Agreement shall be governed by and construed in accordance with the laws of [State/Country].
-
-    6. Entire Agreement:
-
-    6.1. This Agreement constitutes the entire understanding between the parties and supersedes all prior discussions, agreements, or understandings of any kind.
-
-    IN WITNESS WHEREOF, the parties have executed this Agreement as of the date written below.
-
-    Payee Signature: _______________________________
-    Name: [Payee's Full Name]
-    Date: [Date]
-
-    Payer Signature: _______________________________
-    Name: [Payer's Full Name]
-    Date: [Date]
-""".encode('utf-8')
-CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
 # The TAG is the identity, here as everywhere else; `PROSE` and `FORMAL` only describe.
 LEDGER = "simulated"
 PROSE = "Simulated payments: nothing settles, nothing moves."
@@ -110,10 +71,9 @@ def process_payment(amount: int, deposit_token: str, ledger: str, script: bytes)
     set through the same helpers every other contract uses.
     """
     LOGGER(f"Process simulated payment for token {deposit_token} of {amount}")
-    contract = celaut_pb2.Contract(ledger=simulated_ledger)
+    contract = celaut_pb2.Contract(ledger=simulated_ledger, protocol=_PROTOCOL)
     set_token_id(contract, "")
     set_script(contract, script)
-    set_contract_type(contract, CONTRACT)
     return contract
 
 

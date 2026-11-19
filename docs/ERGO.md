@@ -481,10 +481,13 @@ publishes are exactly its normalised internal reputation.
 The payment system implements these fields:
 - `contract`/`script` xattr: the raw ErgoTree/propositionBytes of the box that receives each payment
 - `ledger`: The ledger, with the tag `"ergo-mainnet"` (or `"ergo-<genesis>"`, as above)
+- `protocol`: The payment protocol, with the tag `"ergo-p2pk"`. Its `formal` defines the
+  keys of `xattrs` and the way to pay. Nodes compare it byte for byte
+  ([payment_protocols](payment_protocols/README.md)).
 - `script`: the raw **ErgoTree / propositionBytes** of the wallet's P2PK payment box
 - `token_id`: which asset this method settles in — the reserved symbol `"ERG"` for
   native-ERG payments, or a token's 64-hex id. This is the third dimension of a payment
   method, and it is why a node can advertise `N + 1` `ContractRate`s that share
-  `ledger`, `contract_type` and `script` and differ only here and in `mu_per_unit`.
+  `ledger`, `protocol` and `script` and differ only here and in `mu_per_unit`.
   Advertising a token needs no proto change: it is another row, not a nested field, and
   ERG's row stays byte-identical to what it always was.

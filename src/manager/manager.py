@@ -639,14 +639,18 @@ def register_peer_instance(peer: celaut_pb2.Peer,
     return peer_id, True
 
 def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
-    """Whether a payment contract a peer advertises is on a ledger this node settles on.
+    """Whether a payment contract a peer advertises is one this node can pay to.
 
-    The ledger is compared on its whole declaration (``ledger_descriptors.
-    same_payment_ledger`` against ``ledger_descriptors.payment_ledger``), not on its tag:
-    a contract that says "ergo" but declares another network, other units or another
-    deposit binding cannot be paid by this node, and storing it would make the payer
-    try. A contract with only a tag (a node from before ledgers were declared) is
-    refused too: its rate is per whole unit, and it would be read here as per base unit.
+    Two things must match, each on its whole declaration and not on its tags. The ledger
+    (``ledger_descriptors.same_payment_ledger`` against ``ledger_descriptors.
+    payment_ledger``): a contract that says "ergo" but declares another network or other
+    units cannot be paid by this node. And the payment protocol
+    (``payment_protocol.same_payment_protocol`` against ``ledger_descriptors.
+    payment_protocol``, #671): the exact bytes of its formal. A node that does not know
+    the formal does not know the keys of the contract nor how to pay, so it does not use
+    the contract. A contract with only a tag (a node from before ledgers were declared)
+    is refused too: its rate is per whole unit, and it would be read here as per base
+    unit.
 
     The payee parameters (``payment.min_confirmations``, #626) are the peer's own choice
     and are not compared. They must be usable, though: a payee that asks for a number
@@ -655,24 +659,33 @@ def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
     from src.utils.ledger_descriptors import (
         payee_parameters_reason,
         payment_ledger,
+        payment_protocol,
         same_payment_ledger,
     )
+    from src.utils.payment_protocol import same_payment_protocol
 
     tags = list(contract.ledger.tags)
     ours = payment_ledger(tags[0]) if tags else None
-    if ours is not None and same_payment_ledger(contract.ledger, ours):
-        reason = payee_parameters_reason(contract.ledger)
-        if reason is None:
-            return True
+    if ours is None or not same_payment_ledger(contract.ledger, ours):
+        log.LOGGER(
+            f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags or '(none)'}: "
+            "it does not declare a ledger this node settles on."
+        )
+        return False
+    our_protocol = payment_protocol(tags[0])
+    if our_protocol is None or not same_payment_protocol(contract.protocol, our_protocol):
+        log.LOGGER(
+            f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags}: "
+            "its payment protocol is not one this node knows."
+        )
+        return False
+    reason = payee_parameters_reason(contract.protocol)
+    if reason is not None:
         log.LOGGER(
             f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags}: {reason}."
         )
         return False
-    log.LOGGER(
-        f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags or '(none)'}: "
-        "it does not declare a ledger this node settles on."
-    )
-    return False
+    return True
 
 
 def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int]]:
