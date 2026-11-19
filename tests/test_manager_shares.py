@@ -12,6 +12,7 @@ from unittest.mock import patch
 try:
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue
+    from tests.share_policies import add_share
     from src.manager import shares as ms
     from src.utils.registry_errors import ServiceNotInRegistry
     IMPORT_ERROR = None
@@ -25,8 +26,7 @@ def _dir(name, xattrs=None, children=None):
     b.filesystem.SetInParent()
     for c in (children or []):
         b.filesystem.branch.append(c)
-    for k, v in (xattrs or {}).items():
-        keyvalue.set_value(b.xattrs, k, v)
+    add_share(b, xattrs)
     return b
 
 

@@ -189,13 +189,11 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
             "environment_variables": {
                 "ZEBRA": {"prose": "z"}, "ALPHA": {"prose": "a", "tags": ["t"]},
             },
-            "init": {"xattrs": {"b": "Yg==", "a": "YQ=="}},
             "resources": {"at_most": {"benchmark": {"int_ops_per_sec": 5, "a": "7"}}},
         }, "api": {"slot": [{"port": 1, "mu_per_call": {"rpc": {"n": "10"}, "abc": {"n": "5"}}}]}})
 
         self.assertEqual([e.key for e in service.container.environment_variables], ["ALPHA", "ZEBRA"])
         self.assertEqual(keyvalue.get(service.container.environment_variables, "ALPHA").prose, "a")
-        self.assertEqual(keyvalue.to_dict(service.container.init.xattrs), {"a": b"a", "b": b"b"})
         self.assertEqual(
             keyvalue.to_dict(service.container.resources.at_most.benchmark),
             {"a": 7, "int_ops_per_sec": 5},
@@ -204,10 +202,12 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
 
     def test_the_order_an_author_types_keys_in_does_not_reach_the_bytes(self):
         def parsed(mapping):
-            return parse_service_spec({"container": {"init": {"xattrs": mapping}}})
+            return parse_service_spec(
+                {"container": {"resources": {"at_init": {"benchmark": mapping}}}}
+            )
 
-        forward = parsed({"a": "MQ==", "b": "Mg==", "c": "Mw=="})
-        backward = parsed({"c": "Mw==", "b": "Mg==", "a": "MQ=="})
+        forward = parsed({"a": 1, "b": 2, "c": 3})
+        backward = parsed({"c": 3, "b": 2, "a": 1})
         self.assertEqual(forward.SerializeToString(), backward.SerializeToString())
 
     def test_camel_case_field_names_are_found_too(self):
@@ -215,29 +215,30 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
         self.assertEqual(keyvalue.get(service.container.environment_variables, "A").prose, "p")
 
     def test_the_protobuf_list_shape_is_accepted_and_sorted(self):
-        service = parse_service_spec({"container": {"init": {"xattrs": [
-            {"key": "b", "value": "Yg=="}, {"key": "a", "value": "YQ=="},
-        ]}}})
-        self.assertEqual([e.key for e in service.container.init.xattrs], ["a", "b"])
+        service = parse_service_spec({"container": {"resources": {"at_init": {"benchmark": [
+            {"key": "b", "value": "2"}, {"key": "a", "value": "1"},
+        ]}}}})
+        self.assertEqual([e.key for e in service.container.resources.at_init.benchmark], ["a", "b"])
 
     def test_an_empty_value_written_explicitly_is_kept(self):
-        service = parse_service_spec({"container": {"init": {"xattrs": {"k": ""}}}})
-        self.assertTrue(service.container.init.xattrs[0].HasField("value"))
+        service = parse_service_spec({"container": {"resources": {"at_init": {"benchmark": {"k": 0}}}}})
+        entry = service.container.resources.at_init.benchmark[0]
+        self.assertTrue(entry.HasField("value"))
         again = celaut.Service()
         again.ParseFromString(service.SerializeToString())
-        self.assertTrue(again.container.init.xattrs[0].HasField("value"))
+        self.assertTrue(again.container.resources.at_init.benchmark[0].HasField("value"))
         self.assertEqual(again.SerializeToString(), service.SerializeToString())
 
     def test_a_list_that_repeats_a_key_is_refused(self):
         with self.assertRaisesRegex(ValueError, "repeats key.*a"):
-            parse_service_spec({"container": {"init": {"xattrs": [
-                {"key": "a", "value": "MQ=="}, {"key": "a", "value": "Mg=="},
-            ]}}})
+            parse_service_spec({"container": {"resources": {"at_init": {"benchmark": [
+                {"key": "a", "value": "1"}, {"key": "a", "value": "2"},
+            ]}}}})
 
     def test_an_object_that_repeated_a_key_in_the_file_is_refused(self):
-        text = '{"container": {"init": {"xattrs": {"a": "MQ==", "b": "Mg==", "a": "Mw=="}}}}'
+        text = '{"container": {"resources": {"at_init": {"benchmark": {"a": 1, "b": 2, "a": 3}}}}}'
         document = json.loads(text, object_pairs_hook=keyvalue.json_object_hook)
-        with self.assertRaisesRegex(ValueError, r"container\.init\.xattrs repeats key.*a"):
+        with self.assertRaisesRegex(ValueError, r"container\.resources\.at_init\.benchmark repeats key.*a"):
             parse_service_spec(document)
         # Read without the hook, the loader cannot know -- which is why the packer uses it.
         parse_service_spec(json.loads(text))
@@ -279,9 +280,9 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
         self.assertEqual(parse_benchmark({"a": 1, "b": 2}, "p"), {"a": 1, "b": 2})
 
     def test_json_objects_to_entries_does_not_modify_its_input(self):
-        document = {"container": {"init": {"xattrs": {"b": "Yg==", "a": "YQ=="}}}}
+        document = {"container": {"resources": {"at_init": {"benchmark": {"b": 2, "a": 1}}}}}
         keyvalue.json_objects_to_entries(document, celaut.Service.DESCRIPTOR)
-        self.assertEqual(list(document["container"]["init"]["xattrs"]), ["b", "a"])
+        self.assertEqual(list(document["container"]["resources"]["at_init"]["benchmark"]), ["b", "a"])
 
 
 @unittest.skipIf(
@@ -313,22 +314,6 @@ class PackerTests(unittest.TestCase):
                               '"mu_per_call": {"a": 1, "a": 2}}]}')
         with self.assertRaisesRegex(ValueError, r"api\[8\]\.mu_per_call repeats key.*a"):
             packer.parseApi()
-
-    def test_init_xattrs_are_read_from_the_object(self):
-        packer = self._packer('{"init": {"xattrs": {"b": "text", "a": "more"}}}')
-        self.assertEqual(
-            ZipContainerPacker._init_xattrs(packer.json["init"]), {"a": b"more", "b": b"text"}
-        )
-        keyvalue.from_dict(
-            packer.service.container.init.xattrs, ZipContainerPacker._init_xattrs(packer.json["init"])
-        )
-        self.assertEqual([e.key for e in packer.service.container.init.xattrs], ["a", "b"])
-        self.assertEqual(ZipContainerPacker._init_xattrs({}), {})
-
-    def test_init_xattrs_refuse_a_repeated_key(self):
-        packer = self._packer('{"init": {"xattrs": {"a": "1", "a": "2"}}}')
-        with self.assertRaisesRegex(ValueError, r"init\.xattrs repeats key.*a"):
-            ZipContainerPacker._init_xattrs(packer.json["init"])
 
     def test_benchmark_is_packed_sorted_and_refuses_a_repeated_key(self):
         packer = self._packer(

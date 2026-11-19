@@ -136,8 +136,7 @@ IPs and MACs are derived from the `vmachine_id` without DHCP to ensure stability
 `src/virtualizers/microvm/shares.py` materializes **parent → child shared
 filesystems** for microVM guests, whichever hypervisor booted them, over the
 virtio-fs backend in `src/virtualizers/microvm/virtiofs.py`.
-This is purely a backend: the semantics (the `shared`/`guest`/`access` /
-`share_tag`/`share_env` xattrs, share identity) live in
+This is purely a backend: the semantics (the `share` policy, share identity) live in
 `src/utils/shared_filesystems.py`, authorization in `src/manager/shares.py`, and
 the service specification never mentions VirtioFS. See
 [`docs/SHARED_FILESYSTEMS.md`](../../../docs/SHARED_FILESYSTEMS.md) for the full

@@ -16,26 +16,28 @@ The invariant, normatively:
 * A service that is not a child of the exporter can never attach to the
   directory. **A node that allows it is malicious.**
 
-Sharing is expressed through reserved xattrs on directories in
-``Container.Filesystem.ItemBranch.xattrs`` -- an execution-environment concern,
-never a ``Service.Network``:
+Sharing is expressed through the ``share`` policy (#670) on directories in
+``Container.Filesystem.ItemBranch.policies`` -- an execution-environment concern,
+never a ``Service.Network``. The value of the policy holds these keys (see
+``src/utils/policies.py`` and ``docs/policies/share.formal``):
 
-* ``shared=true`` — exported to the child instances this instance launches.
-* ``guest=true``  — inherited from the parent instance that launched this one.
+* ``role=shared`` — exported to the child instances this instance launches.
+* ``role=guest``  — inherited from the parent instance that launched this one.
+* ``role=network`` — shared with the members of a network (``network=<tag>``).
 * ``access=ro|rw`` — requested access mode for the mount (defaults to ``rw``).
-* ``share_tag=<tag>`` — logical name of the share, used instead of the path.
-* ``share_env=<ENV_VAR>`` — names an environment variable whose *value*
+* ``tag=<tag>`` — logical name of the share, used instead of the path.
+* ``env=<ENV_VAR>`` — names an environment variable whose *value*
   discriminates which concrete share this is.
 
 ``guest`` is an **execution precondition, not an option**: declaring that a
 directory is inherited means the service cannot run unless an instance exists
 that created that directory and exported it to this one. There is no
-"``required``" xattr because it is always required, and no partial start -- from
+"``required``" key because it is always required, and no partial start -- from
 inside a guest, a datanode writing to its local disk is indistinguishable from
 one whose share came up empty. The launch fails instead, before anything is
 spent; see ``src/manager/shares.py``.
 
-The last two xattrs mirror ``Service.Network``: ``share_tag`` plays the part of
+The last two keys mirror ``Service.Network``: ``tag`` plays the part of
 ``Network.tags``, the logical domain. A share is identified by::
 
     name          = share_tag        if declared, else the exported path
@@ -65,7 +67,7 @@ common parent -- for example six services that a script launches one by one. Her
 the scope that replaces the instance tree is a ``Service.Network``, so a share
 stays a channel inside a communication domain the Networks model already allows:
 
-* ``share_network=<tag>`` — this directory is shared with every instance that
+* ``role=network`` and ``network=<tag>`` — this directory is shared with every instance that
   declares the same network (the network entry of ``Service.network`` that
   carries ``<tag>``) and the same name, variable and value.
 
@@ -100,36 +102,15 @@ from typing import Dict, List, Mapping, Optional
 from protos import celaut_pb2 as celaut
 from src.manager.network_templates import Missing, substitute
 from src.utils.container_filesystem import FilesystemNotStored, load_container_filesystem
-from src.utils import keyvalue
-
-# Reserved sharing xattr keys (distinct from the POSIX metadata keys in
-# src/utils/filesystem_xattrs.py).
-SHARED_XATTR_KEY = "shared"
-GUEST_XATTR_KEY = "guest"
-ACCESS_XATTR_KEY = "access"
-SHARE_TAG_XATTR_KEY = "share_tag"
-SHARE_ENV_XATTR_KEY = "share_env"
-SHARE_NETWORK_XATTR_KEY = "share_network"
+from src.utils import policies
 
 # First field of the material a share id is hashed from. It keeps the two kinds
 # of share in separate id spaces whatever text the other fields carry.
 _PARENT_DOMAIN = "parent"
 _NETWORK_DOMAIN = "network"
 
-ACCESS_RO = "ro"
-ACCESS_RW = "rw"
-_VALID_ACCESS = (ACCESS_RO, ACCESS_RW)
-
-_TRUE_VALUES = frozenset({b"1", b"true", b"yes", b"on"})
-_FALSE_VALUES = frozenset({b"", b"0", b"false", b"no", b"off"})
-
-# A tag is matched literally, so what it may contain is pinned down rather than
-# left to whoever writes the xattr: surrounding whitespace is stripped, the match
-# is case-sensitive, and the charset excludes anything that could make two tags
-# look alike (no whitespace inside, no control characters, no separators). An
-# env var name is a POSIX one.
-_TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@:+-]*$")
-_ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ACCESS_RO = policies.ACCESS_RO
+ACCESS_RW = policies.ACCESS_RW
 
 
 @dataclass(frozen=True)
@@ -181,84 +162,23 @@ class ShareRef:
         return f"'{self.name}'{env_part}{network_part}"
 
 
-def _decode_bool(key: str, value) -> bool:
-    if isinstance(value, str):
-        value = value.encode("utf-8")
-    value = bytes(value).strip().lower()
-    if value in _TRUE_VALUES:
-        return True
-    if value in _FALSE_VALUES:
-        return False
-    raise ValueError(f"xattr '{key}' must be a boolean (true/false), got {value!r}")
+def declaration_from_policies(
+    path: str,
+    entry_policies,
+) -> "SharedDir | None":
+    """Build a :class:`SharedDir` for ``path`` if its policies declare a share.
 
-
-def _decode_access(xattrs: Mapping[str, bytes]) -> str:
-    raw = xattrs.get(ACCESS_XATTR_KEY)
-    if raw is None:
-        return ACCESS_RW  # default to read-write
-    if isinstance(raw, str):
-        raw = raw.encode("utf-8")
-    access = bytes(raw).strip().lower().decode("utf-8", "replace")
-    if access not in _VALID_ACCESS:
-        raise ValueError(
-            f"xattr '{ACCESS_XATTR_KEY}' must be one of {_VALID_ACCESS}, got '{access}'"
-        )
-    return access
-
-
-def _decode_name(path: str, key: str, xattrs: Mapping[str, bytes], pattern) -> str:
-    """Read an identifier-valued xattr (``share_tag`` / ``share_env``)."""
-    raw = xattrs.get(key)
-    if raw is None:
-        return ""
-    if isinstance(raw, str):
-        raw = raw.encode("utf-8")
-    value = bytes(raw).strip().decode("utf-8", "replace")
-    if not value:
-        raise ValueError(f"xattr '{key}' on '{path}' is declared but empty")
-    if not pattern.match(value):
-        raise ValueError(
-            f"xattr '{key}' on '{path}' is '{value}', which is not a valid "
-            f"{key} (expected {pattern.pattern})"
-        )
-    return value
-
-
-def declaration_from_xattrs(path: str, xattrs: Mapping[str, bytes]) -> "SharedDir | None":
-    """Build a :class:`SharedDir` for ``path`` if its xattrs opt into sharing.
-
-    Returns ``None`` when the directory declares none of ``shared``, ``guest``
-    and ``share_network``. Raises ``ValueError`` on a malformed / contradictory
-    declaration.
+    Returns ``None`` when the directory has no ``share`` policy. Raises ``ValueError``
+    (a :class:`~src.utils.policies.PolicyError`) on a policy that this node does not
+    accept: an unknown one, a repeated one, or a ``share`` value that is not valid.
     """
-    has_shared = SHARED_XATTR_KEY in xattrs and _decode_bool(SHARED_XATTR_KEY, xattrs[SHARED_XATTR_KEY])
-    has_guest = GUEST_XATTR_KEY in xattrs and _decode_bool(GUEST_XATTR_KEY, xattrs[GUEST_XATTR_KEY])
-    tag = _decode_name(path, SHARE_TAG_XATTR_KEY, xattrs, _TAG_PATTERN)
-    env = _decode_name(path, SHARE_ENV_XATTR_KEY, xattrs, _ENV_NAME_PATTERN)
-    network = _decode_name(path, SHARE_NETWORK_XATTR_KEY, xattrs, _TAG_PATTERN)
-    if not has_shared and not has_guest and not network:
-        # A tag or an env var names a share that is neither exported, imported
-        # nor shared in a network: nothing would ever be materialized, so it is a
-        # typo, not a declaration.
-        if tag or env:
-            raise ValueError(
-                f"directory '{path}' declares {SHARE_TAG_XATTR_KEY}/{SHARE_ENV_XATTR_KEY} "
-                f"without '{SHARED_XATTR_KEY}', '{GUEST_XATTR_KEY}' or "
-                f"'{SHARE_NETWORK_XATTR_KEY}'"
-            )
+    parsed = policies.check_list(
+        entry_policies, policies.PLACE_ENTRY_DIRECTORY, f"directory '{path}'"
+    )
+    value = parsed.get(policies.SHARE)
+    if value is None:
         return None
-    if has_shared and has_guest:
-        raise ValueError(
-            f"directory '{path}' cannot be both shared (export) and guest (import)"
-        )
-    if network and (has_shared or has_guest):
-        # A network share has no owner and no sides. Combined with a parent
-        # share it would be two identities for one directory.
-        raise ValueError(
-            f"directory '{path}' declares '{SHARE_NETWORK_XATTR_KEY}' together with "
-            f"'{SHARED_XATTR_KEY}' or '{GUEST_XATTR_KEY}'; a network share is "
-            f"symmetric and has neither side"
-        )
+    role = value["role"]
     # The path of a share is the one thing here a *remote* spec gets to point at
     # something outside itself: the node reads the exporter's subtree off the
     # image to seed the share with it. A protobuf carries whatever the sending
@@ -271,12 +191,12 @@ def declaration_from_xattrs(path: str, xattrs: Mapping[str, bytes]) -> "SharedDi
         )
     return SharedDir(
         path=path,
-        shared=has_shared,
-        guest=has_guest,
-        access=_decode_access(xattrs),
-        tag=tag,
-        env=env,
-        network=network,
+        shared=role == policies.ROLE_SHARED,
+        guest=role == policies.ROLE_GUEST,
+        access=value.get("access", ACCESS_RW),
+        tag=value.get("tag", ""),
+        env=value.get("env", ""),
+        network=value.get("network", ""),
     )
 
 
@@ -295,11 +215,16 @@ def _walk(
     for branch in fs.branch:
         path = _join(parent_path, branch.name)
         is_dir = branch.HasField("filesystem")
-        decl = declaration_from_xattrs(path, keyvalue.to_dict(branch.xattrs))
-        if decl is not None and not is_dir:
-            raise ValueError(
-                f"sharing xattrs (shared/guest/share_network) are only valid on directories; "
-                f"'{path}' is not a directory"
+        if is_dir:
+            decl = declaration_from_policies(path, branch.policies)
+        else:
+            # A file, a link or a device: no setting is valid on it.
+            policies.check_list(branch.policies, policies.PLACE_ENTRY_FILE, f"entry '{path}'")
+            decl = None
+        if is_dir and branch.filesystem.policies:
+            # A nested filesystem is not separately mounted: nothing there could be honoured.
+            policies.check_list(
+                branch.filesystem.policies, policies.PLACE_NESTED, f"the subdirectory '{path}'"
             )
         if decl is not None and enclosing is not None:
             # Nesting is how a re-export would be smuggled in: a `shared` inside
@@ -342,7 +267,7 @@ def _reject_duplicate_names(declarations: List[SharedDir]) -> None:
             if clash is not None:
                 raise ValueError(
                     f"'{clash}' and '{d.path}' are both {side} under the name "
-                    f"'{d.share_name}'; give them different {SHARE_TAG_XATTR_KEY} values"
+                    f"'{d.share_name}'; give them different tags"
                 )
             seen[d.share_name] = d.path
 
@@ -359,10 +284,11 @@ def declarations_for_filesystem(
     Same walk and same rules either way, so a declaration the packer refuses is
     exactly one a node would have refused later.
 
-    Raises ``ValueError`` on anything a spec alone can be judged on: a malformed
-    xattr, a non-directory, a nested declaration, or two of them resolving to one
+    Raises ``ValueError`` on anything a spec alone can be judged on: a policy that this node
+    does not accept, a share on a non-directory, a nested declaration, or two of them resolving to one
     share.
     """
+    policies.check_list(filesystem.policies, policies.PLACE_ROOT, "the root filesystem")
     declarations = _walk(filesystem, "/", None)
     _reject_duplicate_names(declarations)
     return declarations
@@ -371,10 +297,13 @@ def declarations_for_filesystem(
 def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     """All shared/guest directory declarations in a service's container fs.
 
-    Raises ``ValueError`` on anything a spec alone can be judged on: a malformed
-    xattr, a non-directory, a nested declaration, two of them resolving to one
+    Raises ``ValueError`` on anything a spec alone can be judged on: a policy that this node
+    does not accept, a share on a non-directory, a nested declaration, two of them resolving to one
     share, or a ``share_network`` naming a network the service does not declare.
     """
+    # Before the tree is read: a service that this node does not understand is
+    # refused whether or not it holds the tree.
+    policies.check_list(service.container.init.policies, policies.PLACE_INIT, "init")
     try:
         filesystem = load_container_filesystem(service)
     except FilesystemNotStored:

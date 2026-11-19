@@ -1435,8 +1435,8 @@ def build(
     fs_hash_types = filesystem_hash_types(service)
 
     # Read once, from the ROOT Filesystem -- the one `container.filesystem` points
-    # at. A nested Filesystem is a subdirectory and is not separately mounted, so
-    # a read_mode set on one describes nothing and is ignored.
+    # at. A nested Filesystem is a subdirectory and is not separately mounted, so it
+    # can have no policy: the launch refuses a service that has one (#670).
     #
     # Read here rather than at the mkfs call because it decides two things before
     # that: whether the metadata contract is mandatory for this tree, and whether

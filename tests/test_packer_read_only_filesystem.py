@@ -35,10 +35,10 @@ try:
     load_example_config()
 
     from protos import celaut_pb2 as celaut
-    from src.utils import keyvalue
+    from src.utils import keyvalue, policies
+    from tests.share_policies import add_share
     from src.utils.filesystem_xattrs import (
         FILESYSTEM_METADATA_KEYS,
-        READ_MODE_KEY,
         READ_MODE_RO,
         FilesystemNodeMetadata,
         filesystem_metadata_xattrs,
@@ -71,13 +71,17 @@ def _branch(name, *, directory=False, xattrs=None, with_metadata=True):
     branch.name = name
     if with_metadata:
         keyvalue.update(branch.xattrs, filesystem_metadata_xattrs(_metadata(0o40755 if directory else 0o100644)))
-    for key, value in (xattrs or {}).items():
-        keyvalue.set_value(branch.xattrs, key, value)
+    add_share(branch, xattrs)
     if directory:
         branch.filesystem.CopyFrom(celaut.Service.Container.Filesystem())
     else:
         branch.file = b"x"
     return branch
+
+
+def _policies_of(tree):
+    """The policies of the root of ``tree``, validated by the reader that a node uses."""
+    return policies.check_list(tree.policies, policies.PLACE_ROOT, "the root filesystem")
 
 
 def _tree(*branches):
@@ -107,7 +111,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
+        self.assertEqual(_policies_of(tree), {"read_mode": "ro"})
         # And it reads back through the helper the builder actually uses.
         self.assertEqual(read_mode(tree), READ_MODE_RO)
 
@@ -122,9 +126,9 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
-        self.assertNotIn(READ_MODE_KEY, outer.filesystem.xattrs)
-        self.assertNotIn(READ_MODE_KEY, inner_dir.filesystem.xattrs)
+        self.assertEqual(_policies_of(tree), {"read_mode": "ro"})
+        self.assertEqual(len(outer.filesystem.policies), 0)
+        self.assertEqual(len(inner_dir.filesystem.policies), 0)
 
     # -- absent / false ----------------------------------------------------- #
 
@@ -136,16 +140,14 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({})._apply_read_only_filesystem(tree)
 
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
-        self.assertEqual(len(tree.xattrs), 0)
+        self.assertEqual(len(tree.policies), 0)
 
     def test_false_writes_no_key_at_all(self):
         tree = _tree(_branch("service.py"))
 
         _packer({READ_ONLY_FILESYSTEM_KEY: False})._apply_read_only_filesystem(tree)
 
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
-        self.assertEqual(len(tree.xattrs), 0)
+        self.assertEqual(len(tree.policies), 0)
 
     def test_an_absent_property_serializes_identically_to_before(self):
         # The hash-stability claim, made concrete: the bytes of a tree packed
@@ -204,14 +206,14 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
+        self.assertEqual(_policies_of(tree), {"read_mode": "ro"})
 
     def test_true_plus_a_network_share_is_allowed(self):
         tree = _tree(_branch("mnt", directory=True, xattrs={"share_network": b"net"}))
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
+        self.assertEqual(_policies_of(tree), {"read_mode": "ro"})
 
     def test_an_inherited_guest_directory_is_allowed(self):
         # Only *exporting* is incompatible. A `guest` directory is mounted from the
@@ -221,7 +223,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
+        self.assertEqual(_policies_of(tree), {"read_mode": "ro"})
 
     def test_a_shared_export_without_the_property_is_untouched(self):
         # The refusal is conditional on read_only_filesystem, not a new rule for
@@ -230,7 +232,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({})._apply_read_only_filesystem(tree)
 
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
+        self.assertEqual(len(tree.policies), 0)
 
     # -- refusal: incomplete per-entry metadata ----------------------------- #
 
@@ -247,7 +249,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn(READ_ONLY_FILESYSTEM_KEY, message)
         self.assertIn("metadata", message)
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
+        self.assertEqual(len(tree.policies), 0)
 
     def test_metadata_incomplete_deeper_in_the_tree_is_refused(self):
         outer = _branch("bin", directory=True)
@@ -265,7 +267,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({})._apply_read_only_filesystem(tree)
 
-        self.assertNotIn(READ_MODE_KEY, tree.xattrs)
+        self.assertEqual(len(tree.policies), 0)
 
     def test_the_packer_emits_every_metadata_key_on_every_branch(self):
         # The finding that makes the gate a no-op for this packer: the same call

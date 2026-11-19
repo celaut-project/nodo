@@ -1,6 +1,6 @@
-"""`service.json`'s `shared_filesystems` property -> reserved xattrs on directory branches.
+"""`service.json`'s `shared_filesystems` property -> `share` policies on directory branches.
 
-`src/utils/shared_filesystems.py` defines the xattrs and the node consumes them, but
+`src/utils/shared_filesystems.py` defines the share policy and the node consumes it, but
 nothing in the packer wrote them. This pins the packer half:
 
 * absent or empty writes nothing, so no existing service gets a new id;
@@ -23,7 +23,7 @@ try:
 
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue
-    from src.utils.filesystem_xattrs import READ_MODE_KEY
+    from src.utils import policies
     from src.utils.shared_filesystems import declarations_for_filesystem, declarations_for_service
     from src.packers.zip_with_dockerfile import (
         READ_ONLY_FILESYSTEM_KEY,
@@ -64,6 +64,13 @@ def _packer(service_json):
     return packer
 
 
+def _share(branch):
+    """The parsed `share` policy of a branch, read as a node reads it."""
+    return policies.check_list(
+        branch.policies, policies.PLACE_ENTRY_DIRECTORY, "a directory"
+    ).get(policies.SHARE)
+
+
 def _declare(*entries):
     return {SHARED_FILESYSTEMS_KEY: list(entries)}
 
@@ -83,21 +90,23 @@ class SharedFilesystemsPropertyTests(unittest.TestCase):
 
     # -- roles --------------------------------------------------------------- #
 
-    def test_shared_role_sets_the_xattrs(self):
+    def test_shared_role_writes_the_share_policy(self):
         tree = _tree(_dir("shared"))
 
         _packer(_declare(
             {"path": "/shared", "role": "shared", "tag": "demo-share", "env": "SHARE_ID", "access": "rw"}
         ))._apply_shared_filesystems(tree)
 
-        xattrs = keyvalue.to_dict(tree.branch[0].xattrs)
-        self.assertEqual(xattrs["shared"], b"true")
-        self.assertEqual(xattrs["share_tag"], b"demo-share")
-        self.assertEqual(xattrs["share_env"], b"SHARE_ID")
-        self.assertEqual(xattrs["access"], b"rw")
-        self.assertNotIn("guest", xattrs)
+        self.assertEqual(
+            _share(tree.branch[0]),
+            {"role": "shared", "tag": "demo-share", "env": "SHARE_ID", "access": "rw"},
+        )
+        self.assertEqual(len(tree.branch[0].policies), 1)
+        self.assertEqual(bytes(tree.branch[0].policies[0].formal), policies.SHARE_FORMAL)
+        # The xattrs are file attributes: the packer writes no setting there.
+        self.assertEqual(len(tree.branch[0].xattrs), 0)
 
-    def test_guest_role_sets_the_xattrs_on_a_nested_directory(self):
+    def test_guest_role_writes_the_policy_on_a_nested_directory(self):
         tree = _tree(_dir("mnt", _dir("from-parent")))
 
         _packer(_declare(
@@ -105,14 +114,13 @@ class SharedFilesystemsPropertyTests(unittest.TestCase):
         ))._apply_shared_filesystems(tree)
 
         # protobuf copies a branch on append, so read it back from the tree.
-        xattrs = keyvalue.to_dict(tree.branch[0].filesystem.branch[0].xattrs)
-        self.assertEqual(xattrs["guest"], b"true")
-        self.assertEqual(xattrs["share_tag"], b"demo-share")
-        self.assertEqual(xattrs["access"], b"ro")
-        self.assertNotIn("shared", xattrs)
-        self.assertEqual(len(tree.branch[0].xattrs), 0)
+        self.assertEqual(
+            _share(tree.branch[0].filesystem.branch[0]),
+            {"role": "guest", "tag": "demo-share", "access": "ro"},
+        )
+        self.assertEqual(len(tree.branch[0].policies), 0)
 
-    def test_network_role_sets_share_network_and_no_side(self):
+    def test_network_role_writes_the_network_role(self):
         tree = _tree(_dir("data"))
         service_json = _declare(
             {"path": "/data", "role": "network", "network": "hdfs", "tag": "hdfs-data"}
@@ -122,8 +130,8 @@ class SharedFilesystemsPropertyTests(unittest.TestCase):
         _packer(service_json)._apply_shared_filesystems(tree)
 
         self.assertEqual(
-            keyvalue.to_dict(tree.branch[0].xattrs),
-            {"share_network": b"hdfs", "share_tag": b"hdfs-data"},
+            _share(tree.branch[0]),
+            {"role": "network", "network": "hdfs", "tag": "hdfs-data"},
         )
 
     def test_network_role_requires_a_declared_network(self):
@@ -150,14 +158,14 @@ class SharedFilesystemsPropertyTests(unittest.TestCase):
 
         _packer(_declare({"path": "/shared", "role": "shared"}))._apply_shared_filesystems(tree)
 
-        self.assertEqual(keyvalue.to_dict(tree.branch[0].xattrs), {"shared": b"true"})
+        self.assertEqual(_share(tree.branch[0]), {"role": "shared"})
 
     def test_path_is_normalized(self):
         tree = _tree(_dir("shared"))
 
         _packer(_declare({"path": "/shared/", "role": "shared"}))._apply_shared_filesystems(tree)
 
-        self.assertEqual(keyvalue.to_dict(tree.branch[0].xattrs), {"shared": b"true"})
+        self.assertEqual(_share(tree.branch[0]), {"role": "shared"})
 
     # -- missing directory ---------------------------------------------------- #
 

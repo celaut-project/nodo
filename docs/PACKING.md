@@ -399,10 +399,7 @@ The `service.json` file defines **runtime metadata** for the service: its archit
         }
     },
     "init": {
-        "entry_path": ["usr", "local", "bin", "start.sh"],
-        "xattrs": {
-            "custom.flag": "enabled"
-        }
+        "entry_path": ["usr", "local", "bin", "start.sh"]
     },
     "config_declaration": {
         "path": ["__config__"]
@@ -643,18 +640,21 @@ a top-level boolean in `service.json`:
 The packer translates that into
 
 ```
-Service.Container.Filesystem.xattrs["read_mode"] = "ro"
+Service.Container.Filesystem.policies = [ Policy{ formal = <read_mode.formal>, value = "ro" } ]
 ```
 
-That is an xattr on the **filesystem itself** — a sibling of `branch`, distinct from
+That is a policy on the **filesystem itself** — a sibling of `branch`, distinct from
 the per-entry `ItemBranch.xattrs` — and only on the one `Container.filesystem` points
-at. A nested `Filesystem` (a subdirectory) is not separately mounted, so a `read_mode`
-set on one is ignored, and the packer does not write one there. Absent means `"rw"`,
-so every service packed before this key existed is unaffected; any value other than
-`"rw"` or `"ro"` is refused at build time rather than resolved to a default.
+at. A nested `Filesystem` (a subdirectory) is not separately mounted, so it can have no
+policy: a node refuses a service that has one there, and the packer does not write one.
+The definition of the setting is [`policies/read_mode.formal`](policies/read_mode.formal).
+Absent means `"rw"`, so a service that does not use it is unaffected and keeps its id;
+any value other than `"rw"` or `"ro"` is refused rather than resolved to a default.
+A service with `read_only_filesystem: true` gets a new service id: services packed
+before #670 must be packed again.
 
 `read_only_filesystem: false`, and the property being absent, are the same thing: the
-packer writes **no** `read_mode` key at all rather than `"rw"`. Absent already means
+packer writes **no** `read_mode` policy at all rather than `"rw"`. Absent already means
 `rw` to every reader, and the filesystem tree is hashed into the service id — so
 writing the default would give every existing service a new id on its next repack for
 no change in meaning.
@@ -711,7 +711,7 @@ subtree with `unsquashfs` or `fsck.erofs`, so no mount is needed.
 `read_only_filesystem` service has to arrange: this packer writes all of them on
 every branch it builds, root and nested alike, for every service. The completeness
 gate exists for trees produced by other packers and for services packed before the
-metadata contract existed. The packer asserts it anyway before setting the xattr, so
+metadata contract existed. The packer asserts it anyway before setting the policy, so
 that if that ever stops being true it says so rather than shipping a service every
 node would refuse.
 
@@ -721,7 +721,7 @@ node would refuse.
 - **Type:** `array` of objects
 - **Required:** No
 - **Default:** absent (nothing is written)
-- **Description:** Declares directories this service **exports** to the children it launches (`role: "shared"`), **inherits** from the parent that launched it (`role: "guest"`), or **shares** with the members of one of its networks (`role: "network"`). The packer writes the reserved xattrs described in [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md) on the directory's `ItemBranch`, and the node reads them at launch.
+- **Description:** Declares directories this service **exports** to the children it launches (`role: "shared"`), **inherits** from the parent that launched it (`role: "guest"`), or **shares** with the members of one of its networks (`role: "network"`). The packer writes the `share` policy described in [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md) on the directory's `ItemBranch` (`policies`, not `xattrs`), and the node reads it at launch. A service with a share gets a new service id: services packed before #670 must be packed again.
 
 ```json
 "shared_filesystems": [
@@ -747,15 +747,15 @@ node would refuse.
 | Field | Required | Becomes | Meaning |
 |---|---|---|---|
 | `path` | yes | (selects the branch) | Absolute path of the directory, not `/`. |
-| `role` | yes | `shared=true`, `guest=true`, or nothing for `network` | `shared` exports, `guest` inherits, `network` shares with the members of a network. |
-| `network` | with `role: "network"` only | `share_network` | Tag of an entry of the service's `network`. The packer refuses a tag that no entry carries. |
-| `tag` | no | `share_tag` | Logical name of the share, used instead of the path. |
-| `env` | no | `share_env` | Environment variable whose value picks the concrete share. |
+| `role` | yes | `role=shared`, `role=guest` or `role=network` | `shared` exports, `guest` inherits, `network` shares with the members of a network. |
+| `network` | with `role: "network"` only | `network` | Tag of an entry of the service's `network`. The packer refuses a tag that no entry carries. |
+| `tag` | no | `tag` | Logical name of the share, used instead of the path. |
+| `env` | no | `env` | Environment variable whose value picks the concrete share. |
 | `access` | no | `access` | `ro` or `rw` (default `rw`). |
 
 - The directory **must already exist** in the image. The packer does not create it: if it is missing the pack fails and tells you to create it in the Dockerfile (`RUN mkdir -p /shared`), so owner, mode and content stay your decision.
 - Types are checked strictly, as with `read_only_filesystem`: a list of objects, a `role` of `shared` or `guest`, strings where strings are expected. Unknown fields and a repeated `path` are refused. This is checked when `service.json` is read, before the image is built.
-- The result goes through the same validation the node applies, so `shared` and `guest` are exclusive, declarations cannot nest, names (`tag`, or the path) cannot repeat on one side, `tag` must match `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, and `env` must be a POSIX variable name.
+- The result goes through the same validation the node applies, so declarations cannot nest, names (`tag`, or the path) cannot repeat on one side, `tag` must match `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, and `env` must be a POSIX variable name.
 - Absent or empty writes **nothing**, so no existing service gets a new id.
 - `read_only_filesystem: true` is allowed with every role (see above). The service mounts its shares read-only.
 - An exported directory counts toward the **exporter's** `resources.at_init.disk_space` and `at_most.disk_space`; its guests are charged nothing for it. Each member of a network share is charged an equal part of it. See [SHARED_FILESYSTEMS.md](SHARED_FILESYSTEMS.md#accounting).
@@ -984,12 +984,11 @@ A service whose children only fit one at a time puts each child in its own group
 #### `init`
 - **Type:** `object`
 - **Required:** No
-- **Description:** Defines the container entrypoint and optional extended attributes.
+- **Description:** Defines the container entrypoint.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `entry_path` | `string` or `array` | Path segments to the entrypoint binary or script |
-| `xattrs` | `object` | Key-value extended attributes passed to the container init |
 
 **`entry_path` formats — all equivalent:**
 ```json
@@ -1004,18 +1003,7 @@ A service whose children only fit one at a time puts each child in its own group
 >
 > **`entry_path` constraints** (enforced at runtime): it must be a **single** path — no whitespace, no `.` or `..` segments, and no CLI arguments appended (the entry path is a path only, not a command line). Put any flags or arguments inside your entrypoint script instead.
 
-**Example — With xattrs:**
-```json
-{
-    "init": {
-        "entry_path": ["usr", "local", "bin", "myservice"],
-        "xattrs": {
-            "exec.mode": "daemon",
-            "custom.flag": "enabled"
-        }
-    }
-}
-```
+> `init.xattrs` was removed (#670). The node never read it, and the packer refuses a `service.json` that has it. A setting of the start is a policy, and none is defined yet.
 
 **Legacy compatibility — `entrypoint` field:**
 
@@ -1538,10 +1526,7 @@ hashed into the service id.
         }
     },
     "init": {
-        "entry_path": ["usr", "local", "bin", "serve"],
-        "xattrs": {
-            "runtime.mode": "production"
-        }
+        "entry_path": ["usr", "local", "bin", "serve"]
     },
     "config_declaration": {
         "path": ["etc", "mlservice", "config"]

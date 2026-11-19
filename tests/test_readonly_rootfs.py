@@ -6,7 +6,7 @@ room for writes, and a content-addressed service has none to leave room for -- s
 it was 64 MiB of flat tax on every capsule, 44% of a 145 MiB one and 10x on a
 12 MB one.
 
-The contract is `Filesystem.xattrs["read_mode"]`, and these are the four places it
+The contract is the `read_mode` policy of `Filesystem.policies`, and these are the four places it
 has to be honoured consistently or a service is built one way and booted another:
 
 * the helper that reads it (absent is `rw`, garbage is an error, never a default),
@@ -23,6 +23,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from src.utils import policies
 from src.utils.filesystem_xattrs import (
     FILESYSTEM_METADATA_KEYS,
     FilesystemNodeMetadata,
@@ -92,9 +93,13 @@ def _complete_branch(name="file.txt", content=b"hello", mode=stat.S_IFREG | 0o64
     return branch
 
 
+def _set_read_mode(fs, value):
+    policies.set_policy(fs.policies, policies.make(policies.READ_MODE, value))
+
+
 def _ro_filesystem(*branches):
     fs = celaut.Service.Container.Filesystem()
-    keyvalue.set_value(fs.xattrs, "read_mode", b"ro")
+    _set_read_mode(fs, b"ro")
     for branch in branches:
         fs.branch.append(branch)
     return fs
@@ -125,7 +130,7 @@ class ReadModeHelperTests(unittest.TestCase):
 
     def test_an_explicit_rw_is_writable(self):
         fs = celaut.Service.Container.Filesystem()
-        keyvalue.set_value(fs.xattrs, "read_mode", b"rw")
+        _set_read_mode(fs, b"rw")
         self.assertEqual(read_mode(fs), READ_MODE_RW)
 
     def test_ro_is_read_only(self):
@@ -135,14 +140,14 @@ class ReadModeHelperTests(unittest.TestCase):
         # The direction that matters: a typo must not resolve to "rw" and build a
         # service the other way round from the one its author declared.
         fs = celaut.Service.Container.Filesystem()
-        keyvalue.set_value(fs.xattrs, "read_mode", b"readonly")
-        with self.assertRaisesRegex(ValueError, "unsupported read_mode"):
+        _set_read_mode(fs, b"readonly")
+        with self.assertRaisesRegex(ValueError, "not valid for 'read_mode'"):
             read_mode(fs)
 
     def test_a_non_utf8_value_is_refused(self):
         fs = celaut.Service.Container.Filesystem()
-        keyvalue.set_value(fs.xattrs, "read_mode", b"\xff\xfe")
-        with self.assertRaisesRegex(ValueError, "not valid UTF-8"):
+        _set_read_mode(fs, b"\xff\xfe")
+        with self.assertRaisesRegex(ValueError, "not valid for 'read_mode'"):
             read_mode(fs)
 
     def test_only_the_root_filesystems_read_mode_is_read(self):
@@ -568,7 +573,7 @@ class ReadOnlySizingTests(unittest.TestCase):
         # The build raises on it, with the path and the accepted values. Pricing
         # is not where a manifest is rejected.
         fs = celaut.Service.Container.Filesystem()
-        keyvalue.set_value(fs.xattrs, "read_mode", b"garbage")
+        _set_read_mode(fs, b"garbage")
         self.assertFalse(ch_limits.is_read_only_service(_service(filesystem=fs)))
 
 

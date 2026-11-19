@@ -1,0 +1,5 @@
+access.default=rw
+keys=access,env,network,role,tag
+place=filesystem.directory
+role.values=guest,network,shared
+setting=share

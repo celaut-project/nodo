@@ -104,11 +104,8 @@ FIELDS = [
     ("Slot.mu_per_call", "celaut.Service.Api.Slot", "mu_per_call", _amount_value),
     ("Container.environment_variables", "celaut.Service.Container",
      "environment_variables", _data_format_value),
-    ("Filesystem.xattrs", "celaut.Service.Container.Filesystem", "xattrs", _bytes_value),
     ("ItemBranch.xattrs", "celaut.Service.Container.Filesystem.ItemBranch", "xattrs",
      _bytes_value),
-    ("Init.xattrs", "celaut.Service.Container.Init", "xattrs", _bytes_value),
-    ("pack.Init.xattrs", "pack.Service.Container.Init", "xattrs", _bytes_value),
     ("Configuration.environment_variables", "celaut.Configuration",
      "environment_variables", _bytes_value),
     ("Sysresources.benchmark", "celaut.Sysresources", "benchmark", _uint64_value),
@@ -152,13 +149,10 @@ class SchemaTests(unittest.TestCase):
                 ("legacy_celaut", "Contract", "xattrs", 2),
                 ("legacy_celaut", "Service.Api.Slot", "mu_per_call", 4),
                 ("legacy_celaut", "Service.Container", "environment_variables", 7),
-                ("legacy_celaut", "Service.Container.Filesystem", "xattrs", 2),
                 ("legacy_celaut", "Service.Container.Filesystem.ItemBranch", "xattrs", 5),
-                ("legacy_celaut", "Service.Container.Init", "xattrs", 2),
                 ("legacy_celaut", "Configuration", "environment_variables", 1),
                 ("legacy_celaut", "Sysresources", "benchmark", 99),
                 ("legacy_celaut", "Peer", "mu_per_call", 4),
-                ("legacy_pack", "Service.Container.Init", "xattrs", 2),
             ]),
         )
         for label, full_name, field_name, _ in FIELDS:
@@ -368,11 +362,13 @@ class ServiceIdTests(unittest.TestCase):
     def test_the_golden_service_holds_what_it_was_built_with(self):
         service = celaut.Service()
         service.ParseFromString(GOLDEN_SERVICE)
+        # `Init.xattrs` was removed (#670): its field number now holds `policies`, so
+        # these entries read as policies with an empty formal, which a node refuses.
         self.assertEqual(
-            keyvalue.to_dict(service.container.init.xattrs),
-            {"zeta": b"zeta", "alpha": b"alpha", "mid": b"mid", "beta": b"beta",
-             "read_mode": b"read_mode"},
+            sorted(tag for policy in service.container.init.policies for tag in policy.tags),
+            ["alpha", "beta", "mid", "read_mode", "zeta"],
         )
+        self.assertEqual([bytes(p.formal) for p in service.container.init.policies], [b""] * 5)
         self.assertEqual(
             {key: df.prose for key, df in keyvalue.items(service.container.environment_variables)},
             {"alpha": "p-alpha", "beta": "p-beta", "mid": "p-mid", "read_mode": "p-read_mode",
@@ -390,7 +386,6 @@ class ServiceIdTests(unittest.TestCase):
     def test_the_pack_schema_reread_as_celaut_is_byte_identical(self):
         # ZipContainerPacker.save re-reads the pack.Service bytes as a celaut.Service.
         packed = pack_pb2.Service(prose="x")
-        keyvalue.from_dict(packed.container.init.xattrs, {k: _bytes_value(k) for k in KEYS})
         keyvalue.from_dict(
             packed.container.resources.at_most.benchmark, {k: _uint64_value(k) for k in KEYS}
         )
@@ -405,7 +400,6 @@ class ServiceIdTests(unittest.TestCase):
         # What the maps could not promise: two builders, one service, one id.
         first, second = celaut.Service(), celaut.Service()
         for service, order in ((first, KEYS), (second, list(reversed(KEYS)))):
-            keyvalue.from_dict(service.container.init.xattrs, {k: _bytes_value(k) for k in order})
             keyvalue.from_dict(
                 service.api.slot.add().mu_per_call, {k: _amount_value(k) for k in order}
             )
@@ -417,7 +411,9 @@ class ServiceIdTests(unittest.TestCase):
                 service.container.environment_variables, {k: _data_format_value(k) for k in order}
             )
         self.assertEqual(first.SerializeToString(), second.SerializeToString())
-        self.assertEqual([entry.key for entry in first.container.init.xattrs], sorted(KEYS))
+        self.assertEqual(
+            [entry.key for entry in first.container.environment_variables], sorted(KEYS)
+        )
 
     def test_canonical_order_is_by_utf8_bytes(self):
         contract = celaut.Contract()

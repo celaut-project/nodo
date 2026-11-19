@@ -6,7 +6,7 @@ import tarfile
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional
 
-from src.utils import keyvalue
+from src.utils import keyvalue, policies
 
 MODE_KEY = "mode"
 UID_KEY = "uid"
@@ -26,14 +26,12 @@ FILESYSTEM_METADATA_KEYS = (
     DEVICE_IS_BLOCK_KEY,
 )
 
-# `Filesystem.xattrs` -- the entry list on the tree itself, not on one of its entries.
-# Only the Filesystem referenced directly by `Container.filesystem` is read: a
-# nested one (a subdirectory, reached through `ItemBranch.item.filesystem`) is
-# not separately mounted, so nothing there could be honoured.
-READ_MODE_KEY = "read_mode"
-READ_MODE_RW = "rw"
-READ_MODE_RO = "ro"
-READ_MODES = (READ_MODE_RW, READ_MODE_RO)
+# The `read_mode` setting (#670) is a policy on the root Filesystem, the one that
+# `Container.filesystem` holds. A nested one (a subdirectory, reached through
+# `ItemBranch.item.filesystem`) is not separately mounted, so it can have no policy.
+READ_MODE_RW = policies.READ_MODE_RW
+READ_MODE_RO = policies.READ_MODE_RO
+READ_MODES = policies.READ_MODES
 
 
 @dataclass(frozen=True)
@@ -257,36 +255,30 @@ def parse_filesystem_metadata_xattrs(
 def read_mode(filesystem: Any) -> str:
     """Whether this service asked for a writable rootfs: ``"rw"`` or ``"ro"``.
 
-    Absent is ``"rw"``, which is what every service packed before this key existed
-    declares by saying nothing -- so reading it can never change how an existing
-    service is built.
+    Absent is ``"rw"``, which is what every service packed without the setting
+    declares by saying nothing -- so reading it can never change how such a service is
+    built.
 
-    Anything else is an integrity error rather than a value to fall back on. The
-    key is what decides whether the node builds a pre-sized ext4 the guest can
-    write to or an immutable image it cannot, and a typo resolved to a default is
-    a service silently built the other way round from the one its author meant.
+    A policy that this node does not accept is an integrity error rather than
+    something to ignore or fall back on, and that covers the other settings of the
+    tree and old data in the same field (read as a policy with an empty ``formal``).
+    The setting decides whether the node builds a pre-sized ext4 the guest can write to
+    or an immutable image it cannot, and a service that this node does not understand,
+    resolved to a default, is a service silently built the other way round from the one
+    its author meant.
 
-    Read only from the tree's own ``xattrs``; pass the Filesystem that
+    Read only from the tree's own ``policies``; pass the Filesystem that
     ``Container.filesystem`` points at, not one of its subdirectories.
     """
-    xattrs = keyvalue.to_dict(getattr(filesystem, "xattrs", None) or [])
-    if READ_MODE_KEY not in xattrs:
-        return READ_MODE_RW
-
-    raw = xattrs[READ_MODE_KEY]
-    if isinstance(raw, str):
-        raw = raw.encode("utf-8")
     try:
-        value = bytes(raw).decode("utf-8").strip()
-    except Exception as e:
-        raise ValueError(f"{READ_MODE_KEY} is not valid UTF-8 bytes") from e
-
-    if value not in READ_MODES:
-        raise ValueError(
-            f"unsupported {READ_MODE_KEY} '{value}': expected one of "
-            + ", ".join(READ_MODES)
+        parsed = policies.check_list(
+            getattr(filesystem, "policies", None) or [],
+            policies.PLACE_ROOT,
+            "the root filesystem",
         )
-    return value
+    except policies.PolicyError as e:
+        raise ValueError(str(e)) from e
+    return parsed.get(policies.READ_MODE, READ_MODE_RW)
 
 
 def missing_metadata_keys(xattrs: Mapping[str, bytes]) -> List[str]:
@@ -327,7 +319,7 @@ def assert_complete_filesystem_metadata(
             raise ValueError(
                 f"incomplete filesystem metadata at '{rel_path}': missing "
                 + ", ".join(sorted(missing))
-                + f". A {READ_MODE_KEY}={READ_MODE_RO} service must declare "
+                + f". A {policies.READ_MODE}={READ_MODE_RO} service must declare "
                 + ", ".join(FILESYSTEM_METADATA_KEYS)
                 + " on every entry: the image it is built into cannot be corrected "
                 "from inside the guest."

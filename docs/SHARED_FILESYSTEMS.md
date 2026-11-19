@@ -9,7 +9,7 @@ node-conformance property, verifiable and punishable through reputation.
 
 There are two kinds of share. A **parent share** (`shared` / `guest`) goes from
 an instance to the children it launches; the instance tree is its scope. A
-**network share** (`share_network`, #268) is for instances with no common parent;
+**network share** (`role=network`, #268) is for instances with no common parent;
 a `Service.Network` is its scope. Network shares are described in
 [their own section](#network-shares--no-common-parent); the other sections are
 about parent shares, unless they say otherwise.
@@ -25,47 +25,60 @@ about parent shares, unless they say otherwise.
 
 ### Declaration
 
-Reserved xattrs on directories in `Container.Filesystem.ItemBranch.xattrs`. A
-parent share does not involve `Service.Network`; a network share does.
+The `share` policy (#670) on a directory, in
+`Container.Filesystem.ItemBranch.policies`. A policy is a setting that a node
+identifies by the exact bytes of its `formal`
+([`docs/policies/share.formal`](policies/share.formal)); see
+[policies/README.md](policies/README.md). A parent share does not involve
+`Service.Network`; a network share does.
 
-| xattr | meaning |
+The value of the policy is `key=value` lines, sorted by key, joined by a newline:
+
+| key | meaning |
 | --- | --- |
-| `shared=true` | this directory is **exported** to the children this instance launches |
-| `guest=true` | this directory is **inherited** from the parent that launched this instance |
-| `access=ro\|rw` | requested mount mode for a `guest` dir (default `rw`) |
-| `share_tag=<tag>` | logical **name** of the share, used instead of the mount path |
-| `share_env=<ENV_VAR>` | environment variable whose **value** picks the concrete share |
-| `share_network=<tag>` | shared with the members of the network with that tag (a [network share](#network-shares--no-common-parent)) |
+| `role=shared` | this directory is **exported** to the children this instance launches |
+| `role=guest` | this directory is **inherited** from the parent that launched this instance |
+| `role=network` | shared with the members of the network in `network` (a [network share](#network-shares--no-common-parent)) |
+| `access=ro\|rw` | requested mount mode (default `rw`) |
+| `tag=<tag>` | logical **name** of the share, used instead of the mount path |
+| `env=<ENV_VAR>` | environment variable whose **value** picks the concrete share |
+| `network=<tag>` | the tag of the network; only with `role=network` |
 
-A packed service gets these xattrs from the `shared_filesystems` field of
+`role` is required. Another key makes the value not valid, and a node that
+does not accept a policy does not run the service. The `xattrs` of an entry are
+file attributes only: the node reads no share from them, so a service packed
+before #670 with `shared=true` there must be packed again.
+
+A packed service gets this policy from the `shared_filesystems` field of
 `service.json`; see [PACKING.md](PACKING.md#shared_filesystems).
 
 Everything decidable from a spec alone is rejected (`ValueError`) as soon as the
 node reads it, which is what makes it validatable at pack time:
 
-- `shared` and `guest` are mutually exclusive on one directory, and both are only
-  valid on directories;
-- `share_network` excludes both of them;
-- `share_tag` / `share_env` are meaningless without one of the three;
+- `role` is one value, so a directory cannot be both `shared` and `guest`; the
+  policy is only valid on directories; `network` is only valid with
+  `role=network`;
+- a policy that the node does not know, a repeated one, and one in a place where
+  it is not defined are refused;
 - **a share declaration cannot be nested inside another.** A `shared` inside a
   `guest` subtree is the re-export the invariant forbids, and two overlapping
   declarations are two mounts covering one path with the winner decided by the
   order of the mount plan — undefined, not a policy;
 - **two directories on the same side cannot carry the same name.** A path cannot
-  repeat in a tree, so path-named shares never collide; a repeated `share_tag`
+  repeat in a tree, so path-named shares never collide; a repeated `tag`
   would resolve two directories to one share, hence one virtio-fs tag emitted as
   two devices;
-- `share_tag` is matched **literally and case-sensitively**, after stripping
-  surrounding whitespace, and is restricted to `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, so
-  a stray `\n` cannot silently break matching. `share_env` must be a POSIX
+- `tag` is matched **literally and case-sensitively**, with no whitespace
+  stripped, and is restricted to `[A-Za-z0-9][A-Za-z0-9._@:+-]*`, so
+  a stray `\n` cannot silently break matching. `env` must be a POSIX
   variable name.
 
 ### Identity
 
 ```
-name          = share_tag        if declared, else the exported path
-discriminator = env[share_env]   if share_env is declared, else ""
-share_id      = H("parent", parent_instance_id, name, share_env, discriminator)
+name          = tag              if declared, else the exported path
+discriminator = environment[env] if env is declared, else ""
+share_id      = H("parent", parent_instance_id, name, env, discriminator)
 ```
 
 The first field keeps parent shares and network shares in separate id spaces.
@@ -76,7 +89,7 @@ granted by pushing the separator into its own tag.
 
 The **name of the variable** is part of the identity, not only its value. That is
 what makes the match symmetric -- both sides must agree on which variable
-discriminates, not just on its value: without it, a child declaring no `share_env`
+discriminates, not just on its value: without it, a child declaring no `env`
 would derive the same id as a parent that declares one but was launched with no
 value for it, skipping the discriminator altogether. A variable that is declared
 on both sides but set on neither is still a match — two instances missing the
@@ -85,8 +98,8 @@ same variable are in the same unnamed domain.
 | declared | `share_id` | effect |
 | --- | --- | --- |
 | neither | `H(father, path, "", "")` | the share is the path |
-| only `share_tag` | `H(father, tag, "", "")` | independent of where either side mounts it |
-| only `share_env` | `H(father, path, env, value)` | tied to the path, one share per value |
+| only `tag` | `H(father, tag, "", "")` | independent of where either side mounts it |
+| only `env` | `H(father, path, env, value)` | tied to the path, one share per value |
 | both | `H(father, tag, env, value)` | the full case |
 
 A share is **not durable, and the tag does not make it so**: `parent_instance_id`
@@ -99,8 +112,8 @@ assumption, so it is worth stating plainly: this is not a persistence mechanism.
 
 ### Authorization is a precondition, checked before anything is spent
 
-`guest=true` is an **execution precondition, not an option**. There is no
-`required` xattr because it is always required: a service that declares an
+`role=guest` is an **execution precondition, not an option**. There is no
+`required` key because it is always required: a service that declares an
 inherited directory cannot run unless an instance exists that created that
 directory and exported it to *this* one. If it does not, the launch **fails**.
 Starting anyway would be the worst of both options — from inside a guest, a
@@ -175,7 +188,7 @@ none of its descendants have shares:
 - Where the fan-out lands is decided **by the balancer at the first hop**, not by
   whoever launches: if the child was delegated to a peer, the subtree pins there.
   It cannot be vetoed or foreseen.
-- `share_tag` makes inspectability worse, not better: the spec no longer says
+- `tag` makes inspectability worse, not better: the spec no longer says
   which host directory is touched, because the discriminator is resolved at
   runtime from an environment value.
 
@@ -183,10 +196,10 @@ none of its descendants have shares:
 
 ```
 # coordinator (the parent)
-/data       shared=true, share_tag=hdfs-data, share_env=HDFS_CLUSTER
+/data       role=shared, tag=hdfs-data, env=HDFS_CLUSTER
 
 # namenode + N datanodes (its children)
-/mnt/hdfs   guest=true,  share_tag=hdfs-data, share_env=HDFS_CLUSTER, access=rw
+/mnt/hdfs   role=guest,  tag=hdfs-data, env=HDFS_CLUSTER, access=rw
 ```
 
 Launched with `HDFS_CLUSTER=prod`, the N+1 instances derive one `share_id` and
@@ -214,14 +227,14 @@ instance that does not declare the network cannot join the share.
 #### Declaring a network share
 
 ```
-/data   share_network=hdfs, share_tag=hdfs-data, share_env=HDFS_CLUSTER
+/data   role=network, network=hdfs, tag=hdfs-data, env=HDFS_CLUSTER
 ```
 
-- `share_network=<tag>` names the entry of `Service.network` that carries that
+- `network=<tag>` names the entry of `Service.network` that carries that
   tag. The service must declare that network; a spec that does not is refused
   when the node reads it, and at pack time.
-- `share_tag`, `share_env` and `access` work as for a parent share.
-- A network share is **symmetric**: there is no `shared` or `guest` side, and it
+- `tag`, `env` and `access` work as for a parent share.
+- A network share is **symmetric**: there is no `shared` or `guest` role, and it
   cannot be combined with either.
 - In `service.json`: `{"path": "/data", "role": "network", "network": "hdfs",
   "tag": "hdfs-data"}`. See [PACKING.md](PACKING.md#shared_filesystems).
@@ -230,7 +243,7 @@ instance that does not declare the network cannot join the share.
 
 ```
 formal    = the network's formal, with every ${VAR} substituted ("" if none)
-share_id  = H("network", tag, formal, name, share_env, discriminator)
+share_id  = H("network", tag, formal, name, env, discriminator)
 ```
 
 - The network takes the place of the parent instance id. Every member that
@@ -322,7 +335,7 @@ leave, and the maintenance tick calculates it again.
 ```
 # coordinator, namenode and four datanodes, each launched by a script
 network:  tags=[hdfs], formal="cluster=${HDFS_CLUSTER}"
-/data     share_network=hdfs, share_tag=hdfs-data
+/data     role=network, network=hdfs, tag=hdfs-data
 ```
 
 Launched with `HDFS_CLUSTER=prod`, the first instance creates the share on the

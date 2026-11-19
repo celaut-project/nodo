@@ -16,6 +16,7 @@ IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue
+    from tests.share_policies import add_share
     from src.utils import shared_filesystems as sf
     from src.manager import shares as ms
     from src.manager import share_location as sl
@@ -33,8 +34,7 @@ except Exception as exc:  # pragma: no cover - environment-dependent
 def _dir(name, xattrs=None):
     b = celaut.Service.Container.Filesystem.ItemBranch(name=name)
     b.filesystem.SetInParent()
-    for k, v in (xattrs or {}).items():
-        keyvalue.set_value(b.xattrs, k, v)
+    add_share(b, xattrs)
     return b
 
 

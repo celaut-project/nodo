@@ -58,6 +58,25 @@ message BytesKeyValue {
     optional bytes value = 2;
 }
 
+// A setting of a service. It has the same form as each replaceable component
+// (tags, prose, formal), plus the value. A setting is the decision of an author that a
+// node enforces. Nodes compare a setting by the exact bytes of its formal, and never by
+// its tags or its prose. A node that does not know the formal, or does not understand
+// the value, does not run the service. In one list, two policies do not have the same
+// formal, and a sender sorts the list by formal (bytes, ascending). The order does not
+// change the meaning. A policy with an empty formal is not valid.
+message Policy {
+    // Names, for a reader. A node does not use them to identify the setting.
+    repeated string tags = 1;
+    // The text, for an implementer. A node does not use it to identify the setting.
+    string prose = 2;
+    // The definition of the setting. It is what nodes compare. It is not empty. A
+    // published formal never changes: a new meaning is a new formal.
+    bytes formal = 3;
+    // The setting in this message. Its form is defined by the formal.
+    bytes value = 4;
+}
+
 // One entry of a list of key-value entries, with an Amount value. The list follows the
 // same rules as a list of BytesKeyValue.
 message AmountKeyValue {
@@ -338,38 +357,37 @@ message Service {
                     // The content of a directory.
                     Filesystem filesystem = 4;
                 }
-                // Attributes of the entry. Every entry has all or none of these keys:
-                // "mode", "uid", "gid", "mtime_ns", "device.major", "device.minor",
-                // "device.is_block". Their values are base-10 integers as UTF-8 text. On
-                // an entry that is not a device, the three device keys are "0". Keys for
-                // a shared directory:
-                // "shared": "true" exports the directory to the child services.
-                // "guest": "true" gets the directory from the parent service. A service
-                // with "guest" does not start if its parent does not export that share.
-                // "access": "ro" or "rw". The default is "rw".
-                // "share_tag": the name of the share. The default is the path.
-                // "share_env": the name of an environment variable. Its value selects
-                // the share.
+                // Attributes of the entry, as in a tar archive. Every entry has all or
+                // none of these keys: "mode", "uid", "gid", "mtime_ns", "device.major",
+                // "device.minor", "device.is_block". Their values are base-10 integers as
+                // UTF-8 text. On an entry that is not a device, the three device keys are
+                // "0". A node reads no setting from here and ignores other keys.
                 repeated BytesKeyValue xattrs = 5;
+                // Settings of the entry. Only these places are valid: the setting
+                // "share" on a directory. A node that does not know a policy does not
+                // run the service. See Policy.
+                repeated Policy policies = 6;
             }
             // The entries of the directory.
             repeated ItemBranch branch = 1;
-            // Attributes of the whole tree. Only on the root Filesystem: a reader
-            // ignores them on a subdirectory. Key "read_mode": "rw" (the default) or
-            // "ro". Another value is an error. With "ro", the service can write only in
-            // /tmp and /run. Every entry must then have all the metadata keys, and no
-            // directory can have "shared". The node can then make a compressed image
-            // and mount it read-only.
-            repeated BytesKeyValue xattrs = 2;
+            // Settings of the whole tree. Only on the root Filesystem (the one that
+            // Container.filesystem holds): a subdirectory has none. The setting
+            // "read_mode" is valid here: "rw" (the default) or "ro". With "ro", the
+            // service can write only in /tmp and /run. Every entry must then have all
+            // the metadata keys. The node can then make a compressed image and mount it
+            // read-only. A node that does not know a policy does not run the service.
+            // See Policy.
+            repeated Policy policies = 2;
         }
 
         // How the node starts the service.
         message Init {
             // The path of the executable, as path segments. No arguments.
             repeated string entry_path = 1;
-            // Other start options of the service, as keys and values. The node does not
-            // read them now.
-            repeated BytesKeyValue xattrs = 2;
+            // Settings of the start. No setting is defined here now, so a node
+            // refuses a service that has one. The list exists now so that a setting
+            // defined later is safe on nodes that are old. See Policy.
+            repeated Policy policies = 2;
         }
 
         // Where the service reads its configuration.
@@ -442,8 +460,8 @@ message Service {
     }
 
     // Shared disks / VirtioFS / filesystem inheritance are NOT networks. Those are an
-    // execution-environment concern expressed through Container.Filesystem.ItemBranch.xattrs
-    // (shared, guest, access, share_tag, share_env).
+    // execution-environment concern expressed through the policies of Container.Filesystem
+    // (the setting "share").
 
     // A logical domain where the instances of the service find their peers. It gives
     // which peers the service wants (tags, prose, formal) and which protocols these

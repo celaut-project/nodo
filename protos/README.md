@@ -9,7 +9,7 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
   - `xattrs = 2` (`script`, `address`, `token_id`, `contract_type`, and on a
     reputation proof `owner_public_key` and `owner_signature`)
 - `Service.Container`
-  - `init` (`entry_path`, `xattrs`)
+  - `init` (`entry_path`, `policies`)
   - `config_declaration`
 - `Service.Api.Slot`
   - `transport`
@@ -82,7 +82,7 @@ depending on the protobuf implementation. A repeated field keeps its order.
 
 | Entry message | `value` | Used by |
 |---|---|---|
-| `BytesKeyValue` | `bytes` (`optional`) | every `xattrs` (`Contract`, `ItemBranch`, `Filesystem`, `Init`, and `pack.Service.Container.Init`), `Configuration.environment_variables` |
+| `BytesKeyValue` | `bytes` (`optional`) | `Contract.xattrs` and `ItemBranch.xattrs`, `Configuration.environment_variables` |
 | `AmountKeyValue` | `Amount` | `Peer.mu_per_call`, `Service.Api.Slot.mu_per_call` |
 | `DataFormatKeyValue` | `DataFormat` | `Service.Container.environment_variables` |
 | `Uint64KeyValue` | `uint64` (`optional`) | `Sysresources.benchmark` |

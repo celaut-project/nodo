@@ -6,10 +6,7 @@
   "architecture": "linux/amd64",
   "read_only_filesystem": true,
   "init": {
-    "entry_path": ["service", "start"],
-    "xattrs": {
-      "boot_mode": "prod"
-    }
+    "entry_path": ["service", "start"]
   },
   "config_declaration": {
     "path": ["config", "runtime", "node.pb"]
@@ -109,16 +106,16 @@
 - `init.entry_path` is serialized to `container.init.entry_path`.
 - Legacy `entrypoint` is still accepted in `service.json` and is mapped to `container.init.entry_path`.
 - If `service.json` provides slash-based input (for example `"/service/start"`), packer normalizes it to segmented form (`["service","start"]`).
-- `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
-- Every `service.json` object that becomes a key/value list on the wire (`init.xattrs`,
-  `api[].mu_per_call`, `resources.*.benchmark`, and the same fields inside embedded
+- `init.xattrs` was removed (#670): the node never read it. The packer refuses a `service.json` that has it.
+- Every `service.json` object that becomes a key/value list on the wire (`api[].mu_per_call`, `resources.*.benchmark`, and the same fields inside embedded
   services / workload groups) keeps its **object syntax**. The packer writes the list
   sorted by key, so the order keys are typed in never changes the service id, and a key
   written twice in one object is a packing error (JSON alone would silently keep the last).
   See [`protos/README.md`](../../protos/README.md).
 - `read_only_filesystem` (boolean, optional, default `false`) is serialized to
-  `container.filesystem.xattrs["read_mode"] = "ro"` — the xattr list on the **filesystem
-  itself**, not on one of its entries, and only on the root tree that
+  the `read_mode` policy (value `ro`, `formal` in `docs/policies/read_mode.formal`) in
+  `container.filesystem.policies` — the policy list on the **filesystem itself**, not on
+  one of its entries, and only on the root tree that
   `container.filesystem` points at. A nested `Filesystem` (a subdirectory, reached via
   `ItemBranch.item.filesystem`) is not separately mounted, so nothing is written there.
   It declares that the service needs nothing writable beyond `/tmp` and `/run`, which
@@ -126,7 +123,7 @@
   pre-sized ext4, and `at_init.disk_space` becomes a ceiling rather than a floor. Which
   of the two formats is used is the node's own choice and is deliberately not
   expressible here. See `docs/PACKING.md` for the full contract.
-  - **Absent and `false` are identical**: no `read_mode` key is written, rather than
+  - **Absent and `false` are identical**: no `read_mode` policy is written, rather than
     `"rw"`. Absent already means `rw` to every reader, and the tree is hashed into the
     service id, so writing the default would change the id of every existing service on
     its next repack.
@@ -134,13 +131,13 @@
     field, raised when `service.json` is read and before the image is built — coercing
     it would mean treating `"false"` as truthy too.
   - **Refused with `read_only_filesystem: true`:** exporting a shared filesystem (a
-    directory whose `branch.xattrs` carry `shared=true`). A share is seeded from the
+    directory whose `branch.policies` carry a `share` policy with `role=shared`). A share is seeded from the
     exporter's own image with `debugfs`, an ext4 reader that cannot open an
-    erofs/squashfs image. Importing one (`guest=true`) is fine. The packer refuses this
+    erofs/squashfs image. Importing one (`role=guest`) is fine. The packer refuses this
     at pack time, the same condition the node checks at launch.
   - **Per-entry metadata** (the contract below) is mandatory for `ro`. This packer
     already emits every key on every branch for every service, so there is nothing
-    extra to declare; it is asserted before the xattr is set.
+    extra to declare; it is asserted before the policy is set.
 - `config_declaration.path` is serialized to `container.config_declaration.path`.
 - If `service.json` provides slash-based input (for example `"/config/runtime/node.pb"`), packer normalizes it to segmented form.
 - `api[].transport` is required and serialized to `api.slot[].transport.tags` (host transport, e.g. `tcp`, `udp`).

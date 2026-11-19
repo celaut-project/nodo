@@ -29,7 +29,6 @@ from src.utils.arch_guard import ensure_native_arch
 from src.utils.architectures import PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
 from src.utils.filesystem_xattrs import (
-    READ_MODE_KEY,
     READ_MODE_RO,
     assert_complete_filesystem_metadata,
     describe_mode_type,
@@ -39,13 +38,8 @@ from src.utils.filesystem_xattrs import (
     metadata_from_lstat,
     metadata_from_tarinfo,
 )
+from src.utils import policies
 from src.utils.shared_filesystems import (
-    ACCESS_XATTR_KEY,
-    GUEST_XATTR_KEY,
-    SHARE_ENV_XATTR_KEY,
-    SHARE_NETWORK_XATTR_KEY,
-    SHARE_TAG_XATTR_KEY,
-    SHARED_XATTR_KEY,
     declarations_for_filesystem,
 )
 from src.utils.verify import calculate_hashes_by_stream
@@ -85,13 +79,11 @@ DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile
 READ_ONLY_FILESYSTEM_KEY = "read_only_filesystem"
 
 # `service.json` property that declares shared filesystems: a list of
-# {path, role, tag?, env?, access?}. It becomes the reserved xattrs of
-# src/utils/shared_filesystems.py on the directory's ItemBranch. See docs/PACKING.md.
+# {path, role, tag?, env?, access?, network?}. It becomes the `share` policy
+# (src/utils/policies.py) on the directory's ItemBranch. See docs/PACKING.md.
 SHARED_FILESYSTEMS_KEY = "shared_filesystems"
-_SHARED_ROLE_XATTRS = {"shared": SHARED_XATTR_KEY, "guest": GUEST_XATTR_KEY}
-# A network share (#268) is not a side of a parent share: its role names no xattr
-# of its own, and its `network` field becomes `share_network`.
-_NETWORK_ROLE = "network"
+_SHARED_ROLES = (policies.ROLE_SHARED, policies.ROLE_GUEST)
+_NETWORK_ROLE = policies.ROLE_NETWORK
 _SHARED_ENTRY_FIELDS = {"path", "role", "tag", "env", "access", "network"}
 
 # Ensure bee_rpc uses the configured cache and block directories.
@@ -440,7 +432,7 @@ class ZipContainerPacker:
                     )
             if "path" not in entry or "role" not in entry:
                 raise ValueError(f"{at} requires both 'path' and 'role'.")
-            if entry["role"] not in (*_SHARED_ROLE_XATTRS, _NETWORK_ROLE):
+            if entry["role"] not in (*_SHARED_ROLES, _NETWORK_ROLE):
                 raise ValueError(
                     f"{at}.role must be 'shared', 'guest' or 'network', got {entry['role']!r}."
                 )
@@ -478,7 +470,7 @@ class ZipContainerPacker:
         self,
         root_filesystem: celaut.Service.Container.Filesystem,
     ) -> None:
-        """Translate ``shared_filesystems`` into xattrs on the directories' branches.
+        """Translate ``shared_filesystems`` into ``share`` policies on the directories' branches.
 
         The directory must already exist in the image: it is not created here, so
         the author decides its owner, mode and content in the Dockerfile. Absent or
@@ -504,16 +496,14 @@ class ZipContainerPacker:
                     )
                 filesystem = branch.filesystem
 
-            if entry["role"] != _NETWORK_ROLE:
-                keyvalue.set_value(branch.xattrs, _SHARED_ROLE_XATTRS[entry["role"]], b"true")
-            for field, key in (
-                ("network", SHARE_NETWORK_XATTR_KEY),
-                ("tag", SHARE_TAG_XATTR_KEY),
-                ("env", SHARE_ENV_XATTR_KEY),
-                ("access", ACCESS_XATTR_KEY),
-            ):
-                if field in entry:
-                    keyvalue.set_value(branch.xattrs, key, entry[field].encode("utf-8"))
+            value = policies.share_value(
+                role=entry["role"],
+                access=entry["access"].strip().lower() if "access" in entry else None,
+                tag=entry["tag"].strip() if "tag" in entry else None,
+                env=entry["env"].strip() if "env" in entry else None,
+                network=entry["network"].strip() if "network" in entry else None,
+            )
+            policies.set_policy(branch.policies, policies.make(policies.SHARE, value))
 
         try:
             declarations_for_filesystem(root_filesystem)
@@ -548,7 +538,7 @@ class ZipContainerPacker:
         self,
         root_filesystem: celaut.Service.Container.Filesystem,
     ) -> None:
-        """Translate ``read_only_filesystem: true`` into the tree's ``read_mode`` xattr.
+        """Translate ``read_only_filesystem: true`` into the tree's ``read_mode`` policy.
 
         Set on the **root** ``Filesystem`` only -- the one ``Container.filesystem``
         points at. A nested ``Filesystem`` (a subdirectory, reached through
@@ -585,17 +575,21 @@ class ZipContainerPacker:
                 f"tree is missing required per-entry filesystem metadata: {e}"
             ) from e
 
-        keyvalue.set_value(root_filesystem.xattrs, READ_MODE_KEY, READ_MODE_RO.encode("utf-8"))
+        policies.set_policy(
+            root_filesystem.policies,
+            policies.make(policies.READ_MODE, READ_MODE_RO.encode("utf-8")),
+        )
 
     @staticmethod
-    def _init_xattrs(init: dict) -> dict:
-        """``init.xattrs`` from ``service.json`` (an object) as ``{key: bytes}``."""
-        declared = init.get("xattrs")
-        keyvalue.check_json_object(declared, "init.xattrs")
-        return {
-            key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
-            for key, value in (declared or {}).items()
-        }
+    def _refuse_init_xattrs(init: dict) -> None:
+        """``init.xattrs`` was removed (#670): the node never read it, and a setting of
+        the start is a policy now. Refused, not ignored, so an operator who set one
+        learns that it is not written."""
+        if "xattrs" in init:
+            raise ValueError(
+                "service.json: 'init.xattrs' was removed. The node never read it. A "
+                "setting of the start is a policy, and no such setting is defined yet."
+            )
 
     def parseNoticeDeclaration(self):
         """Where the service reads the notices of the node (#645).
@@ -759,9 +753,15 @@ class ZipContainerPacker:
             # filesystem block's id, and the service id above it, are the same as
             # they would be with every type spelled out.
             root_filesystem = recursive_parsing(directory="/")
-            # Before read_only: its refusal of an exported share reads these xattrs.
+            # Before read_only: its refusal of an exported share reads these policies.
             self._apply_shared_filesystems(root_filesystem)
             self._apply_read_only_filesystem(root_filesystem)
+            # The same reader as the node's: the packer does not pack a service that a
+            # node refuses (#670).
+            try:
+                declarations_for_filesystem(root_filesystem)
+            except ValueError as e:
+                raise ValueError(f"service.json: invalid policy: {e}") from e
 
             self.filesystem_block = _install_as_block(
                 *block_builder.build_multiblock(
@@ -853,7 +853,7 @@ class ZipContainerPacker:
             # Legacy compatibility: map service.json entrypoint -> container.init.entry_path
             entry_path = _normalize_path_segments(self.json.get("entrypoint"))
         self.service.container.init.entry_path.extend(entry_path)
-        keyvalue.from_dict(self.service.container.init.xattrs, self._init_xattrs(init))
+        self._refuse_init_xattrs(init)
         
         # Arch
         

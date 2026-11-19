@@ -1,9 +1,10 @@
-"""Unit tests for the parent -> child shared-filesystem xattr model."""
+"""Unit tests for the parent -> child shared-filesystem policy model."""
 import unittest
 
 try:
     from protos import celaut_pb2 as celaut
-    from src.utils import keyvalue
+    from src.utils import keyvalue, policies
+    from tests.share_policies import add_share
     from src.utils import shared_filesystems as sf
     IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - environment-dependent
@@ -17,15 +18,13 @@ def _dir(name, xattrs=None, children=None):
     b.filesystem.SetInParent()
     for c in (children or []):
         b.filesystem.branch.append(c)
-    for k, v in (xattrs or {}).items():
-        keyvalue.set_value(b.xattrs, k, v)
+    add_share(b, xattrs)
     return b
 
 
 def _file(name, xattrs=None):
     b = celaut.Service.Container.Filesystem.ItemBranch(name=name, file=b"x")
-    for k, v in (xattrs or {}).items():
-        keyvalue.set_value(b.xattrs, k, v)
+    add_share(b, xattrs)
     return b
 
 
@@ -65,20 +64,24 @@ class SharedFilesystemsTest(unittest.TestCase):
         svc = _service(_dir("a", children=[_dir("b", children=[_dir("c", {"shared": b"true"})])]))
         self.assertEqual(sf.exported_dirs(svc)[0].path, "/a/b/c")
 
-    def test_boolean_variants(self):
-        for truthy in (b"true", b"1", b"TRUE", b"yes", b"on"):
-            svc = _service(_dir("d", {"shared": truthy}))
-            self.assertEqual(len(sf.exported_dirs(svc)), 1, truthy)
-        for falsy in (b"false", b"0", b"no", b""):
-            svc = _service(_dir("d", {"shared": falsy}))
-            self.assertEqual(sf.exported_dirs(svc), [], falsy)
+    def test_the_role_decides_the_side(self):
+        exported = _service(_dir("d", {"shared": b"true"}))
+        self.assertEqual(len(sf.exported_dirs(exported)), 1)
+        self.assertEqual(sf.guest_dirs(exported), [])
+        imported = _service(_dir("d", {"guest": b"true"}))
+        self.assertEqual(len(sf.guest_dirs(imported)), 1)
+        self.assertEqual(sf.exported_dirs(imported), [])
 
-    def test_shared_and_guest_together_is_rejected(self):
-        svc = _service(_dir("d", {"shared": b"true", "guest": b"true"}))
+    def test_a_role_that_is_both_sides_is_rejected(self):
+        # The two booleans of the old form became one `role`, so "both" cannot be written.
+        branch = _dir("d")
+        policies.set_policy(
+            branch.policies, policies.make(policies.SHARE, b"role=guest,shared")
+        )
         with self.assertRaises(ValueError):
-            sf.declarations_for_service(svc)
+            sf.declarations_for_service(_service(branch))
 
-    def test_sharing_xattrs_on_file_is_rejected(self):
+    def test_a_share_policy_on_a_file_is_rejected(self):
         svc = _service(_file("f", {"shared": b"true"}))
         with self.assertRaises(ValueError):
             sf.declarations_for_service(svc)
@@ -267,8 +270,8 @@ class ShareTagAndEnvTest(unittest.TestCase):
         self.assertIn("HDFS_CLUSTER=prod", ref.describe())
 
     def test_a_tag_is_matched_literally_and_its_charset_is_pinned(self):
-        self.assertEqual(self._decl({"shared": b"true", "share_tag": b"  x-1 "}).tag, "x-1")
-        for bad in (b"has space", b"tiene\nsalto", b"-leading", b"sla/sh"):
+        self.assertEqual(self._decl({"shared": b"true", "share_tag": b"x-1"}).tag, "x-1")
+        for bad in (b"  x-1 ", b"has space", b"tiene\nsalto", b"-leading", b"sla/sh"):
             with self.assertRaises(ValueError, msg=bad):
                 self._decl({"shared": b"true", "share_tag": bad})
         for bad in (b"1BAD", b"has-dash", b"has space"):
