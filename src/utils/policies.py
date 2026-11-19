@@ -40,9 +40,13 @@ PLACE_ENTRY_FILE = "filesystem.file"            # a file, a link or a device ent
 PLACE_ROOT = "filesystem.root"                  # the filesystem that Container.filesystem holds
 PLACE_NESTED = "filesystem.nested"              # the filesystem of a subdirectory
 PLACE_INIT = "init"                             # Container.Init
+PLACE_API_SLOT = "api.slot"                     # Service.Api.Slot (#669)
 
 SHARE = "share"
 READ_MODE = "read_mode"
+ACCESS = "access"
+TUNNEL_AUTH = "tunnel_auth"
+WAKE = "wake"
 
 SHARE_FORMAL: bytes = component_formal({
     "setting": SHARE,
@@ -57,6 +61,37 @@ READ_MODE_FORMAL: bytes = component_formal({
     "values": "ro,rw",
     "default": "rw",
 })
+
+ACCESS_FORMAL: bytes = component_formal({
+    "setting": ACCESS,
+    "place": PLACE_API_SLOT,
+    "values": "any,direct,tunnel",
+    "default": "any",
+})
+TUNNEL_AUTH_FORMAL: bytes = component_formal({
+    "setting": TUNNEL_AUTH,
+    "place": PLACE_API_SLOT,
+    "values": "address,token",
+    "default": "token",
+})
+WAKE_FORMAL: bytes = component_formal({
+    "setting": WAKE,
+    "place": PLACE_API_SLOT,
+    "values": "never,on_tunnel",
+    "default": "never",
+})
+
+# Values of the settings of a slot (#669).
+ACCESS_DIRECT = "direct"
+ACCESS_TUNNEL = "tunnel"
+ACCESS_ANY = "any"
+ACCESS_SLOT_VALUES = (ACCESS_ANY, ACCESS_DIRECT, ACCESS_TUNNEL)
+TUNNEL_AUTH_TOKEN = "token"
+TUNNEL_AUTH_ADDRESS = "address"
+TUNNEL_AUTH_VALUES = (TUNNEL_AUTH_ADDRESS, TUNNEL_AUTH_TOKEN)
+WAKE_NEVER = "never"
+WAKE_ON_TUNNEL = "on_tunnel"
+WAKE_VALUES = (WAKE_NEVER, WAKE_ON_TUNNEL)
 
 # Keys of the value of a `share` policy.
 ROLE_SHARED = "shared"
@@ -140,6 +175,15 @@ def parse_read_mode_value(value: bytes) -> str:
     return text
 
 
+def _word_parser(values):
+    def parse(value: bytes) -> str:
+        text = _text(value, "the value")
+        if text not in values:
+            raise ValueError(f"expected one of {list(values)}, got {text!r}")
+        return text
+    return parse
+
+
 @dataclass(frozen=True)
 class Setting:
     name: str
@@ -153,6 +197,10 @@ _SETTINGS: Dict[bytes, Setting] = {
     for s in (
         Setting(SHARE, SHARE_FORMAL, frozenset({PLACE_ENTRY_DIRECTORY}), parse_share_value),
         Setting(READ_MODE, READ_MODE_FORMAL, frozenset({PLACE_ROOT}), parse_read_mode_value),
+        Setting(ACCESS, ACCESS_FORMAL, frozenset({PLACE_API_SLOT}), _word_parser(ACCESS_SLOT_VALUES)),
+        Setting(TUNNEL_AUTH, TUNNEL_AUTH_FORMAL, frozenset({PLACE_API_SLOT}),
+                _word_parser(TUNNEL_AUTH_VALUES)),
+        Setting(WAKE, WAKE_FORMAL, frozenset({PLACE_API_SLOT}), _word_parser(WAKE_VALUES)),
     )
 }
 
@@ -236,3 +284,38 @@ def set_policy(policies, policy: celaut.Policy) -> None:
     copies = [celaut.Policy.FromString(p.SerializeToString()) for p in kept]
     del policies[:]
     policies.extend(copies)
+
+
+@dataclass(frozen=True)
+class SlotAccess:
+    """The settings of one slot, with the default of each one that the slot does not set."""
+    access: str = ACCESS_ANY
+    tunnel_auth: str = TUNNEL_AUTH_TOKEN
+    wake: str = WAKE_NEVER
+
+
+def slot_access(slot: celaut.Service.Api.Slot) -> SlotAccess:
+    """The settings of ``slot`` (#669). Raises :class:`PolicyError` if the slot is not valid.
+
+    Two pairs are not valid, because the tunnel is the only way for both: ``wake=on_tunnel``
+    and ``tunnel_auth=address`` need an ``access`` other than ``direct``.
+    """
+    where = f"slot {slot.port}"
+    parsed = check_list(slot.policies, PLACE_API_SLOT, where)
+    result = SlotAccess(
+        access=parsed.get(ACCESS, ACCESS_ANY),
+        tunnel_auth=parsed.get(TUNNEL_AUTH, TUNNEL_AUTH_TOKEN),
+        wake=parsed.get(WAKE, WAKE_NEVER),
+    )
+    if result.access == ACCESS_DIRECT:
+        if result.wake == WAKE_ON_TUNNEL:
+            raise PolicyError(f"{where}: wake=on_tunnel is not valid with access=direct")
+        if result.tunnel_auth == TUNNEL_AUTH_ADDRESS:
+            raise PolicyError(f"{where}: tunnel_auth=address is not valid with access=direct")
+    return result
+
+
+def check_service_slots(service: celaut.Service) -> None:
+    """Refuse a service that has a slot that this node does not accept (#669)."""
+    for slot in service.api.slot:
+        slot_access(slot)

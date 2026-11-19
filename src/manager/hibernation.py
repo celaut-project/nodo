@@ -126,6 +126,21 @@ def wake_instance(token: str, sysreq: celaut_pb2.Sysresources) -> bool:
         return False
 
 
+def wake_saved_instance(token: str) -> bool:
+    """Wake the hibernated instance ``token`` with the resources that it had (#669).
+
+    For a request or the activity window. False if the instance is not hibernated, if it has
+    no saved resources (a row hibernated before they were saved), or if the wake failed:
+    then it stays hibernated. An instance hibernated for no balance is not woken here.
+    """
+    saved = sc.get_saved_resources(token)
+    if saved is None:
+        log.LOGGER(f"Instance {token} has no saved resources to wake it; it stays hibernated.")
+        return False
+    return wake_instance(token, celaut_pb2.Sysresources(**{
+        field: int(value) for field, value in saved.items() if value is not None}))
+
+
 def wake_window_instances() -> int:
     """Wake every instance that the activity window hibernated (issue #344), with the
     resources it held when it went down. Returns how many are running again.
@@ -143,14 +158,8 @@ def wake_window_instances() -> int:
         return 0
     for row in rows:
         token = row["id"]
-        saved = {field: row.get(field) for field in ("mem_limit", "cpu_period", "cpu_quota")}
-        if not saved["mem_limit"] or not saved["cpu_quota"]:
-            log.LOGGER(f"Instance {token} was hibernated by the activity window but has no "
-                       "saved resources; it stays hibernated.")
-            continue
         try:
-            if wake_instance(token, celaut_pb2.Sysresources(**{
-                    field: int(value) for field, value in saved.items() if value is not None})):
+            if wake_saved_instance(token):
                 woken += 1
                 log.LOGGER(f"Instance {token} is running again: the activity window opened.")
             else:

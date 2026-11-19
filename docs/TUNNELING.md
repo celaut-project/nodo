@@ -57,7 +57,8 @@ available wherever the gateway is.
 
 Transport is **beeRPC** (`bee_rpc`, protobuf buffers over gRPC/HTTP2) — the same
 transport as every other gateway RPC. The stream is bidirectional and typed
-`TokenMessage | bytes -> bytes`:
+`TokenMessage | bytes -> bytes`. A tunnel with no token starts with an `Instance.Uri`
+instead (see *A tunnel with no token*, below):
 
 | Step | Direction       | Message                     | Meaning                                        |
 | ---- | --------------- | --------------------------- | ---------------------------------------------- |
@@ -180,6 +181,68 @@ the service's own `service.api.slot` declarations.
 This is deliberately narrower than "any port of that microVM". Without the check,
 a token would grant access to every port inside the VM, including internal ones
 the service never meant to expose.
+
+---
+
+## A tunnel with no token: `tunnel_auth=address`
+
+A third party that does not hold the instance token can open a tunnel to a slot that the
+author of the service opened to it (#669). The author sets three policies on the slot. They
+are described in [`policies/README.md`](policies/README.md#settings-of-a-slot).
+
+| Policy | Values (default first) | Meaning |
+| ------ | ---------------------- | ------- |
+| `access` | `any`, `tunnel`, `direct` | `direct` closes the tunnel to the slot, with a token or without. The other two values do not change the tunnel. A direct connection does not go through the node, so for it `access` is only a declaration for callers. |
+| `tunnel_auth` | `token`, `address` | `address`: the tunnel finds the instance by the `Instance.Uri` that the node published, with no token. |
+| `wake` | `never`, `on_tunnel` | `on_tunnel`: the tunnel wakes a hibernated instance. |
+
+A slot with `access=direct` and `wake=on_tunnel` (or `tunnel_auth=address`) is not valid.
+A node refuses the service.
+
+### The handshake
+
+The caller sends an `Instance.Uri` (the ip and the port from the `uri_slot` of the instance)
+at index 3 in place of the `TokenMessage`. The node finds the instance and the slot in an
+index of the addresses that it published. The rest of the stream is the same.
+
+### What the node does
+
+1. The node refuses if no live instance published the `Uri`, if the slot does not declare
+   `tunnel_auth=address`, or if `access` is `direct`.
+2. If the instance is hibernated and the slot does not declare `wake=on_tunnel`, the node
+   refuses. It does not wake the instance.
+3. If the instance is hibernated and the slot declares `wake=on_tunnel`, the node wakes it with
+   the CPU and RAM that it had before it was hibernated (this is true when the parent
+   hibernated it, too). Many callers at the same time share one wake.
+4. The node waits at most `network.TUNNEL_WAKE_TIMEOUT_S` (60 s) for the wake and for the
+   first connection to the service.
+
+The instance pays for its own wake, its tunnel and its disk from its own balance. With no
+balance, or if the node has no room for the instance, it stays hibernated. A row that was
+hibernated before the node saved the resources has nothing to restore and stays hibernated.
+
+Every failure of this mode is `UNAVAILABLE` with one text. The caller does not learn if the
+address is unknown, if the slot is closed to this way, or if the instance sleeps. If the time
+ends, the wake goes on in the background, and a new call can find the instance awake.
+
+### No receipts
+
+A tunnel by `Uri` gives no execution receipts. The node signs them with material that comes
+from the instance token, or from the token of an ancestor for a `DescendantTunnel`. A caller
+with only an address has neither. A caller that needs receipts uses a token.
+
+### Direct first, tunnel after
+
+The node does not wake an instance for a direct connection. A direct connection to a
+hibernated instance fails. A caller that knows a slot with `wake=on_tunnel` tries the `Uri`
+directly, and on a connection error opens a tunnel with the same `Uri`. This is a convention
+of the caller. The node has no client for it.
+
+### Cost and risk
+
+The tunnel is slower than a direct connection, and the node charges for it. Anyone who knows
+the address can wake the instance and spend its balance. The key `${VAR}` in `Network.formal`
+(see [`NETWORKS.md`](NETWORKS.md)) limits a network to the instances that share its value.
 
 ---
 
@@ -465,7 +528,8 @@ they existed:
   node→service side documented here.
 * **`network.service_tunneling`, `network.tunnel_protocol`, `network.ddns`.**
   These specific keys never existed. The tunnelling settings that do exist are
-  `network.DELEGATION_TUNNEL_POLICY`, `network.TUNNEL_UDP_IDLE_TIMEOUT_S`, and the
+  `network.DELEGATION_TUNNEL_POLICY`, `network.TUNNEL_UDP_IDLE_TIMEOUT_S`,
+  `network.TUNNEL_WAKE_TIMEOUT_S`, and the
   prices under `pricing.TUNNEL_OPEN_MU` / `pricing.NET_MU_PER_GIB` (see
   *Metering*, above).
 * **A persistent tunnel registry.** An early design kept one long-lived tunnel

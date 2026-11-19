@@ -936,7 +936,33 @@ class ZipContainerPacker:
                 method: celaut.Amount(n=str(amount_mu))
                 for method, amount_mu in item.get("mu_per_call", {}).items()
             })
+            self._parse_slot_policies(item, slot)
             self.service.api.slot.append(slot)
+
+    def _parse_slot_policies(self, item, slot):
+        """The ``policies`` object of an api slot -> the policies of the slot (#669).
+
+        ``{"access": "any", "tunnel_auth": "address", "wake": "on_tunnel"}``: only these
+        keys. The result is judged by the same reader as the node, so the packer cannot
+        write a slot that a node refuses.
+        """
+        declared = item.get("policies")
+        if declared is None:
+            return
+        where = f"service.json api slot port={slot.port}: 'policies'"
+        if not isinstance(declared, dict):
+            raise ValueError(f"{where} must be an object.")
+        unknown = sorted(set(declared) - {policies.ACCESS, policies.TUNNEL_AUTH, policies.WAKE})
+        if unknown:
+            raise ValueError(f"{where} has unknown key(s) {unknown}.")
+        for name, value in declared.items():
+            if not isinstance(value, str):
+                raise ValueError(f"{where}: '{name}' must be a string.")
+            policies.set_policy(slot.policies, policies.make(name, value.encode("utf-8")))
+        try:
+            policies.slot_access(slot)
+        except policies.PolicyError as e:
+            raise ValueError(f"service.json {e}") from None
 
     def _parse_api_protocol_stack(self, item, port):
         """An api slot's ``protocol`` (one layer) or ``protocol_stack`` (layers) -> protocols.

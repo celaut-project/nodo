@@ -22,7 +22,7 @@ read-only root filesystem. It is the message `celaut.Policy` (`tags`, `prose`, `
 - The `xattrs` of an entry are file attributes (mode, uid, gid, mtime, device). A node
   reads no setting from them.
 
-The places are: a filesystem entry (`filesystem.directory` for a directory,
+The places are: a slot of the API (`api.slot`, #669), a filesystem entry (`filesystem.directory` for a directory,
 `filesystem.file` for the rest), the root filesystem (`filesystem.root`: the one that
 `Container.filesystem` holds), and `Init` (`init`). A subdirectory's `Filesystem` has no
 policies. No setting is defined on `Init` yet, so a node refuses any policy there. The
@@ -38,6 +38,9 @@ files.
 | --- | --- | --- | --- |
 | `share` | [`share.formal`](share.formal) | a directory entry | `key=value` lines, sorted by key |
 | `read_mode` | [`read_mode.formal`](read_mode.formal) | the root filesystem | `ro` or `rw` |
+| `access` | [`access.formal`](access.formal) | a slot of the API | `direct`, `tunnel` or `any` |
+| `tunnel_auth` | [`tunnel_auth.formal`](tunnel_auth.formal) | a slot of the API | `token` or `address` |
+| `wake` | [`wake.formal`](wake.formal) | a slot of the API | `never` or `on_tunnel` |
 
 ### `share`
 
@@ -54,3 +57,20 @@ Example value of a read-only guest: `access=ro`, `env=DATASET`, `role=guest`,
 
 Declares if the root filesystem is writable: `ro` or `rw`. With no policy, it is writable.
 See [PACKING.md](../PACKING.md#read_mode--a-read-only-rootfs).
+
+### Settings of a slot
+
+Three settings of one slot of `Service.Api` (#669). The value is the word, in UTF-8. A slot
+that does not set one has the default.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `access` | `any` | How a third party reaches the slot. The node enforces it in the tunnel only. A direct connection does not go through the node, so for it `access=tunnel` is a declaration for callers. |
+| `tunnel_auth` | `token` | How the tunnel finds the instance. `address`: the `Instance.Uri` that the caller knows, with no token. |
+| `wake` | `never` | `on_tunnel`: a tunnel connection wakes a hibernated instance. |
+
+A node refuses a service that has `wake=on_tunnel` or `tunnel_auth=address` on a slot with
+`access=direct`. The node ignores these settings in `ConfigurationFile.gateway`. A packer
+writes them from `policies` in a slot of `api` in `service.json`:
+`{"port": 8333, "policies": {"tunnel_auth": "address", "wake": "on_tunnel"}}`. How the tunnel
+uses them is in [TUNNELING.md](../TUNNELING.md).

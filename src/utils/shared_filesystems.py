@@ -304,6 +304,7 @@ def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     # Before the tree is read: a service that this node does not understand is
     # refused whether or not it holds the tree.
     policies.check_list(service.container.init.policies, policies.PLACE_INIT, "init")
+    policies.check_service_slots(service)
     try:
         filesystem = load_container_filesystem(service)
     except FilesystemNotStored:

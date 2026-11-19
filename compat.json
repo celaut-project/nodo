@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "4aee848ef5a247a2596a736aea09d9825ebc88a2f0f5c9c291c6d9b8c7581993",
+  "celaut_proto": "567a98d5d21df5b2726c81ea73871546f71c2ba58d3db8a6f1800b44fa355b35",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",
@@ -221,6 +221,7 @@
     "network.REANNOUNCE_ON_CHANGE",
     "network.RECURSION_MAX_HOPS",
     "network.TUNNEL_UDP_IDLE_TIMEOUT_S",
+    "network.TUNNEL_WAKE_TIMEOUT_S",
     "network.VERIFY_GATEWAY_REACHABILITY",
     "packer.ARM_PACKER_SUPPORT",
     "packer.MIN_BUFFER_BLOCK_SIZE",
@@ -376,6 +377,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "bfe0fd9b5b56f8c4d2a9820498e3d3e37ad5dcd85891a55b29d8ee664b9c887d",
+  "database": "38f247cf3c0b1f988ba2035ca6e278f8dd78b9658b711892e295ecabc16ffb92",
   "storage_format": 1
 }

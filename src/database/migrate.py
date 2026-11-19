@@ -932,6 +932,18 @@ TABLES = {
             hash TEXT NOT NULL,
             PRIMARY KEY (account_id, seq)
         )
+    ''',
+    # The published address of each live local instance: the `Uri` of its `uri_slot`, with
+    # the instance and the internal port. A tunnel by `Uri` (#669) has no token, so it finds
+    # the instance here instead of reading every stored instance. A dead instance has no rows.
+    "uri_slot_index": '''
+        CREATE TABLE IF NOT EXISTS uri_slot_index (
+            ip TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            instance_id TEXT NOT NULL,
+            internal_port INTEGER NOT NULL,
+            PRIMARY KEY (ip, port)
+        )
     '''
 }
 
@@ -1152,6 +1164,36 @@ def create_tables(cursor):
     ensure_peer_address_uniqueness(cursor)
     forget_peer_rates_per_whole_unit(cursor)
     name_the_network_in_ledger_tags(cursor)
+    backfill_uri_slot_index(cursor)
+
+
+def backfill_uri_slot_index(cursor) -> None:
+    """Fill ``uri_slot_index`` from the stored instances that are alive (#669).
+
+    Idempotent: a row that exists is replaced by the same row. An instance that cannot be
+    read has no rows, and a failure here never stops the node.
+    """
+    try:
+        from protos import celaut_pb2
+        cursor.execute(
+            "SELECT id, serialized_instance FROM local_instances "
+            "WHERE killed_at IS NULL AND serialized_instance IS NOT NULL"
+        )
+        for row in cursor.fetchall():
+            instance = celaut_pb2.Instance()
+            try:
+                instance.ParseFromString(row[1] if isinstance(row[1], bytes) else bytes(row[1]))
+            except Exception:
+                continue
+            for uri_slot in instance.uri_slot:
+                for uri in uri_slot.uri:
+                    cursor.execute(
+                        "INSERT OR REPLACE INTO uri_slot_index "
+                        "(ip, port, instance_id, internal_port) VALUES (?, ?, ?, ?)",
+                        (uri.ip, uri.port, row[0], uri_slot.internal_port),
+                    )
+    except Exception as e:
+        print(f"Could not fill the index of published addresses: {e}")
 
 
 def retire_unmetered_column(cursor) -> None:

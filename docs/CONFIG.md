@@ -491,7 +491,7 @@ It only publishes on the host's own interface — reaching an instance from anyw
 is still [`nodo tunnel`](TUNNELING.md).
 
 Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) and
-`TUNNEL_UDP_IDLE_TIMEOUT_S` — see [`TUNNELING.md`](TUNNELING.md).
+`TUNNEL_UDP_IDLE_TIMEOUT_S` and `TUNNEL_WAKE_TIMEOUT_S` (60 s: the wait of a tunnel by `Uri` for a hibernated instance) — see [`TUNNELING.md`](TUNNELING.md).
 
 | Key | Default | Meaning |
 |---|---|---|

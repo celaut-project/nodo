@@ -711,6 +711,7 @@ network:
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
+  TUNNEL_WAKE_TIMEOUT_S: 60  # How long a tunnel by Uri (no token) waits for a hibernated instance of a slot with wake=on_tunnel: the wake and the first connection. After this the tunnel answers UNAVAILABLE and the wake goes on in the background.
 
 # Which communication domains this node is willing to run a service for.
 #
