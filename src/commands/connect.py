@@ -12,6 +12,19 @@ SELF_ANNOUNCE_TO_CONNECTING_PEERS = env_manager.get("SELF_ANNOUNCE_TO_CONNECTING
 
 sc = SQLConnection()
 
+def _keep_minted_client(peer_id: str, client_id: str) -> None:
+    """Store the client minted for the first ``GetPeerInfo`` as this node's client at the peer.
+
+    That mint happens before the peer has an id here, so nothing recorded it. Left
+    unrecorded, ``get_client_id_on_other_peer`` finds no client for the peer and mints a
+    second one, leaving the first orphaned there. A client already stored is kept: it is
+    the one the peer has bound to this node.
+    """
+    if not client_id or sc.get_peer_client(peer_id=peer_id):
+        return
+    sc.add_external_client(peer_id=peer_id, client_id=client_id)
+
+
 def connect(peer: str, expected_peer_id: str = ""):
     """Handshake with ``peer`` and register what it advertises; True when it was added.
 
@@ -80,6 +93,7 @@ def connect(peer: str, expected_peer_id: str = ""):
                 print("Failed to add a peer.")
         else:
             print(f'Added peer {peer} with id {peer_id}')
+            _keep_minted_client(peer_id=peer_id, client_id=client_id)
             # Dialled by hand, so chosen: if gossip had already filed this peer, it is
             # now eligible for the automatic refill (issue #427).
             sc.mark_peer_chosen(peer_id=peer_id)
