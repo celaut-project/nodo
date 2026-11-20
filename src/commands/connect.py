@@ -56,10 +56,22 @@ def connect(peer: str, expected_peer_id: str = ""):
             # peer -- nothing about it is stored yet, so get_client_id_on_other_peer
             # (which needs a stored address to open its own channel from) cannot be
             # used here; mint straight over the channel already open for this call.
-            client_id = mint_client_id_on_channel(channel)
-            if not client_id:
-                print(f"Could not mint a client_id at {peer}; it may refuse this node.")
-            peer_info = BeeClient.get_peer_info(channel, client_id=client_id)
+            #
+            # A peer already known has a client of ours stored (the certificate proved
+            # whose address this is, so the lookup is by a verified id): use it, or each
+            # re-handshake would leave one more orphaned client there. Only when the peer
+            # does not answer with it is a fresh one minted, and the stored one is left
+            # alone -- no answer may be a timeout, and replacing it would drop the
+            # account it holds.
+            client_id = sc.get_peer_client(peer_id=certificate_peer_id)
+            peer_info = None
+            if client_id:
+                peer_info = BeeClient.get_peer_info(channel, client_id=client_id)
+            if peer_info is None:
+                client_id = mint_client_id_on_channel(channel)
+                if not client_id:
+                    print(f"Could not mint a client_id at {peer}; it may refuse this node.")
+                peer_info = BeeClient.get_peer_info(channel, client_id=client_id)
         finally:
             channel.close()
 
