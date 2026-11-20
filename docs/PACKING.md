@@ -640,24 +640,31 @@ a top-level boolean in `service.json`:
 The packer translates that into
 
 ```
-Service.Container.Filesystem.policies = [ Policy{ formal = <read_mode.formal>, value = "ro" } ]
+Service.Container.Filesystem.policies = [
+    Policy{ formal = <entry_metadata.formal>, value = "" },
+    Policy{ formal = <read_mode.formal>, value = "ro" },
+]
 ```
+
+The `entry_metadata` policy is always there, with or without `read_mode`: see
+[`entry_metadata`](#entry_metadata--per-entry-metadata). The packer sorts the list by
+`formal`, so the order above is only an example.
 
 That is a policy on the **filesystem itself** — a sibling of `branch`, distinct from
 the per-entry `ItemBranch.xattrs` — and only on the one `Container.filesystem` points
 at. A nested `Filesystem` (a subdirectory) is not separately mounted, so it can have no
 policy: a node refuses a service that has one there, and the packer does not write one.
 The definition of the setting is [`policies/read_mode.formal`](policies/read_mode.formal).
-Absent means `"rw"`, so a service that does not use it is unaffected and keeps its id;
+Absent means `"rw"`, so a service that does not use it gets no `read_mode` policy;
 any value other than `"rw"` or `"ro"` is refused rather than resolved to a default.
 A service with `read_only_filesystem: true` gets a new service id: services packed
-before #670 must be packed again.
+before #670 must be packed again. (Every service that is packed again gets a new id
+anyway, because of `entry_metadata`.)
 
 `read_only_filesystem: false`, and the property being absent, are the same thing: the
 packer writes **no** `read_mode` policy at all rather than `"rw"`. Absent already means
 `rw` to every reader, and the filesystem tree is hashed into the service id — so
-writing the default would give every existing service a new id on its next repack for
-no change in meaning.
+writing the default would add a policy to the tree for no change in meaning.
 
 The value must be a JSON boolean. A string `"true"` is a packer error naming the
 field, not a yes: accepting it would mean accepting `"false"` as truthy too, and
@@ -674,7 +681,7 @@ when `service.json` is read, before the image is built.
 | `at_init.disk_space` | a **floor** — the image is grown to it | a **ceiling** — the build is refused above it |
 | billed disk | the floor, or the built image if larger | the built image |
 | guest mount | `rw` | `ro`, plus tmpfs on `/tmp` and `/run` |
-| filesystem metadata | optional per entry | **required on every entry** |
+| filesystem metadata | optional per entry, when the root declares `entry_metadata` | **required on every entry**, and the root must declare `entry_metadata` |
 
 That last row is the cost of the rest. The metadata keys (`mode`, `uid`, `gid`,
 `mtime_ns`, `device.*`) are normally optional per entry: an entry carrying none of
@@ -683,7 +690,9 @@ or ELF magic. That heuristic cannot restore a uid or a gid, and cannot produce a
 device node at all. On a writable image whatever it gets wrong can still be fixed
 from inside the guest; on an image with no writable escape hatch it cannot. So for
 `read_mode: ro` the keys stop being optional, and a tree missing any of them is
-refused at build time, naming the path and the missing keys.
+refused at build time, naming the path and the missing keys. A tree whose root does
+not declare `entry_metadata` is also refused: without that setting the node reads none
+of the keys.
 
 **What it saves.** `OVERHEAD_BYTES` is a flat 64 MiB whether the tree is 2 GiB or
 2 MiB — a rounding error on a large service and the dominant term on a small one,
@@ -716,6 +725,17 @@ that if that ever stops being true it says so rather than shipping a service eve
 node would refuse.
 
 ---
+
+#### `entry_metadata` — per-entry metadata
+
+The packer always writes the policy `entry_metadata` (empty value) on the root
+`Filesystem`, because it always writes the seven keys `mode`, `uid`, `gid`, `mtime_ns`,
+`device.major`, `device.minor` and `device.is_block` in `ItemBranch.xattrs` of every
+entry. The definition is [`policies/entry_metadata.formal`](policies/entry_metadata.formal).
+Without the policy a node reads no key and refuses a tree where an entry carries one of
+them. `read_mode: "ro"` needs the policy and all the keys on every entry. Every repacked
+service gets a new service id, also a service that does not use `read_only_filesystem`:
+services packed before this change must be packed again.
 
 #### `shared_filesystems`
 - **Type:** `array` of objects
@@ -2311,7 +2331,7 @@ Once the Docker build produces the filesystem tar, the packer recursively parses
 | Regular file (large, ≥ `MIN_BUFFER_BLOCK_SIZE`) | Stored as a separate content-addressed block; referenced by hash |
 | Directory | Recursively parsed |
 | Symlink | Stored with source and destination paths |
-| Device node (block/char) | Stored as a file placeholder; recovered via xattrs during build |
+| Device node (block/char) | Stored as a file placeholder; recovered via the `entry_metadata` keys during build |
 | Whiteout file (`.wh..wh..opq`) | Skipped (OCI layer opaque whiteout marker) |
 
 > **Block storage:** Large files are stored as blocks identified by their content hash. This deduplicates identical large files across services and avoids embedding huge blobs directly in the protobuf. `GetService` also skips re-sending a block the requesting peer already holds: the peer tells the sender mid-transfer, over the same call, so the saving reaches the wire and not only the disk (issue #371). The same holds for the Service that a `StartService` or `GetServiceEstimatedCost` request carries: the node that receives it says which blocks it holds, and a sender that asked for it (`block_skip`) stops sending them. A sender that did not ask sends all of them, as before.
@@ -2474,7 +2494,7 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │  │  Symlink?  ──► store src + dst paths    │     │
 │  │                                         │     │
 │  │  Device?   ──► store as placeholder,    │     │
-│  │                recover via xattrs       │     │
+│  │                recover via metadata     │     │
 │  │                                         │     │
 │  │  Small     ──► embed raw bytes          │     │
 │  │  file?         directly in spec         │     │
@@ -2490,7 +2510,7 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │  └─────────────────────────────────────────┘     │
 │                                                  │
 │  File permissions and metadata preserved         │
-│  via extended attributes (xattrs) on each entry  │
+│  via entry_metadata keys (xattrs) on each entry  │
 └────────────┬─────────────────────────────────────┘
              │
              ▼

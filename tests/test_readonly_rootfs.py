@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.utils import policies
+from tests.share_policies import declare_entry_metadata
 from src.utils.filesystem_xattrs import (
     FILESYSTEM_METADATA_KEYS,
     FilesystemNodeMetadata,
@@ -99,6 +100,7 @@ def _set_read_mode(fs, value):
 
 def _ro_filesystem(*branches):
     fs = celaut.Service.Container.Filesystem()
+    declare_entry_metadata(fs)
     _set_read_mode(fs, b"ro")
     for branch in branches:
         fs.branch.append(branch)
@@ -174,6 +176,14 @@ class MetadataCompletenessGateTests(unittest.TestCase):
 
     def test_a_fully_declared_tree_passes(self):
         assert_complete_filesystem_metadata(_ro_filesystem(_complete_branch()))
+
+    def test_a_tree_that_does_not_declare_entry_metadata_is_refused(self):
+        fs = _ro_filesystem(_complete_branch())
+        del fs.policies[:]
+        _set_read_mode(fs, b"ro")
+
+        with self.assertRaisesRegex(ValueError, "entry_metadata"):
+            assert_complete_filesystem_metadata(fs)
 
     def test_an_entry_with_no_metadata_at_all_is_refused(self):
         # This is precisely the legacy shape: no xattrs, an exec bit guessed from

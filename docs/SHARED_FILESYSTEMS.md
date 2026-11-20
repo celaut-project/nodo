@@ -45,8 +45,8 @@ The value of the policy is `key=value` lines, sorted by key, joined by a newline
 | `network=<tag>` | the tag of the network; only with `role=network` |
 
 `role` is required. Another key makes the value not valid, and a node that
-does not accept a policy does not run the service. The `xattrs` of an entry are
-file attributes only: the node reads no share from them, so a service packed
+does not accept a policy does not run the service. The `xattrs` of an entry hold
+metadata only (see `entry_metadata`): the node reads no share from them, so a service packed
 before #670 with `shared=true` there must be packed again.
 
 A packed service gets this policy from the `shared_filesystems` field of

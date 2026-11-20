@@ -16,7 +16,12 @@ try:
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue, policies
     from src.utils import shared_filesystems as sf
-    from src.utils.filesystem_xattrs import read_mode
+    from src.utils.filesystem_xattrs import (
+        assert_complete_filesystem_metadata,
+        assert_no_undeclared_metadata,
+        entry_metadata_declared,
+        read_mode,
+    )
     from src.packers.zip_with_dockerfile import ZipContainerPacker
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -53,6 +58,24 @@ def _read_mode(value):
     return policies.make(policies.READ_MODE, value)
 
 
+def entry_metadata_policy():
+    return policies.make(policies.ENTRY_METADATA, b"")
+
+
+def _keys():
+    return {k: b"0" for k in policies.ENTRY_METADATA_KEYS}
+
+
+def _entry(name, keys=None, nested=None):
+    branch = Filesystem.ItemBranch(name=name, file=b"x") if nested is None else _dir(name)
+    for key, value in (keys or {}).items():
+        keyvalue.set_value(branch.xattrs, key, value)
+    if nested is not None:
+        for child in nested:
+            branch.filesystem.branch.append(child)
+    return branch
+
+
 def _share(value):
     return policies.make(policies.SHARE, value)
 
@@ -82,7 +105,11 @@ class IdentifiedByFormalTests(unittest.TestCase):
             sf.declarations_for_service(service)
 
     def test_the_formal_bytes_are_the_ones_published_in_docs(self):
-        for name, formal in (("share", policies.SHARE_FORMAL), ("read_mode", policies.READ_MODE_FORMAL)):
+        for name, formal in (
+            ("share", policies.SHARE_FORMAL),
+            ("read_mode", policies.READ_MODE_FORMAL),
+            ("entry_metadata", policies.ENTRY_METADATA_FORMAL),
+        ):
             with open(os.path.join(DOCS, f"{name}.formal"), "rb") as f:
                 self.assertEqual(f.read(), formal, name)
 
@@ -286,3 +313,84 @@ class PackerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"imports unavailable: {IMPORT_ERROR}")
+class EntryMetadataTests(unittest.TestCase):
+
+    def test_the_setting_is_known_at_the_root(self):
+        fs = Filesystem(policies=[entry_metadata_policy()])
+        self.assertTrue(entry_metadata_declared(fs))
+        self.assertFalse(entry_metadata_declared(Filesystem()))
+        sf.declarations_for_service(_service([entry_metadata_policy()]))
+
+    def test_the_keys_are_sorted_as_in_the_formal(self):
+        self.assertEqual(list(policies.ENTRY_METADATA_KEYS), sorted(policies.ENTRY_METADATA_KEYS))
+        self.assertIn(b"keys=" + ",".join(policies.ENTRY_METADATA_KEYS).encode(),
+                      policies.ENTRY_METADATA_FORMAL)
+
+    def test_it_is_refused_on_a_nested_filesystem(self):
+        branch = _dir("sub")
+        branch.filesystem.policies.append(entry_metadata_policy())
+        with self.assertRaisesRegex(ValueError, "subdirectory '/sub'"):
+            sf.declarations_for_service(_service((), (), branch))
+
+    def test_it_is_refused_on_a_directory_entry(self):
+        with self.assertRaisesRegex(ValueError, "not valid in this place"):
+            sf.declarations_for_service(_service((), (), _dir("d", entry_metadata_policy())))
+
+    def test_it_is_refused_on_a_file_entry(self):
+        branch = Filesystem.ItemBranch(name="f", file=b"x")
+        branch.policies.append(entry_metadata_policy())
+        with self.assertRaisesRegex(ValueError, "not valid in this place"):
+            sf.declarations_for_service(_service((), (), branch))
+
+    def test_it_is_refused_on_init(self):
+        with self.assertRaises(ValueError):
+            sf.declarations_for_service(_service((), [entry_metadata_policy()]))
+
+    def test_it_is_refused_on_a_slot(self):
+        service = _service()
+        slot = service.api.add_slot() if hasattr(service.api, "add_slot") else service.api.slot.add()
+        slot.policies.append(entry_metadata_policy())
+        with self.assertRaises(ValueError):
+            policies.check_service_slots(service)
+
+    def test_a_value_with_content_is_refused(self):
+        service = _service([policies.make(policies.ENTRY_METADATA, b"1")])
+        with self.assertRaisesRegex(ValueError, "empty value"):
+            sf.declarations_for_service(service)
+        with self.assertRaises(ValueError):
+            entry_metadata_declared(Filesystem(policies=[policies.make(policies.ENTRY_METADATA, b"1")]))
+
+    def test_a_repeat_is_refused(self):
+        service = _service([entry_metadata_policy(), entry_metadata_policy()])
+        with self.assertRaisesRegex(ValueError, "repeats"):
+            sf.declarations_for_service(service)
+
+    def test_keys_without_the_policy_are_refused_and_named(self):
+        fs = Filesystem(branch=[_entry("sub", nested=[_entry("deep", {"uid": b"0"})])])
+        with self.assertRaises(ValueError) as caught:
+            assert_no_undeclared_metadata(fs)
+        self.assertIn("/sub/deep", str(caught.exception))
+        self.assertIn("Pack the service again", str(caught.exception))
+
+    def test_one_key_is_enough_to_be_refused(self):
+        fs = Filesystem(branch=[_entry("f", {"gid": b"0"})])
+        with self.assertRaisesRegex(ValueError, "'/f'"):
+            assert_no_undeclared_metadata(fs)
+
+    def test_keys_with_the_policy_are_accepted(self):
+        fs = Filesystem(policies=[entry_metadata_policy()],
+                        branch=[_entry("sub", _keys(), nested=[_entry("deep", _keys())])])
+        assert_no_undeclared_metadata(fs)
+
+    def test_no_keys_and_no_policy_is_accepted(self):
+        assert_no_undeclared_metadata(Filesystem(branch=[_entry("f"), _entry("sub", nested=[_entry("g")])]))
+
+    def test_read_mode_ro_needs_the_policy(self):
+        fs = Filesystem(policies=[_read_mode(b"ro")], branch=[_entry("f", _keys())])
+        with self.assertRaisesRegex(ValueError, "entry_metadata"):
+            assert_complete_filesystem_metadata(fs)
+        fs.policies.append(entry_metadata_policy())
+        assert_complete_filesystem_metadata(fs)

@@ -25,6 +25,8 @@ from src.utils.filesystem_xattrs import (
     FilesystemNodeMetadata,
     READ_MODE_RO,
     assert_complete_filesystem_metadata,
+    assert_no_undeclared_metadata,
+    entry_metadata_declared,
     parse_filesystem_metadata_xattrs,
     read_mode,
 )
@@ -409,7 +411,15 @@ def _audit_device_node(
 def _decode_branch_metadata(
     branch: celaut_pb2.Service.Container.Filesystem.ItemBranch,
     rel_path: str,
+    entry_metadata: bool,
 ) -> Optional[FilesystemNodeMetadata]:
+    """The metadata of an entry, or ``None``.
+
+    Only a root that declares ``entry_metadata`` has xattrs that the node reads:
+    without the setting no xattr is read, and the entry takes the legacy path.
+    """
+    if not entry_metadata:
+        return None
     try:
         return parse_filesystem_metadata_xattrs(keyvalue.to_dict(branch.xattrs))
     except ValueError as e:
@@ -670,11 +680,17 @@ def _write_item(
     legacy_regular_files: Set[Path],
     security_context: _BuildSecurityContext,
     hash_types: Optional[Sequence[bytes]] = None,
+    *,
+    entry_metadata: bool,
 ) -> None:
-    """`hash_types` is the context this tree's block pointers sit in -- what a
+    """`entry_metadata` is whether the root declares the setting of that name: it is
+    computed once per build and decides if the xattrs are read.
+    `hash_types` is the context this tree's block pointers sit in -- what a
     pointer that leaves its hash types out inherits. See container_filesystem."""
     rel_path = _join_relative_path(parent_rel_path, branch.name)
-    metadata = _decode_branch_metadata(branch=branch, rel_path=rel_path)
+    metadata = _decode_branch_metadata(
+        branch=branch, rel_path=rel_path, entry_metadata=entry_metadata
+    )
     _ensure_metadata_matches_branch(metadata=metadata, branch=branch, rel_path=rel_path)
     target_path = _safe_rootfs_path(
         rootfs_dir=root_dir,
@@ -692,6 +708,7 @@ def _write_item(
             legacy_regular_files=legacy_regular_files,
             security_context=security_context,
             hash_types=hash_types,
+            entry_metadata=entry_metadata,
         )
         if metadata is not None:
             _apply_regular_metadata(path=target_path, metadata=metadata, rel_path=rel_path)
@@ -818,6 +835,8 @@ def _write_fs(
     legacy_regular_files: Set[Path],
     security_context: _BuildSecurityContext,
     hash_types: Optional[Sequence[bytes]] = None,
+    *,
+    entry_metadata: bool,
 ) -> None:
     for branch in fs_element.branch:
         _write_item(
@@ -828,6 +847,7 @@ def _write_fs(
             legacy_regular_files=legacy_regular_files,
             security_context=security_context,
             hash_types=hash_types,
+            entry_metadata=entry_metadata,
         )
 
 
@@ -1447,6 +1467,16 @@ def build(
         raise RuntimeError(f"Invalid filesystem read_mode: {e}") from e
     read_only = service_read_mode == READ_MODE_RO
 
+    # Before any heavy work: a tree with the metadata keys and no `entry_metadata`
+    # was packed before the setting existed, and the node would build it wrong.
+    try:
+        assert_no_undeclared_metadata(fs)
+        declares_entry_metadata = entry_metadata_declared(fs)
+    except ValueError as e:
+        raise RuntimeError(
+            f"Refusing to build service {service_id}: {e}"
+        ) from e
+
     if read_only:
         # The legacy executable-sniffing fallback (`_apply_executable_permissions`
         # over `legacy_regular_files`) stays available to rw services packed before
@@ -1476,6 +1506,7 @@ def build(
             legacy_regular_files=legacy_regular_files,
             security_context=security_context,
             hash_types=fs_hash_types,
+            entry_metadata=declares_entry_metadata,
         )
         _apply_symlinks(symlinks, rootfs_dir, security_context)
     finally:

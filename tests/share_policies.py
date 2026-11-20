@@ -33,3 +33,9 @@ def add_share(branch, keys):
     policies.set_policy(
         branch.policies, policies.make(policies.SHARE, share_value_from_keys(keys))
     )
+
+
+def declare_entry_metadata(filesystem):
+    """Declare ``entry_metadata`` on a root ``filesystem``, as the packer does; return it."""
+    policies.set_policy(filesystem.policies, policies.make(policies.ENTRY_METADATA, b""))
+    return filesystem

@@ -44,6 +44,7 @@ PLACE_API_SLOT = "api.slot"                     # Service.Api.Slot (#669)
 
 SHARE = "share"
 READ_MODE = "read_mode"
+ENTRY_METADATA = "entry_metadata"
 ACCESS = "access"
 TUNNEL_AUTH = "tunnel_auth"
 WAKE = "wake"
@@ -60,6 +61,24 @@ READ_MODE_FORMAL: bytes = component_formal({
     "place": PLACE_ROOT,
     "values": "ro,rw",
     "default": "rw",
+})
+# The keys that `entry_metadata` defines for `ItemBranch.xattrs`, sorted as in its formal.
+ENTRY_METADATA_KEYS = (
+    "device.is_block",
+    "device.major",
+    "device.minor",
+    "gid",
+    "mode",
+    "mtime_ns",
+    "uid",
+)
+ENTRY_METADATA_FORMAL: bytes = component_formal({
+    "setting": ENTRY_METADATA,
+    "place": PLACE_ROOT,
+    "keys": ",".join(ENTRY_METADATA_KEYS),
+    "encoding": "base-10 integers as UTF-8 text",
+    "entry": "all keys or none",
+    "nondevice": "device.is_block, device.major and device.minor are 0",
 })
 
 ACCESS_FORMAL: bytes = component_formal({
@@ -175,6 +194,18 @@ def parse_read_mode_value(value: bytes) -> str:
     return text
 
 
+def parse_entry_metadata_value(value: bytes) -> bytes:
+    """The value of an ``entry_metadata`` policy: empty, or ``ValueError``.
+
+    The setting is a declaration that the tree carries the metadata keys, so it has
+    nothing to say in its value. Any content is refused now, because a value that a
+    node ignores today would mean something else the day a node reads it.
+    """
+    if bytes(value):
+        raise ValueError("expected an empty value")
+    return b""
+
+
 def _word_parser(values):
     def parse(value: bytes) -> str:
         text = _text(value, "the value")
@@ -197,6 +228,8 @@ _SETTINGS: Dict[bytes, Setting] = {
     for s in (
         Setting(SHARE, SHARE_FORMAL, frozenset({PLACE_ENTRY_DIRECTORY}), parse_share_value),
         Setting(READ_MODE, READ_MODE_FORMAL, frozenset({PLACE_ROOT}), parse_read_mode_value),
+        Setting(ENTRY_METADATA, ENTRY_METADATA_FORMAL, frozenset({PLACE_ROOT}),
+                parse_entry_metadata_value),
         Setting(ACCESS, ACCESS_FORMAL, frozenset({PLACE_API_SLOT}), _word_parser(ACCESS_SLOT_VALUES)),
         Setting(TUNNEL_AUTH, TUNNEL_AUTH_FORMAL, frozenset({PLACE_API_SLOT}),
                 _word_parser(TUNNEL_AUTH_VALUES)),
@@ -261,6 +294,19 @@ def make(name: str, value: bytes) -> celaut.Policy:
                 value=value,
             )
     raise KeyError(name)
+
+
+def entry_metadata_declared(filesystem) -> bool:
+    """Whether the root filesystem declares ``entry_metadata`` (raises :class:`PolicyError`).
+
+    Pass the Filesystem that ``Container.filesystem`` points at, like ``read_mode``.
+    """
+    parsed = check_list(
+        getattr(filesystem, "policies", None) or [],
+        PLACE_ROOT,
+        "the root filesystem",
+    )
+    return ENTRY_METADATA in parsed
 
 
 def share_value(

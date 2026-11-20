@@ -534,6 +534,25 @@ class ZipContainerPacker:
             )
         return value
 
+    @staticmethod
+    def _apply_entry_metadata(
+        root_filesystem: celaut.Service.Container.Filesystem,
+    ) -> None:
+        """Declare ``entry_metadata`` on the **root** ``Filesystem``, always.
+
+        The principle of ``read_mode`` ("absent writes nothing") does not apply here.
+        The packer always writes the seven metadata keys on every entry
+        (``filesystem_metadata_xattrs`` in ``recursive_parsing``), and a node reads
+        xattrs only when the root declares the setting. So the policy is always
+        written: without it the node would ignore the keys, and refuse the service.
+        The value is empty. Nested filesystems get no policy: the setting is for the
+        root only.
+        """
+        policies.set_policy(
+            root_filesystem.policies,
+            policies.make(policies.ENTRY_METADATA, b""),
+        )
+
     def _apply_read_only_filesystem(
         self,
         root_filesystem: celaut.Service.Container.Filesystem,
@@ -560,7 +579,7 @@ class ZipContainerPacker:
 
         # Per-entry metadata is mandatory for ro (assert_complete_filesystem_metadata
         # in src/utils/filesystem_xattrs.py refuses the build otherwise). Nothing to
-        # emit here: recursive_parsing already calls
+        # emit here: _apply_entry_metadata has declared the setting, and recursive_parsing already calls
         # filesystem_metadata_xattrs on every branch it creates, root and
         # nested alike, and that writes all of FILESYSTEM_METADATA_KEYS at once. The
         # gate exists for trees from other packers, and for services packed before
@@ -755,6 +774,8 @@ class ZipContainerPacker:
             root_filesystem = recursive_parsing(directory="/")
             # Before read_only: its refusal of an exported share reads these policies.
             self._apply_shared_filesystems(root_filesystem)
+            # Before read_only: its assert_complete_filesystem_metadata needs it.
+            self._apply_entry_metadata(root_filesystem)
             self._apply_read_only_filesystem(root_filesystem)
             # The same reader as the node's: the packer does not pack a service that a
             # node refuses (#670).

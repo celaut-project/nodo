@@ -11,6 +11,12 @@ from src.utils.filesystem_xattrs import filesystem_metadata_xattrs, FilesystemNo
 
 IMPORT_ERROR = None
 try:
+    # Before anything that builds a ConfigManager at import: the shipped example
+    # points STORAGE at /nodo, which only exists on an installed node.
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
+    from tests.share_policies import declare_entry_metadata
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue
     from src.utils.hashing import SHA3_256_ID
@@ -77,7 +83,62 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
         keyvalue.set_value(branch.xattrs, "mode", str(stat.S_IFREG | 0o644).encode("utf-8"))
 
         with self.assertRaisesRegex(RuntimeError, "Invalid filesystem metadata xattrs"):
-            ch_build._decode_branch_metadata(branch, "/file.txt")
+            ch_build._decode_branch_metadata(branch, "/file.txt", entry_metadata=True)
+
+    def test_decode_branch_metadata_reads_nothing_without_the_setting(self):
+        branch = celaut.Service.Container.Filesystem.ItemBranch()
+        branch.name = "file.txt"
+        branch.file = b"hello"
+        keyvalue.set_value(branch.xattrs, "mode", str(stat.S_IFREG | 0o644).encode("utf-8"))
+
+        # Not even a partial contract is an error: no xattr is read.
+        self.assertIsNone(
+            ch_build._decode_branch_metadata(branch, "/file.txt", entry_metadata=False)
+        )
+
+    def _tree_with_keys(self, declared):
+        branch = celaut.Service.Container.Filesystem.ItemBranch()
+        branch.name = "app"
+        branch.file = b"x"
+        keyvalue.update(branch.xattrs, filesystem_metadata_xattrs(FilesystemNodeMetadata(
+            mode=stat.S_IFREG | 0o755, uid=0, gid=0, mtime_ns=0,
+            device_major=0, device_minor=0, device_is_block=False,
+        )))
+        fs = celaut.Service.Container.Filesystem()
+        fs.branch.append(branch)
+        if declared:
+            declare_entry_metadata(fs)
+        return fs
+
+    def test_build_refuses_keys_without_the_setting_before_building(self):
+        service = celaut.Service(container=celaut.Service.Container(
+            filesystem=self._tree_with_keys(declared=False).SerializeToString()))
+        with tempfile.TemporaryDirectory() as tmpdir, \
+                patch.object(ch_build, "get_arch_tag", return_value="x86_64"), \
+                patch.object(ch_build, "_is_service_built_for_arch", return_value=False), \
+                patch.object(ch_build, "_validate_guest_assets", return_value=("k", "i")), \
+                patch.object(ch_build, "_bundle_dir", return_value=Path(tmpdir)), \
+                patch.object(ch_build, "_write_fs") as write_fs:
+            with self.assertRaisesRegex(RuntimeError, "Pack the service again"):
+                ch_build.build(service, celaut.Metadata(), service_id="svc")
+            write_fs.assert_not_called()
+
+    def test_a_tree_with_the_setting_is_written_with_its_metadata(self):
+        fs = self._tree_with_keys(declared=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            symlinks = []
+            legacy = set()
+            with patch.object(ch_build, "copy_block_if_exists", return_value=False), \
+                    patch.object(ch_build.os, "lchown"), patch.object(ch_build.os, "utime"):
+                ch_build._write_fs(
+                    fs_element=fs, root_dir=Path(tmpdir), parent_rel_path="/",
+                    symlinks=symlinks, legacy_regular_files=legacy,
+                    security_context=self._security_context(), entry_metadata=True,
+                )
+            written = Path(tmpdir) / "app"
+            self.assertTrue(written.is_file())
+            self.assertEqual(stat.S_IMODE(written.stat().st_mode), 0o755)
+            self.assertNotIn(written, legacy)
 
     def test_write_item_legacy_file_tracks_fallback_candidates(self):
         branch = celaut.Service.Container.Filesystem.ItemBranch()
@@ -95,6 +156,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
                     symlinks=symlinks,
                     legacy_regular_files=legacy_regular_files,
                     security_context=self._security_context(),
+                    entry_metadata=False,
                 )
 
             written = Path(tmpdir) / "legacy.bin"
@@ -126,6 +188,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
                 legacy_regular_files=set(),
                 security_context=self._security_context(),
                 hash_types=(SHA3_256_ID,),
+                entry_metadata=False,
             )
 
             self.assertEqual((Path(tmpdir) / "input_0.pb").read_bytes(), self.ONNX_INPUT_PB)
@@ -151,6 +214,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
                         symlinks=[],
                         legacy_regular_files=set(),
                         security_context=self._security_context(),
+                        entry_metadata=False,
                     )
 
     def test_write_item_rejects_mismatched_link_dst(self):
@@ -176,6 +240,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
                     root_dir=Path(tmpdir),
                     parent_rel_path="/",
                     symlinks=[],
+                    entry_metadata=True,
                     legacy_regular_files=set(),
                     security_context=self._security_context(),
                 )
@@ -342,6 +407,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
                 symlinks=symlinks,
                 legacy_regular_files=legacy_regular_files,
                 security_context=self._security_context(),
+                entry_metadata=True,
             )
 
             with patch.object(ch_build.os, "chown"), patch.object(ch_build.os, "utime"):

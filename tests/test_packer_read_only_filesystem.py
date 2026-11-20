@@ -36,7 +36,7 @@ try:
 
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue, policies
-    from tests.share_policies import add_share
+    from tests.share_policies import add_share, declare_entry_metadata
     from src.utils.filesystem_xattrs import (
         FILESYSTEM_METADATA_KEYS,
         READ_MODE_RO,
@@ -80,15 +80,28 @@ def _branch(name, *, directory=False, xattrs=None, with_metadata=True):
 
 
 def _policies_of(tree):
-    """The policies of the root of ``tree``, validated by the reader that a node uses."""
-    return policies.check_list(tree.policies, policies.PLACE_ROOT, "the root filesystem")
+    """The policies of the root of ``tree`` but ``entry_metadata``, validated by the node's reader.
+
+    ``entry_metadata`` is on every packed tree and not what these tests are about: see
+    ``_declared``.
+    """
+    parsed = dict(policies.check_list(tree.policies, policies.PLACE_ROOT, "the root filesystem"))
+    parsed.pop(policies.ENTRY_METADATA, None)
+    return parsed
+
+
+def _declared(tree):
+    return policies.ENTRY_METADATA in policies.check_list(
+        tree.policies, policies.PLACE_ROOT, "the root filesystem"
+    )
 
 
 def _tree(*branches):
     filesystem = celaut.Service.Container.Filesystem()
     for branch in branches:
         filesystem.branch.append(branch)
-    return filesystem
+    # The packer declares it before `_apply_read_only_filesystem` runs.
+    return declare_entry_metadata(filesystem)
 
 
 def _packer(service_json):
@@ -140,14 +153,14 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(len(tree.policies), 0)
+        self.assertEqual(_policies_of(tree), {})
 
     def test_false_writes_no_key_at_all(self):
         tree = _tree(_branch("service.py"))
 
         _packer({READ_ONLY_FILESYSTEM_KEY: False})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(len(tree.policies), 0)
+        self.assertEqual(_policies_of(tree), {})
 
     def test_an_absent_property_serializes_identically_to_before(self):
         # The hash-stability claim, made concrete: the bytes of a tree packed
@@ -232,7 +245,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(len(tree.policies), 0)
+        self.assertEqual(_policies_of(tree), {})
 
     # -- refusal: incomplete per-entry metadata ----------------------------- #
 
@@ -249,7 +262,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn(READ_ONLY_FILESYSTEM_KEY, message)
         self.assertIn("metadata", message)
-        self.assertEqual(len(tree.policies), 0)
+        self.assertEqual(_policies_of(tree), {})
 
     def test_metadata_incomplete_deeper_in_the_tree_is_refused(self):
         outer = _branch("bin", directory=True)
@@ -267,7 +280,38 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(len(tree.policies), 0)
+        self.assertEqual(_policies_of(tree), {})
+
+    # -- entry_metadata ----------------------------------------------------- #
+
+    def test_the_packer_always_declares_entry_metadata_on_the_root_only(self):
+        inner_dir = _branch("deeper", directory=True)
+        outer = _branch("bin", directory=True)
+        outer.filesystem.branch.append(inner_dir)
+        tree = celaut.Service.Container.Filesystem()
+        tree.branch.append(outer)
+
+        for requested in ({}, {READ_ONLY_FILESYSTEM_KEY: True}):
+            with self.subTest(read_only=requested):
+                declared = celaut.Service.Container.Filesystem()
+                declared.CopyFrom(tree)
+                packer = _packer(requested)
+                packer._apply_entry_metadata(declared)
+                packer._apply_read_only_filesystem(declared)
+                self.assertTrue(_declared(declared))
+                self.assertEqual(
+                    [bytes(p.formal) for p in declared.policies if p.formal == policies.ENTRY_METADATA_FORMAL],
+                    [policies.ENTRY_METADATA_FORMAL],
+                )
+                self.assertEqual(len(declared.branch[0].filesystem.policies), 0)
+                self.assertEqual(len(declared.branch[0].filesystem.branch[0].filesystem.policies), 0)
+
+    def test_true_without_entry_metadata_is_refused(self):
+        tree = celaut.Service.Container.Filesystem()
+        tree.branch.append(_branch("service.py"))
+
+        with self.assertRaisesRegex(ValueError, "entry_metadata"):
+            _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
     def test_the_packer_emits_every_metadata_key_on_every_branch(self):
         # The finding that makes the gate a no-op for this packer: the same call

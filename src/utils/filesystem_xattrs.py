@@ -16,15 +16,9 @@ DEVICE_MAJOR_KEY = "device.major"
 DEVICE_MINOR_KEY = "device.minor"
 DEVICE_IS_BLOCK_KEY = "device.is_block"
 
-FILESYSTEM_METADATA_KEYS = (
-    MODE_KEY,
-    UID_KEY,
-    GID_KEY,
-    MTIME_NS_KEY,
-    DEVICE_MAJOR_KEY,
-    DEVICE_MINOR_KEY,
-    DEVICE_IS_BLOCK_KEY,
-)
+# The keys are defined by the `entry_metadata` setting; the node reads them only when
+# the root declares it.
+FILESYSTEM_METADATA_KEYS = policies.ENTRY_METADATA_KEYS
 
 # The `read_mode` setting (#670) is a policy on the root Filesystem, the one that
 # `Container.filesystem` holds. A nested one (a subdirectory, reached through
@@ -281,15 +275,64 @@ def read_mode(filesystem: Any) -> str:
     return parsed.get(policies.READ_MODE, READ_MODE_RW)
 
 
+def entry_metadata_declared(filesystem: Any) -> bool:
+    """Whether the root declares ``entry_metadata``; ``ValueError`` on a bad policy list.
+
+    Without it the node reads no xattr of the tree, so a tree that carries the keys
+    without declaring them is not read half way: see
+    :func:`assert_no_undeclared_metadata`.
+    """
+    try:
+        return policies.entry_metadata_declared(filesystem)
+    except policies.PolicyError as e:
+        raise ValueError(str(e)) from e
+
+
+def assert_no_undeclared_metadata(filesystem: Any) -> None:
+    """Refuse a root that has the metadata keys on an entry but no ``entry_metadata``.
+
+    Such a tree was packed before the setting existed. The node reads no xattr
+    without the policy, so it would build the tree from the legacy heuristic and
+    ignore the uid, gid, mode and devices that the packer recorded: it would build it
+    wrong, and say nothing. The node refuses it instead, and the service must be
+    packed again (the same as #670). Nothing is refused when the root declares the
+    setting, or when no entry has any of the keys. Recursive, nested filesystems
+    included. ``filesystem`` is the root: the one that ``Container.filesystem`` holds.
+    """
+    if entry_metadata_declared(filesystem):
+        return
+    _refuse_metadata_keys(filesystem, "/")
+
+
+def _refuse_metadata_keys(filesystem: Any, parent_rel_path: str) -> None:
+    for branch in getattr(filesystem, "branch", []) or []:
+        name = getattr(branch, "name", "") or ""
+        rel_path = f"{parent_rel_path.rstrip('/')}/{name}" if name else parent_rel_path
+        xattrs = keyvalue.to_dict(getattr(branch, "xattrs", None) or [])
+        present = [key for key in FILESYSTEM_METADATA_KEYS if key in xattrs]
+        if present:
+            raise ValueError(
+                f"filesystem metadata without the {policies.ENTRY_METADATA} setting at "
+                f"'{rel_path}': it has {', '.join(present)}. The root filesystem does "
+                f"not declare {policies.ENTRY_METADATA}, so the node reads no metadata "
+                "and would build this service wrong. Pack the service again."
+            )
+        nested = None
+        try:
+            if branch.HasField("filesystem"):
+                nested = branch.filesystem
+        except (AttributeError, ValueError):
+            nested = None
+        if nested is not None:
+            _refuse_metadata_keys(nested, rel_path)
+
+
 def missing_metadata_keys(xattrs: Mapping[str, bytes]) -> List[str]:
     """Which of :data:`FILESYSTEM_METADATA_KEYS` this entry does not carry."""
     return [key for key in FILESYSTEM_METADATA_KEYS if key not in xattrs]
 
 
-def assert_complete_filesystem_metadata(
-    filesystem: Any,
-    parent_rel_path: str = "/",
-) -> None:
+def assert_complete_filesystem_metadata(filesystem: Any) -> None:
     """Refuse a tree that does not declare mode/uid/gid/mtime/device for every entry.
 
     The metadata keys are optional everywhere else: an entry that carries none of
@@ -307,7 +350,19 @@ def assert_complete_filesystem_metadata(
 
     Recursive: the gate is about what ends up in the image, and a subdirectory's
     entries end up in it just as much as the root's.
+
+    The root must also declare ``entry_metadata``: without it the node reads no key.
     """
+    if not entry_metadata_declared(filesystem):
+        raise ValueError(
+            f"A {policies.READ_MODE}={READ_MODE_RO} service must declare the "
+            f"{policies.ENTRY_METADATA} setting on the root filesystem: without it the "
+            "node reads no metadata, and the image cannot be corrected from inside the guest."
+        )
+    _assert_complete_entries(filesystem, "/")
+
+
+def _assert_complete_entries(filesystem: Any, parent_rel_path: str) -> None:
     for branch in getattr(filesystem, "branch", []) or []:
         name = getattr(branch, "name", "") or ""
         rel_path = (
@@ -332,7 +387,7 @@ def assert_complete_filesystem_metadata(
         except (AttributeError, ValueError):
             nested = None
         if nested is not None:
-            assert_complete_filesystem_metadata(nested, parent_rel_path=rel_path)
+            _assert_complete_entries(nested, rel_path)
 
 
 def _parse_utf8_int(key: str, value: bytes) -> int:

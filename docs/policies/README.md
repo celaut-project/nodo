@@ -19,8 +19,10 @@ read-only root filesystem. It is the message `celaut.Policy` (`tags`, `prose`, `
   not change the meaning.
 - A published `formal` never changes. A new meaning is a new `formal`, therefore a new
   setting.
-- The `xattrs` of an entry are file attributes (mode, uid, gid, mtime, device). A node
-  reads no setting from them.
+- The keys of the `xattrs` of an entry (mode, uid, gid, mtime, device) are defined by the
+  setting [`entry_metadata`](entry_metadata.formal) of the root filesystem. Without that
+  setting, a node reads none of them, and it refuses a tree where an entry carries one of
+  the keys. A node reads no other setting from `xattrs`.
 
 The places are: a slot of the API (`api.slot`, #669), a filesystem entry (`filesystem.directory` for a directory,
 `filesystem.file` for the rest), the root filesystem (`filesystem.root`: the one that
@@ -38,6 +40,7 @@ files.
 | --- | --- | --- | --- |
 | `share` | [`share.formal`](share.formal) | a directory entry | `key=value` lines, sorted by key |
 | `read_mode` | [`read_mode.formal`](read_mode.formal) | the root filesystem | `ro` or `rw` |
+| `entry_metadata` | [`entry_metadata.formal`](entry_metadata.formal) | the root filesystem | empty |
 | `access` | [`access.formal`](access.formal) | a slot of the API | `direct`, `tunnel` or `any` |
 | `tunnel_auth` | [`tunnel_auth.formal`](tunnel_auth.formal) | a slot of the API | `token` or `address` |
 | `wake` | [`wake.formal`](wake.formal) | a slot of the API | `never` or `on_tunnel` |
@@ -52,6 +55,16 @@ by a newline, with no empty or repeated key. Keys: `role` (required: `shared`, `
 
 Example value of a read-only guest: `access=ro`, `env=DATASET`, `role=guest`,
 `tag=photos`, one for each line.
+
+### `entry_metadata`
+
+Declares that the tree carries metadata in `ItemBranch.xattrs`. The value is empty: any
+other value is not valid. The keys are `mode`, `uid`, `gid`, `mtime_ns`, `device.major`,
+`device.minor` and `device.is_block`, as base-10 integers in UTF-8 text. An entry has all
+the keys or none. An entry with none gets the default of the node. `read_mode=ro` needs
+this setting and all the keys on every entry. A node that finds one of the keys in a tree
+without the setting does not run the service: the service must be packed again. The packer
+always writes this setting. See [PACKING.md](../PACKING.md#entry_metadata--per-entry-metadata).
 
 ### `read_mode`
 

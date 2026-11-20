@@ -1,0 +1,6 @@
+encoding=base-10 integers as UTF-8 text
+entry=all keys or none
+keys=device.is_block,device.major,device.minor,gid,mode,mtime_ns,uid
+nondevice=device.is_block, device.major and device.minor are 0
+place=filesystem.root
+setting=entry_metadata
