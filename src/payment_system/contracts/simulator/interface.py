@@ -2,14 +2,26 @@ from typing import Tuple
 
 from protos import celaut_pb2
 from hashlib import sha3_256
+from src.identity.node_identity import component_formal
 from src.utils.contract_xattrs import set_script, set_token_id
 from src.utils.logger import LOGGER
 
-# The payment protocol of a simulated payment. Nothing is paid, so it only names itself (#671).
+# The payment protocol of a simulated payment (#671). Nothing is paid, but the formal
+# still defines the xattrs that `process_payment` writes, as every payment protocol does.
 _PROTOCOL = celaut_pb2.Contract.Protocol(
     tags=["simulated"],
-    prose="Simulated payments: nothing settles, nothing moves.",
-    formal=b"payment.kind=simulated",
+    prose=(
+        "Simulated payments: nothing settles, nothing moves. The script attribute is "
+        "the script that the payer gives. Nothing is paid to it. The token_id "
+        "attribute is empty. The two attributes are always present."
+    ),
+    formal=component_formal({
+        "payment.kind": "simulated",
+        "payment.xattr.script": "the script bytes that the payer gives; nothing is paid "
+                                "to them",
+        "payment.xattr.token_id": "empty: there is no asset",
+        "payment.xattr.required": "script, token_id",
+    }),
 )
 CONTRACT_HASH = sha3_256(_PROTOCOL.formal).hexdigest()
 
