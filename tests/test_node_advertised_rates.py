@@ -1,6 +1,6 @@
 """Tests for the prices a node advertises to its peers.
 
-The rates ride in ``Peer.mu_per_call`` -- node-wide, not per-address, since
+The rates ride in ``Peer.rates`` -- node-wide, not per-address, since
 they do not depend on which of a node's addresses you reach it through. A receiving
 peer stores the whole message verbatim in ``peer.advertisement``
 (``manager.add_peer_instance``) and ``submit_to_ledger`` republishes it for the
@@ -151,7 +151,7 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         uri.transport.tags.append("tcp")
         with _config():
             for rate, amount_mu in rates_module.node_advertised_rates().items():
-                keyvalue.set_value(peer.mu_per_call, rate, celaut.Amount(n=str(amount_mu)))
+                keyvalue.set_value(peer.rates, rate, celaut.Amount(n=str(amount_mu)))
         return peer
 
     def test_rates_survive_the_advertisement_round_trip(self):
@@ -162,7 +162,7 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         parsed.ParseFromString(stored)
 
         self.assertEqual(
-            {rate: amount.n for rate, amount in keyvalue.items(parsed.mu_per_call)},
+            {rate: amount.n for rate, amount in keyvalue.items(parsed.rates)},
             {
                 "ram_mu_per_gib_second": "277",
                 "cpu_mu_per_vcpu_second": "1111",

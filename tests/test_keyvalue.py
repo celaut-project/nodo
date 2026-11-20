@@ -66,8 +66,8 @@ class ReadTests(unittest.TestCase):
 
     def test_message_values_are_returned_whole(self):
         peer = celaut.Peer()
-        keyvalue.from_dict(peer.mu_per_call, {"exec": celaut.Amount(n="5")})
-        self.assertEqual(keyvalue.get(peer.mu_per_call, "exec"), celaut.Amount(n="5"))
+        keyvalue.from_dict(peer.rates, {"exec": celaut.Amount(n="5")})
+        self.assertEqual(keyvalue.get(peer.rates, "exec"), celaut.Amount(n="5"))
 
     def test_duplicate_keys(self):
         contract = _wire(("b", b"1"), ("a", b"2"), ("b", b"3"), ("a", b"4"), ("c", b"5"))
@@ -158,26 +158,26 @@ class WriteTests(unittest.TestCase):
 
     def test_message_values_survive_update_and_delete(self):
         peer = celaut.Peer()
-        keyvalue.from_dict(peer.mu_per_call, {
+        keyvalue.from_dict(peer.rates, {
             "a": celaut.Amount(n="1"), "b": celaut.Amount(n="2"),
         })
-        keyvalue.set_value(peer.mu_per_call, "c", celaut.Amount(n="3"))
-        keyvalue.delete(peer.mu_per_call, "a")
+        keyvalue.set_value(peer.rates, "c", celaut.Amount(n="3"))
+        keyvalue.delete(peer.rates, "a")
         self.assertEqual(
-            {k: v.n for k, v in keyvalue.items(peer.mu_per_call)}, {"b": "2", "c": "3"}
+            {k: v.n for k, v in keyvalue.items(peer.rates)}, {"b": "2", "c": "3"}
         )
         # The value is copied in: changing the source afterwards changes nothing.
         source = celaut.Amount(n="9")
-        keyvalue.set_value(peer.mu_per_call, "d", source)
+        keyvalue.set_value(peer.rates, "d", source)
         source.n = "10"
-        self.assertEqual(keyvalue.get(peer.mu_per_call, "d").n, "9")
+        self.assertEqual(keyvalue.get(peer.rates, "d").n, "9")
 
     def test_from_dict_of_a_field_read_from_another_message(self):
         # The copy idiom used where a slot is filled from a peer.
         source = celaut.Peer()
-        keyvalue.from_dict(source.mu_per_call, {"x": celaut.Amount(n="1")})
+        keyvalue.from_dict(source.rates, {"x": celaut.Amount(n="1")})
         target = celaut.Service.Api.Slot()
-        keyvalue.from_dict(target.mu_per_call, keyvalue.to_dict(source.mu_per_call))
+        keyvalue.from_dict(target.mu_per_call, keyvalue.to_dict(source.rates))
         self.assertEqual(target.mu_per_call[0].value.n, "1")
 
 
@@ -337,7 +337,7 @@ class PublishedJsonTests(unittest.TestCase):
 
     def _peer(self):
         peer = celaut.Peer()
-        keyvalue.from_dict(peer.mu_per_call, {
+        keyvalue.from_dict(peer.rates, {
             "exec": celaut.Amount(n="10"), "build_mu": celaut.Amount(n="7"),
         })
         proof = peer.reputation_proofs.add()
@@ -347,7 +347,7 @@ class PublishedJsonTests(unittest.TestCase):
 
     def test_key_value_fields_are_objects(self):
         published = json.loads(keyvalue.message_to_json(self._peer()))
-        self.assertEqual(published["muPerCall"], {"build_mu": {"n": "7"}, "exec": {"n": "10"}})
+        self.assertEqual(published["rates"], {"build_mu": {"n": "7"}, "exec": {"n": "10"}})
         self.assertEqual(
             published["reputationProofs"][0]["xattrs"], {"script": "AQI=", "token_id": "qg=="}
         )
@@ -358,8 +358,8 @@ class PublishedJsonTests(unittest.TestCase):
 
         pool, _ = legacy_map_schema.build()
         old = legacy_map_schema.message_class(pool, "legacy_celaut.Peer")()
-        old.mu_per_call["exec"].n = "10"
-        old.mu_per_call["build_mu"].n = "7"
+        old.rates["exec"].n = "10"
+        old.rates["build_mu"].n = "7"
         proof = old.reputation_proofs.add()
         proof.ledger.tags.append("ergo")
         proof.xattrs["token_id"] = b"\xaa"
@@ -383,7 +383,7 @@ class PublishedJsonTests(unittest.TestCase):
         again = celaut.Peer()
         json_format.ParseDict(json_format.MessageToDict(peer), again)
         self.assertEqual(again.SerializeToString(), peer.SerializeToString())
-        self.assertIsInstance(json_format.MessageToDict(peer)["muPerCall"], list)
+        self.assertIsInstance(json_format.MessageToDict(peer)["rates"], list)
 
 
 if __name__ == "__main__":

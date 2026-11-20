@@ -102,7 +102,7 @@ def _data_format_value(key):
 # Every converted field: (label, message, field, value factory).
 FIELDS = [
     ("Contract.xattrs", "celaut.Contract", "xattrs", _bytes_value),
-    ("Peer.mu_per_call", "celaut.Peer", "mu_per_call", _amount_value),
+    ("Peer.rates", "celaut.Peer", "rates", _amount_value),
     ("Slot.mu_per_call", "celaut.Service.Api.Slot", "mu_per_call", _amount_value),
     ("Container.environment_variables", "celaut.Service.Container",
      "environment_variables", _data_format_value),
@@ -154,7 +154,8 @@ class SchemaTests(unittest.TestCase):
                 ("legacy_celaut", "Service.Container.Filesystem.ItemBranch", "xattrs", 5),
                 ("legacy_celaut", "Configuration", "environment_variables", 1),
                 ("legacy_celaut", "Sysresources", "benchmark", 99),
-                ("legacy_celaut", "Peer", "mu_per_call", 4),
+                ("legacy_celaut", "Peer", "rates", 4),
+                ("legacy_celaut", "Peer", "limits", 11),
             ]),
         )
         for label, full_name, field_name, _ in FIELDS:
@@ -285,7 +286,7 @@ class OldBytesReadByNewNodesTests(unittest.TestCase):
         peer.ParseFromString(GOLDEN_PEER)
         self.assertEqual(peer.SerializeToString(), GOLDEN_PEER)
         self.assertEqual(
-            {key: amount.n for key, amount in keyvalue.items(peer.mu_per_call)},
+            {key: amount.n for key, amount in keyvalue.items(peer.rates)},
             {"ram_mu_per_gib_second": "277", "build_mu": "10000000",
              "cpu_mu_per_vcpu_second": "1111", "net_mu_per_gib": ""},
         )

@@ -81,7 +81,8 @@ def _announcement():
     uri = _uri(peer)
     uri.expiry_unix_timestamp = 1800000000
     uri.protocol_stack.add(tags=["grpc"], prose="gRPC", formal=b"\x01")
-    keyvalue.set_value(peer.mu_per_call, "start", celaut_pb2.Amount(n="1000"))
+    keyvalue.set_value(peer.rates, "start", celaut_pb2.Amount(n="1000"))
+    keyvalue.set_value(peer.limits, "max_concurrent_connections:finance.yahoo.com", 5)
     rate = peer.payment_contracts.add()
     rate.contract.ledger.tags.append("ergo")
     rate.contract.ledger.prose = "Ergo mainnet"
@@ -123,7 +124,7 @@ def _announcement():
 # same names the census uses, so a covered field with no mutation is a failure.
 MUTATIONS = {
     "Peer.uri": lambda p: _uri(p, ip="5.6.7.8", port=9090),
-    "Peer.mu_per_call": lambda p: keyvalue.set_value(p.mu_per_call, "start", celaut_pb2.Amount(n="2000")),
+    "Peer.rates": lambda p: keyvalue.set_value(p.rates, "start", celaut_pb2.Amount(n="2000")),
     "Peer.payment_contracts": lambda p: keyvalue.set_value(p.payment_contracts[0].contract.xattrs, "token_id", b"\xff"),
     "Peer.reputation_proofs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "token_id", b"\xff"),
     "Peer.signature_scheme": lambda p: p.signature_scheme.components.add(tags=["secp256k1"]),
@@ -154,6 +155,7 @@ MUTATIONS = {
     "ActivityWindow.Span.start_minute": lambda p: setattr(p.activity_window.spans[0], "start_minute", 1321),
     "ActivityWindow.Span.end_minute": lambda p: setattr(p.activity_window.spans[0], "end_minute", 361),
     "Peer.resources": lambda p: p.resources.add().architecture.tags.append("linux/arm64"),
+    "Peer.limits": lambda p: keyvalue.set_value(p.limits, "max_concurrent_connections:finance.yahoo.com", 6),
     "Peer.devices": lambda p: p.devices.add().architecture.tags.append("pci:10de:2204+aa:bb"),
     "Device.architecture": lambda p: p.devices[0].architecture.tags.append("pci:10de:2509+cc:dd"),
     "Device.resources": lambda p: p.devices[0].ClearField("resources"),

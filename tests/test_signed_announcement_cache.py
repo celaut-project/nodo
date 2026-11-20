@@ -96,7 +96,7 @@ class SignedAnnouncementCacheTests(unittest.TestCase):
         with patch:
             gateway_utils._sign_peer(_announcement())
             with_rate = _announcement()
-            keyvalue.set_value(with_rate.mu_per_call, "exec", celaut_pb2.Amount(n="10"))
+            keyvalue.set_value(with_rate.rates, "exec", celaut_pb2.Amount(n="10"))
             gateway_utils._sign_peer(with_rate)
 
         self.assertEqual(len(calls), 2)

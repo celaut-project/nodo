@@ -1345,12 +1345,15 @@ message Peer {
     // "ram_mu_per_gib_second:<architecture>"), "cpu_mu_per_vcpu_second",
     // "disk_mu_per_gib_second", "net_mu_per_gib", "build_mu", "tunnel_open_mu",
     // "modify_resources_mu", "statement_query_mu", "statement_row_mu",
-    // "scarcity_max_multiplier". The values of the "_mu" keys
-    // are in MU. Each RAM, CPU and disk rate is a base price. When a resource is scarce,
+    // "scarcity_max_multiplier". The keys "net_mu_per_gib" and "connection_open_mu" (one
+    // connection) can also have the form "<key>:<network>", with the network as in
+    // limits (a DNS host name in lowercase, or "*"): the price for the instances that reach that network, in place of the
+    // general rate of the same name. A network without such a key has the general rate.
+    // The values of the "_mu" keys are in MU. Each RAM, CPU and disk rate is a base price. When a resource is scarce,
     // the node multiplies its rate by a factor from 1 to scarcity_max_multiplier. The
     // other rates do not change. scarcity_max_multiplier has no unit. The node does not
     // send a rate of 0. A reader ignores a key that it does not know.
-    repeated AmountKeyValue mu_per_call = 4;
+    repeated AmountKeyValue rates = 4;
     // The public key of the identity of the node, in the encoding that
     // signature_scheme gives, as 64 lowercase hexadecimal characters. It is the id of
     // the peer. A reader refuses a key with uppercase characters or spaces.
@@ -1427,6 +1430,22 @@ message Peer {
     // Peer.resources: a reader does not read a device architecture as a main
     // architecture.
     repeated Device devices = 10;
+    // The limits of the node, as keys with a number. A key has the form
+    // "<limit>:<network>". The network is a DNS host name in lowercase, as a tag of
+    // Service.Network. Only these networks have keys: a pow: network is a set of peers
+    // and uses no access of this node to a third party. A reader splits the key at the
+    // first ":". The tag "*" is every network that has no key of its own. The limits are for one client
+    // (the caller that pays for the instance). With the prefix "global_" the limit is
+    // for all the clients together: when it is full, the node refuses a new connection
+    // even if the client is within its own limits. Limits: "max_concurrent_connections",
+    // "max_connections_per_day", "max_connections_per_month", "max_gib_per_day" and
+    // "max_gib_per_month". A day and a month are the calendar days and months in UTC.
+    // The node gives a limit because its access to a network is a limited supply. The
+    // price of the same network is in rates. A limit that is absent is not a
+    // promise of no limit. It is an offer: the quote (EstimatedCost) is the authority
+    // for one instance, and the node refuses an instance that goes beyond a limit. A
+    // reader ignores a key that it does not know.
+    repeated Uint64KeyValue limits = 11;
     // The unix time of the announcement, in seconds. A reader accepts a Peer only if its
     // ts is more than the ts of the last Peer that it accepted for the same public_key.
     int64 ts = 99;

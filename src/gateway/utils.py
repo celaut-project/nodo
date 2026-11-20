@@ -448,7 +448,7 @@ def _unsigned_peer(uris: List[celaut.Instance.Uri], *, quiet: bool = False) -> c
     # virtualizer stack, which imports this module back at import time.
     from src.utils.cost_functions.general_cost_functions import node_advertised_rates
 
-    keyvalue.from_dict(peer.mu_per_call, {
+    keyvalue.from_dict(peer.rates, {
         rate: celaut.Amount(n=str(amount_mu))
         for rate, amount_mu in node_advertised_rates().items()
     })
@@ -510,7 +510,7 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     slot = instance.api.slot.add()
     slot.port = port
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
-    keyvalue.from_dict(slot.mu_per_call, keyvalue.to_dict(peer.mu_per_call))
+    keyvalue.from_dict(slot.mu_per_call, keyvalue.to_dict(peer.rates))
     instance.api.payment_contracts.extend(peer.payment_contracts)
 
     uri_slot = instance.uri_slot.add()

@@ -301,13 +301,13 @@ def anchor_at_head(statement: celaut_pb2.BalanceStatement) -> Mark:
 
 
 def advertised_rates(peer: Optional[celaut_pb2.Peer]) -> Dict[str, int]:
-    """The rates in the ``Peer`` of a peer (``Peer.mu_per_call``)."""
+    """The rates in the ``Peer`` of a peer (``Peer.rates``)."""
     from src.utils import keyvalue
 
     if peer is None:
         return {}
     rates = {}
-    for key, amount in keyvalue.items(peer.mu_per_call):
+    for key, amount in keyvalue.items(peer.rates):
         try:
             rates[key] = int(amount.n)
         except (TypeError, ValueError):

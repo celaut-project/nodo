@@ -607,7 +607,7 @@ def canonical_peer_content_digest(peer) -> str:
 
     The signature has to cover the *whole* advertisement, not just the addresses:
     ``payment_contracts`` is what decides where this node's money is sent, and
-    ``mu_per_call`` carries the advertised rates. Leaving them unsigned let
+    ``rates`` carries the advertised rates. Leaving them unsigned let
     anyone take a legitimately signed ``Peer``, swap in their own payment contract,
     and have it accepted and stored (``add_contract`` is INSERT OR IGNORE, so the
     forged contract lands *next to* the real one rather than replacing it). Each
@@ -663,7 +663,12 @@ def canonical_peer_content_digest(peer) -> str:
         sorted(_canonical_protocol(c) for c in peer.signature_scheme.components)
     )
     rates = ";".join(
-        f"{key}={amount.n}" for key, amount in keyvalue.items(peer.mu_per_call)
+        f"{key}={amount.n}" for key, amount in keyvalue.items(peer.rates)
+    )
+    # `limits`: the same encoding as the rates. A limit moved or removed changes what the
+    # node promises, so the signature covers it.
+    limits = ";".join(
+        f"{key}={value}" for key, value in keyvalue.items(peer.limits)
     )
     resources = sorted(_canonical_architecture_resources(r) for r in peer.resources)
     # `devices` (#536): the same encoding. An entry repeated is a device repeated, so
@@ -683,6 +688,7 @@ def canonical_peer_content_digest(peer) -> str:
         "/".join(contracts),
         "/".join(proofs),
         rates,
+        limits,
         scheme,
         "/".join(resources),
         activity_window,

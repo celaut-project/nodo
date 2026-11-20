@@ -86,7 +86,7 @@ depending on the protobuf implementation. A repeated field keeps its order.
 | Entry message | `value` | Used by |
 |---|---|---|
 | `BytesKeyValue` | `bytes` (`optional`) | `Contract.xattrs` and `ItemBranch.xattrs`, `Configuration.environment_variables` |
-| `AmountKeyValue` | `Amount` | `Peer.mu_per_call`, `Service.Api.Slot.mu_per_call` |
+| `AmountKeyValue` | `Amount` | `Peer.rates`, `Service.Api.Slot.mu_per_call` |
 | `DataFormatKeyValue` | `DataFormat` | `Service.Container.environment_variables` |
 | `Uint64KeyValue` | `uint64` (`optional`) | `Sysresources.benchmark` |
 

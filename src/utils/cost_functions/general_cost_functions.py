@@ -12,7 +12,7 @@ from src.utils.monetary import HOUR_SECONDS, prices
 env_manager = ConfigManager()
 
 # Keys of the rate list this node advertises to peers. Names are part of the wire
-# contract: a peer reads them out of Peer.mu_per_call (see gateway.utils._build_peer),
+# contract: a peer reads them out of Peer.rates (see gateway.utils._build_peer),
 # so renaming one silently drops it for everybody who already knows the old name.
 #
 # Every rate is in MU. What an MU is worth travels alongside them in
@@ -26,7 +26,7 @@ RATE_RAM_PER_GIB_SECOND = "ram_mu_per_gib_second"
 # reader that knows a service's arch can look its rate up without a second naming
 # convention, and one that does not still reads the un-suffixed key above.
 #
-# It rides in the SAME `Peer.mu_per_call` list every other rate does, which is why this
+# It rides in the SAME `Peer.rates` list every other rate does, which is why this
 # needs no protobuf change: the list is <string, Amount> entries, its keys are already an open
 # vocabulary, and a peer running an older nodo simply does not find the suffixed key
 # and falls back to the scalar one, which is what it does with any key it cannot

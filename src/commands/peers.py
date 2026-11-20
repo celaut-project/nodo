@@ -76,7 +76,7 @@ def _peer_records(connection, peer_id=None):
             # Rates the peer advertised. Absent for peers running a version from
             # before nodes published them.
             advertised_rates = {
-                rate: amount.n for rate, amount in keyvalue.items(announced.mu_per_call)
+                rate: amount.n for rate, amount in keyvalue.items(announced.rates)
             }
             # Every proof the peer announced, not just one: a node can hold
             # several, and each is an opinion set it published (issue #281).
