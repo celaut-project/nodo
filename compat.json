@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "4b7533fdcd8fd59a2d1814f8cdd1b95c971c4a91759d6a2aaa214bae88b28218",
+  "celaut_proto": "0b1e6acb43db850c184df52406e65f024ce96544bb86a5dd9af55c07c51f2017",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",
@@ -285,6 +285,7 @@
     "reputation.MAX_OFFCHAIN_PROOFS_PER_RESPONSE",
     "reputation.MAX_OFFCHAIN_PROOF_AGE_DAYS",
     "reputation.MAX_OFFCHAIN_PROOF_BYTES",
+    "reputation.MIN_OFFCHAIN_POW_BITS",
     "reputation.OFFCHAIN_PULL_INTERVAL_SECONDS",
     "reputation.PULL_BYTES_PER_CLIENT_PER_HOUR",
     "reputation.PULL_CALLS_PER_CLIENT_PER_HOUR",
@@ -298,6 +299,7 @@
     "reputation.PUSH_OFFCHAIN_PROOFS",
     "reputation.PUSH_ONLY_FROM_PEERS",
     "reputation.SHARE_OFFCHAIN_PROOFS",
+    "reputation.TARGET_OFFCHAIN_POW_BITS",
     "routing.HIDDEN",
     "routing.LOCAL_NETWORKS",
     "routing.tor.ANNOUNCE",
