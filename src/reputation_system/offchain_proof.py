@@ -379,25 +379,6 @@ def scores(proof: celaut_pb2.ReputationProof) -> Dict[str, tuple]:
     return {subject: (abs(total), total >= 0) for subject, total in out.items() if total}
 
 
-def fault_reports(proof: celaut_pb2.ReputationProof) -> List[dict]:
-    """The fault reports of a proof: ``accused``, ``reason`` and ``proven`` (the evidence
-    proves it)."""
-    reports = []
-    for opinion in proof.opinions:
-        if opinion.amount or opinion.positive:
-            continue
-        try:
-            content = json.loads(bytes(opinion.content).decode("utf-8") or "{}")
-        except Exception:
-            content = {}
-        reason = content.get("reason") if isinstance(content, dict) else None
-        if not reason:
-            continue
-        proven = opinion.HasField("evidence") and fault_proofs.check(opinion.evidence) is not None
-        reports.append({"accused": opinion.object, "reason": str(reason), "proven": proven})
-    return reports
-
-
 def ledger_fault_reports(limit: Optional[int] = None) -> List[tuple]:
     """The faults that this node holds the evidence of, as ``(accused, R9 text)`` for the
     boxes of the proof on the ledger (#652): the newest first, at most

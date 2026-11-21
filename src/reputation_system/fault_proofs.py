@@ -285,12 +285,18 @@ def attach(evidence: celaut_pb2.FaultEvidence) -> Optional[celaut_pb2.FaultEvide
     return evidence if check(evidence) is not None else None
 
 
+def _escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
 def digest(evidence: celaut_pb2.FaultEvidence) -> str:
     """Blake2b-256 hex of the signed digests of the evidence: one per statement and per
     receipt, in order. Two copies of the same evidence have the same digest."""
     import hashlib
 
-    parts = [evidence.reason, evidence.accused]
+    # The reason and the accused are text: "|" and "\\" are escaped, so no value can
+    # move into the next field. A plain value has none, so its digest does not change.
+    parts = [_escape(evidence.reason), _escape(evidence.accused)]
     parts += [statement_signature.statement_digest(s) for s in evidence.statements]
     parts += [execution_receipt.receipt_digest(r) for r in evidence.receipts]
     return hashlib.blake2b("|".join(parts).encode("utf-8"), digest_size=32).hexdigest()
