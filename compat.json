@@ -287,6 +287,7 @@
     "reputation.MAX_OFFCHAIN_PROOF_BYTES",
     "reputation.MIN_OFFCHAIN_POW_BITS",
     "reputation.OFFCHAIN_PULL_INTERVAL_SECONDS",
+    "reputation.PUBLISH_FAULT_EVIDENCE",
     "reputation.PULL_BYTES_PER_CLIENT_PER_HOUR",
     "reputation.PULL_CALLS_PER_CLIENT_PER_HOUR",
     "reputation.PULL_GLOBAL_CALLS_PER_MINUTE",
