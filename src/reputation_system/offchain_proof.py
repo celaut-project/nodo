@@ -92,6 +92,14 @@ def max_proof_age_seconds() -> int:
         return 30 * 86400
 
 
+def publish_fault_evidence() -> bool:
+    """``reputation.PUBLISH_FAULT_EVIDENCE``: whether this node puts the evidence of the
+    faults that it found itself in its proof (#658). It holds pages of the accused peer
+    about the accounts of this node: amounts, ``instance_ref``, ``execution_name`` and
+    receipt digests. When false, those faults go as reports with no evidence."""
+    return bool(_setting("PUBLISH_FAULT_EVIDENCE", True))
+
+
 def max_proofs() -> int:
     try:
         return max(0, int(_setting("MAX_OFFCHAIN_PROOFS_PER_RESPONSE", 25)))
@@ -284,6 +292,13 @@ def _fault_opinions(sql, exclude: str) -> List[celaut_pb2.ReputationOpinion]:
         if row["accused"] == exclude or key in seen:
             continue
         seen.add(key)
+        if row.get("source") == "own" and not publish_fault_evidence():
+            # The pages show the accounts of this node. The fault is reported with no
+            # evidence, as a fault that rests on what only this node knows (#658).
+            opinions.append(celaut_pb2.ReputationOpinion(
+                type=node_type(), object=row["accused"], amount=0, positive=False,
+                content=_fault_content(*key[1:])))
+            continue
         opinions.append(celaut_pb2.ReputationOpinion(
             type=node_type(), object=row["accused"], amount=0, positive=False,
             content=_fault_content(*key[1:]), evidence=evidence))
@@ -581,6 +596,9 @@ def ledger_fault_reports(limit: Optional[int] = None) -> List[tuple]:
         return []
     for row in rows:
         if row["accused"] == me:
+            continue
+        if row.get("source") == "own" and not publish_fault_evidence():
+            # The box would point at evidence that this node does not publish (#658).
             continue
         evidence = celaut_pb2.FaultEvidence()
         try:

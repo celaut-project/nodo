@@ -455,6 +455,12 @@ reputation:
   # positive opinion of the proof, so that score is lower. 0 (the default) puts none.
   MAX_FAULT_REPORTS: 64
   MAX_FAULT_REPORTS_ON_LEDGER: 0
+  # Whether this node puts the evidence of the faults that it found itself in its proof.
+  # The evidence is pages that the accused peer signed about the accounts of this node:
+  # amounts, instance_ref, execution_name and receipt digests. Every node that gets the
+  # proof can read them. false reports those faults with no evidence: other nodes cannot
+  # check them, and they do not score the accused peer for them (#658).
+  PUBLISH_FAULT_EVIDENCE: true
   # The days that a kept off-chain proof of another node counts, from the date that its
   # publisher signed. An older proof is dropped and refused. 0 is no limit (#659).
   MAX_OFFCHAIN_PROOF_AGE_DAYS: 30

@@ -5382,9 +5382,10 @@ class SQLConnection(metaclass=Singleton):
 
     def get_fault_evidence(self, limit: int) -> List[dict]:
         """The newest ``limit`` evidences: ``accused``, ``reason``, ``account_ref``,
-        ``seq``, ``evidence`` (serialized ``FaultEvidence``) and ``ts``."""
+        ``seq``, ``evidence`` (serialized ``FaultEvidence``), ``source`` (``own`` or
+        ``received``) and ``ts``."""
         rows = self._execute(
-            'SELECT accused, reason, account_ref, seq, evidence, ts FROM fault_evidence '
+            'SELECT accused, reason, account_ref, seq, evidence, source, ts FROM fault_evidence '
             'ORDER BY ts DESC LIMIT ?', (int(limit),)).fetchall()
         return [dict(row) for row in rows]
 

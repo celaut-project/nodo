@@ -854,10 +854,38 @@ the evidence (`fault_proofs.digest`). The token comes from the largest opinion o
 proof, so the proof keeps its supply. The evidence stays off the chain, because a box
 pays rent for each byte: a reader gets it with `GetReputationProofs`.
 
+### What a father tells to third parties
+
+The evidence of a fault that this node found itself holds pages that the accused peer signed
+about the accounts of this node on that peer. Every node that pulls or receives the proof
+reads them. A page holds:
+
+- the rows of the account: the kind of each movement, the amounts, the balance after, the
+  dates and the `detail` (for a `start`: the quote of the peer and the receipt digest; for a
+  maintenance row: the resources and the seconds; for a `stop`: the reason and the MU left);
+- the `instance_ref` and the `service_id` of the child, when the page is of a descendant, and
+  the `execution_name` and the digests of the receipts, when the evidence has receipts;
+- the `account_ref`, which is a hash of the account and not the token.
+
+It does not hold the token of the instance, the `client_id`, the deposit of the father on the
+peer, or the statements of other accounts. A reader still learns that this node ran a service
+on that peer, when, for how long, and what it paid. It is the price of a fault that a third
+party can check: the signature covers the whole page, so a node cannot hide a row or a field
+and keep a page that `fault_proofs.check` accepts (the digest of a movement hashes all its
+fields).
+
+An operator who does not want to tell this sets `reputation.PUBLISH_FAULT_EVIDENCE` to `false`.
+The faults that this node found itself are then reported with no evidence, as the faults that
+rest on what only the reporter knows. The accused peer still loses reputation with this node.
+Other nodes cannot check the report, so they do not score the peer for it, and no fault box
+for it goes on Ergo. Evidence that this node got from other nodes is public already and still
+goes on.
+
 ### Limits
 
 - The evidence shows the account of the reporter on the peer by its `account_ref`, and
-  its movements: what the reporter paid and when. It shows no credential.
+  its movements: what the reporter paid and when. It shows no credential. See [what a father
+  tells to third parties](#what-a-father-tells-to-third-parties).
 - A proof is only as new as the last pull.
 - `cred` can be copied, as for `ô`. Here a copy also needs `r̂(p) > 0`.
 
