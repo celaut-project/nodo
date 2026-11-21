@@ -382,7 +382,7 @@ def scores(proof: celaut_pb2.ReputationProof) -> Dict[str, tuple]:
 def ledger_fault_reports(limit: Optional[int] = None) -> List[tuple]:
     """The faults that this node holds the evidence of, as ``(accused, R9 text)`` for the
     boxes of the proof on the ledger (#652): the newest first, at most
-    ``reputation.MAX_FAULT_REPORTS_ON_LEDGER``. R9 is JSON with ``reason``,
+    ``reputation.MAX_FAULT_REPORTS_ON_LEDGER`` (default 0: none, #660). R9 is JSON with ``reason``,
     ``account_ref``, ``seq`` and ``evidence``, the digest of the evidence
     (``fault_proofs.digest``): a reader gets the evidence off the chain. A box pays rent
     for each byte, so the evidence itself does not go on the ledger."""
@@ -390,9 +390,9 @@ def ledger_fault_reports(limit: Optional[int] = None) -> List[tuple]:
 
     if limit is None:
         try:
-            limit = max(0, int(_setting("MAX_FAULT_REPORTS_ON_LEDGER", 8)))
+            limit = max(0, int(_setting("MAX_FAULT_REPORTS_ON_LEDGER", 0)))
         except (TypeError, ValueError):
-            limit = 8
+            limit = 0
     if limit <= 0:
         return []
     me = get_node_public_key_hex() or ""

@@ -338,7 +338,12 @@ The registers of an opinion box itself:
 - **R9** — free-form content; for a self-opinion, the node's signed `Peer` message; for a
   fault report (R8 false, one token), JSON with `reason`, `account_ref`, `seq` and
   `evidence`, the digest of the signed evidence that `GetReputationProofs` gives (#652, see
-  [`REPUTATION.md`](REPUTATION.md#on-ergo))
+  [`REPUTATION.md`](REPUTATION.md#on-ergo)). A node puts none by default. With
+  `reputation.MAX_FAULT_REPORTS_ON_LEDGER` = N it adds up to N of these boxes to each
+  submit. Each box holds `SAFE_MIN_BOX_VALUE` (0.001 ERG), so a submit costs up to
+  N × 0.001 ERG more, and the one token of each box comes from the largest positive
+  opinion of the proof (`add_fault_boxes`), so the on-chain score of that peer is lower.
+  The submit with fault boxes has not been tested on a test network (#660)
 
 ###### Reading the reputation held on a node
 

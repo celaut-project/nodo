@@ -275,7 +275,7 @@ prove it alone. See [`REPUTATION.md`](REPUTATION.md#off-chain-reputation).
 | `reputation.PUSH_OFFCHAIN_FANOUT` | `3` | The most peers that get a push. |
 | `reputation.PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS` | `300` | The least time between two pushes. |
 | `reputation.MAX_FAULT_REPORTS` | `64` | The most fault reports in the proof of this node. Reports with evidence come first. |
-| `reputation.MAX_FAULT_REPORTS_ON_LEDGER` | `8` | The most fault reports in the proof of this node on Ergo. Each one is a box of one token against the accused peer. The evidence stays off the chain. |
+| `reputation.MAX_FAULT_REPORTS_ON_LEDGER` | `0` | The most fault reports in the proof of this node on Ergo. `0` puts none: the operator opts in. Each one is a box of one token against the accused peer, and costs 0.001 ERG (`SAFE_MIN_BOX_VALUE`) on each submit. Its token comes from the largest positive opinion of the proof, so the on-chain score of that peer is lower. The evidence stays off the chain. |
 | `reputation.FAULT_EVIDENCE_RETENTION_DAYS` | `90` | The days that the evidence of a fault is kept. `0` keeps it for ever. |
 
 ## `builder` — build tuning

@@ -451,8 +451,10 @@ reputation:
   PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS: 300
   # The most fault reports in the proof of this node, and in its proof on the ledger.
   # A box on the ledger pays rent for each byte, so the evidence stays off the chain.
+  # Each report on the ledger is a box of 0.001 ERG, and its token comes from the largest
+  # positive opinion of the proof, so that score is lower. 0 (the default) puts none.
   MAX_FAULT_REPORTS: 64
-  MAX_FAULT_REPORTS_ON_LEDGER: 8
+  MAX_FAULT_REPORTS_ON_LEDGER: 0
   # The days that the evidence of a fault is kept. 0 keeps it for ever.
   FAULT_EVIDENCE_RETENTION_DAYS: 90
 
