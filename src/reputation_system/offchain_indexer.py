@@ -163,6 +163,10 @@ def push_tick() -> int:
         proof = offchain_proof.own_proof()
         if proof is None:
             return 0
+        if offchain_proof.pow_bits(proof) < offchain_proof.own_pow_bits():
+            # The nonce is still being looked for (#677): a peer would refuse this proof.
+            # The faults are not marked as pushed, so the next tick tries again.
+            return 0
         key = _fault_key(proof)
         if key == _pushed_faults:
             return 0
@@ -200,7 +204,10 @@ def opinion_rows(proofs: List[celaut_pb2.ReputationProof], local: Dict[str, floa
         if not verdicts:
             continue
         credibility = agreement(verdicts, local)
-        voice = credibility * max(0.0, float(local.get(proof.publisher, 0.0)))
+        # cred * r_local, and the factor of its work (#677): linear in the work, so
+        # splitting the work between identities gives no more voice.
+        voice = (credibility * max(0.0, float(local.get(proof.publisher, 0.0)))
+                 * offchain_proof.pow_factor(offchain_proof.pow_bits(proof)))
         for subject, value in verdicts.items():
             rows.append((subject, proof.publisher, value, voice))
     return rows
@@ -226,6 +233,10 @@ def refresh() -> int:
         try:
             proof.ParseFromString(row["proof"])
         except Exception:
+            continue
+        if offchain_proof.pow_bits(proof) < offchain_proof.min_pow_bits():
+            # The minimum rose after the proof was kept (#677).
+            sql.delete_offchain_proof(row["publisher"])
             continue
         proofs.append(proof)
     try:

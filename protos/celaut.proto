@@ -1306,9 +1306,16 @@ message ReputationProof {
     repeated ReputationOpinion opinions = 3;
     // The scheme of the signature, as on the Peer, without the prose.
     Peer.SignatureScheme signature_scheme = 4;
+    // The nonce of the proof of work (#677). The work of the proof is the number of
+    // leading zero bits of the hash of the proof with this nonce (see
+    // offchain_proof.pow_bits). The publisher tries nonces until the hash has the zero
+    // bits that it wants. The signature covers it, so a node that passes the proof on
+    // cannot change it. A proof with nonce 0 has the work of that one hash, which is
+    // no more than any other single try.
+    uint64 pow_nonce = 5;
     // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
     // that the node signs.
-    string signature = 5;
+    string signature = 6;
 }
 
 // The answer of PushReputationProof.

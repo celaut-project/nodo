@@ -16,6 +16,11 @@ The opinions of this node are:
 
 The signature covers a canonical text of every field, never ``SerializeToString()``,
 as for a statement: ``"celaut-reputation-proof:" + publisher + "|" + proof_digest``.
+
+The proof also holds a proof of work (#677): ``pow_nonce``, which the signature covers.
+The work is the number of leading zero bits of ``proof_digest``. A receiver refuses a
+proof with fewer bits than ``reputation.MIN_OFFCHAIN_POW_BITS``, and weighs the others by
+``pow_factor``. A node looks for a nonce only when ``TARGET_OFFCHAIN_POW_BITS`` is above 0.
 """
 import hashlib
 import json
@@ -110,14 +115,13 @@ def _opinion_text(opinion: celaut_pb2.ReputationOpinion) -> str:
                      "1" if opinion.positive else "0", bytes(opinion.content).hex(), evidence))
 
 
-def proof_digest(proof: celaut_pb2.ReputationProof) -> str:
-    """Blake2b-256 hex of the canonical text of every field but the signature.
-
-    ``publisher|ts|scheme|opinion/opinion/...``. An opinion is ``hex(type)~hex(object)
-    ~amount~positive~hex(content)~evidence``, where ``evidence`` is
+def pow_base(proof: celaut_pb2.ReputationProof) -> str:
+    """Blake2b-256 hex of the canonical text of every field but the nonce and the
+    signature: ``publisher|ts|scheme|opinion/opinion/...``. An opinion is
+    ``hex(type)~hex(object)~amount~positive~hex(content)~evidence``, where ``evidence`` is
     ``fault_proofs.digest`` of its evidence, or empty. The scheme is
-    ``execution_receipt.canonical_scheme``.
-    """
+    ``execution_receipt.canonical_scheme``. It is computed once when a node looks for a
+    nonce: only the last step of the digest depends on the nonce."""
     text = "|".join((
         proof.publisher, str(int(proof.ts)),
         execution_receipt.canonical_scheme(proof.signature_scheme),
@@ -126,8 +130,88 @@ def proof_digest(proof: celaut_pb2.ReputationProof) -> str:
     return hashlib.blake2b(text.encode("utf-8"), digest_size=32).hexdigest()
 
 
+def _pow_hash(base: str, nonce: int) -> bytes:
+    return hashlib.blake2b(f"{base}|{int(nonce)}".encode("utf-8"), digest_size=32).digest()
+
+
+def proof_digest(proof: celaut_pb2.ReputationProof) -> str:
+    """Blake2b-256 hex of ``pow_base|pow_nonce``: it covers every field but the signature.
+    The signature is over this digest, and the work of the proof (#677) is the number of
+    leading zero bits of it (:func:`pow_bits`)."""
+    return _pow_hash(pow_base(proof), proof.pow_nonce).hex()
+
+
+# -- Proof of work (#677) -----------------------------------------------------------------
+
+# A node does not look for more zero bits than this: 2^32 hashes is hours of work.
+MAX_POW_BITS = 32
+
+
+def zero_bits(raw: bytes) -> int:
+    """The number of leading zero bits of ``raw``."""
+    value = int.from_bytes(raw, "big")
+    return len(raw) * 8 - value.bit_length()
+
+
+def pow_bits(proof: celaut_pb2.ReputationProof) -> int:
+    """The work of ``proof``: the leading zero bits of its digest. A proof with nonce 0
+    has the bits of that one hash, no more than any other single try. 0 if the digest
+    cannot be computed."""
+    try:
+        return zero_bits(bytes.fromhex(proof_digest(proof)))
+    except Exception:
+        return 0
+
+
+def _pow_int(key: str, default: int) -> int:
+    try:
+        return max(0, min(MAX_POW_BITS, int(_setting(key, default))))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def min_pow_bits() -> int:
+    """``reputation.MIN_OFFCHAIN_POW_BITS``: a proof with fewer bits is refused and
+    dropped. 0 keeps every proof."""
+    return _pow_int("MIN_OFFCHAIN_POW_BITS", 0)
+
+
+def target_pow_bits() -> int:
+    """``reputation.TARGET_OFFCHAIN_POW_BITS``: the bits that give a proof its whole voice.
+    0 switches the weight by work off, and this node looks for no nonce."""
+    return _pow_int("TARGET_OFFCHAIN_POW_BITS", 0)
+
+
+def pow_factor(bits: int) -> float:
+    """The factor of the voice of a proof with ``bits`` of work: ``min(1, 2^(bits -
+    target))``. It is linear in the work (2^bits is the number of tries), so a publisher
+    that splits its work between N identities has the same voice in all, and no more.
+    1 when the weight by work is off (``target`` 0)."""
+    target = target_pow_bits()
+    if target <= 0:
+        return 1.0
+    return min(1.0, 2.0 ** (int(bits) - target))
+
+
+def mine(proof: celaut_pb2.ReputationProof, bits: int,
+         stop: Optional[threading.Event] = None, start: int = 0) -> bool:
+    """Look for a ``pow_nonce`` that gives ``proof`` at least ``bits`` of work, and set it.
+    False if ``stop`` was set first. The proof must have its ``publisher``, ``ts``,
+    opinions and scheme: it is signed after (:func:`sign`)."""
+    base = pow_base(proof)
+    nonce = int(start)
+    while True:
+        if zero_bits(_pow_hash(base, nonce)) >= bits:
+            proof.pow_nonce = nonce
+            return True
+        nonce += 1
+        if stop is not None and nonce % 4096 == 0 and stop.is_set():
+            return False
+
+
 def sign(proof: celaut_pb2.ReputationProof) -> Optional[celaut_pb2.ReputationProof]:
-    """Sign ``proof`` with the key of this node, in place. None with no identity key."""
+    """Sign ``proof`` with the key of this node, in place. None with no identity key. The
+    signature covers ``pow_nonce``: set it first."""
     publisher = get_node_public_key_hex()
     if not publisher:
         return None
@@ -216,8 +300,17 @@ def _fault_opinions(sql, exclude: str) -> List[celaut_pb2.ReputationOpinion]:
     return opinions[:limit]
 
 
-def build_own_proof() -> Optional[celaut_pb2.ReputationProof]:
-    """The signed proof of this node now, or None with no identity key."""
+def own_pow_bits() -> int:
+    """The bits that this node looks for in its own proof: the target, and never fewer than
+    the minimum that it asks of others. 0 when both are 0: it looks for no nonce."""
+    return max(target_pow_bits(), min_pow_bits())
+
+
+def build_own_proof(mine_bits: Optional[int] = None) -> Optional[celaut_pb2.ReputationProof]:
+    """The signed proof of this node now, or None with no identity key.
+
+    With ``mine_bits`` above 0 the nonce is looked for here, and the call takes the time
+    that it takes (``own_proof`` does it in a thread). With None the proof has nonce 0."""
     from src.database.sql_connection import SQLConnection
 
     sql = SQLConnection()
@@ -225,32 +318,102 @@ def build_own_proof() -> Optional[celaut_pb2.ReputationProof]:
     proof = celaut_pb2.ReputationProof(ts=int(time.time()))
     proof.opinions.extend(_score_opinions(sql, me))
     proof.opinions.extend(_fault_opinions(sql, me))
+    if mine_bits:
+        proof.publisher = me
+        proof.signature_scheme.CopyFrom(execution_receipt.receipt_scheme())
+        mine(proof, mine_bits)
     return sign(proof)
 
 
+def _content_key(proof: celaut_pb2.ReputationProof) -> str:
+    """What the proof says, with no date and no nonce: two proofs with the same key need no
+    new work."""
+    return hashlib.blake2b(
+        "/".join(_opinion_text(opinion) for opinion in proof.opinions).encode("utf-8"),
+        digest_size=16).hexdigest()
+
+
+def _reuse_seconds() -> int:
+    """How long a proof that said the same may stay: half of the maximum age, so a peer
+    does not drop it, and one day when the age has no limit."""
+    age = max_proof_age_seconds()
+    return age // 2 if age else 86400
+
+
 _own_lock = threading.Lock()
-_own_cache: Dict[str, object] = {"at": 0.0, "proof": None}
+_own_cache: Dict[str, object] = {"at": 0.0, "proof": None, "key": None, "stop": None}
+
+
+def _mine_in_background(unsigned: celaut_pb2.ReputationProof, key: str, bits: int,
+                        stop: threading.Event) -> None:
+    """Look for the nonce of ``unsigned`` in a thread, sign it, and make it the proof of
+    this node when nothing newer took its place."""
+    def work():
+        try:
+            proof = celaut_pb2.ReputationProof()
+            proof.CopyFrom(unsigned)
+            if not mine(proof, bits, stop=stop) or sign(proof) is None:
+                return
+            with _own_lock:
+                if _own_cache["stop"] is stop and not stop.is_set():
+                    _own_cache.update(proof=proof, key=key)
+        except Exception as e:
+            log.LOGGER(f"Cannot look for the work of the reputation proof: {e}")
+
+    threading.Thread(target=work, name="offchain-pow", daemon=True).start()
 
 
 def own_proof() -> Optional[celaut_pb2.ReputationProof]:
     """The proof of this node, built again at most every ``OWN_PROOF_SECONDS``. A proof
-    is signed once for many callers, and its ``ts`` grows only when it is built again."""
+    is signed once for many callers, and its ``ts`` grows only when it is built again.
+
+    With work to do (``own_pow_bits`` above 0) a proof that says the same as the last one
+    is kept, and so is its nonce, until it is old (``_reuse_seconds``). A proof that
+    changed is mined in a thread, and the last proof is given until the new one is ready:
+    the tick never waits for the work (#677)."""
     with _own_lock:
         now = time.monotonic()
-        if _own_cache["proof"] is None or now - float(_own_cache["at"]) >= OWN_PROOF_SECONDS:
-            try:
-                proof = build_own_proof()
-            except Exception as e:
-                log.LOGGER(f"Cannot build the reputation proof of this node: {e}")
-                proof = None
-            if proof is not None:
-                _own_cache.update(at=now, proof=proof)
+        cached = _own_cache["proof"]
+        if cached is not None and now - float(_own_cache["at"]) < OWN_PROOF_SECONDS:
+            return cached
+        bits = own_pow_bits()
+        try:
+            fresh = build_own_proof()
+        except Exception as e:
+            log.LOGGER(f"Cannot build the reputation proof of this node: {e}")
+            return cached
+        if fresh is None:
+            return cached
+        if not bits:
+            _own_cache.update(at=now, proof=fresh, key=None)
+            return fresh
+        key = _content_key(fresh)
+        if cached is not None and key == _own_cache["key"] \
+                and time.time() - cached.ts < _reuse_seconds():
+            _own_cache.update(at=now)
+            return cached
+        previous_stop = _own_cache["stop"]
+        if previous_stop is not None:
+            previous_stop.set()
+        stop = threading.Event()
+        # No proof yet: give the one with nonce 0 now. It is below the bits, and a peer
+        # that asks for them refuses it, but the node has one to answer with.
+        if cached is None:
+            _own_cache.update(proof=fresh, key=None)
+        _own_cache.update(at=now, stop=stop)
+        unsigned = celaut_pb2.ReputationProof()
+        unsigned.CopyFrom(fresh)
+        unsigned.ClearField("signature")
+        _mine_in_background(unsigned, key, bits, stop)
         return _own_cache["proof"]
 
 
 def forget_own_proof() -> None:
     with _own_lock:
-        _own_cache.update(at=0.0, proof=None)
+        stop = _own_cache["stop"]
+        if stop is not None:
+            stop.set()
+        _own_cache.update(at=0.0, proof=None, key=None, stop=None)
 
 
 # -- Proofs of other nodes --------------------------------------------------------------
@@ -359,6 +522,8 @@ def receive(raw: bytes, known: Optional[set] = None) -> Optional[str]:
     age = max_proof_age_seconds()
     if age and proof.ts < time.time() - age:
         return "too old"
+    if pow_bits(proof) < min_pow_bits():
+        return "not enough work"
     last = sql.offchain_proof_ts(proof.publisher)
     if last is not None and proof.ts <= last:
         return "not newer than the kept proof"

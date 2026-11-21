@@ -5452,6 +5452,11 @@ class SQLConnection(metaclass=Singleton):
             f'DELETE FROM offchain_proofs WHERE publisher NOT IN ({marks})', tuple(keep)
         ).rowcount
 
+    def delete_offchain_proof(self, publisher: str) -> int:
+        """Delete the kept proof of ``publisher``. Returns how many."""
+        return self._execute('DELETE FROM offchain_proofs WHERE publisher = ?',
+                             (str(publisher),)).rowcount
+
     def delete_offchain_proofs_older_than(self, ts: int) -> int:
         """Delete the kept proofs that their publisher dated before ``ts``. Returns how
         many."""

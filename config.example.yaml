@@ -458,6 +458,15 @@ reputation:
   # The days that a kept off-chain proof of another node counts, from the date that its
   # publisher signed. An older proof is dropped and refused. 0 is no limit (#659).
   MAX_OFFCHAIN_PROOF_AGE_DAYS: 30
+  # The proof of work of an off-chain proof (#677). The work is the number of leading zero
+  # bits of the digest of the proof (2^bits tries on average). A proof with fewer bits than
+  # MIN is refused and dropped. The voice of a proof is multiplied by min(1, 2^(bits -
+  # TARGET)): linear in the work, so splitting it between identities gives no more voice.
+  # With TARGET above 0 this node also looks for the nonce of its own proof, in a thread,
+  # again only when what the proof says changes. 0 and 0 (the defaults) turn it all off.
+  # Both are at most 32.
+  MIN_OFFCHAIN_POW_BITS: 0
+  TARGET_OFFCHAIN_POW_BITS: 0
   # The days that the evidence of a fault is kept. 0 keeps it for ever.
   FAULT_EVIDENCE_RETENTION_DAYS: 90
 

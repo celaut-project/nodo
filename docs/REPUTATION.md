@@ -811,6 +811,26 @@ failed us, has no voice. So a new identity costs nothing and gives nothing, and 
 that only copies our scores also needs good work for us. The opinion of a node about
 itself does not count. The prior keeps one weak voice from moving a peer far.
 
+**Proof of work (#677).** A proof holds a `pow_nonce`, and the signature covers it. The
+work of the proof is the number of leading zero bits of its digest (`proof_digest`, the
+hash of the proof with its nonce): a publisher tries nonces until the hash has the bits that
+it wants, and a receiver checks it with one hash. A receiver refuses a proof with fewer than
+`reputation.MIN_OFFCHAIN_POW_BITS` bits (and drops a kept one when the minimum rises), and
+multiplies the voice by `min(1, 2^(bits − TARGET_OFFCHAIN_POW_BITS))`. The factor is linear
+in the work, not in the bits: a publisher that splits the same work between N identities
+has the same voice in all of them, and the minimum makes each identity pay a floor. With the
+two settings at 0 (the default) the work changes nothing. The voice stays anchored in the
+local reputation `r_local` of the publisher, as before: the reputation of the publisher on
+the ledger or off-chain does not enter the weight.
+
+A node with `TARGET_OFFCHAIN_POW_BITS` above 0 looks for the nonce of its own proof, in a
+thread, so the tick does not wait. The proof that says the same is kept, with its date and
+its nonce, for half of `MAX_OFFCHAIN_PROOF_AGE_DAYS`, so the node does not look again at
+each 5-minute rebuild. While a changed proof is being mined the node gives the last one, and
+it does not push a proof that is below its own bits. CPU work is cheaper than burned ERG
+for an attacker with GPUs, so the work is an addition to the burn on the ledger, not a
+replacement.
+
 **Limits on the voices (#659).** The voices on one subject add up to at most
 `balancers.OFFCHAIN_SUBJECT_VOICE_CAP` (5.0). Above it, each voice is scaled by the same
 factor: the weighted mean of the verdicts stays, and only the confidence is bounded. One
