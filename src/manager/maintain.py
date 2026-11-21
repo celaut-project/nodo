@@ -768,6 +768,11 @@ def maintain_vmachines(debug_mode: bool=False):
             sys_req = dict(sys_req)
             sys_req['disk_space'] = resolved_disk
 
+        # The disk with its shares may not pass the ``at_most`` of the instance (#661). The
+        # tick charges at most that, which is the figure that the quote of its start bounds,
+        # and the writers are stopped after the charge.
+        sys_req, over_ceiling = hold_disk_to_ceiling(vmachine_id, sys_req, resolved_disk)
+
         charged_at = time.monotonic()
         seconds = _seconds_to_charge(vmachine_id, charged_at)
         charge_mu = compute_maintenance_cost(
@@ -837,6 +842,9 @@ def maintain_vmachines(debug_mode: bool=False):
             charged_this_tick += int(charge_mu or 0)
             if debug_mode: log.LOGGER(f"Charged {vmachine_id} for the interval it just held.")
 
+        if over_ceiling:
+            _stop_disk_writers(vmachine_id)
+
     charged_this_tick += _charge_hibernated(hibernated, scarcity, debug_mode)
 
     # What this hour looked like (issue #337). Both figures were computed above and
@@ -851,6 +859,43 @@ def maintain_vmachines(debug_mode: bool=False):
     # is what had the janitor judge QEMU guests with CH's liveness test (#295), and
     # `interface` is the only place that knows which backends this node has.
     vm_janitor_cleanup_orphans(debug_mode=debug_mode)
+
+
+def hold_disk_to_ceiling(vmachine_id: str, sys_req, resolved_disk: Optional[int]):
+    """``(sys_req, over)``: ``sys_req`` with the disk held to ``max_disk_space``, and
+    whether the disk with its shares (``resolved_disk``, None when the instance has none)
+    was over it (#661). The row is written with the ceiling, so what the tick charges, and
+    what the host ceiling adds up, never pass the ``at_most`` that the quote of the start
+    bounds."""
+    ceiling = int(dict(sys_req).get('max_disk_space') or 0)
+    if resolved_disk is None or not ceiling or resolved_disk <= ceiling:
+        return sys_req, False
+    log.LOGGER(f"{vmachine_id} holds {resolved_disk} B of disk with its shares, "
+               f"over its at_most of {ceiling} B.")
+    sc.update_sys_req(id=vmachine_id, mem_limit=None, disk_space=ceiling)
+    sys_req = dict(sys_req)
+    sys_req['disk_space'] = ceiling
+    return sys_req, True
+
+
+def _stop_disk_writers(vmachine_id: str) -> None:
+    """Stop who writes the share of an instance that is over its ``at_most`` (#661).
+
+    An exporter pays for all its share, and its guests write to it without paying: they
+    are stopped. An instance with no guests, or one that is a member of a network share,
+    is stopped itself: it cannot pay for more disk than its ``at_most``."""
+    from src.virtualizers.microvm.shares import guests_of
+
+    try:
+        targets = guests_of(vmachine_id) or [vmachine_id]
+    except Exception as e:
+        log.LOGGER(f"Cannot read the guests of {vmachine_id}: {e}")
+        targets = [vmachine_id]
+    for token in targets:
+        try:
+            stop_instance(token=token, reason=dead_instances.DISK_OVER_AT_MOST)
+        except Exception as e:
+            log.LOGGER(f"Cannot stop {token} for the disk of {vmachine_id}: {e}")
 
 
 def _charge_hibernated(hibernated: List[dict], scarcity, debug_mode: bool = False) -> int:

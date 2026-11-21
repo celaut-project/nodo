@@ -377,22 +377,27 @@ def local_execution(
     # answer gives.
     start_receipts: dict = {}
 
+    def _reserved_and_most(resolved_resources: celaut_pb2.Sysresources, disk_space: int):
+        """``(reserved, most)``: what the node reserved, and the most that the instance may
+        grow to (its ``at_most``), never below what the node reserved: the floors can raise
+        the start above what the manifest declares as its most."""
+        reserved = celaut_pb2.Sysresources()
+        reserved.CopyFrom(resolved_resources)
+        reserved.disk_space = int(disk_space)
+        declared = resolve_billable_resources(resources.at_most, service_id, service=service) \
+            if resources.HasField("at_most") else reserved
+        most = celaut_pb2.Sysresources(**{
+            key: max(int(getattr(reserved, key)), int(getattr(declared, key)))
+            for key in start_quote.SHAPE_KEYS})
+        return reserved, most
+
     def _local_quote(resolved_resources: celaut_pb2.Sysresources, disk_space: int,
                      on_close: str, closes_at: int) -> dict:
         """``detail.quote`` of the ``start`` movement: the terms that the ticks of this
         instance charge, and the start shape that the node reserved (#652). Empty when it
         cannot be priced: the start goes on, with a quote that nobody can check."""
         try:
-            reserved = celaut_pb2.Sysresources()
-            reserved.CopyFrom(resolved_resources)
-            reserved.disk_space = int(disk_space)
-            declared = resolve_billable_resources(resources.at_most, service_id, service=service) \
-                if resources.HasField("at_most") else reserved
-            # Never below what the node reserved: the floors can raise the start above
-            # what the manifest declares as its most.
-            most = celaut_pb2.Sysresources(**{
-                key: max(int(getattr(reserved, key)), int(getattr(declared, key)))
-                for key in start_quote.SHAPE_KEYS})
+            reserved, most = _reserved_and_most(resolved_resources, disk_space)
             terms = start_quote.local_terms(reserved, most, launch_bp, launch_bound,
                                             service_arch, on_close, closes_at)
             return start_quote_detail(terms, start_quote.shape_of(reserved))
@@ -454,6 +459,9 @@ def local_execution(
             # launch and kept for the life of the instance (#344).
             launch_on_close=launch_on_close,
             launch_closes_at=launch_closes_at,
+            # The most disk that the instance may hold with its shares (#661): the tick
+            # holds it to this, and the quote of its start is made at it.
+            max_disk_space=_max_disk(resolved_resources, disk_space),
             # What the father paid, and the build taken from it (#570). The start
             # names the execution as its receipt does (#419), and holds the quote of
             # this node for the instance, which the statement then signs (#652).
@@ -468,6 +476,13 @@ def local_execution(
             ),
         )
         registered_id = vmachine_id
+
+    def _max_disk(resolved_resources: celaut_pb2.Sysresources, disk_space: int) -> Optional[int]:
+        try:
+            return int(_reserved_and_most(resolved_resources, disk_space)[1].disk_space) or None
+        except Exception as e:
+            log.LOGGER(f"Cannot tell the most disk of {service_id}: {e}")
+            return None
 
     # Execute virtualizer process.
     try:

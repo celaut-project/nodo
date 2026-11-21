@@ -64,7 +64,7 @@ class ShareDiskAccountingTest(unittest.TestCase):
 
     # -- the world as a launch leaves it ----------------------------------- #
 
-    def _register(self, vmachine_id, disk_space, name):
+    def _register(self, vmachine_id, disk_space, name, max_disk_space=None):
         """Register an instance the way ``local_execution`` does."""
         self.sc.add_local_instance(
             father_id="dev-client-1",
@@ -78,6 +78,7 @@ class ShareDiskAccountingTest(unittest.TestCase):
             disk_space=disk_space,
             envs=None,
             mem_limit=64 * 1024 ** 2,
+            max_disk_space=max_disk_space,
         )
 
     def _rootfs(self, vmachine_id, size=ROOTFS_BYTES):
@@ -189,6 +190,59 @@ class ShareDiskAccountingTest(unittest.TestCase):
         self.assertNotEqual(before["disk_space"], after["disk_space"])
         for column in ("mem_limit", "cpu_period", "cpu_quota", "arch"):
             self.assertEqual(before[column], after[column], column)
+
+    # -- the at_most of the disk with its shares (#661) --------------------- #
+
+    def _exporter_with_share(self, max_disk_space):
+        self._register(PARENT, ROOTFS_BYTES, "exporter", max_disk_space=max_disk_space)
+        image = self._rootfs(PARENT)
+        directory = self._materialize_share()
+        save_runtime_state(PARENT, {
+            "rootfs_path": str(image), "exported_shares": [SHARE_ID],
+        })
+        return directory
+
+    def _ceiling_tick(self, vmachine_id):
+        from src.manager import maintain
+        resolved = shares.resolved_disk_bytes(vmachine_id)
+        if resolved is not None:
+            self.sc.update_sys_req(id=vmachine_id, mem_limit=None, disk_space=resolved)
+        sys_req, over = maintain.hold_disk_to_ceiling(
+            vmachine_id, dict(self.sc.get_sys_req(id=vmachine_id)), resolved)
+        return int(sys_req["disk_space"]), over
+
+    def test_the_most_disk_is_kept_on_the_row(self):
+        self._register(PARENT, ROOTFS_BYTES, "exporter", max_disk_space=4000)
+        self.assertEqual(int(self.sc.get_sys_req(id=PARENT)["max_disk_space"]), 4000)
+
+    def test_a_share_under_the_at_most_is_charged_as_it_is(self):
+        self._exporter_with_share(max_disk_space=4000)
+        self.assertEqual(self._ceiling_tick(PARENT), (1500, False))
+
+    def test_a_share_that_grows_over_the_at_most_is_charged_the_at_most(self):
+        directory = self._exporter_with_share(max_disk_space=4000)
+        (directory / "more.bin").write_bytes(b"y" * 100_000)
+        self.assertEqual(self._ceiling_tick(PARENT), (4000, True))
+        self.assertEqual(self._recorded_disk(PARENT), 4000)
+        self.assertEqual(host_limits.committed_resources().disk_bytes, 4000)
+
+    def test_an_instance_with_no_ceiling_is_not_held(self):
+        directory = self._exporter_with_share(max_disk_space=None)
+        (directory / "more.bin").write_bytes(b"y" * 100_000)
+        self.assertEqual(self._ceiling_tick(PARENT), (101_500, False))
+
+    def test_an_ordinary_instance_is_never_over_its_ceiling(self):
+        self._register("vm-plain", 700, "plain", max_disk_space=700)
+        self.assertEqual(self._ceiling_tick("vm-plain"), (700, False))
+
+    def test_the_guests_of_an_exporter_are_the_other_users_of_its_share(self):
+        self._exporter_with_share(max_disk_space=4000)
+        base = str(virtiofs.shared_fs_base_dir(self.root))
+        ref = ShareRef(share_id=SHARE_ID, name="data", env="", discriminator="",
+                       path="/data", readonly=False)
+        virtiofs.reserve_share(base, virtiofs.mount_for(ref, base, exported=False), CHILD)
+        self.assertEqual(shares.guests_of(PARENT), [CHILD])
+        self.assertEqual(shares.guests_of(CHILD), [])
 
 
 if __name__ == "__main__":

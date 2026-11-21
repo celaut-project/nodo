@@ -1189,6 +1189,7 @@ class SQLConnection(metaclass=Singleton):
         launch_bound=None,
         launch_on_close: Optional[str] = None,
         launch_closes_at: Optional[int] = None,
+        max_disk_space: Optional[int] = None,
     ):
         """
         Adds an internal container to the database, with the first rows of its account.
@@ -1249,15 +1250,16 @@ class SQLConnection(metaclass=Singleton):
             # database's column defaults to NULL however the fresh schema is declared.
             # Writing it at the one insert is what makes the two agree.
             cursor.execute('''
-                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility, launch_period_seconds, launch_on_close, launch_closes_at, launched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp, launch_volatility, launch_period_seconds, launch_on_close, launch_closes_at, max_disk_space, launched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
                   disk_space, int(cpu_period or 0), int(cpu_quota or 0),
                   serialized_instance, service_id, virtualizer, envs, arch,
                   launch_bp.get("cpu"), launch_bp.get("mem"), launch_bp.get("disk"),
                   None if launch_bound is None else float(launch_bound.volatility),
                   None if launch_bound is None else int(launch_bound.period_seconds),
-                  launch_on_close, launch_closes_at))
+                  launch_on_close, launch_closes_at,
+                  None if max_disk_space is None else int(max_disk_space)))
             self._append_opening(cursor, container_id, movements)
 
         self._transaction(work)
@@ -1471,7 +1473,8 @@ class SQLConnection(metaclass=Singleton):
         """
         result = self._execute('''
             SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch, launch_cpu_bp, launch_mem_bp, launch_disk_bp,
-                   launch_volatility, launch_period_seconds, CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts
+                   launch_volatility, launch_period_seconds, max_disk_space,
+                   CAST(strftime('%s', launched_at) AS INTEGER) AS launched_ts
             FROM local_instances WHERE id = ? AND killed_at IS NULL
         ''', (id,))
         row = result.fetchone()

@@ -216,6 +216,7 @@ TABLES = {
             launch_disk_bp INTEGER DEFAULT NULL,
             launch_volatility REAL DEFAULT NULL,
             launch_period_seconds INTEGER DEFAULT NULL,
+            max_disk_space INTEGER DEFAULT NULL,
             launch_on_close TEXT DEFAULT NULL,
             launch_closes_at INTEGER DEFAULT NULL,
             launched_at DATETIME DEFAULT NULL,
@@ -1094,6 +1095,9 @@ def create_tables(cursor):
         "launch_disk_bp": "INTEGER DEFAULT NULL",
         "launch_volatility": "REAL DEFAULT NULL",
         "launch_period_seconds": "INTEGER DEFAULT NULL",
+        # The most disk that the instance may hold with its shares (its ``at_most``).
+        # NULL: no ceiling, as on every row written before this column existed.
+        "max_disk_space": "INTEGER DEFAULT NULL",
         "launched_at": "DATETIME DEFAULT NULL",
         # NULL on every row written before this column existed: none of them is
         # suspended.

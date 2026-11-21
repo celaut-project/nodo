@@ -49,6 +49,8 @@ OUT_OF_BALANCE = "out_of_balance"
 PROCESS_LOST = "process_lost"
 GUEST_PANIC = "guest_panic"
 ACTIVITY_WINDOW = "activity_window"
+# The disk of the instance, with its shares, went over its ``at_most`` (#661).
+DISK_OVER_AT_MOST = "disk_over_at_most"
 PEER_STOPPED = "peer_stopped"
 LAUNCH_FAILED = "launch_failed"
 BURNALL = "burnall"

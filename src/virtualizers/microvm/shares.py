@@ -234,6 +234,19 @@ def exported_disk_bytes(vmachine_id: str) -> int:
     return share_bytes(str(shared_fs_base_dir(paths.cache_root())), exported)
 
 
+def guests_of(vmachine_id: str) -> List[str]:
+    """The other VMs that use a share that this VM exports: the ones that write to its
+    shares and that it does not run itself (``[]`` if it exports none)."""
+    state = load_runtime_state(vmachine_id) or {}
+    base_dir = str(shared_fs_base_dir(paths.cache_root()))
+    guests: List[str] = []
+    for share_id in state.get("exported_shares") or []:
+        for user in (load_share_state(base_dir, share_id) or {}).get("users") or []:
+            if user != vmachine_id and user not in guests:
+                guests.append(user)
+    return guests
+
+
 def holds_network_share_locally(share_id_hex: str) -> bool:
     """Whether this node holds the network share now (see ``LocateShare``)."""
     return holds_network_share(str(shared_fs_base_dir(paths.cache_root())), share_id_hex)

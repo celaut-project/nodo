@@ -481,10 +481,22 @@ touched.
 A network share is counted differently: each member pays an equal part (see
 [Accounting of a network share](#accounting-of-a-network-share)).
 
-There is no separate reservation per share, and no ceiling a guest could exceed
-on its own: a guest cannot make the share grow beyond what its exporter is
-willing to pay for, because it is the exporter that pays, and an exporter that
-outgrows its balance is stopped by the mechanism that already stops one.
+There is no separate reservation per share. The ceiling is the `at_most.disk_space` of
+the instance that pays (the exporter; for a network share, each member and its part).
+The node keeps it on the row (`local_instances.max_disk_space`, the figure of the most
+that the quote of the start is made at; empty on a row from before #661, which has no
+ceiling). At each tick, when the disk with its shares is over it:
+
+- the tick charges the ceiling, and writes it on the row, so the charge never passes the
+  maximum figure of the quote, and an honest exporter is never an overcharge (#661);
+- the writers are stopped after the charge (`disk_over_at_most`): the guests of an
+  exporter, which write without paying; or the instance itself when it has no guests or
+  is a member of a network share. What the share holds stays, so the next tick of an
+  exporter with no guests left stops the exporter.
+
+The check is at the tick, not at the write: between two ticks a guest can write more
+than the ceiling. A guest cannot make the share grow beyond what its exporter has
+declared it may pay for, but it can pass it for the length of a tick.
 
 The service specification never mentions VirtioFS; swapping the backend requires
 no protocol change.
