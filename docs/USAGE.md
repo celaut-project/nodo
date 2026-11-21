@@ -781,8 +781,13 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo db:reset`
 
-- **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]` `[--no-input]`**  
-  Asks for missing env vars, one by one, the same way as `execute`.  
+- **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]` `[--initial-mu amount | --initial-mu-from-estimate]` `[--no-input]`**  
+  Asks for missing env vars, one by one, the same way as `execute`.
+  `--initial-mu` sets the `initial_mu` of the start by hand, in the display unit
+  (the builds of this node are taken out of it). `--initial-mu-from-estimate` asks this
+  node for its quote first (as `nodo estimate`) and sends the funding that it suggests:
+  the `cost` plus the default periods of maintenance. The two flags do not go together.
+  Without them, this node funds the start by default.  
   Testing/dev only. `execute` always picks the peer through `execution_balancer`
   (cheapest local-or-connected-peer candidate, tried in cost order). This command
   skips that entirely and delegates straight to `peer_id` — no comparison against

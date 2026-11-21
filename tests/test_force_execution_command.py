@@ -102,6 +102,52 @@ class ForceExecutionCommandTests(unittest.TestCase):
         self.assertEqual(len(configs), 1)
         self.assertFalse(configs[0].HasField("initial_mu"))
 
+    def test_forced_generator_sends_the_initial_mu_it_is_given(self):
+        with patch.object(force_execution_cmd, "get_execute_client", return_value="client-a"):
+            messages = list(force_execution_cmd._forced_generator(
+                _hash="aa" * 32,
+                token="forced-token",
+                local_client_balance_mu=force_execution_cmd.DEV_CLIENT_FUNDING_MU,
+                initial_mu=1234,
+            ))
+        configs = [m for m in messages if isinstance(m, celaut.Configuration)]
+        self.assertEqual(configs[0].initial_mu.n, "1234")
+
+    def _run_forced(self, **kwargs):
+        with patch.object(force_execution_cmd.sc, "peer_exists", return_value=True), patch.object(
+            force_execution_cmd, "resolve_service_hash", return_value="svc-resolved"
+        ), patch.object(
+            force_execution_cmd, "matching_payment_system", return_value=self._payment_system()
+        ), patch.object(force_execution_cmd.sc, "set_forced_execution_peer"), patch.object(
+            force_execution_cmd.sc, "pop_forced_execution_peer"
+        ), patch.object(
+            force_execution_cmd, "_forced_generator", return_value=iter(())
+        ) as gen, patch.object(
+            force_execution_cmd, "launch_via_gateway", return_value=None
+        ), patch.object(force_execution_cmd, "print_endpoints"):
+            force_execution_cmd.force_execution(peer_id="peer-a", service="svc", **kwargs)
+        return gen
+
+    def test_manual_initial_mu_reaches_the_generator(self):
+        gen = self._run_forced(initial_mu=500)
+        self.assertEqual(gen.call_args.kwargs["initial_mu"], 500)
+
+    def test_initial_mu_from_estimate_takes_the_suggestion_of_the_node(self):
+        with patch("src.commands.estimate.fetch_quote", return_value=object()), patch(
+            "src.commands.estimate.suggested_initial_mu", return_value=777
+        ):
+            gen = self._run_forced(initial_mu_from_estimate=True)
+        self.assertEqual(gen.call_args.kwargs["initial_mu"], 777)
+
+    def test_a_failed_estimate_launches_nothing(self):
+        with patch("src.commands.estimate.fetch_quote", return_value=None):
+            gen = self._run_forced(initial_mu_from_estimate=True)
+        gen.assert_not_called()
+
+    def test_both_ways_to_set_the_initial_mu_are_refused(self):
+        gen = self._run_forced(initial_mu=5, initial_mu_from_estimate=True)
+        gen.assert_not_called()
+
     def test_the_hint_is_cleaned_up_even_when_the_gateway_call_fails(self):
         with patch.object(force_execution_cmd.sc, "peer_exists", return_value=True), patch.object(
             force_execution_cmd, "resolve_service_hash", return_value="svc-resolved"

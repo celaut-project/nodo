@@ -20,6 +20,7 @@ one-time token this command generates and stores against the peer id
 """
 import uuid
 
+from src.utils.utils import to_amount
 from protos import celaut_pb2
 
 from src.commands.execute import (
@@ -52,6 +53,7 @@ def _forced_generator(
     local_client_balance_mu: int,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
+    initial_mu: int | None = None,
 ):
     try:
         client_id = get_execute_client(amount_mu=local_client_balance_mu)
@@ -65,12 +67,16 @@ def _forced_generator(
         # uses a caller-supplied token as-is rather than generating its own.
         yield celaut_pb2.RecursionGuard(token=token)
 
-        # No initial_mu: `launch_service` uses the `cost` of the price of this node plus
+        # Without `initial_mu` (the default): `launch_service` uses the `cost` of the price of this node plus
         # its default balance as the amount that the client pays (#563, #577, #636). `delegate_execution` sends the peer that amount
         # less the build of this node, converted to the executor's MU. The client's funding above is
         # a local matter and must not travel as the instance's balance -- charging the
         # client is what it is for.
+        # With `initial_mu` (`--initial-mu`, `--initial-mu-from-estimate`): that amount is
+        # what the client pays, the builds of this node included (#563).
         config = celaut_pb2.Configuration()
+        if initial_mu:
+            config.initial_mu.CopyFrom(to_amount(initial_mu))
         if envs:
             keyvalue.update(config.environment_variables, {
                 k: v.encode() for k, v in envs.items()
@@ -94,7 +100,16 @@ def force_execution(
     instance_name: str | None = None,
     check_envs: bool = False,
     ask_envs: bool = False,
+    initial_mu: int | None = None,
+    initial_mu_from_estimate: bool = False,
 ):
+    if initial_mu is not None and initial_mu_from_estimate:
+        print("❌ Use either an initial MU or --initial-mu-from-estimate, not both.")
+        return
+    if initial_mu is not None and initial_mu <= 0:
+        print("❌ The initial MU must be more than zero.")
+        return
+
     if not sc.peer_exists(peer_id):
         print(f"❌ Peer '{peer_id}' is not connected. Check `nodo peers`.")
         return
@@ -121,6 +136,17 @@ def force_execution(
         print(f"❌ Cannot force execution onto peer '{peer_id}': {exc}.")
         return
 
+    if initial_mu_from_estimate:
+        # Same quote and same funding as `nodo estimate` shows: cost + default periods.
+        from src.commands.estimate import fetch_quote, suggested_initial_mu
+        from src.utils.monetary import format_mu
+
+        quote = fetch_quote(service, announce=False)
+        if quote is None:
+            return
+        initial_mu = suggested_initial_mu(quote)
+        print(f"Initial MU suggested by the node: {format_mu(initial_mu)}")
+
     token = uuid.uuid4().hex
     sc.set_forced_execution_peer(token=token, peer_id=peer_id)
     try:
@@ -132,6 +158,7 @@ def force_execution(
                 local_client_balance_mu=DEV_CLIENT_FUNDING_MU,
                 envs=envs,
                 instance_name=instance_name,
+                initial_mu=initial_mu,
             ),
             success_message=f"🚀 Service forced onto peer {peer_id} successfully!\n",
         )

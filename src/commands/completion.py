@@ -81,6 +81,48 @@ PATH_COMMANDS = ["import", "pack", "ggconf"]
 # (e.g. `export <service> <path>`). The first arg is still an id.
 SECOND_ARG_PATH_COMMANDS = ["export"]
 
+# Flags of each command, offered when the word being typed starts with "-".
+# Keep this in sync with the flags that nodo.py parses for each command.
+COMMAND_FLAGS = {
+    "execute": ["--name", "-e", "--no-input", "--receipt"],
+    "force_execution": ["--name", "-e", "--no-input", "--initial-mu", "--initial-mu-from-estimate"],
+    "get": ["--now"],
+    "export": ["--raw"],
+    "integrity": ["--fix"],
+    "service_envs": ["--json"],
+    "update": ["--check", "--force"],
+    "uninstall": ["--yes", "-y", "--no-input", "--delete-wallets"],
+    "kill": ["--json"],
+    "hibernate": ["--json"],
+    "observe": ["--save"],
+    "tunnel": ["--json", "--detach", "--udp", "--listen", "--host", "--peer", "--idle"],
+    "tunnels": ["--json", "--inbound", "--instance"],
+    "tunnel_close": ["--json", "--all"],
+    "peer_reputation": ["--json"],
+    "instances": ["--grouped", "--json", "--dead", "--all"],
+    "packs": ["--json", "--active"],
+    "pack_cancel": ["--json"],
+    "ggconf": ["-e"],
+    "refresh_peers": ["--invite"],
+    "pay": ["--payment-method", "--ledger", "--asset"],
+    "chat": ["--json", "--service"],
+    "chat_open": ["--json", "--message", "--service"],
+    "chat_reply": ["--service"],
+    "chat_threads": ["--json"],
+    "chat_thread": ["--json"],
+    "chat_clients": ["--json"],
+    "chat_client": ["--json"],
+}
+
+
+def _flag_cases() -> str:
+    """The ``case`` arms that map a command to its flags (shared by bash and zsh)."""
+    return "\n".join(
+        f'            {command}) flags="{_quote_words(flags)}" ;;'
+        for command, flags in COMMAND_FLAGS.items()
+    )
+
+
 DAEMON_SUBCOMMANDS = ["start", "status", "stop", "restart"]
 
 # Every top-level command nodo understands.
@@ -393,6 +435,15 @@ _nodo_completion() {{
     fi
 
     local cmd="${{COMP_WORDS[1]}}"
+    # A word that starts with "-" is a flag of the command.
+    if [[ "$cur" == -* ]]; then
+        local flags=""
+        case "$cmd" in
+{_flag_cases()}
+        esac
+        COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
+        return 0
+    fi
     # First positional argument: an id/tag, a path, or a daemon subcommand.
     if [ "$cword" -eq 2 ]; then
         local kind=""
@@ -455,6 +506,16 @@ _nodo() {{
     fi
 
     local cmd=${{words[2]}}
+    # A word that starts with "-" is a flag of the command.
+    if [[ ${{words[CURRENT]}} == -* ]]; then
+        local flags=""
+        case $cmd in
+{_flag_cases()}
+        esac
+        items=(${{=flags}})
+        compadd -a items
+        return
+    fi
     if (( CURRENT == 3 )); then
         local kind=""
         case $cmd in

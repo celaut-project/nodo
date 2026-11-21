@@ -25,16 +25,16 @@ ESTIMATION_BALANCE_MU = 10 ** 16
 FUNDING_HOURS = (1, 24)
 
 
-def estimate(service: str) -> None:
-    service = resolve_service_hash(service)
-    if not service:
-        print("No service allowed.")
-        return
+def fetch_quote(service: str, *, announce: bool = True):
+    """The quote of this node for ``service`` (a resolved hash), or ``None`` after saying why.
 
+    ``nodo estimate`` shows it and ``nodo force_execution --initial-mu-from-estimate``
+    takes the funding it suggests.
+    """
     metadata = read_metadata_from_disk(service_hash=service)
     if not metadata:
         print(f"Cannot estimate cost. Metadata for service {service} not found.")
-        return
+        return None
 
     # Obtain a dev client to authenticate the request.
     clients = get_dev_clients(amount_mu=ESTIMATION_BALANCE_MU)
@@ -42,7 +42,7 @@ def estimate(service: str) -> None:
         client_id = next(clients)
     except StopIteration:
         print("There is no dev client available with enough balance.")
-        return
+        return None
 
     # No `initial_mu`: it does not change the quote (#636, 9). `cost` is what the start
     # spends, the build and the builds of the initial children of the service (#538),
@@ -52,8 +52,9 @@ def estimate(service: str) -> None:
 
     channel = local_channel()
 
-    print(f"Estimate {service}")
-    print("Querying gateway for estimated cost (uses real-time locked RAM)...")
+    if announce:
+        print(f"Estimate {service}")
+        print("Querying gateway for estimated cost (uses real-time locked RAM)...")
 
     try:
         estimated_cost = BeeClient.get_service_estimated_cost(
@@ -68,13 +69,44 @@ def estimate(service: str) -> None:
     except Exception as e:
         print("Execution feasibility: NO")
         print(f"Reason: gateway error — {str(e)}")
-        return
+        return None
     finally:
         channel.close()
 
     if not estimated_cost:
         print("Execution feasibility: NO")
         print("Reason: gateway could not generate a valid estimated cost (insufficient resources or unsupported architecture).")
+        return None
+    return estimated_cost
+
+
+def default_periods() -> int:
+    return int(env_manager.get("deposits.DEFAULT_INITIAL_PERIODS", 360))
+
+
+def suggested_initial_mu(estimated_cost, periods=None) -> int:
+    """The ``initial_mu`` that this node suggests: the ``cost`` of the quote (the builds)
+    plus the funding sum of ``periods`` maintenance periods (the default of this node
+    if not given). It is the last line of the price bound of ``nodo estimate``.
+    """
+    periods = int(periods or default_periods())
+    loop_seconds = int(estimated_cost.maintenance_seconds_loop or 0)
+    cost_mu = from_amount(estimated_cost.cost)
+    if loop_seconds <= 0:
+        return cost_mu
+    return cost_mu + price_bound.funding_sum_mu(
+        from_amount(estimated_cost.init_maintenance_cost), loop_seconds,
+        price_bound.of_quote(estimated_cost), periods)
+
+
+def estimate(service: str) -> None:
+    service = resolve_service_hash(service)
+    if not service:
+        print("No service allowed.")
+        return
+
+    estimated_cost = fetch_quote(service)
+    if estimated_cost is None:
         return
 
     print("Execution feasibility: YES")
@@ -88,7 +120,7 @@ def estimate(service: str) -> None:
     print(f"- Charged every:            {estimated_cost.maintenance_seconds_loop} seconds")
     for line in price_bound_lines(
             estimated_cost,
-            default_periods=int(env_manager.get("deposits.DEFAULT_INITIAL_PERIODS", 360))):
+            default_periods=default_periods()):
         print(line)
     for line in quote_closing_lines(estimated_cost):
         print(line)

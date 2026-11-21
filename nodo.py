@@ -583,9 +583,27 @@ if __name__ == '__main__':
 
                 no_input = "--no-input" in args and not args.remove("--no-input")
 
+                initial_mu_from_estimate = "--initial-mu-from-estimate" in args \
+                    and not args.remove("--initial-mu-from-estimate")
+
+                initial_mu = None
+                if "--initial-mu" in args:
+                    from src.utils.monetary import parse_to_mu
+                    try:
+                        mu_index = args.index("--initial-mu")
+                        initial_mu = parse_to_mu(args[mu_index + 1])
+                        args = args[:mu_index] + args[mu_index + 2:]
+                    except IndexError:
+                        print("Error: --initial-mu requires an amount", flush=True)
+                        sys.exit(1)
+                    except ValueError as e:
+                        print(f"Error: --initial-mu: {e}", flush=True)
+                        sys.exit(1)
+
                 if len(args) != 2:
                     print(
                         "Usage: nodo force_execution <peer_id> [--name instance-name] [-e key value] "
+                        "[--initial-mu amount | --initial-mu-from-estimate] "
                         "[--no-input] <service id|service tag|'.celaut' file path>",
                         flush=True,
                     )
@@ -604,6 +622,8 @@ if __name__ == '__main__':
                     instance_name=instance_name,
                     check_envs=True,
                     ask_envs=sys.stdin.isatty() and not no_input,
+                    initial_mu=initial_mu,
+                    initial_mu_from_estimate=initial_mu_from_estimate,
                 )
 
             case "estimate":

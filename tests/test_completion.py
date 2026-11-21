@@ -17,6 +17,22 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     celaut = None  # type: ignore[assignment]
 
 
+class CommandFlagTests(unittest.TestCase):
+    def test_every_flag_command_is_a_known_command(self):
+        for command in completion.COMMAND_FLAGS:
+            self.assertIn(command, completion.COMMANDS, command)
+
+    def test_force_execution_offers_the_initial_mu_flags(self):
+        flags = completion.COMMAND_FLAGS["force_execution"]
+        self.assertIn("--initial-mu", flags)
+        self.assertIn("--initial-mu-from-estimate", flags)
+
+    def test_both_scripts_carry_the_flags(self):
+        for script in (completion.bash_script("/n", "python"), completion.zsh_script("/n", "python")):
+            self.assertIn("--initial-mu-from-estimate", script)
+            self.assertIn("--no-input", script)
+
+
 class CommandCatalogueTests(unittest.TestCase):
     def test_every_id_command_is_a_known_command(self):
         for command in (
