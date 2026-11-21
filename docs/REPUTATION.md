@@ -742,6 +742,31 @@ also from a node that is not its peer. It scores only a fault of one of its peer
 never a fault of itself. A fault with evidence goes into the proof of the node that
 checked it, so the evidence travels on.
 
+**The first row of a page is never evidence.** A node reads a child from `from_seq =
+mark + 1` (`_read_child`). In the evidence, the first row of the page with the charges is
+the mark: `fault_proofs` judges only the rows after it (`charges[1:]`, from the date of
+`charges[0]`), as the node does with its own mark. So an overcharge in one single row
+after a read is scored by the reporter itself, with the local penalty, and its evidence
+cannot prove it: the page has no row after the mark. This is a known limit, not a bug.
+The reporter runs `fault_proofs.attach`, so that report goes without evidence.
+
+**Cost of a pull.** A node that pulls reads at most `MAX_OFFCHAIN_PROOFS_PER_RESPONSE`
+proofs (25), and it refuses each proof over `MAX_OFFCHAIN_PROOF_BYTES` (1 MiB) before it
+parses it. A proof holds at most `MAX_OPINIONS` opinions (4096), and the node checks the
+evidence of at most `MAX_EVIDENCES_CHECKED` of them (64). One evidence holds at most
+`fault_proofs.MAX_STATEMENTS` statements (4) and `MAX_RECEIPTS` receipts (16), and
+`check` refuses a larger one without a check. So the worst case of one pull is:
+
+- 25 MiB to parse (25 proofs of 1 MiB). An honest node sends at most 4 MiB
+  (`MAX_OFFCHAIN_BYTES_PER_RESPONSE`), but a hostile peer is not held to that limit;
+- 1600 evidence checks (25 proofs of 64 evidences), each with up to 4 statements and
+  16 receipts to verify. This applies also to the proofs of publishers that are not
+  peers, because valid evidence needs no trust in who sends it.
+
+The deadline of the call (`RPC_TIMEOUT_SECONDS`, 10 s) bounds the time: the node does not
+read the next proof after it. The pull runs once in each
+`reputation.OFFCHAIN_PULL_INTERVAL_SECONDS`, from one random peer.
+
 ### The quote in the `start` movement
 
 A maintenance charge is judged against the quote of the peer. Before #652, the quote
