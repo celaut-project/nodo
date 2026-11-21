@@ -327,6 +327,11 @@ stale — notably one that reinstalled and came back under a new identity key, s
 column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
 `nodo debit_client <client id> <amount>` in the background.
 
+`u` on Clients flips the `unlimited` flag of the selected client and runs
+`nodo clients unlimited <client id> on|off` in the background. While it is on, the node tops the
+client up to `client.UNLIMITED_TARGET_BALANCE_MU` whenever it holds less (the Metering column
+says `kept funded`); off, the top-ups stop and the balance stays. No confirmation: it is reversible.
+
 `+`/`-` on Instances open the same modal for the selected instance and run
 `nodo increase_deposit <instance> <amount>` or `nodo decrease_deposit <instance> <amount>`.
 `h` asks first, then runs `nodo hibernate <instance>`.

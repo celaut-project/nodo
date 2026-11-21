@@ -85,7 +85,11 @@ pub fn page_actions(page: Page) -> Vec<MenuItem> {
             MenuItem::new("Choose (auto-pay)", 'a'),
             MenuItem::new("Refresh all peers", 'r'),
         ],
-        Page::Clients => vec![MenuItem::new("Credit…", '+'), MenuItem::new("Debit…", '-')],
+        Page::Clients => vec![
+            MenuItem::new("Credit…", '+'),
+            MenuItem::new("Debit…", '-'),
+            MenuItem::new("Keep funded on/off", 'u'),
+        ],
         Page::Chat => vec![
             MenuItem { label: "Reply", key: KeyCode::Enter },
             MenuItem::new("Close", 'c'),

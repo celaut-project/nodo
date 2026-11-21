@@ -661,6 +661,11 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Clients => {
             app.open_credit_client(true)
         }
+        // Clients' `u` flips the `unlimited` flag (keep the client funded), a direct
+        // action: it is reversible and takes nothing back.
+        (KeyModifiers::NONE, KeyCode::Char('u')) if app.page() == Page::Clients => {
+            app.toggle_selected_client_unlimited()
+        }
         // CHAT (issue #431): `o` starts the peer/topic/message wizard, Enter replies
         // in the selected chat, `c`/`R` close and reopen it. Mirrors Peers' `d`/
         // Clients' `+`/`-` in being a direct action, not a confirmation -- closing is

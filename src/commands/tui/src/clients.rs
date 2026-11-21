@@ -182,6 +182,37 @@ impl App {
         self.edit_kind = crate::app::EditKind::Text;
     }
 
+    /// Flip the `unlimited` flag of the selected client (`nodo clients unlimited <id>
+    /// on|off`). On, the maintenance thread keeps the client topped up to
+    /// `client.UNLIMITED_TARGET_BALANCE_MU`; off, the top-ups stop and the balance
+    /// stays. Delegating to the CLI keeps one code path for the flag, like the credit
+    /// and debit above. It is reversible, so it asks for no confirmation.
+    pub fn toggle_selected_client_unlimited(&mut self) {
+        if self.page() != crate::app::Page::Clients {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(client) = self.clients.selected().cloned() else {
+            self.status = "Select a client first".to_string();
+            return;
+        };
+        let (word, state) = if client.unlimited { ("Stop funding", "off") } else { ("Keep funded", "on") };
+        let label = format!("{word} client {}", shorten(&client.id, 18));
+        self.spawn_command(
+            crate::app::CommandKind::Generic,
+            label,
+            vec![
+                "clients".to_string(),
+                "unlimited".to_string(),
+                client.id,
+                state.to_string(),
+            ],
+        );
+    }
+
     /// Open the same amount modal for the selected instance: `+` adds to its deposit and
     /// `-` takes from it (`nodo increase_deposit` / `decrease_deposit`). The MU come from
     /// the father of the instance, or go back to it, and the rows of the statement say
