@@ -3536,6 +3536,10 @@ pub struct App {
     pub docs: crate::docs::DocsState,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
+    /// The sections of the Details overlay, when it has any (`nodo inspect --json`):
+    /// a title and the lines of each. `details.lines` is the one now shown.
+    pub details_tabs: Vec<(String, Vec<String>)>,
+    pub details_tab: usize,
     pub status: String,
     /// Where the tab bar and the current page's selectable table were last drawn, so a
     /// click can be mapped back to a tab or a row. Written by the draw path each frame;
@@ -3717,6 +3721,8 @@ impl Default for App {
             context_menu: None,
             docs: crate::docs::DocsState::default(),
             details: None,
+            details_tabs: Vec::new(),
+            details_tab: 0,
             // Nothing to report until something happens: the footer's first line
             // already lists `r` and `q`, and saying them twice was noise.
             status: String::new(),
@@ -6358,7 +6364,7 @@ impl App {
         self.spawn_command(
             CommandKind::Inspect(id.clone()),
             "Inspect service".to_string(),
-            vec!["inspect".to_string(), id],
+            vec!["inspect".to_string(), id, "--json".to_string()],
         );
     }
 
@@ -6549,6 +6555,27 @@ impl App {
         }
     }
 
+    /// Show another section of the Details overlay: `delta` steps from the current one,
+    /// wrapping round. Does nothing when the overlay has no sections.
+    pub fn switch_details_tab(&mut self, delta: isize) {
+        let count = self.details_tabs.len() as isize;
+        if count > 0 {
+            self.select_details_tab((self.details_tab as isize + delta).rem_euclid(count) as usize);
+        }
+    }
+
+    /// Show section `index` of the Details overlay, from its top.
+    pub fn select_details_tab(&mut self, index: usize) {
+        let Some((_, lines)) = self.details_tabs.get(index) else {
+            return;
+        };
+        self.details_tab = index;
+        if let Some(details) = self.details.as_mut() {
+            details.lines = lines.clone();
+            details.scroll = 0;
+        }
+    }
+
     /// Dismiss a writes confirmation without writing anything.
     pub fn cancel_pending_writes(&mut self) {
         self.pending_action = None;
@@ -6580,6 +6607,8 @@ impl App {
     /// Close the Details overlay and return to normal mode.
     pub fn close_details(&mut self) {
         self.details = None;
+        self.details_tabs.clear();
+        self.details_tab = 0;
         self.deck_confirm = None;
         self.deck_confirm_zones = None;
         self.input_mode = InputMode::Normal;
@@ -6624,8 +6653,11 @@ impl App {
         match outcome.kind {
             CommandKind::Inspect(service_id) => {
                 if outcome.success {
-                    let mut lines: Vec<String> =
-                        outcome.stdout.lines().map(ToString::to_string).collect();
+                    let tabs = parse_inspect_sections(&outcome.stdout);
+                    let mut lines: Vec<String> = match tabs.first() {
+                        Some((_, lines)) => lines.clone(),
+                        None => outcome.stdout.lines().map(ToString::to_string).collect(),
+                    };
                     if lines.is_empty() {
                         lines.push("(no output)".to_string());
                     }
@@ -6634,8 +6666,11 @@ impl App {
                         lines,
                         scroll: 0,
                     });
+                    self.details_tabs = tabs;
+                    self.details_tab = 0;
                     self.input_mode = InputMode::Details;
-                    self.status = "Service details • ↑/↓ scroll • Esc close".to_string();
+                    self.status =
+                        "Service details • ←/→ section • ↑/↓ scroll • Esc close".to_string();
                 } else {
                     self.status = format!("nodo inspect failed: {}", first_line(&outcome.stderr));
                 }
@@ -14997,4 +15032,29 @@ mod energy_series {
         assert_eq!(series.median_cost_today(), 0.0);
         assert_eq!(series.median_cost_over(7), 0.0);
     }
+}
+
+/// The sections of `nodo inspect <id> --json`, as (title, lines). Empty when `stdout`
+/// is not that report, so the overlay falls back to showing the text as it is.
+pub(crate) fn parse_inspect_sections(stdout: &str) -> Vec<(String, Vec<String>)> {
+    let Ok(report) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return Vec::new();
+    };
+    report["sections"]
+        .as_array()
+        .map(|sections| {
+            sections
+                .iter()
+                .filter_map(|section| {
+                    let title = section["title"].as_str()?.to_string();
+                    let lines = section["lines"]
+                        .as_array()?
+                        .iter()
+                        .filter_map(|line| line.as_str().map(ToString::to_string))
+                        .collect();
+                    Some((title, lines))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }

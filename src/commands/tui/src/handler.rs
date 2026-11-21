@@ -149,6 +149,11 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 (_, KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q')) => {
                     app.decline_kya()
                 }
+                (_, KeyCode::Left | KeyCode::BackTab) => app.switch_details_tab(-1),
+                (_, KeyCode::Right | KeyCode::Tab) => app.switch_details_tab(1),
+                (_, KeyCode::Char(digit @ '1'..='9')) => {
+                    app.select_details_tab(digit as usize - '1' as usize)
+                }
                 (_, KeyCode::Up) => app.scroll_details(-1),
                 (_, KeyCode::Down) => app.scroll_details(1),
                 (_, KeyCode::PageUp) => app.scroll_details(-10),

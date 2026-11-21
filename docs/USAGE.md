@@ -619,9 +619,12 @@ hashing:
 These commands offer extended management and exploration features:
 
 - **inspect `<service id | tag>`**  
-  Inspects details of a specific service, including the env vars it asks for (give each with `nodo execute -e <key> <value>`).  
-  **Example:**  
-  `nodo inspect 1234567890abcdef`
+  Shows what a service declares and what running it asks you to accept. It starts with the **assumptions** (can it reach outside networks, what it reserves and may use, which services it starts, which ports it opens, whether this node can run it), then the sections: `env` (variables it asks for; give each with `nodo execute -e <key> <value>`), `machine` (architecture, entry point, resources, devices), `network`, `api` (ports, access, wake), `deps`, `fs` (shared directories) and `meta` (hashes, tags, reputation proofs).  
+  Give a section name to print only that section. `--json` prints the whole report as one JSON object.  
+  **Examples:**  
+  `nodo inspect 1234567890abcdef`  
+  `nodo inspect my-service network`  
+  `nodo inspect my-service --json`
 
 - **tag `<service id | tag> <new tag>`**  
   Assigns or updates a tag for a service.  
@@ -1293,7 +1296,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | TUNNELS: INBOUND table (streams relayed for others; list only) | — | `nodo tunnels --inbound [--json]` (new) |
 | SERVICES: list | — | `nodo services [--json]` (new `--json`) |
 | SERVICES: reputation card | — | `nodo services <service> [--json]` (new) |
-| SERVICES: details | `i` | `nodo inspect <service>` |
+| SERVICES: details (←/→ or 1-9 change section, ↑/↓ scroll) | `i` | `nodo inspect <service> --json` |
 | SERVICES: execute (y/N, then each env var one at a time; values masked, Ctrl+R or 👁 shows it) | `e` | `nodo service_envs <service> --json`, then `nodo execute --no-input [-e key value]… <service>` (new `service_envs`, `--no-input`) |
 | SERVICES: delete | `d` | `nodo remove <service>` |
 | SERVICES: get from peers | — | `nodo get <service>` |

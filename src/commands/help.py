@@ -57,7 +57,7 @@ GROUPS: List[Group] = [
             ("export <service> <path>", "write it out as a file (--raw for the tree)"),
             ("publish <service>", "offer a service to the rest of the network"),
             ("services [<service>]", "list the registry, or one service's reputation"),
-            ("inspect <service>", "show a service's spec and metadata"),
+            ("inspect <service> [<section>]", "assumptions, env vars, machine, network... (--json)"),
             ("tag <service> <new tag>", "name a service, so its id stays optional"),
             ("remove <service>", "drop a service from the registry"),
             ("integrity [<service>] [--fix]", "check the stored blocks against their hashes"),

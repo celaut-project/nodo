@@ -843,11 +843,8 @@ if __name__ == '__main__':
                 prune(argv=sys.argv[2:])
 
             case "inspect":
-                from src.commands.inspect_service import inspect
-                try:
-                    inspect(service=sys.argv[2])
-                except:  # Control the ServiceRegistryError exception, don't show to the user.
-                    pass
+                from src.commands.inspect_service import inspect_command
+                _exit(0 if inspect_command(sys.argv[2:]) else 1)
 
             case "services":
                 from src.commands.services import services_command

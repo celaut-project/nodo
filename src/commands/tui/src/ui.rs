@@ -5827,6 +5827,7 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
         ),
         None => (String::new(), String::new(), 0, 0),
     };
+    let sectioned = !app.details_tabs.is_empty() && app.input_mode == InputMode::Details;
     let confirming = app.input_mode == InputMode::ConfirmWrites;
     let gating = app.input_mode == InputMode::AcceptKya;
     // A diff of five keys in a box of thirty rows reads as if something is missing,
@@ -5838,7 +5839,7 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
         // and still not say what to press.
         frame.size().height.saturating_sub(4).max(8)
     } else {
-        (lines + 2).clamp(8, frame.size().height.saturating_sub(4).max(8))
+        (lines + 2 + u16::from(sectioned)).clamp(8, frame.size().height.saturating_sub(4).max(8))
     };
     let area = centered_rect(if gating { 94 } else { 80 }, height, frame.size());
     frame.render_widget(Clear, area);
@@ -5848,6 +5849,8 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
         "y continue • n cancel • ↑/↓ scroll"
     } else if confirming {
         "y apply • n cancel • ↑/↓ scroll"
+    } else if sectioned {
+        "←/→ section • ↑/↓ scroll • Esc close"
     } else {
         "↑/↓ scroll • Esc close"
     };
@@ -5864,11 +5867,77 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
         crate::layout_util::has_wide_glyph(&text),
     );
     frame.render_widget(block, area);
-    let popup = Paragraph::new(text)
+    let inner = if sectioned && inner.height > 1 {
+        let rows = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).split(inner);
+        frame.render_widget(
+            Paragraph::new(details_tab_bar(&app.details_tabs, app.details_tab, rows[0].width))
+                .style(Style::default().bg(popup_background())),
+            rows[0],
+        );
+        rows[1]
+    } else {
+        inner
+    };
+    let body: Text = if sectioned {
+        Text::from(
+            app.details
+                .iter()
+                .flat_map(|details| details.lines.iter())
+                .map(|line| details_line(line))
+                .collect::<Vec<Line>>(),
+        )
+    } else {
+        Text::from(text)
+    };
+    let popup = Paragraph::new(body)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(text_colour()).bg(popup_background()));
     frame.render_widget(popup, inner);
+}
+
+/// The row of section names over a sectioned Details overlay, the current one marked.
+/// The names are cut to the width rather than wrapped: a second row would take a line
+/// from the text, and `1`-`9` and `←/→` reach every section anyway.
+fn details_tab_bar(tabs: &[(String, Vec<String>)], current: usize, width: u16) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut used = 0usize;
+    for (index, (title, _)) in tabs.iter().enumerate() {
+        let label = format!(" {} {} ", index + 1, title);
+        let columns = display_width(&label) + 1;
+        if used + columns > width as usize {
+            break;
+        }
+        used += columns;
+        let style = if index == current {
+            Style::default().fg(inverse_text()).bg(accent()).bold()
+        } else {
+            Style::default().fg(muted())
+        };
+        spans.push(Span::styled(label, style));
+        spans.push(Span::raw(" "));
+    }
+    Line::from(spans)
+}
+
+/// One line of a service report, coloured by the level an assumption starts with.
+fn details_line(line: &str) -> Line<'static> {
+    let colour = if line.starts_with("[RISK]") {
+        Some(bad())
+    } else if line.starts_with("[warn]") {
+        Some(warn())
+    } else if line.starts_with("[ ok ]") {
+        Some(good())
+    } else {
+        None
+    };
+    match colour {
+        Some(colour) if line.len() >= 6 => Line::from(vec![
+            Span::styled(line[..6].to_string(), Style::default().fg(colour).bold()),
+            Span::raw(line[6..].to_string()),
+        ]),
+        _ => Line::from(line.to_string()),
+    }
 }
 
 /// A popup `percent_x` of `area`'s width and `height` rows tall, centred.
@@ -8330,6 +8399,41 @@ mod tests {
             .collect::<String>();
         assert!(screen.contains("Service abcdef"));
         assert!(screen.contains("tag: demo"));
+    }
+
+    #[test]
+    fn sectioned_details_show_a_tab_bar_and_switch_sections() {
+        use crate::app::{parse_inspect_sections, DetailsView};
+        let report = r#"{"sections":[
+            {"key":"summary","title":"Assumptions","lines":["[RISK] Network: open"]},
+            {"key":"env","title":"Environment","lines":["API_KEY"]}]}"#;
+        let mut app = App::new();
+        app.details_tabs = parse_inspect_sections(report);
+        assert_eq!(app.details_tabs.len(), 2);
+        app.details = Some(DetailsView {
+            title: "Service abc".to_string(),
+            lines: app.details_tabs[0].1.clone(),
+            scroll: 0,
+        });
+        app.input_mode = InputMode::Details;
+        let draw = |app: &mut App| {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(app, frame)).unwrap();
+            terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect::<String>()
+        };
+        let first = draw(&mut app);
+        assert!(first.contains("1 Assumptions") && first.contains("2 Environment"));
+        assert!(first.contains("[RISK] Network: open") && !first.contains("API_KEY"));
+        app.switch_details_tab(1);
+        let second = draw(&mut app);
+        assert!(second.contains("API_KEY") && !second.contains("[RISK]"));
+        app.switch_details_tab(1);
+        assert_eq!(app.details_tab, 0, "the sections wrap round");
+    }
+
+    #[test]
+    fn inspect_text_that_is_not_a_report_has_no_sections() {
+        assert!(crate::app::parse_inspect_sections("plain text\nlines").is_empty());
     }
 
     #[test]
