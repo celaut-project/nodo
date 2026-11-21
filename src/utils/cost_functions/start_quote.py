@@ -27,10 +27,6 @@ def _seconds() -> int:
     return int(env_manager.get("MANAGER_ITERATION_TIME"))
 
 
-def _sysresources(shape: Mapping) -> celaut.Sysresources:
-    return celaut.Sysresources(**{key: int(shape.get(key) or 0) for key in SHAPE_KEYS})
-
-
 def shape_of(resources: celaut.Sysresources) -> dict:
     return {key: int(getattr(resources, key)) for key in SHAPE_KEYS}
 
@@ -50,28 +46,4 @@ def local_terms(start: celaut.Sysresources, most: celaut.Sysresources,
         "volatility_period_seconds": None if bound is None else int(bound.period_seconds),
         "on_close": str(on_close),
         "closes_at": int(closes_at or 0),
-    }
-
-
-def delegated_terms(shape: Mapping) -> Optional[dict]:
-    """The terms of an instance that this node gave to a peer, from the shape that its
-    ticks charge (``delegated_price.priced_shape``): the start and the most, at the
-    multipliers of the launch, with no volatility (#577, #636). None with no shape."""
-    if not shape or not shape.get("launch_bp"):
-        return None
-    seconds = _seconds()
-    start = {key: shape.get(f"base_{key}", shape.get(key)) for key in SHAPE_KEYS}
-    most = {key: shape.get(f"max_{key}", start[key]) for key in SHAPE_KEYS}
-    launch_bp, arch = shape["launch_bp"], shape.get("arch")
-    return {
-        "init_maintenance_cost": int(charge_at_launch_price(
-            _sysresources(start), seconds, launch_bp, arch)),
-        "max_maintenance_cost": int(charge_at_launch_price(
-            _sysresources(most), seconds, launch_bp, arch)),
-        "maintenance_seconds_loop": seconds,
-        "price_bounded": True,
-        "price_volatility": 0.0,
-        "volatility_period_seconds": 0,
-        "on_close": "refuse",
-        "closes_at": 0,
     }

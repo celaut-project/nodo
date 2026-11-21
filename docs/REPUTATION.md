@@ -781,8 +781,12 @@ node signs its quote and binds it to the account of the instance:
 - `base`: the start shape that the node reserved.
 
 A local start writes the figures that its ticks charge: the reserved resources at the
-price of the launch, with the bound of the launch. A delegated start writes the price of
-the node for the child, with no volatility (#577). The delegating node reads the quote
+price of the launch, with the bound of the launch. The `start` movement of an alias
+account (the instance that this node delegated) holds no quote: this node never serves an
+alias account (`answer` refuses it), and the rows of `settle_child` that charge it (the
+`adjustment` corrections and the catch-up of `now - charged_until`) are not bounded by a
+quote, so a quote there would make an honest charge look like an overcharge. A change
+that serves an alias account must first make the check skip these rows. The delegating node reads the quote
 from the `start` row of the child (`_check_start`). It then uses that quote, and the date
 of that row as the launch, in place of the quote that the peer sent. A signed figure above
 the figure that the peer sent is logged, and is not a fault. A peer from before #652

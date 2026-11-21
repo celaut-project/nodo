@@ -22,7 +22,6 @@ from src.payment_system.mu_conversion import (
     convert_mu,
     matching_payment_system,
 )
-from src.utils.cost_functions import start_quote
 from src.utils.cost_functions.delegated_price import priced_shape
 from src.utils.cost_functions.peer_quotes import maintenance_terms
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
@@ -407,14 +406,12 @@ def delegate_execution(
             config=extract_instance_name(config)[1] or celaut_pb2.Configuration(),
             initial_mu=initial_mu,
         )
-        # What the ticks of the child charge its father, and the quote of this node for
-        # it, which the ``start`` movement holds and the statement signs (#652).
+        # What the ticks of the child charge its father. The ``start`` movement holds no
+        # quote: no one reads an alias account (``balance_statement.answer`` never serves
+        # it), and the correction rows of ``settle_child`` are not bounded by a quote (#662).
         shape = priced_shape(service, metadata, service_id,
                              get_arch_tag(service=service, metadata=metadata)
                              if service is not None else None)
-        own_quote = statement_check.start_quote_detail(
-            start_quote.delegated_terms(shape),
-            {key: shape.get(f"base_{key}") for key in start_quote.SHAPE_KEYS} if shape else None)
         SQLConnection().add_delegated_instance(
             father_id=father_id,
             peer_id=peer,  # Add node_uri.
@@ -436,8 +433,7 @@ def delegate_execution(
             peer_balance_mu=peer_balance_mu,
             movements=(
                 ledger.Movement(ledger.START, initial_mu,
-                                detail={**(execution_cause(alias, receipt) or {}),
-                                        **own_quote} or None),
+                                detail=execution_cause(alias, receipt) or None),
                 ledger.Movement(ledger.BUILD, -int(own_build_mu)),
             ),
             sent_peer_mu=sent_peer_mu,
