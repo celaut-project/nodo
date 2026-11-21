@@ -455,6 +455,9 @@ reputation:
   # positive opinion of the proof, so that score is lower. 0 (the default) puts none.
   MAX_FAULT_REPORTS: 64
   MAX_FAULT_REPORTS_ON_LEDGER: 0
+  # The days that a kept off-chain proof of another node counts, from the date that its
+  # publisher signed. An older proof is dropped and refused. 0 is no limit (#659).
+  MAX_OFFCHAIN_PROOF_AGE_DAYS: 30
   # The days that the evidence of a fault is kept. 0 keeps it for ever.
   FAULT_EVIDENCE_RETENTION_DAYS: 90
 
@@ -1092,6 +1095,10 @@ balancers:
   # The voice that the term starts from: the sum of the voices of the publishers is
   # divided by this plus itself, so one weak voice does not move a peer far.
   OFFCHAIN_REPUTATION_PRIOR: 1.0
+  # The most voice that all the publishers together may have on one subject. Above it
+  # every voice is scaled down by the same factor, so one operator with many identities,
+  # each with a little good work, does not get many voices (#659). 0 is no cap.
+  OFFCHAIN_SUBJECT_VOICE_CAP: 5.0
   COST_AVERAGE_VARIATION: 1
   # Weight of a peer's donation credit. Bonus only, never a penalty: penalising
   # non-donors is exactly what would make patching this out rational.

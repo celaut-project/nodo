@@ -78,6 +78,15 @@ def max_fault_reports() -> int:
         return 64
 
 
+def max_proof_age_seconds() -> int:
+    """The oldest a kept proof may be (``reputation.MAX_OFFCHAIN_PROOF_AGE_DAYS``), in
+    seconds. 0 is no limit."""
+    try:
+        return max(0, int(float(_setting("MAX_OFFCHAIN_PROOF_AGE_DAYS", 30)) * 86400))
+    except (TypeError, ValueError, OverflowError):
+        return 30 * 86400
+
+
 def max_proofs() -> int:
     try:
         return max(0, int(_setting("MAX_OFFCHAIN_PROOFS_PER_RESPONSE", 25)))
@@ -347,6 +356,9 @@ def receive(raw: bytes, known: Optional[set] = None) -> Optional[str]:
         known = set(sql.get_peers_id())
     if proof.ts > time.time() + 300:
         return "dated in the future"
+    age = max_proof_age_seconds()
+    if age and proof.ts < time.time() - age:
+        return "too old"
     last = sql.offchain_proof_ts(proof.publisher)
     if last is not None and proof.ts <= last:
         return "not newer than the kept proof"

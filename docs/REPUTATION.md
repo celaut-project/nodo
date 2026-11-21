@@ -811,6 +811,16 @@ failed us, has no voice. So a new identity costs nothing and gives nothing, and 
 that only copies our scores also needs good work for us. The opinion of a node about
 itself does not count. The prior keeps one weak voice from moving a peer far.
 
+**Limits on the voices (#659).** The voices on one subject add up to at most
+`balancers.OFFCHAIN_SUBJECT_VOICE_CAP` (5.0). Above it, each voice is scaled by the same
+factor: the weighted mean of the verdicts stays, and only the confidence is bounded. One
+operator with N identities, each with a little good work, gets no more than the cap. It
+does not stop that operator from taking the whole cap on a subject that no one else rates.
+A proof also has a maximum age, `reputation.MAX_OFFCHAIN_PROOF_AGE_DAYS` (30): it is
+refused when received if its publisher dated it before that, and dropped at the next
+scoring. The date is the one that the publisher signed, so a publisher that stops
+publishing loses its voice after that time.
+
 At `OFFCHAIN_REPUTATION_WEIGHT: 1.0`, a peer that all voices rate perfectly can beat a
 price `e¹` ≈ 2.7 times higher. That is less than `SOCIALIZATION_FACTOR: 2`: what this
 node saw itself comes first.

@@ -276,6 +276,7 @@ prove it alone. See [`REPUTATION.md`](REPUTATION.md#off-chain-reputation).
 | `reputation.PUSH_OFFCHAIN_MIN_INTERVAL_SECONDS` | `300` | The least time between two pushes. |
 | `reputation.MAX_FAULT_REPORTS` | `64` | The most fault reports in the proof of this node. Reports with evidence come first. |
 | `reputation.MAX_FAULT_REPORTS_ON_LEDGER` | `0` | The most fault reports in the proof of this node on Ergo. `0` puts none: the operator opts in. Each one is a box of one token against the accused peer, and costs 0.001 ERG (`SAFE_MIN_BOX_VALUE`) on each submit. Its token comes from the largest positive opinion of the proof, so the on-chain score of that peer is lower. The evidence stays off the chain. |
+| `reputation.MAX_OFFCHAIN_PROOF_AGE_DAYS` | `30` | The days that a kept off-chain proof of another node counts, from the date that its publisher signed. A proof that is older is refused when received, and dropped from the kept ones at the next scoring, so an old opinion does not keep its weight while its publisher is a peer (#659). `0` is no limit. |
 | `reputation.FAULT_EVIDENCE_RETENTION_DAYS` | `90` | The days that the evidence of a fault is kept. `0` keeps it for ever. |
 
 ## `builder` — build tuning
@@ -930,6 +931,7 @@ ties.
 | `balancers.ONCHAIN_PUBLISHER_CAP` | `5.0` | The most any one proof may contribute to `S`, in ERG. It binds a single honest publisher and nothing else — minting a proof is free, so a burn split across several never meets it. Above 5 ERG behind one proof, burning earns less than donating the same; at or below, the two are identical. |
 | `balancers.OFFCHAIN_REPUTATION_WEIGHT` | `1.0` | Weight of what the signed **off-chain** proofs of other nodes say about a peer (`e^1` ≈ 2.7× premium at most). Below `SOCIALIZATION_FACTOR`: what this node saw itself comes first. A proof costs nothing, so a publisher has a voice only when it agrees with us and did good work for us (#652). See [`REPUTATION.md`](REPUTATION.md#off-chain-reputation). |
 | `balancers.OFFCHAIN_REPUTATION_PRIOR` | `1.0` | The voice that `ŝ` starts from. One weak voice does not move a peer far. |
+| `balancers.OFFCHAIN_SUBJECT_VOICE_CAP` | `5.0` | The most that the voices of all publishers add up to on one subject. Above it each voice is scaled by the same factor: the weighted mean stays and only the confidence is bounded. Stops one operator with many identities from getting many voices (#659). `0` is no cap. |
 | `balancers.COST_AVERAGE_VARIATION` | `1` | How much the `price_volatility` of a bounded quote inflates its cost when candidates are compared (`cost * (1 + v * k)`). Bounded candidates are always ranked ahead of unbounded ones (#636). |
 | `balancers.DONATION_WEIGHT` | `0.3` | Weight of a peer's donation credit (`e^0.3` ≈ 35 % premium at most). **The safety parameter** — a high value closes the network to newcomers; see [`DONATIONS.md`](DONATIONS.md). |
 | `balancers.DONATION_HALF_CREDIT` | `"5000000000"` | Donation credit, in MU, at which half that weight is earned. |

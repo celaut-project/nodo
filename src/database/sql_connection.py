@@ -5452,6 +5452,11 @@ class SQLConnection(metaclass=Singleton):
             f'DELETE FROM offchain_proofs WHERE publisher NOT IN ({marks})', tuple(keep)
         ).rowcount
 
+    def delete_offchain_proofs_older_than(self, ts: int) -> int:
+        """Delete the kept proofs that their publisher dated before ``ts``. Returns how
+        many."""
+        return self._execute('DELETE FROM offchain_proofs WHERE ts < ?', (int(ts),)).rowcount
+
     def replace_offchain_opinions(self, rows: List[Tuple[str, str, float, float]]) -> bool:
         """Set the off-chain opinions to exactly ``rows``: ``(subject, publisher, verdict,
         weight)``. One transaction, so a reader never sees half of them. A failure keeps

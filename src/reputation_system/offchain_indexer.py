@@ -209,11 +209,17 @@ def opinion_rows(proofs: List[celaut_pb2.ReputationProof], local: Dict[str, floa
 def refresh() -> int:
     """Score the kept proofs and store the result. Returns how many rows."""
     from src.database.sql_connection import SQLConnection
+    from src.reputation_system import offchain_proof
     from src.reputation_system.onchain_indexer import local_scores
 
     sql = SQLConnection()
     known = set(sql.get_peers_id())
     sql.delete_offchain_proofs_except(known)
+    age = offchain_proof.max_proof_age_seconds()
+    if age:
+        # An old opinion keeps no weight (#659). The proof is dropped, and ``receive``
+        # refuses it again, so a peer cannot hand the same old proof back.
+        sql.delete_offchain_proofs_older_than(int(time.time()) - age)
     proofs = []
     for row in sql.get_offchain_proofs():
         proof = celaut_pb2.ReputationProof()

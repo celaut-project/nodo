@@ -25,6 +25,7 @@ from src.utils.logger import LOGGER
 
 DEFAULT_OFFCHAIN_WEIGHT = 1.0
 DEFAULT_OFFCHAIN_PRIOR = 1.0
+DEFAULT_SUBJECT_VOICE_CAP = 5.0
 CACHE_SECONDS = 60
 
 
@@ -46,6 +47,11 @@ def prior() -> float:
     return value if value > 0 else DEFAULT_OFFCHAIN_PRIOR
 
 
+def subject_voice_cap() -> float:
+    """The most voice that all publishers together may have on one subject. 0 is no cap."""
+    return max(0.0, _parameter("OFFCHAIN_SUBJECT_VOICE_CAP", DEFAULT_SUBJECT_VOICE_CAP))
+
+
 def verdict(amount: int, positive: bool, half: float) -> float:
     """The score of a publisher on the scale of our own: ``r / (|r| + half)``."""
     amount = abs(int(amount))
@@ -55,9 +61,15 @@ def verdict(amount: int, positive: bool, half: float) -> float:
     return value if positive else -value
 
 
-def standing(rows: Iterable[Mapping], prior_weight: float) -> Dict[str, float]:
+def standing(rows: Iterable[Mapping], prior_weight: float,
+             voice_cap: float = 0.0) -> Dict[str, float]:
     """``{subject: s}`` from the stored rows (``subject_id``, ``publisher``, ``verdict``,
-    ``weight``). A subject that no publisher with a voice speaks of is not in it."""
+    ``weight``). A subject that no publisher with a voice speaks of is not in it.
+
+    ``voice_cap`` (> 0) is the most that the voices on one subject add up to: above it
+    every voice is scaled by the same factor, so the weighted mean of the verdicts stays,
+    and only the confidence is bounded. One operator with N identities, each with a
+    little good work, gets no more than the cap (#659)."""
     voices: Dict[str, float] = {}
     sums: Dict[str, float] = {}
     for row in rows:
@@ -67,7 +79,14 @@ def standing(rows: Iterable[Mapping], prior_weight: float) -> Dict[str, float]:
         subject = row["subject_id"]
         voices[subject] = voices.get(subject, 0.0) + w
         sums[subject] = sums.get(subject, 0.0) + w * float(row["verdict"])
-    return {subject: sums[subject] / (voices[subject] + prior_weight) for subject in sums}
+    out = {}
+    for subject in sums:
+        total, signed = voices[subject], sums[subject]
+        if voice_cap > 0 and total > voice_cap:
+            signed *= voice_cap / total
+            total = voice_cap
+        out[subject] = signed / (total + prior_weight)
+    return out
 
 
 _lock = threading.Lock()
@@ -84,7 +103,8 @@ def standing_by_peer() -> Dict[str, float]:
             return cached
     try:
         from src.database.sql_connection import SQLConnection
-        value = standing(SQLConnection().get_offchain_opinions(), prior())
+        value = standing(SQLConnection().get_offchain_opinions(), prior(),
+                         subject_voice_cap())
     except Exception as e:
         LOGGER(f"Cannot read the off-chain reputation: {e}")
         return {}
