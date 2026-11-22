@@ -725,6 +725,7 @@ network:
   # asked the same thing twice. A TTL of 0 turns it off for that query.
   QUERY_CACHE_TTL_SECONDS: 30  # How long a quote's price is remembered. Whether there is room for it is checked on every answer.
   QUERY_CACHE_PEER_TTL_SECONDS: 10  # How long a quote got from a peer is reused. Shorter: the peer may have served it from its own cache.
+  OFFER_VALIDITY_SECONDS: 60  # How long this node keeps the price of its offer for a start. The offer is signed with this time, and a start that sends it back before then gets the offered price, even if the load moved. 0: no promise.
   QUERY_CACHE_AVAILABILITY_TTL_SECONDS: 5  # How long an availability answer is remembered. Short: it moves fast. A local start, stop or resize forgets it at once.
   QUERY_CACHE_WAIT_SECONDS: 5  # How long a question waits for the same one already being computed before it is refused with "retry".
   QUERY_CACHE_MAX_ENTRIES: 4096  # Questions remembered at once; the least recently used go first.

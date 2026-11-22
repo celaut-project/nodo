@@ -13,7 +13,9 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 SERVICE = [("prose", 1), ("container", 2), ("api", 3), ("network", 4),
            ("possible_environment_workload", 5), ("initial_environment_workload", 6)]
-CONFIGURATION = [("environment_variables", 1), ("initial_mu", 2)]
+# `offer` is the signed offer that a start carries (#657). Not the closing policy, and
+# `Configuration` is not part of the hash of a service.
+CONFIGURATION = [("environment_variables", 1), ("initial_mu", 2), ("offer", 3)]
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

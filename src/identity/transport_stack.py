@@ -75,6 +75,7 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
     same_component,
+    offer_payload,
     receipt_payload,
     reputation_proof_payload,
     statement_payload,
@@ -480,6 +481,19 @@ def gateway_component() -> Layer:
                                  "client_id or instance token",
         "statement.instance_ref": "blake2b-256 hex of UTF-8 of celaut-ledger-instance:token",
         "statement.digest.hex": "lowercase hex of UTF-8; empty for an empty text",
+        "offer.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
+        "offer.signature.payload": offer_payload(peer_id, "<offer_digest>"),
+        "offer.digest": "blake2b-256 hex of UTF-8 of hex(cost.n)|"
+                        "hex(init_maintenance_cost.n)|hex(max_maintenance_cost.n)|"
+                        "maintenance_seconds_loop|price_bounded|price_volatility|"
+                        "volatility_period_seconds|closes_at|on_close|valid_until|"
+                        "launch_scarcity",
+        "offer.digest.hex": "lowercase hex of UTF-8; numbers decimal; price_bounded 1 or 0; "
+                            "on_close the number of the enum",
+        "offer.digest.price_volatility": "the 4 bytes of the float, big-endian, in "
+                                         "lowercase hex",
+        "offer.digest.launch_scarcity": "'key=value' for each key, sorted by key, joined "
+                                        "by ';'; empty when there is none",
         "receipt.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
         "receipt.signature.payload": receipt_payload(peer_id, "<receipt_digest>"),
         "receipt.digest": "blake2b-256 hex of UTF-8 of hex(kind)|peer_id|execution_name|"
@@ -606,6 +620,14 @@ def gateway_component() -> Layer:
         "statement with no valid signature is not valid. A node that gives the "
         "statement of a descendant that another node wrote sets relayed and signs it "
         "with its own key.\n"
+        "\n"
+        "OFFER SIGNATURE. A node that sets EstimatedCost.valid_until signs the offer with "
+        "the key and the scheme of its Peer. The signed text is \"" + offer_payload(
+            "<public_key>", "<offer_digest>") + "\". The offer digest is a BLAKE2b-256 "
+        "hash of a text that the formal field specifies. This text contains every field "
+        "of the offer but the signature. A node that signed an offer keeps its price "
+        "until valid_until for a start that carries the offer in Configuration.offer. A "
+        "caller that gets a valid_until with no valid signature reads it as 0.\n"
         "\n"
         "EXECUTION RECEIPTS. A receipt is a statement that the node signs about one "
         "execution that it runs. The answer of StartService contains a start receipt. "

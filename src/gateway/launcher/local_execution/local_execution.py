@@ -15,7 +15,7 @@ from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.cost_functions.execution_cost import launch_price_bp, system_scarcity
 from src.utils.cost_functions.price_bound import current_bound
-from src.utils.cost_functions import start_quote
+from src.utils.cost_functions import offer_honor, start_quote
 from src.manager.statement_check import start_quote_detail
 from src.virtualizers.interface import resolve_billable_resources
 from src.utils.cost_functions.start_funding import (
@@ -107,6 +107,12 @@ def local_execution(
 ) -> celaut_pb2.ServiceInstance:
     requested_instance_name, sanitized_config = extract_instance_name(config)
     config = sanitized_config or celaut_pb2.Configuration()
+    # The offer of this node that the caller accepts (#657) is for the price of the start. It
+    # is not part of what the instance is given, so it leaves the configuration here.
+    offer = config.offer if config.HasField("offer") else None
+    if offer is not None:
+        offer = celaut_pb2.EstimatedCost.FromString(offer.SerializeToString())
+        config.ClearField("offer")
     instance_name = reserve_instance_name(requested_name=requested_instance_name)
     configured_virtualizer = get_configured_virtualizer()
     log.LOGGER(
@@ -128,12 +134,20 @@ def local_execution(
     # the ceilings of this price (the funding sum), and the instance row records this price, which is
     # what the ticks measure the bound from: two readings could differ, and then the
     # funding would not cover the ceiling that the row allows.
-    launch_scarcity = system_scarcity()
+    #
+    # With a valid offer of this node (#657), the load and the bound are those of the offer:
+    # the node keeps the price that it offered until `valid_until`, so the quote of the
+    # start is the offer, and the ticks charge at that price. Without one, they are the
+    # ones of now.
+    kept = offer_honor.honored(
+        offer, metadata=metadata, config=config, resources=resources,
+        arch=service_arch, service=service)
+    launch_scarcity = system_scarcity() if kept is None else kept[0]
     launch_bp = launch_price_bp(launch_scarcity)
     # The price bound of this launch (#636), read once: the balance is funded at its
     # ceilings, and the row stores it, so the ticks use it for the whole life of the
     # instance and never the config or the price history of a later moment.
-    launch_bound = current_bound()
+    launch_bound = current_bound() if kept is None else kept[1]
 
     # The father paid `initial_mu`, and only that (#563). The build is taken out of it,
     # and what is left is the balance of the instance. A request that carries no amount
