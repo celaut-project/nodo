@@ -8,6 +8,7 @@ from src.virtualizers.architecture import UnsupportedArchitectureException, get_
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.cost_functions.architecture_resources import NOT_EXECUTING_REASON, executes_locally
+from src.utils.cost_functions import offer_honor
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils import activity_window
@@ -102,6 +103,13 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             if price is None:
                 # No peer offers it either: the client gets the reason of this node.
                 raise local_refusal
+            # The price of this node is signed, and kept until a time (#657). The price
+            # that a peer runs is not: this node holds no promise of that peer.
+            if price is local_price:
+                price = offer_honor.sign(price)
+            else:
+                price = celaut_pb2.EstimatedCost.FromString(price.SerializeToString())
+                price.ClearField("launch_scarcity")
 
             yield from BeeClient.respond(
                 message_iterator=price,

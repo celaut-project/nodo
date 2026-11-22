@@ -355,7 +355,32 @@ off the instance was stopped at its first tick after the node left the free stat
 
 The quote and the funding are exact only when the load does not move between the quote and
 the launch. A launch at a higher load than its quote records a higher launch price and
-is funded for it.
+is funded for it. A node that signs its offer avoids this (below).
+
+**The offer is a commitment (#657).** The room that a caller leaves between the offer and
+the launch is not `price_volatility`: that is the bound of the price *after* the launch.
+So the node signs its offer with a time, and keeps its price until then:
+
+| Field | Meaning |
+|---|---|
+| `valid_until` | Unix time until which the node keeps the price. 0: no promise, and no signature. Set by `network.OFFER_VALIDITY_SECONDS` (default 60). |
+| `launch_scarcity` | The load that the figures come from, in parts per million (`cpu`, `mem`, `disk`). The figures are computed from this quantised load, so the node gets the same figures from it again. |
+| `signature` | The signature of the node over every other field (`signed_offer.offer_digest`). A `valid_until` with no valid signature is read as 0. |
+
+The caller sends the offer back in `Configuration.offer`, if it has at least
+`MIN_OFFER_REMAINING_SECONDS` left. The node keeps no state. At the start it checks its own
+signature, the time, and that the figures of the offer are the ones that it computes for
+this service and these resources at the load of the offer (`offer_honor.honored`). If so, it
+prices the start at that load: the funding, the row of the instance, the ticks, and the
+quote in the `start` movement are the price of the offer. Otherwise (another service, a
+changed offer, a past time) the start is priced at the price of now, as without an offer.
+
+The caller then checks the quote of the `start` with no room: each figure is at most the
+offered one (`stricter_quote`, `kept`). Without a commitment (a node that sets no
+`valid_until`, or an offer too close to its end) the room is still `1 + price_volatility`.
+The price comes from the cache of `network.QUERY_CACHE_TTL_SECONDS`, so an offer can hold a
+price that is that much older than its signature. An offer of a service that the node
+delegates to a peer is not signed.
 
 ### Starting an instance
 

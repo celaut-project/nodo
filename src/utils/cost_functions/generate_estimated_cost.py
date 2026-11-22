@@ -1,8 +1,9 @@
-from typing import Optional
+from typing import Dict, Optional
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.cost_functions.resource_availability import availability_reclaiming_disk
 from src.utils import activity_window, notice, on_close
 from src.utils.cost_functions import price_bound
+from src.utils.cost_functions import execution_cost, signed_offer
 from src.utils.cost_functions.execution_cost import launch_charge_mu
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost
 from src.utils.utils import to_amount
@@ -37,6 +38,8 @@ def generate_estimated_cost(
         arch: Optional[str] = None,
         service: Optional[celaut.Service] = None,
         check_availability: bool = True,
+        scarcity: Optional[Dict[str, float]] = None,
+        bound=price_bound.CURRENT,
 ) -> Optional[celaut_pb2.EstimatedCost]:
     """What running this service here would cost, at the current prices and load.
 
@@ -58,6 +61,12 @@ def generate_estimated_cost(
 
     ``check_availability=False`` prices the service whatever the current load, for a
     caller that remembers the price and checks availability itself on every answer.
+
+    ``scarcity`` and ``bound`` price the service at that load and with that bound, and not
+    at the ones of now. The node that keeps an offer (#657) replays them from the offer, to
+    check that the offer is for this service and these resources. Omitted, both are read
+    once, now. The offer carries the load, quantised (``signed_offer.quantize``): the
+    figures are computed from the quantised load, so a replay gives the same figures.
     """
 
     # A node that cannot carry the notice of the service refuses it, as it refuses an
@@ -86,7 +95,14 @@ def generate_estimated_cost(
     # The price bound of the quote (#636), read once. The maintenance figures are the
     # price at the time of the estimate, at the launch price of now (``P``); the bound is
     # ``P * (1 + v)^k``. A free node quotes the anchor of a launch while free (1x), not 0.
-    bound = price_bound.current_bound()
+    if bound is price_bound.CURRENT:
+        bound = price_bound.current_bound()
+    # The load that the price comes from, read once and quantised (#657): the figures
+    # below are from it, and the offer carries it, so that the node can price a start at
+    # the same load when it keeps the offer.
+    launch_load = signed_offer.quantize(
+        execution_cost.system_scarcity() if scarcity is None else scarcity)
+    scarcity = signed_offer.to_scarcity(launch_load)
 
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(
@@ -100,6 +116,7 @@ def generate_estimated_cost(
                 resources.at_init, service_hash, service=service
             ),
             seconds=MANAGER_ITERATION_TIME,
+            scarcity=scarcity,
             arch=arch,
         )) if resources.HasField('at_init') else to_amount(0),
 
@@ -111,6 +128,7 @@ def generate_estimated_cost(
                 resources.at_most, service_hash, service=service
             ),
             seconds=MANAGER_ITERATION_TIME,
+            scarcity=scarcity,
             arch=arch,
         )) if resources.HasField('at_most') else to_amount(0),
 
@@ -124,4 +142,9 @@ def generate_estimated_cost(
         # its load (#344): the next close as an absolute time, 0 if none is scheduled.
         closes_at=activity_window.next_close(),
         on_close=on_close.to_enum(activity_window.effective_on_close()),
+
+        # The load of this price, for a start that keeps the offer (#657). The node signs
+        # the offer when it sends it (`signed_offer.seal`) or clears this.
+        launch_scarcity=[celaut_pb2.Uint64KeyValue(key=key, value=value)
+                         for key, value in sorted(launch_load.items())],
     )

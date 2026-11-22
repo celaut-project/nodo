@@ -73,6 +73,10 @@ _CLIENT_BINDING_PREFIX: Final[str] = "celaut-client-binding:"
 # this node signs for its owner, who can hold it up as evidence of a charge.
 _STATEMENT_PREFIX: Final[str] = "celaut-balance-statement:"
 
+# Domain separation for a price offer (#657): the maintenance terms that this node keeps
+# for a start until ``valid_until``, which a caller can hold up against it.
+_OFFER_PREFIX: Final[str] = "celaut-price-offer:"
+
 # Domain separation for an execution receipt (#419, docs/EXECUTION_RECEIPTS.md): what
 # this node signs about one execution it runs, which a client can hold up against it.
 _RECEIPT_PREFIX: Final[str] = "celaut-execution-receipt:"
@@ -769,6 +773,16 @@ def receipt_payload(peer_id: str, receipt_digest: str) -> str:
     :func:`statement_payload`, with a prefix of its own.
     """
     return f"{_RECEIPT_PREFIX}{peer_id}|{receipt_digest}"
+
+
+def offer_payload(peer_id: str, offer_digest: str) -> str:
+    """The exact string a node signs for its price offer (#657).
+
+    ``offer_digest`` is ``signed_offer.offer_digest``, which covers every field of the
+    offer but the signature. The same shape as :func:`statement_payload`, with a prefix
+    of its own.
+    """
+    return f"{_OFFER_PREFIX}{peer_id}|{offer_digest}"
 
 
 def reputation_proof_payload(peer_id: str, proof_digest: str) -> str:

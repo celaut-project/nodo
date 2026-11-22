@@ -23,6 +23,7 @@ from src.payment_system.mu_conversion import (
     matching_payment_system,
 )
 from src.utils.cost_functions.delegated_price import priced_shape
+from src.utils.cost_functions import signed_offer
 from src.utils.cost_functions.peer_quotes import maintenance_terms
 from src.utils.cost_functions.start_funding import StartAmountTooSmall
 from src.utils.instance_names import extract_instance_name
@@ -166,7 +167,12 @@ def _check_start(peer: str, client_id: str, external_token: str,
 _FIGURES = ("init_maintenance_cost", "max_maintenance_cost")
 
 
-def stricter_quote(offered: Optional[dict], signed: dict) -> tuple:
+#: The seconds that an offer must have left for this node to send it with the start: the
+#: peer checks its time when it begins the start.
+MIN_OFFER_REMAINING_SECONDS = 2
+
+
+def stricter_quote(offered: Optional[dict], signed: dict, kept: bool = False) -> tuple:
     """``(columns, notes)``: the ``quote_*`` columns that the maintenance of the child is
     checked against, from the offer that the peer made before the start (``offered``,
     ``peer_quotes.maintenance_terms``) and the quote that it signed in the ``start``
@@ -179,7 +185,10 @@ def stricter_quote(offered: Optional[dict], signed: dict) -> tuple:
     * bounded when either is bounded, with the smaller volatility of the two;
     * each figure is the signed one, but at most the offered one times ``1 + v`` (the price
       can move between the quote and the launch, and ``v`` is that room). With another loop
-      length the figures are not comparable, and the offered terms stay;
+      length the figures are not comparable, and the offered terms stay. When the offer is
+      a commitment that this node sent with the start (``kept``, #657), the peer keeps its
+      price until the time of the offer, so there is no room: each figure is at most the
+      offered one;
     * the close is the later ``closes_at`` of the two, and its ``on_close``.
 
     The evidence of a fault can still be the signed quote, because the signed ``start``
@@ -202,7 +211,7 @@ def stricter_quote(offered: Optional[dict], signed: dict) -> tuple:
     columns["quote_price_bounded"] = 1
 
     same_loop = signed.get("quote_maintenance_seconds_loop") == offered.get("maintenance_seconds_loop")
-    room = 1.0 + float(offered_v or 0.0)
+    room = 1.0 if kept else 1.0 + float(offered_v or 0.0)
     for key in _FIGURES:
         before, now = offered.get(key), signed.get(f"quote_{key}")
         if before is None:
@@ -230,17 +239,17 @@ def stricter_quote(offered: Optional[dict], signed: dict) -> tuple:
 
 def _keep_signed_start(peer: str, external_token: str,
                        peer_quote: Optional[celaut_pb2.EstimatedCost],
-                       columns: dict, page: bytes) -> None:
+                       columns: dict, page: bytes, kept: bool = False) -> None:
     """Keep the quote that ``peer`` signed in the ``start`` movement of the child, and its
     page (#652). The signed page binds the peer, so a fault against it can be proved to
     other nodes. The maintenance of the child is checked against the stricter of that quote
     and the offer that the peer sent before the start (``stricter_quote``), so the signed
     quote cannot turn off the check against the peer. Never raises."""
     try:
-        kept, notes = stricter_quote(maintenance_terms(peer_quote), columns)
+        held, notes = stricter_quote(maintenance_terms(peer_quote), columns, kept=kept)
         for note in notes:
             log.LOGGER(f"{peer}, child {external_token[:8]}: {note}.")
-        SQLConnection().set_delegated_signed_start(external_token, kept, page)
+        SQLConnection().set_delegated_signed_start(external_token, held, page)
     except Exception as e:
         log.LOGGER(f"Cannot keep the signed quote of the child {external_token[:8]} on {peer}: {e}")
 
@@ -323,6 +332,15 @@ def delegate_execution(
             config, payment_system=payment_system, initial_mu=sent_mu
         )
         sent_peer_mu = _mu(peer_config.initial_mu) if peer_config.HasField("initial_mu") else 0
+        # The offer of the peer is a commitment when it is signed, and its time is not past
+        # (#657): the peer keeps its price until then, if the start carries the offer. What
+        # the caller put in `offer` is not the offer of this peer, so it never goes on.
+        peer_config.ClearField("offer")
+        offer_kept = False
+        if peer_quote is not None and signed_offer.committed_until(peer_quote, peer) \
+                >= time.time() + MIN_OFFER_REMAINING_SECONDS:
+            peer_config.offer.CopyFrom(peer_quote)
+            offer_kept = True
 
         if balance_on_other_peer(peer_id=peer) <= sent_mu:
             raise Exception(
@@ -443,7 +461,8 @@ def delegate_execution(
             quote=maintenance_terms(peer_quote),
         )
         if signed_start is not None:
-            _keep_signed_start(peer, external_token, peer_quote, *signed_start)
+            _keep_signed_start(peer, external_token, peer_quote, *signed_start,
+                               kept=offer_kept)
         service_instance.token = alias
         service_instance.instance.CopyFrom(published_instance)
         if receipt is not None:
