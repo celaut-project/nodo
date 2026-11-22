@@ -147,6 +147,25 @@ def _is_loopback(ip: str) -> bool:
         return False
 
 
+def _is_guest_network(interface: str, ip: str) -> bool:
+    """Whether ``ip`` on ``interface`` is the host side of the network of the guests (#655).
+
+    That is the bridge ``virtualizers.ch.NETWORK_BRIDGE_NAME``, or any address in
+    ``virtualizers.ch.NETWORK_SUBNET``. The bridge name is a setting, so a prefix of the
+    name is not enough. The guests reach the node there (``nodo doctor`` says so), and
+    nobody else can: a client that dials it waits for a timeout, or reaches another machine
+    on a LAN that uses the same subnet.
+    """
+    bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch") or "").strip()
+    if bridge and (interface or "").strip() == bridge:
+        return True
+    subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24") or "").strip()
+    try:
+        return ipaddress.ip_address(ip) in ipaddress.ip_network(subnet, strict=False)
+    except ValueError:
+        return False
+
+
 def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     """Every address this node is reachable at, not just one caller's subnet.
 
@@ -159,7 +178,10 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     Container/VPN interfaces (docker0, br-*, veth*, ...) are skipped outright via
     ``is_virtual_interface``: their addresses (e.g. 172.17.0.1) are real on this
     host but unreachable from anywhere else, so they are never a candidate LAN
-    address, let alone a routable one.
+    address, let alone a routable one. The same holds for the network of the guests of
+    this node (``_is_guest_network``, #655), which the list of prefixes cannot name
+    because its bridge is a setting. ``build_invite`` reads this list, so an invitation
+    does not carry that address either.
 
     The public host comes first, because it is the one a remote peer can actually
     use and ``generate_uris_by_peer_id`` yields in insertion order. Private/LAN
@@ -195,7 +217,7 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
             ip = get_local_ip_from_network(interface, allow_link_local=False)
         except (KeyError, ValueError):
             continue
-        if ip in seen_ips or _is_loopback(ip):
+        if ip in seen_ips or _is_loopback(ip) or _is_guest_network(interface, ip):
             continue
         seen_ips.add(ip)
         if _is_globally_routable(ip):
