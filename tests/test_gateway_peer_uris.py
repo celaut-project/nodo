@@ -43,6 +43,59 @@ class UrisForAllInterfacesTests(unittest.TestCase):
         announced_ips = {uri.ip for uri in uris}
         self.assertEqual(announced_ips, {"192.168.1.47"})
 
+    def _announced(self, interfaces, **settings):
+        real_get = gateway_utils.env_manager.get
+
+        def get(key, default=None):
+            return settings.get(key, real_get(key, default))
+
+        with patch.object(gateway_utils, "_gateway_port", return_value=40001), \
+             patch.object(gateway_utils, "_public_host", return_value=None), \
+             patch.object(gateway_utils.env_manager, "get", side_effect=get), \
+             patch.object(gateway_utils.ni, "interfaces", return_value=list(interfaces)), \
+             patch.object(
+                 gateway_utils,
+                 "get_local_ip_from_network",
+                 side_effect=lambda interface, allow_link_local=False: interfaces[interface],
+             ):
+            return [uri.ip for uri in gateway_utils._uris_for_all_interfaces()]
+
+    def test_the_guest_bridge_is_never_announced(self):
+        # #655: the bridge of nodo for its guests is not a docker or a veth interface.
+        interfaces = {"lo": "127.0.0.1", "nodo-br-ch": "192.168.200.1", "host0": "10.213.195.2"}
+        self.assertEqual(self._announced(interfaces), ["10.213.195.2"])
+
+    def test_a_renamed_bridge_is_not_announced_by_its_name(self):
+        interfaces = {"guests0": "10.77.0.1", "eth0": "192.168.1.47"}
+        self.assertEqual(self._announced(
+            interfaces, **{"virtualizers.ch.NETWORK_BRIDGE_NAME": "guests0"}), ["192.168.1.47"])
+
+    def test_an_address_in_the_guest_subnet_is_not_announced(self):
+        interfaces = {"eth1": "192.168.200.1", "eth0": "192.168.1.47"}
+        self.assertEqual(self._announced(interfaces), ["192.168.1.47"])
+
+    def test_a_node_with_only_the_guest_bridge_announces_nothing(self):
+        self.assertEqual(self._announced({"nodo-br-ch": "192.168.200.1"}), [])
+
+    def test_the_invitation_leaves_the_guest_bridge_out(self):
+        # The path of `nodo invite`: the Peer of the node, and the invitation made from it.
+        from src.utils import peer_invite
+
+        interfaces = {"nodo-br-ch": "192.168.200.1", "host0": "10.213.195.2"}
+        with patch.object(gateway_utils, "_gateway_port", return_value=40001), \
+             patch.object(gateway_utils, "_public_host", return_value=None), \
+             patch.object(gateway_utils, "_local_payment_contracts", return_value=[]), \
+             patch.object(gateway_utils.ni, "interfaces", return_value=list(interfaces)), \
+             patch.object(
+                 gateway_utils,
+                 "get_local_ip_from_network",
+                 side_effect=lambda interface, allow_link_local=False: interfaces[interface],
+             ):
+            peer = gateway_utils.generate_full_node_peer_info(fresh=True)
+        targets = peer_invite.invite_targets(
+            peer_invite.parse_invite(peer_invite.build_invite(peer)))
+        self.assertEqual(targets, ["10.213.195.2:40001"])
+
     def test_does_not_fall_back_to_loopback_when_no_address_is_usable(self):
         with patch.object(gateway_utils, "_public_host", return_value=None), \
              patch.object(gateway_utils.ni, "interfaces", return_value=[]):
