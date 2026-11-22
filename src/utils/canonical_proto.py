@@ -173,7 +173,11 @@ def _message(descriptor: Descriptor, data, pos: int, end: int, path: str,
                 pos += length
             continue
 
-        repeated = field.label == F.LABEL_REPEATED
+        # `label` was removed in protobuf 7 in favour of `is_repeated`.
+        repeated = getattr(field, "is_repeated", None)
+        if repeated is None:
+            repeated = field.label == F.LABEL_REPEATED
+        repeated = bool(repeated)
         if number == last and not (repeated and field.type in _LENGTH_TYPES):
             raise NotCanonical(where, f"the field {number} is written twice")
         last = number
