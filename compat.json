@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "0b1e6acb43db850c184df52406e65f024ce96544bb86a5dd9af55c07c51f2017",
+  "celaut_proto": "07b4073759a6203f4dd812ba0ed1edb09c6307c37417f22e0a9be463355b239c",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",
@@ -211,6 +211,7 @@
     "network.GATEWAY_PORT",
     "network.ISOLATE_INTERNAL_CHILDREN",
     "network.LOCAL_NETWORK",
+    "network.OFFER_VALIDITY_SECONDS",
     "network.PUBLIC_IP",
     "network.PUBLIC_TCP_PORT",
     "network.PUBLIC_UDP_PORT",
