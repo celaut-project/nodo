@@ -4832,8 +4832,10 @@ class SQLConnection(metaclass=Singleton):
         row = result.fetchone()
         if row:
             return row['id']
-        
-        log.LOGGER(f'Container not found for URI: {uri}')
+
+        # Not a local instance (a peer, a client or the host itself): the normal answer for
+        # every external caller, so nothing is logged.
+        return None
 
     def get_balance_by_father_id(self, id: str) -> int:
         """
