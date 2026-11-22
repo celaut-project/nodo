@@ -38,7 +38,7 @@ from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_U
 from src.utils.cost_functions.general_cost_functions import RATE_STATEMENT_QUERY, RATE_STATEMENT_ROW, compute_maintenance_cost
 from src.utils.monetary import format_mu, prices
 from src.utils.hashing import get_configured_hash_id, get_configured_hash_spec, hash_stream
-from src.utils import partial_service
+from src.utils import partial_service, service_canonical
 from src.utils.omit_filesystem import OmitSession, omit_session
 from src.utils.service_content import read_service_content
 from src.utils.config import ConfigManager
@@ -420,6 +420,21 @@ def fetch_service_from_peers(wanted: str) -> bool:
                 elif os.path.exists(service_dir):
                     os.remove(service_dir)
                 continue
+
+            # The id is right, so every node that has this service has these bytes: if they
+            # are not the canonical encoding, no peer can give a service that is
+            # (docs/CANONICAL_ENCODING.md). It is not the fault of the peer, so it is not
+            # penalised.
+            try:
+                service_canonical.enforce_spec_path(
+                    service_dir, f"The service {wanted} that the peer {peer} sent")
+            except service_canonical.ServiceNotCanonical as e:
+                log.LOGGER(f"Service {wanted} not stored: {e}")
+                if os.path.isdir(service_dir):
+                    shutil.rmtree(service_dir, ignore_errors=True)
+                elif os.path.exists(service_dir):
+                    os.remove(service_dir)
+                return False
 
             log.LOGGER(f"Store the service {service_dir}")
             shutil.move(service_dir, f"{REGISTRY}{wanted}")

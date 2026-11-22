@@ -1442,6 +1442,14 @@ misc:
   USE_PRINT: false
   VALIDATE_ON_IMPORT: true
   CONFIGURATION_REQUIRED: false
+  # What to do with a service whose bytes are not the canonical encoding
+  # (docs/CANONICAL_ENCODING.md). The id of a service is the hash of its bytes, so a service
+  # that can be encoded in two ways has two ids.
+  #   * refuse: the packer does not pack it; StartService, GetService and `nodo import` do
+  #     not store it.
+  #   * warn: log it and go on. For a node that holds services packed before the rules.
+  #   * off: do not check.
+  CANONICAL_SERVICE: refuse
   # Keep a service without its filesystem (the block that holds its files). The node
   # keeps the specification and the other blocks, and marks the service as partial
   # (a `.nofs` file in its registry entry). A partial service cannot run on this node
