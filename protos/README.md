@@ -175,6 +175,13 @@ python3 -m grpc_tools.protoc -Iprotos --include_source_info \
 `tests/identity/test_protocol_doc.py` fails if an element has no description, or if
 `celaut_doc.binpb` is not current.
 
+## The encoding of a message with an id
+
+The `Service` and the `Filesystem` of its container have an id: the hash of their bytes. A
+field that is added to them can only use the types that [the canonical
+encoding](../docs/CANONICAL_ENCODING.md) allows, and a test fails if it does not
+(`tests/test_canonical_proto.py`). A number of a field is never changed after a release.
+
 ## Operational notes
 
 - This migration is breaking: no legacy fallback.

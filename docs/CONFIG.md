@@ -1217,6 +1217,7 @@ revives it.
 
 - `general_flags.SIMULATE_PAYMENTS` — dry-run payments (dev).
 - `misc.VALIDATE_ON_IMPORT` (`true`), `misc.CONFIGURATION_REQUIRED`.
+- `misc.CANONICAL_SERVICE` (`refuse`) — what the node does with a service whose bytes are not the canonical encoding ([`CANONICAL_ENCODING.md`](CANONICAL_ENCODING.md)). `refuse`: the packer does not pack it, `StartService`, `GetService` and `nodo import` do not store it. `warn`: log it and go on, for a node that holds services packed before the rules. `off`: do not check. A value that is not one of the three is `refuse`. The packer checks the specification and the filesystem that it made. A node that gets a service checks the specification as stored. `StartService` also checks that the content hashes to the id that came with the request, whatever this setting says.
 - `misc.OMIT_FS` (`false`) — keep services without their filesystem. See [Partial services](#partial-services-miscomit_fs).
 - `logs.DEBUG_MODE`, `logs.MEMORY_LOGS`.
 - `logs.TUNNEL_LOGS` — log every tunnel handshake, relay close and billing tick

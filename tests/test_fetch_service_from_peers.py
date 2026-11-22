@@ -31,6 +31,13 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     maintain = None  # type: ignore[assignment]
 
 
+# A specification that is the canonical encoding (docs/CANONICAL_ENCODING.md): the node does
+# not store a service that is not one, whatever its hash.
+SERVICE = celaut_pb2.Service(prose="the service").SerializeToString() if IMPORT_ERROR is None else b""
+# The same service with its fields in another order, which protobuf reads as the same message.
+NOT_CANONICAL = (b"\x12\x00" + b"\x0a\x03abc") if IMPORT_ERROR is None else b""
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class FetchServiceFromPeersTests(unittest.TestCase):
     def setUp(self):
@@ -92,17 +99,41 @@ class FetchServiceFromPeersTests(unittest.TestCase):
         ]
 
     def test_a_service_that_hashes_to_the_id_is_stored(self):
-        wanted = self._received(b"the service")
+        wanted = self._received(SERVICE)
         iterate, get = self._peer_sends(("peer-a", self.received_path))
         with iterate, get:
             self.assertTrue(maintain.fetch_service_from_peers(wanted))
 
         with open(os.path.join(self.registry, wanted), "rb") as f:
-            self.assertEqual(f.read(), b"the service")
+            self.assertEqual(f.read(), SERVICE)
         self.assertTrue(os.path.exists(os.path.join(self.metadata_registry, wanted)))
 
+    def test_a_service_that_is_not_canonical_is_not_stored_and_the_peer_is_not_penalised(self):
+        # The id is right: every peer holds these bytes, so no peer can give another
+        # encoding of the same service. It is not the fault of the peer.
+        wanted = self._received(NOT_CANONICAL)
+        iterate, get = self._peer_sends(("peer-a", self.received_path))
+        with iterate, get:
+            self.assertFalse(maintain.fetch_service_from_peers(wanted))
+
+        self.assertFalse(os.path.exists(os.path.join(self.registry, wanted)))
+        self.assertEqual(self._penalties(), [])
+
+    def test_with_warn_a_service_that_is_not_canonical_is_stored(self):
+        wanted = self._received(NOT_CANONICAL)
+        iterate, get = self._peer_sends(("peer-a", self.received_path))
+        real = maintain.service_canonical.env_manager.get
+        setting = patch.object(
+            maintain.service_canonical.env_manager, "get",
+            side_effect=lambda key, default=None: "warn" if key == "misc.CANONICAL_SERVICE"
+            else real(key, default))
+        with iterate, get, setting:
+            self.assertTrue(maintain.fetch_service_from_peers(wanted))
+
+        self.assertTrue(os.path.exists(os.path.join(self.registry, wanted)))
+
     def test_a_service_that_does_not_hash_to_the_id_is_dropped_and_the_next_peer_asked(self):
-        wanted = self._received(b"the service")
+        wanted = self._received(SERVICE)
         good = self.received_path
         self._received(b"something else")
         bad = self.received_path
@@ -113,10 +144,10 @@ class FetchServiceFromPeersTests(unittest.TestCase):
 
         self.assertFalse(os.path.exists(bad))
         with open(os.path.join(self.registry, wanted), "rb") as f:
-            self.assertEqual(f.read(), b"the service")
+            self.assertEqual(f.read(), SERVICE)
 
     def test_a_peer_that_sends_another_service_is_penalised_once_per_service(self):
-        wanted = self._received(b"the service")
+        wanted = self._received(SERVICE)
         for _ in range(2):  # `wanted_services_retry` asks again; the peer still lies.
             self._received(b"something else")
             iterate, get = self._peer_sends(("peer-bad", self.received_path))
@@ -129,7 +160,7 @@ class FetchServiceFromPeersTests(unittest.TestCase):
         )
 
     def test_a_peer_past_the_deadline_is_penalised_and_the_next_peer_asked(self):
-        wanted = self._received(b"the service")
+        wanted = self._received(SERVICE)
         deadline = grpc.RpcError()
         deadline.code = lambda: grpc.StatusCode.DEADLINE_EXCEEDED
         iterate, get = self._peer_sends(("peer-slow", deadline), ("peer-good", self.received_path))
@@ -142,7 +173,7 @@ class FetchServiceFromPeersTests(unittest.TestCase):
         )
 
     def test_a_peer_the_idle_watchdog_cut_off_is_penalised(self):
-        wanted = self._received(b"the service")
+        wanted = self._received(SERVICE)
         self.watchdog = maintain._IdleWatchdog(30)
         self.watchdog.fired = True
         cancelled = grpc.RpcError()
@@ -158,7 +189,7 @@ class FetchServiceFromPeersTests(unittest.TestCase):
 
     def test_a_peer_that_fails_otherwise_is_not_penalised_here(self):
         # Unreachable is `PEER_REFRESH_FAILED`'s to score, once per outage.
-        wanted = self._received(b"the service")
+        wanted = self._received(SERVICE)
         unavailable = grpc.RpcError()
         unavailable.code = lambda: grpc.StatusCode.UNAVAILABLE
         iterate, get = self._peer_sends(("peer-down", unavailable))
@@ -168,7 +199,7 @@ class FetchServiceFromPeersTests(unittest.TestCase):
         self.assertEqual(self._penalties(), [])
 
     def test_nothing_is_stored_when_no_peer_sends_the_service(self):
-        wanted = self._received(b"the service")
+        wanted = self._received(SERVICE)
         self._received(b"something else")
         iterate, get = self._peer_sends(("peer-bad", self.received_path))
         with iterate, get:

@@ -36,7 +36,8 @@ try:
     from src.gateway.gateway import Gateway
     from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
     from src.utils.bee_client import BeeClient, Dir
-    from src.utils.hashing import get_configured_hash_id
+    from src.utils.hashing import get_configured_hash_id, get_configured_hash_spec, hash_stream
+    from src.utils.service_content import read_service_content
     import src.gateway.utils as gateway_utils
     import src.gateway.iterables.abstract_input_service_iterable as abstract_input_service_iterable
     import src.utils.utils as nodo_utils
@@ -138,7 +139,10 @@ class StartServiceBlockSkipEndToEndTests(unittest.TestCase):
             pf_object_with_block_pointers=service,
             blocks=[big_hash],
         )
-        self.service_hash = "aa" * 20
+        # The id that the request carries is the hash of the service: the node refuses a
+        # content that does not hash to it (docs/CANONICAL_ENCODING.md).
+        self.service_hash = hash_stream(
+            read_service_content(self.service_dir), get_configured_hash_spec()).hex()
         self.metadata = celaut.Metadata(
             hashtag=celaut.Metadata.HashTag(
                 hash=[celaut.Metadata.HashTag.Hash(

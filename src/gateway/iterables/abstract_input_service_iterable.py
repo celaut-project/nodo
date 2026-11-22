@@ -1,5 +1,6 @@
 import concurrent.futures
 import os
+import shutil
 from typing import Optional, Generator, Set, Tuple
 
 from protos import celaut_pb2 as celaut
@@ -7,7 +8,7 @@ from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_message_mode, rpc_input
 from src.gateway.client_gate import ClientRequired, require_caller
 from src.gateway.utils import save_service
-from src.utils import logger as log, start_ref
+from src.utils import logger as log, service_canonical, start_ref
 from src.utils.bee_client import BeeClient, Buffer, Dir, StreamControl
 from src.utils.hashing import get_configured_hash_id
 from src.manager.maintain import add_wanted
@@ -33,6 +34,14 @@ class BreakIteration(Exception):
 SKIP_POLL_SECONDS = 0.005
 
 _END = object()
+
+
+def _discard_received(path: str) -> None:
+    """Remove a service that arrived and that the node does not keep."""
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+    elif os.path.exists(path):
+        os.remove(path)
 
 
 def find_service_hash(_hash: celaut.Metadata.HashTag.Hash) \
@@ -179,6 +188,19 @@ class AbstractInputServiceIterable:
                         for hash in list(self.metadata.hashtag.hash):
                             log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
                         raise Exception("Metadata hash integrity error before save it.")
+
+                # What came is what the id names, and it has the one encoding that the id
+                # allows (docs/CANONICAL_ENCODING.md). The node stores the service under the
+                # id of the request, so a content that does not hash to it must not be
+                # stored: it would be what this node runs and sends under that id.
+                if not os.path.exists(os.path.join(REGISTRY, self.service_hash)):
+                    try:
+                        service_canonical.verify_received_id(r.dir, self.service_hash)
+                        service_canonical.enforce_spec_path(
+                            r.dir, f"The service {self.service_hash} that came with the request")
+                    except Exception:
+                        _discard_received(r.dir)
+                        raise
 
                 self.service_saved = save_service(
                     metadata=self.metadata,

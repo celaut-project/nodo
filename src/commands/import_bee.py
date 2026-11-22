@@ -5,7 +5,7 @@ from protos import celaut_pb2
 from bee_rpc.client import parse_from_buffer, read_from_file
 from bee_rpc.reader import read_bee_file
 
-from src.utils import partial_service
+from src.utils import partial_service, service_canonical
 from src.utils.block_tree import block_tree
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_stream
@@ -199,6 +199,15 @@ def import_bee(
                 _discard(metadata_dir, service_dir, blocks_before)
                 return
         
+        # The id of a service is the hash of its bytes, so they must be the canonical encoding
+        # (docs/CANONICAL_ENCODING.md). `misc.CANONICAL_SERVICE: warn` imports it anyway.
+        try:
+            service_canonical.enforce_spec_path(service_dir, "The service to import")
+        except service_canonical.ServiceNotCanonical as e:
+            print(str(e))
+            _discard(metadata_dir, service_dir, blocks_before)
+            return
+
         # Only now is the id known: the one that the metadata says may not be the one of the
         # content (VALIDATE_ON_IMPORT replaced it above).
         service_saved = os.path.exists(os.path.join(REGISTRY, service_hash))

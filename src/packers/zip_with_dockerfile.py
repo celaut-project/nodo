@@ -42,6 +42,7 @@ from src.utils import policies
 from src.utils.shared_filesystems import (
     declarations_for_filesystem,
 )
+from src.utils import service_canonical
 from src.utils.verify import calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
@@ -791,6 +792,10 @@ class ZipContainerPacker:
                     inherited=hash_types_for_packing()
                 )
             )
+            # The id of the service covers the bytes of this block, so the packer does not
+            # store a filesystem that has another encoding than the canonical one
+            # (docs/CANONICAL_ENCODING.md).
+            service_canonical.enforce_filesystem_block(self.filesystem_block.hex(), BLOCKDIR)
 
             return celaut.Metadata.HashTag(
                 hash=calculate_hashes_by_stream(
@@ -1347,6 +1352,13 @@ class ZipContainerPacker:
             pf_object_with_block_pointers=spec,
             blocks=[self.filesystem_block]
         )
+        # What is stored is checked, and not the message in memory: its id is the hash of
+        # these bytes (docs/CANONICAL_ENCODING.md).
+        try:
+            service_canonical.enforce_spec_path(service_directory, "The specification that the packer made")
+        except service_canonical.ServiceNotCanonical:
+            shutil.rmtree(service_directory, ignore_errors=True)
+            raise
 
         # Every digest this node has to record, hashed here from the service's
         # expanded content rather than taken from the id build_multiblock
