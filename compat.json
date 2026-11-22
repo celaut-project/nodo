@@ -191,6 +191,7 @@
     "main.METADATA_REGISTRY",
     "main.REGISTRY",
     "main.STORAGE",
+    "misc.CANONICAL_SERVICE",
     "misc.CONFIGURATION_REQUIRED",
     "misc.MEMSWAP_FACTOR",
     "misc.OMIT_FS",
