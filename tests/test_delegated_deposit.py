@@ -72,7 +72,8 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         local_mu_per_unit=1_000_000_000, peer_mu_per_unit=2_000_000_000
     )
 
-    def _delegate(self, *, initial_mu, own_build_mu=0, peer_build_mu=0, child_balance=None,
+    def _delegate(self, *, initial_mu, own_build_mu=0, peer_build_mu=0, build_paid_mu=0,
+                  child_balance=None,
                   start_error=None, mark=None, record_error=None, stop_error=None):
         """Run a delegation. ``child_balance`` is what the peer reports, in its MU, and
         ``mark`` the last movement of its statement."""
@@ -117,6 +118,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
                     refund_container=[lambda: refunds.append(True)],
                     own_build_mu=own_build_mu,
                     peer_build_mu=peer_build_mu,
+                    build_paid_mu=build_paid_mu,
                 )
             except Exception as e:
                 error = e
@@ -150,6 +152,18 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         self.assertIsNone(r.error)
         # 900 000 of ours, and two peer MU for each.
         self.assertEqual(int(r.sent.initial_mu.n), 1_800_000)
+
+    def test_the_peer_is_also_sent_the_part_of_the_build_that_pays_the_peer(self):
+        # This node pays 100 000 of the build of the peer out of its own build. The father
+        # can get back only the balance: the row does not hold the build of the peer.
+        r = self._delegate(initial_mu=1_000_000, own_build_mu=100_000, peer_build_mu=200_000,
+                           build_paid_mu=100_000, child_balance=1_600_000)
+
+        self.assertIsNone(r.error)
+        # 1 000 000 of ours, and two peer MU for each.
+        self.assertEqual(int(r.sent.initial_mu.n), 2_000_000)
+        self.assertEqual(r.written["balance_mu"], 900_000)
+        self.assertEqual(r.written["sent_peer_mu"], 2_000_000)
 
     def test_the_row_keeps_what_the_father_can_get_back_in_our_mu(self):
         """What the father paid, less the build of this node: as a local child has it.

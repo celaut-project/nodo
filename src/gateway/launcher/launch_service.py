@@ -168,12 +168,30 @@ def _delegation_terms(estimated_cost: celaut_pb2.EstimatedCost,
 
     The first comes out of what the father paid, and the second out of what this node
     sends the peer. The ``cost`` of both prices is the build plus the builds of the
-    initial children (#538), with no balance (#636, 9). This node keeps only its build:
-    ``own_children_mu`` is the figure that its price put in for the children, and those
-    MU go to the peer with the balance. The peer builds the children itself, so its part
-    is its whole ``cost``.
+    initial children (#538), with no balance (#636, 9). The child is charged only the
+    build of this node: ``own_children_mu`` is the figure that its price put in for the
+    children, and those MU go to the peer with the balance. The peer builds the children
+    itself, so its part is its whole ``cost``. This node pays the rest of the build of the
+    peer out of its own build (``_build_paid_to_peer``).
     """
     return own_build_of(own, own_children_mu), peer_build_mu(estimated_cost)
+
+
+def _build_paid_to_peer(own_build: int, peer_build: int, own_children_mu: int = 0) -> int:
+    """The part of the build of this node that it sends the peer with the balance, in
+    local MU.
+
+    The father pays the build of this node, and the peer takes its own build from what
+    it gets. The builds of the initial children already go to the peer with the balance
+    (``own_children_mu``). This node pays the rest of the build of the peer out of its own
+    build, so the balance of the father does not pay it. The margin of the delegation is
+    what this node keeps: ``own_build`` less this figure. ``covers`` makes sure that it
+    is not negative, and the figure is never more than ``own_build``: this node does not
+    pay out more than it charges, also for a peer that it does not cover
+    (``force_execution``).
+    """
+    return min(max(int(own_build), 0),
+               max(int(peer_build) - max(int(own_children_mu), 0), 0))
 
 
 def _peer_period_mu(estimated_cost: celaut_pb2.EstimatedCost) -> int:
@@ -230,14 +248,15 @@ def _funding_failure(
             if own is None:
                 return "this node could not price the service, so no peer is covered"
             own_build, peer_build = _delegation_terms(estimated_cost, own, own_children_mu)
-            # The balance is what this node sends the peer, and the peer applies its
-            # own rule to it.
             balance_mu = balance_after_build(
                 initial_mu=initial_mu, build_mu=own_build,
                 minimum_mu=_mu(own.init_maintenance_cost),
             )
+            # This node sends the peer the balance and the part of its build that pays
+            # the build of the peer, and the peer applies its own rule to it.
             balance_after_build(
-                initial_mu=balance_mu,
+                initial_mu=balance_mu + _build_paid_to_peer(
+                    own_build, peer_build, own_children_mu),
                 build_mu=peer_build,
                 # One period as the peer quoted it: the funding sum of one period at
                 # its bound (#636). The peer checks the same sum at the start.
@@ -341,6 +360,7 @@ def _force_delegate(
         father_ip=father_ip,
         own_build_mu=own_build_mu,
         peer_build_mu=peer_build_value,
+        build_paid_mu=_build_paid_to_peer(own_build_mu, peer_build_value, own_children_mu),
         service=service,
         peer_quote=peer_quotes.signed(forced_peer, estimated_cost),
     )
@@ -739,6 +759,8 @@ def launch_service(
                         father_ip=father_ip,
                         own_build_mu=own_build_mu,
                         peer_build_mu=peer_build_value,
+                        build_paid_mu=_build_paid_to_peer(
+                            own_build_mu, peer_build_value, own_children_mu),
                         service=service,
                         # The quote as the peer signed it, in its MU: the tick checks
                         # the maintenance charge of the peer against it (#567).
