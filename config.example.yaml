@@ -675,6 +675,9 @@ network:
   # `nodo increase_peer_deposit` and `nodo force_execution` still work: an operator
   # typing the command is overriding this default on purpose. Peers can still ask THIS
   # node to run services for them -- that direction is client.ACCEPT_NEW_DEPOSITS.
+  # The client pays the price of this node, and a peer is selected only if that price
+  # covers its quote. With EXECUTE_LOCALLY: false, that price comes from the peers (see
+  # EXECUTE_LOCALLY below).
   DELEGATE_EXECUTION: true
   # If false, this node never runs a service itself: the balancer stops pricing local
   # execution and only ever selects a peer, so a service no peer will take fails
@@ -703,6 +706,15 @@ network:
   # that parent's own rootfs and cannot run anywhere else. With this off there is no
   # local candidate for it, so such a launch fails rather than being delegated to a
   # peer that could not honour it either.
+  #
+  # Off, the price of this node comes from its peers (#684), because its own pricing.*
+  # rates have no link to what a peer charges it. For each figure (the start, and the
+  # maintenance at the start and at the most), the client pays the higher of the price
+  # of this node and the median of the quotes of the peers that can run the service. The
+  # price also covers the quote of at least one peer, so a launch does not fail for the
+  # price when a peer can run the service. A peer above that price is not selected. The
+  # price is fixed for the life of the instance: if the peer raises its price later,
+  # this node pays the difference. On, this rule does not apply.
   #
   # Turning this off with DELEGATE_EXECUTION also off leaves no candidates at all and
   # refuses every launch. That is a coherent thing to ask for -- a node that is only a

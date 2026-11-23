@@ -307,9 +307,14 @@ class QuoteTests(_FreshCache, unittest.TestCase):
         self.assertEqual(asked.call_args.kwargs["configuration"].initial_mu.n, "1000")
 
     def test_a_peer_that_costs_more_than_this_node_charges_is_not_offered(self):
-        with self.assertRaises(Exception) as caught:
-            self._quote({"peer-a": price(1_400)}, executes=False)
-        self.assertNotIsInstance(caught.exception, HiddenModeRejection)
+        # A node that runs services, with no room for this one. A node that only
+        # delegates prices from its peers instead (#684, `test_delegating_price.py`).
+        with self.assertRaises(HiddenModeRejection):
+            self._quote({"peer-a": price(1_400)}, hidden_rejection=True)
+
+    def test_a_node_that_only_delegates_offers_the_price_of_its_peers(self):
+        offer, _ = self._quote({"peer-a": price(1_400)}, executes=False)
+        self.assertEqual(offer.cost.n, "1400")
 
     def test_the_local_price_is_offered_even_when_a_peer_is_cheaper(self):
         # The client pays what this node advertises, whoever runs the service.

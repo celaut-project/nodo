@@ -13,7 +13,7 @@ from src.utils import logger as log
 from src.utils.arch_guard import arch_from_tags
 from src.utils.cost_functions.architecture_resources import ask_of, should_skip_peer
 from src.utils.cost_functions import peer_quotes
-from src.utils.cost_functions.delegated_price import covers, own_price
+from src.utils.cost_functions.delegated_price import covers, delegating_price, own_price
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
 from src.utils.tools.query_cache import HIT, QueryCache, canonical_key, peer_quote_ttl, with_sorted_hashes
@@ -274,7 +274,10 @@ def execution_balancer(
     ``own`` is the price of this node for the service when a peer runs it
     (``delegated_price.own_price``): a peer is a candidate only if it covers its quote.
     The launcher gives the price that it then charges, so that both are the same figure.
-    Not given, it is priced here.
+    Not given, it is priced here. With ``network.EXECUTE_LOCALLY`` off, ``own`` is raised
+    in place to the price of a node that only delegates (``delegated_price.delegating_price``,
+    #684): the median of the quotes of the peers, when it is higher. The launcher then
+    charges that figure.
     """
 
     # sorted by cost, tuple of celaut.Instances or 'local' and cost
@@ -293,7 +296,8 @@ def execution_balancer(
     # node with both off has no candidates at all and refuses every launch, which is a
     # coherent thing to ask for (a node that is only a wallet and a peer directory)
     # and not this function's business to second-guess.
-    if env_manager.get("network.EXECUTE_LOCALLY", True):
+    executes_locally = env_manager.get("network.EXECUTE_LOCALLY", True)
+    if executes_locally:
         try:
             _local = generate_estimated_cost(
                 resources=resources,
@@ -351,6 +355,15 @@ def execution_balancer(
             )
         except Exception as e:
             log.LOGGER(f'Error pricing the service for this node, so no peer is covered: {e}')
+
+    # This node does not run the service, so its own rates have no link to what the
+    # work costs: the peers set the price (#684). In place, so that the launcher
+    # charges the figure that the peers were compared with.
+    if own is not None and not executes_locally:
+        quoted = delegating_price(own, [cost for peer, cost in peers.items() if peer != 'local'])
+        if quoted != own:
+            log.LOGGER('This node only delegates: its price is raised to the median of its peers.')
+            own.CopyFrom(quoted)
 
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")

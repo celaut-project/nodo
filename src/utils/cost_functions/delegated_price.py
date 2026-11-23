@@ -16,9 +16,14 @@ peer and not here:
 
 So the peers are not a price to pass on but a cost to cover. ``covers`` says whether a
 peer is covered: its quote, in local MU, against our own price for the same service.
+
+A node that does not run services itself (``network.EXECUTE_LOCALLY: false``) cannot
+raise its rates to the level of its peers: its own price has no link to them. So its
+price comes from the peers too (``delegating_price``, #684): for each figure, the
+higher of its own price and the median of the quotes of the peers.
 """
 
-from typing import Mapping, Optional, Tuple
+from typing import Iterable, Mapping, Optional, Tuple
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.config import ConfigManager
@@ -182,3 +187,80 @@ def covers(own: celaut_pb2.EstimatedCost, peer_cost: celaut_pb2.EstimatedCost) -
                                  _mu(peer_cost.init_maintenance_cost), peer_s) \
         and _per_second_at_least(_mu(own.max_maintenance_cost), own_s,
                                  _mu(peer_cost.max_maintenance_cost), peer_s)
+
+
+# The figures of a quote that ``delegating_price`` sets from the peers.
+_QUOTED_FIELDS = ("cost", "init_maintenance_cost", "max_maintenance_cost")
+
+
+def _in_period(peer_mu: int, peer_seconds: int, own_seconds: int) -> int:
+    """``peer_mu`` per ``peer_seconds`` as MU per ``own_seconds``, rounded up.
+
+    Rounded up, so that a price of this node at this figure covers the peer
+    (``_per_second_at_least``). A period that does not say its length is used as it is.
+    """
+    if own_seconds > 0 and peer_seconds > 0:
+        return -(-peer_mu * own_seconds // peer_seconds)
+    return peer_mu
+
+
+def _median(values: list) -> int:
+    """The median of ``values``, rounded up: for an even count, the mean of the two
+    middle values."""
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return -(-(ordered[middle - 1] + ordered[middle]) // 2)
+
+
+def delegating_price(
+        own: celaut_pb2.EstimatedCost,
+        quotes: Iterable[celaut_pb2.EstimatedCost],
+) -> celaut_pb2.EstimatedCost:
+    """The price of a node that only delegates (``network.EXECUTE_LOCALLY: false``, #684).
+
+    ``own`` is ``own_price`` of the service, and ``quotes`` are the quotes of the peers
+    that can run it, in local MU (``execution_balancer.quotes_from_peers``). For each
+    figure (``cost``, ``init_maintenance_cost`` and ``max_maintenance_cost``), the price
+    is the higher of ``own`` and the median of the quotes. The maintenance of a peer is
+    first put in the period of this node (``MANAGER_ITERATION_TIME``).
+
+    A median for each figure does not always cover one whole quote: one peer can be
+    below the median in one figure and above it in another. So the price is also raised
+    to cover the peer that needs the smallest raise above the median. Thus at least one
+    peer is covered (``covers``), and no figure is lower than that of the cheapest peer.
+
+    The other fields are those of ``own``: a fixed price, with no volatility. If a peer
+    raises its price during the life of the instance, this node pays the difference.
+    Without quotes, the price is ``own``.
+    """
+    price = celaut_pb2.EstimatedCost()
+    price.CopyFrom(own)
+    own_seconds = int(own.maintenance_seconds_loop)
+    rows = []
+    for quote in quotes:
+        peer_seconds = int(quote.maintenance_seconds_loop)
+        rows.append({
+            "cost": max(_mu(quote.cost), 0),
+            "init_maintenance_cost": max(_in_period(
+                _mu(quote.init_maintenance_cost), peer_seconds, own_seconds), 0),
+            "max_maintenance_cost": max(_in_period(
+                _mu(quote.max_maintenance_cost), peer_seconds, own_seconds), 0),
+        })
+    if not rows:
+        return price
+
+    floor = {
+        field: max(_mu(getattr(own, field)), _median([row[field] for row in rows]))
+        for field in _QUOTED_FIELDS
+    }
+
+    def raise_for(row: dict) -> tuple:
+        return (sum(max(row[field] - floor[field], 0) for field in _QUOTED_FIELDS),
+                sum(row[field] for field in _QUOTED_FIELDS))
+
+    cheapest = min(rows, key=raise_for)
+    for field in _QUOTED_FIELDS:
+        getattr(price, field).CopyFrom(to_amount(max(floor[field], cheapest[field])))
+    return price
