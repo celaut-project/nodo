@@ -232,7 +232,7 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
         # network.PUBLIC_IP set. Announce the LAN addresses anyway: they are useless
         # to a remote peer, but they are what makes an all-on-one-LAN deployment work
         # at all, and they beat the loopback fallback below, which is useful to nobody.
-        log.LOGGER('No routable address; falling back to announcing private addresses.')
+        # Not logged: it is the normal case on a LAN, and this runs on every call.
         uris.extend(private)
 
     uris.extend(onion)
