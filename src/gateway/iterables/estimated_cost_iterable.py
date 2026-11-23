@@ -25,7 +25,7 @@ from src.utils.cost_functions.delegated_quote import (
     delegation_time_budget,
     peer_round,
 )
-from src.utils.cost_functions.delegated_price import covers, own_price
+from src.utils.cost_functions.delegated_price import covers, delegating_price, own_price
 from src.utils.logger import LOGGER as logger
 from src.utils.partial_service import is_partial
 from src.utils.utils import get_only_the_ip_from_context
@@ -200,6 +200,9 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         suppose that the client knows the same peers. The peers are asked within the time
         the caller gives (``delegation_time_budget``), and only when this node has no room:
         with room, the offer is the local price, and the peers would change nothing.
+        A node that does not run services itself (``network.EXECUTE_LOCALLY: false``)
+        offers ``delegated_price.delegating_price``: its own price, raised to the median
+        of the quotes of its peers (#684).
         """
         if local_price is not None or not env_manager.get("network.DELEGATE_EXECUTION", True):
             return local_price
@@ -233,6 +236,9 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         except Exception as e:
             logger(f"Could not price {self.service_hash} for a peer, so no peer is offered: {e}")
             return None
+        # A node that does not run services itself prices from its peers (#684).
+        if not executes_locally():
+            own = delegating_price(own, quotes.values())
         if any(covers(own, cost) for cost in quotes.values()):
             return own
         return None
