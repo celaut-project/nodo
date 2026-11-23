@@ -540,11 +540,18 @@ test node) and refused starts funded exactly as the quote said.
 
 When the request has no `initial_mu`, the father pays the `cost` of the candidate plus the
 default balance of the service alone (`launch_service._client_charge_mu`). When the service
-runs on a peer, this node keeps only its build (`delegated_price.own_build_of` takes the
-builds of the children that its price put in `cost` out again) and sends the rest to the
-peer. The peer takes its whole `cost` (its build and the builds of the children,
-`delegated_price.peer_build_mu`), and what is left must pay one period as the peer quoted it
-(the funding sum of one period at its bound). A local start with no amount at all (a direct
+runs on a peer, the child is charged only the build of this node
+(`delegated_price.own_build_of` takes the builds of the children that its price put in
+`cost` out again), and the rest is its balance. This node sends the peer that balance plus
+the part of its build that pays the build of the peer
+(`launch_service._build_paid_to_peer`): the build of the peer less the builds of the
+children, which already go with the balance, and never more than the build of this node.
+This node keeps the rest of its build as the margin of the delegation. The peer takes its
+whole `cost` (its build and the builds of the children, `delegated_price.peer_build_mu`),
+and what is left must pay one period as the peer quoted it (the funding sum of one period at
+its bound). So the build of the peer does not come out of the default balance: a node that
+only delegates raises its `cost` to the build of the peer (#684), and a peer build larger
+than the default balance does not make the start fail. A local start with no amount at all (a direct
 call) is funded with the same figure.
 
 A tick charges a local instance for the seconds since its last charge, not for a fixed

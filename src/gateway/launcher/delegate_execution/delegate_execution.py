@@ -264,6 +264,7 @@ def delegate_execution(
                         father_ip: str = "",
                         own_build_mu: int = 0,
                         peer_build_mu: int = 0,
+                        build_paid_mu: int = 0,
                         service: Optional[celaut.Service] = None,
                         peer_quote: Optional[celaut_pb2.EstimatedCost] = None,
                    ) -> celaut_pb2.ServiceInstance:
@@ -272,10 +273,13 @@ def delegate_execution(
     ``config.initial_mu`` is what the father paid, in local MU (#563). The child is
     charged what this node advertises (#577), as a local one is: this node keeps its own
     build, ``own_build_mu``, and the rest is the balance of the child. That balance is what
-    the father can get back, and it is what this node sends the peer, in the MU of the
-    peer. The peer takes its own build from it, ``peer_build_mu`` as it quoted it (its
-    ``cost``: its build and the builds of the initial children, no balance, #636), in
-    local MU, and the rest is the balance of the child there. The account of the child here
+    the father can get back. This node sends the peer that balance plus ``build_paid_mu``,
+    the part of its own build that pays the build of the peer
+    (``launch_service._build_paid_to_peer``), in the MU of the peer. The peer takes its own
+    build from it, ``peer_build_mu`` as it quoted it (its ``cost``: its build and the
+    builds of the initial children, no balance, #636), in local MU, and the rest is the
+    balance of the child there. So the build of the peer does not come out of the balance
+    of the father. The account of the child here
     opens with the ``start`` and the ``build`` of this node, and shows nothing of the
     peer.
 
@@ -310,8 +314,7 @@ def delegate_execution(
         initial_mu = _mu(config.initial_mu) if config.HasField("initial_mu") else 0
         # What the father can get back: the balance of the child, as a local one has it.
         balance_mu = initial_mu - int(own_build_mu)
-        sent_mu = balance_mu
-        if sent_mu <= 0:
+        if balance_mu <= 0:
             # Nothing is left for the peer after the build of this node: the same
             # rejection as an amount that does not fit the build, and nothing was
             # charged to the peer.
@@ -319,6 +322,9 @@ def delegate_execution(
                 f'initial_mu {initial_mu} MU does not cover the build of this node, '
                 f'{int(own_build_mu)} MU, and a start on {peer}.'
             )
+        # What the peer gets: the balance of the child, and the part of the build of this
+        # node that pays the build of the peer. That part is not the father's to get back.
+        sent_mu = balance_mu + max(int(build_paid_mu), 0)
 
         # The configuration travels to the peer's Gateway, which reads MU on its
         # own scale, so it is translated here -- with the amount that the peer gets,

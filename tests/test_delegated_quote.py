@@ -497,6 +497,41 @@ class LaunchTests(_FreshCache, unittest.TestCase):
         # which takes its build and the builds of its children.
         self.assertEqual(kwargs["own_build_mu"], 40)
         self.assertEqual(kwargs["peer_build_mu"], 270)
+        # The children already go with the balance, and they cover the build of the peer.
+        self.assertEqual(kwargs["build_paid_mu"], 0)
+
+    def test_with_no_amount_this_node_pays_the_build_of_the_peer_out_of_its_own(self):
+        # A node that only delegates raises its cost to the build of the peer (#684).
+        # The build of the peer, 20 000, is more than the default balance, 1 000. The
+        # father pays 21 000, and the build that this node charges goes to the peer with
+        # the balance: the build of the peer does not come out of the balance.
+        r = self._launch([("peer-a", price(20_000, init=50))], own=price(20_000, init=50))
+        self.assertIsNone(r.error)
+        self.assertEqual(r.spend.call_args.kwargs["amount_mu"], 21_000)
+        kwargs = r.delegate.call_args.kwargs
+        self.assertEqual(kwargs["own_build_mu"], 20_000)
+        self.assertEqual(kwargs["peer_build_mu"], 20_000)
+        self.assertEqual(kwargs["build_paid_mu"], 20_000)
+
+    def test_this_node_keeps_the_margin_of_the_build(self):
+        # A build of 300 here, 200 on the peer: 200 go to the peer and 100 stay here.
+        r = self._launch([("peer-a", price(200))], own=price(300))
+        self.assertIsNone(r.error)
+        self.assertEqual(r.delegate.call_args.kwargs["build_paid_mu"], 200)
+
+    def test_the_builds_of_the_children_are_not_paid_twice_to_the_peer(self):
+        # The children (300 here) already go to the peer with the balance. The peer
+        # quotes 320 for its build and the children: this node pays it the other 20.
+        r = self._launch([("peer-a", price(320))], own=price(340), own_children=300)
+        self.assertIsNone(r.error)
+        self.assertEqual(r.delegate.call_args.kwargs["build_paid_mu"], 20)
+
+    def test_this_node_never_pays_the_peer_more_than_its_own_build(self):
+        # A peer that this node does not cover: it gets the build of this node, 40, and
+        # no more.
+        r = self._launch([("peer-a", price(200))], initial_mu=1_500, own=price(40))
+        self.assertIsNone(r.error)
+        self.assertEqual(r.delegate.call_args.kwargs["build_paid_mu"], 40)
 
     def test_a_client_that_sets_its_amount_is_never_charged_more_than_it_set(self):
         r = self._launch([("peer-a", price(800))], initial_mu=1_500, own=price(300))
