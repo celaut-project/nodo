@@ -41,6 +41,9 @@ def legacy(full_name):
 # revision with maps: bytes and uint64 values, message values, and entries whose value
 # is empty / 0 (what a proto3 scalar would drop without `optional`). The order of the
 # entries in each is the one that implementation happened to emit.
+# GOLDEN_PEER was re-tagged by hand for the renumbering of Peer: reputation_proofs 1 -> 12
+# (0x0a -> 0x62), payment_contracts 3 -> 6 (0x1a -> 0x32), rates 4 -> 7 (0x22 -> 0x3a), and
+# the entries of rates now come before reputation_proofs: a message is written in field order.
 # The same bytes with `xattrs` at its new number: #671 moved it from 2 to 3, and every entry
 # tag below is 0x1a (field 3) where the previous module wrote 0x12 (field 2).
 GOLDEN_CONTRACT = bytes.fromhex(
@@ -60,10 +63,10 @@ GOLDEN_CONFIGURATION = bytes.fromhex(
     "6d69640a0e0a055a4542524112057a65627261"
 )
 GOLDEN_PEER = bytes.fromhex(
-    "0a0f1a0d0a08746f6b656e5f69641201aa22200a166370755f6d755f7065725f76637075"
-    "5f7365636f6e6412060a043131313122160a086275696c645f6d75120a0a083130303030"
-    "30303022120a0e6e65745f6d755f7065725f6769621200221e0a1572616d5f6d755f7065"
-    "725f6769625f7365636f6e6412050a03323737"
+    "3a200a166370755f6d755f7065725f766370755f7365636f6e6412060a04313131313a16"
+    "0a086275696c645f6d75120a0a0831303030303030303a120a0e6e65745f6d755f706572"
+    "5f67696212003a1e0a1572616d5f6d755f7065725f6769625f7365636f6e6412050a0332"
+    "3737620f1a0d0a08746f6b656e5f69641201aa"
 )
 GOLDEN_SERVICE = bytes.fromhex(
     "0a076669787475726512820212030a01781a570a052f6d61696e120c0a04626574611204"
@@ -154,8 +157,8 @@ class SchemaTests(unittest.TestCase):
                 ("legacy_celaut", "Service.Container.Filesystem.ItemBranch", "xattrs", 5),
                 ("legacy_celaut", "Configuration", "environment_variables", 1),
                 ("legacy_celaut", "Sysresources", "benchmark", 99),
-                ("legacy_celaut", "Peer", "rates", 4),
-                ("legacy_celaut", "Peer", "limits", 11),
+                ("legacy_celaut", "Peer", "rates", 7),
+                ("legacy_celaut", "Peer", "limits", 8),
             ]),
         )
         for label, full_name, field_name, _ in FIELDS:

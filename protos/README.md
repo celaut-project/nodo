@@ -27,11 +27,11 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
   Sysresources resources = 2; }` — a resource shape for one architecture. A single
   `Sysresources`, with no `at_init`/`at_most` split: the message only says what is
   supported or asked about.
-- `Peer.resources = 8` is `repeated ArchitectureResources`: the most a node supports per
+- `Peer.resources = 9` is `repeated ArchitectureResources`: the most a node supports per
   architecture it serves, which doubles as its list of supported architectures.
   `resources` carries capacity ceilings and the node's measured `benchmark` scores. It is
   covered by the `Peer` signature (`node_identity.canonical_peer_content_digest`).
-- `Peer.ts` moved from field 8 to field 9.
+- `Peer.ts` is field 3 (see "Order of the fields of `Peer`").
 - `GetResourceAvailability` takes `Client & ArchitectureResources` (it took a bare
   `Service.Container.Resources`). An empty `architecture` means the answering node's
   native one. In a request, the limits are the most an instance may grow to (the former
@@ -66,7 +66,7 @@ break compatibility.
 - `ConfigurationFile.devices = 5` is a list of `AttachedDevice`: the devices that the
   node attached at the start, with their ids and guest PCI addresses. The service reads
   them in `__config__`, as it reads its networks.
-- `Peer.devices = 10` is `repeated Device`. An entry repeated is a device
+- `Peer.devices = 10` (unchanged) is `repeated Device`. An entry repeated is a device
   repeated, so the number of entries of one architecture is the count. Only `at_most`
   has a value (the limits and the measured benchmark), and `attach` lists all the ways
   that the node can attach that device. It is covered by the `Peer` signature.
@@ -181,6 +181,33 @@ The `Service` and the `Filesystem` of its container have an id: the hash of thei
 field that is added to them can only use the types that [the canonical
 encoding](../docs/CANONICAL_ENCODING.md) allows, and a test fails if it does not
 (`tests/test_canonical_proto.py`). A number of a field is never changed after a release.
+
+## Order of the fields of `Peer`
+
+The fields of `Peer` were numbered in the order that they were added, and `ts` was 99. Now
+the numbers follow the groups of the message, and the declarations are in the same order:
+
+| Group | Field | Number (was) |
+|---|---|---|
+| Identity and signature | `public_key` | 1 (5) |
+| | `signature_scheme` | 2 (7) |
+| | `ts` | 3 (99) |
+| | `signature` | 4 (6) |
+| Where the node is | `uri` | 5 (2) |
+| What it charges and limits | `payment_contracts` | 6 (3) |
+| | `rates` | 7 (4) |
+| | `limits` | 8 (11) |
+| What it can run | `resources` | 9 (8) |
+| | `devices` | 10 (10) |
+| | `activity_window` | 11 (9) |
+| What others say about it | `reputation_proofs` | 12 (1) |
+
+**Not wire compatible**, as the other changes of the alpha: every node is upgraded
+together. A node reads a `Peer` that it stored before as unreadable or empty (the readers
+of `peer.advertisement` already treat that as "nothing announced"), until the peer
+announces itself again. The signature does not change: the content digest is made from the
+fields, not from their numbers. A client that checks the signature (superapp) needs the
+new `celaut.proto` and the digest with `limits`.
 
 ## Operational notes
 

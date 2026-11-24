@@ -1420,37 +1420,6 @@ message Peer {
         repeated Protocol protocol_stack = 5;
     }
 
-    // The reputation proofs of the node, each with its owner attestation.
-    repeated Contract reputation_proofs = 1;
-    // All the addresses of the node.
-    repeated Uri uri = 2;
-    // The payment contracts that the node accepts, and the value of each in MU. They are
-    // the same for all the addresses.
-    repeated ContractRate payment_contracts = 3;
-    // The rates of the node. Keys: "ram_mu_per_gib_second" (and
-    // "ram_mu_per_gib_second:<architecture>"), "cpu_mu_per_vcpu_second",
-    // "disk_mu_per_gib_second", "net_mu_per_gib", "build_mu", "tunnel_open_mu",
-    // "modify_resources_mu", "statement_query_mu", "statement_row_mu",
-    // "scarcity_max_multiplier". The keys "net_mu_per_gib" and "connection_open_mu" (one
-    // connection) can also have the form "<key>:<network>", with the network as in
-    // limits (a DNS host name in lowercase, or "*"): the price for the instances that reach that network, in place of the
-    // general rate of the same name. A network without such a key has the general rate.
-    // The values of the "_mu" keys are in MU. Each RAM, CPU and disk rate is a base price. When a resource is scarce,
-    // the node multiplies its rate by a factor from 1 to scarcity_max_multiplier. The
-    // other rates do not change. scarcity_max_multiplier has no unit. The node does not
-    // send a rate of 0. A reader ignores a key that it does not know.
-    repeated AmountKeyValue rates = 4;
-    // The public key of the identity of the node, in the encoding that
-    // signature_scheme gives, as 64 lowercase hexadecimal characters. It is the id of
-    // the peer. A reader refuses a key with uppercase characters or spaces.
-    string public_key = 5;
-    // The signature, by public_key, of the text "<public_key>|<ts>|<content digest>", in
-    // lowercase hexadecimal. The content digest covers all the other fields of the
-    // Peer. The celaut-gateway layer specifies the digest. The signature proves that
-    // the holder of the key made this content. Thus a node can accept the Peer from a
-    // relay, and no challenge is necessary.
-    string signature = 6;
-
     // Why a stack and not four named fields: a scheme with a different shape
     // (hash-based, threshold, ...) needs no proto migration, only a different-length
     // stack. There is no id derived from the descriptor: a hash algorithm can be named
@@ -1483,39 +1452,45 @@ message Peer {
         // must have tags, a formal field or both.
         repeated Protocol components = 1;
     }
+
+    // The identity of the node and the signature over the rest of the message.
+    // The public key of the identity of the node, in the encoding that
+    // signature_scheme gives, as 64 lowercase hexadecimal characters. It is the id of
+    // the peer. A reader refuses a key with uppercase characters or spaces.
+    string public_key = 1;
     // The signature scheme. The signature covers it, so a relay cannot change it.
-    SignatureScheme signature_scheme = 7;
-    // The maximum resources that the node supports, one entry for each architecture
-    // that it runs. If the list is not empty, the node does not run an architecture
-    // that is not in it. If the list is empty, the node gives no data about its
-    // resources. Each value is a limit of capacity, not the free capacity now. The node
-    // can refuse a request that fits, because of load. The node always refuses a
-    // request that does not fit. The benchmark gives the measured score for each core.
-    // If the node did not measure a score, the score is absent, never 0. Before a
-    // caller asks for a cost or for availability, it can skip a node whose entry does
-    // not fit the request.
-    repeated ArchitectureResources resources = 8;
-    // The hours in which the node takes new work. If the message is absent, the node
-    // gives no schedule: a reader does not assume that the node is open or closed. An
-    // empty list of spans means that the node is always open. It is the schedule that
-    // the node has now: it can change, and the node then announces a new Peer with a
-    // higher ts. It is not a promise. The quote (EstimatedCost.closes_at and on_close)
-    // is the authority for one instance.
-    ActivityWindow activity_window = 9;
-    // The devices that the node can attach directly to an instance. One entry is one
-    // device, with its architecture. The node repeats an entry for each device that it
-    // has. The number of entries with the same architecture is the maximum number of
-    // devices that the node can give at the same time with that architecture. A reader
-    // does not add the numbers of different architectures: one device with two kernels
-    // is one device. If the list is empty, the node has no devices to give. In the
-    // resources of an entry, only at_most has a value. Its limits are the most that the
-    // device can give, and its benchmark has the scores that the node measured. If the
-    // node did not measure a score, the score is absent, never 0. The attach list has
-    // all the ways that the node can attach that device. The values are a limit of
-    // capacity, not the free capacity now. GetResourceAvailability gives the real answer. This list is not
-    // Peer.resources: a reader does not read a device architecture as a main
-    // architecture.
-    repeated Device devices = 10;
+    SignatureScheme signature_scheme = 2;
+    // The unix time of the announcement, in seconds. A reader accepts a Peer only if its
+    // ts is more than the ts of the last Peer that it accepted for the same public_key.
+    int64 ts = 3;
+    // The signature, by public_key, of the text "<public_key>|<ts>|<content digest>", in
+    // lowercase hexadecimal. The content digest covers all the other fields of the
+    // Peer. The celaut-gateway layer specifies the digest. The signature proves that
+    // the holder of the key made this content. Thus a node can accept the Peer from a
+    // relay, and no challenge is necessary.
+    string signature = 4;
+
+    // Where the node is.
+    // All the addresses of the node.
+    repeated Uri uri = 5;
+
+    // What the node charges, and what it limits.
+    // The payment contracts that the node accepts, and the value of each in MU. They are
+    // the same for all the addresses.
+    repeated ContractRate payment_contracts = 6;
+    // The rates of the node. Keys: "ram_mu_per_gib_second" (and
+    // "ram_mu_per_gib_second:<architecture>"), "cpu_mu_per_vcpu_second",
+    // "disk_mu_per_gib_second", "net_mu_per_gib", "build_mu", "tunnel_open_mu",
+    // "modify_resources_mu", "statement_query_mu", "statement_row_mu",
+    // "scarcity_max_multiplier". The keys "net_mu_per_gib" and "connection_open_mu" (one
+    // connection) can also have the form "<key>:<network>", with the network as in
+    // limits (a DNS host name in lowercase, or "*"): the price for the instances that reach that network, in place of the
+    // general rate of the same name. A network without such a key has the general rate.
+    // The values of the "_mu" keys are in MU. Each RAM, CPU and disk rate is a base price. When a resource is scarce,
+    // the node multiplies its rate by a factor from 1 to scarcity_max_multiplier. The
+    // other rates do not change. scarcity_max_multiplier has no unit. The node does not
+    // send a rate of 0. A reader ignores a key that it does not know.
+    repeated AmountKeyValue rates = 7;
     // The limits of the node, as keys with a number. A key has the form
     // "<limit>:<network>". The network is a DNS host name in lowercase, as a tag of
     // Service.Network. Only these networks have keys: a pow: network is a set of peers
@@ -1531,10 +1506,44 @@ message Peer {
     // rates. A limit that is absent is not a promise of no limit. It is an offer: the
     // quote (EstimatedCost) is the authority for one instance, and the node refuses an
     // instance that goes beyond a limit. A reader ignores a key that it does not know.
-    repeated Uint64KeyValue limits = 11;
-    // The unix time of the announcement, in seconds. A reader accepts a Peer only if its
-    // ts is more than the ts of the last Peer that it accepted for the same public_key.
-    int64 ts = 99;
+    repeated Uint64KeyValue limits = 8;
+
+    // What the node can run.
+    // The maximum resources that the node supports, one entry for each architecture
+    // that it runs. If the list is not empty, the node does not run an architecture
+    // that is not in it. If the list is empty, the node gives no data about its
+    // resources. Each value is a limit of capacity, not the free capacity now. The node
+    // can refuse a request that fits, because of load. The node always refuses a
+    // request that does not fit. The benchmark gives the measured score for each core.
+    // If the node did not measure a score, the score is absent, never 0. Before a
+    // caller asks for a cost or for availability, it can skip a node whose entry does
+    // not fit the request.
+    repeated ArchitectureResources resources = 9;
+    // The devices that the node can attach directly to an instance. One entry is one
+    // device, with its architecture. The node repeats an entry for each device that it
+    // has. The number of entries with the same architecture is the maximum number of
+    // devices that the node can give at the same time with that architecture. A reader
+    // does not add the numbers of different architectures: one device with two kernels
+    // is one device. If the list is empty, the node has no devices to give. In the
+    // resources of an entry, only at_most has a value. Its limits are the most that the
+    // device can give, and its benchmark has the scores that the node measured. If the
+    // node did not measure a score, the score is absent, never 0. The attach list has
+    // all the ways that the node can attach that device. The values are a limit of
+    // capacity, not the free capacity now. GetResourceAvailability gives the real answer. This list is not
+    // Peer.resources: a reader does not read a device architecture as a main
+    // architecture.
+    repeated Device devices = 10;
+    // The hours in which the node takes new work. If the message is absent, the node
+    // gives no schedule: a reader does not assume that the node is open or closed. An
+    // empty list of spans means that the node is always open. It is the schedule that
+    // the node has now: it can change, and the node then announces a new Peer with a
+    // higher ts. It is not a promise. The quote (EstimatedCost.closes_at and on_close)
+    // is the authority for one instance.
+    ActivityWindow activity_window = 11;
+
+    // What other nodes say about the node.
+    // The reputation proofs of the node, each with its owner attestation.
+    repeated Contract reputation_proofs = 12;
 }
 
 // The proof of work fields come from issue #361; the peer binding from the "Peers and
