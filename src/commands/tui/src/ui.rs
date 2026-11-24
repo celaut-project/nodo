@@ -221,7 +221,6 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::AddAsset => draw_asset_form_popup(frame, app),
         InputMode::ExecuteEnvs => crate::env_form::draw(frame, app),
         InputMode::PickChatPeer => crate::chat::draw_peer_picker(frame, app),
-        InputMode::PickChatTopic => crate::chat::draw_topic_picker(frame, app),
         InputMode::PickChatService => crate::chat::draw_service_picker(frame, app),
         InputMode::ContextMenu => crate::context_menu::draw(frame, app),
         // Drawn inline by `chat::draw` as part of the conversation pane, not as a

@@ -9,7 +9,7 @@ use crate::app::{
     App, DetailsView, InputMode, Instance, InstanceClient,
     InstanceUsage, Page, PendingAction, Service, StatefulList,
 };
-use crate::chat::{ChatCompose, ChatEntry, ChatEntryKind, ChatMessageRow, ChatService, SharedService};
+use crate::chat::{ChatCompose, ChatEntry, ChatMessageRow, ChatService, SharedService};
 use crate::clients::Client;
 use crate::peer_resources::{Announced, ArchOffer};
 use crate::peers::Peer;
@@ -203,15 +203,15 @@ pub(crate) fn populated_app() -> App {
             .take(8)
             .enumerate()
             .map(|(n, id)| ChatEntry {
-                key: format!("conv-{n}"),
-                peer_id: id.clone(),
+                key: format!("client-{n}#1"),
+                peer_id: (n % 4 != 3).then(|| id.clone()),
                 topic: format!("topic {n} — a fairly long subject line 🦀"),
                 last_ts: 1_700_000_000 + n as i64,
-                kind: ChatEntryKind::Conversation {
-                    conversation_id: format!("conv-{n}"),
-                    opened_by_us: n % 2 == 0,
-                    closed_at: None,
-                },
+                client_id: format!("client-{n}"),
+                number: 1,
+                opened_by_us: n % 2 == 0,
+                closed_at: None,
+                waiting: n % 3 == 0,
             })
             .collect(),
     );
@@ -348,18 +348,13 @@ pub(crate) fn overlays() -> Vec<(&'static str, Page, Box<dyn Fn(&mut App)>)> {
         ("chat-peer", Page::Chat, Box::new(|app: &mut App| {
             app.input_mode = InputMode::PickChatPeer;
         })),
-        ("chat-topic", Page::Chat, Box::new(|app: &mut App| {
-            app.chat_wizard_peer_id = Some("peer-1".to_string());
-            app.chat_wizard_topics = (0..12).map(|n| format!("topic {n}")).collect();
-            app.input_mode = InputMode::PickChatTopic;
-        })),
         ("chat-new-topic", Page::Chat, Box::new(|app: &mut App| {
             app.input_mode = InputMode::NewChatTopic;
         })),
         ("chat-compose", Page::Chat, Box::new(|app: &mut App| {
             app.chat_compose = Some(ChatCompose::Reply {
-                conversation_id: "conv-0".to_string(),
-                peer_id: "peer-1".to_string(),
+                conversation_ref: "client-0#1".to_string(),
+                who: "peer-1".to_string(),
             });
             app.input = "line one\nline two that is fairly long 🦀 東京\nthree".to_string();
             app.chat_attachment = Some(ChatService {
@@ -369,7 +364,7 @@ pub(crate) fn overlays() -> Vec<(&'static str, Page, Box<dyn Fn(&mut App)>)> {
             app.input_mode = InputMode::ComposeChatMessage;
         })),
         ("chat-service", Page::Chat, Box::new(|app: &mut App| {
-            app.chat_compose = Some(ChatCompose::ReplyUntopiced { peer_id: "peer-1".to_string() });
+            app.chat_compose = Some(ChatCompose::Reply { conversation_ref: "client-0#1".to_string(), who: "peer-1".to_string() });
             app.input_mode = InputMode::PickChatService;
         })),
         ("instance-tree", Page::Instances, Box::new(|app: &mut App| {

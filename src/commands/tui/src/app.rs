@@ -1,7 +1,7 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
 use crate::chat::{
-    get_client_messages, get_conversation_messages, get_untopiced_messages, ChatCardAction, ChatCompose, ChatEntry,
-    ChatEntryKind, ChatService,
+    get_conversation_messages, ChatCardAction, ChatCompose, ChatEntry,
+    ChatService,
     ChatMessageRow,
 };
 use crate::clients::{get_client_detail, get_clients, Client, ClientDetail};
@@ -560,13 +560,10 @@ pub enum InputMode {
     /// CHAT page, new-chat wizard step 1: pick which peer to start a chat with,
     /// narrowed by typing (issue: TUI chat/peers/clients redesign).
     PickChatPeer,
-    /// CHAT page, new-chat wizard step 2: pick one of that peer's existing topics, or
-    /// "+ New topic…" to type one (`NewChatTopic`).
-    PickChatTopic,
-    /// CHAT page, new-chat wizard step 2b: typing a topic that was not already
-    /// offered by `PickChatTopic`.
+    /// CHAT page, new-chat wizard step 2: typing the topic. A topic is always
+    /// required: each run of the wizard opens a new conversation.
     NewChatTopic,
-    /// CHAT page, the final step either wizard leads to: a real, possibly multi-line
+    /// CHAT page, the final step of the wizard, and the reply box: a real, possibly multi-line
     /// message, docked in the conversation pane rather than a centered popup --
     /// `Enter` inserts a newline here instead of submitting (see `handler.rs`).
     ComposeChatMessage,
@@ -3289,8 +3286,8 @@ pub struct App {
     pub tunnel_instance: Option<String>,
     /// The PACKS page: `nodo pack` runs, newest first, read from the registry.
     pub packs: StatefulList<crate::packs::Pack>,
-    /// The CHAT sidebar (issue #431): every conversation, both directions, plus each
-    /// peer's topic-less bucket, merged and sorted by recency -- see `chat::ChatEntry`.
+    /// The CHAT sidebar (issue #431): every conversation, served here or mirrored,
+    /// grouped by peer -- see `chat::ChatEntry`.
     pub conversations: StatefulList<ChatEntry>,
     pub conversations_error: Option<String>,
     pub instances: StatefulList<Instance>,
@@ -3502,13 +3499,10 @@ pub struct App {
     /// `credit_client` / `debit_client`.
     pub credit_is_instance: bool,
     /// The new-chat wizard's state (issue: TUI chat/peers/clients redesign): typed
-    /// filter and highlighted index for `PickChatPeer`, the peer it settled on, the
-    /// topics offered by `PickChatTopic`, and its own highlighted index.
+    /// filter and highlighted index for `PickChatPeer`, and the peer it settled on.
     pub chat_wizard_peer_filter: String,
     pub chat_wizard_peer_index: usize,
     pub chat_wizard_peer_id: Option<String>,
-    pub chat_wizard_topics: Vec<String>,
-    pub chat_wizard_topic_index: usize,
     /// What the open `ComposeChatMessage` box will do with its body once sent --
     /// which `nodo` subcommand, and with what -- set by whichever of the new-chat
     /// wizard or `open_reply_prompt` opened it.
@@ -3706,8 +3700,6 @@ impl Default for App {
             chat_wizard_peer_filter: String::new(),
             chat_wizard_peer_index: 0,
             chat_wizard_peer_id: None,
-            chat_wizard_topics: Vec::new(),
-            chat_wizard_topic_index: 0,
             chat_compose: None,
             chat_attachment: None,
             chat_service_index: 0,
@@ -4206,7 +4198,7 @@ impl App {
         match self.page() {
             Page::Peers => self.peers.selected().map(|peer| peer.id.clone()),
             Page::Clients => self.clients.selected().map(|client| client.id.clone()),
-            Page::Chat => self.conversations.selected().map(|entry| entry.peer_id.clone()),
+            Page::Chat => self.conversations.selected().map(|entry| entry.them_id().to_string()),
             _ => None,
         }
     }
@@ -4435,17 +4427,9 @@ impl App {
         self.conversation_messages = self
             .conversations
             .selected()
-            .map(|entry| entry.kind.clone())
-            .map(|kind| match kind {
-                ChatEntryKind::Conversation { conversation_id, .. } => {
-                    get_conversation_messages(&database, &conversation_id).unwrap_or_default()
-                }
-                ChatEntryKind::Untopiced { peer_id } => {
-                    get_untopiced_messages(&database, &peer_id).unwrap_or_default()
-                }
-                ChatEntryKind::Client { client_id, .. } => {
-                    get_client_messages(&database, &client_id).unwrap_or_default()
-                }
+            .map(|entry| {
+                get_conversation_messages(&database, &entry.client_id, entry.number, entry.opened_by_us)
+                    .unwrap_or_default()
             })
             .unwrap_or_default();
     }
@@ -4491,8 +4475,6 @@ impl App {
         self.chat_wizard_peer_filter.clear();
         self.chat_wizard_peer_index = 0;
         self.chat_wizard_peer_id = None;
-        self.chat_wizard_topics.clear();
-        self.chat_wizard_topic_index = 0;
         self.chat_compose = None;
         self.chat_attachment = None;
         self.chat_service_index = 0;
@@ -4943,7 +4925,6 @@ impl App {
             InputMode::AddAsset => self.save_new_asset(),
             InputMode::ExecuteEnvs => self.submit_env_form(),
             InputMode::PickChatPeer => self.submit_chat_peer_pick(),
-            InputMode::PickChatTopic => self.submit_chat_topic_pick(),
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
             InputMode::GetService => self.submit_get_service(),

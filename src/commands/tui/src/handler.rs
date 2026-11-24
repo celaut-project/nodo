@@ -338,18 +338,6 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             }
             return Ok(());
         }
-        // New-chat wizard step 2: pick an existing topic, or "+ New topic…".
-        InputMode::PickChatTopic => {
-            match (key.modifiers, key.code) {
-                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
-                (_, KeyCode::Up) => app.move_chat_topic_selection(-1),
-                (_, KeyCode::Down) => app.move_chat_topic_selection(1),
-                (_, KeyCode::Enter) => app.submit_input().await,
-                (_, KeyCode::Esc) => app.close_input(),
-                _ => {}
-            }
-            return Ok(());
-        }
         // The docked, multi-line compose box: the one text entry in this interface
         // where Enter does NOT submit -- it inserts a newline, since a real message
         // (not a label) is the whole point of this step.

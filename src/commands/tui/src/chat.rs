@@ -1,26 +1,30 @@
-//! The CHAT page: free-text conversations with peer operators (issue #431), redesigned
-//! as a persistent sidebar + conversation pane (Telegram/WhatsApp-shaped) instead of a
-//! table-above-a-card, so the page can actually hold a conversation rather than a
-//! one-line-per-message transcript. See the module doc on `peers.rs` for why this
-//! lives in its own file.
+//! The CHAT page: free-text conversations (issue #431), shown as a persistent sidebar
+//! + conversation pane (Telegram/WhatsApp-shaped). See the module doc on `peers.rs`
+//! for why this lives in its own file.
 //!
-//! Three things changed from the page this replaces:
+//! There is one kind of conversation. A client opens it against a node, and it lives
+//! on that node. Its name is `client_id#number`: the "ref". Two sides see the same
+//! conversation:
 //!
-//! - **One merged list, not a direction toggle.** `peer_chat_conversations.
-//!   opened_by_us` used to pick which half of the table a toggle showed; now both
-//!   halves are one list, sorted by last activity, with a glyph per row saying which
-//!   half a chat belongs to.
-//! - **Topic-less messages are a row.** `peer_chat_messages.conversation_id` can be
-//!   NULL -- flat messages that predate conversations, and still the only kind a peer
-//!   sends before it names a thread -- and were invisible in the TUI because the old
-//!   query only ever read `peer_chat_conversations`. Each peer with any gets a
-//!   synthetic "(no topic)" entry here (`ChatEntryKind::Untopiced`).
-//! - **Opening a chat is peer → topic → message, not one free-text line.** The old
-//!   `<peer_id> <topic...>` line sent `topic` itself as the opening message; now the
-//!   three are separate steps, and the message is real prose, not a label.
+//! - **Served here** (`opened_by_us` is false): one of this node's clients opened it
+//!   with this node. The operator of this node answers it.
+//! - **A mirror** (`opened_by_us` is true): this node is the client. The rows are a
+//!   local copy of a conversation that lives on another node.
+//!
+//! The page reads both from the view `chat_threads` and shows them in one list. The
+//! list is grouped by peer. A served conversation of a client with no peer has no
+//! peer: it goes in the last group.
+//!
+//! `chat_messages.from_operator` is the same on both sides: 1 if the operator of the
+//! serving node wrote it, 0 if the client did. So "us" is `from_operator = 1` on a
+//! served conversation and `from_operator = 0` on a mirror.
+//!
+//! Opening a chat is peer, then topic, then message. The topic is always required.
+//! Each run of the wizard opens a new conversation.
 
 use crate::app::{
-    get_service_command, shorten, App, CommandKind, EditKind, Identifiable, InputMode, Page,
+    get_service_command, shorten, table_exists, App, CommandKind, EditKind, Identifiable,
+    InputMode, Page,
 };
 use crate::layout_util::Column;
 use crate::peers::Peer;
@@ -34,28 +38,9 @@ use prost::Message;
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
 
-/// One `peer_chat_conversations` row. Mirrors
-/// `src/database/sql_connection.py::list_conversations`.
-#[derive(Debug, Clone)]
-pub struct ConversationSummary {
-    pub id: String,
-    pub peer_id: String,
-    pub topic: String,
-    pub opened_by_us: bool,
-    pub opened_at: String,
-    /// `None` while open. Closing is local bookkeeping only (see
-    /// `src/manager/chat.py::close_conversation`) -- nothing here means the peer
-    /// agreed, or was even told.
-    pub closed_at: Option<String>,
-    /// Its most recent message's timestamp, or (if somehow it has none) when it was
-    /// opened -- what the sidebar sorts by, so an old thread that just got a reply
-    /// reads as current rather than staying buried under its own opening date.
-    pub last_ts: i64,
-}
-
-/// One `peer_chat_messages` row within a single thread or a topic-less peer history,
-/// as the conversation pane shows it. `ts` arrives already formatted -- the message's
-/// own clock, not when this node happened to receive it.
+/// One `chat_messages` row of a single conversation, as the conversation pane shows
+/// it. `ts` arrives already formatted -- the message's own clock, not when this node
+/// happened to receive it.
 #[derive(Debug, Clone)]
 pub struct ChatMessageRow {
     pub from_us: bool,
@@ -66,7 +51,7 @@ pub struct ChatMessageRow {
 }
 
 /// A service shared in a chat message (issue #438): `ChatMessage.service`, the
-/// service's own `Metadata`, as `peer_chat_messages.service_metadata` stores it,
+/// service's own `Metadata`, as `chat_messages.service_metadata` stores it,
 /// with the registry id the node derived from it (`service_id`, see
 /// `src/utils/verify.py::registry_service_id`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,63 +147,31 @@ pub enum ChatCardAction {
     Execute(ChatService),
 }
 
-/// The service-card columns, or two NULLs on a database the node has not added
-/// them to yet -- see `column_exists` for why a missing column must not empty the
-/// whole conversation.
-fn service_columns(connection: &Connection) -> &'static str {
-    if crate::app::column_exists(connection, "peer_chat_messages", "service_metadata") {
-        "service_id, service_metadata"
-    } else {
-        "NULL, NULL"
-    }
-}
 
-/// A peer's topic-less message history, as one row: `peer_chat_messages` rows with no
-/// `conversation_id`, which predate conversations and still arrive whenever a peer
-/// chats without naming a thread. Grouped by peer since there is no conversation row
-/// to group them under.
-#[derive(Debug, Clone)]
-pub struct UntopicedSummary {
-    pub peer_id: String,
-    pub message_count: i64,
-    pub last_ts: i64,
-}
-
-/// What one sidebar row *is*: a real thread, or a peer's topic-less history.
-#[derive(Debug, Clone)]
-pub enum ChatEntryKind {
-    Conversation {
-        conversation_id: String,
-        opened_by_us: bool,
-        closed_at: Option<String>,
-    },
-    Untopiced {
-        peer_id: String,
-    },
-    /// The support thread of a client that has no peer bound to it
-    /// (`client_chat_messages`). `ChatEntry::peer_id` holds its client id. `waiting`
-    /// is true while the client wrote last, so the operator sees what needs an answer.
-    Client {
-        client_id: String,
-        waiting: bool,
-    },
-}
-
-/// One row in the CHAT sidebar: a conversation and a topic-less peer bucket are the
-/// same kind of thing here -- something with a peer, a topic (real or "(no topic)"),
-/// and messages -- so both are this one type, told apart by `kind` only where the
-/// difference actually matters (closing, replying).
+/// One row in the CHAT sidebar: one row of the view `chat_threads`.
 #[derive(Debug, Clone)]
 pub struct ChatEntry {
-    /// The conversation id, or `untopic:<peer_id>` for a topic-less bucket -- stable
-    /// across refreshes either way, which is what lets `StatefulList` keep the
-    /// selection when the periodic reload replaces every entry.
+    /// The ref, `client_id#number`. It is stable across refreshes, which lets
+    /// `StatefulList` keep the selection when the periodic reload replaces every entry.
     pub key: String,
-    pub peer_id: String,
-    /// Empty for a topic-less bucket, displayed as "(no topic)".
+    pub client_id: String,
+    pub number: i64,
+    /// The peer this conversation is grouped under. `None` for a client with no peer.
+    pub peer_id: Option<String>,
+    /// True if this node is the client (a mirror). False if it is served here.
+    pub opened_by_us: bool,
+    /// Empty if the conversation has no topic.
     pub topic: String,
+    /// `None` while open. Closing is local bookkeeping only: nothing here means the
+    /// other side agreed, or was even told.
+    pub closed_at: Option<String>,
+    /// Its most recent message's timestamp, or (if it has none) when it was opened.
+    /// This is what the sidebar sorts by inside a group.
     pub last_ts: i64,
-    pub kind: ChatEntryKind,
+    /// True if the last message is not from the operator of the serving node. On a
+    /// served conversation the client wrote last: it waits for us. On a mirror our own
+    /// message is last: it waits for the other node.
+    pub waiting: bool,
 }
 
 impl Identifiable for ChatEntry {
@@ -227,293 +180,154 @@ impl Identifiable for ChatEntry {
     }
 }
 
+impl ChatEntry {
+    /// The conversation is open and the client wrote last: this node owes an answer.
+    pub fn waits_for_us(&self) -> bool {
+        self.waiting && !self.opened_by_us && self.closed_at.is_none()
+    }
+
+    /// The conversation is open and our message is last: the other node owes an answer.
+    pub fn waits_for_peer(&self) -> bool {
+        self.waiting && self.opened_by_us && self.closed_at.is_none()
+    }
+
+    /// The name of the other side: the peer, or the client if it has no peer.
+    pub fn them_name(&self) -> String {
+        match &self.peer_id {
+            Some(peer_id) => short_peer_name(peer_id),
+            None => format!("client {}", short_peer_name(&self.client_id)),
+        }
+    }
+
+    /// A short form of `them_name` for the sidebar: a client with no peer is `@abc...xyz`.
+    fn sidebar_name(&self) -> String {
+        match &self.peer_id {
+            Some(peer_id) => short_peer_name(peer_id),
+            None => format!("@{}", short_peer_name(&self.client_id)),
+        }
+    }
+
+    /// The full id behind `them_name`, for click-to-copy.
+    pub fn them_id(&self) -> &str {
+        self.peer_id.as_deref().unwrap_or(&self.client_id)
+    }
+}
+
 /// What a docked `ComposeChatMessage` box will do with the body once it is sent --
-/// which of the three `nodo` subcommands to shell out to, and with what.
+/// which of the two `nodo` subcommands to shell out to, and with what.
 #[derive(Debug, Clone)]
 pub enum ChatCompose {
     /// Step 3 of the new-chat wizard: `chat_open <peer> <topic> --message <body>`.
     NewConversation { peer_id: String, topic: String },
-    /// A reply in an existing, open thread: `chat_reply <conversation_id> <body>`.
-    Reply { conversation_id: String, peer_id: String },
-    /// A reply to a peer's topic-less history: the flat `chat <peer> <body>`, since
-    /// there is no conversation id to reply into.
-    ReplyUntopiced { peer_id: String },
-    /// An answer in the support thread of a client: `chat_client_reply <client> <body>`.
-    /// Text only: that thread takes no service and no conversation id.
-    ReplyClient { client_id: String },
+    /// A reply in an open conversation, of either kind: `chat_reply <ref> <body>`.
+    /// `who` is only the name the compose title shows.
+    Reply { conversation_ref: String, who: String },
 }
 
-/// Threads on the CHAT page, both directions in one list -- `opened_by_us` rides
-/// along on each row instead of picking which half of the table is shown, and
-/// `last_ts` (this thread's most recent message, or its opening if it has none yet)
-/// is what the merged sidebar actually sorts by.
-pub fn get_conversations(database: &Path) -> SqlResult<Vec<ConversationSummary>> {
+/// The conversations on the CHAT page, from the view `chat_threads`. The list is
+/// grouped by peer: the group with the newest message is first, the group of clients
+/// with no peer is last, and inside a group the newest conversation is first.
+pub fn load_entries(database: &Path) -> Result<Vec<ChatEntry>, String> {
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let connection = Connection::open(database).map_err(|error| error.to_string())?;
+    if !has_view(&connection, "chat_threads") {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT ref, client_id, number, peer_id, opened_by_us, COALESCE(topic, ''),
+                    closed_at,
+                    CASE WHEN last_ts = 0
+                         THEN COALESCE(CAST(strftime('%s', opened_at) AS INTEGER), 0)
+                         ELSE last_ts END,
+                    messages > 0 AND last_from_operator = 0
+             FROM chat_threads",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut entries = statement
+        .query_map([], |row| {
+            Ok(ChatEntry {
+                key: row.get(0)?,
+                client_id: row.get(1)?,
+                number: row.get(2)?,
+                peer_id: row.get(3)?,
+                opened_by_us: row.get(4)?,
+                topic: row.get(5)?,
+                closed_at: row.get(6)?,
+                last_ts: row.get(7)?,
+                waiting: row.get(8)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<SqlResult<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+    group_by_peer(&mut entries);
+    Ok(entries)
+}
+
+/// Sort the entries so that the conversations of one peer are together.
+fn group_by_peer(entries: &mut [ChatEntry]) {
+    let mut newest: std::collections::HashMap<Option<String>, i64> = Default::default();
+    for entry in entries.iter() {
+        let slot = newest.entry(entry.peer_id.clone()).or_insert(i64::MIN);
+        *slot = (*slot).max(entry.last_ts);
+    }
+    entries.sort_by(|a, b| {
+        // `false` sorts first: a peer before the group with no peer.
+        (a.peer_id.is_none(), std::cmp::Reverse(newest[&a.peer_id]), &a.peer_id)
+            .cmp(&(b.peer_id.is_none(), std::cmp::Reverse(newest[&b.peer_id]), &b.peer_id))
+            .then(b.last_ts.cmp(&a.last_ts))
+            .then(a.key.cmp(&b.key))
+    });
+}
+
+/// Whether the database has a table or a view with this name.
+fn has_view(connection: &Connection, name: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?1",
+            [name],
+            |_| Ok(()),
+        )
+        .is_ok()
+}
+
+/// One conversation's messages, oldest first. `from_us` follows the side: on a
+/// served conversation the operator is us, on a mirror the client (this node) is us.
+pub fn get_conversation_messages(
+    database: &Path,
+    client_id: &str,
+    number: i64,
+    opened_by_us: bool,
+) -> SqlResult<Vec<ChatMessageRow>> {
     if !database.exists() {
         return Ok(Vec::new());
     }
     let connection = Connection::open(database)?;
-    if !crate::app::table_exists(&connection, "peer_chat_conversations") {
+    if !table_exists(&connection, "chat_messages") {
         return Ok(Vec::new());
     }
     let mut statement = connection.prepare(
-        "SELECT c.id, c.peer_id, COALESCE(c.topic, ''), c.opened_by_us, c.opened_at, c.closed_at,
-                COALESCE(MAX(m.ts), CAST(strftime('%s', c.opened_at) AS INTEGER)) AS last_ts
-         FROM peer_chat_conversations c
-         LEFT JOIN peer_chat_messages m ON m.conversation_id = c.id
-         GROUP BY c.id",
-    )?;
-    let conversations = statement
-        .query_map([], |row| {
-            Ok(ConversationSummary {
-                id: row.get(0)?,
-                peer_id: row.get(1)?,
-                topic: row.get(2)?,
-                opened_by_us: row.get(3)?,
-                opened_at: row.get(4)?,
-                closed_at: row.get(5)?,
-                last_ts: row.get(6)?,
-            })
-        })?
-        .collect();
-    conversations
-}
-
-/// One thread's messages, oldest first. Mirrors
-/// `src/database/sql_connection.py::get_conversation_messages`.
-pub fn get_conversation_messages(database: &Path, conversation_id: &str) -> SqlResult<Vec<ChatMessageRow>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !crate::app::table_exists(&connection, "peer_chat_messages") {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(&format!(
-        "SELECT from_us, body, ts, {}
-         FROM peer_chat_messages
-         WHERE conversation_id = ?1
-         ORDER BY id ASC",
-        service_columns(&connection)
-    ))?;
-    let messages = statement
-        .query_map([conversation_id], |row| {
-            let ts: i64 = row.get(2)?;
-            Ok(ChatMessageRow {
-                from_us: row.get(0)?,
-                body: row.get(1)?,
-                ts: crate::app::format_unix_timestamp(ts),
-                service: SharedService::from_row(row.get(3)?, row.get(4)?),
-            })
-        })?
-        .collect();
-    messages
-}
-
-/// Every peer with topic-less history, one row each, most recent message first --
-/// the CHAT page's only view onto `peer_chat_messages` rows with no
-/// `conversation_id`, which the old table-of-conversations query could never match.
-pub fn get_untopiced_summaries(database: &Path) -> SqlResult<Vec<UntopicedSummary>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !crate::app::table_exists(&connection, "peer_chat_messages") {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(
-        "SELECT peer_id, COUNT(*), MAX(ts)
-         FROM peer_chat_messages
-         WHERE conversation_id IS NULL
-         GROUP BY peer_id",
-    )?;
-    let summaries = statement
-        .query_map([], |row| {
-            Ok(UntopicedSummary {
-                peer_id: row.get(0)?,
-                message_count: row.get(1)?,
-                last_ts: row.get(2)?,
-            })
-        })?
-        .collect();
-    summaries
-}
-
-/// One peer's topic-less messages, oldest first -- the counterpart of
-/// `get_conversation_messages` for a bucket with no conversation row of its own.
-pub fn get_untopiced_messages(database: &Path, peer_id: &str) -> SqlResult<Vec<ChatMessageRow>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !crate::app::table_exists(&connection, "peer_chat_messages") {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(&format!(
-        "SELECT from_us, body, ts, {}
-         FROM peer_chat_messages
-         WHERE peer_id = ?1 AND conversation_id IS NULL
-         ORDER BY id ASC",
-        service_columns(&connection)
-    ))?;
-    let messages = statement
-        .query_map([peer_id], |row| {
-            let ts: i64 = row.get(2)?;
-            Ok(ChatMessageRow {
-                from_us: row.get(0)?,
-                body: row.get(1)?,
-                ts: crate::app::format_unix_timestamp(ts),
-                service: SharedService::from_row(row.get(3)?, row.get(4)?),
-            })
-        })?
-        .collect();
-    messages
-}
-
-/// One client with a support thread, as `src/database/sql_connection.py::
-/// list_client_chat_threads` lists it.
-#[derive(Debug, Clone)]
-pub struct ClientThreadSummary {
-    pub client_id: String,
-    pub last_ts: i64,
-    /// True when the last message is the client's: the thread waits for an answer.
-    pub waiting: bool,
-}
-
-/// The clients with a support thread, one row each. A client that has a peer bound to
-/// it is left out: its messages are in the peer chat, and `chat_client_reply` refuses
-/// to answer it (`src/manager/chat.py::reply_to_client`). A client that wrote before
-/// it was bound to a peer keeps its old rows, but they are not shown here.
-pub fn get_client_threads(database: &Path) -> SqlResult<Vec<ClientThreadSummary>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !crate::app::table_exists(&connection, "client_chat_messages") {
-        return Ok(Vec::new());
-    }
-    // A database whose `peer` table has no `local_client_id` yet has no bound client.
-    let unbound = if crate::app::column_exists(&connection, "peer", "local_client_id") {
-        "AND m.client_id NOT IN (SELECT local_client_id FROM peer WHERE local_client_id IS NOT NULL)"
-    } else {
-        ""
-    };
-    let mut statement = connection.prepare(&format!(
-        "SELECT m.client_id, m.ts, m.from_operator
-         FROM client_chat_messages m
-         WHERE m.sequence = (SELECT MAX(sequence) FROM client_chat_messages
-                             WHERE client_id = m.client_id)
-           {unbound}
-         ORDER BY m.ts DESC, m.client_id"
-    ))?;
-    let threads = statement
-        .query_map([], |row| {
-            Ok(ClientThreadSummary {
-                client_id: row.get(0)?,
-                last_ts: row.get(1)?,
-                waiting: !row.get::<_, bool>(2)?,
-            })
-        })?
-        .collect();
-    threads
-}
-
-/// One client's support thread, oldest first. `from_us` is the operator's side.
-pub fn get_client_messages(database: &Path, client_id: &str) -> SqlResult<Vec<ChatMessageRow>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !crate::app::table_exists(&connection, "client_chat_messages") {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(
-        "SELECT from_operator, body, ts
-         FROM client_chat_messages
-         WHERE client_id = ?1
+        "SELECT from_operator, body, ts, service_id, service_metadata
+         FROM chat_messages
+         WHERE client_id = ?1 AND conversation = ?2
          ORDER BY sequence ASC",
     )?;
     let messages = statement
-        .query_map([client_id], |row| {
+        .query_map(rusqlite::params![client_id, number], |row| {
             let ts: i64 = row.get(2)?;
+            let from_operator: bool = row.get(0)?;
             Ok(ChatMessageRow {
-                from_us: row.get(0)?,
+                from_us: from_operator != opened_by_us,
                 body: row.get(1)?,
                 ts: crate::app::format_unix_timestamp(ts),
-                service: None,
+                service: SharedService::from_row(row.get(3)?, row.get(4)?),
             })
         })?
         .collect();
     messages
-}
-
-/// Every topic this peer has already used, most recently opened first -- what the
-/// "pick a topic" wizard step offers alongside "+ New topic…". Never enforced (a
-/// topic is a label, not a key), so this is convenience only: reusing one does not
-/// reopen that thread, it just starts a new one with the same label.
-pub fn get_conversation_topics(database: &Path, peer_id: &str) -> SqlResult<Vec<String>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !crate::app::table_exists(&connection, "peer_chat_conversations") {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(
-        "SELECT topic, MAX(opened_at) AS last_opened
-         FROM peer_chat_conversations
-         WHERE peer_id = ?1 AND topic <> ''
-         GROUP BY topic
-         ORDER BY last_opened DESC",
-    )?;
-    let topics = statement
-        .query_map([peer_id], |row| row.get::<_, String>(0))?
-        .collect();
-    topics
-}
-
-/// The sidebar's whole model: every conversation and every topic-less bucket, merged
-/// and sorted by `last_ts` descending -- a thread that just got a reply reads as
-/// current, same as a peer who just sent a fresh topic-less message.
-pub fn load_entries(database: &Path) -> Result<Vec<ChatEntry>, String> {
-    let conversations = get_conversations(database).map_err(|error| error.to_string())?;
-    let untopiced = get_untopiced_summaries(database).map_err(|error| error.to_string())?;
-    let clients = get_client_threads(database).map_err(|error| error.to_string())?;
-
-    let mut entries: Vec<ChatEntry> = conversations
-        .into_iter()
-        .map(|conversation| ChatEntry {
-            key: conversation.id.clone(),
-            peer_id: conversation.peer_id,
-            topic: conversation.topic,
-            last_ts: conversation.last_ts,
-            kind: ChatEntryKind::Conversation {
-                conversation_id: conversation.id,
-                opened_by_us: conversation.opened_by_us,
-                closed_at: conversation.closed_at,
-            },
-        })
-        .collect();
-    entries.extend(untopiced.into_iter().map(|summary| ChatEntry {
-        key: format!("untopic:{}", summary.peer_id),
-        peer_id: summary.peer_id.clone(),
-        topic: String::new(),
-        last_ts: summary.last_ts,
-        kind: ChatEntryKind::Untopiced {
-            peer_id: summary.peer_id,
-        },
-    }));
-    entries.extend(clients.into_iter().map(|thread| ChatEntry {
-        key: format!("client:{}", thread.client_id),
-        peer_id: thread.client_id.clone(),
-        topic: String::new(),
-        last_ts: thread.last_ts,
-        kind: ChatEntryKind::Client {
-            client_id: thread.client_id,
-            waiting: thread.waiting,
-        },
-    }));
-    entries.sort_by(|a, b| b.last_ts.cmp(&a.last_ts));
-    Ok(entries)
 }
 
 impl App {
@@ -532,9 +346,8 @@ impl App {
 
     // --- New chat wizard: peer -> topic -> message --------------------------
 
-    /// Step 1: start a new chat by picking a peer. `nodo chat_open` still mints the
-    /// conversation and needs the peer named up front -- this just replaces the old
-    /// one-line `<peer_id> <topic...>` prompt with three focused steps.
+    /// Step 1: start a new chat by picking a peer. `nodo chat_open` needs the peer
+    /// named up front, and it opens a new conversation each time.
     pub fn open_new_chat_wizard(&mut self) {
         if self.page() != Page::Chat {
             return;
@@ -577,6 +390,7 @@ impl App {
         self.chat_wizard_peer_index = 0;
     }
 
+    /// Step 2: the peer is picked. Ask for the topic: it is always required.
     pub(crate) fn submit_chat_peer_pick(&mut self) {
         let Some(peer_id) = self
             .filtered_chat_peers()
@@ -586,44 +400,11 @@ impl App {
             self.status = "No peer matches; type less, or Esc to cancel".to_string();
             return;
         };
-        self.chat_wizard_peer_id = Some(peer_id.clone());
-        self.chat_wizard_topics =
-            get_conversation_topics(&self.paths.database, &peer_id).unwrap_or_default();
-        self.chat_wizard_topic_index = 0;
-        self.input_mode = InputMode::PickChatTopic;
-        self.input_title = format!("New chat with {} — pick a topic", shorten(&peer_id, 18));
-        self.status = "↑/↓ choose • Enter next • Esc cancel".to_string();
-    }
-
-    /// Step 2: pick a topic already used with this peer, or start a new one. `+1` for
-    /// the leading "+ New topic…" row, which is not itself one of `chat_wizard_topics`.
-    pub fn move_chat_topic_selection(&mut self, delta: i32) {
-        let count = self.chat_wizard_topics.len() + 1;
-        let current = self.chat_wizard_topic_index as i32;
-        self.chat_wizard_topic_index = (current + delta).rem_euclid(count as i32) as usize;
-    }
-
-    pub(crate) fn submit_chat_topic_pick(&mut self) {
-        let Some(peer_id) = self.chat_wizard_peer_id.clone() else {
-            self.close_input();
-            return;
-        };
-        if self.chat_wizard_topic_index == 0 {
-            self.input_mode = InputMode::NewChatTopic;
-            self.input.clear();
-            self.input_title = format!("New chat with {} — topic", shorten(&peer_id, 18));
-            self.edit_kind = EditKind::Text;
-            return;
-        }
-        let Some(topic) = self
-            .chat_wizard_topics
-            .get(self.chat_wizard_topic_index - 1)
-            .cloned()
-        else {
-            self.close_input();
-            return;
-        };
-        self.open_chat_compose(ChatCompose::NewConversation { peer_id, topic });
+        self.input_mode = InputMode::NewChatTopic;
+        self.input.clear();
+        self.input_title = format!("New chat with {} — topic", shorten(&peer_id, 18));
+        self.chat_wizard_peer_id = Some(peer_id);
+        self.edit_kind = EditKind::Text;
     }
 
     pub(crate) fn submit_new_chat_topic(&mut self) {
@@ -646,13 +427,7 @@ impl App {
             ChatCompose::NewConversation { peer_id, topic } => {
                 format!("Message to {} — {}", shorten(peer_id, 18), topic)
             }
-            ChatCompose::Reply { peer_id, .. } => format!("Reply to {}", shorten(peer_id, 18)),
-            ChatCompose::ReplyUntopiced { peer_id } => {
-                format!("Message to {} (no topic)", shorten(peer_id, 18))
-            }
-            ChatCompose::ReplyClient { client_id } => {
-                format!("Answer client {}", shorten(client_id, 18))
-            }
+            ChatCompose::Reply { who, .. } => format!("Reply to {who}"),
         };
         self.chat_compose = Some(target);
         self.input.clear();
@@ -661,9 +436,8 @@ impl App {
         self.back_to_compose();
     }
 
-    /// Reply in the selected entry: an open thread, or a topic-less peer's flat
-    /// history. Mirrors what `o` starts from scratch, but with the peer (and, for a
-    /// thread, the topic) already settled.
+    /// Reply in the selected conversation, of either kind. `nodo chat_reply` decides
+    /// what to do: answer as the operator, or send to the peer.
     pub fn open_reply_prompt(&mut self) {
         if self.page() != Page::Chat {
             return;
@@ -676,28 +450,14 @@ impl App {
             self.status = "Select a chat first".to_string();
             return;
         };
-        match entry.kind {
-            ChatEntryKind::Conversation {
-                conversation_id,
-                closed_at,
-                ..
-            } => {
-                if closed_at.is_some() {
-                    self.status = "Closed; press R to reopen before replying".to_string();
-                    return;
-                }
-                self.open_chat_compose(ChatCompose::Reply {
-                    conversation_id,
-                    peer_id: entry.peer_id,
-                });
-            }
-            ChatEntryKind::Untopiced { peer_id } => {
-                self.open_chat_compose(ChatCompose::ReplyUntopiced { peer_id });
-            }
-            ChatEntryKind::Client { client_id, .. } => {
-                self.open_chat_compose(ChatCompose::ReplyClient { client_id });
-            }
+        if entry.closed_at.is_some() {
+            self.status = "Closed; press R to reopen before replying".to_string();
+            return;
         }
+        self.open_chat_compose(ChatCompose::Reply {
+            who: entry.them_name(),
+            conversation_ref: entry.key,
+        });
     }
 
     pub(crate) fn submit_chat_compose(&mut self) {
@@ -710,8 +470,6 @@ impl App {
         let body = self.input.trim_end_matches('\n').to_string();
         // An attached service is a message on its own (issue #438).
         let attachment = self.chat_attachment.clone();
-        // The support thread of a client takes text only (`reply_to_client`).
-        let attachment = attachment.filter(|_| !matches!(target, ChatCompose::ReplyClient { .. }));
         if body.trim().is_empty() && attachment.is_none() {
             self.status = "Type a message first".to_string();
             return;
@@ -724,10 +482,6 @@ impl App {
     /// `Ctrl+A` or the Attach button: pick one of this node's services to share.
     pub fn open_chat_service_picker(&mut self) {
         if self.input_mode != InputMode::ComposeChatMessage {
-            return;
-        }
-        if matches!(self.chat_compose, Some(ChatCompose::ReplyClient { .. })) {
-            self.status = "A support answer is text only: no service can be attached".to_string();
             return;
         }
         // Row 0 is "no attachment"; start on whatever is attached now.
@@ -792,11 +546,9 @@ impl App {
         }
     }
 
-    /// Close the selected conversation. Local bookkeeping only -- the peer is
+    /// Close the selected conversation. Local bookkeeping only -- the other side is
     /// never told, and nothing here waits on a reply, so it is a direct action
     /// rather than a confirmation: reversible with `R`, unlike forgetting a peer.
-    /// A no-op, not an error, on a topic-less bucket: there is no conversation row
-    /// to close.
     pub fn close_selected_conversation(&mut self) {
         if self.page() != Page::Chat {
             return;
@@ -809,24 +561,14 @@ impl App {
             self.status = "Select a chat first".to_string();
             return;
         };
-        let ChatEntryKind::Conversation {
-            conversation_id,
-            closed_at,
-            ..
-        } = entry.kind
-        else {
-            self.status = "Topic-less messages and client support threads have no conversation to close"
-                .to_string();
-            return;
-        };
-        if closed_at.is_some() {
-            self.status = format!("{} is already closed", shorten(&conversation_id, 18));
+        if entry.closed_at.is_some() {
+            self.status = format!("{} is already closed", shorten(&entry.key, 18));
             return;
         }
         self.spawn_command(
             CommandKind::Generic,
             "Close conversation".to_string(),
-            vec!["chat_close".to_string(), conversation_id],
+            vec!["chat_close".to_string(), entry.key],
         );
     }
 
@@ -843,30 +585,20 @@ impl App {
             self.status = "Select a chat first".to_string();
             return;
         };
-        let ChatEntryKind::Conversation {
-            conversation_id,
-            closed_at,
-            ..
-        } = entry.kind
-        else {
-            self.status = "Topic-less messages and client support threads have no conversation to reopen"
-                .to_string();
-            return;
-        };
-        if closed_at.is_none() {
-            self.status = format!("{} is already open", shorten(&conversation_id, 18));
+        if entry.closed_at.is_none() {
+            self.status = format!("{} is already open", shorten(&entry.key, 18));
             return;
         }
         self.spawn_command(
             CommandKind::Generic,
             "Reopen conversation".to_string(),
-            vec!["chat_reopen".to_string(), conversation_id],
+            vec!["chat_reopen".to_string(), entry.key],
         );
     }
 }
 
-/// The `nodo` invocation a sent compose box turns into: which of the three chat
-/// subcommands, the text if there is any, and `--service` for an attached card.
+/// The `nodo` invocation a sent compose box turns into: `chat_open` or `chat_reply`,
+/// the text if there is any, and `--service` for an attached card.
 pub(crate) fn chat_compose_command(
     target: ChatCompose,
     body: String,
@@ -882,22 +614,10 @@ pub(crate) fn chat_compose_command(
             }
             (label, args)
         }
-        ChatCompose::Reply { conversation_id, .. } => (
+        ChatCompose::Reply { conversation_ref, .. } => (
             "Reply".to_string(),
-            ["chat_reply".to_string(), conversation_id].into_iter().chain(text).collect(),
+            ["chat_reply".to_string(), conversation_ref].into_iter().chain(text).collect(),
         ),
-        ChatCompose::ReplyUntopiced { peer_id } => (
-            "Message".to_string(),
-            ["chat".to_string(), peer_id].into_iter().chain(text).collect(),
-        ),
-        // No `--service`: `attachment` is dropped for this target, and the command
-        // takes only the text.
-        ChatCompose::ReplyClient { client_id } => {
-            return (
-                format!("Answer client {}", shorten(&client_id, 18)),
-                ["chat_client_reply".to_string(), client_id].into_iter().chain(text).collect(),
-            );
-        }
     };
     if let Some(service) = attachment {
         args.extend(["--service".to_string(), service.id.clone()]);
@@ -906,7 +626,7 @@ pub(crate) fn chat_compose_command(
 }
 
 /// The CHAT sidebar's columns (issue #453). The peer column is wide enough for the
-/// `→ abc...xyz` it always holds and outlasts the topic, which is in the
+/// `→ abc...xyz` it always holds (a client with no peer reads `← @abc...xyz`) and outlasts the topic, which is in the
 /// conversation pane's title as well.
 pub(crate) const SIDEBAR_COLUMNS: [Column; 2] = [
     Column::new("Chat", Constraint::Length(16), 11, 0),
@@ -971,31 +691,23 @@ fn draw_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
         .items
         .iter()
         .map(|entry| {
-            let (glyph, row_color) = match &entry.kind {
-                ChatEntryKind::Conversation {
-                    opened_by_us,
-                    closed_at,
-                    ..
-                } => {
-                    let glyph = if *opened_by_us { "→" } else { "←" };
-                    let color = if closed_at.is_some() { muted() } else { good() };
-                    (glyph, color)
-                }
-                ChatEntryKind::Untopiced { .. } => ("•", muted()),
-                // A client that waits for an answer stands out from one that has it.
-                ChatEntryKind::Client { waiting: true, .. } => ("◆", warn()),
-                ChatEntryKind::Client { waiting: false, .. } => ("◇", muted()),
+            // `→`: this node opened it with a peer. `←`: a client of this node opened it.
+            let glyph = if entry.opened_by_us { "→" } else { "←" };
+            // A conversation that waits for this node stands out. `◇` marks one that
+            // waits for the other node.
+            let (marker, row_color) = if entry.closed_at.is_some() {
+                ("", muted())
+            } else if entry.waits_for_us() {
+                ("◆ ", warn())
+            } else if entry.waits_for_peer() {
+                ("◇ ", good())
+            } else {
+                ("", good())
             };
+            let topic = if entry.topic.is_empty() { "(no topic)" } else { entry.topic.as_str() };
             let cells: Vec<TextCell> = vec![
-                format!("{glyph} {}", short_peer_name(&entry.peer_id)).into(),
-                if let ChatEntryKind::Client { waiting, .. } = &entry.kind {
-                    if *waiting { "waiting" } else { "answered" }.to_string()
-                } else if entry.topic.is_empty() {
-                    "(no topic)".to_string()
-                } else {
-                    entry.topic.clone()
-                }
-                .into(),
+                format!("{glyph} {}", entry.sidebar_name()).into(),
+                format!("{marker}{topic}").into(),
             ];
             (cells, Style::default().fg(row_color))
         })
@@ -1042,26 +754,20 @@ fn draw_conversation(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     };
 
-    let status_word = match &entry.kind {
-        ChatEntryKind::Conversation { closed_at, .. } => {
-            if closed_at.is_some() {
-                "closed"
-            } else {
-                "open"
-            }
-        }
-        ChatEntryKind::Untopiced { .. } => "no topic",
-        ChatEntryKind::Client { waiting: true, .. } => "waiting for an answer",
-        ChatEntryKind::Client { waiting: false, .. } => "answered",
+    let status_word = if entry.closed_at.is_some() {
+        "closed"
+    } else if entry.waits_for_us() {
+        "waiting for an answer"
+    } else if entry.waits_for_peer() {
+        "waiting for the other node"
+    } else {
+        "open"
     };
-    let topic_display = match &entry.kind {
-        ChatEntryKind::Client { .. } => "client support",
-        _ if entry.topic.is_empty() => "(no topic)",
-        _ => &entry.topic,
-    };
+    let topic_display = if entry.topic.is_empty() { "(no topic)" } else { &entry.topic };
     let title = format!(
-        " {}  •  {}  •  {} ",
-        short_peer_name(&entry.peer_id),
+        " {}  •  {}  •  {}  •  {} ",
+        entry.them_name(),
+        entry.key,
         topic_display,
         status_word
     );
@@ -1073,7 +779,7 @@ fn draw_conversation(frame: &mut Frame, app: &mut App, area: Rect) {
     // terminal's width -- clicking the title row copies it either way (issue:
     // click-to-copy full IDs).
     app.id_copy_areas.push((
-        entry.peer_id.clone(),
+        entry.them_id().to_string(),
         Rect { x: area.x, y: area.y, width: area.width, height: 1 },
     ));
 
@@ -1112,7 +818,7 @@ fn message_lines(message: &ChatMessageRow, entry: &ChatEntry) -> Vec<Line<'stati
     let who = if message.from_us {
         "us".to_string()
     } else {
-        short_peer_name(&entry.peer_id)
+        entry.them_name()
     };
     let mut body_lines = message.body.split('\n');
     let first = body_lines.next().unwrap_or("");
@@ -1324,22 +1030,9 @@ fn draw_compose_box(frame: &mut Frame, app: &mut App, area: Rect) {
     // Buttons to the right of the input, aligned with its first row of text.
     let buttons = split[1];
     let button = Style::default().fg(accent()).add_modifier(Modifier::BOLD);
-    // A support answer is text only, so it has no Attach button (and no click area).
-    if matches!(app.chat_compose, Some(ChatCompose::ReplyClient { .. })) {
-        app.chat_attach_area = Rect::ZERO;
-    } else {
-        app.chat_attach_area = Rect::new(
-            buttons.x + 1,
-            buttons.y + 1,
-            ATTACH_BUTTON.len() as u16,
-            1,
-        )
-        .intersection(buttons);
-        frame.render_widget(
-            Paragraph::new(Span::styled(ATTACH_BUTTON, button)),
-            app.chat_attach_area,
-        );
-    }
+    app.chat_attach_area =
+        Rect::new(buttons.x + 1, buttons.y + 1, ATTACH_BUTTON.len() as u16, 1).intersection(buttons);
+    frame.render_widget(Paragraph::new(Span::styled(ATTACH_BUTTON, button)), app.chat_attach_area);
     // Sending with the mouse (issue #438): the chord that sends is the one key in
     // this interface a terminal may not be able to deliver -- see handler.rs.
     app.chat_send_area =
@@ -1486,71 +1179,6 @@ pub fn draw_peer_picker(frame: &mut Frame, app: &App) {
     );
 }
 
-/// Step 2's popup: this peer's existing topics, plus "+ New topic…" leading them.
-pub fn draw_topic_picker(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, (app.chat_wizard_topics.len() as u16 + 8).max(9), frame.size());
-    frame.render_widget(Clear, area);
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(accent()))
-        .style(Style::default().fg(text_colour()).bg(popup_background()))
-        .title(Span::styled(
-            format!(" {} ", app.input_title.to_uppercase()),
-            Style::default().fg(accent()).bold(),
-        ));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    let new_topic_selected = app.chat_wizard_topic_index == 0;
-    lines.push(Line::from(vec![
-        Span::styled(
-            if new_topic_selected { "▸ " } else { "  " },
-            Style::default().fg(accent()).bold(),
-        ),
-        Span::styled(
-            "+ New topic…",
-            if new_topic_selected {
-                Style::default().fg(good()).bold()
-            } else {
-                Style::default().fg(good())
-            },
-        ),
-    ]));
-    for (index, topic) in app.chat_wizard_topics.iter().enumerate() {
-        let selected = app.chat_wizard_topic_index == index + 1;
-        lines.push(Line::from(vec![
-            Span::styled(
-                if selected { "▸ " } else { "  " },
-                Style::default().fg(accent()).bold(),
-            ),
-            Span::styled(
-                topic.clone(),
-                if selected {
-                    Style::default().fg(text_colour()).bold()
-                } else {
-                    Style::default().fg(muted())
-                },
-            ),
-        ]));
-    }
-    if app.chat_wizard_topics.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No topic used with this peer yet.",
-            Style::default().fg(muted()),
-        )));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "↑/↓ choose  ·  ⏎ next  ·  Esc cancel",
-        Style::default().fg(warn()),
-    )));
-    frame.render_widget(
-        Paragraph::new(lines).style(Style::default().fg(text_colour()).bg(popup_background())),
-        inner,
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1578,7 +1206,7 @@ mod tests {
     fn chat_database(dir: &Path) -> PathBuf {
         let path = dir.join("database.sqlite");
         let connection = Connection::open(&path).unwrap();
-        for table in ["peer", "peer_chat_conversations", "peer_chat_messages"] {
+        for table in ["peer", "chat_conversations", "chat_messages", "chat_threads"] {
             connection.execute_batch(&migration_table(table)).unwrap();
         }
         connection
@@ -1589,6 +1217,43 @@ mod tests {
             )
             .unwrap();
         path
+    }
+
+    /// A conversation row. `remote` is the peer of a mirror, NULL when served here.
+    fn conversation(
+        connection: &Connection,
+        client_id: &str,
+        number: i64,
+        remote: Option<&str>,
+        topic: &str,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO chat_conversations (client_id, number, remote_peer_id, topic,
+                                                 opened_at)
+                 VALUES (?1, ?2, ?3, ?4, '2020-01-01 00:00:00')",
+                rusqlite::params![client_id, number, remote, topic],
+            )
+            .unwrap();
+    }
+
+    fn message(
+        connection: &Connection,
+        client_id: &str,
+        sequence: i64,
+        conversation: i64,
+        from_operator: i64,
+        body: &str,
+        ts: i64,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO chat_messages (client_id, sequence, conversation, from_operator,
+                                            body, ts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![client_id, sequence, conversation, from_operator, body, ts],
+            )
+            .unwrap();
     }
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -1614,147 +1279,156 @@ mod tests {
     }
 
     #[test]
-    fn conversations_carry_both_directions_against_the_real_schema() {
-        let dir = temp_dir("schema");
+    fn a_mirror_and_a_served_conversation_of_one_peer_are_grouped_under_it() {
+        let dir = temp_dir("grouped");
         let database = chat_database(&dir);
         let connection = Connection::open(&database).unwrap();
+        // A mirror: this node is the client `ours` of `peer-1`.
+        conversation(&connection, "ours", 1, Some("peer-1"), "ping");
+        message(&connection, "ours", 1, 1, 0, "hi", 100);
+        // A served one: `theirs` is a client of this node, bound to `peer-1`.
+        connection.execute_batch("UPDATE peer SET local_client_id = 'theirs'").unwrap();
+        conversation(&connection, "theirs", 1, None, "help");
+        message(&connection, "theirs", 1, 1, 0, "please", 200);
+        // A conversation of another peer, in between by age.
         connection
-            .execute(
-                "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us, topic)
-                 VALUES ('conv-ours', 'peer-1', 1, 'ping')",
-                [],
+            .execute_batch(
+                "INSERT INTO peer (id, advertisement, remote_client_id, balance_mu,
+                                   reputation_score) VALUES ('peer-2', NULL, NULL, '0', 0)",
             )
             .unwrap();
-        connection
-            .execute(
-                "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us, topic, closed_at)
-                 VALUES ('conv-theirs', 'peer-1', 0, '', '2026-01-01 00:00:00')",
-                [],
-            )
-            .unwrap();
+        conversation(&connection, "ours2", 1, Some("peer-2"), "other");
+        message(&connection, "ours2", 1, 1, 0, "x", 150);
 
-        let conversations = get_conversations(&database).expect("must survive the real schema");
-        assert_eq!(conversations.len(), 2, "both directions in one list now");
-        let ours = conversations.iter().find(|c| c.id == "conv-ours").unwrap();
-        assert!(ours.opened_by_us);
-        assert_eq!(ours.topic, "ping");
-        assert!(ours.closed_at.is_none());
-        let theirs = conversations.iter().find(|c| c.id == "conv-theirs").unwrap();
-        assert!(!theirs.opened_by_us);
-        assert!(theirs.closed_at.is_some());
+        let entries = load_entries(&database).unwrap();
+
+        let order: Vec<(&str, Option<&str>, bool)> = entries
+            .iter()
+            .map(|e| (e.key.as_str(), e.peer_id.as_deref(), e.opened_by_us))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                ("theirs#1", Some("peer-1"), false),
+                ("ours#1", Some("peer-1"), true),
+                ("ours2#1", Some("peer-2"), true),
+            ],
+            "peer-1 holds both kinds and comes first: its newest message is the newest"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn conversation_messages_are_read_oldest_first() {
-        let dir = temp_dir("messages");
+    fn a_served_conversation_of_a_client_with_no_peer_is_listed_under_no_peer() {
+        let dir = temp_dir("nopeer");
         let database = chat_database(&dir);
         let connection = Connection::open(&database).unwrap();
-        connection
-            .execute(
-                "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us)
-                 VALUES ('conv-1', 'peer-1', 1)",
-                [],
-            )
-            .unwrap();
-        for (from_us, body, ts) in [(1, "hi", 1_700_000_000), (0, "hi back", 1_700_000_060)] {
-            connection
-                .execute(
-                    "INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
-                     VALUES ('peer-1', ?1, ?2, ?3, 'conv-1')",
-                    rusqlite::params![from_us, body, ts],
-                )
-                .unwrap();
-        }
+        conversation(&connection, "plain", 1, None, "support");
+        message(&connection, "plain", 1, 1, 0, "hola", 5_000);
+        conversation(&connection, "ours", 1, Some("peer-1"), "ping");
+        message(&connection, "ours", 1, 1, 0, "hi", 100);
 
-        let messages = get_conversation_messages(&database, "conv-1").unwrap();
-        assert_eq!(messages.len(), 2);
-        assert!(messages[0].from_us);
-        assert_eq!(messages[0].body, "hi");
-        assert!(!messages[1].from_us);
+        let entries = load_entries(&database).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].key, "ours#1", "the no-peer group is last, even if newer");
+        assert_eq!(entries[1].key, "plain#1");
+        assert_eq!(entries[1].peer_id, None);
+        assert!(!entries[1].opened_by_us);
+        assert_eq!(entries[1].them_id(), "plain");
+        assert!(entries[1].them_name().starts_with("client "));
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn topicless_messages_are_grouped_by_peer_and_reachable_at_last() {
-        // The whole point of `Untopiced`: a message with no `conversation_id` used to
-        // be invisible in the TUI, reachable only through `nodo chat`/`show_chat`.
-        let dir = temp_dir("untopiced");
+    fn an_empty_conversation_sorts_by_its_opening_and_keeps_its_closing() {
+        let dir = temp_dir("opening");
         let database = chat_database(&dir);
         let connection = Connection::open(&database).unwrap();
-        for (body, ts) in [("hello", 1_700_000_000), ("anyone there?", 1_700_000_100)] {
-            connection
-                .execute(
-                    "INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
-                     VALUES ('peer-1', 0, ?1, ?2, NULL)",
-                    rusqlite::params![body, ts],
-                )
-                .unwrap();
-        }
-
-        let summaries = get_untopiced_summaries(&database).unwrap();
-        assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].peer_id, "peer-1");
-        assert_eq!(summaries[0].message_count, 2);
-        assert_eq!(summaries[0].last_ts, 1_700_000_100);
-
-        let messages = get_untopiced_messages(&database, "peer-1").unwrap();
-        assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].body, "hello");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn load_entries_merges_conversations_and_untopiced_by_recency() {
-        let dir = temp_dir("merge");
-        let database = chat_database(&dir);
-        let connection = Connection::open(&database).unwrap();
-        // An old conversation with no messages of its own (falls back to opened_at)...
+        conversation(&connection, "ours", 1, Some("peer-1"), "");
         connection
-            .execute(
-                "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us, opened_at)
-                 VALUES ('conv-old', 'peer-1', 1, '2020-01-01 00:00:00')",
-                [],
-            )
-            .unwrap();
-        // ...and a topic-less message far more recent than it.
-        connection
-            .execute(
-                "INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
-                 VALUES ('peer-1', 0, 'just now', 2000000000, NULL)",
-                [],
-            )
+            .execute_batch("UPDATE chat_conversations SET closed_at = '2026-01-01 00:00:00'")
             .unwrap();
 
         let entries = load_entries(&database).unwrap();
-        assert_eq!(entries.len(), 2);
-        assert!(
-            matches!(entries[0].kind, ChatEntryKind::Untopiced { .. }),
-            "the more recent topic-less bucket sorts first"
-        );
-        assert_eq!(entries[0].key, "untopic:peer-1");
+
+        assert_eq!(entries[0].last_ts, 1_577_836_800, "opened_at as unix seconds");
+        assert!(entries[0].closed_at.is_some());
+        assert!(!entries[0].waiting, "no message, nothing to wait for");
+        assert!(entries[0].topic.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn get_conversation_topics_lists_distinct_topics_only() {
-        let dir = temp_dir("topics");
+    fn the_waiting_marker_follows_who_wrote_last_on_each_side() {
+        let dir = temp_dir("waiting");
         let database = chat_database(&dir);
         let connection = Connection::open(&database).unwrap();
-        for (id, topic) in [("c1", "billing"), ("c2", "billing"), ("c3", "uptime")] {
-            connection
-                .execute(
-                    "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us, topic)
-                     VALUES (?1, 'peer-1', 1, ?2)",
-                    rusqlite::params![id, topic],
-                )
-                .unwrap();
+        // Served, the client wrote last: it waits for us.
+        conversation(&connection, "c1", 1, None, "a");
+        message(&connection, "c1", 1, 1, 0, "q", 10);
+        // Served, the operator wrote last: answered.
+        conversation(&connection, "c2", 1, None, "b");
+        message(&connection, "c2", 1, 1, 0, "q", 10);
+        message(&connection, "c2", 2, 1, 1, "a", 11);
+        // Mirror, our message is last: it waits for the other node.
+        conversation(&connection, "m1", 1, Some("peer-1"), "c");
+        message(&connection, "m1", 1, 1, 0, "q", 10);
+        // Mirror, the operator of the other node wrote last: answered.
+        conversation(&connection, "m2", 1, Some("peer-1"), "d");
+        message(&connection, "m2", 1, 1, 0, "q", 10);
+        message(&connection, "m2", 2, 1, 1, "a", 11);
+
+        let entries = load_entries(&database).unwrap();
+        let find = |key: &str| entries.iter().find(|e| e.key == key).unwrap();
+
+        assert!(find("c1#1").waits_for_us() && !find("c1#1").waits_for_peer());
+        assert!(!find("c2#1").waits_for_us() && !find("c2#1").waits_for_peer());
+        assert!(find("m1#1").waits_for_peer() && !find("m1#1").waits_for_us());
+        assert!(!find("m2#1").waits_for_us() && !find("m2#1").waits_for_peer());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_closed_conversation_does_not_wait() {
+        let mut entry = entry_of("c#1", false);
+        entry.waiting = true;
+        assert!(entry.waits_for_us());
+        entry.closed_at = Some("2026-01-01 00:00:00".to_string());
+        assert!(!entry.waits_for_us() && !entry.waits_for_peer());
+    }
+
+    #[test]
+    fn us_and_them_are_mapped_per_side() {
+        let dir = temp_dir("sides");
+        let database = chat_database(&dir);
+        let connection = Connection::open(&database).unwrap();
+        for (client, remote) in [("served", None), ("mirror", Some("peer-1"))] {
+            conversation(&connection, client, 1, remote, "t");
+            message(&connection, client, 1, 1, 0, "from the client", 1_700_000_000);
+            message(&connection, client, 2, 1, 1, "from the operator", 1_700_000_060);
+            // Another conversation of the same client must not leak in.
+            conversation(&connection, client, 2, remote, "other");
+            message(&connection, client, 3, 2, 1, "elsewhere", 1_700_000_090);
         }
 
-        let topics = get_conversation_topics(&database, "peer-1").unwrap();
-        assert_eq!(topics.len(), 2);
-        assert!(topics.contains(&"billing".to_string()));
-        assert!(topics.contains(&"uptime".to_string()));
+        let served = get_conversation_messages(&database, "served", 1, false).unwrap();
+        let read: Vec<(bool, &str)> = served.iter().map(|m| (m.from_us, m.body.as_str())).collect();
+        assert_eq!(read, [(false, "from the client"), (true, "from the operator")]);
+
+        let mirror = get_conversation_messages(&database, "mirror", 1, true).unwrap();
+        let read: Vec<(bool, &str)> = mirror.iter().map(|m| (m.from_us, m.body.as_str())).collect();
+        assert_eq!(read, [(true, "from the client"), (false, "from the operator")]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_database_without_the_chat_tables_reads_as_empty() {
+        let dir = temp_dir("missing");
+        let database = dir.join("database.sqlite");
+        Connection::open(&database).unwrap();
+        assert!(load_entries(&database).unwrap().is_empty());
+        assert!(get_conversation_messages(&database, "c", 1, false).unwrap().is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1768,6 +1442,21 @@ mod tests {
         app
     }
 
+    fn entry_of(key: &str, opened_by_us: bool) -> ChatEntry {
+        let (client_id, number) = key.split_once('#').unwrap();
+        ChatEntry {
+            key: key.to_string(),
+            client_id: client_id.to_string(),
+            number: number.parse().unwrap(),
+            peer_id: Some("peer-1".to_string()),
+            opened_by_us,
+            topic: "ping".to_string(),
+            closed_at: None,
+            last_ts: 0,
+            waiting: false,
+        }
+    }
+
     #[test]
     fn the_wizard_walks_peer_then_topic_then_compose() {
         let mut app = on_chat_page(vec![peer("peer-abc"), peer("peer-xyz")]);
@@ -1777,12 +1466,12 @@ mod tests {
         app.chat_wizard_peer_filter = "xyz".to_string();
         app.chat_peer_filter_changed();
         app.submit_chat_peer_pick();
-        assert_eq!(app.input_mode, InputMode::PickChatTopic);
+        assert_eq!(app.input_mode, InputMode::NewChatTopic, "the topic is always typed");
         assert_eq!(app.chat_wizard_peer_id.as_deref(), Some("peer-xyz"));
 
-        // No prior topics with this peer, so index 0 is always "+ New topic…".
-        app.submit_chat_topic_pick();
-        assert_eq!(app.input_mode, InputMode::NewChatTopic);
+        app.input = "   ".to_string();
+        app.submit_new_chat_topic();
+        assert_eq!(app.input_mode, InputMode::NewChatTopic, "an empty topic is refused");
 
         app.input = "status".to_string();
         app.submit_new_chat_topic();
@@ -1795,37 +1484,9 @@ mod tests {
     }
 
     #[test]
-    fn picking_an_existing_topic_skips_the_free_text_step() {
-        let mut app = on_chat_page(vec![peer("peer-abc")]);
-        app.open_new_chat_wizard();
-        app.submit_chat_peer_pick();
-        app.chat_wizard_topics = vec!["billing".to_string()];
-        app.chat_wizard_topic_index = 1; // "billing", not "+ New topic…"
-
-        app.submit_chat_topic_pick();
-
-        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
-        assert!(matches!(
-            app.chat_compose,
-            Some(ChatCompose::NewConversation { ref topic, .. }) if topic == "billing"
-        ));
-    }
-
-    #[test]
     fn an_empty_compose_is_rejected_before_anything_is_sent() {
         let mut app = on_chat_page(vec![peer("peer-abc")]);
-        app.conversations = StatefulList::with_items(vec![ChatEntry {
-            key: "conv-1".to_string(),
-            peer_id: "peer-abc".to_string(),
-            topic: "ping".to_string(),
-            last_ts: 0,
-            kind: ChatEntryKind::Conversation {
-                conversation_id: "conv-1".to_string(),
-                opened_by_us: true,
-                closed_at: None,
-            },
-        }]);
-        app.conversations.next();
+        one_conversation(&mut app);
 
         app.open_reply_prompt();
         assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
@@ -1839,17 +1500,9 @@ mod tests {
     #[test]
     fn replying_to_a_closed_conversation_is_refused() {
         let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![ChatEntry {
-            key: "conv-1".to_string(),
-            peer_id: "peer-1".to_string(),
-            topic: "ping".to_string(),
-            last_ts: 0,
-            kind: ChatEntryKind::Conversation {
-                conversation_id: "conv-1".to_string(),
-                opened_by_us: true,
-                closed_at: Some("2026-01-02 00:00:00".to_string()),
-            },
-        }]);
+        let mut entry = entry_of("c#1", true);
+        entry.closed_at = Some("2026-01-02 00:00:00".to_string());
+        app.conversations = StatefulList::with_items(vec![entry]);
         app.conversations.next();
 
         app.open_reply_prompt();
@@ -1859,141 +1512,67 @@ mod tests {
     }
 
     #[test]
-    fn replying_to_a_topicless_bucket_sends_the_flat_command() {
-        let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![ChatEntry {
-            key: "untopic:peer-1".to_string(),
-            peer_id: "peer-1".to_string(),
-            topic: String::new(),
-            last_ts: 0,
-            kind: ChatEntryKind::Untopiced { peer_id: "peer-1".to_string() },
-        }]);
-        app.conversations.next();
+    fn a_reply_sends_chat_reply_with_the_ref_for_both_kinds() {
+        for (key, opened_by_us) in [("served#3", false), ("mirror#7", true)] {
+            let mut app = on_chat_page(Vec::new());
+            app.conversations = StatefulList::with_items(vec![entry_of(key, opened_by_us)]);
+            app.conversations.next();
 
-        app.open_reply_prompt();
-        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
-        assert!(matches!(app.chat_compose, Some(ChatCompose::ReplyUntopiced { .. })));
-
-        // `c`/`R` have nothing to act on here.
-        app.close_input();
-        app.conversations.next();
-        app.close_selected_conversation();
-        assert!(app.status.contains("no conversation to close"), "{}", app.status);
-    }
-
-    /// A database with the support table and two clients that wrote: `plain` (a client,
-    /// the client wrote last) and `bound` (bound to `peer-1`, so it is not a support
-    /// client here).
-    fn support_database(dir: &Path) -> PathBuf {
-        let database = chat_database(dir);
-        let connection = Connection::open(&database).unwrap();
-        connection.execute_batch(&migration_table("client_chat_messages")).unwrap();
-        connection
-            .execute_batch(
-                "UPDATE peer SET local_client_id = 'bound' WHERE id = 'peer-1';
-                 INSERT INTO client_chat_messages VALUES ('plain', 1, 0, 'hola', 1000);
-                 INSERT INTO client_chat_messages VALUES ('plain', 2, 1, 'que tal', 1001);
-                 INSERT INTO client_chat_messages VALUES ('plain', 3, 0, 'ayuda', 1002);
-                 INSERT INTO client_chat_messages VALUES ('answered', 1, 0, 'x', 900);
-                 INSERT INTO client_chat_messages VALUES ('answered', 2, 1, 'y', 901);
-                 INSERT INTO client_chat_messages VALUES ('bound', 1, 0, 'old', 2000);",
-            )
-            .unwrap();
-        database
-    }
-
-    #[test]
-    fn support_threads_list_only_clients_without_a_peer() {
-        let dir = temp_dir("support-list");
-        let database = support_database(&dir);
-
-        let threads = get_client_threads(&database).unwrap();
-        let ids: Vec<&str> = threads.iter().map(|thread| thread.client_id.as_str()).collect();
-        assert_eq!(ids, ["plain", "answered"], "recent first, and the bound client is left out");
-        assert!(threads[0].waiting, "the client wrote last");
-        assert!(!threads[1].waiting, "the operator wrote last");
-
-        let entries = load_entries(&database).unwrap();
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].key, "client:plain");
-        assert!(matches!(
-            &entries[0].kind,
-            ChatEntryKind::Client { client_id, waiting: true } if client_id == "plain"
-        ));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_support_thread_is_read_oldest_first_with_the_operator_as_us() {
-        let dir = temp_dir("support-read");
-        let database = support_database(&dir);
-
-        let messages = get_client_messages(&database, "plain").unwrap();
-        let read: Vec<(bool, &str)> =
-            messages.iter().map(|m| (m.from_us, m.body.as_str())).collect();
-        assert_eq!(read, [(false, "hola"), (true, "que tal"), (false, "ayuda")]);
-        assert!(get_client_messages(&database, "nobody").unwrap().is_empty());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_database_without_the_support_table_still_reads() {
-        let dir = temp_dir("support-missing");
-        let database = chat_database(&dir);
-        assert!(get_client_threads(&database).unwrap().is_empty());
-        assert!(get_client_messages(&database, "plain").unwrap().is_empty());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    fn support_entry(waiting: bool) -> ChatEntry {
-        ChatEntry {
-            key: "client:plain".to_string(),
-            peer_id: "plain".to_string(),
-            topic: String::new(),
-            last_ts: 0,
-            kind: ChatEntryKind::Client { client_id: "plain".to_string(), waiting },
+            app.open_reply_prompt();
+            assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
+            let Some(target) = app.chat_compose.clone() else { panic!("no compose") };
+            assert!(
+                matches!(&target, ChatCompose::Reply { conversation_ref, .. } if conversation_ref == key)
+            );
+            let (_, args) = chat_compose_command(target, "hola".to_string(), None);
+            assert_eq!(args, ["chat_reply", key, "hola"]);
         }
     }
 
     #[test]
-    fn answering_a_client_sends_chat_client_reply_without_a_service() {
+    fn a_reply_to_a_client_can_carry_a_service() {
         let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![support_entry(true)]);
+        let mut entry = entry_of("plain#1", false);
+        entry.peer_id = None;
+        app.conversations = StatefulList::with_items(vec![entry]);
         app.conversations.next();
-
         app.open_reply_prompt();
-        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
-        assert!(matches!(
-            &app.chat_compose,
-            Some(ChatCompose::ReplyClient { client_id }) if client_id == "plain"
-        ));
-
-        // A support answer is text only: Ctrl+A does not open the picker.
         app.open_chat_service_picker();
-        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
-        assert!(app.status.contains("text only"), "{}", app.status);
-
-        let service = ChatService { id: "abc".to_string(), tags: Vec::new() };
-        let (label, args) = chat_compose_command(
-            ChatCompose::ReplyClient { client_id: "plain".to_string() },
-            "hola cliente".to_string(),
-            Some(&service),
-        );
-        assert!(label.contains("plain"), "{label}");
-        assert_eq!(args, ["chat_client_reply", "plain", "hola cliente"]);
-
-        // `c`/`R` have no conversation to act on.
-        app.close_input();
-        app.close_selected_conversation();
-        assert!(app.status.contains("no conversation to close"), "{}", app.status);
-        app.reopen_selected_conversation();
-        assert!(app.status.contains("no conversation to reopen"), "{}", app.status);
+        assert_eq!(app.input_mode, InputMode::PickChatService, "no text-only rule any more");
     }
 
     #[test]
-    fn the_sidebar_marks_a_client_that_waits_for_an_answer() {
+    fn close_and_reopen_use_the_ref() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let mut app = on_chat_page(Vec::new());
+            app.conversations = StatefulList::with_items(vec![entry_of("served#3", false)]);
+            app.conversations.next();
+            app.close_selected_conversation();
+            assert!(app.command_task.is_some(), "a command was spawned");
+            assert_eq!(app.status, "Running nodo chat_close served#3…");
+
+            let mut app = on_chat_page(Vec::new());
+            let mut entry = entry_of("mirror#7", true);
+            entry.closed_at = Some("2026-01-02 00:00:00".to_string());
+            app.conversations = StatefulList::with_items(vec![entry]);
+            app.conversations.next();
+            app.reopen_selected_conversation();
+            assert!(app.command_task.is_some(), "a command was spawned");
+            assert_eq!(app.status, "Running nodo chat_reopen mirror#7…");
+        });
+    }
+
+    #[test]
+    fn the_sidebar_marks_what_waits_and_groups_by_peer() {
         let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![support_entry(true)]);
+        let mut waiting = entry_of("plain#1", false);
+        waiting.peer_id = None;
+        waiting.topic = "support".to_string();
+        waiting.waiting = true;
+        let mut mirror = entry_of("ours#1", true);
+        mirror.waiting = true;
+        app.conversations = StatefulList::with_items(vec![mirror, waiting]);
         app.conversations.next();
         app.conversation_messages = vec![ChatMessageRow {
             from_us: false,
@@ -2002,26 +1581,19 @@ mod tests {
             service: None,
         }];
         let screen = render(&mut app, 120, 20);
-        assert!(screen.contains("◆ plain"), "{screen}");
-        assert!(screen.contains("waiting"), "{screen}");
-        assert!(screen.contains("waiting for an answer"), "{screen}");
+        assert!(screen.contains("→ peer-1"), "{screen}");
+        assert!(screen.contains("← @plain"), "{screen}");
+        assert!(screen.contains("◇ ping"), "waits for the other node: {screen}");
+        assert!(screen.contains("◆ support"), "waits for us: {screen}");
         assert!(screen.contains("ayuda"), "{screen}");
     }
 
     #[test]
     fn closing_an_already_closed_conversation_is_a_no_op_not_a_command() {
         let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![ChatEntry {
-            key: "conv-1".to_string(),
-            peer_id: "peer-1".to_string(),
-            topic: String::new(),
-            last_ts: 0,
-            kind: ChatEntryKind::Conversation {
-                conversation_id: "conv-1".to_string(),
-                opened_by_us: true,
-                closed_at: Some("2026-01-02 00:00:00".to_string()),
-            },
-        }]);
+        let mut entry = entry_of("c#1", true);
+        entry.closed_at = Some("2026-01-02 00:00:00".to_string());
+        app.conversations = StatefulList::with_items(vec![entry]);
         app.conversations.next();
 
         app.close_selected_conversation();
@@ -2033,17 +1605,7 @@ mod tests {
     #[test]
     fn reopening_an_already_open_conversation_is_a_no_op_not_a_command() {
         let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![ChatEntry {
-            key: "conv-1".to_string(),
-            peer_id: "peer-1".to_string(),
-            topic: String::new(),
-            last_ts: 0,
-            kind: ChatEntryKind::Conversation {
-                conversation_id: "conv-1".to_string(),
-                opened_by_us: true,
-                closed_at: None,
-            },
-        }]);
+        app.conversations = StatefulList::with_items(vec![entry_of("c#1", true)]);
         app.conversations.next();
 
         app.reopen_selected_conversation();
@@ -2069,17 +1631,7 @@ mod tests {
         }
 
         let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![ChatEntry {
-            key: "conv-1".to_string(),
-            peer_id: "peer-1".to_string(),
-            topic: String::new(),
-            last_ts: 0,
-            kind: ChatEntryKind::Conversation {
-                conversation_id: "conv-1".to_string(),
-                opened_by_us: true,
-                closed_at: None,
-            },
-        }]);
+        app.conversations = StatefulList::with_items(vec![entry_of("conv-1#1", true)]);
         app.conversations.next();
         app.open_reply_prompt();
         assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
@@ -2106,7 +1658,7 @@ mod tests {
     }
 
     /// The redesigned page end to end: a sidebar wide enough for both directions and
-    /// the topic-less bucket at once, and a conversation pane that wraps a multi-line
+    /// a client with no peer at once, and a conversation pane that wraps a multi-line
     /// message instead of clipping it -- the two concrete complaints this redesign
     /// was for.
     #[test]
@@ -2114,37 +1666,15 @@ mod tests {
         use ratatui::{backend::TestBackend, Terminal};
 
         let mut app = on_chat_page(Vec::new());
-        app.conversations = StatefulList::with_items(vec![
-            ChatEntry {
-                key: "conv-ours".to_string(),
-                peer_id: "peer-ours".to_string(),
-                topic: "billing".to_string(),
-                last_ts: 3,
-                kind: ChatEntryKind::Conversation {
-                    conversation_id: "conv-ours".to_string(),
-                    opened_by_us: true,
-                    closed_at: None,
-                },
-            },
-            ChatEntry {
-                key: "conv-theirs".to_string(),
-                peer_id: "peer-theirs".to_string(),
-                topic: String::new(),
-                last_ts: 2,
-                kind: ChatEntryKind::Conversation {
-                    conversation_id: "conv-theirs".to_string(),
-                    opened_by_us: false,
-                    closed_at: None,
-                },
-            },
-            ChatEntry {
-                key: "untopic:peer-flat".to_string(),
-                peer_id: "peer-flat".to_string(),
-                topic: String::new(),
-                last_ts: 1,
-                kind: ChatEntryKind::Untopiced { peer_id: "peer-flat".to_string() },
-            },
-        ]);
+        let mut billing = entry_of("conv-ours#1", true);
+        billing.peer_id = Some("peer-ours".to_string());
+        billing.topic = "billing".to_string();
+        let mut theirs = entry_of("conv-theirs#1", false);
+        theirs.peer_id = Some("peer-theirs".to_string());
+        theirs.topic = String::new();
+        let mut flat = entry_of("flat#1", false);
+        flat.peer_id = None;
+        app.conversations = StatefulList::with_items(vec![billing, theirs, flat]);
         app.conversations.next();
         app.conversation_messages = vec![ChatMessageRow {
             from_us: true,
@@ -2323,17 +1853,7 @@ mod tests {
     }
 
     fn one_conversation(app: &mut App) {
-        app.conversations = StatefulList::with_items(vec![ChatEntry {
-            key: "conv-1".to_string(),
-            peer_id: "peer-1".to_string(),
-            topic: "ping".to_string(),
-            last_ts: 0,
-            kind: ChatEntryKind::Conversation {
-                conversation_id: "conv-1".to_string(),
-                opened_by_us: true,
-                closed_at: None,
-            },
-        }]);
+        app.conversations = StatefulList::with_items(vec![entry_of("conv-1#1", true)]);
         app.conversations.next();
     }
 
@@ -2349,16 +1869,18 @@ mod tests {
         let dir = temp_dir("card");
         let database = chat_database(&dir);
         let connection = Connection::open(&database).unwrap();
+        conversation(&connection, "ours", 1, Some("peer-1"), "t");
         connection
             .execute(
-                "INSERT INTO peer_chat_messages
-                     (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
-                 VALUES ('peer-1', 0, 'try this', 1, NULL, ?1, ?2)",
+                "INSERT INTO chat_messages
+                     (client_id, sequence, conversation, from_operator, body, ts, service_id,
+                      service_metadata)
+                 VALUES ('ours', 1, 1, 1, 'try this', 1, ?1, ?2)",
                 rusqlite::params![SERVICE_ID, metadata_bytes(&["hello-world", "demo"])],
             )
             .unwrap();
 
-        let messages = get_untopiced_messages(&database, "peer-1").unwrap();
+        let messages = get_conversation_messages(&database, "ours", 1, true).unwrap();
 
         let service = messages[0].service.clone().expect("a card");
         assert_eq!(service.id.as_deref(), Some(SERVICE_ID));
@@ -2376,17 +1898,19 @@ mod tests {
         let dir = temp_dir("card-no-id");
         let database = chat_database(&dir);
         let connection = Connection::open(&database).unwrap();
+        conversation(&connection, "ours", 1, Some("peer-1"), "t");
         connection
             .execute(
-                "INSERT INTO peer_chat_messages
-                     (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
-                 VALUES ('peer-1', 0, 'try this', 1, NULL, NULL, ?1)",
+                "INSERT INTO chat_messages
+                     (client_id, sequence, conversation, from_operator, body, ts, service_id,
+                      service_metadata)
+                 VALUES ('ours', 1, 1, 1, 'try this', 1, NULL, ?1)",
                 [metadata_bytes(&["hello-world"])],
             )
             .unwrap();
         let mut app = on_chat_page(Vec::new());
         one_conversation(&mut app);
-        app.conversation_messages = get_untopiced_messages(&database, "peer-1").unwrap();
+        app.conversation_messages = get_conversation_messages(&database, "ours", 1, true).unwrap();
         assert_eq!(app.conversation_messages[0].service.as_ref().unwrap().id, None);
 
         let screen = render(&mut app, 120, 30);
@@ -2395,29 +1919,6 @@ mod tests {
         assert!(screen.contains("no id of this node's hash type"), "{screen}");
         assert!(!screen.contains("[ Get ]"), "{screen}");
         assert!(app.chat_card_buttons.is_empty());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// A database the node has not added the card columns to yet still reads --
-    /// as plain messages -- rather than failing the whole conversation.
-    #[test]
-    fn a_database_without_the_card_columns_still_reads() {
-        let dir = temp_dir("card-old-schema");
-        let database = dir.join("database.sqlite");
-        let connection = Connection::open(&database).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE peer_chat_messages (id INTEGER PRIMARY KEY, peer_id TEXT,
-                     from_us INTEGER, body TEXT, ts INTEGER, conversation_id TEXT);
-                 INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
-                 VALUES ('peer-1', 1, 'hi', 1, 'conv-1');",
-            )
-            .unwrap();
-
-        let messages = get_conversation_messages(&database, "conv-1").unwrap();
-
-        assert_eq!(messages.len(), 1);
-        assert!(messages[0].service.is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2499,11 +2000,11 @@ mod tests {
     #[test]
     fn a_message_with_only_an_attachment_sends_the_service_alone() {
         let target = ChatCompose::Reply {
-            conversation_id: "conv-1".to_string(),
-            peer_id: "peer-1".to_string(),
+            conversation_ref: "conv-1#1".to_string(),
+            who: "peer-1".to_string(),
         };
         let (_, args) = chat_compose_command(target, String::new(), Some(&card()));
-        assert_eq!(args, vec!["chat_reply", "conv-1", "--service", SERVICE_ID]);
+        assert_eq!(args, vec!["chat_reply", "conv-1#1", "--service", SERVICE_ID]);
 
         let target = ChatCompose::NewConversation {
             peer_id: "peer-1".to_string(),
@@ -2515,9 +2016,12 @@ mod tests {
             vec!["chat_open", "peer-1", "try this", "--message", "look", "--service", SERVICE_ID]
         );
 
-        let target = ChatCompose::ReplyUntopiced { peer_id: "peer-1".to_string() };
+        let target = ChatCompose::Reply {
+            conversation_ref: "conv-1#1".to_string(),
+            who: "peer-1".to_string(),
+        };
         let (_, args) = chat_compose_command(target, "hi".to_string(), None);
-        assert_eq!(args, vec!["chat", "peer-1", "hi"], "no attachment, no flag");
+        assert_eq!(args, vec!["chat_reply", "conv-1#1", "hi"], "no attachment, no flag");
     }
 
     /// Ctrl+A picks one of this node's services; Esc or Enter both return to the
