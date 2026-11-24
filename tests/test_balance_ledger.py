@@ -553,6 +553,40 @@ class SettleStopTests(_Database):
         self.assertFalse(self.sc.internal_instance_exists("i1"))
         self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1000)
 
+    def test_a_dead_father_passes_the_leftover_to_the_client_above_it(self):
+        self.add_instance("i2", "i1", 300, movements=(ledger.Movement(ledger.START, 300),))
+        self.sc.settle_stop("i1", "father_stop", father_id="c1", credit=False)
+
+        self.assertEqual(self.sc.settle_stop("i2", "father_stop", father_id="i1"), 300)
+
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1300)
+        refund = self.rows("c1")[-1]
+        self.assertEqual((refund["kind"], int(refund["amount_mu"])), (ledger.REFUND, 300))
+        self.assertEqual(refund["instance_ref"], ledger.instance_ref("i2"))
+        self.assertNotEqual(self.rows("i2")[-2]["detail"], '{"lost":"father_gone"}')
+        self.assert_adds_up("i2", 0)
+        self.assert_chained("c1")
+
+    def test_the_leftover_goes_up_through_more_than_one_dead_ancestor(self):
+        self.add_instance("i2", "i1", 0)
+        self.add_instance("i3", "i2", 300, movements=(ledger.Movement(ledger.START, 300),))
+        self.sc.settle_stop("i2", "father_stop", father_id="i1", credit=False)
+        self.sc.settle_stop("i1", "father_stop", father_id="c1", credit=False)
+
+        self.assertEqual(self.sc.settle_stop("i3", "father_stop", father_id="i2"), 300)
+
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1300)
+
+    def test_a_dead_father_with_no_live_ancestor_still_loses_the_leftover(self):
+        self.add_instance("x1", "gone", 0)
+        self.add_instance("i2", "x1", 300, movements=(ledger.Movement(ledger.START, 300),))
+        self.sc.settle_stop("x1", "father_stop", father_id="gone", credit=False)
+
+        self.assertEqual(self.sc.settle_stop("i2", "father_stop", father_id="x1"), 300)
+
+        self.assertEqual(self.rows("i2")[-2]["detail"], '{"lost":"father_gone"}')
+        self.assertEqual(self.sc.get_balance_by_client_id("c1"), 1000)
+
     def test_a_caller_that_takes_the_leftover_gets_the_figure_and_the_father_nothing(self):
         self.assertEqual(
             self.sc.settle_stop("i1", "burnall", father_id="c1", credit=False), 400)

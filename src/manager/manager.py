@@ -1294,10 +1294,17 @@ def _log_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, cre
             f"caller of stop_instance rather than to its father {father_id}."
         )
     elif not sc.account_exists(father_id):
-        log.LOGGER(
-            f"Cannot return {format_mu(leftover_mu)} unspent by {token}: "
-            f"its father {father_id!r} is gone."
-        )
+        receiver = sc.payable_account(father_id)
+        if receiver:
+            log.LOGGER(
+                f"Returned {format_mu(leftover_mu)} unspent by {token} to {receiver}, "
+                f"the nearest live ancestor: its father {father_id!r} is gone."
+            )
+        else:
+            log.LOGGER(
+                f"Cannot return {format_mu(leftover_mu)} unspent by {token}: "
+                f"its father {father_id!r} is gone and no ancestor is left."
+            )
     else:
         log.LOGGER(
             f"Returned {format_mu(leftover_mu)} unspent by {token} to its "
