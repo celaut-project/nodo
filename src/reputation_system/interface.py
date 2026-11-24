@@ -171,10 +171,11 @@ def get_node_reputation(node_id: Optional[str] = None) -> NodeReputation:
 def _own_proof_ids(node_id: str) -> Tuple[str, ...]:
     """The proofs ``node_id`` publishes through -- its own voice, not the network's.
 
-    Ours comes from the config. A peer's comes from the advertisement it signed, which
-    is where ``commands.verify_reputation`` reads them from too: a proof announced there
-    is one the peer can be asked to prove it owns, so the same list is the one it is
-    accountable for. A node may announce several.
+    Ours comes from the config. A peer's comes from the ``ReputationProof`` it signed and
+    this node kept (``ledger_proofs``), which is where ``commands.verify_reputation`` reads
+    them from too: a pointer there is one the peer can be asked to prove it owns, so the
+    same list is the one it is accountable for. A node may announce several. Until this
+    node has pulled the proof of a peer, the list is empty.
 
     Announced, and therefore voluntary. A node that publishes an opinion about itself
     from a proof it never announces is not excluded by this, and minting a proof is
@@ -188,25 +189,21 @@ def _own_proof_ids(node_id: str) -> Tuple[str, ...]:
         configured = str(env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID') or '')
         return (configured,) if configured else ()
 
-    from protos import celaut_pb2
+    from src.reputation_system.offchain_proof import ledger_proofs_of
     from src.utils.contract_xattrs import get_token_id
 
     try:
-        advertisement = sc.get_peer_advertisement(node_id)
-        if not advertisement:
-            return ()
-        announced = celaut_pb2.Peer()
-        announced.ParseFromString(advertisement)
+        contracts = ledger_proofs_of(sc.get_offchain_proof((node_id or "").lower()))
     except Exception as e:
-        # An unreadable advertisement means we cannot tell which proofs are the peer's
-        # own, so none are set aside. Said in the log rather than silently, because the
-        # figures that follow then include whatever it published about itself.
+        # An unreadable proof means we cannot tell which proofs are the peer's own, so
+        # none are set aside. Said in the log rather than silently, because the figures
+        # that follow then include whatever it published about itself.
         LOGGER(f"Could not read the reputation proofs {node_id} announced: {e}")
         return ()
 
     return tuple(
         token_id
-        for token_id in (get_token_id(contract) for contract in announced.reputation_proofs)
+        for token_id in (get_token_id(contract) for contract in contracts)
         if token_id
     )
 

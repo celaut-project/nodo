@@ -440,8 +440,8 @@ and only R7 is constrained by what the contract has to be able to spend.
 It lives on the proof rather than on the `Peer` because **ownership is a property of the
 proof**. A node holds as many proofs as it likes and nothing says they share an owner, so
 one attestation per ledger on the announcement could not describe two proofs on the same
-ledger published by different wallets. Riding in the proof also means the announcement's
-signature already covers it, through `reputation_proofs`.
+ledger published by different wallets. It rides in a pointer of `ReputationProof.ledger_proofs`,
+so the signature of that proof, made with the identity key, covers it.
 
 An attestation proves possession of a key, and nothing more. It does not say the node
 accepts payment on that ledger (`payment_contracts` does, and it carries its own address)
@@ -522,9 +522,9 @@ What is singular and what is plural is deliberate, and the two do not conflict:
 | Field | Count | Why |
 |---|---|---|
 | `public_key`, `signature`, `signature_scheme` | one | The key is what **names** the node, so a second one at the same level is a second identity: reputation, deposits and payment attribution all split in two. Cross-signing two *names* does not heal the split — whoever needs the link speaks only one of the schemes, so they can verify only half of the proof. |
-| owner attestation, in each proof's `xattrs` | one per proof | The wallet that **published that proof**, and its signature over the node's id. Not a second name: it vouches *for* the identity above, so there is a single root and nobody has to pick which key the node is. |
+| owner attestation, in the `xattrs` of each pointer in `ReputationProof.ledger_proofs` | one per proof | The wallet that **published that proof**, and its signature over the node's id. Not a second name: it vouches *for* the identity above, so there is a single root and nobody has to pick which key the node is. |
 | `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Being named by a key of its own while accepting several ledgers is the expected shape. See [Balances and prices](#balances-and-prices). |
-| `reputation_proofs` | many | A node holds as many proofs as it has published opinions under. See [Reputation proof](#reputation-proof). |
+| `ReputationProof.ledger_proofs` | many | A node holds as many proofs on ledgers as it has published opinions under. They are pointers in the `ReputationProof`, not in the `Peer`. See [Reputation proof](#reputation-proof). |
 
 The distinction that runs through the table is **root versus role**. A key in a
 different role, signed by the identity, is not a competing name: that is what a ledger
@@ -575,9 +575,10 @@ opinion: register R5 names the node it is about — by that node's **identity pu
 key**, the same key that is its `peer_id` — and the token amount in the box is the
 weight behind it.
 
-Read the direction carefully: a proof belongs to its *author*. `Peer.reputation_proofs`
-in an announcement is what that peer thinks of others, never a rating of the peer
-itself, and a single identity key may hold several proofs at once. What a node thinks of
+Read the direction carefully: a proof belongs to its *author*. The `ReputationProof` of a
+peer, and the pointers to its proofs on ledgers (`ledger_proofs`), are what that peer
+thinks of others, never a rating of the peer itself. The `Peer` does not carry them, and a
+single identity key may hold several proofs at once. What a node thinks of
 a peer is separate and local: a score plus the events that explain it, keyed by the
 peer's public key.
 

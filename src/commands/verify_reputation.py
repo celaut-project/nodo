@@ -1,7 +1,7 @@
 """Verify a specific peer's on-chain reputation proofs (read-only dev command).
 
-Given a peer id, this reads every proof the peer announced in its stored advertisement
--- a node can hold more than one, and each is an opinion set it published, not a
+Given a peer id, this reads every proof the peer pointed to in the reputation proof of
+the peer that this node kept (``ledger_proofs``) -- a node can hold more than one, and each is an opinion set it published, not a
 credential we assigned it (issue #281) -- and checks two things about each:
 
   1. the proof names an owner, and that owner signed this peer's id
@@ -30,42 +30,38 @@ broadcast, and no RPC round-trip against the peer is needed.
 import sqlite3
 from typing import Optional
 
-from protos import celaut_pb2
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_token_id
 from src.reputation_system.contracts.ergo.proof_validation import (
     explain_contract_ledger,
 )
+from src.reputation_system.offchain_proof import ledger_proofs_of
 from src.reputation_system.proof_attestation import attested_proof_owner
 
 
-def _peer_advertisement(peer_id: str) -> Optional[celaut_pb2.Peer]:
-    """The signed ``Peer`` message ``peer_id`` sent, kept verbatim, or None.
+def _ledger_proofs(peer_id: str) -> Optional[list]:
+    """The pointers to proofs on ledgers in the kept ``ReputationProof`` of ``peer_id``, or
+    None when this node holds no proof of the peer.
 
-    Read out of the stored advertisement rather than out of columns of its own: it is
-    what the peer actually signed, so everything checked here -- the proofs it
-    announced and the wallet attestation that ties them to it -- is read from one
-    object that verifies as a whole (issue #281).
+    Read out of the proof the peer signed and this node kept as it came, so everything
+    checked here -- the pointers it gave and the wallet attestation that ties each one to
+    it -- is read from one object that verifies as a whole (issue #281). The ``Peer`` does
+    not carry them.
     """
     database_file = ConfigManager().get("DATABASE_FILE")
     connection = sqlite3.connect(database_file)
     try:
         cursor = connection.cursor()
-        cursor.execute("SELECT advertisement FROM peer WHERE id = ?", (peer_id,))
+        cursor.execute("SELECT proof FROM offchain_proofs WHERE publisher = ?", (peer_id,))
         row = cursor.fetchone()
+    except sqlite3.OperationalError:
+        return None
     finally:
         connection.close()
 
     if not row or not row[0]:
         return None
-
-    announced = celaut_pb2.Peer()
-    try:
-        announced.ParseFromString(row[0])
-    except Exception as e:
-        print(f"  (unreadable advertisement for {peer_id}: {e})", flush=True)
-        return None
-    return announced
+    return ledger_proofs_of(row[0])
 
 
 def verify_reputation(peer_id: str) -> bool:
@@ -78,16 +74,16 @@ def verify_reputation(peer_id: str) -> bool:
     """
     print(f"Verifying reputation proofs for peer {peer_id} ...", flush=True)
 
-    announced = _peer_advertisement(peer_id)
-    if announced is None:
+    pointers = _ledger_proofs(peer_id)
+    if pointers is None:
         print(
-            f"FAIL: no stored advertisement for peer {peer_id}. "
-            "Run 'nodo peers' to list known peers.",
+            f"FAIL: no stored reputation proof for peer {peer_id}. This node keeps one "
+            "after it pulls one from a peer. Run 'nodo peers' to list known peers.",
             flush=True,
         )
         return False
 
-    proofs = [c for c in announced.reputation_proofs if get_token_id(c)]
+    proofs = [c for c in pointers if get_token_id(c)]
     if not proofs:
         print(
             f"FAIL: peer {peer_id} announced no reputation proof. "

@@ -17,7 +17,7 @@ A descriptor has two parts:
 
 * **The network** -- which chain and which network, and how its assets and units are
   named. The definition of the ledger itself, and repeated whole wherever that ledger
-  appears: in ``Peer.payment_contracts`` and again in ``Peer.reputation_proofs``. Each
+  appears: in ``Peer.payment_contracts`` and again in ``ReputationProof.ledger_proofs``. Each
   place has to be readable on its own; saving the bytes is a concern for whoever
   transports or stores the announcement, not for what it says.
 * **The use** -- what celaut does on it at that place, and nothing more. A reputation

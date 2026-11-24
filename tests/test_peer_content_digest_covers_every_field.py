@@ -92,9 +92,6 @@ def _announcement():
     rate.contract.protocol.formal = b"\x05"
     keyvalue.set_value(rate.contract.xattrs, "token_id", b"\xaa")
     rate.mu_per_unit.n = "1000000000"
-    proof = peer.reputation_proofs.add()
-    proof.ledger.tags.append("ergo")
-    keyvalue.set_value(proof.xattrs, "token_id", b"\xbb")
     peer.signature_scheme.components.add(tags=["ed25519"], prose="Ed25519", formal=b"\x03")
     announced = peer.resources.add()
     announced.architecture.tags.extend(["linux/amd64", "x86_64"])
@@ -126,7 +123,6 @@ MUTATIONS = {
     "Peer.uri": lambda p: _uri(p, ip="5.6.7.8", port=9090),
     "Peer.rates": lambda p: keyvalue.set_value(p.rates, "start", celaut_pb2.Amount(n="2000")),
     "Peer.payment_contracts": lambda p: keyvalue.set_value(p.payment_contracts[0].contract.xattrs, "token_id", b"\xff"),
-    "Peer.reputation_proofs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "token_id", b"\xff"),
     "Peer.signature_scheme": lambda p: p.signature_scheme.components.add(tags=["secp256k1"]),
     "Peer.Uri.ip": lambda p: setattr(p.uri[0], "ip", "9.9.9.9"),
     "Peer.Uri.port": lambda p: setattr(p.uri[0], "port", 1234),
@@ -137,12 +133,12 @@ MUTATIONS = {
     "Peer.Uri.Protocol.prose": lambda p: setattr(p.uri[0].protocol_stack[0], "prose", "other"),
     "Peer.Uri.Protocol.formal": lambda p: setattr(p.uri[0].protocol_stack[0], "formal", b"\xfe"),
     "Peer.SignatureScheme.components": lambda p: p.signature_scheme.components.add(tags=["schnorr"]),
-    "Contract.ledger": lambda p: p.reputation_proofs[0].ledger.tags.append("cardano"),
+    "Contract.ledger": lambda p: p.payment_contracts[0].contract.ledger.tags.append("cardano"),
     "Contract.protocol": lambda p: p.payment_contracts[0].contract.protocol.tags.append("other"),
     "Contract.Protocol.tags": lambda p: p.payment_contracts[0].contract.protocol.tags.append("p2key"),
     "Contract.Protocol.prose": lambda p: setattr(p.payment_contracts[0].contract.protocol, "prose", "other"),
     "Contract.Protocol.formal": lambda p: setattr(p.payment_contracts[0].contract.protocol, "formal", b"\xfb"),
-    "Contract.xattrs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "script", b"\x99"),
+    "Contract.xattrs": lambda p: keyvalue.set_value(p.payment_contracts[0].contract.xattrs, "script", b"\x99"),
     "Contract.Ledger.tags": lambda p: p.payment_contracts[0].contract.ledger.tags.append("mainnet"),
     "Contract.Ledger.prose": lambda p: setattr(p.payment_contracts[0].contract.ledger, "prose", "other"),
     "Contract.Ledger.formal": lambda p: setattr(p.payment_contracts[0].contract.ledger, "formal", b"\xfd"),

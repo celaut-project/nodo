@@ -340,16 +340,17 @@ class PublishedJsonTests(unittest.TestCase):
         keyvalue.from_dict(peer.rates, {
             "exec": celaut.Amount(n="10"), "build_mu": celaut.Amount(n="7"),
         })
-        proof = peer.reputation_proofs.add()
-        proof.ledger.tags.append("ergo")
-        keyvalue.from_dict(proof.xattrs, {"token_id": b"\xaa", "script": b"\x01\x02"})
+        contract = peer.payment_contracts.add().contract
+        contract.ledger.tags.append("ergo")
+        keyvalue.from_dict(contract.xattrs, {"token_id": b"\xaa", "script": b"\x01\x02"})
         return peer
 
     def test_key_value_fields_are_objects(self):
         published = json.loads(keyvalue.message_to_json(self._peer()))
         self.assertEqual(published["rates"], {"build_mu": {"n": "7"}, "exec": {"n": "10"}})
         self.assertEqual(
-            published["reputationProofs"][0]["xattrs"], {"script": "AQI=", "token_id": "qg=="}
+            published["paymentContracts"][0]["contract"]["xattrs"],
+            {"script": "AQI=", "token_id": "qg=="},
         )
 
     def test_it_matches_what_protobuf_wrote_for_the_map(self):
@@ -360,10 +361,10 @@ class PublishedJsonTests(unittest.TestCase):
         old = legacy_map_schema.message_class(pool, "legacy_celaut.Peer")()
         old.rates["exec"].n = "10"
         old.rates["build_mu"].n = "7"
-        proof = old.reputation_proofs.add()
-        proof.ledger.tags.append("ergo")
-        proof.xattrs["token_id"] = b"\xaa"
-        proof.xattrs["script"] = b"\x01\x02"
+        contract = old.payment_contracts.add().contract
+        contract.ledger.tags.append("ergo")
+        contract.xattrs["token_id"] = b"\xaa"
+        contract.xattrs["script"] = b"\x01\x02"
         self.assertEqual(
             json.loads(keyvalue.message_to_json(self._peer())),
             json.loads(json_format.MessageToJson(old)),

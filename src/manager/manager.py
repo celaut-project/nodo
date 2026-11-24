@@ -313,17 +313,16 @@ def descends_from_dev_client(id: Optional[str], max_depth: int = 64) -> bool:
     return False
 
 
-def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
-    """Check that ``peer`` really controls a reputation proof it announced.
+def validate_reputation_proof(contract_ledger, peer_id: str) -> bool:
+    """Check that the node ``peer_id`` really controls a reputation proof that it points to.
 
-    Nothing is stored: the proof ids themselves live in the peer's signed
-    advertisement, which is kept verbatim (see :func:`_peer_advertisement`), and a
-    peer holds as many proofs as it likes -- there is no single one to record
-    (issue #281). What this call is for is the check itself: a peer announcing a
-    proof whose on-chain R7 owner is a key it cannot prove it holds is either
+    The pointer is one of ``ReputationProof.ledger_proofs``, in a proof that
+    ``peer_id`` signed (``offchain_proof.receive``). Nothing is stored here: the proof
+    is kept as it came. What this call is for is the check itself: a node that points
+    to a proof whose on-chain R7 owner is a key it cannot prove it holds is either
     misconfigured or claiming someone else's reputation, and that is worth a log line
-    even though the peer is still accepted (its identity rests on the signature it
-    sent, see :func:`verified_peer_public_key`, not on any proof).
+    even though the node is still accepted (its identity rests on the signature of its
+    ``Peer``, see :func:`verified_peer_public_key`, not on any proof).
 
     Ownership runs through the proof's own owner attestation rather than through the
     peer's ``peer_id``: R7 is the reputation contract's spending clause, so it holds an
@@ -335,7 +334,7 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
     from src.reputation_system.proof_attestation import attested_proof_owner
     from src.utils.contract_xattrs import get_owner_attestation
 
-    wallet_public_key = attested_proof_owner(contract_ledger, peer.public_key)
+    wallet_public_key = attested_proof_owner(contract_ledger, peer_id)
     if not wallet_public_key:
         # Two different things, and only one of them is a claim about ownership. A proof
         # arriving with no attestation at all says nothing about who holds it -- there is
@@ -343,24 +342,24 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
         # is a claim this node has checked and rejected. Reporting both as "does not own"
         # blamed a peer for having stated nothing (issue #315).
         _, signature = get_owner_attestation(contract_ledger)
-        if not normalize_public_key_hex(peer.public_key):
+        if not normalize_public_key_hex(peer_id):
             # The third case, and the only one that is not about the proof at all:
             # `attested_proof_owner` has nothing to check the attestation *against*.
             # Both call sites work on an already-verified peer, so this should be
             # unreachable -- and saying "the attestation does not verify" if it ever is
             # reached would be the same misattribution this branch exists to undo.
             log.LOGGER(
-                f"Peer {peer.public_key} announced a reputation proof, but its own peer "
+                f"Peer {peer_id} announced a reputation proof, but its own peer "
                 "id is not a usable key, so no attestation can be checked against it."
             )
         elif not signature:
             log.LOGGER(
-                f"Peer {peer.public_key} announced a reputation proof with no owner "
+                f"Peer {peer_id} announced a reputation proof with no owner "
                 "attestation, so this node cannot credit it."
             )
         else:
             log.LOGGER(
-                f"Peer {peer.public_key} announced a reputation proof whose owner "
+                f"Peer {peer_id} announced a reputation proof whose owner "
                 "attestation does not verify."
             )
         return False
@@ -370,7 +369,7 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
     # something was wrong and nothing about what.
     reason = explain_contract_ledger(contract_ledger, wallet_public_key)
     if reason:
-        log.LOGGER(f"Peer {peer.public_key}: {reason}")
+        log.LOGGER(f"Peer {peer_id}: {reason}")
         return False
 
     return True
@@ -623,19 +622,6 @@ def register_peer_instance(peer: celaut_pb2.Peer,
         except Exception as e:
             log.LOGGER(f"Error adding contract {rate.contract} for peer {peer_id}: {e}")
 
-    # The proofs a peer announces are its own opinions about other nodes, not a
-    # credential we hold on file (issue #281). They travel in the advertisement stored
-    # above; all that is left to do here is flag one the peer does not actually own.
-    for contract in peer.reputation_proofs:
-        try:
-            # No line of our own on a False: validate_reputation_proof has already said
-            # which of the several failures it was, and a second line asserting the peer
-            # "does not own" the proof both duplicated it and overstated the weakest of
-            # them (issue #315).
-            validate_reputation_proof(contract_ledger=contract, peer=peer)
-        except Exception as e:
-            log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
-
     return peer_id, True
 
 def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
@@ -712,14 +698,6 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
         except Exception as e:
             # One malformed contract must not abort the rest of the refresh.
             log.LOGGER(f"Error adding contract {rate.contract} for peer {peer_id}: {e}")
-
-    for contract_ledger in peer.reputation_proofs:
-        try:
-            # See add_peer_instance: the check logs its own reason, in terms of what the
-            # peer actually announced (issue #315).
-            validate_reputation_proof(contract_ledger=contract_ledger, peer=peer)
-        except Exception as e:
-            log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
 
     log.LOGGER(f"Peer {peer_id} updated.")
     return stored

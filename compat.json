@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "572b6409e69725238248d74d5456fe8132c83a57f5c175302bf5b75634e62fa2",
+  "celaut_proto": "cb2b030aad0957a2a63825cffa4599a13d5a3c6479af1ceca1efecd9e9f9917e",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",

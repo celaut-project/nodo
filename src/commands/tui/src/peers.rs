@@ -98,6 +98,44 @@ pub struct PeerDetail {
     pub events: Vec<crate::app::ReputationEvent>,
 }
 
+/// The ids of the proofs on ledgers that the kept `ReputationProof` of a peer points to
+/// (`ledger_proofs`). Empty when this node holds no proof of the peer, or the table does
+/// not exist yet: the node keeps one after a pull or a push took it.
+fn get_ledger_proof_ids(connection: &Connection, peer_id: &str) -> Vec<String> {
+    if !crate::app::table_exists(connection, "offchain_proofs") {
+        return Vec::new();
+    }
+    let raw: Option<Vec<u8>> = connection
+        .query_row(
+            "SELECT proof FROM offchain_proofs WHERE publisher = ?1",
+            [peer_id],
+            |row| row.get(0),
+        )
+        .ok();
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    let Ok(proof) = crate::app::protos::ReputationProof::decode(raw.as_slice()) else {
+        return Vec::new();
+    };
+    proof
+        .ledger_proofs
+        .into_iter()
+        .filter_map(|contract| {
+            // An entry list, not a map: a key resolves to the LAST entry that carries it
+            // (what a map did on a repeat).
+            contract
+                .xattrs
+                .iter()
+                .rev()
+                .find(|entry| entry.key == "token_id")
+                .and_then(|entry| entry.value.clone())
+                .and_then(|value| String::from_utf8(value).ok())
+        })
+        .filter(|token_id| !token_id.is_empty())
+        .collect()
+}
+
 pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
     // A node that has never been migrated has no database, or one with no `peer`
     // table in it, and neither is a failure to report -- it is a node with no peers
@@ -141,41 +179,19 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 .get::<_, Option<i64>>(4)?
                 .map(|score| score.to_string())
                 .unwrap_or_else(|| "0".to_string());
-            // Straight out of the advertisement the peer signed, which we store
-            // verbatim: it carries every proof the peer holds, where a column of our
-            // own could only ever keep the last one announced (issue #281). Decoded
-            // once here for both the proofs and the resources it announced (#455).
+            // The advertisement the peer signed, which we store verbatim, for the
+            // resources it announced (#455). The proofs it points to are not in it: they
+            // are in the `ReputationProof` that this node kept, read per peer below.
             let advertisement = row.get::<_, Option<Vec<u8>>>(3)?;
             let decoded = advertisement
                 .as_deref()
                 .map(crate::app::protos::Peer::decode);
             let resources = crate::peer_resources::from_decoded(decoded.as_ref());
-            let proof_ids = decoded
-                .and_then(Result::ok)
-                .map(|announced| {
-                    announced
-                        .reputation_proofs
-                        .into_iter()
-                        .filter_map(|contract| {
-                            // An entry list, not a map: a key resolves to the LAST
-                            // entry that carries it (what a map did on a repeat).
-                            contract
-                                .xattrs
-                                .iter()
-                                .rev()
-                                .find(|entry| entry.key == "token_id")
-                                .and_then(|entry| entry.value.clone())
-                                .and_then(|value| String::from_utf8(value).ok())
-                        })
-                        .filter(|token_id| !token_id.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
             let id: String = row.get(0)?;
             Ok(Peer {
                 uris: row.get(1)?,
                 balance: row.get::<_, String>(2)?,
-                proof_ids,
+                proof_ids: Vec::new(),
                 resources,
                 reputation_score,
                 remote_client_id: row.get(5)?,
@@ -193,6 +209,7 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
         .into_iter()
         .map(|mut peer| {
             peer.contracts = get_peer_contracts(&connection, &peer.id)?;
+            peer.proof_ids = get_ledger_proof_ids(&connection, &peer.id);
             Ok(peer)
         })
         .collect()

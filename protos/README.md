@@ -200,14 +200,36 @@ the numbers follow the groups of the message, and the declarations are in the sa
 | What it can run | `resources` | 9 (8) |
 | | `devices` | 10 (10) |
 | | `activity_window` | 11 (9) |
-| What others say about it | `reputation_proofs` | 12 (1) |
+| (removed) | `reputation_proofs` | 12 reserved (1) |
+
+## The pointers to proofs on ledgers moved to `ReputationProof`
+
+`Peer.reputation_proofs` (a `repeated Contract`) is removed: its number 12 and its name are
+`reserved`. The same pointers are now `ReputationProof.ledger_proofs = 7`, in the proof that
+the node signs with its identity key and gives with `GetReputationProofs`. One message now
+holds everything that a node says about reputation, and the `Peer` holds only what a node
+says about itself.
+
+- A `Contract` in `ledger_proofs` names the ledger, the script and the token of one proof
+  on a ledger. Its `xattrs` carry the owner attestation: the wallet that owns the proof
+  vouches for the identity of the node.
+- The digest of the `Peer` no longer has the proofs segment. The digest of the
+  `ReputationProof` (`offchain_proof.pow_base`) has a new last segment: the sorted pointers,
+  joined by `/`. The signature covers them, so a node that passes the proof on cannot add
+  or remove one.
+- A node learns the pointers of a peer when it pulls the proof of that peer (about every
+  `reputation.OFFCHAIN_PULL_INTERVAL_SECONDS`), no more with the `Peer`. It checks each
+  attestation when it keeps the proof (`offchain_proof.check_ledger_proofs`). A failure is
+  a log line: the opinions of the proof still count on their own.
+- The `Peer` that a node publishes on a ledger has no pointers, so the attestation is no
+  more on the ledger with it.
 
 **Not wire compatible**, as the other changes of the alpha: every node is upgraded
 together. A node reads a `Peer` that it stored before as unreadable or empty (the readers
 of `peer.advertisement` already treat that as "nothing announced"), until the peer
-announces itself again. The signature does not change: the content digest is made from the
-fields, not from their numbers. A client that checks the signature (superapp) needs the
-new `celaut.proto` and the digest with `limits`.
+announces itself again. The signature of a `Peer` changes, because its digest changed
+twice: it now has the segment `limits` (superapp must add it) and no proofs segment. A
+client that checks it needs the new `celaut.proto` and the new digest.
 
 ## Operational notes
 

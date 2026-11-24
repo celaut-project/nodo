@@ -41,9 +41,10 @@ def legacy(full_name):
 # revision with maps: bytes and uint64 values, message values, and entries whose value
 # is empty / 0 (what a proto3 scalar would drop without `optional`). The order of the
 # entries in each is the one that implementation happened to emit.
-# GOLDEN_PEER was re-tagged by hand for the renumbering of Peer: reputation_proofs 1 -> 12
-# (0x0a -> 0x62), payment_contracts 3 -> 6 (0x1a -> 0x32), rates 4 -> 7 (0x22 -> 0x3a), and
-# the entries of rates now come before reputation_proofs: a message is written in field order.
+# GOLDEN_PEER was re-tagged by hand for the renumbering of Peer: rates 4 -> 7 (0x22 ->
+# 0x3a). The previous module also wrote one reputation proof in it (field 1). That field
+# left the Peer (the pointers to proofs on ledgers are in ReputationProof.ledger_proofs),
+# so its bytes are cut off. Every other byte is as the previous module wrote it.
 # The same bytes with `xattrs` at its new number: #671 moved it from 2 to 3, and every entry
 # tag below is 0x1a (field 3) where the previous module wrote 0x12 (field 2).
 GOLDEN_CONTRACT = bytes.fromhex(
@@ -66,7 +67,7 @@ GOLDEN_PEER = bytes.fromhex(
     "3a200a166370755f6d755f7065725f766370755f7365636f6e6412060a04313131313a16"
     "0a086275696c645f6d75120a0a0831303030303030303a120a0e6e65745f6d755f706572"
     "5f67696212003a1e0a1572616d5f6d755f7065725f6769625f7365636f6e6412050a0332"
-    "3737620f1a0d0a08746f6b656e5f69641201aa"
+    "3737"
 )
 GOLDEN_SERVICE = bytes.fromhex(
     "0a076669787475726512820212030a01781a570a052f6d61696e120c0a04626574611204"
@@ -293,7 +294,6 @@ class OldBytesReadByNewNodesTests(unittest.TestCase):
             {"ram_mu_per_gib_second": "277", "build_mu": "10000000",
              "cpu_mu_per_vcpu_second": "1111", "net_mu_per_gib": ""},
         )
-        self.assertEqual(keyvalue.get(peer.reputation_proofs[0].xattrs, "token_id"), b"\xaa")
 
 
 class NewBytesReadByOldNodesTests(unittest.TestCase):

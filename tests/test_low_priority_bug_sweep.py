@@ -90,10 +90,10 @@ class UnattestedProofIsNotADisownedProofTests(unittest.TestCase):
     """
 
     def _lines(self, contract):
-        peer = celaut_pb2.Peer(public_key="ab" * 32)
         lines = []
         with unittest.mock.patch.object(manager.log, "LOGGER", lines.append):
-            verdict = manager.validate_reputation_proof(contract_ledger=contract, peer=peer)
+            verdict = manager.validate_reputation_proof(
+                contract_ledger=contract, peer_id="ab" * 32)
         return verdict, " ".join(lines)
 
     def test_a_proof_with_no_attestation_is_not_accused_of_being_disowned(self):
@@ -110,10 +110,9 @@ class UnattestedProofIsNotADisownedProofTests(unittest.TestCase):
         # rest of this fix undoes.
         contract = celaut_pb2.Contract()
         set_owner_attestation(contract, "02" + "11" * 32, "ff" * 65)
-        peer = celaut_pb2.Peer(public_key="not-a-key")
         lines = []
         with unittest.mock.patch.object(manager.log, "LOGGER", lines.append):
-            manager.validate_reputation_proof(contract_ledger=contract, peer=peer)
+            manager.validate_reputation_proof(contract_ledger=contract, peer_id="not-a-key")
         logged = " ".join(lines)
         self.assertIn("not a usable key", logged)
         self.assertNotIn("does not verify", logged)

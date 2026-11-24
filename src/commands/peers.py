@@ -78,13 +78,10 @@ def _peer_records(connection, peer_id=None):
             advertised_rates = {
                 rate: amount.n for rate, amount in keyvalue.items(announced.rates)
             }
-            # Every proof the peer announced, not just one: a node can hold
-            # several, and each is an opinion set it published (issue #281).
-            proof_ids = [
-                token_id for token_id in (
-                    get_token_id(contract) for contract in announced.reputation_proofs
-                ) if token_id
-            ]
+        # Every proof the peer pointed to, not just one: a node can hold several, and
+        # each is an opinion set it published (issue #281). They are in the
+        # ``ReputationProof`` that this node kept, not in the ``Peer``.
+        proof_ids = _ledger_proof_ids(connection, peer_id_)
         endpoints = []
         if has_uri:
             endpoints = [
@@ -116,6 +113,22 @@ def _peer_records(connection, peer_id=None):
             "advertisement_error": advertisement_error,
         })
     return records
+
+
+def _ledger_proof_ids(connection, peer_id: str) -> list:
+    """The ids of the proofs on ledgers that the kept ``ReputationProof`` of ``peer_id``
+    points to. Empty when this node has not pulled a proof of the peer yet."""
+    from src.reputation_system.offchain_proof import ledger_proofs_of
+
+    if not _table_exists(connection, "offchain_proofs"):
+        return []
+    row = connection.execute(
+        "SELECT proof FROM offchain_proofs WHERE publisher = ?", (peer_id,)
+    ).fetchone()
+    return [
+        token_id for token_id in (get_token_id(c) for c in ledger_proofs_of(row[0] if row else None))
+        if token_id
+    ]
 
 
 def _table_exists(connection, name: str) -> bool:

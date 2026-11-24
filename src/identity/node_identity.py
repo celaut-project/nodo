@@ -515,7 +515,7 @@ def get_node_public_key_hex() -> Optional[str]:
     return _cached_keypair(mnemonic)[0]
 
 
-def _canonical_contract_message(contract) -> str:
+def canonical_contract_message(contract) -> str:
     """Deterministic encoding of one ``Contract`` (a ledger, a protocol and its xattrs)."""
     xattrs = ";".join(
         f"{key}={bytes(value).hex()}" for key, value in keyvalue.items(contract.xattrs)
@@ -534,7 +534,7 @@ def _canonical_contract_message(contract) -> str:
 def _canonical_contract(contract_rate) -> str:
     """Deterministic encoding of one advertised payment contract and its rate."""
     return "~".join([
-        _canonical_contract_message(contract_rate.contract),
+        canonical_contract_message(contract_rate.contract),
         contract_rate.mu_per_unit.n,
     ])
 
@@ -619,19 +619,6 @@ def canonical_peer_content_digest(peer) -> str:
     neither can be stripped (making a soon-to-expire address look permanent, or a
     UDP endpoint look like a TCP one) nor extended in transit.
 
-    ``reputation_proofs`` is covered as well. The proofs are validated against the
-    peer's own id before being stored, so a forged one cannot enter the database --
-    but the message is kept verbatim and republished on-chain, where a reader is told
-    the signature vouches for it. Leaving them out would let a relay graft proofs onto
-    (or strip them from) a claim that still verifies.
-
-    An owner attestation rides inside the proof it belongs to, as two of that
-    ``Contract``'s xattrs, so it is covered by ``reputation_proofs`` above with nothing
-    further to account for here. Each one carries its own signature by the wallet it
-    names, so a forged entry cannot survive :func:`attested_proof_owner` -- but a relay
-    could still strip one, and a peer whose attestation went missing loses the
-    reputation it can prove, which covering the proofs is what prevents.
-
     Built field by field rather than from ``SerializeToString()``, which protobuf does
     not guarantee to be canonical (field order, unknown fields, non-minimal varints).
     Every repeated element is sorted so the digest does not depend on the order a node
@@ -662,7 +649,6 @@ def canonical_peer_content_digest(peer) -> str:
     """
     uris = sorted(_canonical_uri(uri) for uri in peer.uri)
     contracts = sorted(_canonical_contract(gp) for gp in peer.payment_contracts)
-    proofs = sorted(_canonical_contract_message(c) for c in peer.reputation_proofs)
     scheme = ";".join(
         sorted(_canonical_protocol(c) for c in peer.signature_scheme.components)
     )
@@ -690,7 +676,6 @@ def canonical_peer_content_digest(peer) -> str:
     canonical = "|".join([
         "/".join(uris),
         "/".join(contracts),
-        "/".join(proofs),
         rates,
         limits,
         scheme,

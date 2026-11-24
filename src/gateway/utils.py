@@ -503,12 +503,6 @@ def _unsigned_peer(uris: List[celaut.Instance.Uri], *, quiet: bool = False) -> c
     for start_minute, end_minute in window.utc_spans():
         peer.activity_window.spans.add(start_minute=start_minute, end_minute=end_minute)
 
-    from src.reputation_system.fetch import local_proofs
-
-    reputation_proofs = list(local_proofs())
-    if not quiet:
-        log.LOGGER(f'Using {len(reputation_proofs)} local reputation proofs')
-    peer.reputation_proofs.extend(reputation_proofs)
     return peer
 
 

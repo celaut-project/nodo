@@ -283,12 +283,9 @@ class ProtocolCommandLedgerTests(unittest.TestCase):
         rate.contract.ledger.formal = bytes(rate.contract.ledger.formal).replace(
             b"network=mainnet", b"network=testnet"
         )
-        peer.reputation_proofs.add().ledger.CopyFrom(ledger_descriptors.ergo_reputation_ledger())
-        # A proof carrying the payment declaration is not a proof's declaration.
-        peer.reputation_proofs.add().ledger.CopyFrom(ledger_descriptors.ergo_payment_ledger())
         report = protocol._compare_ledgers(peer)
         self.assertEqual([r["status"] for r in report],
-                         ["differs", "match", "match", "differs"])
+                         ["differs", "match"])
         self.assertEqual(list(report[0]["formal_difference"]), ["network"])
         self.assertEqual(report[1]["where"], "payment_contracts[0].protocol")
 

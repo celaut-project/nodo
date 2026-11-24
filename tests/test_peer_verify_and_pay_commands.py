@@ -23,17 +23,19 @@ from src.commands import pay as pv
 
 
 def _announcement(proof_ids):
-    """A stored advertisement carrying the given proofs."""
-    peer = celaut_pb2.Peer()
+    """The pointers to proofs on ledgers in a kept ``ReputationProof``, one for each id."""
+    pointers = []
     for proof_id in proof_ids:
-        set_token_id(peer.reputation_proofs.add(), proof_id)
-    return peer
+        contract = celaut_pb2.Contract()
+        set_token_id(contract, proof_id)
+        pointers.append(contract)
+    return pointers
 
 
 class VerifyReputationCommandTests(unittest.TestCase):
     """`verify_reputation(peer_id)` runs the node's own check, not a copy of it.
 
-    The command's job is reading the advertisement, resolving each proof's attested
+    The command's job is reading the kept reputation proof, resolving each proof's attested
     owner, and reporting; the verdict itself comes from `explain_contract_ledger`.
     These mock that boundary rather than the primitives beneath it -- mocking those
     was what let the two implementations drift apart unnoticed.
@@ -42,7 +44,7 @@ class VerifyReputationCommandTests(unittest.TestCase):
     def _patch(self, **overrides):
         # Sensible "happy path" defaults; individual tests override one piece.
         defaults = dict(
-            _peer_advertisement=lambda peer_id: _announcement(["proof-token-1"]),
+            _ledger_proofs=lambda peer_id: _announcement(["proof-token-1"]),
             attested_proof_owner=lambda contract, peer_id: "02" + "ab" * 32,
             explain_contract_ledger=lambda contract, wallet: None,
         )
@@ -61,10 +63,10 @@ class VerifyReputationCommandTests(unittest.TestCase):
         self.assertTrue(self._run())
 
     def test_fail_when_peer_announced_no_proof(self):
-        self.assertFalse(self._run(_peer_advertisement=lambda peer_id: celaut_pb2.Peer()))
+        self.assertFalse(self._run(_ledger_proofs=lambda peer_id: []))
 
     def test_fail_when_the_peer_is_not_known(self):
-        self.assertFalse(self._run(_peer_advertisement=lambda peer_id: None))
+        self.assertFalse(self._run(_ledger_proofs=lambda peer_id: None))
 
     def test_fail_when_no_owner_is_attested(self):
         # R7 names a wallet, so a proof whose owner this peer cannot prove has proved
@@ -117,14 +119,14 @@ class VerifyReputationCommandTests(unittest.TestCase):
             return None
 
         self.assertTrue(self._run(
-            _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
+            _ledger_proofs=lambda peer_id: _announcement(["proof-a", "proof-b"]),
             explain_contract_ledger=explain,
         ))
         self.assertEqual(checked, ["proof-a", "proof-b"])
 
     def test_one_unowned_proof_fails_the_peer(self):
         self.assertFalse(self._run(
-            _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
+            _ledger_proofs=lambda peer_id: _announcement(["proof-a", "proof-b"]),
             explain_contract_ledger=lambda contract, wallet: (
                 "no unspent boxes" if get_token_id(contract) == "proof-b" else None
             ),

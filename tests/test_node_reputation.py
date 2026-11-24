@@ -481,21 +481,22 @@ class OwnProofResolutionTests(unittest.TestCase):
     """
 
     def _peer_announcing(self, *proof_ids):
+        """The kept ``ReputationProof`` of a peer that points to ``proof_ids``."""
         from protos import celaut_pb2
         from src.utils.contract_xattrs import set_token_id
 
-        peer = celaut_pb2.Peer()
+        proof = celaut_pb2.ReputationProof(publisher=NODE_ID)
         for proof_id in proof_ids:
-            set_token_id(peer.reputation_proofs.add(), proof_id)
-        return peer.SerializeToString()
+            set_token_id(proof.ledger_proofs.add(), proof_id)
+        return proof.SerializeToString()
 
-    def test_a_peers_own_proofs_come_from_the_advertisement_it_signed(self):
+    def test_a_peers_own_proofs_come_from_the_reputation_proof_it_signed(self):
         from src.reputation_system import interface
 
         second = "bb" * 32
         with mock.patch.object(
             interface.sc,
-            "get_peer_advertisement",
+            "get_offchain_proof",
             return_value=self._peer_announcing(OWN_PROOF, second),
         ):
             self.assertEqual(interface._own_proof_ids(NODE_ID), (OWN_PROOF, second))
@@ -510,7 +511,7 @@ class OwnProofResolutionTests(unittest.TestCase):
                 ), \
                 mock.patch.object(
                     interface.sc,
-                    "get_peer_advertisement",
+                    "get_offchain_proof",
                     side_effect=AssertionError("read the database for our own proof"),
                 ):
             env.get.return_value = OWN_PROOF
@@ -519,16 +520,16 @@ class OwnProofResolutionTests(unittest.TestCase):
     def test_a_peer_that_announced_no_proof_has_nothing_set_aside(self):
         from src.reputation_system import interface
 
-        with mock.patch.object(interface.sc, "get_peer_advertisement", return_value=None):
+        with mock.patch.object(interface.sc, "get_offchain_proof", return_value=None):
             self.assertEqual(interface._own_proof_ids(NODE_ID), ())
 
-    def test_an_unreadable_advertisement_sets_nothing_aside_rather_than_raising(self):
+    def test_an_unreadable_proof_sets_nothing_aside_rather_than_raising(self):
         # The figures then include whatever the peer published about itself, and the log
         # says so. Failing the whole read would tell the operator less.
         from src.reputation_system import interface
 
         with mock.patch.object(
-            interface.sc, "get_peer_advertisement", return_value=b"\xff\xff not a Peer"
+            interface.sc, "get_offchain_proof", return_value=b"\xff\xff not a proof"
         ):
             self.assertEqual(interface._own_proof_ids(NODE_ID), ())
 

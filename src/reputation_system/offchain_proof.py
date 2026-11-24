@@ -17,6 +17,11 @@ The opinions of this node are:
 The signature covers a canonical text of every field, never ``SerializeToString()``,
 as for a statement: ``"celaut-reputation-proof:" + publisher + "|" + proof_digest``.
 
+The proof also points to the proofs of its publisher on ledgers (``ledger_proofs``): one
+``Contract`` for each, with the owner attestation of its wallet. The ``Peer`` does not
+carry them. A pointer is not an opinion, so it has no weight here: a reader checks the
+attestation (``manager.validate_reputation_proof``) and reads the opinions on the ledger.
+
 The proof also holds a proof of work (#677): ``pow_nonce``, which the signature covers.
 The work is the number of leading zero bits of ``proof_digest``. A receiver refuses a
 proof with fewer bits than ``reputation.MIN_OFFCHAIN_POW_BITS``, and weighs the others by
@@ -31,6 +36,7 @@ from typing import Dict, Iterable, List, Optional
 from protos import celaut_pb2
 from src.identity import execution_receipt
 from src.identity.node_identity import (
+    canonical_contract_message,
     get_node_public_key_hex,
     normalize_public_key_hex,
     reputation_proof_payload,
@@ -47,9 +53,11 @@ env_manager = ConfigManager()
 # does not set it, and then the type is the text below, so an opinion always has one.
 NODE_TYPE_FALLBACK = "celaut-node"
 
-# The most opinions that a received proof may hold, and the most evidences in it that
-# this node checks. More is refused, not cut: a cut proof does not verify.
+# The most opinions and the most ledger pointers that a received proof may hold, and the
+# most evidences in it that this node checks. More is refused, not cut: a cut proof does
+# not verify.
 MAX_OPINIONS = 4096
+MAX_LEDGER_PROOFS = 64
 MAX_EVIDENCES_CHECKED = 64
 
 # The ledger tag of an opinion that comes from an off-chain proof, in reports.
@@ -123,17 +131,25 @@ def _opinion_text(opinion: celaut_pb2.ReputationOpinion) -> str:
                      "1" if opinion.positive else "0", bytes(opinion.content).hex(), evidence))
 
 
+def _ledger_proofs_text(proof: celaut_pb2.ReputationProof) -> str:
+    """The pointers to the proofs on ledgers, sorted so the order does not matter."""
+    return "/".join(sorted(canonical_contract_message(c) for c in proof.ledger_proofs))
+
+
 def pow_base(proof: celaut_pb2.ReputationProof) -> str:
     """Blake2b-256 hex of the canonical text of every field but the nonce and the
-    signature: ``publisher|ts|scheme|opinion/opinion/...``. An opinion is
+    signature: ``publisher|ts|scheme|opinion/opinion/...|pointer/pointer/...``. An opinion is
     ``hex(type)~hex(object)~amount~positive~hex(content)~evidence``, where ``evidence`` is
     ``fault_proofs.digest`` of its evidence, or empty. The scheme is
-    ``execution_receipt.canonical_scheme``. It is computed once when a node looks for a
+    ``execution_receipt.canonical_scheme``. The pointers are the sorted
+    ``node_identity.canonical_contract_message`` of each ``ledger_proofs``, joined by ``/``,
+    after the opinions. It is computed once when a node looks for a
     nonce: only the last step of the digest depends on the nonce."""
     text = "|".join((
         proof.publisher, str(int(proof.ts)),
         execution_receipt.canonical_scheme(proof.signature_scheme),
         "/".join(_opinion_text(opinion) for opinion in proof.opinions),
+        _ledger_proofs_text(proof),
     ))
     return hashlib.blake2b(text.encode("utf-8"), digest_size=32).hexdigest()
 
@@ -321,6 +337,19 @@ def own_pow_bits() -> int:
     return max(target_pow_bits(), min_pow_bits())
 
 
+def _own_ledger_proofs() -> List[celaut_pb2.Contract]:
+    """The pointers to the proofs of this node on ledgers, each with the attestation of its
+    wallet over the ``peer_id`` of this node (``fetch.local_proofs``). An error gives none:
+    the proof of this node is still built and signed."""
+    from src.reputation_system.fetch import local_proofs
+
+    try:
+        return list(local_proofs())[:MAX_LEDGER_PROOFS]
+    except Exception as e:
+        log.LOGGER(f"Cannot read the ledger proofs of this node: {e}")
+        return []
+
+
 def build_own_proof(mine_bits: Optional[int] = None) -> Optional[celaut_pb2.ReputationProof]:
     """The signed proof of this node now, or None with no identity key.
 
@@ -333,6 +362,7 @@ def build_own_proof(mine_bits: Optional[int] = None) -> Optional[celaut_pb2.Repu
     proof = celaut_pb2.ReputationProof(ts=int(time.time()))
     proof.opinions.extend(_score_opinions(sql, me))
     proof.opinions.extend(_fault_opinions(sql, me))
+    proof.ledger_proofs.extend(_own_ledger_proofs())
     if mine_bits:
         proof.publisher = me
         proof.signature_scheme.CopyFrom(execution_receipt.receipt_scheme())
@@ -344,7 +374,8 @@ def _content_key(proof: celaut_pb2.ReputationProof) -> str:
     """What the proof says, with no date and no nonce: two proofs with the same key need no
     new work."""
     return hashlib.blake2b(
-        "/".join(_opinion_text(opinion) for opinion in proof.opinions).encode("utf-8"),
+        ("/".join(_opinion_text(opinion) for opinion in proof.opinions)
+         + "|" + _ledger_proofs_text(proof)).encode("utf-8"),
         digest_size=16).hexdigest()
 
 
@@ -524,6 +555,8 @@ def receive(raw: bytes, known: Optional[set] = None) -> Optional[str]:
         return "not readable"
     if len(proof.opinions) > MAX_OPINIONS:
         return "too many opinions"
+    if len(proof.ledger_proofs) > MAX_LEDGER_PROOFS:
+        return "too many ledger proofs"
     if not verify(proof):
         return "not signed by its publisher"
     me = (get_node_public_key_hex() or "").lower()
@@ -553,8 +586,45 @@ def receive(raw: bytes, known: Optional[set] = None) -> Optional[str]:
             log.LOGGER(f"Cannot check the evidence in the proof of {proof.publisher}: {e}")
     if proof.publisher not in known:
         return None
+    check_ledger_proofs(proof)
     sql.store_offchain_proof(proof.publisher, proof.ts, raw)
     return None
+
+
+def ledger_proofs_of(raw: Optional[bytes]) -> List[celaut_pb2.Contract]:
+    """The ``ledger_proofs`` of a kept proof, from its bytes (the ``proof`` column of
+    ``offchain_proofs``). None, or bytes that cannot be read, give none."""
+    if not raw:
+        return []
+    proof = celaut_pb2.ReputationProof()
+    try:
+        proof.ParseFromString(bytes(raw))
+    except Exception:
+        return []
+    return list(proof.ledger_proofs)
+
+
+def stored_ledger_proofs(peer_id: str) -> List[celaut_pb2.Contract]:
+    """The pointers to the proofs on ledgers that ``peer_id`` gave in its kept proof, or
+    none: this node holds a proof only after a pull or a push took it, and only of a peer."""
+    from src.database.sql_connection import SQLConnection
+
+    return ledger_proofs_of(SQLConnection().get_offchain_proof((peer_id or "").lower()))
+
+
+def check_ledger_proofs(proof: celaut_pb2.ReputationProof) -> None:
+    """Log each pointer of ``proof`` that its publisher does not own. Nothing is refused:
+    the opinions of the proof are credited on their own, and a pointer that fails is only
+    a pointer that a reader does not credit (``manager.validate_reputation_proof`` logs
+    why)."""
+    from src.manager.manager import validate_reputation_proof
+
+    for contract in proof.ledger_proofs:
+        try:
+            validate_reputation_proof(contract_ledger=contract, peer_id=proof.publisher)
+        except Exception as e:
+            log.LOGGER(f"Uncontrolled error validating a ledger proof of "
+                       f"{proof.publisher}: {e}")
 
 
 def scores(proof: celaut_pb2.ReputationProof) -> Dict[str, tuple]:

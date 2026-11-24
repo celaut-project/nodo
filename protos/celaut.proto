@@ -1322,7 +1322,8 @@ message ReputationOpinion {
 }
 
 // The opinions of a node about other nodes, signed with its identity key. It is the
-// off-chain form of a reputation proof on a ledger. A receiver keeps only the newest
+// off-chain form of a reputation proof on a ledger, and it holds the pointers to the
+// proofs of the node on ledgers (ledger_proofs). A receiver keeps only the newest
 // proof of each publisher.
 message ReputationProof {
     // The peer_id of the node that signs: its public key, in lowercase hexadecimal. It
@@ -1345,6 +1346,14 @@ message ReputationProof {
     // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
     // that the node signs.
     string signature = 6;
+    // The proofs of the publisher on ledgers, as pointers: each Contract names the ledger,
+    // the script and the token of one proof, and carries the owner attestation (in its
+    // xattrs) by which the wallet that owns the proof vouches for the publisher. They are
+    // pointers: the opinions of such a proof are on the ledger, not here. The signature
+    // covers them, so a node that passes the proof on cannot add or remove one. A reader
+    // credits a pointer only when the attestation verifies for the publisher. The list
+    // is empty when the publisher has no proof on a ledger.
+    repeated Contract ledger_proofs = 7;
 }
 
 // The answer of PushReputationProof.
@@ -1383,12 +1392,11 @@ message ServiceInstance {
 // link speaks only one of the two schemes. A key in a *different role* (a proof's
 // owner, the per-process TLS key) is not a second identity: it is a hierarchy with a
 // single root. A scheme that needs two keypairs (a classical/post-quantum hybrid) is
-// ONE scheme with one descriptor whose encoding carries both. payment_contracts and
-// reputation_proofs stay repeated on purpose: a menu the payer picks one item from,
-// and a fact per proof.
+// ONE scheme with one descriptor whose encoding carries both. payment_contracts stays
+// repeated on purpose: a menu the payer picks one item from.
 
-// What a node announces about itself: its addresses, its prices, its reputation
-// proofs, its resources and its identity. The node signs it. A reader refuses a Peer
+// What a node announces about itself: its addresses, its prices, its resources and its
+// identity. The node signs it. A reader refuses a Peer
 // without a public_key and a signature, or with a signature that does not verify.
 message Peer {
     // One address of the node. It gives its transport and its protocols, so each
@@ -1541,9 +1549,10 @@ message Peer {
     // is the authority for one instance.
     ActivityWindow activity_window = 11;
 
-    // What other nodes say about the node.
-    // The reputation proofs of the node, each with its owner attestation.
-    repeated Contract reputation_proofs = 12;
+    // The proofs of reputation of the node, on a ledger or off it, are not in the Peer.
+    // They are in ReputationProof (GetReputationProofs): each one signed by its publisher.
+    reserved 12;
+    reserved "reputation_proofs";
 }
 
 // The proof of work fields come from issue #361; the peer binding from the "Peers and

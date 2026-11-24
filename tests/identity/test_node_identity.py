@@ -97,17 +97,6 @@ class CanonicalPeerContentDigestTests(unittest.TestCase):
             ni.canonical_peer_content_digest(_peer(transport="udp")),
         )
 
-    def test_covers_the_reputation_proofs(self):
-        # The signed message is republished on-chain as "verifiable against the
-        # peer's key", so a relay must not be able to graft proofs onto it -- nor
-        # strip the legitimate ones -- while the signature still checks out.
-        grafted = _peer()
-        grafted.reputation_proofs.add().ledger.formal = b"GRAFTED"
-        self.assertNotEqual(
-            ni.canonical_peer_content_digest(_peer()),
-            ni.canonical_peer_content_digest(grafted),
-        )
-
     def test_covers_the_protocol_stack(self):
         swapped = _peer()
         del swapped.uri[0].protocol_stack[:]

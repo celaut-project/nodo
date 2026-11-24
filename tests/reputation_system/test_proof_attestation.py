@@ -116,16 +116,18 @@ class ProofOwnerAttestationTests(unittest.TestCase):
             self.assertFalse(pa.attest_proof_ownership(contract, MNEMONIC))
         self.assertEqual(len(contract.xattrs), 0)
 
-    def test_an_attestation_is_covered_by_the_peer_signature(self):
-        # It rides in the proof's xattrs, which the digest already covers through
-        # reputation_proofs -- so stripping one breaks the announcement rather than
-        # silently costing the peer the reputation it can prove.
-        peer = celaut_pb2.Peer()
-        peer.reputation_proofs.append(self._proof())
-        with_attestation = ni.canonical_peer_content_digest(peer)
+    def test_an_attestation_is_covered_by_the_reputation_proof_signature(self):
+        # It rides in the xattrs of a pointer in ``ReputationProof.ledger_proofs``, which
+        # the digest of the proof covers -- so stripping one breaks the signature rather
+        # than silently costing the node the reputation it can prove.
+        from src.reputation_system import offchain_proof
 
-        keyvalue.delete(peer.reputation_proofs[0].xattrs, "owner_signature")
-        self.assertNotEqual(with_attestation, ni.canonical_peer_content_digest(peer))
+        proof = celaut_pb2.ReputationProof(publisher=self.peer_id)
+        proof.ledger_proofs.append(self._proof())
+        with_attestation = offchain_proof.proof_digest(proof)
+
+        keyvalue.delete(proof.ledger_proofs[0].xattrs, "owner_signature")
+        self.assertNotEqual(with_attestation, offchain_proof.proof_digest(proof))
 
 if __name__ == "__main__":
     unittest.main()

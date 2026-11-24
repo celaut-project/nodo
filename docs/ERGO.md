@@ -22,12 +22,13 @@ The reputation system in the Nodo allows nodes to share their opinion about othe
 - In this way, each node assigns a different reputation to its peers, enabling a decentralized and transparent evaluation system.
 
 **A proof is the author's opinions, not a score awarded to its holder.** This is the
-part that reads backwards at first: when a peer announces a proof to us
-(`Peer.reputation_proofs`), it is showing us *what it thinks of others*, not a
+part that reads backwards at first: when a peer points us to a proof
+(`ReputationProof.ledger_proofs`, from `GetReputationProofs`), it is showing us *what it thinks of others*, not a
 credential we granted it or a rating we should read off it. That also means one
 identity key may hold **several** proofs at once, so nothing on our side records
-"the" proof of a peer — the proofs a peer announced live in the signed
-advertisement we store verbatim.
+"the" proof of a peer — the pointers a peer gave live in the signed
+`ReputationProof` that we keep as it came (table `offchain_proofs`). The `Peer` does not
+carry them.
 
 R5 used to hold the target's *reputation proof token id* instead of its public key.
 That made every opinion an opinion about one of the target's proofs rather than about
@@ -322,11 +323,12 @@ The reputation system utilizes the following fields:
   Ergo chain
 - `token_id`: Maps to the reputation proof ID, corresponding to the `token_id` in Ergo
 
-A `Peer` carries these as `repeated Contract reputation_proofs` — repeated because the
-peer may hold several proofs, and each entry is one of the peer's own published
+A `ReputationProof` carries these as `repeated Contract ledger_proofs` — repeated because the
+peer may hold several proofs, and each entry points to one of the peer's own published
 opinion sets rather than a rating of the peer (see [Reputation system
-implementation](#reputation-system-implementation)). `nodo peers` lists every proof id
-a peer announced; `nodo verify_reputation <peer_id>` checks, for each of them, that
+implementation](#reputation-system-implementation)). The `Peer` does not carry them: a node
+learns them when it pulls the proof of the peer. `nodo peers` lists every proof id the kept
+proof of a peer points to; `nodo verify_reputation <peer_id>` checks, for each of them, that
 the peer actually controls it on-chain.
 
 The registers of an opinion box itself:

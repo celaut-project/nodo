@@ -19,6 +19,7 @@ try:
     from src.gateway import utils as gateway_utils
     from src.identity import node_identity as ni
     from src.reputation_system import fetch as reputation_fetch
+    from src.reputation_system import offchain_proof
     from src.reputation_system import proof_attestation
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -209,15 +210,16 @@ class TwoAnnouncementShapesShareTheCacheTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class AttestedProofsDoNotMoveTheDigestTests(unittest.TestCase):
-    """An announced reputation proof has to describe the same content twice (issue #314).
+class AttestedLedgerProofsDoNotMoveTheContentKeyTests(unittest.TestCase):
+    """A pointer to a proof on a ledger has to describe the same content twice (issue #314).
 
-    The cache above is keyed on the announcement's content digest, and a proof's owner
-    attestation is an xattr the digest covers. Ergo's Schnorr signing draws a random
-    nonce, so an attestation signed per announcement gives identical content a different
-    digest, and the cache then never hits on exactly the nodes that hold a proof. These
-    go through `local_proofs`, where the attestation is made: a hand-built `Peer` never
-    reaches it, so a case that builds one cannot see this.
+    The pointers are in the own ``ReputationProof`` (``ledger_proofs``), not in the
+    ``Peer``. The proof digest covers their owner attestation. Ergo's Schnorr signing
+    draws a random nonce, so an attestation signed per build gives identical content a
+    different key, and a node with work to do (``TARGET_OFFCHAIN_POW_BITS``) would look for
+    a new nonce each time. These go through ``local_proofs``, where the attestation is
+    made: a hand-built ``Contract`` never reaches it, so a case that builds one cannot see
+    this.
     """
 
     _counting_signer = SignedAnnouncementCacheTests._counting_signer
@@ -247,38 +249,36 @@ class AttestedProofsDoNotMoveTheDigestTests(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     @staticmethod
-    def _announcement_with_proofs(ip="1.2.3.4", port=8080):
-        """An announcement carrying this node's proofs, as `_build_peer` assembles it."""
-        peer = _announcement(ip=ip, port=port)
-        peer.reputation_proofs.extend(reputation_fetch.local_proofs())
-        return peer
+    def _proof_with_pointers():
+        """A proof carrying the pointers of this node, as ``build_own_proof`` assembles it."""
+        proof = celaut_pb2.ReputationProof(publisher=ni.get_node_public_key_hex())
+        proof.ledger_proofs.extend(offchain_proof._own_ledger_proofs())
+        return proof
 
     def test_the_proof_is_attested(self):
-        # Guards the rest: an unattested proof carries no signature xattr, so the
-        # digests below would match for the wrong reason.
-        peer = self._announcement_with_proofs()
-        self.assertEqual(len(peer.reputation_proofs), 1)
+        # Guards the rest: an unattested pointer carries no signature xattr, so the keys
+        # below would match for the wrong reason.
+        proof = self._proof_with_pointers()
+        self.assertEqual(len(proof.ledger_proofs), 1)
         self.assertEqual(
             proof_attestation.attested_proof_owner(
-                peer.reputation_proofs[0], ni.get_node_public_key_hex()
+                proof.ledger_proofs[0], ni.get_node_public_key_hex()
             ),
             proof_attestation._wallet_public_key_hex(WALLET_MNEMONIC),
         )
 
-    def test_identical_content_keeps_one_digest(self):
-        digests = {
-            ni.canonical_peer_content_digest(self._announcement_with_proofs())
-            for _ in range(3)
-        }
-        self.assertEqual(len(digests), 1, f"content digest moved: {digests}")
+    def test_identical_content_keeps_one_key_and_one_digest(self):
+        keys = {offchain_proof._content_key(self._proof_with_pointers()) for _ in range(3)}
+        digests = {offchain_proof.proof_digest(self._proof_with_pointers()) for _ in range(3)}
+        self.assertEqual(len(keys), 1, f"content key moved: {keys}")
+        self.assertEqual(len(digests), 1, f"proof digest moved: {digests}")
 
-    def test_an_announcement_with_a_proof_is_signed_once(self):
-        calls, patch = self._counting_signer()
-        with patch:
-            gateway_utils._sign_peer(self._announcement_with_proofs())
-            gateway_utils._sign_peer(self._announcement_with_proofs())
-
-        self.assertEqual(len(calls), 1)
+    def test_a_pointer_moves_the_digest(self):
+        with_pointer = self._proof_with_pointers()
+        without = celaut_pb2.ReputationProof(publisher=with_pointer.publisher)
+        self.assertNotEqual(
+            offchain_proof.proof_digest(with_pointer), offchain_proof.proof_digest(without)
+        )
 
 
 if __name__ == "__main__":

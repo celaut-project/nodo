@@ -93,16 +93,15 @@ def own_declaration(*, prose: bool = True) -> Dict:
 def _compare_ledgers(peer) -> List[Dict]:
     """Each ledger ``peer`` declares, against this node's declaration of the same ledger.
 
-    Each against the declaration for its place: a payment contract against how this
-    node declares that ledger for payments, a reputation proof against how it declares
-    it for proofs. A ledger this node has no declaration for there is ``unknown``.
+    Each payment contract against how this node declares that ledger for payments. A
+    ledger this node has no declaration for there is ``unknown``. The ledgers of the
+    proofs of a peer are not in its ``Peer`` (they are in its ``ReputationProof``), so
+    they are not compared here.
     """
-    from src.identity.node_identity import same_declaration
     from src.identity.transport_stack import formal_difference
     from src.utils.ledger_descriptors import (
         payment_ledger,
         payment_protocol,
-        reputation_ledger,
         same_payment_ledger,
     )
     from src.utils.payment_protocol import same_payment_protocol
@@ -116,9 +115,6 @@ def _compare_ledgers(peer) -> List[Dict]:
         (f"payment_contracts[{i}].protocol", rate.contract.protocol, payment_protocol,
          same_payment_protocol)
         for i, rate in enumerate(peer.payment_contracts)
-    ] + [
-        (f"reputation_proofs[{i}]", proof.ledger, reputation_ledger, same_declaration)
-        for i, proof in enumerate(peer.reputation_proofs)
     ]
     report: List[Dict] = []
     for where, ledger, local_ledger, same in declared:
@@ -253,7 +249,7 @@ def _print_declaration(declaration: Dict) -> None:
     print("Payment protocols in payment_contracts (Contract.Protocol)")
     for component in declaration["payment_protocols"]:
         _print_component("protocol", component)
-    print("Ledgers in reputation_proofs (Contract.Ledger)")
+    print("Ledgers in ledger_proofs (ReputationProof, Contract.Ledger)")
     for component in declaration["reputation_ledgers"]:
         _print_component("ledger", component)
 
