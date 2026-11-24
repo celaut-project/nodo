@@ -42,36 +42,38 @@ VECTOR_ENVS_DIGEST = "e684ff3022c2a14c62addd0129cd4a5d3dc95b2d13a924ce4fc57aa7e9
 VECTOR_START_CANONICAL = (
     "7374617274"                                                          # hex("start")
     "|03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"   # peer_id
-    "|b08b762433f9c582f3347fbe192e523260278d24533a94e1972fbcddba42158a"   # execution_name
+    "|94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"   # scheme digest
     "|1798329600"                                                         # ts
+    "|b08b762433f9c582f3347fbe192e523260278d24533a94e1972fbcddba42158a"   # execution_name
     "|a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a"   # service_id.type
     "~63e5b5a4137cfa77cb9d10adae081d0df082a826d8441721460d5933f5800056"   # service_id.value
     "|e684ff3022c2a14c62addd0129cd4a5d3dc95b2d13a924ce4fc57aa7e9842a45"   # envs_digest
     "|3132333435363738"                                                   # hex("12345678")
-    "||||0|0|0||0|0|||||"                                                 # stream fields
     "|100000|200000|536870912|1073741824"                                 # what it reserved
     "|6923dd1bc0460082c5d55a831908c24a282860b7f1cd6c2b79cf1bc8857c639c"   # kernel
     "|313064653a31616430/313064653a32323034"                              # hex of each chip, sorted
-    "|94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"   # scheme digest
+    "||||0|0|0||0|0|||||"                                                 # stream fields
 )
-VECTOR_START_DIGEST = "dce17112c8c183eb1dc8382b253f395154b9bd3e64c3001d00276b1c59036cf8"
+VECTOR_START_DIGEST = "51eabf92a969830856c67647e118c354f3f5feb996b54427160d6d6132389f3f"
 VECTOR_START_SIGNATURE = (
-    "131d085e3bc65c4cebd27fd2a98fec40bc1be0488c9ef559c0038364c53973ba"
-    "ed6b095473b1a725e100ca2989df1be7aa104f3a3ac468082ece67a0afddc60e"
+    "e82bb5c69fb6b7054f0fa5c2477cec8dc3b9e1148ce8f15e56af82824c782b73"
+    "0d10b3d47b79a482cfd596c8f5bae91f1d0d78fa822fef2d6d9e037926fa7604"
 )
 VECTOR_IN_HEAD = "4cc36e6c5ce771828a06755610180b0db14686b7b88ec9aca2d94dc67cb82b58"
 VECTOR_OUT_HEAD = "721ba2dbda02e1f8d3f9bf151175163f77ece18af91d85a2357a438d36f2ed85"
-VECTOR_CHECKPOINT_DIGEST = "9b70d9fc991f69e5cc3a06e39d860ad00abefc55bba3e42f4b5e08a621f5f0a4"
+VECTOR_CHECKPOINT_DIGEST = "92b549c868ba4d005ed20f2937c162312016011e95153bde859af659aaec1257"
 VECTOR_CHECKPOINT_SIGNATURE = (
-    "3bc5472ebb40bbb1d1aef20d811a481873b9828c517c07040189f7237ed90176"
-    "c646748d6a82f8274e37560ed9ff30f7280ec82ea50d60630cc022e8de35ad03"
+    "ff4b2145b7a18adc3add1ecee1d52bb6b0cc9ef157e289b4d861afc91c56a671"
+    "9e9e31ae09980af879a0ce9613cb8e46faa7f5414d1b214e7f3b750c9167790c"
 )
 VECTOR_CHECKPOINT_CANONICAL = (
     "636865636b706f696e74"                                                # hex("checkpoint")
     "|03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
-    "|b08b762433f9c582f3347fbe192e523260278d24533a94e1972fbcddba42158a"
+    "|94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"   # scheme digest
     "|1798329600"
+    "|b08b762433f9c582f3347fbe192e523260278d24533a94e1972fbcddba42158a"
     "|~||"                                                                # no start fields
+    "|0|0|0|0||"                                                          # no start fields
     "|74756e6e656c"                                                       # hex("tunnel")
     "|00112233445566778899aabbccddeeff"                                   # session
     "|38303830"                                                           # hex("8080")
@@ -81,8 +83,6 @@ VECTOR_CHECKPOINT_CANONICAL = (
     "|37"                                                                 # hex("7")
     "|636c69656e742d74756e6e656c"                                         # hex("client-tunnel")
     "||"                                                                  # capture, degraded
-    "|0|0|0|0||"                                                          # no start fields
-    "|94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"
 )
 
 
@@ -310,7 +310,7 @@ class TamperTests(unittest.TestCase):
         self.assertEqual(
             (receipt.cpu_period, receipt.cpu_quota, receipt.mem_limit, receipt.disk_space,
              receipt.kernel, list(receipt.devices)), (0, 0, 0, 0, "", []))
-        self.assertTrue(er.canonical_receipt(receipt).endswith("|0|0|0|0|||94c3da627446ed1f3c3736d21ded39451ec00c4ccc687acc42b9d0c61dfcf573"))
+        self.assertIn("|3132333435363738|0|0|0|0|||", er.canonical_receipt(receipt))
         self.assertEqual(er.problems(receipt), [])
 
     def test_the_start_receipt_names_the_resources_the_kernel_and_the_sorted_devices(self):

@@ -54,9 +54,10 @@ def _hex(text: str) -> str:
 def offer_digest(offer: celaut_pb2.EstimatedCost) -> str:
     """Blake2b-256 hex of the canonical text of every field but the signature.
 
-    The text is ``hex(cost.n)|hex(init_maintenance_cost.n)|hex(max_maintenance_cost.n)|
-    maintenance_seconds_loop|price_bounded|price_volatility|volatility_period_seconds|
-    closes_at|on_close|valid_until|launch_scarcity``. ``price_bounded`` is 1 or 0.
+    The parts are in the order of the numbers of the fields in ``celaut.proto``, joined by
+    ``|``: ``hex(cost.n)|hex(init_maintenance_cost.n)|hex(max_maintenance_cost.n)|
+    maintenance_seconds_loop|launch_scarcity|price_bounded|price_volatility|
+    volatility_period_seconds|valid_until|closes_at|on_close``. ``price_bounded`` is 1 or 0.
     ``price_volatility`` is the 4 bytes of the float, big-endian, in hex. ``on_close`` is
     the number of the enum. ``launch_scarcity`` is ``key=value`` for each key, sorted by
     key and joined with ``;``.
@@ -64,11 +65,11 @@ def offer_digest(offer: celaut_pb2.EstimatedCost) -> str:
     scarcity = ";".join(f"{key}={value}" for key, value in sorted(scarcity_of(offer).items()))
     text = "|".join((
         _hex(offer.cost.n), _hex(offer.init_maintenance_cost.n),
-        _hex(offer.max_maintenance_cost.n), str(offer.maintenance_seconds_loop),
+        _hex(offer.max_maintenance_cost.n), str(offer.maintenance_seconds_loop), scarcity,
         "1" if offer.price_bounded else "0",
         struct.pack(">f", offer.price_volatility).hex(),
-        str(offer.volatility_period_seconds), str(offer.closes_at), str(int(offer.on_close)),
-        str(offer.valid_until), scarcity,
+        str(offer.volatility_period_seconds), str(offer.valid_until), str(offer.closes_at),
+        str(int(offer.on_close)),
     ))
     return hashlib.blake2b(text.encode("utf-8"), digest_size=32).hexdigest()
 

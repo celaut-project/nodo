@@ -372,15 +372,16 @@ The node signs the UTF-8 bytes of
 
 with its identity key, in the scheme of its `Peer`. This is the shape of the balance
 statement, with its own prefix. `receipt_digest` is the lowercase hex of
-Blake2b-256 over the UTF-8 of this text, with the fields in this order:
+Blake2b-256 over the UTF-8 of this text, with the fields in the order of their numbers in
+`celaut.proto`:
 
-    hex(kind) | peer_id | execution_name | ts
+    hex(kind) | peer_id | blake2b_256_hex(UTF-8(scheme)) | ts
+    | execution_name
     | hex(service_id.type) ~ hex(service_id.value) | envs_digest | hex(initial_mu.n)
+    | cpu_period | cpu_quota | mem_limit | disk_space | kernel | hex(device)/hex(device)...
     | hex(plane) | session | hex(slot) | seq
     | in_events | in_bytes | in_head | out_events | out_bytes | out_head
     | hex(mu_charged.n) | hex(coverage) | hex(capture_mode) | hex(degraded_reason)
-    | cpu_period | cpu_quota | mem_limit | disk_space | kernel | hex(device)/hex(device)...
-    | blake2b_256_hex(UTF-8(scheme))
 
 - `hex()` of a text is the lowercase hex of its UTF-8. Every free text goes through
   it. A number is decimal. A hash is lowercase hex. An unused field is empty, or `0`.

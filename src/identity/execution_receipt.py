@@ -274,15 +274,16 @@ def receipt_scheme() -> "celaut_pb2.Peer.SignatureScheme":
 
 def canonical_receipt(receipt: celaut_pb2.ExecutionReceipt) -> str:
     """The text that :func:`receipt_digest` hashes: every field but ``envs_salt`` and
-    ``signature``, in field order, joined by ``|``::
+    ``signature``, in the order of the numbers of the fields in ``celaut.proto``, joined by
+    ``|``. This order is part of the protocol (``receipt.digest`` in ``transport_stack``)::
 
-        hex(kind) | peer_id | execution_name | ts
+        hex(kind) | peer_id | blake2b_256(UTF-8(canonical_scheme(signature_scheme))) | ts
+        | execution_name
         | hex(service_id.type) "~" hex(service_id.value) | envs_digest | hex(initial_mu.n)
+        | cpu_period | cpu_quota | mem_limit | disk_space | kernel | hex(device)/hex(device)...
         | hex(plane) | session | hex(slot) | seq
         | in_events | in_bytes | in_head | out_events | out_bytes | out_head
         | hex(mu_charged.n) | hex(coverage) | hex(capture_mode) | hex(degraded_reason)
-        | cpu_period | cpu_quota | mem_limit | disk_space | kernel | hex(device)/hex(device)...
-        | blake2b_256(UTF-8(canonical_scheme(signature_scheme)))
 
     hex() of a text is the lowercase hex of its UTF-8; numbers are decimal; a field
     the kind does not use is empty (``""``, ``0``, an empty ``~``). ``devices`` is
@@ -290,17 +291,18 @@ def canonical_receipt(receipt: celaut_pb2.ExecutionReceipt) -> str:
     """
     r = receipt
     return "|".join((
-        _hex_text(r.kind), r.peer_id, r.execution_name, str(int(r.ts)),
+        _hex_text(r.kind), r.peer_id,
+        _blake2b_256(canonical_scheme(r.signature_scheme).encode("utf-8")).hex(),
+        str(int(r.ts)), r.execution_name,
         f"{bytes(r.service_id.type).hex()}~{bytes(r.service_id.value).hex()}",
         r.envs_digest, _hex_text(r.initial_mu.n),
+        str(int(r.cpu_period)), str(int(r.cpu_quota)), str(int(r.mem_limit)),
+        str(int(r.disk_space)), r.kernel, "/".join(_hex_text(d) for d in r.devices),
         _hex_text(r.plane), r.session, _hex_text(r.slot), str(int(r.seq)),
         str(int(r.in_events)), str(int(r.in_bytes)), r.in_head,
         str(int(r.out_events)), str(int(r.out_bytes)), r.out_head,
         _hex_text(r.mu_charged.n), _hex_text(r.coverage), _hex_text(r.capture_mode),
         _hex_text(r.degraded_reason),
-        str(int(r.cpu_period)), str(int(r.cpu_quota)), str(int(r.mem_limit)),
-        str(int(r.disk_space)), r.kernel, "/".join(_hex_text(d) for d in r.devices),
-        _blake2b_256(canonical_scheme(r.signature_scheme).encode("utf-8")).hex(),
     ))
 
 

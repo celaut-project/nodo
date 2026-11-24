@@ -239,6 +239,42 @@ the content comes after them.
 | Content | `opinions` | 6 (3) |
 | | `ledger_proofs` | 7 (7) |
 
+## Order of the fields of `ExecutionReceipt`, `BalanceStatement` and `EstimatedCost`
+
+The same rule as `Peer`: the envelope of the signature first, then the content by topic.
+The fields that a kind of message uses are together.
+
+`ExecutionReceipt`: the envelope (`kind` 1, `peer_id` 2, `signature_scheme` 3, `ts` 4,
+`signature` 5), the execution (`execution_name` 6), the fields only in "start"
+(`service_id` 7 to `devices` 16: the service, the environment, the funding and what the node
+reserved), the fields only in "checkpoint" and "close" (`plane` 17 to `coverage` 28), and the
+fields only for Observe (`capture_mode` 29, `degraded_reason` 30).
+
+`BalanceStatement`: the envelope (`ts` 1, `signature` 2, `relayed` 3), which account
+(`account_ref` 4, `service_id` 5, `instance_ref` 6), the range asked for (`from_seq` 7,
+`to_seq` 8, `movements` 9), and the state of the account (`balance` 10, `head_seq` 11,
+`head_hash` 12, `oldest_seq` 13, `retention_days` 14).
+
+`EstimatedCost`: the price (`cost` 1 to `launch_scarcity` 5), the promise on the price
+(`price_bounded` 6, `price_volatility` 7, `volatility_period_seconds` 8), the time of the
+offer (`valid_until` 9, `closes_at` 10, `on_close` 11), and `signature` 12.
+
+The digest of an `ExecutionReceipt` follows the new numbers (`execution_receipt.canonical_receipt`
+and `receipt.digest` in `transport_stack`): `signature_scheme` is now the third part of the
+text, in place of the last, and the fields only in "start" come before the stream fields. A
+receipt signed before this change does not verify.
+
+The digests of `BalanceStatement` and `EstimatedCost` follow the numbers too
+(`statement_signature.statement_digest` and `signed_offer.offer_digest`). In the statement,
+`relayed` is now always in the text, as 1 or 0, and `service_id` and `instance_ref` have
+their own place and are empty when they have no value: before, each one was added at the
+end only when it had a value. A statement or an offer signed before this change does not
+verify. `tests/test_digests_follow_field_numbers.py` writes both texts by hand.
+
+**Not wire compatible**, as the other changes of the alpha. A receipt or a statement that a
+client or a node kept before is unreadable. The fault evidence that a node kept
+(`FaultEvidence` holds statements and receipts) is skipped, until new evidence comes.
+
 **Not wire compatible**, as the other changes of the alpha. A proof that a node kept before
 (`offchain_proofs`) is unreadable and is skipped, until the publisher gives a newer one. The
 signature does not change: the digest is made from the fields, not from their numbers.

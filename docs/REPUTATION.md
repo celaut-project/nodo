@@ -374,15 +374,14 @@ The statement of a descendant also gives `service_id`: the service that the desc
 runs, as the lowercase hexadecimal of its content hash. The node takes it from its row of
 the instance. Each `child_bound` row also holds it in `detail.service_id`. The field is
 empty when the node does not know the service, and in the answer to a read without
-`instance_ref`. The digest covers `service_id` only when it is not empty
-(`|service_id:` and the hex of its UTF-8, after the movements and before `|relayed`).
+`instance_ref`. The digest has `service_id` in its own place, as the hex of its UTF-8
+(empty when the field is empty).
 
 The statement of a descendant also gives the `instance_ref` of the request. The node signs
 that the statement is the account of that descendant, so it cannot say later that it was
 the statement of another account. A reader refuses an answer to a read with
-`instance_ref` that does not have the same `instance_ref`. The digest covers it only when
-it is not empty (`|instance_ref:` and the hex of its UTF-8, after `service_id` and
-before `|relayed`).
+`instance_ref` that does not have the same `instance_ref`. The digest has it in its own
+place, as the hex of its UTF-8 (empty when the field is empty).
 
 ### Delegated children
 
@@ -399,9 +398,8 @@ instance, one hop at a time. The service never sees a peer id or a peer token.
 
 The node checks the signature of the peer with the key of the peer, and that the peer
 signed the `instance_ref` that the node sent. Then it sets `relayed` and the
-`instance_ref` that its own caller sent on the statement, and signs it with its own key. The digest covers `relayed`
-only when it is true (`|relayed` at the end of the text), so the digest of a statement
-that a node wrote itself does not change. A node above checks the statement with the
+`instance_ref` that its own caller sent on the statement, and signs it with its own key.
+The digest has `relayed` in its own place, as 1 or 0. A node above checks the statement with the
 key of the node that it asked, so a read across two or more delegations works. The rows
 and their hashes do not change. The reader trusts its own node, as it does for every
 other answer.
@@ -947,7 +945,7 @@ These are decisions for the alpha. Each one is a known limit, not a defect that 
 - **A broken service looks like a missing one.** `maintenance_while_unreachable` is a local
   judgement that cannot tell a VM that runs a service that does not listen from a VM that
   is not there.
-- **Mixed versions.** A peer that does not know `instance_ref` in the statement (field 14)
+- **Mixed versions.** A peer that does not know `instance_ref` in the statement (field 6)
   cannot give the statement of a descendant. When that peer must answer, it is
   `statement_inconsistent`.
 

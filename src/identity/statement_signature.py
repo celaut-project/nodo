@@ -30,24 +30,20 @@ def movement_hash(movement: celaut_pb2.BalanceMovement) -> str:
 def statement_digest(statement: celaut_pb2.BalanceStatement) -> str:
     """Blake2b-256 hex of the canonical text of every field but the signature.
 
-    ``service_id`` is in the text only when it is not empty (``|service_id:`` and its
-    hex, after the movements). ``instance_ref`` is in the text only when it is not empty
-    (``|instance_ref:`` and its hex, after ``service_id``). ``relayed`` is in the text
-    only when it is true (``|relayed`` at the end). So the digest of a statement without
-    them does not change (#631).
+    The parts are in the order of the numbers of the fields in ``celaut.proto``, joined by
+    ``|``: ``ts``, ``relayed`` (1 or 0), ``account_ref``, ``hex(service_id)``,
+    ``hex(instance_ref)``, ``from_seq``, ``to_seq``, the hash of each movement joined by
+    ``/``, ``hex(balance.n)``, ``head_seq``, ``head_hash``, ``oldest_seq`` and
+    ``retention_days``. A part with no value is empty.
     """
     text = "|".join((
-        statement.account_ref, str(statement.from_seq), str(statement.to_seq),
-        str(statement.ts), str(statement.retention_days), str(statement.oldest_seq),
-        str(statement.head_seq), statement.head_hash, _hex(statement.balance.n),
+        str(statement.ts), "1" if statement.relayed else "0", statement.account_ref,
+        _hex(statement.service_id), _hex(statement.instance_ref),
+        str(statement.from_seq), str(statement.to_seq),
         "/".join(movement_hash(m) for m in statement.movements),
+        _hex(statement.balance.n), str(statement.head_seq), statement.head_hash,
+        str(statement.oldest_seq), str(statement.retention_days),
     ))
-    if statement.service_id:
-        text += "|service_id:" + _hex(statement.service_id)
-    if statement.instance_ref:
-        text += "|instance_ref:" + _hex(statement.instance_ref)
-    if statement.relayed:
-        text += "|relayed"
     return hashlib.blake2b(text.encode("utf-8"), digest_size=32).hexdigest()
 
 

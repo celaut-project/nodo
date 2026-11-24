@@ -461,18 +461,14 @@ def gateway_component() -> Layer:
                                     "~';'.join(sorted(key=value or key=))",
         "statement.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
         "statement.signature.payload": statement_payload(peer_id, "<statement_digest>"),
-        "statement.digest": "blake2b-256 hex of UTF-8 of account_ref|from_seq|to_seq|ts|"
-                            "retention_days|oldest_seq|head_seq|head_hash|hex(balance.n)|"
-                            "movements",
+        "statement.digest": "blake2b-256 hex of UTF-8 of ts|relayed|account_ref|"
+                            "hex(service_id)|hex(instance_ref)|from_seq|to_seq|movements|"
+                            "hex(balance.n)|head_seq|head_hash|oldest_seq|retention_days",
         "statement.digest.movements": "'/'.join(hash of each movement in seq order)",
-        "statement.digest.service_id": "'|service_id:'+hex(service_id) after movements "
-                                       "when service_id is not empty; nothing when empty",
-        "statement.digest.instance_ref": "'|instance_ref:'+hex(instance_ref) after "
-                                         "service_id when instance_ref is not empty; "
-                                         "nothing when empty",
-        "statement.digest.relayed": "'|relayed' after movements, service_id and "
-                                    "instance_ref when relayed is true; nothing when it "
-                                    "is false",
+        "statement.digest.service_id": "hex(service_id); empty when service_id is empty",
+        "statement.digest.instance_ref": "hex(instance_ref); empty when instance_ref is "
+                                         "empty",
+        "statement.digest.relayed": "1 when relayed is true, else 0",
         "statement.movement.hash": "blake2b-256 hex of UTF-8 of "
                                    "celaut-balance-movement:prev_hash|seq~ts~hex(amount.n)~"
                                    "hex(balance_after.n)~hex(kind)~instance_ref~hex(detail)",
@@ -485,9 +481,9 @@ def gateway_component() -> Layer:
         "offer.signature.payload": offer_payload(peer_id, "<offer_digest>"),
         "offer.digest": "blake2b-256 hex of UTF-8 of hex(cost.n)|"
                         "hex(init_maintenance_cost.n)|hex(max_maintenance_cost.n)|"
-                        "maintenance_seconds_loop|price_bounded|price_volatility|"
-                        "volatility_period_seconds|closes_at|on_close|valid_until|"
-                        "launch_scarcity",
+                        "maintenance_seconds_loop|launch_scarcity|price_bounded|"
+                        "price_volatility|volatility_period_seconds|valid_until|"
+                        "closes_at|on_close",
         "offer.digest.hex": "lowercase hex of UTF-8; numbers decimal; price_bounded 1 or 0; "
                             "on_close the number of the enum",
         "offer.digest.price_volatility": "the 4 bytes of the float, big-endian, in "
@@ -496,13 +492,13 @@ def gateway_component() -> Layer:
                                         "by ';'; empty when there is none",
         "receipt.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
         "receipt.signature.payload": receipt_payload(peer_id, "<receipt_digest>"),
-        "receipt.digest": "blake2b-256 hex of UTF-8 of hex(kind)|peer_id|execution_name|"
-                          "ts|hex(service_id.type)~hex(service_id.value)|envs_digest|"
-                          "hex(initial_mu.n)|hex(plane)|session|hex(slot)|seq|in_events|"
-                          "in_bytes|in_head|out_events|out_bytes|out_head|"
+        "receipt.digest": "blake2b-256 hex of UTF-8 of hex(kind)|peer_id|scheme|ts|"
+                          "execution_name|hex(service_id.type)~hex(service_id.value)|"
+                          "envs_digest|hex(initial_mu.n)|cpu_period|cpu_quota|mem_limit|"
+                          "disk_space|kernel|hex(devices)|hex(plane)|session|hex(slot)|seq|"
+                          "in_events|in_bytes|in_head|out_events|out_bytes|out_head|"
                           "hex(mu_charged.n)|hex(coverage)|hex(capture_mode)|"
-                          "hex(degraded_reason)|cpu_period|cpu_quota|mem_limit|disk_space|"
-                          "kernel|hex(devices)|scheme",
+                          "hex(degraded_reason)",
         "receipt.digest.hex": "lowercase hex of UTF-8; empty for an empty text; numbers "
                               "decimal; an unused field empty or 0",
         "receipt.digest.devices": "the chips sorted, each in lowercase hex of UTF-8, "

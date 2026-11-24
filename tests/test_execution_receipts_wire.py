@@ -718,9 +718,11 @@ class DeclarationTests(unittest.TestCase):
         declared = parse_component_formal(transport_stack.gateway_component()[2])["receipt.digest"]
         names = [part.split("(")[-1].split(".")[0].rstrip(")") for part in
                  declared.split("UTF-8 of ", 1)[1].replace("~", "|").split("|")]
+        # The digest follows the numbers of the fields, so a field that is added at the end
+        # of the message is added at the end of the text.
         fields = [f.name for f in celaut_pb2.ExecutionReceipt.DESCRIPTOR.fields
                   if f.name not in ("envs_salt", "signature")]
-        expected = [n for n in fields if n != "signature_scheme"] + ["scheme"]
+        expected = ["scheme" if n == "signature_scheme" else n for n in fields]
         expected.insert(expected.index("service_id") + 1, "service_id")
         self.assertEqual(names, expected)
 

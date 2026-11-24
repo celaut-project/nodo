@@ -118,11 +118,11 @@ class TheProtoTests(unittest.TestCase):
                 self.assertAlmostEqual(back.price_volatility, 0.25)
                 self.assertEqual(back.volatility_period_seconds, 86400)
 
-    def test_price_bounded_is_field_5_and_false_by_default(self):
+    def test_price_bounded_is_field_6_and_false_by_default(self):
         fields = celaut.EstimatedCost.DESCRIPTOR.fields_by_name
-        self.assertEqual(fields["price_bounded"].number, 5)
-        self.assertEqual(fields["price_volatility"].number, 6)
-        self.assertEqual(fields["volatility_period_seconds"].number, 7)
+        self.assertEqual(fields["price_bounded"].number, 6)
+        self.assertEqual(fields["price_volatility"].number, 7)
+        self.assertEqual(fields["volatility_period_seconds"].number, 8)
         self.assertFalse(celaut.EstimatedCost().price_bounded)
 
     def test_no_variance_anywhere(self):

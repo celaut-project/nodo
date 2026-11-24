@@ -763,6 +763,7 @@ message DescendantTunnel {
 
 // The cost to run a service on the node. The node that answers sets it.
 message EstimatedCost {
+    // The price.
     // The cost that the start spends, in MU. It is the cost to build the service, plus
     // the cost to build its initial children. It does not include a balance, for the
     // service or for its children. If the service is already built, its build cost is
@@ -801,32 +802,33 @@ message EstimatedCost {
     Amount max_maintenance_cost = 3;
     // The length of one maintenance period, in seconds.
     int32 maintenance_seconds_loop = 4;
+    // The load of the node that its price comes from, at the time of the offer: for
+    // each resource, a key ("cpu", "mem" or "disk") and the scarcity in parts per
+    // million, from 0 (plentiful) to 1000000 (exhausted). The node uses it at the start
+    // to keep the price of the offer. A caller does not need it. The list follows the
+    // rules of a list of Uint64KeyValue. It is empty when valid_until is 0.
+    repeated Uint64KeyValue launch_scarcity = 5;
+
+    // The promise on the price.
     // True if the node promises a limit on the price. The limit is set by
     // price_volatility and volatility_period_seconds. A maintenance period of the
     // instance must not charge more than that limit. A client that sees a larger charge
     // can report the node. False means that the node makes no promise. The other two
     // fields have no meaning then. False is the default value of this field.
-    bool price_bounded = 5;
+    bool price_bounded = 6;
     // The highest relative rise of the price in one volatility period. For example, 0.10
     // means that the price can rise by 10 percent in each period. The price at the time
     // t is at most the launch price times (1 + price_volatility) to the power k, where k
     // is the number of the period of t, counted from the launch of the instance. The
     // price can fall without limit. A reader that gets a value that is not a finite
     // number, or a value below 0, reads it as 0.
-    float price_volatility = 6;
+    float price_volatility = 7;
     // The length of one volatility period, in seconds. The first period starts at the
     // launch of the instance. If the value is 0, the whole life of the instance is one
     // period. A reader that gets a value below 0 reads it as 0.
-    int32 volatility_period_seconds = 7;
-    // The unix time of the next scheduled close of the activity window of the node, in
-    // seconds. 0 means that no close is scheduled. It is an absolute time, so it does
-    // not change while the answer travels. It is not a promise that the instance lives
-    // until this time: the node can stop for a cause that is not in its schedule. It is
-    // also not a promise of a long life when it is 0.
-    int64 closes_at = 8;
-    // What the node does with a running instance when the window closes. A node that
-    // does not set this field reads as ON_CLOSE_REFUSE.
-    OnClose on_close = 9;
+    int32 volatility_period_seconds = 8;
+
+    // The time of the offer.
     // The unix time, in seconds, until which the node keeps the price of this offer for
     // a start. A caller that sends the offer in Configuration.offer before this time
     // gets an instance at the price of the offer: the quote in the start movement of
@@ -834,13 +836,18 @@ message EstimatedCost {
     // bound as the offer. 0 means that the node makes no promise for the start, and
     // the node does not sign the offer. A caller then does not hold the node to the
     // figures, and uses price_volatility as the room between the offer and the launch.
-    int64 valid_until = 10;
-    // The load of the node that its price comes from, at the time of the offer: for
-    // each resource, a key ("cpu", "mem" or "disk") and the scarcity in parts per
-    // million, from 0 (plentiful) to 1000000 (exhausted). The node uses it at the start
-    // to keep the price of the offer. A caller does not need it. The list follows the
-    // rules of a list of Uint64KeyValue. It is empty when valid_until is 0.
-    repeated Uint64KeyValue launch_scarcity = 11;
+    int64 valid_until = 9;
+    // The unix time of the next scheduled close of the activity window of the node, in
+    // seconds. 0 means that no close is scheduled. It is an absolute time, so it does
+    // not change while the answer travels. It is not a promise that the instance lives
+    // until this time: the node can stop for a cause that is not in its schedule. It is
+    // also not a promise of a long life when it is 0.
+    int64 closes_at = 10;
+    // What the node does with a running instance when the window closes. A node that
+    // does not set this field reads as ON_CLOSE_REFUSE.
+    OnClose on_close = 11;
+
+    // The signature.
     // The signature of the node over this offer, with the key and the scheme of its
     // Peer, in lowercase hexadecimal. The celaut-gateway layer gives the text that the
     // node signs. It covers every other field, so a caller cannot change the offer. It
@@ -1111,59 +1118,66 @@ message BalanceMovement {
 
 // The answer of GetBalanceStatement.
 message BalanceStatement {
-    // The account, as a hash: blake2b-256 hex of "celaut-ledger-account:" followed by
-    // the client_id or the instance token. Never the credential itself, so that a
-    // statement can be shown to others.
-    string account_ref = 1;
-    // The first movement that the request asked for. 0 means none given.
-    uint64 from_seq = 2;
-    // The last movement that the request asked for. 0 means none given.
-    uint64 to_seq = 3;
-    // The movements of the range, in ascending seq order and with no gap. When the
-    // caller reads its own account up to the head, the last movement is the charge for
-    // this answer. If the node holds fewer movements than the range, because of its
-    // retention or its limit, they are the first it holds from from_seq: the caller asks
-    // again from the last seq it received.
-    repeated BalanceMovement movements = 4;
-    // The balance of the account at the head, in MU.
-    Amount balance = 5;
-    // The last movement of the account when the node answered. The balance is the
-    // balance after that movement. 0 for an account with no movement.
-    uint64 head_seq = 6;
-    // The hash of the last movement. For an account with no movement, its genesis hash.
-    string head_hash = 7;
-    // The first movement that the node still holds. Older ones were deleted when they
-    // passed its retention, and the first movement it holds hangs from the hash of a
-    // movement that it no longer has.
-    uint64 oldest_seq = 8;
-    // How long the node keeps the movements of a dead account, in days, after its last
-    // movement. 0 means for ever, which is the default: the movements of an account that
-    // lives, and of a dead account with anything alive below it, are never deleted. A
-    // reader treats 0 as at least ledger.MIN_PEER_RETENTION_DAYS.
-    uint32 retention_days = 9;
+    // The envelope of the signature.
     // When the node answered, in unix seconds, on the clock of the node.
-    int64 ts = 10;
+    int64 ts = 1;
     // The signature of the node, with the key and the scheme of its Peer, in lowercase
     // hexadecimal. The celaut-gateway layer gives the text that it signs. A statement
     // without a valid signature is not valid.
-    string signature = 11;
+    string signature = 2;
     // True when the node that signs did not write the movements. It read the statement
     // of a descendant from the next node, checked the signature of that node, and
     // signs it again for its own caller. The digest covers it only when it is true.
-    bool relayed = 12;
+    bool relayed = 3;
+
+    // Which account.
+    // The account, as a hash: blake2b-256 hex of "celaut-ledger-account:" followed by
+    // the client_id or the instance token. Never the credential itself, so that a
+    // statement can be shown to others.
+    string account_ref = 4;
     // In the answer to a read with instance_ref: the service of the instance that the
     // statement is about, as the lowercase hexadecimal of its content hash. The caller
     // can then know which service each descendant runs. Empty when the node does not
     // know it, and in the answer to a read without instance_ref. The digest covers it
     // only when it is not empty.
-    string service_id = 13;
+    string service_id = 5;
     // In the answer to a read with instance_ref: the instance_ref of the request. The
     // node signs that the statement is the account of that descendant, so it cannot say
     // later that the statement was of another account. A reader refuses an answer to a
     // read with instance_ref that does not have the same instance_ref. A node that
     // relays sets the instance_ref that its own caller asked for. Empty in the answer to
     // a read without instance_ref. The digest covers it only when it is not empty.
-    string instance_ref = 14;
+    string instance_ref = 6;
+
+    // The range that the request asked for.
+    // The first movement that the request asked for. 0 means none given.
+    uint64 from_seq = 7;
+    // The last movement that the request asked for. 0 means none given.
+    uint64 to_seq = 8;
+    // The movements of the range, in ascending seq order and with no gap. When the
+    // caller reads its own account up to the head, the last movement is the charge for
+    // this answer. If the node holds fewer movements than the range, because of its
+    // retention or its limit, they are the first it holds from from_seq: the caller asks
+    // again from the last seq it received.
+    repeated BalanceMovement movements = 9;
+
+    // The state of the account.
+    // The balance of the account at the head, in MU.
+    Amount balance = 10;
+    // The last movement of the account when the node answered. The balance is the
+    // balance after that movement. 0 for an account with no movement.
+    uint64 head_seq = 11;
+    // The hash of the last movement. For an account with no movement, its genesis hash.
+    string head_hash = 12;
+    // The first movement that the node still holds. Older ones were deleted when they
+    // passed its retention, and the first movement it holds hangs from the hash of a
+    // movement that it no longer has.
+    uint64 oldest_seq = 13;
+    // How long the node keeps the movements of a dead account, in days, after its last
+    // movement. 0 means for ever, which is the default: the movements of an account that
+    // lives, and of a dead account with anything alive below it, are never deleted. A
+    // reader treats 0 as at least ledger.MIN_PEER_RETENTION_DAYS.
+    uint32 retention_days = 14;
 }
 
 // An execution receipt (docs/EXECUTION_RECEIPTS.md): a statement that the node signs
@@ -1179,107 +1193,112 @@ message BalanceStatement {
 //     no close is not by itself proof of a fault.
 // A field that the kind does not use is empty or zero, and the signature covers it too.
 message ExecutionReceipt {
+    // The envelope of the signature.
     // "start", "checkpoint" or "close".
     string kind = 1;
     // The peer_id of the node that signs: its public key, in lowercase hexadecimal.
     string peer_id = 2;
+    // The scheme of the signature, as on the Peer, without the prose.
+    Peer.SignatureScheme signature_scheme = 3;
+    // When the node signed, in unix seconds, on the clock of the node.
+    int64 ts = 4;
+    // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
+    // that the node signs. A receipt without a valid signature is not valid.
+    string signature = 5;
+
+    // The execution.
     // The name of the execution: blake2b-256 hex of the UTF-8 bytes of the instance
     // token followed by the 32 bytes of the public key (not its hexadecimal text). The
     // client, who has the token, can calculate it. A receipt never contains the token.
     // In a DescendantTunnel stream, the name is blake2b-256 hex of the UTF-8 bytes of
     // "celaut-execution-ref:" and the instance_ref, followed by the 32 bytes of the
     // public key: the caller has the instance_ref and not the token.
-    string execution_name = 3;
-    // When the node signed, in unix seconds, on the clock of the node.
-    int64 ts = 4;
+    string execution_name = 6;
 
+    // Only in "start": the service, the environment, the funding and what the node reserved.
     // Only in "start". The service of the instance, as the content hash with which the
     // registry of the node keeps it.
-    Metadata.HashTag.Hash service_id = 5;
+    Metadata.HashTag.Hash service_id = 7;
     // Only in "start". blake2b-256 hex of envs_salt followed by the UTF-8 of the
     // canonical text of the environment variables that the service got. The
     // celaut-gateway layer gives the canonical text.
-    string envs_digest = 6;
+    string envs_digest = 8;
     // Only in "start". 16 random bytes that the node selects for each start. The
     // signature does not cover it: it lets the holder of the receipt show the digest
     // to others and keep the values secret. A verifier refuses a salt of another
     // length, because nothing separates the salt from the canonical text.
-    bytes envs_salt = 7;
+    bytes envs_salt = 9;
     // Only in "start". The Configuration.initial_mu of the start, in MU: what the node
     // charged the caller, the build included. It is the amount of the "start" movement
     // of the instance in its balance statement.
-    Amount initial_mu = 8;
-
-    // Only in "checkpoint" and "close". The stream: "tunnel" (ServiceTunnel) or
-    // "observe" (Observe).
-    string plane = 9;
-    // Only in "checkpoint" and "close". A random identifier of the stream, in
-    // lowercase hexadecimal, that the node selects when the stream starts.
-    string session = 10;
-    // Only in "checkpoint" and "close" of a tunnel. The slot of the tunnel.
-    string slot = 11;
-    // Only in "checkpoint" and "close". The number of the checkpoint in the stream: 1
-    // for the first, and one more for each next checkpoint.
-    uint64 seq = 12;
-    // Only in "checkpoint" and "close". The events into the instance: for a tunnel,
-    // the messages from the caller that the node sent to the service; for Observe,
-    // the packets with direction "IN".
-    uint64 in_events = 13;
-    // The bytes of these events.
-    uint64 in_bytes = 14;
-    // The hash chain of these events. The celaut-gateway layer gives how to calculate
-    // it.
-    string in_head = 15;
-    // The events out of the instance: for a tunnel, the messages from the service that
-    // the node sent to the caller; for Observe, the packets with direction "OUT".
-    uint64 out_events = 16;
-    // The bytes of these events.
-    uint64 out_bytes = 17;
-    // The hash chain of these events.
-    string out_head = 18;
-    // Only for a tunnel, and always there. What the node charged the instance for this
-    // tunnel up to the checkpoint, in MU: the charge to open it and the traffic it
-    // billed. It is the sum of the "tunnel" movements of this session in the balance
-    // statement. The chains cover only the messages that the meter accepted.
-    Amount mu_charged = 19;
-    // Only in "checkpoint" and "close". What the node can see of the traffic of the
-    // instance: "client-tunnel" (all the bytes of this tunnel, and nothing else),
-    // "instance-tap" (the packets of the instance that the capture got, with the bytes
-    // that it holds: the capture cuts a long frame and can drop packets under load) or
-    // "counters-only" (only counts and lengths).
-    string coverage = 20;
-    // Only for Observe. The capture mode of the session: "pcap" or "conntrack".
-    string capture_mode = 21;
-    // Only for Observe. Why the capture is not full. Empty when it is full.
-    string degraded_reason = 22;
-
-    // The scheme of the signature, as on the Peer, without the prose.
-    Peer.SignatureScheme signature_scheme = 23;
-    // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
-    // that the node signs. A receipt without a valid signature is not valid.
-    string signature = 24;
-
+    Amount initial_mu = 10;
     // Only in "start". What the node reserved for the instance at the start: the
     // resolved figures, with the floors of the node applied, and not what the manifest
     // declared. They are what the maintenance charge prices. The values are those of
     // Sysresources, with the same units. Zero in a start that the node gave to a peer:
     // the executor reserved them and this node does not attest them. This is the CFS CPU
     // period that the node reserved, in microseconds.
-    uint64 cpu_period = 25;
+    uint64 cpu_period = 11;
     // Only in "start". The CFS CPU quota that the node reserved, in microseconds.
-    uint64 cpu_quota = 26;
+    uint64 cpu_quota = 12;
     // Only in "start". The memory limit that the node reserved, in bytes.
-    uint64 mem_limit = 27;
+    uint64 mem_limit = 13;
     // Only in "start". The disk space that the node reserved, in bytes.
-    uint64 disk_space = 28;
+    uint64 disk_space = 14;
     // Only in "start". The guest kernel that the instance boots, as the SHA-256 hex
     // with which the kernel store of the node keeps it. A device tag fixes it. Empty
     // if the node does not know it (a start that the node gave to a peer).
-    string kernel = 29;
+    string kernel = 15;
     // Only in "start". The chip of each device that the node attached at the start,
     // sorted. Empty if the instance has no devices, and in a start that the node gave to a
     // peer.
-    repeated string devices = 30;
+    repeated string devices = 16;
+
+    // Only in "checkpoint" and "close": the stream and what went through it.
+    // Only in "checkpoint" and "close". The stream: "tunnel" (ServiceTunnel) or
+    // "observe" (Observe).
+    string plane = 17;
+    // Only in "checkpoint" and "close". A random identifier of the stream, in
+    // lowercase hexadecimal, that the node selects when the stream starts.
+    string session = 18;
+    // Only in "checkpoint" and "close" of a tunnel. The slot of the tunnel.
+    string slot = 19;
+    // Only in "checkpoint" and "close". The number of the checkpoint in the stream: 1
+    // for the first, and one more for each next checkpoint.
+    uint64 seq = 20;
+    // Only in "checkpoint" and "close". The events into the instance: for a tunnel,
+    // the messages from the caller that the node sent to the service; for Observe,
+    // the packets with direction "IN".
+    uint64 in_events = 21;
+    // The bytes of these events.
+    uint64 in_bytes = 22;
+    // The hash chain of these events. The celaut-gateway layer gives how to calculate
+    // it.
+    string in_head = 23;
+    // The events out of the instance: for a tunnel, the messages from the service that
+    // the node sent to the caller; for Observe, the packets with direction "OUT".
+    uint64 out_events = 24;
+    // The bytes of these events.
+    uint64 out_bytes = 25;
+    // The hash chain of these events.
+    string out_head = 26;
+    // Only for a tunnel, and always there. What the node charged the instance for this
+    // tunnel up to the checkpoint, in MU: the charge to open it and the traffic it
+    // billed. It is the sum of the "tunnel" movements of this session in the balance
+    // statement. The chains cover only the messages that the meter accepted.
+    Amount mu_charged = 27;
+    // Only in "checkpoint" and "close". What the node can see of the traffic of the
+    // instance: "client-tunnel" (all the bytes of this tunnel, and nothing else),
+    // "instance-tap" (the packets of the instance that the capture got, with the bytes
+    // that it holds: the capture cuts a long frame and can drop packets under load) or
+    // "counters-only" (only counts and lengths).
+    string coverage = 28;
+
+    // Only for Observe: how the capture was made.
+    // Only for Observe. The capture mode of the session: "pcap" or "conntrack".
+    string capture_mode = 29;
+    // Only for Observe. Why the capture is not full. Empty when it is full.
+    string degraded_reason = 30;
 }
 
 // Signed messages of one node that show a fault of that node. A receiver checks them
