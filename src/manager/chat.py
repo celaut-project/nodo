@@ -32,6 +32,13 @@ it has. ``ChatThread.latest`` tells at once if there is something new. For a mir
 :func:`sync_all` does this for every peer; the daemon runs it on a timer and the commands
 that read a conversation run it first.
 
+**Evidence.** The node that keeps a conversation signs every message that it stores, and
+chains the messages of a conversation (``src/identity/chat_signature.py``). The signature
+binds that node and nobody else. A mirror checks each entry that it copies and refuses the
+ones that do not verify. :func:`export_conversation` writes a conversation with its
+signatures, with a hash of the client_id instead of the client_id, and
+:func:`verify_document` checks it with no state of any node (docs/CHAT_EVIDENCE.md).
+
 Authentication is the same as every other client-facing RPC of the gateway: ``client_id``
 is a bearer credential, like ``TokenMessage.token``. A peer that wants to be recognised
 signs over the client_id in the request that creates it (``Client.peer_id`` and
@@ -47,6 +54,7 @@ from typing import List, Optional, Tuple
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
+from src.identity import chat_signature, node_identity
 from src.identity.grpc_transport import peer_channel
 from src.utils.bee_client import BeeClient
 from src.manager.manager import get_client_id_on_other_peer
@@ -192,8 +200,46 @@ def _validated_topic(topic: Optional[str]) -> str:
 # The node that serves the conversations.
 
 
-def receive_chat_message(message: celaut_pb2.ChatMessage) -> Tuple[int, int]:
-    """Verify and store an incoming Chat message. Return ``(conversation_id, sequence)``.
+def _seal(client_id: str, number: int, from_operator: bool, body: str,
+          service: Optional[celaut_pb2.Metadata]):
+    """The function that signs a message of a conversation that this node keeps.
+
+    It is called by the database inside the transaction that gives the sequence, so the
+    chain of the conversation never has two messages after the same one.
+    """
+    client_ref = chat_signature.client_ref(client_id)
+
+    def seal(sequence: int, ts: int, previous_hash: Optional[str]):
+        entry = celaut_pb2.ChatEntry(
+            sequence=sequence, conversation_id=number, ts=ts, from_operator=from_operator,
+            body=body,
+            prev_hash=previous_hash or chat_signature.genesis_hash(client_ref, number),
+        )
+        if service is not None:
+            entry.service.CopyFrom(service)
+        digest = chat_signature.entry_hash(client_ref, entry)
+        peer_id = node_identity.get_node_public_key_hex()
+        signature = node_identity.sign_peer_payload(
+            node_identity.chat_entry_payload(peer_id, digest)
+        ) if peer_id else None
+        return digest, entry.prev_hash, signature or ""
+    return seal
+
+
+def _to_entry(row: dict) -> celaut_pb2.ChatEntry:
+    """A ChatEntry from a row of ``get_chat_messages_after``."""
+    entry = celaut_pb2.ChatEntry(
+        sequence=row["sequence"], conversation_id=row["conversation"], ts=row["ts"],
+        from_operator=row["from_operator"], body=row["body"], prev_hash=row["prev_hash"],
+        signature=row["signature"],
+    )
+    if row["service_metadata"] is not None:
+        entry.service.ParseFromString(row["service_metadata"])
+    return entry
+
+
+def receive_chat_message(message: celaut_pb2.ChatMessage) -> celaut_pb2.ChatEntry:
+    """Verify and store an incoming Chat message. Return the entry that was stored, signed.
 
     Raises :class:`ChatError` when ``client_id`` is not a client of this node, the
     conversation is not one of that client, or the body or the shared service is not
@@ -201,7 +247,8 @@ def receive_chat_message(message: celaut_pb2.ChatMessage) -> Tuple[int, int]:
 
     ``conversation_id`` 0 opens a new conversation of the client with the next number
     (``topic`` is its label). A message in a conversation that the operator closed opens
-    it again: the client waits for an answer.
+    it again: the client waits for an answer. The entry is the receipt of this node: it
+    carries the number of the conversation, the sequence and the time, and the signature.
     """
     client_id = message.client_id
     if not client_id or not sc.client_exists(client_id=client_id):
@@ -229,9 +276,11 @@ def receive_chat_message(message: celaut_pb2.ChatMessage) -> Tuple[int, int]:
     sequence = sc.add_chat_message(
         client_id=client_id, conversation=number, from_operator=False, body=body,
         ts=int(time.time()), keep_per_client=MAX_STORED_MESSAGES_PER_CLIENT, service=service,
+        seal=_seal(client_id, number, False, body, service),
     )
     log.LOGGER(f"Chat message {sequence} stored in {format_ref(client_id, number)}.")
-    return number, sequence
+    [stored] = sc.get_chat_messages_after(client_id=client_id, after_sequence=sequence - 1, limit=1)
+    return _to_entry(stored)
 
 
 def get_client_thread(client_id: str, after_sequence: int = 0) -> celaut_pb2.ChatThread:
@@ -241,19 +290,15 @@ def get_client_thread(client_id: str, after_sequence: int = 0) -> celaut_pb2.Cha
     conversations of the client. At most ``MAX_THREAD_ENTRIES_PER_ANSWER``: if there
     are more, these are the first ones after the cursor (not the newest), so a client
     that moves its cursor to the last sequence that it got reads everything. ``latest``
-    is the last sequence of the client whatever the cut, 0 if it has no message.
+    is the last sequence of the client whatever the cut, 0 if it has no message. Each
+    entry carries the signature of this node.
     """
     thread = celaut_pb2.ChatThread(latest=sc.get_chat_latest(client_id=client_id))
-    for entry in sc.get_chat_messages_after(
+    for row in sc.get_chat_messages_after(
         client_id=client_id, after_sequence=after_sequence,
         limit=MAX_THREAD_ENTRIES_PER_ANSWER,
     ):
-        added = thread.entries.add(
-            sequence=entry["sequence"], conversation_id=entry["conversation"],
-            ts=entry["ts"], from_operator=entry["from_operator"], body=entry["body"],
-        )
-        if entry["service_metadata"] is not None:
-            added.service.ParseFromString(entry["service_metadata"])
+        thread.entries.append(_to_entry(row))
     return thread
 
 
@@ -274,6 +319,7 @@ def _reply_as_operator(client_id: str, number: int, body: str,
     sequence = sc.add_chat_message(
         client_id=client_id, conversation=number, from_operator=True, body=body,
         ts=int(time.time()), keep_per_client=MAX_STORED_MESSAGES_PER_CLIENT, service=metadata,
+        seal=_seal(client_id, number, True, body, metadata),
     )
     log.LOGGER(f"Chat answer {sequence} stored in {format_ref(client_id, number)}.")
     return sequence
@@ -300,8 +346,13 @@ def _client_id_on(peer_id: str) -> str:
 
 
 def _send_to_peer(peer_id: str, client_id: str, conversation_id: int, body: str,
-                  service: Optional[str] = None, topic: str = "") -> celaut_pb2.ChatAck:
-    """Send one message to ``peer_id`` in a conversation of ``client_id``; return its ack."""
+                  service: Optional[str] = None, topic: str = "") -> celaut_pb2.ChatEntry:
+    """Send one message to ``peer_id`` in a conversation of ``client_id``.
+
+    Returns the entry that the peer stored: its receipt. The signature of the receipt is
+    checked, and a receipt that does not verify is an error, because it is the evidence
+    that the peer got the message.
+    """
     metadata = local_service_metadata(service) if service else None
     wire_body = body
     if metadata is not None:
@@ -322,7 +373,13 @@ def _send_to_peer(peer_id: str, client_id: str, conversation_id: int, body: str,
     if ack is None or not ack.stored:
         # The reason of the peer travels back as it is: the node of the peer knows why.
         raise ChatError((ack.reason if ack is not None else "") or f"{peer_id} refused the message.")
-    return ack
+    if not ack.HasField("entry") or not ack.entry.conversation_id or not chat_signature.verify_entry(
+        ack.entry, chat_signature.client_ref(client_id), peer_id,
+    ):
+        raise ChatError(
+            f"{peer_id} stored the message but its receipt has no valid signature."
+        )
+    return ack.entry
 
 
 def open_conversation(peer_id: str, topic: str, body: str, service: Optional[str] = None) -> str:
@@ -335,13 +392,13 @@ def open_conversation(peer_id: str, topic: str, body: str, service: Optional[str
     """
     topic = _validated_topic(topic)
     client_id = _client_id_on(peer_id)
-    ack = _send_to_peer(peer_id, client_id, 0, body, service=service, topic=topic)
+    receipt = _send_to_peer(peer_id, client_id, 0, body, service=service, topic=topic)
     sc.open_chat_conversation(
-        client_id=client_id, topic=topic, remote_peer_id=peer_id, number=ack.conversation_id,
+        client_id=client_id, topic=topic, remote_peer_id=peer_id, number=receipt.conversation_id,
     )
     _sync_after_send(client_id, peer_id)
-    log.LOGGER(f"Opened {format_ref(client_id, ack.conversation_id)} with peer {peer_id}.")
-    return format_ref(client_id, ack.conversation_id)
+    log.LOGGER(f"Opened {format_ref(client_id, receipt.conversation_id)} with peer {peer_id}.")
+    return format_ref(client_id, receipt.conversation_id)
 
 
 def _send_in_mirror(row: dict, body: str, service: Optional[str] = None) -> None:
@@ -360,6 +417,51 @@ def _sync_after_send(client_id: str, peer_id: str) -> None:
         log.LOGGER(f"Chat sync with peer {peer_id} failed after a send: {e}")
 
 
+def _copy_entry(client_id: str, peer_id: str, entry: celaut_pb2.ChatEntry) -> bool:
+    """Check one entry that a peer gave, and copy it to the mirror. Return whether it was copied.
+
+    The entry is stored exactly as the peer signed it. It is refused, with a line in the
+    log, if the signature is not valid, if it is over the size of a message, if its
+    service is not valid, or if it does not follow the message before it in the chain.
+    A peer that signs two different messages after the same one is caught by the last
+    check, and the signatures are the evidence.
+    """
+    if not entry.conversation_id or not entry.sequence:
+        return False
+    if not chat_signature.verify_entry(entry, chat_signature.client_ref(client_id), peer_id):
+        log.LOGGER(f"Chat entry {entry.sequence} of peer {peer_id} refused: bad signature.")
+        return False
+    if len(entry.body.encode("utf-8")) > MAX_MESSAGE_BYTES:
+        log.LOGGER(f"Chat entry {entry.sequence} of peer {peer_id} refused: too long.")
+        return False
+    service = None
+    if entry.HasField("service"):
+        try:
+            service = _validated_service(entry.service)
+        except ChatError:
+            log.LOGGER(f"Chat entry {entry.sequence} of peer {peer_id} refused: bad service.")
+            return False
+    last_hash = sc.get_chat_last_hash(client_id=client_id, conversation=entry.conversation_id)
+    if last_hash and entry.prev_hash != last_hash:
+        log.LOGGER(
+            f"Chat entry {entry.sequence} of peer {peer_id} refused: it does not follow "
+            "the message before it."
+        )
+        return False
+    sc.open_chat_conversation(
+        client_id=client_id, remote_peer_id=peer_id, number=entry.conversation_id,
+    )
+    sc.add_chat_message(
+        client_id=client_id, conversation=entry.conversation_id,
+        from_operator=entry.from_operator, body=entry.body, ts=entry.ts,
+        keep_per_client=MAX_STORED_MESSAGES_PER_CLIENT, sequence=entry.sequence,
+        service=service,
+        sealed=(chat_signature.entry_hash(chat_signature.client_ref(client_id), entry),
+                entry.prev_hash, entry.signature),
+    )
+    return True
+
+
 def _sync_client(client_id: str, peer_id: str) -> int:
     """Copy the new messages of ``client_id`` on ``peer_id`` to the mirror. Return how many."""
     channel = peer_channel(peer_id=peer_id)
@@ -371,27 +473,8 @@ def _sync_client(client_id: str, peer_id: str) -> int:
             break
         for entry in thread.entries:
             cursor = max(cursor, entry.sequence)
-            if not entry.conversation_id or not entry.sequence:
-                continue
-            service = None
-            if entry.HasField("service"):
-                try:
-                    service = _validated_service(entry.service)
-                except ChatError:
-                    service = None
-            body = entry.body.encode("utf-8")[:MAX_MESSAGE_BYTES].decode("utf-8", "ignore")
-            if service is not None:
-                body = _strip_fallback(body, service)
-            sc.open_chat_conversation(
-                client_id=client_id, remote_peer_id=peer_id, number=entry.conversation_id,
-            )
-            sc.add_chat_message(
-                client_id=client_id, conversation=entry.conversation_id,
-                from_operator=entry.from_operator, body=body, ts=entry.ts,
-                keep_per_client=MAX_STORED_MESSAGES_PER_CLIENT, sequence=entry.sequence,
-                service=service,
-            )
-            copied += 1
+            if _copy_entry(client_id, peer_id, entry):
+                copied += 1
         if cursor >= thread.latest:
             break
     return copied
@@ -489,3 +572,90 @@ def get_conversation(ref: str) -> Optional[dict]:
     """One conversation as ``chat_threads`` shows it, or None."""
     client_id, number = parse_ref(ref)
     return sc.get_chat_thread_row(client_id=client_id, number=number)
+
+
+# ---------------------------------------------------------------------------------------
+# Evidence: a conversation with the signatures of the node that keeps it.
+
+EVIDENCE_FORMAT = "celaut-chat-evidence/1"
+
+
+def export_conversation(ref: str) -> dict:
+    """The conversation ``ref`` as a document that others can check (docs/CHAT_EVIDENCE.md).
+
+    It holds the id of the node that signed (``node``), a hash of the client_id
+    (``client_ref``, never the client_id: it is a credential) and the entries with their
+    signatures. :func:`verify_document` checks it with no state of any node. The entries
+    are the ones that this node stores; the oldest may be removed by the cap of stored
+    messages, and then the document says that it does not start at the first message.
+    """
+    client_id, number = parse_ref(ref)
+    row = sc.get_chat_thread_row(client_id=client_id, number=number)
+    if row is None:
+        raise ChatError(f"No such conversation: {ref}.")
+    node = row["peer_id"] if row["opened_by_us"] else node_identity.get_node_public_key_hex()
+    if not node:
+        raise ChatError("This node has no identity key, so it has signed nothing.")
+    entries = []
+    for message in sc.get_conversation_messages(
+        client_id=client_id, conversation=number, limit=MAX_STORED_MESSAGES_PER_CLIENT,
+    ):
+        if not message["signature"]:
+            raise ChatError(f"The message {message['sequence']} of {ref} has no signature.")
+        item = {
+            "sequence": message["sequence"], "conversation_id": number, "ts": message["ts"],
+            "from_operator": message["from_operator"], "body": message["body"],
+            "prev_hash": message["prev_hash"], "signature": message["signature"],
+        }
+        if message["service_metadata"] is not None:
+            metadata = celaut_pb2.Metadata.FromString(message["service_metadata"])
+            item["service"] = {
+                "hashes": [[h.type.hex(), h.value.hex()] for h in metadata.hashtag.hash],
+                "tags": list(metadata.hashtag.tag),
+            }
+        entries.append(item)
+    return {
+        "format": EVIDENCE_FORMAT, "node": node,
+        "client_ref": chat_signature.client_ref(client_id), "conversation_id": number,
+        "topic": row["topic"] or "", "entries": entries,
+    }
+
+
+def verify_document(document: dict) -> dict:
+    """Check an exported conversation. It needs nothing from any node.
+
+    Returns ``{"valid", "from_start", "reason", "node", "entries"}``. ``valid`` is true
+    if every signature verifies for ``node`` and the chain holds. ``from_start`` is true
+    if the first entry is the first message of the conversation; if it is false, the
+    older messages were removed and are not part of the evidence. It never raises: a
+    document that is not well formed is not valid.
+    """
+    def result(valid, from_start=False, reason="", node="", entries=0):
+        return {"valid": valid, "from_start": from_start, "reason": reason,
+                "node": node, "entries": entries}
+
+    try:
+        if document.get("format") != EVIDENCE_FORMAT:
+            return result(False, reason="This is not a chat evidence document.")
+        node, client_ref, number = document["node"], document["client_ref"], document["conversation_id"]
+        entries = []
+        for item in document["entries"]:
+            entry = celaut_pb2.ChatEntry(
+                sequence=item["sequence"], conversation_id=item["conversation_id"],
+                ts=item["ts"], from_operator=bool(item["from_operator"]), body=item["body"],
+                prev_hash=item["prev_hash"], signature=item["signature"],
+            )
+            if "service" in item:
+                for type_hex, value_hex in item["service"]["hashes"]:
+                    entry.service.hashtag.hash.add(
+                        type=bytes.fromhex(type_hex), value=bytes.fromhex(value_hex))
+                entry.service.hashtag.tag.extend(item["service"]["tags"])
+            entries.append(entry)
+    except (AttributeError, KeyError, TypeError, ValueError) as e:
+        return result(False, reason=f"The document is not well formed: {e!r}.")
+    if not entries:
+        return result(False, reason="The document has no entry.", node=node)
+    if any(entry.conversation_id != number for entry in entries):
+        return result(False, reason="An entry is of another conversation.", node=node)
+    valid, from_start, reason = chat_signature.verify_chain(entries, client_ref, node)
+    return result(valid, from_start, reason, node, len(entries))

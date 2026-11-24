@@ -592,7 +592,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
         if message is None:
             raise Exception("Chat needs a ChatMessage.")
         try:
-            conversation_id, sequence = receive_chat_message(message)
+            entry = receive_chat_message(message)
         except ChatError as e:
             # Refused, not raised: the sender learns *why* it was not stored --
             # unknown client_id or conversation, empty or oversize body -- the same
@@ -605,7 +605,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
             )
             return
         yield from BeeClient.respond(
-            celaut_pb2.ChatAck(stored=True, conversation_id=conversation_id, sequence=sequence)
+            celaut_pb2.ChatAck(stored=True, entry=entry)
         )
 
     def GetChatThread(self, request_iterator, context, **kwargs):

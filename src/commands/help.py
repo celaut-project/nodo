@@ -100,6 +100,8 @@ GROUPS: List[Group] = [
             ("chat_thread <ref>", "show the messages of one conversation (--json)"),
             ("chat_close <ref>", "close a conversation (local only)"),
             ("chat_reopen <ref>", "reopen a closed conversation"),
+            ("chat_export <ref>", "write a signed conversation (JSON)"),
+            ("chat_verify <file>", "check a signed conversation (no node)"),
             ("chat_sync [<peer>]", "copy the answers of peers to our conversations now"),
             ("clients [<client>]", "list clients, or one with its history (--json)"),
             ("reputation [<peer>]", "what the network stakes on us (--json)"),

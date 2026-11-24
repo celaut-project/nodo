@@ -1347,6 +1347,25 @@ if __name__ == '__main__':
                 ok = reopen_thread(ref=sys.argv[2])
                 _exit(0 if ok else 1)
 
+            case "chat_export":
+                # The conversation as a document with the signatures of the node that
+                # keeps it, to show to others. It has no client_id (a credential).
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_export <client_id#number> > conversation.json", flush=True)
+                    _exit(1)
+                from src.commands.chat import export_thread
+                ok = export_thread(ref=sys.argv[2])
+                _exit(0 if ok else 1)
+
+            case "chat_verify":
+                # Checks an exported conversation. It needs no node and no database.
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_verify <conversation.json>", flush=True)
+                    _exit(1)
+                from src.commands.chat import verify_thread
+                ok = verify_thread(path=sys.argv[2])
+                _exit(0 if ok else 1)
+
             case "chat_sync":
                 # Copies the answers of the peers to the conversations that this node
                 # opened there. The daemon does it on a timer; this does it now.

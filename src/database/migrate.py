@@ -762,7 +762,11 @@ TABLES = {
     # insert, and the oldest rows of a client are removed on each insert
     # (`add_chat_message`) -- both bounds exist because a message here may come from a
     # peer this node did not choose, so neither one long message nor a client that never
-    # stops sending can grow the table without limit.
+    # stops sending can grow the table without limit. `signature` is the signature of the
+    # node that keeps the conversation, over the entry and `prev_hash`, the `hash` of the
+    # message before it in the same conversation (src/identity/chat_signature.py); `hash`
+    # is the hash of this entry. They are empty on a row that was written before the
+    # signature existed, or by a node with no identity key.
     "chat_messages": '''
         CREATE TABLE IF NOT EXISTS chat_messages (
             client_id TEXT NOT NULL,
@@ -773,6 +777,9 @@ TABLES = {
             ts INTEGER NOT NULL,
             service_id TEXT DEFAULT NULL,
             service_metadata BLOB DEFAULT NULL,
+            hash TEXT NOT NULL DEFAULT '',
+            prev_hash TEXT NOT NULL DEFAULT '',
+            signature TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (client_id, sequence),
             FOREIGN KEY (client_id, conversation) REFERENCES chat_conversations (client_id, number)
         )
@@ -1165,6 +1172,12 @@ def create_tables(cursor):
         # it (see maintain.peer_deposits). 0 on every row written before the column
         # existed: those peers all arrived directly.
         "learned_via_gossip": "INTEGER NOT NULL DEFAULT 0",
+    })
+    # A message of a conversation holds the signature of the node and its place in the chain.
+    ensure_columns(cursor, "chat_messages", {
+        "hash": "TEXT NOT NULL DEFAULT ''",
+        "prev_hash": "TEXT NOT NULL DEFAULT ''",
+        "signature": "TEXT NOT NULL DEFAULT ''",
     })
     # What a payment was *for*, as opposed to how far it got. A donation this node
     # paid out of its own earnings is not a payment to a peer, and `status` cannot say

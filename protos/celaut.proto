@@ -1662,6 +1662,22 @@ message ChatEntry {
     string body = 5;
     // The Metadata of a service that the writer shares. Optional.
     optional Metadata service = 6;
+    // The digest of the message before this one in the same conversation, in lowercase
+    // hexadecimal. The first message of a conversation has the digest that the
+    // celaut-gateway layer gives for the start of a conversation. So a node cannot
+    // remove or add a message in the middle of a conversation without a break in the
+    // chain that a reader can see. The digest always covers it.
+    string prev_hash = 7;
+    // The signature of the node that keeps the conversation, with the key and the scheme
+    // of its Peer, in lowercase hexadecimal. The celaut-gateway layer gives the text that
+    // it signs. The node signs every message that it stores: the ones of the client too,
+    // so the entry is a receipt that the node got the message, and the ones of the
+    // operator. The signature covers the sequence, the conversation, the time, the
+    // direction, the text, the hashes and the tags of the service, prev_hash and a hash
+    // of the client_id (never the client_id itself, so that a signed conversation can be
+    // shown to others). An entry without a valid signature is not valid. The signature
+    // binds the node and nobody else: it does not prove that the client wrote the text.
+    string signature = 8;
 }
 
 // The request of GetChatThread.
@@ -1687,11 +1703,10 @@ message ChatAck {
     bool stored = 1;
     // Why the node did not store the message. Empty if stored is true.
     string reason = 2;
-    // The conversation of the message: the number that the node gave if the message
-    // opened one, or the same number that the message had. 0 if stored is false.
-    uint64 conversation_id = 3;
-    // The sequence that the node gave to the message. 0 if stored is false.
-    uint64 sequence = 4;
+    // The message as the node stored it, signed by the node: its conversation (the number
+    // that the node gave if the message opened one), its sequence and its time. The
+    // client keeps it as the receipt of the node. Not set if stored is false.
+    optional ChatEntry entry = 3;
 }
 
 // See docs/RECURSION_GUARD.md (issue #456).

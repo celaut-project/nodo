@@ -78,6 +78,7 @@ from src.identity.node_identity import (
     offer_payload,
     receipt_payload,
     reputation_proof_payload,
+    chat_entry_payload,
     statement_payload,
 )
 from src.identity import protocol_doc
@@ -482,6 +483,17 @@ def gateway_component() -> Layer:
                                  "client_id or instance token",
         "statement.instance_ref": "blake2b-256 hex of UTF-8 of celaut-ledger-instance:token",
         "statement.digest.hex": "lowercase hex of UTF-8; empty for an empty text",
+        "chat.entry.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
+        "chat.entry.signature.payload": chat_entry_payload(peer_id, "<entry_hash>"),
+        "chat.entry.hash": "blake2b-256 hex of UTF-8 of celaut-chat-entry:client_ref|sequence|"
+                           "conversation_id|ts|from_operator|hex(body)|service|prev_hash",
+        "chat.entry.from_operator": "1 when from_operator is true, else 0",
+        "chat.entry.service": "'/'.join(hex(hash.type)~hex(hash.value) of each hash)~"
+                              "'/'.join(hex(tag) of each tag); empty when there is no service",
+        "chat.entry.client_ref": "blake2b-256 hex of UTF-8 of celaut-chat-client:client_id",
+        "chat.entry.genesis": "blake2b-256 hex of UTF-8 of "
+                              "celaut-chat-genesis:client_ref#conversation_id, the prev_hash "
+                              "of the first entry of a conversation",
         "offer.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
         "offer.signature.payload": offer_payload(peer_id, "<offer_digest>"),
         "offer.digest": "blake2b-256 hex of UTF-8 of hex(cost.n)|"

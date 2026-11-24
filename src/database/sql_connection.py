@@ -3696,7 +3696,9 @@ class SQLConnection(metaclass=Singleton):
     def add_chat_message(self, client_id: str, conversation: int, from_operator: bool,
                          body: str, ts: int, keep_per_client: int,
                          sequence: Optional[int] = None,
-                         service: Optional[celaut_pb2.Metadata] = None) -> int:
+                         service: Optional[celaut_pb2.Metadata] = None,
+                         seal: Optional[Callable[[int, int, Optional[str]], Tuple[str, str, str]]] = None,
+                         sealed: Optional[Tuple[str, str, str]] = None) -> int:
         """Store one message of a conversation of ``client_id``; return its sequence.
 
         On a serving node ``sequence`` is not given: it is the last one of the client plus
@@ -3711,6 +3713,13 @@ class SQLConnection(metaclass=Singleton):
         ``service`` is the Metadata of a service shared in the message (issue #438),
         stored serialized, next to the registry id that this node derives from it
         (``registry_service_id``) -- the id that its Get and Execute take.
+
+        The node that keeps the conversation gives ``seal``: it is called inside the
+        transaction, once the sequence is chosen, as ``seal(sequence, ts, previous_hash)``
+        where ``previous_hash`` is the hash of the message before this one in the same
+        conversation (None for the first). It returns ``(hash, prev_hash, signature)``,
+        which are stored with the message. A mirror gives ``sealed``, the same three
+        values as the node wrote them, and they are stored as they are.
         """
         from src.utils.verify import registry_service_id
 
@@ -3726,13 +3735,23 @@ class SQLConnection(metaclass=Singleton):
                 chosen = (row[0] or 0) + 1
             else:
                 chosen = int(sequence)
+            if seal is not None:
+                row = cursor.execute(
+                    '''SELECT hash FROM chat_messages
+                       WHERE client_id = ? AND conversation = ? AND sequence < ?
+                       ORDER BY sequence DESC LIMIT 1''',
+                    (client_id, int(conversation), chosen),
+                ).fetchone()
+                values = seal(chosen, int(ts), row[0] if row else None)
+            else:
+                values = sealed or ('', '', '')
             cursor.execute(
                 '''INSERT OR IGNORE INTO chat_messages
                        (client_id, sequence, conversation, from_operator, body, ts,
-                        service_id, service_metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                        service_id, service_metadata, hash, prev_hash, signature)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (client_id, chosen, int(conversation), int(bool(from_operator)), body,
-                 int(ts), service_id, service_blob),
+                 int(ts), service_id, service_blob, *values),
             )
             cursor.execute(
                 '''DELETE FROM chat_messages
@@ -3753,6 +3772,15 @@ class SQLConnection(metaclass=Singleton):
             return chosen
         return self._transaction(work)
 
+    def get_chat_last_hash(self, client_id: str, conversation: int) -> Optional[str]:
+        """The hash of the last message of a conversation, or None if it has none."""
+        row = self._execute(
+            '''SELECT hash FROM chat_messages WHERE client_id = ? AND conversation = ?
+               ORDER BY sequence DESC LIMIT 1''',
+            (client_id, int(conversation)),
+        ).fetchone()
+        return row[0] if row else None
+
     def get_chat_latest(self, client_id: str) -> int:
         """The last sequence of the messages of ``client_id``; 0 if it has none."""
         row = self._execute(
@@ -3770,7 +3798,7 @@ class SQLConnection(metaclass=Singleton):
         """
         result = self._execute(
             '''SELECT sequence, conversation, from_operator, body, ts, service_id,
-                      service_metadata
+                      service_metadata, hash, prev_hash, signature
                FROM chat_messages
                WHERE client_id = ? AND sequence > ?
                ORDER BY sequence ASC
@@ -3786,6 +3814,9 @@ class SQLConnection(metaclass=Singleton):
                 'ts': int(row['ts']),
                 'service': _chat_service(row),
                 'service_metadata': row['service_metadata'],
+                'hash': row['hash'],
+                'prev_hash': row['prev_hash'],
+                'signature': row['signature'],
             }
             for row in result.fetchall()
         ]
@@ -3794,7 +3825,8 @@ class SQLConnection(metaclass=Singleton):
                                   limit: int = 200) -> List[dict]:
         """The newest ``limit`` messages of one conversation, oldest first."""
         result = self._execute(
-            '''SELECT sequence, from_operator, body, ts, service_id, service_metadata
+            '''SELECT sequence, from_operator, body, ts, service_id, service_metadata,
+                      hash, prev_hash, signature
                FROM chat_messages
                WHERE client_id = ? AND conversation = ?
                ORDER BY sequence DESC
@@ -3808,6 +3840,10 @@ class SQLConnection(metaclass=Singleton):
                 'body': row['body'],
                 'ts': int(row['ts']),
                 'service': _chat_service(row),
+                'service_metadata': row['service_metadata'],
+                'hash': row['hash'],
+                'prev_hash': row['prev_hash'],
+                'signature': row['signature'],
             }
             for row in reversed(result.fetchall())
         ]

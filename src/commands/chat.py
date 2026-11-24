@@ -181,3 +181,49 @@ def sync_chats(peer_id: str = None) -> bool:
     copied = sync_all(peer_id=peer_id)
     print(f"{copied} new message(s).", flush=True)
     return True
+
+
+def export_thread(ref: str) -> bool:
+    """Print a conversation as a signed document, in JSON, for others to check.
+
+    The document has a hash of the client_id, never the client_id: it is a credential.
+    """
+    import json
+    from src.manager.chat import ChatError, export_conversation
+
+    _sync_quietly()
+    try:
+        document = export_conversation(ref)
+    except ChatError as e:
+        print(f"STOP: {e}", flush=True)
+        return False
+    print(json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False), flush=True)
+    return True
+
+
+def verify_thread(path: str) -> bool:
+    """Check an exported conversation (``chat_export``). It needs no node.
+
+    Returns whether it is valid: every signature verifies and the chain holds.
+    """
+    import json
+    from src.manager.chat import verify_document
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            document = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"STOP: cannot read {path}: {e}", flush=True)
+        return False
+    result = verify_document(document)
+    if not result["valid"]:
+        print(f"NOT VALID: {result['reason']}", flush=True)
+        return False
+    print(f"Valid: {result['entries']} message(s) signed by node {result['node']}.", flush=True)
+    if not result["from_start"]:
+        print(
+            "The first message is not the start of the conversation: the node removed "
+            "the older ones. Only the messages in the document are proven.",
+            flush=True,
+        )
+    return True

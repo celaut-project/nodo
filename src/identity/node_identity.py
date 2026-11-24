@@ -73,6 +73,11 @@ _CLIENT_BINDING_PREFIX: Final[str] = "celaut-client-binding:"
 # this node signs for its owner, who can hold it up as evidence of a charge.
 _STATEMENT_PREFIX: Final[str] = "celaut-balance-statement:"
 
+# Domain separation for a chat entry: a message of a conversation that this node keeps,
+# signed as a receipt of the message of a client or as an answer of the operator. The
+# conversation can be shown to others as evidence.
+_CHAT_ENTRY_PREFIX: Final[str] = "celaut-chat-signature:"
+
 # Domain separation for a price offer (#657): the maintenance terms that this node keeps
 # for a start until ``valid_until``, which a caller can hold up against it.
 _OFFER_PREFIX: Final[str] = "celaut-price-offer:"
@@ -765,6 +770,16 @@ def receipt_payload(peer_id: str, receipt_digest: str) -> str:
     :func:`statement_payload`, with a prefix of its own.
     """
     return f"{_RECEIPT_PREFIX}{peer_id}|{receipt_digest}"
+
+
+def chat_entry_payload(peer_id: str, entry_hash: str) -> str:
+    """The exact string a node signs for a chat entry.
+
+    ``entry_hash`` is ``chat_signature.entry_hash``, which covers every field of the
+    entry but the signature, and the hash of the entry before it. The same shape as
+    :func:`statement_payload`, with a prefix of its own.
+    """
+    return f"{_CHAT_ENTRY_PREFIX}{peer_id}|{entry_hash}"
 
 
 def offer_payload(peer_id: str, offer_digest: str) -> str:

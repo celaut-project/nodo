@@ -208,6 +208,8 @@ COMMANDS = sorted(
         "chat_thread",
         "chat_close",
         "chat_reopen",
+        "chat_export",
+        "chat_verify",
         "chat_sync",
     }
 )

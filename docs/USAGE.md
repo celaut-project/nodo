@@ -1290,6 +1290,13 @@ nodo tunnel_close <tunnel id> --json       # and close one
   and the reading commands do it first). A peer answers in its own node; it never sends
   anything back, so the answer shows when the copy runs.
 
+  The node that keeps a conversation signs each message that it stores, and chains the
+  messages of the conversation. `ChatAck.entry` is the signed receipt of a message, and
+  every `ChatEntry` of `GetChatThread` is signed. `nodo chat_export <ref>` writes a
+  conversation with its signatures (no `client_id` in it), and `nodo chat_verify <file>`
+  checks it with no node. A signed conversation is evidence against the node that signed it,
+  not for it: see [CHAT_EVIDENCE.md](CHAT_EVIDENCE.md).
+
   Binding a client to a peer (`AssociateClient`, or the signature in `GenerateClient`)
   changes no conversation. It only lets the lists group the conversations of that client
   under the peer.
@@ -1428,6 +1435,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `chat_threads [<peer>] [--json]` / `chat_thread <ref> [--json]` | list conversations / read one |
 | `chat_close <ref>` / `chat_reopen <ref>` | close / reopen (local only) |
 | `chat_sync [<peer>]` | copy the answers of the peers to our conversations now |
+| `chat_export <ref>` / `chat_verify <file>` | write a signed conversation / check one (needs no node) |
 | `clients [<client>] [--json] [--limit N]` | clients, or one with its history |
 | `reputation [<peer>] [--json]` | what the network stakes on us (or on a peer) |
 | `verify_reputation <peer>` | validate a peer's reputation proof and ownership |

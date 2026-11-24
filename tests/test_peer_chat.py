@@ -23,7 +23,8 @@ try:
     from protos import celaut_pb2
     from src.database import migrate
     from src.database.sql_connection import SQLConnection
-    from src.identity import node_identity as ni
+    from src.identity import chat_signature, node_identity as ni
+    from tests.reputation_system.test_offchain_reputation import _Signer
     import src.manager.chat as chat
     import src.manager.manager as manager
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -158,7 +159,8 @@ class ServiceCardTests(unittest.TestCase):
 
     def test_a_shared_service_is_stored_as_its_metadata_and_not_twice_as_text(self):
         metadata = self._metadata()
-        self.assertEqual(chat.receive_chat_message(self._incoming("have a look", metadata)), (1, 1))
+        entry = chat.receive_chat_message(self._incoming("have a look", metadata))
+        self.assertEqual((entry.conversation_id, entry.sequence), (1, 1))
 
         history = self._history()
         self.assertEqual(history[0]["body"], "have a look")
@@ -242,16 +244,28 @@ class ServiceCardTests(unittest.TestCase):
         sent = []
         metadata = self._metadata()
         remote_client = uuid4().hex
+        signer = _Signer()
+        self.sc.add_peer(peer_id=signer.peer_id, advertisement=b"")
+
+        def reply(_channel, message):
+            sent.append(message)
+            entry = celaut_pb2.ChatEntry(
+                sequence=1, conversation_id=1, ts=1, body="look",
+                prev_hash=chat_signature.genesis_hash(chat_signature.client_ref(remote_client), 1))
+            digest = chat_signature.entry_hash(chat_signature.client_ref(remote_client), entry)
+            with signer:
+                entry.signature = ni.sign_peer_payload(
+                    ni.chat_entry_payload(signer.peer_id, digest))
+            return celaut_pb2.ChatAck(stored=True, entry=entry)
+
         with patch.object(chat, "local_service_metadata", return_value=metadata), \
              patch.object(chat.sc, "get_peer_client", return_value=remote_client), \
              patch.object(chat, "peer_channel", return_value=None), \
              patch.object(chat.BeeClient, "get_chat_thread",
                           return_value=celaut_pb2.ChatThread()), \
-             patch.object(chat.BeeClient, "chat",
-                          side_effect=lambda _channel, message: sent.append(message)
-                          or celaut_pb2.ChatAck(stored=True, conversation_id=1, sequence=1)):
+             patch.object(chat.BeeClient, "chat", side_effect=reply):
             ref = chat.open_conversation(
-                peer_id=self.peer_id, topic="try", body="look", service="hello-world")
+                peer_id=signer.peer_id, topic="try", body="look", service="hello-world")
 
         self.assertEqual(ref, f"{remote_client}#1")
         self.assertEqual(sent[0].service, metadata)

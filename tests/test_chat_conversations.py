@@ -24,7 +24,9 @@ try:
     from src.database.sql_connection import SQLConnection, TRACEABILITY_TABLES
     from src.gateway import client_gate
     from src.gateway import gateway as gateway_module
+    from src.identity import chat_signature, node_identity
     import src.manager.chat as chat
+    from tests.reputation_system.test_offchain_reputation import _Signer
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
@@ -64,8 +66,9 @@ class ServedConversationTests(_Database):
         self.sc.add_client(client_id=self.other_id, balance_mu=0, last_usage=None)
 
     def send(self, client_id, body="help", conversation_id=0, **fields):
-        return chat.receive_chat_message(celaut_pb2.ChatMessage(
+        entry = chat.receive_chat_message(celaut_pb2.ChatMessage(
             client_id=client_id, conversation_id=conversation_id, body=body, **fields))
+        return entry.conversation_id, entry.sequence
 
     def test_conversation_zero_opens_the_next_number_of_that_client(self):
         self.assertEqual(self.send(self.client_id, "first"), (1, 1))
@@ -203,8 +206,9 @@ class AssociationTests(_Database):
         self.sc.add_peer(peer_id=self.peer_id, advertisement=b"")
 
     def send(self, body, conversation_id=0):
-        return chat.receive_chat_message(celaut_pb2.ChatMessage(
+        entry = chat.receive_chat_message(celaut_pb2.ChatMessage(
             client_id=self.client_id, conversation_id=conversation_id, body=body))
+        return entry.conversation_id, entry.sequence
 
     def rows(self, table):
         return [tuple(r) for r in self.conn.execute(f"SELECT * FROM {table} ORDER BY 1, 2")]
@@ -242,31 +246,43 @@ class AssociationTests(_Database):
 
 
 class _Remote:
-    """What a peer node answers: the messages of one client and the numbers it gives."""
+    """A peer node: it keeps the messages of one client, signs them and chains them."""
 
-    def __init__(self, client_id):
+    def __init__(self, client_id, signer):
         self.client_id = client_id
-        self.entries = []     # (sequence, conversation, from_operator, body)
+        self.signer = signer
+        self.entries = []
         self.sent = []
 
     def add(self, conversation, from_operator, body):
-        self.entries.append((len(self.entries) + 1, conversation, from_operator, body))
+        ref = chat_signature.client_ref(self.client_id)
+        previous = [e for e in self.entries if e.conversation_id == conversation]
+        entry = celaut_pb2.ChatEntry(
+            sequence=len(self.entries) + 1, conversation_id=conversation,
+            ts=100 + len(self.entries), from_operator=from_operator, body=body,
+            prev_hash=(chat_signature.entry_hash(ref, previous[-1]) if previous
+                       else chat_signature.genesis_hash(ref, conversation)),
+        )
+        self.sign(entry)
+        self.entries.append(entry)
+        return entry
+
+    def sign(self, entry):
+        digest = chat_signature.entry_hash(chat_signature.client_ref(self.client_id), entry)
+        with self.signer:
+            entry.signature = node_identity.sign_peer_payload(
+                node_identity.chat_entry_payload(self.signer.peer_id, digest))
 
     def chat(self, _channel, message):
         self.sent.append(message)
         number = message.conversation_id or (
-            1 + max([c for _s, c, _o, _b in self.entries] or [0]))
-        self.add(number, False, message.body)
-        return celaut_pb2.ChatAck(stored=True, conversation_id=number,
-                                  sequence=len(self.entries))
+            1 + max([e.conversation_id for e in self.entries] or [0]))
+        return celaut_pb2.ChatAck(stored=True, entry=self.add(number, False, message.body))
 
     def get_chat_thread(self, _channel, client_id, after_sequence=0, **_kwargs):
         assert client_id == self.client_id
         thread = celaut_pb2.ChatThread(latest=len(self.entries))
-        for sequence, conversation, from_operator, body in self.entries:
-            if sequence > after_sequence:
-                thread.entries.add(sequence=sequence, conversation_id=conversation, ts=100 + sequence,
-                                   from_operator=from_operator, body=body)
+        thread.entries.extend(e for e in self.entries if e.sequence > after_sequence)
         return thread
 
 
@@ -276,10 +292,11 @@ class MirrorTests(_Database):
 
     def setUp(self):
         super().setUp()
-        self.peer_id = "a" * 66
+        self.signer = _Signer()
+        self.peer_id = self.signer.peer_id
         self.sc.add_peer(peer_id=self.peer_id, advertisement=b"")
         self.remote_client = uuid4().hex
-        self.remote = _Remote(self.remote_client)
+        self.remote = _Remote(self.remote_client, self.signer)
         patches = [
             patch.object(chat.sc, "get_peer_client", return_value=self.remote_client),
             patch.object(chat, "peer_channel", return_value=None),
@@ -381,14 +398,62 @@ class MirrorTests(_Database):
         self.assertEqual(chat.sync_all(peer_id="d" * 66), 0)
         self.assertEqual(chat.sync_all(peer_id=self.peer_id), 1)
 
-    def test_a_peer_cannot_make_this_node_store_what_a_message_may_not_hold(self):
+    def test_an_entry_that_a_message_may_not_hold_is_not_stored(self):
         chat.open_conversation(self.peer_id, topic="t", body="one")
-        self.remote.add(1, True, "x" * (chat.MAX_MESSAGE_BYTES * 2))
-        self.remote.add(0, True, "a conversation 0 is not valid")
+        self.remote.add(1, True, "x" * (chat.MAX_MESSAGE_BYTES + 1))
         chat.sync_all()
         history = chat.get_conversation_history(f"{self.remote_client}#1")
-        self.assertEqual(len(history[-1]["body"].encode()), chat.MAX_MESSAGE_BYTES)
-        self.assertEqual(len(history), 2)
+        self.assertEqual([m["body"] for m in history], ["one"])
+
+    def test_an_entry_with_a_bad_signature_is_not_stored(self):
+        ref = chat.open_conversation(self.peer_id, topic="t", body="one")
+        entry = self.remote.add(1, True, "answer")
+        entry.body = "an answer that the peer did not sign"
+        chat.sync_all()
+        self.assertEqual([m["body"] for m in chat.get_conversation_history(ref)], ["one"])
+
+    def test_an_entry_signed_by_another_node_is_not_stored(self):
+        ref = chat.open_conversation(self.peer_id, topic="t", body="one")
+        other = _Remote(self.remote_client, _Signer())
+        other.entries = list(self.remote.entries)
+        self.remote.entries.append(other.add(1, True, "from a node that is not the peer"))
+        chat.sync_all()
+        self.assertEqual(len(chat.get_conversation_history(ref)), 1)
+
+    def test_an_entry_with_no_signature_is_not_stored(self):
+        ref = chat.open_conversation(self.peer_id, topic="t", body="one")
+        self.remote.add(1, True, "answer").signature = ""
+        chat.sync_all()
+        self.assertEqual(len(chat.get_conversation_history(ref)), 1)
+
+    def test_an_entry_that_does_not_follow_the_stored_chain_is_not_stored(self):
+        ref = chat.open_conversation(self.peer_id, topic="t", body="one")
+        entry = self.remote.add(1, True, "answer")
+        entry.prev_hash = "00" * 32          # a message that skips the one before it
+        self.remote.sign(entry)              # signed, but not after the same message
+        chat.sync_all()
+        self.assertEqual(len(chat.get_conversation_history(ref)), 1)
+
+    def test_a_receipt_with_a_bad_signature_is_an_error(self):
+        def bad_receipt(_channel, message):
+            ack = self.remote.chat(_channel, message)
+            ack.entry.body = "something else"
+            return ack
+        with patch.object(chat.BeeClient, "chat", side_effect=bad_receipt):
+            with self.assertRaises(chat.ChatError) as caught:
+                chat.open_conversation(self.peer_id, topic="t", body="one")
+        self.assertIn("no valid signature", str(caught.exception))
+        self.assertEqual(chat.list_conversations(), [])
+
+    def test_the_mirror_keeps_what_the_peer_signed_so_that_it_can_be_shown(self):
+        ref = chat.open_conversation(self.peer_id, topic="t", body="one")
+        self.remote.add(1, True, "answer")
+        chat.sync_all()
+        document = chat.export_conversation(ref)
+        self.assertEqual(document["node"], self.peer_id)
+        verdict = chat.verify_document(document)
+        self.assertEqual((verdict["valid"], verdict["from_start"], verdict["entries"]),
+                         (True, True, 2))
 
     def test_the_two_kinds_are_listed_together_under_the_peer(self):
         client_id = uuid4().hex
@@ -465,16 +530,18 @@ class ChatGatewayTests(unittest.TestCase):
                              side_effect=lambda message_iterator, indices=None: iter([message_iterator])):
             return list(gateway_module.Gateway().Chat(iter(()), _Context()))
 
-    def test_the_ack_carries_the_conversation_and_the_sequence(self):
+    def test_the_ack_carries_the_signed_entry(self):
+        entry = celaut_pb2.ChatEntry(sequence=9, conversation_id=4, body="hi", signature="ab")
         [ack] = self.chat_call(celaut_pb2.ChatMessage(client_id="c1", body="hi"),
-                               {"return_value": (4, 9)})
-        self.assertEqual((ack.stored, ack.conversation_id, ack.sequence), (True, 4, 9))
+                               {"return_value": entry})
+        self.assertTrue(ack.stored)
+        self.assertEqual(ack.entry, entry)
 
     def test_a_refusal_is_an_ack_with_the_reason(self):
         [ack] = self.chat_call(celaut_pb2.ChatMessage(client_id="c1", body="hi"),
                                {"side_effect": chat.ChatError("Unknown conversation.")})
-        self.assertEqual((ack.stored, ack.reason, ack.conversation_id, ack.sequence),
-                         (False, "Unknown conversation.", 0, 0))
+        self.assertEqual((ack.stored, ack.reason, ack.HasField("entry")),
+                         (False, "Unknown conversation.", False))
 
     def test_the_rpc_table(self):
         rpc = GATEWAY_RPCS["Chat"]
