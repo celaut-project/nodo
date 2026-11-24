@@ -269,7 +269,25 @@ The digests of `BalanceStatement` and `EstimatedCost` follow the numbers too
 `relayed` is now always in the text, as 1 or 0, and `service_id` and `instance_ref` have
 their own place and are empty when they have no value: before, each one was added at the
 end only when it had a value. A statement or an offer signed before this change does not
-verify. `tests/test_digests_follow_field_numbers.py` writes both texts by hand.
+verify.
+
+The digests of `Peer` and `ReputationProof` follow the numbers too:
+
+- `Peer` (`node_identity.canonical_peer_content_digest`): `signature_scheme`, `uri`,
+  `payment_contracts`, `rates`, `limits`, `resources`, `devices`, `activity_window`. Before,
+  the text was `uri|payment_contracts|rates|limits|scheme|resources|activity_window|devices`.
+  `public_key` and `ts` are not in the digest. The signed text is still
+  `<public_key>|<ts>|<digest>`, so the key and the time come before the digest.
+- `ReputationProof` (`offchain_proof.pow_base`): `publisher|signature_scheme|ts|opinions|
+  ledger_proofs`. `pow_nonce` (field 4) is not in the place of its number: `proof_digest` is
+  the hash of `base|pow_nonce`, so a node that looks for a nonce hashes the base once and
+  then only these last bytes, for each try. Moving the nonce into the text would make each
+  try hash all the opinions.
+
+A `Peer` or a proof signed before this change does not verify. The formal text of
+`peer.digest` was out of date (it had the proofs and lacked `limits`, `devices` and
+`activity_window`), and it now lists the parts with their encodings.
+`tests/test_digests_follow_field_numbers.py` writes the four texts by hand.
 
 **Not wire compatible**, as the other changes of the alpha. A receipt or a statement that a
 client or a node kept before is unreadable. The fault evidence that a node kept

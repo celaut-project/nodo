@@ -443,12 +443,17 @@ def gateway_component() -> Layer:
         "peer.signature": "Peer.signature_scheme over UTF-8 of payload, lowercase hex",
         "peer.signature.payload": canonical_peer_payload(peer_id, ts, digest),
         "peer.digest": "blake2b-256 hex of UTF-8 of "
-                       "uris|contracts|proofs|rates|scheme|resources",
+                       "scheme|uris|contracts|rates|limits|resources|devices|"
+                       "activity_window",
         "peer.digest.uris": "'/'.join(sorted(uri))",
         "peer.digest.uri": "ip~port~expiry~protocol(transport)~';'.join(sorted(protocol(stack)))",
         "peer.digest.protocol": "hex(formal)~','.join(sorted(tags))~prose",
         "peer.digest.contracts": "'/'.join(sorted(contract_message~mu_per_unit.n))",
-        "peer.digest.proofs": "'/'.join(sorted(contract_message))",
+        "peer.digest.limits": "';'.join(key=value by key)",
+        "peer.digest.devices": "'/'.join(sorted(protocol(architecture)~at_init~at_most~"
+                               "','.join(sorted(attach numbers))))",
+        "peer.digest.activity_window": "'-' when absent, else 'w:'+on_close number+':'+"
+                                       "','.join(sorted(start_minute-end_minute))",
         "peer.digest.contract_message": "hex(ledger.formal)~','.join(sorted(ledger.tags))"
                                         "~ledger.prose~hex(protocol.formal)"
                                         "~','.join(sorted(protocol.tags))~protocol.prose"
@@ -527,8 +532,10 @@ def gateway_component() -> Layer:
                                       "lowercase hex",
         "reputation_proof.signature.payload": reputation_proof_payload(
             peer_id, "<proof_digest>"),
-        "reputation_proof.digest": "blake2b-256 hex of UTF-8 of publisher|ts|scheme|"
-                                   "'/'.join(opinion)",
+        "reputation_proof.digest": "blake2b-256 hex of UTF-8 of base|pow_nonce, where base "
+                                   "is the blake2b-256 hex of UTF-8 of publisher|scheme|"
+                                   "ts|'/'.join(opinion)|'/'.join(sorted(contract_message "
+                                   "of each ledger_proofs))",
         "reputation_proof.digest.opinion": "hex(type)~hex(object)~amount~1 or 0~"
                                            "hex(content)~evidence digest or empty",
         "reputation_proof.digest.scheme": "peer.digest.scheme of signature_scheme",

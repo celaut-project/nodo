@@ -138,7 +138,8 @@ def _ledger_proofs_text(proof: celaut_pb2.ReputationProof) -> str:
 
 def pow_base(proof: celaut_pb2.ReputationProof) -> str:
     """Blake2b-256 hex of the canonical text of every field but the nonce and the
-    signature: ``publisher|ts|scheme|opinion/opinion/...|pointer/pointer/...``. An opinion is
+    signature: ``publisher|scheme|ts|opinion/opinion/...|pointer/pointer/...``, in the order
+    of the numbers of the fields in ``celaut.proto``. An opinion is
     ``hex(type)~hex(object)~amount~positive~hex(content)~evidence``, where ``evidence`` is
     ``fault_proofs.digest`` of its evidence, or empty. The scheme is
     ``execution_receipt.canonical_scheme``. The pointers are the sorted
@@ -146,8 +147,8 @@ def pow_base(proof: celaut_pb2.ReputationProof) -> str:
     after the opinions. It is computed once when a node looks for a
     nonce: only the last step of the digest depends on the nonce."""
     text = "|".join((
-        proof.publisher, str(int(proof.ts)),
-        execution_receipt.canonical_scheme(proof.signature_scheme),
+        proof.publisher, execution_receipt.canonical_scheme(proof.signature_scheme),
+        str(int(proof.ts)),
         "/".join(_opinion_text(opinion) for opinion in proof.opinions),
         _ledger_proofs_text(proof),
     ))
@@ -160,6 +161,8 @@ def _pow_hash(base: str, nonce: int) -> bytes:
 
 def proof_digest(proof: celaut_pb2.ReputationProof) -> str:
     """Blake2b-256 hex of ``pow_base|pow_nonce``: it covers every field but the signature.
+    The nonce is the last part, and not in the place of its number: a node that looks for a
+    nonce hashes the base once and then only these last bytes, for each try.
     The signature is over this digest, and the work of the proof (#677) is the number of
     leading zero bits of it (:func:`pow_bits`)."""
     return _pow_hash(pow_base(proof), proof.pow_nonce).hex()

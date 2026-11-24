@@ -619,6 +619,10 @@ def canonical_peer_content_digest(peer) -> str:
     neither can be stripped (making a soon-to-expire address look permanent, or a
     UDP endpoint look like a TCP one) nor extended in transit.
 
+    The parts are ``signature_scheme``, ``uri``, ``payment_contracts``, ``rates``,
+    ``limits``, ``resources``, ``devices`` and ``activity_window``, in the order of their
+    numbers in ``celaut.proto``, joined by ``|``.
+
     Built field by field rather than from ``SerializeToString()``, which protobuf does
     not guarantee to be canonical (field order, unknown fields, non-minimal varints).
     Every repeated element is sorted so the digest does not depend on the order a node
@@ -673,15 +677,18 @@ def canonical_peer_content_digest(peer) -> str:
     else:
         activity_window = "-"
 
+    # The order of the numbers of the fields in ``celaut.proto``. ``public_key`` and ``ts``
+    # are not here: the payload of the signature has them before this digest
+    # (:func:`canonical_peer_payload`), and ``signature`` is what is signed.
     canonical = "|".join([
+        scheme,
         "/".join(uris),
         "/".join(contracts),
         rates,
         limits,
-        scheme,
         "/".join(resources),
-        activity_window,
         "/".join(devices),
+        activity_window,
     ])
     # Blake2b-256. Nothing outside this function reads the value -- a verifier
     # recomputes it from the peer's own advertisement, and it is never stored or

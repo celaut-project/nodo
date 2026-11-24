@@ -1,4 +1,5 @@
-"""The digest of a statement and of an offer follows the numbers of the fields.
+"""The digest of a Peer, a reputation proof, a statement and an offer follows the numbers of
+the fields.
 
 Each text is written here by hand, part by part, in the order of the numbers of the fields
 of ``celaut.proto``. Another implementation can reproduce a digest from the message and
@@ -10,8 +11,11 @@ import unittest
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     from protos import celaut_pb2
-    from src.identity import statement_signature
+    from src.identity import execution_receipt, node_identity, statement_signature
+    from src.reputation_system import offchain_proof
     from src.utils.cost_functions import signed_offer
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -184,6 +188,72 @@ class OfferDigestTests(unittest.TestCase):
                 offer = _offer()
                 change(offer)
                 self.assertNotEqual(signed_offer.offer_digest(offer), base)
+
+
+def _peer():
+    peer = celaut_pb2.Peer(public_key="ab" * 32, ts=1798329600, signature="ignored")
+    peer.signature_scheme.components.add(tags=["ed25519"], prose="Ed25519", formal=b"\x03")
+    uri = peer.uri.add(ip="1.2.3.4", port=8080, expiry_unix_timestamp=1800000000)
+    uri.transport.tags.append("tcp")
+    uri.protocol_stack.add(tags=["tls"], prose="TLS", formal=b"\x01")
+    from src.utils import keyvalue
+    keyvalue.set_value(peer.rates, "build_mu", celaut_pb2.Amount(n="10"))
+    keyvalue.set_value(peer.rates, "net_mu_per_gib", celaut_pb2.Amount(n="20"))
+    keyvalue.set_value(peer.limits, "max_concurrent_connections:*", 5)
+    peer.activity_window.on_close = celaut_pb2.ON_CLOSE_STOP
+    peer.activity_window.spans.add(start_minute=1320, end_minute=360)
+    return peer
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class PeerDigestTests(unittest.TestCase):
+
+    def test_the_text_is_in_the_order_of_the_numbers_of_the_fields(self):
+        expected = "|".join((
+            "03~ed25519~Ed25519",                                 # signature_scheme = 2
+            "1.2.3.4~8080~1800000000"                             # uri = 5: ip, port, expiry,
+            "~~tcp~"                                              # the transport (formal, tags, prose)
+            "~01~tls~TLS",                                        # and the stack
+            "",                                                   # payment_contracts = 6
+            "build_mu=10;net_mu_per_gib=20",                      # rates = 7
+            "max_concurrent_connections:*=5",                     # limits = 8
+            "",                                                   # resources = 9
+            "",                                                   # devices = 10
+            f"w:{int(celaut_pb2.ON_CLOSE_STOP)}:1320-360",        # activity_window = 11
+        ))
+        digest = hashlib.blake2b(expected.encode("utf-8"), digest_size=32).hexdigest()
+        self.assertEqual(node_identity.canonical_peer_content_digest(_peer()), digest)
+
+    def test_the_payload_has_the_key_and_the_time_before_the_digest(self):
+        self.assertEqual(node_identity.canonical_peer_payload("k", 5, "d"), "k|5|d")
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ReputationProofDigestTests(unittest.TestCase):
+
+    def _proof(self):
+        proof = celaut_pb2.ReputationProof(
+            publisher="ab" * 32, ts=1798329600, pow_nonce=77, signature="ignored")
+        proof.signature_scheme.components.add(tags=["ed25519"], formal=b"\x03")
+        proof.opinions.add(type="celaut-node", object="cd" * 32, amount=40, positive=True,
+                           content=b"hi")
+        proof.ledger_proofs.add().ledger.tags.append("ergo")
+        return proof
+
+    def test_the_text_is_in_the_order_of_the_numbers_of_the_fields(self):
+        proof = self._proof()
+        opinion = "~".join((_hex("celaut-node"), _hex("cd" * 32), "40", "1", b"hi".hex(), ""))
+        pointer = node_identity.canonical_contract_message(proof.ledger_proofs[0])
+        base = _blake("|".join((
+            "ab" * 32,                                            # publisher = 1
+            execution_receipt.canonical_scheme(proof.signature_scheme),   # signature_scheme = 2
+            "1798329600",                                         # ts = 3
+            opinion,                                              # opinions = 6
+            pointer,                                              # ledger_proofs = 7
+        )))
+        self.assertEqual(offchain_proof.pow_base(proof), base)
+        # The nonce (field 4) is hashed last, so a node that looks for it hashes the base once.
+        self.assertEqual(offchain_proof.proof_digest(proof), _blake(f"{base}|77"))
 
 
 if __name__ == "__main__":
