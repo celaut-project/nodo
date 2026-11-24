@@ -263,18 +263,24 @@ class InstanceViewTests(unittest.TestCase):
 class ChatJsonTests(unittest.TestCase):
     def test_threads_and_messages_as_json(self):
         from src.commands import chat
-        threads = [{"id": "c1", "peer_id": "p", "opened_by_us": 1, "topic": "t",
-                    "opened_at": "2026-01-01", "closed_at": None}]
-        messages = [{"ts": 1, "from_us": 1, "body": "hi", "conversation_id": "c1"}]
+        threads = [{"ref": "c1#1", "client_id": "c1", "number": 1, "peer_id": "p",
+                    "opened_by_us": True, "topic": "t", "opened_at": "2026-01-01",
+                    "closed_at": None, "messages": 1, "latest": 1, "last_ts": 1,
+                    "last_from_operator": False}]
+        messages = [{"sequence": 1, "from_operator": False, "body": "hi", "ts": 1,
+                     "service": None}]
         # A stand-in for src.manager.chat, which needs the node's runtime to import.
         fake = types.ModuleType("src.manager.chat")
+        fake.ChatError = type("ChatError", (Exception,), {})
+        fake.sync_all = lambda peer_id=None: 0
         fake.list_conversations = lambda peer_id=None: threads
-        fake.get_conversation_history = lambda conversation_id, limit: messages
+        fake.get_conversation = lambda ref: threads[0]
+        fake.get_conversation_history = lambda ref, limit: messages
         with patch.dict(sys.modules, {"src.manager.chat": fake}):
             ok, out = _run(chat.list_threads, as_json=True)
             self.assertTrue(ok)
             self.assertEqual(_json(out)["conversations"], threads)
-            ok, out = _run(chat.show_thread, "c1", as_json=True)
+            ok, out = _run(chat.show_thread, "c1#1", as_json=True)
         self.assertEqual(_json(out)["messages"], messages)
 
 

@@ -1,9 +1,9 @@
-"""``nodo chat`` -- send and read the free-text channel between peer operators.
+"""``nodo chat_*`` -- talk to the operator of a node, and answer the clients of this one.
 
-Thin CLI wrapper: all of the signing, verification and storage is
-``src.manager.chat``; this only prints. Conversations (issue #431) are an
-addition, not a replacement: the flat, un-threaded ``send_chat``/``show_chat``
-below are unchanged from before they existed.
+Thin CLI wrapper: all of the storage, the checks and the network are
+``src.manager.chat``; this only prints. A conversation is named ``client_id#number`` (see
+that module). The same commands work on both kinds: a conversation that a client of this
+node opened (answer it) and one that this node opened on a peer (write to that peer).
 """
 from datetime import datetime, timezone
 
@@ -20,108 +20,85 @@ def _service_suffix(entry: dict) -> str:
     return f" [service {service_id}{tags}]"
 
 
-def send_chat(peer_id: str, body: str, service: str = None) -> bool:
-    """Send ``body`` to ``peer_id``, with ``service`` attached as a card if given.
-
-    Returns whether it was sent.
-    """
-    from src.manager.chat import ChatError, send_chat_message
-
-    try:
-        send_chat_message(peer_id=peer_id, body=body, service=service)
-    except ChatError as e:
-        print(f"STOP: {e}", flush=True)
-        return False
-    except Exception as e:
-        print(f"Could not reach peer {peer_id}: {e}", flush=True)
-        return False
-    print(f"Sent to {peer_id}.", flush=True)
-    return True
-
-
 def _emit(document: dict) -> bool:
     from src.commands._catalogue import emit_json
     emit_json(document)
     return True
 
 
-def show_chat(peer_id: str, limit: int = 100, as_json: bool = False) -> bool:
-    """Print the stored conversation with ``peer_id``, oldest first."""
-    from src.manager.chat import get_chat_history
+def _when(ts: int) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    history = get_chat_history(peer_id=peer_id, limit=limit)
-    if as_json:
-        return _emit({"peer_id": peer_id, "messages": history})
-    if not history:
-        print(f"No stored messages with {peer_id}.", flush=True)
-        return True
-    for entry in history:
-        when = datetime.fromtimestamp(entry["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        who = "us" if entry["from_us"] else peer_id
-        thread = f" (thread {entry['conversation_id']})" if entry.get("conversation_id") else ""
-        print(f"[{when}] {who}{thread}: {entry['body']}{_service_suffix(entry)}", flush=True)
-    return True
+
+def _sync_quietly(peer_id: str = None) -> None:
+    """Pull the answers of the peers before a read, so that the read is current.
+
+    A peer that does not answer must not stop the read: the stored copy is still shown.
+    """
+    from src.manager.chat import sync_all
+
+    try:
+        sync_all(peer_id=peer_id)
+    except Exception:
+        pass
 
 
 def open_thread(peer_id: str, topic: str, body: str = None, service: str = None,
                 as_json: bool = False) -> bool:
-    """Open a new conversation with ``peer_id``, sending ``body`` as its first message.
+    """Open a conversation with the operator of ``peer_id``, sending ``body`` first.
 
-    ``body`` defaults to ``topic`` itself when not given, which is the whole of
-    what this did before the TUI grew a peer/topic/body wizard: ``topic`` is
-    still just the label, but a caller that wants a real opening message
-    distinct from that label may now pass one.
+    ``body`` defaults to ``topic``. This node is a client of that peer, and the peer
+    gives the number of the conversation.
     """
-    from src.manager.chat import ChatError, close_conversation, open_conversation, send_chat_message
+    from src.manager.chat import ChatError, open_conversation, parse_ref
 
     if body is None:
         body = topic
-
     try:
-        conversation_id = open_conversation(peer_id=peer_id, topic=topic)
+        ref = open_conversation(peer_id=peer_id, topic=topic, body=body, service=service)
     except ChatError as e:
-        print(f"STOP: {e}", flush=True)
-        return False
-    try:
-        send_chat_message(
-            peer_id=peer_id, body=body, conversation_id=conversation_id, service=service,
-        )
-    except ChatError as e:
-        # The thread exists locally either way -- opening is not the send -- but a
-        # thread whose first message never went anywhere is confusing left open.
-        close_conversation(conversation_id)
         print(f"STOP: {e}", flush=True)
         return False
     except Exception as e:
-        close_conversation(conversation_id)
         print(f"Could not reach peer {peer_id}: {e}", flush=True)
         return False
     if as_json:
-        return _emit({"conversation_id": conversation_id, "peer_id": peer_id, "topic": topic})
-    print(f"Opened {conversation_id} with {peer_id}.", flush=True)
+        client_id, number = parse_ref(ref)
+        return _emit({
+            "ref": ref, "client_id": client_id, "number": number,
+            "peer_id": peer_id, "topic": topic,
+        })
+    print(f"Opened {ref} with {peer_id}.", flush=True)
     return True
 
 
-def reply_in_thread(conversation_id: str, body: str, service: str = None) -> bool:
-    """Send ``body`` in the existing conversation ``conversation_id``."""
-    from src.manager.chat import ChatError, reply_to_conversation
+def reply_in_thread(ref: str, body: str, service: str = None) -> bool:
+    """Send ``body`` in the conversation ``ref``, whichever side it is on."""
+    from src.manager.chat import ChatError, reply
 
     try:
-        reply_to_conversation(conversation_id=conversation_id, body=body, service=service)
+        reply(ref=ref, body=body, service=service)
     except ChatError as e:
         print(f"STOP: {e}", flush=True)
         return False
     except Exception as e:
         print(f"Could not reach the peer: {e}", flush=True)
         return False
-    print(f"Sent in {conversation_id}.", flush=True)
+    print(f"Sent in {ref}.", flush=True)
     return True
 
 
 def list_threads(peer_id: str = None, as_json: bool = False) -> bool:
-    """Print every conversation (open and closed) this node knows, newest first."""
+    """Print every conversation (open and closed), the most recently active first.
+
+    ``waiting`` marks the conversations whose last message is not from the operator of
+    the node that serves them: for a conversation of a client it is the client's, so the
+    operator of this node must answer; for a conversation that this node opened it is our
+    own, so the peer has not answered yet.
+    """
     from src.manager.chat import list_conversations
 
+    _sync_quietly(peer_id=peer_id)
     conversations = list_conversations(peer_id=peer_id)
     if as_json:
         return _emit({"conversations": conversations})
@@ -130,109 +107,77 @@ def list_threads(peer_id: str = None, as_json: bool = False) -> bool:
         return True
     for entry in conversations:
         status = "closed" if entry["closed_at"] else "open"
-        opener = "us" if entry["opened_by_us"] else entry["peer_id"]
+        waiting = "" if entry["last_from_operator"] else ", waiting"
+        side = "ours (we are the client)" if entry["opened_by_us"] else "a client's"
+        peer = entry["peer_id"] or "no peer"
         topic = f" -- {entry['topic']}" if entry["topic"] else ""
         print(
-            f"{entry['id']} [{status}] with {entry['peer_id']}, opened by {opener}"
-            f" at {entry['opened_at']}{topic}",
+            f"{entry['ref']} [{status}{waiting}] {side}, {peer}, "
+            f"{entry['messages']} message(s), last {_when(entry['last_ts'])}{topic}",
             flush=True,
         )
     return True
 
 
-def show_thread(conversation_id: str, limit: int = 200, as_json: bool = False) -> bool:
-    """Print one conversation's messages, oldest first."""
-    from src.manager.chat import get_conversation_history
+def show_thread(ref: str, limit: int = 200, as_json: bool = False) -> bool:
+    """Print the messages of one conversation, oldest first."""
+    from src.manager.chat import ChatError, get_conversation, get_conversation_history
 
-    history = get_conversation_history(conversation_id=conversation_id, limit=limit)
+    try:
+        conversation = get_conversation(ref)
+        if conversation is not None and conversation["opened_by_us"]:
+            _sync_quietly(peer_id=conversation["peer_id"])
+        history = get_conversation_history(ref=ref, limit=limit)
+    except ChatError as e:
+        print(f"STOP: {e}", flush=True)
+        return False
     if as_json:
-        return _emit({"conversation_id": conversation_id, "messages": history})
+        return _emit({"ref": ref, "messages": history})
     if not history:
-        print(f"No stored messages in {conversation_id}.", flush=True)
+        print(f"No stored messages in {ref}.", flush=True)
         return True
+    mirror = bool(conversation and conversation["opened_by_us"])
     for entry in history:
-        when = datetime.fromtimestamp(entry["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        who = "us" if entry["from_us"] else "them"
-        print(f"[{when}] {who}: {entry['body']}{_service_suffix(entry)}", flush=True)
+        # The operator of the node that serves the conversation wrote `from_operator`.
+        # On a mirror that is the other side, not us.
+        ours = (not entry["from_operator"]) if mirror else entry["from_operator"]
+        who = "us" if ours else "them"
+        print(
+            f"[{_when(entry['ts'])}] #{entry['sequence']} {who}: "
+            f"{entry['body']}{_service_suffix(entry)}",
+            flush=True,
+        )
     return True
 
 
-def close_thread(conversation_id: str) -> bool:
+def close_thread(ref: str) -> bool:
     from src.manager.chat import ChatError, close_conversation
 
     try:
-        close_conversation(conversation_id)
+        close_conversation(ref)
     except ChatError as e:
         print(f"STOP: {e}", flush=True)
         return False
-    print(f"Closed {conversation_id}.", flush=True)
+    print(f"Closed {ref}.", flush=True)
     return True
 
 
-def reopen_thread(conversation_id: str) -> bool:
+def reopen_thread(ref: str) -> bool:
     from src.manager.chat import ChatError, reopen_conversation
 
     try:
-        reopen_conversation(conversation_id)
+        reopen_conversation(ref)
     except ChatError as e:
         print(f"STOP: {e}", flush=True)
         return False
-    print(f"Reopened {conversation_id}.", flush=True)
+    print(f"Reopened {ref}.", flush=True)
     return True
 
 
-def _when(ts: int) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+def sync_chats(peer_id: str = None) -> bool:
+    """Copy the new messages of the conversations that this node opened on its peers."""
+    from src.manager.chat import sync_all
 
-
-def list_client_chats(as_json: bool = False) -> bool:
-    """Print the clients that have a support thread, the most recently active first.
-
-    ``waiting`` marks the threads whose last message is the client's, so that the
-    operator sees which ones need an answer.
-    """
-    from src.manager.chat import list_client_threads
-
-    threads = list_client_threads()
-    if as_json:
-        return _emit({"threads": threads})
-    if not threads:
-        print("No client support threads.", flush=True)
-        return True
-    for entry in threads:
-        state = "answered" if entry["last_from_operator"] else "waiting"
-        print(
-            f"{entry['client_id']} [{state}] {entry['messages']} message(s),"
-            f" last {_when(entry['last_ts'])}",
-            flush=True,
-        )
-    return True
-
-
-def show_client_chat(client_id: str, limit: int = 200, as_json: bool = False) -> bool:
-    """Print the support thread of one client, oldest first."""
-    from src.manager.chat import get_client_thread_history
-
-    history = get_client_thread_history(client_id=client_id, limit=limit)
-    if as_json:
-        return _emit({"client_id": client_id, "messages": history})
-    if not history:
-        print(f"No support messages from {client_id}.", flush=True)
-        return True
-    for entry in history:
-        who = "us" if entry["from_operator"] else "client"
-        print(f"[{_when(entry['ts'])}] #{entry['sequence']} {who}: {entry['body']}", flush=True)
-    return True
-
-
-def reply_to_client_chat(client_id: str, body: str) -> bool:
-    """Answer a client in its support thread. The client reads it with GetChatThread."""
-    from src.manager.chat import ChatError, reply_to_client
-
-    try:
-        sequence = reply_to_client(client_id=client_id, body=body)
-    except ChatError as e:
-        print(f"STOP: {e}", flush=True)
-        return False
-    print(f"Answered {client_id} (message {sequence}).", flush=True)
+    copied = sync_all(peer_id=peer_id)
+    print(f"{copied} new message(s).", flush=True)
     return True

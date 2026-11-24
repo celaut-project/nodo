@@ -1269,34 +1269,10 @@ if __name__ == '__main__':
                     _exit(1)
                 _exit(0 if ok else 1)
 
-            case "chat":
-                # `nodo chat <peer_id> <message...>` sends; `nodo chat <peer_id>`
-                # with no message prints the stored conversation instead, so
-                # reading and sending share the one positional shape. Flat,
-                # un-threaded history -- see chat_open/chat_reply/chat_threads
-                # for conversations (issue #431).
-                # `--service <id|tag>` attaches a local service as a card (#438).
-                chat_as_json = "--json" in sys.argv[2:]
-                chat_args, chat_service = take_option(
-                    [a for a in sys.argv[2:] if a != "--json"], "--service")
-                if not chat_args:
-                    print("Usage: nodo chat <peer_id> [message...] [--service <id|tag>]", flush=True)
-                    _exit(1)
-                chat_peer_id, chat_words = chat_args[0], chat_args[1:]
-                if chat_words or chat_service:
-                    from src.commands.chat import send_chat
-                    ok = send_chat(
-                        peer_id=chat_peer_id, body=" ".join(chat_words), service=chat_service,
-                    )
-                else:
-                    from src.commands.chat import show_chat
-                    ok = show_chat(peer_id=chat_peer_id, as_json=chat_as_json)
-                _exit(0 if ok else 1)
-
             case "chat_open":
-                # `--message` sends a real first message distinct from the topic
-                # label (TUI peer/topic/body wizard); omitting it keeps sending
-                # `topic` itself, exactly as before that wizard existed.
+                # A conversation is always opened by a client against a node: this node
+                # is the client, and the peer gives the number. `--message` is the first
+                # message; without it the topic is sent.
                 chat_open_args, chat_open_opts = take_options(
                     [a for a in sys.argv[2:] if a != "--json"], "--message", "--service")
                 if len(chat_open_args) < 2:
@@ -1317,16 +1293,19 @@ if __name__ == '__main__':
                 _exit(0 if ok else 1)
 
             case "chat_reply":
+                # `<ref>` is client_id#number. It works on both kinds: it answers a client
+                # of this node, or writes to the peer where this node opened it.
                 chat_reply_args, chat_reply_service = take_option(sys.argv[2:], "--service")
                 if len(chat_reply_args) < (1 if chat_reply_service else 2):
                     print(
-                        "Usage: nodo chat_reply <conversation_id> <message...> [--service <id|tag>]",
+                        "Usage: nodo chat_reply <client_id#number> <message...> "
+                        "[--service <id|tag>]",
                         flush=True,
                     )
                     _exit(1)
                 from src.commands.chat import reply_in_thread
                 ok = reply_in_thread(
-                    conversation_id=chat_reply_args[0],
+                    ref=chat_reply_args[0],
                     body=" ".join(chat_reply_args[1:]),
                     service=chat_reply_service,
                 )
@@ -1344,51 +1323,35 @@ if __name__ == '__main__':
                 _exit(0 if ok else 1)
 
             case "chat_thread":
-                # Singular: one conversation's own messages, not the list.
+                # Singular: the messages of one conversation, not the list.
                 if len(sys.argv) < 3:
-                    print("Usage: nodo chat_thread <conversation_id>", flush=True)
+                    print("Usage: nodo chat_thread <client_id#number>", flush=True)
                     _exit(1)
                 from src.commands.chat import show_thread
-                ok = show_thread(conversation_id=sys.argv[2], as_json="--json" in sys.argv[3:])
+                ok = show_thread(ref=sys.argv[2], as_json="--json" in sys.argv[3:])
                 _exit(0 if ok else 1)
 
             case "chat_close":
                 if len(sys.argv) < 3:
-                    print("Usage: nodo chat_close <conversation_id>", flush=True)
+                    print("Usage: nodo chat_close <client_id#number>", flush=True)
                     _exit(1)
                 from src.commands.chat import close_thread
-                ok = close_thread(conversation_id=sys.argv[2])
+                ok = close_thread(ref=sys.argv[2])
                 _exit(0 if ok else 1)
 
             case "chat_reopen":
                 if len(sys.argv) < 3:
-                    print("Usage: nodo chat_reopen <conversation_id>", flush=True)
+                    print("Usage: nodo chat_reopen <client_id#number>", flush=True)
                     _exit(1)
                 from src.commands.chat import reopen_thread
-                ok = reopen_thread(conversation_id=sys.argv[2])
+                ok = reopen_thread(ref=sys.argv[2])
                 _exit(0 if ok else 1)
 
-            case "chat_clients":
-                # Clients with a support thread (a client that wrote with only its
-                # client_id, no peer). `chat_client` reads one; `chat_client_reply` answers.
-                from src.commands.chat import list_client_chats
-                ok = list_client_chats(as_json="--json" in sys.argv[2:])
-                _exit(0 if ok else 1)
-
-            case "chat_client":
-                if len(sys.argv) < 3:
-                    print("Usage: nodo chat_client <client_id> [--json]", flush=True)
-                    _exit(1)
-                from src.commands.chat import show_client_chat
-                ok = show_client_chat(client_id=sys.argv[2], as_json="--json" in sys.argv[3:])
-                _exit(0 if ok else 1)
-
-            case "chat_client_reply":
-                if len(sys.argv) < 4:
-                    print("Usage: nodo chat_client_reply <client_id> <message...>", flush=True)
-                    _exit(1)
-                from src.commands.chat import reply_to_client_chat
-                ok = reply_to_client_chat(client_id=sys.argv[2], body=" ".join(sys.argv[3:]))
+            case "chat_sync":
+                # Copies the answers of the peers to the conversations that this node
+                # opened there. The daemon does it on a timer; this does it now.
+                from src.commands.chat import sync_chats
+                ok = sync_chats(peer_id=sys.argv[2] if len(sys.argv) > 2 else None)
                 _exit(0 if ok else 1)
 
             case "local_builder":

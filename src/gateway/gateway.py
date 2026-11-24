@@ -592,10 +592,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
         if message is None:
             raise Exception("Chat needs a ChatMessage.")
         try:
-            peer_id = receive_chat_message(message)
+            conversation_id, sequence = receive_chat_message(message)
         except ChatError as e:
             # Refused, not raised: the sender learns *why* it was not stored --
-            # unknown/unassociated client_id, empty or oversize body -- the same
+            # unknown client_id or conversation, empty or oversize body -- the same
             # way it would by reading its own sent history, only immediately.
             # An exception here is reserved for what ChatAck cannot explain: a
             # malformed request, not a message this RPC understood and rejected.
@@ -604,12 +604,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 celaut_pb2.ChatAck(stored=False, reason=str(e))
             )
             return
-        if peer_id:
-            log.LOGGER(f"Chat message accepted from peer {peer_id}.")
-        yield from BeeClient.respond(celaut_pb2.ChatAck(stored=True))
+        yield from BeeClient.respond(
+            celaut_pb2.ChatAck(stored=True, conversation_id=conversation_id, sequence=sequence)
+        )
 
     def GetChatThread(self, request_iterator, context, **kwargs):
-        """The support thread of the caller, which is the client that it sends.
+        """The messages of the caller, which is the client that it sends, in all its conversations.
 
         Free, and gated like ``GetClientMetrics``: the client_id must exist and is
         rate-limited. It returns only the thread of that client, never another one's.

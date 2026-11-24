@@ -22,6 +22,7 @@ from src.manager.metrics import balance_on_other_peer, instance_metrics_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
 from src.reputation_system.onchain_indexer import tick as onchain_reputation_tick
+from src.manager.chat import sync_tick as chat_sync_tick
 from src.reputation_system.offchain_indexer import tick as offchain_reputation_tick
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
@@ -2516,6 +2517,10 @@ def _manager_pass(short_interval_count: int) -> int:
     # Bounded third-party peer discovery; each tick gates itself on live config.
     gossip_pull_tick()
     gossip_push_tick()
+
+    # The answers that peers wrote in the conversations that this node opened there.
+    # Self-gates to chat.SYNC_INTERVAL_SECONDS, never raises.
+    chat_sync_tick()
 
     # Tell known peers when this node's announcement changes -- its address (moving off
     # a LAN, a renewed dynamic public IP), the resources it offers, its rates, contracts

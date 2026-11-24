@@ -1,57 +1,49 @@
-"""Peer-to-peer operator chat (issue: peer chat; conversations, issue #431).
+"""Chat between a client and the operator of a node (issue: peer chat; issue #431).
 
-A free-text channel between two node operators, outside any service execution --
-there is otherwise no way for one operator to reach the other at all when
-something about a shared instance or payment goes wrong.
+A free-text channel outside any service execution. Without it, there is no way for a
+client to reach the operator of a node when something about a shared instance or a
+payment goes wrong, and the operator cannot answer.
 
-Authenticated the same way every other client-facing RPC on this gateway is:
-``client_id`` is a bearer credential, exactly like ``TokenMessage.token`` or
-``ModifyDepositInput.service_token``, not a fresh signature scheme of its own.
-This node attributes a Chat message to whichever peer it already knows that
-client_id as (``peer.local_client_id``) -- a peer this node has never introduced
-itself with cannot chat, because it can never have gotten a bound client_id in
-the first place (see below).
+**One kind of conversation.** A conversation is always opened by a client against a
+node, and it lives on that node. Its name is ``client_id#number``: ``client_id`` is the
+id that the node gave to the client, ``number`` is 1 for the first conversation of that
+client, then 2, 3, and so on. The node gives the number, and it never reuses one, so the
+name is unique in the node and both sides use it. A message names a conversation by
+``number``; ``0`` opens a new one.
 
-The association itself is made once, at ``GenerateClient`` time
-(``manager._created_client``), not here: a client_id is single-use and minted
-right there, so a peer that wants to be recognised later signs over it -- with
-its identity key, the same one a ``Peer`` announcement is signed with -- in the
-very request that creates it (``Client.peer_id``/``Client.signature``,
-``node_identity.client_binding_payload``). Putting that signature on Chat
-itself, instead, was the first cut of this design and was wrong: it would have
-meant broadcasting an internal client_id UUID inside a message this node also
-lets its neighbours relay -- exactly the bearer secret Chat depends on to
-authenticate, handed to anyone in earshot of the gossip.
+The operator of a node that wants to talk to the operator of another node is a client of
+that other node (the client_id that it holds there, ``peer.remote_client_id``), the same
+as any other client. So the node keeps two kinds of rows, in the same tables:
 
-**Conversations (issue #431) are a `conversation_id` per message, not a live
-connection.** A thread is any run of messages that carry the same id -- a UUID4
-the side opening the topic picks, exactly the way a `client_id` is picked -- not
-a `Chat` stream held open between two daemons for the topic's lifetime. Tying a
-thread to one connection would make it synchronous: both operators would need
-their node's stream open at the same moment for the thread to exist at all, which
-does not fit the motivating case ("tell the other operator something is wrong")
--- the recipient is very often not watching their node right then. A message
-naming no `conversation_id` is exactly the flat, un-threaded history this had
-before conversations existed, and still works unchanged.
+* *served*: a conversation of one of its own clients. The operator answers it
+  (:func:`reply`). A client that is bound to a peer is a client like any other.
+* *mirror*: a conversation that this node opened as a client of another node. It lives
+  on that node. The rows here are a local copy, so that the operator reads them with no
+  network, and :func:`sync_all` fills them with the answers (``GetChatThread``).
 
-**Support chat between a client and the operator.** A ``client_id`` with no peer bound
-to it can chat too: the sender is then the client itself, not a peer. Its messages go
-to the thread of that client (``client_chat_messages``), where each one has a
-``sequence`` (1, 2, 3, ... per client; it never changes). The client reads the thread
-with ``GetChatThread`` (:func:`get_client_thread`) and the operator answers with
-:func:`reply_to_client`. Only the client_id is needed, so a plain client can ask its
-operator for help without any peer identity. A client bound to a peer keeps the peer
-behaviour above and does not use this thread.
+**Binding a client to a peer** (``associate_client_with_peer``) changes nothing in the
+conversations. The peer of a served conversation is read from the binding when needed
+(the view ``chat_threads``), so the conversations that exist stay the same and a reader
+groups them by peer.
+
+**How a client learns about an answer.** The node never sends it: the client reads the
+messages with ``GetChatThread`` and a cursor, the ``sequence`` of the last message that
+it has. ``ChatThread.latest`` tells at once if there is something new. For a mirror,
+:func:`sync_all` does this for every peer; the daemon runs it on a timer and the commands
+that read a conversation run it first.
+
+Authentication is the same as every other client-facing RPC of the gateway: ``client_id``
+is a bearer credential, like ``TokenMessage.token``. A peer that wants to be recognised
+signs over the client_id in the request that creates it (``Client.peer_id`` and
+``Client.signature``, ``node_identity.client_binding_payload``), not in ``Chat``: a
+signature in ``Chat`` would have put a bearer secret inside a message that others may
+relay.
 """
-# Deferred: `celaut_pb2.ChatMessage` only exists once `bash/generate_protos.sh` has
-# been rerun against the new RPC (see that script's docstring); this keeps a plain
-# `import src.manager.chat` from failing on the type hint below in the meantime.
 from __future__ import annotations
 
 import os
 import time
-from typing import List, Optional
-from uuid import uuid4
+from typing import List, Optional, Tuple
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
@@ -66,9 +58,15 @@ env_manager = ConfigManager()
 sc = SQLConnection()
 
 MAX_MESSAGE_BYTES = int(env_manager.get("chat.MAX_MESSAGE_BYTES", 4096) or 4096)
-MAX_STORED_MESSAGES_PER_PEER = int(
-    env_manager.get("chat.MAX_STORED_MESSAGES_PER_PEER", 200) or 200
+# The most messages that the node keeps for one client, over all its conversations.
+MAX_STORED_MESSAGES_PER_CLIENT = int(
+    env_manager.get("chat.MAX_STORED_MESSAGES_PER_CLIENT", 200) or 200
 )
+# How often the daemon copies the answers of the peers (see :func:`sync_tick`).
+SYNC_INTERVAL_SECONDS = int(env_manager.get("chat.SYNC_INTERVAL_SECONDS", 30) or 30)
+MAX_TOPIC_CHARS = 120
+# The most messages one GetChatThread answer holds.
+MAX_THREAD_ENTRIES_PER_ANSWER = 200
 
 # The shape a shared service's Metadata (issue #438, `ChatMessage.service`) must
 # have to be stored. It comes from a peer, so it is bounded like a body is: a cap on
@@ -82,7 +80,20 @@ MAX_SERVICE_TAG_CHARS = 64
 
 
 class ChatError(Exception):
-    """A Chat message was refused: unknown or unassociated client_id, or oversize."""
+    """A Chat message was refused: unknown client_id or conversation, or a bad body."""
+
+
+def format_ref(client_id: str, number: int) -> str:
+    """The name of a conversation: ``client_id#number``."""
+    return f"{client_id}#{int(number)}"
+
+
+def parse_ref(ref: str) -> Tuple[str, int]:
+    """The ``(client_id, number)`` of a name ``client_id#number``. Raises :class:`ChatError`."""
+    client_id, separator, number = (ref or "").rpartition("#")
+    if not separator or not client_id or not number.isdigit() or int(number) < 1:
+        raise ChatError(f"{ref!r} is not a conversation. A conversation is client_id#number.")
+    return client_id, int(number)
 
 
 def _validated_body(body: str) -> str:
@@ -170,36 +181,33 @@ def local_service_metadata(service: str) -> celaut_pb2.Metadata:
     return _validated_service(metadata)
 
 
-def receive_chat_message(message: celaut_pb2.ChatMessage) -> Optional[str]:
-    """Verify and store an incoming Chat message. Return the peer_id, or None.
+def _validated_topic(topic: Optional[str]) -> str:
+    topic = " ".join((topic or "").split())
+    if len(topic) > MAX_TOPIC_CHARS:
+        raise ChatError(f"The topic is over {MAX_TOPIC_CHARS} characters; use a shorter one.")
+    return topic
 
-    Raises :class:`ChatError` when ``client_id`` is not a client of this node, or the
-    body is empty/oversize.
 
-    A ``client_id`` bound to a peer (see the module docstring for where that
-    association is made) is a peer: the message is stored under that peer and its
-    peer_id is returned. A ``client_id`` with no peer is a plain client: the message
-    is stored in the support thread of that client and the return value is None.
-    ``MAX_STORED_MESSAGES_PER_PEER`` is the cap in both cases (per peer, or per
-    client). A plain client cannot share a service or name a conversation: those
-    fields belong to the peer chat, and a message that carries one is refused with a
-    reason, not stored with the field dropped.
+# ---------------------------------------------------------------------------------------
+# The node that serves the conversations.
 
-    A ``conversation_id`` this node has not seen before opens the thread on this
-    side too (``opened_by_us=False``): the peer picked the id, so from here it
-    reads as one of *our clients* reaching out, which is exactly the reverse-
-    direction TUI page (issue #431) this distinction exists for.
+
+def receive_chat_message(message: celaut_pb2.ChatMessage) -> Tuple[int, int]:
+    """Verify and store an incoming Chat message. Return ``(conversation_id, sequence)``.
+
+    Raises :class:`ChatError` when ``client_id`` is not a client of this node, the
+    conversation is not one of that client, or the body or the shared service is not
+    valid. Nothing is stored in that case, and no conversation is opened.
+
+    ``conversation_id`` 0 opens a new conversation of the client with the next number
+    (``topic`` is its label). A message in a conversation that the operator closed opens
+    it again: the client waits for an answer.
     """
     client_id = message.client_id
     if not client_id or not sc.client_exists(client_id=client_id):
         raise ChatError("Unknown client_id.")
 
-    peer_id = sc.get_peer_id_by_local_client(client_id=client_id)
-    if not peer_id:
-        return _receive_from_client(client_id, message)
-
     body = _validated_body(message.body)
-
     # A shared service (issue #438). Validated before anything is stored, like the
     # body: malformed Metadata refuses the whole message rather than storing a card
     # the TUI would then offer to `get`.
@@ -207,223 +215,277 @@ def receive_chat_message(message: celaut_pb2.ChatMessage) -> Optional[str]:
     if service is not None:
         body = _strip_fallback(body, service)
 
-    conversation_id = message.conversation_id if message.HasField("conversation_id") else None
-    if conversation_id:
-        sc.create_conversation(conversation_id=conversation_id, peer_id=peer_id, opened_by_us=False)
+    number = int(message.conversation_id)
+    if number:
+        row = sc.get_chat_thread_row(client_id=client_id, number=number)
+        if row is None or row["opened_by_us"]:
+            raise ChatError(f"Unknown conversation {format_ref(client_id, number)}.")
+        if row["closed_at"]:
+            sc.reopen_chat_conversation(client_id=client_id, number=number)
+    else:
+        topic = _validated_topic(message.topic) if message.HasField("topic") else ""
+        number = sc.open_chat_conversation(client_id=client_id, topic=topic)
 
-    sc.add_chat_message(
-        peer_id=peer_id, from_us=False, body=body, ts=int(time.time()),
-        keep_per_peer=MAX_STORED_MESSAGES_PER_PEER, conversation_id=conversation_id,
-        service=service,
+    sequence = sc.add_chat_message(
+        client_id=client_id, conversation=number, from_operator=False, body=body,
+        ts=int(time.time()), keep_per_client=MAX_STORED_MESSAGES_PER_CLIENT, service=service,
     )
-    log.LOGGER(f"Chat message stored from peer {peer_id} (client {client_id}).")
-    return peer_id
+    log.LOGGER(f"Chat message {sequence} stored in {format_ref(client_id, number)}.")
+    return number, sequence
 
 
-def _receive_from_client(client_id: str, message: celaut_pb2.ChatMessage) -> None:
-    """Store a message of a client that has no peer, in the thread of that client."""
-    body = _validated_body(message.body)
-    if message.HasField("service") or message.HasField("conversation_id"):
-        raise ChatError(
-            "A client without a peer cannot send a service or a conversation_id; "
-            "send the text only."
-        )
-    sequence = sc.add_client_chat_message(
-        client_id=client_id, from_operator=False, body=body, ts=int(time.time()),
-        keep_per_client=MAX_STORED_MESSAGES_PER_PEER,
-    )
-    log.LOGGER(f"Chat message {sequence} stored from client {client_id}.")
-    return None
+def get_client_thread(client_id: str, after_sequence: int = 0) -> celaut_pb2.ChatThread:
+    """The ChatThread of ``client_id`` for ``GetChatThread``.
 
-
-def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = None,
-                      service: Optional[str] = None) -> None:
-    """Send and locally record a Chat message to ``peer_id``.
-
-    Sent under whichever client_id this node already holds on ``peer_id``
-    (``sc.get_peer_client`` -- the existing, unrelated ``remote_client_id``); when
-    there is none yet, this node becomes a client of that peer first
-    (``get_client_id_on_other_peer``), which is also the call that lets the
-    recipient bind that new client_id back to *this* node's own peer_id.
-
-    ``conversation_id`` must already be a thread this node opened
-    (:func:`open_conversation`) -- passed through as-is, never minted here, so a
-    typo names a thread that fails to record rather than silently starting a new
-    one under a name nobody asked for.
-
-    ``service`` (an id or tag in the local registry) attaches that service's
-    Metadata as a card (issue #438). The body may then be empty: the card is the message, and the
-    body on the wire still names the service for a peer that predates cards
-    (:func:`service_fallback_line`).
+    The messages with a sequence over ``after_sequence``, in order, of all the
+    conversations of the client. At most ``MAX_THREAD_ENTRIES_PER_ANSWER``: if there
+    are more, these are the first ones after the cursor (not the newest), so a client
+    that moves its cursor to the last sequence that it got reads everything. ``latest``
+    is the last sequence of the client whatever the cut, 0 if it has no message.
     """
+    thread = celaut_pb2.ChatThread(latest=sc.get_chat_latest(client_id=client_id))
+    for entry in sc.get_chat_messages_after(
+        client_id=client_id, after_sequence=after_sequence,
+        limit=MAX_THREAD_ENTRIES_PER_ANSWER,
+    ):
+        added = thread.entries.add(
+            sequence=entry["sequence"], conversation_id=entry["conversation"],
+            ts=entry["ts"], from_operator=entry["from_operator"], body=entry["body"],
+        )
+        if entry["service_metadata"] is not None:
+            added.service.ParseFromString(entry["service_metadata"])
+    return thread
+
+
+def _reply_as_operator(client_id: str, number: int, body: str,
+                       service: Optional[str] = None) -> int:
+    """Store the answer of the operator in a served conversation; return its sequence.
+
+    Nothing is sent: the client reads it with ``GetChatThread``.
+    """
+    row = sc.get_chat_thread_row(client_id=client_id, number=number)
+    if row is None or row["opened_by_us"]:
+        raise ChatError(f"{format_ref(client_id, number)} is not a conversation of a client of this node.")
+    if row["closed_at"]:
+        raise ChatError(f"{format_ref(client_id, number)} is closed; reopen it before replying.")
+    metadata = local_service_metadata(service) if service else None
+    if body or metadata is None:
+        _validated_body(body)
+    sequence = sc.add_chat_message(
+        client_id=client_id, conversation=number, from_operator=True, body=body,
+        ts=int(time.time()), keep_per_client=MAX_STORED_MESSAGES_PER_CLIENT, service=metadata,
+    )
+    log.LOGGER(f"Chat answer {sequence} stored in {format_ref(client_id, number)}.")
+    return sequence
+
+
+# ---------------------------------------------------------------------------------------
+# The node that is the client (a mirror of a conversation that lives on another node).
+
+
+def _client_id_on(peer_id: str) -> str:
+    """The client_id that this node holds on ``peer_id``; it becomes a client if it has none."""
+    if not sc.peer_exists(peer_id=peer_id):
+        raise ChatError(f"{peer_id} is not a known peer.")
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if not client_id:
+        try:
+            # Also the call that lets the peer bind that new client_id to this node.
+            client_id = get_client_id_on_other_peer(peer_id=peer_id)
+        except Exception as e:
+            raise ChatError(f"Could not become a client of {peer_id}: {e}") from e
+    if not client_id:
+        raise ChatError(f"Could not become a client of {peer_id}.")
+    return client_id
+
+
+def _send_to_peer(peer_id: str, client_id: str, conversation_id: int, body: str,
+                  service: Optional[str] = None, topic: str = "") -> celaut_pb2.ChatAck:
+    """Send one message to ``peer_id`` in a conversation of ``client_id``; return its ack."""
     metadata = local_service_metadata(service) if service else None
     wire_body = body
     if metadata is not None:
         line = service_fallback_line(metadata)
         wire_body = f"{body}\n{line}" if body else line
     _validated_body(wire_body)
+    topic = _validated_topic(topic)
 
-    if not sc.peer_exists(peer_id=peer_id):
-        raise ChatError(f"{peer_id} is not a known peer.")
-
-    if conversation_id:
-        conversation = sc.get_conversation(conversation_id)
-        if conversation is None or conversation["peer_id"] != peer_id:
-            raise ChatError(f"{conversation_id} is not a conversation with {peer_id}.")
-        if conversation["closed_at"]:
-            raise ChatError(f"{conversation_id} is closed; reopen it before replying.")
-
-    client_id = sc.get_peer_client(peer_id=peer_id)
-    if not client_id:
-        try:
-            client_id = get_client_id_on_other_peer(peer_id=peer_id)
-        except Exception as e:
-            raise ChatError(f"Could not become a client of {peer_id}: {e}") from e
-    if not client_id:
-        raise ChatError(f"Could not become a client of {peer_id}.")
-
-    chat_message = celaut_pb2.ChatMessage(client_id=client_id, body=wire_body)
-    if conversation_id:
-        chat_message.conversation_id = conversation_id
+    chat_message = celaut_pb2.ChatMessage(
+        client_id=client_id, conversation_id=int(conversation_id), body=wire_body,
+    )
+    if topic and not conversation_id:
+        chat_message.topic = topic
     if metadata is not None:
         chat_message.service.CopyFrom(metadata)
 
     ack = BeeClient.chat(peer_channel(peer_id=peer_id), chat_message)
-    if ack is not None and not ack.stored:
-        # The peer's own reason (unknown/unassociated client_id there, an empty or
-        # oversize body) travels back verbatim rather than being reworded: it is
-        # the recipient's node that knows which, not this one.
-        raise ChatError(ack.reason or f"{peer_id} refused the message.")
-
-    sc.add_chat_message(
-        peer_id=peer_id, from_us=True, body=body, ts=int(time.time()),
-        keep_per_peer=MAX_STORED_MESSAGES_PER_PEER, conversation_id=conversation_id,
-        service=metadata,
-    )
-    log.LOGGER(f"Chat message sent to peer {peer_id}.")
+    if ack is None or not ack.stored:
+        # The reason of the peer travels back as it is: the node of the peer knows why.
+        raise ChatError((ack.reason if ack is not None else "") or f"{peer_id} refused the message.")
+    return ack
 
 
-def open_conversation(peer_id: str, topic: str = "") -> str:
-    """Start a new thread with ``peer_id``, returning its ``conversation_id``.
+def open_conversation(peer_id: str, topic: str, body: str, service: Optional[str] = None) -> str:
+    """Open a conversation with the operator of ``peer_id`` and send its first message.
 
-    Purely local bookkeeping: opening does not itself send anything, and the id
-    is not shared with the peer until the first :func:`send_chat_message` names
-    it. ``topic`` is a free-text label for the TUI's conversation list, set once
-    and never compared or enforced.
+    This node acts as a client of that peer. The peer gives the number; the conversation
+    is then mirrored here. Returns the name ``client_id#number``. ``topic`` is a label for
+    the lists of conversations, ``body`` the first message (it may be empty if
+    ``service`` is given).
     """
-    if not sc.peer_exists(peer_id=peer_id):
-        raise ChatError(f"{peer_id} is not a known peer.")
-    conversation_id = uuid4().hex
-    if not sc.create_conversation(
-        conversation_id=conversation_id, peer_id=peer_id, opened_by_us=True, topic=topic,
-    ):
-        raise ChatError(f"Could not open a conversation with {peer_id}.")
-    return conversation_id
+    topic = _validated_topic(topic)
+    client_id = _client_id_on(peer_id)
+    ack = _send_to_peer(peer_id, client_id, 0, body, service=service, topic=topic)
+    sc.open_chat_conversation(
+        client_id=client_id, topic=topic, remote_peer_id=peer_id, number=ack.conversation_id,
+    )
+    _sync_after_send(client_id, peer_id)
+    log.LOGGER(f"Opened {format_ref(client_id, ack.conversation_id)} with peer {peer_id}.")
+    return format_ref(client_id, ack.conversation_id)
 
 
-def close_conversation(conversation_id: str) -> None:
-    """Mark a thread closed. Local only -- the peer is never told."""
-    if not sc.close_conversation(conversation_id):
-        raise ChatError(f"Could not close conversation {conversation_id}.")
+def _send_in_mirror(row: dict, body: str, service: Optional[str] = None) -> None:
+    if row["closed_at"]:
+        raise ChatError(f"{row['ref']} is closed; reopen it before replying.")
+    _send_to_peer(row["peer_id"], row["client_id"], row["number"], body, service=service)
+    _sync_after_send(row["client_id"], row["peer_id"])
 
 
-def reopen_conversation(conversation_id: str) -> None:
+def _sync_after_send(client_id: str, peer_id: str) -> None:
+    # The message is already stored on the peer. If the read fails now, the next sync
+    # brings it, so a failure here is not an error of the send.
+    try:
+        _sync_client(client_id, peer_id)
+    except Exception as e:
+        log.LOGGER(f"Chat sync with peer {peer_id} failed after a send: {e}")
+
+
+def _sync_client(client_id: str, peer_id: str) -> int:
+    """Copy the new messages of ``client_id`` on ``peer_id`` to the mirror. Return how many."""
+    channel = peer_channel(peer_id=peer_id)
+    cursor = sc.get_chat_latest(client_id=client_id)
+    copied = 0
+    while True:
+        thread = BeeClient.get_chat_thread(channel, client_id, after_sequence=cursor)
+        if thread is None or not thread.entries:
+            break
+        for entry in thread.entries:
+            cursor = max(cursor, entry.sequence)
+            if not entry.conversation_id or not entry.sequence:
+                continue
+            service = None
+            if entry.HasField("service"):
+                try:
+                    service = _validated_service(entry.service)
+                except ChatError:
+                    service = None
+            body = entry.body.encode("utf-8")[:MAX_MESSAGE_BYTES].decode("utf-8", "ignore")
+            if service is not None:
+                body = _strip_fallback(body, service)
+            sc.open_chat_conversation(
+                client_id=client_id, remote_peer_id=peer_id, number=entry.conversation_id,
+            )
+            sc.add_chat_message(
+                client_id=client_id, conversation=entry.conversation_id,
+                from_operator=entry.from_operator, body=body, ts=entry.ts,
+                keep_per_client=MAX_STORED_MESSAGES_PER_CLIENT, sequence=entry.sequence,
+                service=service,
+            )
+            copied += 1
+        if cursor >= thread.latest:
+            break
+    return copied
+
+
+def sync_all(peer_id: Optional[str] = None) -> int:
+    """Copy the new messages of every mirror (or of one peer's) here. Return how many.
+
+    A peer that does not answer is skipped, and the others still sync.
+    """
+    copied = 0
+    for mirrored in sc.get_mirrored_clients():
+        if peer_id is not None and mirrored["peer_id"] != peer_id:
+            continue
+        try:
+            copied += _sync_client(mirrored["client_id"], mirrored["peer_id"])
+        except Exception as e:
+            log.LOGGER(f"Chat sync with peer {mirrored['peer_id']} failed: {e}")
+    return copied
+
+
+_last_sync = 0.0
+
+
+def sync_tick() -> None:
+    """Copy the answers of the peers, at most once every ``SYNC_INTERVAL_SECONDS``.
+
+    Called on every pass of the maintenance loop. It gates itself on the interval and
+    never raises, like the other ticks, so a peer that is down cannot stop the loop.
+    """
+    global _last_sync
+    now = time.monotonic()
+    if now - _last_sync < SYNC_INTERVAL_SECONDS:
+        return
+    _last_sync = now
+    try:
+        sync_all()
+    except Exception as e:
+        log.LOGGER(f"Chat sync failed: {e}")
+
+
+# ---------------------------------------------------------------------------------------
+# What the operator does, whichever side the conversation is on.
+
+
+def reply(ref: str, body: str, service: Optional[str] = None) -> None:
+    """Send ``body`` in the conversation ``ref`` (``client_id#number``).
+
+    On a served conversation this is the answer of the operator to a client. On a mirror
+    this node writes as the client, to the peer where the conversation lives.
+    """
+    client_id, number = parse_ref(ref)
+    row = sc.get_chat_thread_row(client_id=client_id, number=number)
+    if row is None:
+        raise ChatError(f"No such conversation: {ref}.")
+    if row["opened_by_us"]:
+        _send_in_mirror(row, body, service=service)
+    else:
+        _reply_as_operator(client_id, number, body, service=service)
+
+
+def close_conversation(ref: str) -> None:
+    """Mark a conversation closed. Local only -- the other side is never told."""
+    client_id, number = parse_ref(ref)
+    if sc.get_chat_thread_row(client_id=client_id, number=number) is None:
+        raise ChatError(f"No such conversation: {ref}.")
+    if not sc.close_chat_conversation(client_id=client_id, number=number):
+        raise ChatError(f"Could not close conversation {ref}.")
+
+
+def reopen_conversation(ref: str) -> None:
     """Undo :func:`close_conversation`, so replying in it is allowed again."""
-    if sc.get_conversation(conversation_id) is None:
-        raise ChatError(f"No such conversation: {conversation_id}.")
-    if not sc.reopen_conversation(conversation_id):
-        raise ChatError(f"Could not reopen conversation {conversation_id}.")
-
-
-def reply_to_conversation(conversation_id: str, body: str, service: Optional[str] = None) -> None:
-    """Send ``body`` in ``conversation_id``, resolving its peer automatically.
-
-    The convenience a caller who already has a ``conversation_id`` in hand wants
-    -- one that came from :func:`list_conversations`, say -- over
-    :func:`send_chat_message`, which needs the peer named explicitly.
-    """
-    conversation = sc.get_conversation(conversation_id)
-    if conversation is None:
-        raise ChatError(f"No such conversation: {conversation_id}.")
-    send_chat_message(
-        peer_id=conversation["peer_id"], body=body, conversation_id=conversation_id,
-        service=service,
-    )
+    client_id, number = parse_ref(ref)
+    if sc.get_chat_thread_row(client_id=client_id, number=number) is None:
+        raise ChatError(f"No such conversation: {ref}.")
+    if not sc.reopen_chat_conversation(client_id=client_id, number=number):
+        raise ChatError(f"Could not reopen conversation {ref}.")
 
 
 def list_conversations(peer_id: Optional[str] = None, opened_by_us: Optional[bool] = None,
                        include_closed: bool = True) -> List[dict]:
-    """Threads, most recently opened first. See :meth:`SQLConnection.list_conversations`."""
-    return sc.list_conversations(
+    """The conversations, the most recently active first. See :meth:`SQLConnection.list_chat_threads`."""
+    return sc.list_chat_threads(
         peer_id=peer_id, opened_by_us=opened_by_us, include_closed=include_closed,
     )
 
 
-def get_conversation_history(conversation_id: str, limit: int = 200) -> List[dict]:
-    """The stored messages of one thread, oldest first."""
-    return sc.get_conversation_messages(conversation_id=conversation_id, limit=limit)
+def get_conversation_history(ref: str, limit: int = 200) -> List[dict]:
+    """The stored messages of one conversation, oldest first."""
+    client_id, number = parse_ref(ref)
+    return sc.get_conversation_messages(client_id=client_id, conversation=number, limit=limit)
 
 
-def get_chat_history(peer_id: str, limit: int = 100) -> List[dict]:
-    """The stored conversation with ``peer_id``, oldest first."""
-    return sc.get_chat_messages(peer_id=peer_id, limit=limit)
-
-
-# The most entries one GetChatThread answer holds.
-MAX_THREAD_ENTRIES_PER_ANSWER = 200
-
-
-def get_client_thread(client_id: str, after_sequence: int = 0) -> celaut_pb2.ChatThread:
-    """The ChatThread of ``client_id`` for ``GetChatThread``.
-
-    The entries with a sequence over ``after_sequence``, in order. At most
-    ``MAX_THREAD_ENTRIES_PER_ANSWER``: if there are more, these are the first ones
-    after the cursor (not the newest), so a client that moves its cursor to the last
-    sequence that it got reads the whole thread. ``latest`` is the last sequence of the
-    thread whatever the cut, 0 if it is empty. A client bound to a peer has no thread
-    here (its messages are in the peer chat), so it gets an empty one.
-    """
-    thread = celaut_pb2.ChatThread(latest=sc.get_client_chat_latest(client_id=client_id))
-    for entry in sc.get_client_chat_messages(
-        client_id=client_id, after_sequence=after_sequence,
-        limit=MAX_THREAD_ENTRIES_PER_ANSWER,
-    ):
-        thread.entries.add(
-            sequence=entry["sequence"], ts=entry["ts"],
-            from_operator=entry["from_operator"], body=entry["body"],
-        )
-    return thread
-
-
-def reply_to_client(client_id: str, body: str) -> int:
-    """Store the answer of the operator in the thread of ``client_id``; return its sequence.
-
-    Nothing is sent: the client reads it with ``GetChatThread``. Refused when the
-    client does not exist, or is bound to a peer (use the peer chat for that one).
-    """
-    if not client_id or not sc.client_exists(client_id=client_id):
-        raise ChatError("Unknown client_id.")
-    if sc.get_peer_id_by_local_client(client_id=client_id):
-        raise ChatError(
-            f"client_id {client_id} is bound to a peer; talk to that peer with the peer chat."
-        )
-    body = _validated_body(body)
-    sequence = sc.add_client_chat_message(
-        client_id=client_id, from_operator=True, body=body, ts=int(time.time()),
-        keep_per_client=MAX_STORED_MESSAGES_PER_PEER,
-    )
-    log.LOGGER(f"Chat answer {sequence} stored for client {client_id}.")
-    return sequence
-
-
-def list_client_threads() -> List[dict]:
-    """The clients with a support thread, the most recently active first."""
-    return sc.list_client_chat_threads()
-
-
-def get_client_thread_history(client_id: str, limit: int = 200) -> List[dict]:
-    """The newest ``limit`` messages of one client's thread, oldest first."""
-    latest = sc.get_client_chat_latest(client_id=client_id)
-    return sc.get_client_chat_messages(
-        client_id=client_id, after_sequence=max(0, latest - max(0, int(limit))), limit=limit,
-    )
+def get_conversation(ref: str) -> Optional[dict]:
+    """One conversation as ``chat_threads`` shows it, or None."""
+    client_id, number = parse_ref(ref)
+    return sc.get_chat_thread_row(client_id=client_id, number=number)

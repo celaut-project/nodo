@@ -55,9 +55,9 @@ PEER_COMMANDS = [
     "verify_reputation",
     "pay",
     "force_execution",
-    "chat",
     "chat_open",
     "chat_threads",
+    "chat_sync",
     "peers",
     "refresh_peers",
     "peer_reputation",
@@ -65,7 +65,7 @@ PEER_COMMANDS = [
 ]
 
 # Commands whose first positional argument is a client id.
-CLIENT_COMMANDS = ["credit_client", "debit_client", "clients", "chat_client", "chat_client_reply"]
+CLIENT_COMMANDS = ["credit_client", "debit_client", "clients"]
 
 # Commands whose first positional argument is a running tunnel's id.
 TUNNEL_COMMANDS = ["tunnels", "tunnel_close"]
@@ -105,13 +105,10 @@ COMMAND_FLAGS = {
     "ggconf": ["-e"],
     "refresh_peers": ["--invite"],
     "pay": ["--payment-method", "--ledger", "--asset"],
-    "chat": ["--json", "--service"],
     "chat_open": ["--json", "--message", "--service"],
     "chat_reply": ["--service"],
     "chat_threads": ["--json"],
     "chat_thread": ["--json"],
-    "chat_clients": ["--json"],
-    "chat_client": ["--json"],
 }
 
 
@@ -205,16 +202,13 @@ COMMANDS = sorted(
         "daemon",
         "doctor",
         "completion",
-        "chat",
         "chat_open",
         "chat_reply",
         "chat_threads",
         "chat_thread",
         "chat_close",
         "chat_reopen",
-        "chat_clients",
-        "chat_client",
-        "chat_client_reply",
+        "chat_sync",
     }
 )
 
