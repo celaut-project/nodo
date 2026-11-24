@@ -95,16 +95,6 @@ message DataFormatKeyValue {
     DataFormat value = 2;
 }
 
-// One entry of a list of key-value entries, with an unsigned integer value. The list
-// follows the same rules as a list of BytesKeyValue. The value has explicit presence,
-// so an entry with the value 0 is still written.
-message Uint64KeyValue {
-    // The key.
-    string key = 1;
-    // The value.
-    optional uint64 value = 2;
-}
-
 // Why the owner attestation of a reputation proof is in xattrs (owner_public_key,
 // owner_signature) and not in the Peer:
 //
@@ -323,9 +313,9 @@ message Service {
             // Known content hashes of the service.
             repeated Metadata.HashTag.Hash hash = 1;
             // The full or a partial specification of the service. The resources of the
-            // workload are in service.container.resources: at_init for the start, and
-            // at_most for the limit. A partial service can have only the resources and
-            // the architecture.
+            // workload are in service.container.resources: at_init for the start,
+            // at_most for the limit, and benchmarks for the minimum scores. A partial
+            // service can have only the resources and the architecture.
             Service service = 2;
             // True if the service field is complete, so a reader can calculate its
             // hashes and compare them with the hash field.
@@ -497,13 +487,26 @@ message Service {
             DataFormat format = 3;
         }
 
-        // The resources of one instance of the service.
+        // The resources of one instance of the service, and the scores that it needs.
+        // Each list follows the rules of a list of Quantity. A formal of a resource is
+        // valid only in at_init and at_most, and a formal of a benchmark only in
+        // benchmarks. A node refuses a formal in the wrong list.
         message Resources {
-            // The resources that the instance needs at the start. Its benchmark gives the
-            // minimum score for each core.
-            Sysresources at_init = 1;
-            // The maximum resources of the instance. Its benchmark has no meaning.
-            Sysresources at_most = 2;
+            // The resources that the instance needs at the start. A resource that is
+            // not in the list is 0 at the start.
+            repeated Quantity at_init = 1;
+            // The most that the instance can grow to. A resource that is not in the list
+            // cannot grow above its value in at_init. For each formal, the value in
+            // at_init is not more than the value in at_most. If it is, the service is
+            // not valid.
+            repeated Quantity at_most = 2;
+            // The minimum scores that the instance needs, for all its life. A score
+            // does not have a start value and a maximum: the node meets it or does not.
+            // The node compares the scores each time that it places the instance: at
+            // the start, when it wakes the instance, and when it moves it. A score that
+            // must be stable is a formal of a percentile (for example the 5th
+            // percentile over windows of one second), not a separate number.
+            repeated Quantity benchmarks = 3;
         }
 
         // The architecture that the container needs.
@@ -529,8 +532,8 @@ message Service {
         optional NoticeDeclaration notice_declaration = 8;
         // The devices that the node attaches directly to the instance. Repeat the entry
         // for each device that the service needs. If the list is not empty, the
-        // resources of the instance must have the same at_init and at_most, because the
-        // node cannot change the memory of an instance that has devices. A node that has
+        // memory of the instance must have the same value in at_init and at_most,
+        // because the node cannot change the memory of an instance that has devices. A node that has
         // no free devices of these architectures refuses to start the service. A device
         // is available only with the native architecture of the node.
         repeated Device devices = 9;
@@ -585,6 +588,34 @@ message Service {
     repeated Clause initial_environment_workload = 6;
 }
 
+// The life of an instance.
+//
+// An instance is a process that the node runs on the container of a service. It has
+// two states, and no other: it runs (there is a process), or it is hibernated (there
+// is no process). Both states are elemental. Other ways to stop and continue are not
+// new states: they are policies of hibernation, with their own causes and costs.
+//
+// A hibernated instance keeps its identity: its token, its addresses and ports, its
+// account and its balance. It also keeps its state: the filesystem of its container
+// as the process left it. It has no process, and the node reserves none of its
+// resources. Its resources keep their values: they are what the node gives to the
+// instance when it wakes. Where the node keeps the state is its own decision.
+//
+// To wake an instance is to start a new process on the state that the node kept. The
+// new process starts from the entrypoint of the service, unless a policy that the
+// node and the service both know says another way. The node places the instance
+// again: it checks its capacity and the benchmarks of the service. If it cannot, the
+// instance stays hibernated, and the answer says why.
+//
+// An instance hibernates when its parent asks (ModifyServiceSystemResources), when
+// the activity window of the node closes (OnClose), or when its balance cannot pay the
+// next maintenance period. It wakes when its parent asks, when the window opens, when a
+// deposit pays a maintenance period, or with a tunnel if its slot has the policy
+// wake=on_tunnel. The node charges a hibernated instance for the state that it keeps,
+// at its rate for that state (Peer.rates). How long the node keeps a hibernated
+// instance that cannot pay, and if a service can refuse a new process from its
+// entrypoint, are not decided (protos/PENDING.md).
+
 // A running instance of a service, as a caller can reach it.
 message Instance {
     // One address of an instance.
@@ -634,9 +665,9 @@ message Configuration {
     // The offer that the caller accepts for this start: the EstimatedCost that the same
     // node signed, as the node sent it. If the offer is valid for this start, the node
     // keeps its price: it prices the instance, and signs the quote of its start, at the
-    // launch_scarcity of the offer. The offer is valid if the node signed it, its
+    // launch_reserved of the offer. The offer is valid if the node signed it, its
     // valid_until is not past, and the maintenance costs of the offer are what the node
-    // computes for this service and these resources at its launch_scarcity. In all
+    // computes for this service and these resources at its launch_reserved. In all
     // other cases the node ignores the offer and prices the start at its price of now.
     // An absent offer has the same effect.
     optional EstimatedCost offer = 3;
@@ -663,8 +694,9 @@ message ConfigurationFile {
     // The peers of each network that the node resolved at the start. A network that
     // the node did not resolve is not here.
     repeated NetworkResolution network_resolution = 3;
-    // The resources of the instance at the start.
-    Sysresources initial_sysresources = 4;
+    // The resources that the node gave to the instance at the start, as a list of
+    // Quantity, with only formals of resources.
+    repeated Quantity initial_resources = 4;
     // The devices that the node attached to the instance at the start, each with its id
     // and its PCI address in the guest. Empty if the instance has no devices. A device
     // that the node attaches after the start is not here: the answer of
@@ -677,40 +709,97 @@ message ConfigurationFile {
 // Resource limits, requirements and measured scores.
 // -----------------------
 
-// The benchmark keys are in src/utils/benchmark.py::BENCHMARK_KEYS. New primitives are
-// new entry keys, never new proto fields -- this must never need a wire-format change
-// to add one. (benchmark.MEM_WORKING_SETS, benchmark.shortfalls)
+// Two levels: this contract is static and hard to change. Above it are the formal
+// definitions (policies, resources, benchmarks, rates, limits, architectures, APIs,
+// protocols), that nodes can share, negotiate or ignore. A formal is a set of bytes that
+// a document defines. A new thing is a new formal, never a new field, so this contract
+// does not change when a new thing appears. (protos/REASON.md has the rules to reason
+// about this contract. protos/PENDING.md has the open questions.)
 
-// The system resources of one instance. The location of the Sysresources tells if a
-// value is a minimum, a maximum or a measurement.
-message Sysresources {
-    // The block I/O weight, relative, from 10 to 1000.
-    optional uint64 blkio_weight = 1;
-    // The CFS CPU period, in microseconds. The number of cores is cpu_quota divided by
-    // cpu_period (100000 if absent).
-    optional uint64 cpu_period = 2;
-    // The CFS CPU quota, in microseconds.
-    optional uint64 cpu_quota = 3;
-    // The memory limit, in bytes.
-    optional uint64 mem_limit = 4;
-    // The disk space limit, in bytes.
-    optional uint64 disk_space = 5;
-    // The throughput of ONE core on named operations, in units per second. Thus "2
-    // cores, each with 500000 integer operations per second" is cpu_quota/cpu_period =
-    // 2 and int_ops_per_sec = 500000. An absent key says nothing about that operation.
-    // A reader keeps a key that it does not know. Keys: "int_ops_per_sec",
-    // "flt_ops_per_sec", "sha256_hashes_per_sec", and
-    // "mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec" (bytes of memory written per
-    // second, over a working set of that size). Compare a bandwidth only with a
-    // bandwidth over the same size. If the node has no score for that size, it uses the
-    // score of the smallest larger size that it measured. If it has no such score, it
-    // does not apply that minimum. In Service.Container.Resources.at_init (also in the
-    // service of a Service.Workload) and in a GetResourceAvailability
-    // request, the values are the minimum. In Device.resources.at_init, they are
-    // the minimum score of the device. In Peer.resources and in the at_most of Peer.devices,
-    // they are the scores that the node measured. In the at_most of a service
-    // (Service.Container.Resources and Device.resources), they have no meaning.
-    repeated Uint64KeyValue benchmark = 99;
+// A quantity of a thing that a node measures, gives or asks for. It has the same form as
+// a Policy (tags, prose, formal), plus a number. The formal defines what the quantity
+// is: the thing, its unit, if it is per core or total, and how a node measures it. The
+// formal files are in docs/resources and in docs/benchmarks.
+//
+// There are two classes of formal, and the class is part of the definition of the
+// formal. A list that holds quantities says which class it takes:
+// - A resource is consumed. A node reserves it for the instance, adds the resources of
+//   all its instances and keeps the sum within its capacity, enforces it (for example
+//   with cgroups), and charges for it (Peer.rates). Examples: memory, disk, CPU quota.
+// - A benchmark is not consumed. It is a score that the node measures. A node compares
+//   the score with the minimum of each service on its own, and never adds scores. A
+//   benchmark is not enforced, is not charged, and has no sense as a maximum. Examples:
+//   integer operations per second of one core, bandwidth of the memory. Each formal
+//   gives a statistic of the measures: a mean, or a percentile for a score that must be
+//   stable.
+// A node refuses a formal in a list of the wrong class.
+//
+// Nodes compare a quantity by the exact bytes of its formal, and never by its tags or
+// its prose. One rule of comparison is for all the formals: more is better. A node
+// offers enough if its value is greater than or equal to the value that is asked for.
+// A thing that is better when it is less (a latency) is a rate (operations per second).
+// In one list, two quantities do not have the same formal, and a sender sorts the list
+// by formal (bytes, ascending). The order does not change the meaning. A quantity with
+// an empty formal is not valid. A quantity without a value says nothing. It is not 0.
+//
+// What a node does with a formal that it does not know depends on the place:
+// - In a requirement or a limit (Container.Resources, Device.resources, a
+//   ModifyServiceSystemResources request, a GetResourceAvailability request), the node
+//   refuses. It does not run the service. In a GetResourceAvailability answer, it
+//   says can_execute false and gives the reason.
+// - In an announcement (Peer.resources, Peer.devices), the node keeps the quantity and
+//   does not use it. A node never refuses a peer because the peer measures a thing that
+//   the node does not know.
+message Quantity {
+    // Names, for a reader. A node does not use them to identify the quantity.
+    repeated string tags = 1;
+    // The text, for an implementer. A node does not use it to identify the quantity.
+    string prose = 2;
+    // The definition of the quantity. It is what nodes compare. It is not empty. A
+    // published formal never changes: a new meaning is a new formal.
+    bytes formal = 3;
+    // The number, in the unit that the formal defines. It has explicit presence, so a
+    // value 0 is still written.
+    optional uint64 value = 4;
+}
+
+// What a node charges for one thing: a resource that it reserves, or an action that it
+// does. The formal names the thing and gives its unit, for example MU per GiB per
+// second. The rules of Quantity for the formal, the order and the unknown formals
+// apply. A node does not send a rate of 0. A reader ignores a rate that it does not
+// know. In one list, two rates do not have the same formal and scope.
+message Rate {
+    // Names, for a reader.
+    repeated string tags = 1;
+    // The text, for an implementer.
+    string prose = 2;
+    // The definition of the thing that is priced and its unit. It is what nodes compare.
+    bytes formal = 3;
+    // The price, in MU, in the unit of the formal.
+    Amount value = 4;
+    // Where the rate applies, for a rate that depends on it. It can be an architecture
+    // tag or a network (a DNS host name in lowercase, or "*"), as the formal says. An
+    // empty scope is the general rate. A scoped rate replaces the general rate for that
+    // scope.
+    string scope = 5;
+}
+
+// What a node limits: a supply that is not the capacity of the node, for example the
+// connections to a network. The formal names the limit and gives its unit. The rules of
+// Quantity apply. A limit that is absent is not a promise of no limit. It is an offer:
+// the quote (EstimatedCost) is the authority for one instance. In one list, two limits
+// do not have the same formal and scope.
+message Limit {
+    // Names, for a reader.
+    repeated string tags = 1;
+    // The text, for an implementer.
+    string prose = 2;
+    // The definition of the limit and its unit. It is what nodes compare.
+    bytes formal = 3;
+    // The number, in the unit of the formal.
+    optional uint64 value = 4;
+    // Where the limit applies, as in Rate.scope. An empty scope is the general limit.
+    string scope = 5;
 }
 
 // -----------------------
@@ -803,11 +892,15 @@ message EstimatedCost {
     // The length of one maintenance period, in seconds.
     int32 maintenance_seconds_loop = 4;
     // The load of the node that its price comes from, at the time of the offer: for
-    // each resource, a key ("cpu", "mem" or "disk") and the scarcity in parts per
-    // million, from 0 (plentiful) to 1000000 (exhausted). The node uses it at the start
-    // to keep the price of the offer. A caller does not need it. The list follows the
-    // rules of a list of Uint64KeyValue. It is empty when valid_until is 0.
-    repeated Uint64KeyValue launch_scarcity = 5;
+    // each resource, what the node had reserved for all its instances, in the unit of
+    // the formal of that resource. The scarcity of a resource is this value divided by
+    // the capacity of the node for it (Peer.resources). The contract gives no scale to
+    // the scarcity: a quotient of two integers is exact. The node uses it at the start
+    // to keep the price of the offer. If the capacity changed after the offer, the
+    // costs do not match and the node prices the start at its price of now. A caller
+    // does not need it. The list follows the rules of a list of Quantity, and has only
+    // formals of resources. It is empty when valid_until is 0.
+    repeated Quantity launch_reserved = 5;
 
     // The promise on the price.
     // True if the node promises a limit on the price. The limit is set by
@@ -856,7 +949,11 @@ message EstimatedCost {
     string signature = 12;
 }
 
-// What a node does with a running instance when its activity window closes.
+// What a node does with a running instance when its activity window closes. The set
+// is closed: the instance keeps its process, loses its process (it hibernates), or
+// ends (it stops). Other behaviors are one of these three, or a sequence of them: a
+// move to another node is a hibernation here and a wake there. A lower use of
+// resources is a change of resources, not of state.
 enum OnClose {
     // The node does not touch the instance. It refuses a new child and a resource
     // increase until the window opens. This is the default value, so an older node reads
@@ -864,7 +961,8 @@ enum OnClose {
     ON_CLOSE_REFUSE = 0;
     // The node stops the instance and refunds the balance.
     ON_CLOSE_STOP = 1;
-    // The node hibernates the instance, and wakes it when the window opens.
+    // The node hibernates the instance, and wakes it when the window opens. See "The
+    // life of an instance".
     ON_CLOSE_HIBERNATE = 2;
 }
 
@@ -891,7 +989,7 @@ message ActivityWindow {
 // Peers use this message to evaluate the Service.Workload entries of a service: a descendant workload
 // can declare only resources, with no `hash`/complete `service` to ask
 // GetServiceEstimatedCost about. Resources differ per architecture -- most visibly
-// `benchmark`, since the same "1.0 core" is native silicon under one virtualizer and
+// its benchmarks, since the same "1.0 core" is native silicon under one virtualizer and
 // software emulation under another (#448).
 
 // A device that the node attaches directly to the instance, for example a GPU. The
@@ -929,12 +1027,14 @@ message Device {
     // native architecture.
     Service.Container.Architecture architecture = 1;
     // The resources that the service needs from the device, with the same meaning
-    // as in Container.resources. The at_init mem_limit is the memory of the device
-    // that the instance needs at the start, and the at_most mem_limit is the most
-    // that it can grow to. Its benchmark gives the minimum score of the device,
-    // with keys for the device, for example "fp32_flops". The other fields have no
-    // meaning here. A node can give a device whose memory cannot change. Then it
-    // gives the at_most memory, and at_init must not be more than at_most.
+    // as in Container.resources, but with formals of devices: the memory of a device
+    // is not the main memory, and has a formal of its own. The at_init memory is the
+    // memory of the device that the instance needs at the start, and the at_most
+    // memory is the most that it can grow to. Its benchmarks give the minimum score of
+    // the device, for example floating-point operations per second. A node refuses a
+    // formal that has no meaning for a device. A node can give a device whose memory
+    // cannot change. Then it gives the at_most memory, and at_init must not be more
+    // than at_most.
     Service.Container.Resources resources = 2;
     // The ways in which the node can attach the device. In a service: the ways
     // that the service accepts. The node uses the first one in the list that it
@@ -946,24 +1046,28 @@ message Device {
     repeated Attach attach = 3;
 }
 
-// The resources for one architecture. In Peer.resources: the most that the node
-// supports for that architecture, with its measured benchmark scores. In a
-// GetResourceAvailability request: the resources asked about. In that request, the
-// limits are the most that one instance can grow to, and the benchmark is the minimum
-// score for each core.
+// The resources and the scores of one architecture. In Peer.resources and Peer.devices:
+// the most that the node supports for that architecture, and the scores that it
+// measured. In AttachedDevice: what the node gave to the instance. In DeviceChange: the
+// most that the instance can grow to. Each list follows the rules of a list of Quantity.
 message ArchitectureResources {
-    // The architecture, compared by tag. In a GetResourceAvailability request, an empty
-    // architecture is the native architecture of the node.
+    // The architecture, compared by tag.
     Service.Container.Architecture architecture = 1;
-    // The resources. There is no start and maximum pair here.
-    Sysresources resources = 2;
+    // The resources, as Quantity with formals of resources.
+    repeated Quantity resources = 2;
+    // The scores, as Quantity with formals of benchmarks. If the node did not measure a
+    // score, the score is absent, never 0. Empty where the message tells of a request.
+    repeated Quantity benchmarks = 3;
 }
 
 // The request of GetResourceAvailability: the resources asked about.
 message ResourceAvailabilityRequest {
-    // The main architecture and its resources, as in Container.architecture and
-    // Container.resources.
-    ArchitectureResources main = 1;
+    // The main architecture, as in Container.architecture. An empty architecture is
+    // the native architecture of the node.
+    Service.Container.Architecture architecture = 1;
+    // The resources and the scores, as in Container.resources: the node answers for
+    // the at_init, the at_most and the benchmarks of one instance.
+    Service.Container.Resources resources = 3;
     // The devices that the instance needs, one entry for each device, with the same
     // meaning as in Container.devices, also the attach value. A node that cannot attach
     // a device as the entry says answers that it cannot run the instance. The
@@ -1020,13 +1124,9 @@ message Metrics {
     // The balance, in MU. In the answer of GetMetrics, the balance of the instance. In
     // the answer of GetClientMetrics, the balance of the client.
     Amount balance = 1;
-    // True if the instance is suspended: its virtual machine is stopped and the node
-    // keeps its disk, its address and its balance. The node does not charge an instance
-    // while it is suspended. A deposit that pays one maintenance period starts it again.
-    // False for a client_id, and for an instance that runs. Also false for a hibernated
-    // instance: the node charges it for its disk and a deposit does not start it, so
-    // whoever delegated it goes on charging for it.
-    bool suspended = 2;
+    // True if the instance is hibernated: it has no process (see "The life of an
+    // instance"). False for an instance that runs, and for a client_id.
+    bool hibernated = 2;
 }
 
 // The request of GetBalanceStatement. The caller asks for a range of movements by their
@@ -1092,7 +1192,8 @@ message BalanceMovement {
     string instance_ref = 6;
     // The cause of the movement, as JSON with sorted keys and no spaces. Empty if there
     // is none. For a maintenance period: "seconds", and the resources that the node
-    // priced ("mem_limit", "disk_space", "cpu_period", "cpu_quota"). For a refund of a
+    // priced, each with the id of its formal as the key (see protos/PENDING.md). For a
+    // refund of a
     // charge that was not used: "refunds_seq", the seq of that charge. For a
     // child_bound: "starts_seq", the seq of the child_start whose child it names, and
     // "service_id", the service of the child, as the lowercase hexadecimal of its
@@ -1103,8 +1204,8 @@ message BalanceMovement {
     // "reason", the death reason of the instance, and "leftover", the MU that the
     // refund took out of the account. A movement that a party asked for has "actor":
     // "operator" (the operator of the node), "client" or "instance". For a top_up or a withdrawal, the
-    // actor is the father of the instance. A resource_change that hibernates an instance
-    // has "action": "hibernate". A movement with no "actor" is one that the node wrote
+    // actor is the father of the instance. A movement that hibernates or wakes an instance
+    // has "action": "hibernate" or "wake". A movement with no "actor" is one that the node wrote
     // by its own rule.
     string detail = 7;
     // The hash of the movement before this one. For the first movement, the genesis
@@ -1235,17 +1336,11 @@ message ExecutionReceipt {
     Amount initial_mu = 10;
     // Only in "start". What the node reserved for the instance at the start: the
     // resolved figures, with the floors of the node applied, and not what the manifest
-    // declared. They are what the maintenance charge prices. The values are those of
-    // Sysresources, with the same units. Zero in a start that the node gave to a peer:
-    // the executor reserved them and this node does not attest them. This is the CFS CPU
-    // period that the node reserved, in microseconds.
-    uint64 cpu_period = 11;
-    // Only in "start". The CFS CPU quota that the node reserved, in microseconds.
-    uint64 cpu_quota = 12;
-    // Only in "start". The memory limit that the node reserved, in bytes.
-    uint64 mem_limit = 13;
-    // Only in "start". The disk space that the node reserved, in bytes.
-    uint64 disk_space = 14;
+    // declared. They are what the maintenance charge prices. A list of Quantity, with
+    // only formals of resources. Empty in a start that the node gave to a peer: the
+    // executor reserved them and this node does not attest them.
+    repeated Quantity reserved = 11;
+    reserved 12, 13, 14;
     // Only in "start". The guest kernel that the instance boots, as the SHA-256 hex
     // with which the kernel store of the node keeps it. A device tag fixes it. Empty
     // if the node does not know it (a start that the node gave to a peer).
@@ -1507,35 +1602,26 @@ message Peer {
     // The payment contracts that the node accepts, and the value of each in MU. They are
     // the same for all the addresses.
     repeated ContractRate payment_contracts = 6;
-    // The rates of the node. Keys: "ram_mu_per_gib_second" (and
-    // "ram_mu_per_gib_second:<architecture>"), "cpu_mu_per_vcpu_second",
-    // "disk_mu_per_gib_second", "net_mu_per_gib", "build_mu", "tunnel_open_mu",
-    // "modify_resources_mu", "statement_query_mu", "statement_row_mu",
-    // "scarcity_max_multiplier". The keys "net_mu_per_gib" and "connection_open_mu" (one
-    // connection) can also have the form "<key>:<network>", with the network as in
-    // limits (a DNS host name in lowercase, or "*"): the price for the instances that reach that network, in place of the
-    // general rate of the same name. A network without such a key has the general rate.
-    // The values of the "_mu" keys are in MU. Each RAM, CPU and disk rate is a base price. When a resource is scarce,
-    // the node multiplies its rate by a factor from 1 to scarcity_max_multiplier. The
-    // other rates do not change. scarcity_max_multiplier has no unit. The node does not
-    // send a rate of 0. A reader ignores a key that it does not know.
-    repeated AmountKeyValue rates = 7;
-    // The limits of the node, as keys with a number. A key has the form
-    // "<limit>:<network>". The network is a DNS host name in lowercase, as a tag of
-    // Service.Network. Only these networks have keys: a pow: network is a set of peers
-    // and uses no access of this node to a third party. A reader splits the key at the
-    // first ":". The tag "*" is every network that has no key of its own. The limits
-    // are for one client (the caller that pays for the instance). With the prefix
-    // "global_" the limit is for all the clients together: when it is full, the node
-    // refuses a new connection even if the client is within its own limits. Limits:
-    // "max_concurrent_connections", "max_connections_per_day",
-    // "max_connections_per_month", "max_gib_per_day" and "max_gib_per_month". A day and
-    // a month are the calendar days and months in UTC. The node gives a limit because
-    // its access to a network is a limited supply. The price of the same network is in
-    // rates. A limit that is absent is not a promise of no limit. It is an offer: the
-    // quote (EstimatedCost) is the authority for one instance, and the node refuses an
-    // instance that goes beyond a limit. A reader ignores a key that it does not know.
-    repeated Uint64KeyValue limits = 8;
+    // The rates of the node: what it charges for each resource and for each action, as
+    // Rate entries. The formals are in docs/rates. Each rate of a resource is a base
+    // price. When a resource is scarce, the node multiplies its rate by a factor from 1
+    // to a maximum. Where the node gives that maximum is not decided: it is not a price
+    // in MU, so it is not a Rate (protos/PENDING.md). The other rates do not change. A network or an architecture that has its own rate
+    // has an entry with that scope. Any other has the general rate (empty scope).
+    repeated Rate rates = 7;
+    // The limits of the node, as Limit entries. A limit of a network has the network in
+    // its scope: a DNS host name in lowercase, as a tag of Service.Network. Only these
+    // networks have limits: a pow: network is a set of peers and uses no access of this
+    // node to a third party. The scope "*" is every network that has no limit of its own.
+    // The limits are for one client (the caller that pays for the instance). A formal
+    // with the meaning "global" is for all the clients together: when it is full, the
+    // node refuses a new connection even if the client is within its own limits. The
+    // formals (concurrent connections, connections per day and per month, GiB per day
+    // and per month) are in docs/limits. A day and a month are the calendar days and
+    // months in UTC. The node gives a limit because its access to a network is a limited
+    // supply. The price of the same network is in rates. A reader ignores a limit with a
+    // formal that it does not know.
+    repeated Limit limits = 8;
 
     // What the node can run.
     // The maximum resources that the node supports, one entry for each architecture
@@ -1543,7 +1629,7 @@ message Peer {
     // that is not in it. If the list is empty, the node gives no data about its
     // resources. Each value is a limit of capacity, not the free capacity now. The node
     // can refuse a request that fits, because of load. The node always refuses a
-    // request that does not fit. The benchmark gives the measured score for each core.
+    // request that does not fit. The benchmarks give the measured scores.
     // If the node did not measure a score, the score is absent, never 0. Before a
     // caller asks for a cost or for availability, it can skip a node whose entry does
     // not fit the request.
@@ -1554,8 +1640,9 @@ message Peer {
     // devices that the node can give at the same time with that architecture. A reader
     // does not add the numbers of different architectures: one device with two kernels
     // is one device. If the list is empty, the node has no devices to give. In the
-    // resources of an entry, only at_most has a value. Its limits are the most that the
-    // device can give, and its benchmark has the scores that the node measured. If the
+    // resources of an entry, only at_most and benchmarks have values. at_most has the
+    // most that the device can give, and benchmarks has the scores that the node
+    // measured. If the
     // node did not measure a score, the score is absent, never 0. The attach list has
     // all the ways that the node can attach that device. The values are a limit of
     // capacity, not the free capacity now. GetResourceAvailability gives the real answer. This list is not
@@ -1781,8 +1868,8 @@ message AttachedDevice {
 // A change of the devices of an instance. The node never changes a device that the
 // change does not name.
 message DeviceChange {
-    // Devices to attach. One entry is one new device. The limits are the most that the
-    // instance can grow to, as in ArchitectureResources.
+    // Devices to attach. One entry is one new device. The resources are the most that
+    // the instance can grow to, as in ArchitectureResources. It has no benchmarks.
     repeated ArchitectureResources attach = 1;
     // The ids (AttachedDevice.id) of the devices to detach. The service must have
     // released each device in the guest before it asks. An unknown id is an error.
@@ -1791,27 +1878,28 @@ message DeviceChange {
 
 // The answer of ModifyServiceSystemResources.
 message ModifyServiceSystemResourcesOutput {
-    // The resources of the instance now.
-    Sysresources sysreq = 1;
+    // The resources of the instance now, as a list of Quantity with only formals of
+    // resources.
+    repeated Quantity resources = 1;
     // The balance of the instance, in MU.
     Amount balance = 2;
     // The devices that the instance has now, also the ones that the node attached at
     // the start. Empty if the instance has none.
     repeated AttachedDevice devices = 3;
+    // True if the instance is hibernated now.
+    bool hibernated = 4;
 }
 
 // The request of ModifyServiceSystemResources.
 message ModifyServiceSystemResourcesInput {
-    // The minimum resources. Not used now.
-    Sysresources min_sysreq = 1;
-    // The resources that the instance asks for. A field that is not set keeps the value
-    // of the instance. If the CPU (cpu_quota) or the memory (mem_limit) ends at 0, the
-    // node hibernates the instance: it stops the virtual machine and keeps the disk, and
-    // charges only for the disk. If the instance is hibernated and the CPU and the memory
-    // both end above 0, the node starts it again from its entrypoint, on the same disk,
-    // address and ports. A request that sets only one of them does not wake it. The node
-    // refuses to hibernate an instance with a shared filesystem.
-    Sysresources max_sysreq = 2;
+    reserved 1;
+    // The resources that the instance asks for, as a list of Quantity with only
+    // formals of resources. A resource that is not in the list keeps the value of the
+    // instance. Each value must not be more than the at_most of the service. A request
+    // has no benchmarks: a score is not a thing that an instance asks for. A value
+    // never hibernates or wakes the instance: only the field hibernated does. For a
+    // hibernated instance, the resources are the ones that it gets when it wakes.
+    repeated Quantity resources = 2;
     // The instance token. Optional. If it is set, the node changes that instance, whoever
     // sends the request, and the instance that the token names pays for the call. If the
     // parent of the instance is a client, the request must also have that Client. If it
@@ -1824,6 +1912,13 @@ message ModifyServiceSystemResourcesInput {
     // while the instance runs. A node that cannot attach a device after the start
     // refuses a request that sets this field, and never ignores it.
     DeviceChange devices = 4;
+    // The state that the instance asks for. True: the node hibernates the instance.
+    // False: the node wakes it. Absent: the state does not change. A request can set
+    // the resources and the state together: the node applies the resources first. A
+    // request that asks for the state that the instance has already is not an error.
+    // The node refuses to hibernate an instance that uses a network share
+    // (protos/PENDING.md). See "The life of an instance".
+    optional bool hibernated = 5;
 }
 
 // The request of ModifyDeposit.
@@ -2085,9 +2180,10 @@ service Gateway {
     // Changes the resource limits of an instance. A local instance of the node can call
     // it for itself: the node identifies it by its address. Anyone can call it for another
     // instance with its service_token (and the Client of its parent, if the parent is a
-    // client). Resources of 0 hibernate the instance, and resources above 0 wake it (see
-    // ModifyServiceSystemResourcesInput). The node takes a fee from the balance of the
-    // instance that changes. It returns the new resources and the balance.
+    // client). It also hibernates or wakes the instance (see
+    // ModifyServiceSystemResourcesInput.hibernated). The node takes a fee from the
+    // balance of the instance that changes. It returns the new resources, the state and
+    // the balance.
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes the same objects as StartService. Returns the cost to run the service on
     // this node, and starts nothing. A node that cannot run the service now refuses
@@ -2138,7 +2234,7 @@ service Gateway {
     // docs/policies/). If the slot declares wake=on_tunnel, the node wakes a hibernated
     // instance and waits for it. In this mode there are no receipts, and every failure is
     // UNAVAILABLE, with one text: the caller does not learn if the address is unknown, if
-    // the slot is closed to this way, or if the instance is asleep.
+    // the slot is closed to this way, or if the instance is hibernated.
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes an ObserveRequest and returns a stream of ObserveEvent. If the observation
     // starts, the first event is a session event. If not, the stream has only one
