@@ -224,6 +224,25 @@ says about itself.
 - The `Peer` that a node publishes on a ledger has no pointers, so the attestation is no
   more on the ledger with it.
 
+## Order of the fields of `ReputationProof`
+
+The same rule as `Peer`: the fields that make the envelope of the signature come first, and
+the content comes after them.
+
+| Group | Field | Number (was) |
+|---|---|---|
+| Identity and signature | `publisher` | 1 (1) |
+| | `signature_scheme` | 2 (4) |
+| | `ts` | 3 (2) |
+| | `pow_nonce` | 4 (5) |
+| | `signature` | 5 (6) |
+| Content | `opinions` | 6 (3) |
+| | `ledger_proofs` | 7 (7) |
+
+**Not wire compatible**, as the other changes of the alpha. A proof that a node kept before
+(`offchain_proofs`) is unreadable and is skipped, until the publisher gives a newer one. The
+signature does not change: the digest is made from the fields, not from their numbers.
+
 **Not wire compatible**, as the other changes of the alpha: every node is upgraded
 together. A node reads a `Peer` that it stored before as unreadable or empty (the readers
 of `peer.advertisement` already treat that as "nothing announced"), until the peer

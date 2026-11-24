@@ -1329,23 +1329,24 @@ message ReputationProof {
     // The peer_id of the node that signs: its public key, in lowercase hexadecimal. It
     // is the id of the proof.
     string publisher = 1;
+    // The scheme of the signature, as on the Peer, without the prose.
+    Peer.SignatureScheme signature_scheme = 2;
     // When the publisher signed, in unix seconds. A receiver refuses a proof that is
     // not newer than the last proof that it accepted from the same publisher.
-    int64 ts = 2;
-    // The opinions. The signature covers them in this order.
-    repeated ReputationOpinion opinions = 3;
-    // The scheme of the signature, as on the Peer, without the prose.
-    Peer.SignatureScheme signature_scheme = 4;
+    int64 ts = 3;
     // The nonce of the proof of work (#677). The work of the proof is the number of
     // leading zero bits of the hash of the proof with this nonce (see
     // offchain_proof.pow_bits). The publisher tries nonces until the hash has the zero
     // bits that it wants. The signature covers it, so a node that passes the proof on
     // cannot change it. A proof with nonce 0 has the work of that one hash, which is
     // no more than any other single try.
-    uint64 pow_nonce = 5;
+    uint64 pow_nonce = 4;
     // The signature, in lowercase hexadecimal. The celaut-gateway layer gives the text
     // that the node signs.
-    string signature = 6;
+    string signature = 5;
+
+    // The opinions. The signature covers them in this order.
+    repeated ReputationOpinion opinions = 6;
     // The proofs of the publisher on ledgers, as pointers: each Contract names the ledger,
     // the script and the token of one proof, and carries the owner attestation (in its
     // xattrs) by which the wallet that owns the proof vouches for the publisher. They are
