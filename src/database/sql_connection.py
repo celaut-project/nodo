@@ -643,7 +643,8 @@ class SQLConnection(metaclass=Singleton):
         Two rows when the father gets the leftover: a negative ``refund`` on the
         instance, a positive one on the father, who names the instance. The instance
         dies with nothing on it, unless it was in debt, which stays as it was. When
-        the father is gone the instance still dies, and its ``refund`` says
+        the father is dead, the leftover goes to the nearest live ancestor (#691). When
+        there is none the instance still dies, and its ``refund`` says
         ``detail.lost = father_gone``; with ``credit`` off, ``detail.to = caller``, and
         the figure is for the caller of ``stop_instance`` to settle.
 
@@ -666,15 +667,15 @@ class SQLConnection(metaclass=Singleton):
                 return None
             leftover = max(_balance_of(row['balance_mu']), 0)
             if leftover > 0:
-                father_exists = bool(credit and father_id and self._account_exists(cursor, father_id))
+                receiver = self._live_ancestor(cursor, father_id) if credit else None
                 detail = None
                 if not credit:
                     detail = {"to": "caller"}
-                elif not father_exists:
+                elif receiver is None:
                     detail = {"lost": "father_gone"}
                 self._move(cursor, account_id, -leftover, ledger.REFUND, detail=detail)
-                if father_exists:
-                    self._move(cursor, father_id, leftover, ledger.REFUND,
+                if receiver is not None:
+                    self._move(cursor, receiver, leftover, ledger.REFUND,
                                instance_token=account_id)
             # The last row of the chain: the cause and the balance that stays. It moves
             # nothing, so no reader counts it as a charge.
@@ -695,6 +696,28 @@ class SQLConnection(metaclass=Singleton):
         if leftover is not None and not delegated:
             self._forget_consumption(account_id)
         return leftover
+
+    @staticmethod
+    def _live_ancestor(cursor, account_id: Optional[str]) -> Optional[str]:
+        """The first account from ``account_id`` upwards that still exists, or None.
+
+        ``account_id`` itself when it exists. If it stopped, its father, and so on, as
+        ``payable_account`` does for a payment (#630). The walk stops after 16 steps.
+        """
+        for _ in range(16):
+            if not account_id:
+                return None
+            if SQLConnection._account_exists(cursor, account_id):
+                return account_id
+            account_id = next((
+                row['father_id']
+                for table in ("local_instances", "delegated_instances")
+                for row in [cursor.execute(
+                    f'SELECT father_id FROM {table} WHERE id = ?', (account_id,)
+                ).fetchone()]
+                if row is not None
+            ), None)
+        return None
 
     def account_exists(self, account_id: Optional[str]) -> bool:
         """Whether a client, a live local instance or a live delegated one has this id."""
