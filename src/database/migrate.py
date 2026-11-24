@@ -730,66 +730,51 @@ TABLES = {
             PRIMARY KEY (ledger, subject_id, proof_id)
         )
     ''',
-    # One row per Chat message, either side (`from_us` tells which). `body` is
-    # capped in code before this ever runs (chat.MAX_MESSAGE_BYTES), and
-    # `add_chat_message` prunes a peer's own oldest rows past
-    # chat.MAX_STORED_MESSAGES_PER_PEER on every insert -- both bounds exist
-    # because a message here came from a peer this node did not choose, same as
-    # `guest_env`'s MAX_VALUE_BYTES caps a value the guest did not choose. Without
-    # them, either a single long message or a peer that never stops sending would
-    # grow this table without limit.
-    "peer_chat_messages": '''
-        CREATE TABLE IF NOT EXISTS peer_chat_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            peer_id TEXT NOT NULL,
-            from_us INTEGER NOT NULL,
-            body TEXT NOT NULL,
-            ts INTEGER NOT NULL,
-            received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            conversation_id TEXT DEFAULT NULL,
-            service_id TEXT DEFAULT NULL,
-            service_metadata BLOB DEFAULT NULL,
-            FOREIGN KEY (peer_id) REFERENCES peer (id),
-            FOREIGN KEY (conversation_id) REFERENCES peer_chat_conversations (id)
-        )
-    ''',
-    # The support thread between a client and the operator of this node. Only a
-    # client that has no peer bound to it writes here (a peer's messages go to
-    # `peer_chat_messages`). `sequence` is the position in the thread of one client: it
-    # starts at 1 and grows by 1, and it is never reused or renumbered, so a client
-    # that read up to a sequence can ask for what comes after it. The prune on insert
-    # (`add_client_chat_message`) removes the oldest rows only, so the thread is never
-    # empty after its first message and the next sequence is always max + 1. A row is
-    # bounded like a peer message is: the body is capped in code before the insert.
-    "client_chat_messages": '''
-        CREATE TABLE IF NOT EXISTS client_chat_messages (
+    # Chat: one conversation is `client_id#number`. A conversation is always opened by a
+    # client against a node, so it lives on the node that serves it, under the client_id
+    # that node gave to that client. `number` is the position among the conversations of
+    # that client (1, 2, 3, ...); the serving node gives it, and it is never reused.
+    # `remote_peer_id` is NULL on the serving node. It is set on the other side: when this
+    # node is the client, the rows here are a local copy (a mirror) of a conversation that
+    # lives on that peer, and `client_id` is the client_id that this node holds there.
+    # A peer is never stored on a served conversation: the association of a client with a
+    # peer (`peer.local_client_id`) is read when needed (see the view `chat_threads`), so
+    # an association groups the conversations that already exist with no copy.
+    # Closing is local bookkeeping with no message of its own on the wire.
+    "chat_conversations": '''
+        CREATE TABLE IF NOT EXISTS chat_conversations (
             client_id TEXT NOT NULL,
-            sequence INTEGER NOT NULL,
-            from_operator INTEGER NOT NULL,
-            body TEXT NOT NULL,
-            ts INTEGER NOT NULL,
-            PRIMARY KEY (client_id, sequence)
-        )
-    ''',
-    # One row per conversation (issue #431), keyed by the `conversation_id` its
-    # messages carry. `opened_by_us` is what tells the two TUI pages apart: this
-    # node picked the id (a thread we started) versus a peer picked it and this
-    # node only learned of it on the first message that named it (a thread one of
-    # our clients started with us) -- `receive_chat_message` creates the row in the
-    # latter case, `chat.open_conversation` in the former. `topic` is free text set
-    # once, at open, purely a label for the TUI's conversation list; it is never
-    # compared or enforced. Closing is a local bookkeeping act with no message of
-    # its own on the wire: nothing here requires the other side's agreement to stop
-    # showing a thread as open, the same way archiving an email thread does not.
-    "peer_chat_conversations": '''
-        CREATE TABLE IF NOT EXISTS peer_chat_conversations (
-            id TEXT PRIMARY KEY,
-            peer_id TEXT NOT NULL,
-            opened_by_us INTEGER NOT NULL,
+            number INTEGER NOT NULL,
+            remote_peer_id TEXT DEFAULT NULL,
             topic TEXT,
             opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             closed_at DATETIME DEFAULT NULL,
-            FOREIGN KEY (peer_id) REFERENCES peer (id)
+            PRIMARY KEY (client_id, number),
+            FOREIGN KEY (remote_peer_id) REFERENCES peer (id)
+        )
+    ''',
+    # One row per message. `sequence` is the position in the messages of one client, over
+    # all its conversations: it starts at 1, grows by 1, and is never reused or
+    # renumbered, so a reader that has the messages up to one sequence asks for the ones
+    # after it (`GetChatThread`) with a single cursor. On a mirror the serving node gave
+    # the sequence. `from_operator` is the same on both sides: 1 if the operator of the
+    # serving node wrote it, 0 if the client did. `body` is capped in code before the
+    # insert, and the oldest rows of a client are removed on each insert
+    # (`add_chat_message`) -- both bounds exist because a message here may come from a
+    # peer this node did not choose, so neither one long message nor a client that never
+    # stops sending can grow the table without limit.
+    "chat_messages": '''
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            client_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            conversation INTEGER NOT NULL,
+            from_operator INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            service_id TEXT DEFAULT NULL,
+            service_metadata BLOB DEFAULT NULL,
+            PRIMARY KEY (client_id, sequence),
+            FOREIGN KEY (client_id, conversation) REFERENCES chat_conversations (client_id, number)
         )
     ''',
     # One row per movement of a balance (#570): see src/database/ledger.py. The rows of
@@ -948,6 +933,43 @@ TABLES = {
     '''
 }
 
+# Views: the same `"name": '''sql'''` shape as TABLES, created after the tables. A view
+# holds no data, so code that empties every table (`TABLES`) must not see it.
+VIEWS = {
+    # The conversations as a reader needs them: with the peer they belong to, and a
+    # summary of their messages. `peer_id` is the remote peer of a mirror, or the peer
+    # that the client of a served conversation is bound to (NULL for a client with no
+    # peer). `opened_by_us` is 1 for a mirror (this node is the client), 0 for a served
+    # conversation. `last_from_operator` says who wrote last, so that a reader sees
+    # which conversations wait for an answer. Not a table: it holds no row,
+    # so nothing may write to it or empty it.
+    "chat_threads": '''
+        CREATE VIEW IF NOT EXISTS chat_threads AS
+        SELECT c.client_id AS client_id,
+               c.number AS number,
+               c.client_id || '#' || c.number AS ref,
+               COALESCE(c.remote_peer_id,
+                        (SELECT p.id FROM peer p WHERE p.local_client_id = c.client_id)
+               ) AS peer_id,
+               (c.remote_peer_id IS NOT NULL) AS opened_by_us,
+               c.topic AS topic,
+               c.opened_at AS opened_at,
+               c.closed_at AS closed_at,
+               (SELECT COUNT(*) FROM chat_messages m
+                WHERE m.client_id = c.client_id AND m.conversation = c.number) AS messages,
+               COALESCE((SELECT MAX(m.sequence) FROM chat_messages m
+                         WHERE m.client_id = c.client_id AND m.conversation = c.number), 0)
+                   AS latest,
+               COALESCE((SELECT m.ts FROM chat_messages m
+                         WHERE m.client_id = c.client_id AND m.conversation = c.number
+                         ORDER BY m.sequence DESC LIMIT 1), 0) AS last_ts,
+               COALESCE((SELECT m.from_operator FROM chat_messages m
+                         WHERE m.client_id = c.client_id AND m.conversation = c.number
+                         ORDER BY m.sequence DESC LIMIT 1), 0) AS last_from_operator
+        FROM chat_conversations c
+    ''',
+}
+
 # The three ways `payments` is ever read: one peer's history, one client's, and the
 # tx-id lookup `tx_history` does per explorer transaction. The TUI runs the first on
 # every redraw of a selected peer.
@@ -982,17 +1004,12 @@ INDEXES = (
     # The reputation proof of this node lists the faults by date, and the retention
     # deletes them by date (#652).
     "CREATE INDEX IF NOT EXISTS idx_fault_evidence_ts ON fault_evidence (ts)",
-    # A conversation is always read for one peer, newest last (get_chat_messages);
-    # the prune on insert is the same query with the direction reversed.
-    "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_peer "
-    "ON peer_chat_messages (peer_id, id)",
-    # get_conversation_messages reads one conversation_id, oldest first.
-    "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_conversation "
-    "ON peer_chat_messages (conversation_id, id)",
-    # list_conversations reads one peer's threads, and filters by who opened them
-    # (the two TUI pages: ours, and our clients').
-    "CREATE INDEX IF NOT EXISTS idx_peer_chat_conversations_peer "
-    "ON peer_chat_conversations (peer_id, opened_by_us, opened_at)",
+    # The messages of one conversation, in order (`get_conversation_messages`).
+    "CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation "
+    "ON chat_messages (client_id, conversation, sequence)",
+    # The conversations of one peer, as a mirror (`list_conversations`).
+    "CREATE INDEX IF NOT EXISTS idx_chat_conversations_peer "
+    "ON chat_conversations (remote_peer_id, opened_at)",
     # A statement reads one account from a time on, and finding where it starts
     # costs the same whatever the size of the account (#570).
     "CREATE INDEX IF NOT EXISTS idx_balance_movements_account_ts "
@@ -1030,6 +1047,9 @@ def ensure_tables(cursor, names) -> None:
         if not table_sql:
             continue
         cursor.execute(table_sql)
+    for name in names:
+        if name in VIEWS:
+            cursor.execute(VIEWS[name])
     for index_sql in INDEXES:
         # Only the indexes belonging to the tables asked for; the rest may not exist.
         if any(f" ON {name} " in index_sql for name in names):
@@ -1050,6 +1070,12 @@ def create_tables(cursor):
             cursor.execute(index_sql)
         except sqlite3.Error as e:
             print(f"Error creating index: {e}")
+
+    for view_name, view_sql in VIEWS.items():
+        try:
+            cursor.execute(view_sql)
+        except sqlite3.Error as e:
+            print(f"Error creating '{view_name}' view: {e}")
 
     for trigger_sql in TRIGGERS:
         try:
@@ -1140,14 +1166,6 @@ def create_tables(cursor):
         # existed: those peers all arrived directly.
         "learned_via_gossip": "INTEGER NOT NULL DEFAULT 0",
     })
-    # A service shared in the message (issue #438, `ChatMessage.service`): its
-    # serialized Metadata, and the registry id this node derived from it (NULL when
-    # the Metadata has no hash of this node's type). NULL on every ordinary message.
-    ensure_columns(cursor, "peer_chat_messages", {
-        "conversation_id": "TEXT DEFAULT NULL",
-        "service_id": "TEXT DEFAULT NULL",
-        "service_metadata": "BLOB DEFAULT NULL",
-    })
     # What a payment was *for*, as opposed to how far it got. A donation this node
     # paid out of its own earnings is not a payment to a peer, and `status` cannot say
     # so: it describes the lifecycle (communicated / accepted / rejected), which a
@@ -1164,6 +1182,7 @@ def create_tables(cursor):
         "protocol_stack": "BLOB DEFAULT NULL",
     })
     retire_slot_table(cursor)
+    retire_peer_chat_tables(cursor)
     retire_unmetered_column(cursor)
     ensure_peer_address_uniqueness(cursor)
     forget_peer_rates_per_whole_unit(cursor)
@@ -1264,6 +1283,20 @@ def retire_slot_table(cursor) -> None:
         print("Retired the 'slot' table; peer URIs now hang off the peer directly.")
     except sqlite3.Error as e:
         print(f"Error retiring the slot table: {e}")
+
+
+def retire_peer_chat_tables(cursor) -> None:
+    """Drop the three chat tables that `chat_conversations` and `chat_messages` replace.
+
+    The old design had a flat history per peer, a thread per client and conversations
+    with a string id that either side chose. The new one has one kind of conversation
+    (`client_id#number`), so there is no mapping that keeps the old rows true: they go.
+    """
+    try:
+        for name in ("peer_chat_messages", "client_chat_messages", "peer_chat_conversations"):
+            cursor.execute(f"DROP TABLE IF EXISTS {name}")
+    except sqlite3.Error as e:
+        print(f"Error retiring the old chat tables: {e}")
 
 
 def ensure_peer_address_uniqueness(cursor) -> None:

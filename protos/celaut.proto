@@ -1615,51 +1615,69 @@ message PoWRequired {
     int32 difficulty = 5;
 }
 
-// A text message from the operator of one node to the operator of another node, for
-// example to tell that a problem occurred.
-message ChatMessage {
-    // The client_id of the sender on the node that receives the message. If the client
-    // has a binding to a peer, that peer is the sender. If not, the sender is the client
-    // itself and the node keeps the message in the thread of the client (GetChatThread).
-    string client_id = 1;
-    // The text of the message.
-    string body = 2;
-    // The identifier of the conversation. Optional. The side that starts a
-    // conversation makes it, for example as a UUID4 in 32 hexadecimal characters. Both
-    // sides then send it with each message of that conversation. The receiver does not
-    // examine its format.
-    optional string conversation_id = 3;
-    // The Metadata of a service that the sender shares. Optional. The body also names
-    // the service, for a reader that does not know this field.
-    optional Metadata service = 4;
-}
+// Chat. A conversation is always opened by a client against a node, and it lives on
+// that node. It has the name client_id#conversation_id, where client_id is the client_id
+// that the node gave to the client and conversation_id is a number that the node gives:
+// 1 for the first conversation of that client, then 2, 3, and so on. The number is never
+// reused. The name is unique in the node, so both sides use it. The operator of a node
+// that wants to talk to the operator of another node is a client of that node (the
+// client_id that it holds there), the same as any other client. If the client is bound
+// to a peer, the node groups its conversations with that peer; the conversations do not
+// change when the binding is made.
+//
+// Each message of a client has a sequence in the node: 1, 2, 3, ..., over all the
+// conversations of that client. It never changes and it grows by 1. A reader that has
+// the messages up to one sequence asks for the ones after it with GetChatThread.
 
-// One message of the thread between a client and the operator of a node.
-message ChatEntry {
-    // The position in the thread. The first message has sequence 1. The node gives
-    // the sequence; it never changes and it grows by 1.
-    uint64 sequence = 1;
-    // The time that the node stored the message, in Unix seconds.
-    int64 ts = 2;
-    // True if the operator wrote the message, false if the client did.
-    bool from_operator = 3;
+// A text message of a client to the operator of a node (Chat).
+message ChatMessage {
+    // The client_id of the sender on the node that receives the message.
+    string client_id = 1;
+    // The conversation of the message. 0 opens a new conversation: the node gives it the
+    // next number and returns it in ChatAck. Any other value is a conversation of this
+    // client that the node already has.
+    uint64 conversation_id = 2;
+    // A label of the conversation, for a reader of the list of conversations. Optional.
+    // The node keeps it only if conversation_id is 0.
+    optional string topic = 3;
     // The text of the message.
     string body = 4;
+    // The Metadata of a service that the sender shares. Optional. The body also names
+    // the service, for a reader that does not know this field.
+    optional Metadata service = 5;
+}
+
+// One message of a conversation, as the node keeps it.
+message ChatEntry {
+    // The position of the message in the messages of the client. The first message has
+    // sequence 1. The node gives the sequence; it never changes and it grows by 1.
+    uint64 sequence = 1;
+    // The conversation of the message.
+    uint64 conversation_id = 2;
+    // The time that the node stored the message, in Unix seconds.
+    int64 ts = 3;
+    // True if the operator of the node wrote the message, false if the client did.
+    bool from_operator = 4;
+    // The text of the message.
+    string body = 5;
+    // The Metadata of a service that the writer shares. Optional.
+    optional Metadata service = 6;
 }
 
 // The request of GetChatThread.
 message ChatThreadRequest {
-    // Send only the messages with a sequence more than this. 0 sends the whole thread
-    // (up to the limit of the node).
+    // Send only the messages with a sequence more than this. 0 sends the messages from
+    // the first one (up to the limit of the node).
     uint64 after_sequence = 1;
 }
 
 // The answer of GetChatThread.
 message ChatThread {
-    // The messages in order of sequence.
+    // The messages of all the conversations of the client, in order of sequence.
     repeated ChatEntry entries = 1;
-    // The sequence of the last message of the thread, also if entries is empty or the
-    // node cut it. 0 if the thread is empty.
+    // The sequence of the last message of the client, also if entries is empty or the
+    // node cut it. 0 if the client has no message. A reader compares it with the last
+    // sequence that it has to know whether there is something new.
     uint64 latest = 2;
 }
 
@@ -1669,6 +1687,11 @@ message ChatAck {
     bool stored = 1;
     // Why the node did not store the message. Empty if stored is true.
     string reason = 2;
+    // The conversation of the message: the number that the node gave if the message
+    // opened one, or the same number that the message had. 0 if stored is false.
+    uint64 conversation_id = 3;
+    // The sequence that the node gave to the message. 0 if stored is false.
+    uint64 sequence = 4;
 }
 
 // See docs/RECURSION_GUARD.md (issue #456).
@@ -2106,11 +2129,13 @@ service Gateway {
     // starts, the first event is a session event. If not, the stream has only one
     // notice that tells why. The stream stops when the instance stops.
     rpc Observe(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Sends a ChatMessage to the operator of the node. The node returns a ChatAck. The
-    // client_id is enough; a binding to a peer is optional (see ChatMessage).
+    // Sends a ChatMessage to the operator of the node, in a conversation of the client
+    // (conversation_id 0 opens one). The node returns a ChatAck. The client_id is enough;
+    // a binding to a peer is optional.
     rpc Chat(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes a Client (index 2) and a ChatThreadRequest (index 1). Returns the ChatThread
     // of that client: the messages that it sent with Chat and the answers of the
-    // operator. It is free. A node gives only the thread of the client in the request.
+    // operator, in all its conversations. It is free. A node gives only the thread of
+    // the client in the request.
     rpc GetChatThread(stream buffer.Buffer) returns (stream buffer.Buffer) {}
 }

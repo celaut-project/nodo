@@ -1,5 +1,5 @@
 {
-  "celaut_proto": "19e62e440773b147568f6c4acf24747ee4c53075ec1ef37d2b8a7e67c1d02cf8",
+  "celaut_proto": "a936736b44f41489858b9cc666f67cb48ff75ff7894dad6fad1e0582f5b2813e",
   "config_keys": [
     "activity_window.ENABLED",
     "activity_window.FORCE_ACTUAL_ON_CLOSE_POLICY",
@@ -35,7 +35,8 @@
     "builder.WAIT_FOR_CONTAINER",
     "builder.WAIT_FOR_UNLOCK_MEMORY",
     "chat.MAX_MESSAGE_BYTES",
-    "chat.MAX_STORED_MESSAGES_PER_PEER",
+    "chat.MAX_STORED_MESSAGES_PER_CLIENT",
+    "chat.SYNC_INTERVAL_SECONDS",
     "client.ACCEPT_NEW_DEPOSITS",
     "client.CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION",
     "client.DEV_CLIENT_POOL_SIZE",
@@ -384,6 +385,6 @@
     "workload_admission.ON_UNSATISFIABLE",
     "workload_admission.POLICY"
   ],
-  "database": "8963aa01f557be6251d43a6fab7fe39260e7bfd600c425398d8bcdf2fd7380e2",
+  "database": "8120cc207bde421cc28db7f98c45b167dc8d352a3613831c5ac8d96bc1b0664a",
   "storage_format": 1
 }

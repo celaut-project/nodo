@@ -76,17 +76,12 @@ TRACEABILITY_TABLES = (
     # direction, but silently: the node would route as though nobody had ever vouched
     # for anybody.
     "onchain_opinions",
-    # A peer's chat history with this node. Without it, Chat would still answer, but
-    # every message would vanish on the next restart with no error to say so.
-    "peer_chat_messages",
-    # One row per conversation a chat message groups into (issue #431). Without it,
-    # a message naming a fresh conversation_id would still be stored -- the FK is
-    # not enforced by default -- but `chat.list_conversations` would have nothing
-    # to read, and neither TUI page (ours / our clients') could show it.
-    "peer_chat_conversations",
-    # The support thread of a client with the operator (no peer needed). Without it,
-    # `Chat` from such a client would fail on the insert, and `GetChatThread` on the read.
-    "client_chat_messages",
+    # Chat: the conversations (`client_id#number`), their messages, and the view that
+    # lists them with their peer. Without them, `Chat` would still answer, but every
+    # message would vanish on the next restart with no error to say so.
+    "chat_conversations",
+    "chat_messages",
+    "chat_threads",
     # Off-chain reputation (#652): the evidence of faults, the proofs of other nodes and
     # their scores. Without them a fault is still scored, but it is not published, and
     # the balancer reads no off-chain opinion.
@@ -131,15 +126,6 @@ TRACEABILITY_COLUMNS = {
         # Read by every automatic-refill tick (issue #427), so it cannot wait for
         # `nodo migrate` either.
         "learned_via_gossip": "INTEGER NOT NULL DEFAULT 0",
-    },
-    # A node that already deployed peer_chat_messages before conversations existed
-    # has the table but not this column -- an ADD COLUMN, not ensure_tables, for the
-    # same reason as `peer.local_client_id` above.
-    "peer_chat_messages": {
-        "conversation_id": "TEXT DEFAULT NULL",
-        # A service shared in chat (issue #438): same upgrade path again.
-        "service_id": "TEXT DEFAULT NULL",
-        "service_metadata": "BLOB DEFAULT NULL",
     },
 }
 
@@ -3675,268 +3661,213 @@ class SQLConnection(metaclass=Singleton):
         row = result.fetchone()
         return row['id'] if row else None
 
-    def add_chat_message(self, peer_id: str, from_us: bool, body: str, ts: int,
-                         keep_per_peer: int, conversation_id: Optional[str] = None,
-                         service: Optional[celaut_pb2.Metadata] = None) -> None:
-        """Store one Chat message and prune ``peer_id``'s history down to ``keep_per_peer``.
+    # ---- Chat -----------------------------------------------------------------------
+    # A conversation is `client_id#number`; see the comments of `chat_conversations` and
+    # `chat_messages` in migrate.py for what a row means on a serving node and on a mirror.
 
-        The prune runs on every insert rather than on a schedule of its own, the
-        same reasoning as :meth:`prune_demand_history`: on insert is the one moment
-        this node is certainly touching the row, and a peer that never chats again
-        after flooding this node would otherwise never trigger a cleanup at all.
-        Scoped to one peer at a time, so one abusive peer's history cannot crowd
-        another's out of its own share of the ceiling.
+    def open_chat_conversation(self, client_id: str, topic: str = "",
+                               remote_peer_id: Optional[str] = None,
+                               number: Optional[int] = None) -> int:
+        """Open a conversation of ``client_id`` and return its number.
 
-        ``conversation_id`` is deliberately **not** its own scope for the prune: a
-        peer's ceiling is on its whole history, not per thread, or an operator
-        opening many small conversations would buy itself a much larger effective
-        allowance than one who does not -- the ceiling exists to bound one peer's
-        total footprint, not to be multiplied by however many threads it opens.
+        On a serving node ``number`` is not given: it is the last number of the client plus
+        1 (1 for the first), read and written in one transaction, so two conversations of a
+        client never share a number. A mirror gives the ``number`` that the serving node
+        chose, with the peer in ``remote_peer_id``; an existing row is left as it is.
+        """
+        def work(cursor):
+            if number is None:
+                row = cursor.execute(
+                    'SELECT MAX(number) FROM chat_conversations WHERE client_id = ?',
+                    (client_id,),
+                ).fetchone()
+                chosen = (row[0] or 0) + 1
+            else:
+                chosen = int(number)
+            cursor.execute(
+                '''INSERT OR IGNORE INTO chat_conversations
+                       (client_id, number, remote_peer_id, topic)
+                   VALUES (?, ?, ?, ?)''',
+                (client_id, chosen, remote_peer_id, topic or None),
+            )
+            return chosen
+        return self._transaction(work)
+
+    def add_chat_message(self, client_id: str, conversation: int, from_operator: bool,
+                         body: str, ts: int, keep_per_client: int,
+                         sequence: Optional[int] = None,
+                         service: Optional[celaut_pb2.Metadata] = None) -> int:
+        """Store one message of a conversation of ``client_id``; return its sequence.
+
+        On a serving node ``sequence`` is not given: it is the last one of the client plus
+        1, read and written in one transaction. A mirror gives the ``sequence`` that the
+        serving node chose, and a message that it already has is left as it is. Then the
+        messages of the client are cut down to the ``keep_per_client`` newest, and the
+        conversations that have no message left go too, except the one with the highest
+        number, so the next number is never one that was used. The cut is per client, not
+        per conversation, or a client that opens many conversations would buy a larger
+        allowance: the ceiling bounds the whole footprint of one client.
 
         ``service`` is the Metadata of a service shared in the message (issue #438),
-        stored serialized for the TUI to render, next to the registry id this node
-        derives from it (``registry_service_id``) -- the id its Get/Execute take.
+        stored serialized, next to the registry id that this node derives from it
+        (``registry_service_id``) -- the id that its Get and Execute take.
         """
         from src.utils.verify import registry_service_id
 
-        self._execute('''
-            INSERT INTO peer_chat_messages
-                (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            peer_id, int(bool(from_us)), body, int(ts), conversation_id,
-            registry_service_id(service) if service is not None else None,
-            service.SerializeToString() if service is not None else None,
-        ))
-        self._execute('''
-            DELETE FROM peer_chat_messages
-            WHERE peer_id = ? AND id NOT IN (
-                SELECT id FROM peer_chat_messages
-                WHERE peer_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-            )
-        ''', (peer_id, peer_id, max(0, int(keep_per_peer))))
+        service_id = registry_service_id(service) if service is not None else None
+        service_blob = service.SerializeToString() if service is not None else None
 
-    def add_client_chat_message(self, client_id: str, from_operator: bool, body: str,
-                                ts: int, keep_per_client: int) -> int:
-        """Store one message in the support thread of ``client_id``; return its sequence.
-
-        The sequence is the last one of the thread plus 1 (1 for the first message). It
-        is read and written in one transaction, so two messages of one client never get
-        the same sequence. Then the thread is cut down to its ``keep_per_client`` newest
-        messages. The cut removes the oldest rows only, so a sequence never changes and
-        is never given twice.
-        """
         def work(cursor):
-            row = cursor.execute(
-                'SELECT MAX(sequence) FROM client_chat_messages WHERE client_id = ?',
-                (client_id,),
-            ).fetchone()
-            sequence = (row[0] or 0) + 1
+            if sequence is None:
+                row = cursor.execute(
+                    'SELECT MAX(sequence) FROM chat_messages WHERE client_id = ?',
+                    (client_id,),
+                ).fetchone()
+                chosen = (row[0] or 0) + 1
+            else:
+                chosen = int(sequence)
             cursor.execute(
-                '''INSERT INTO client_chat_messages
-                       (client_id, sequence, from_operator, body, ts)
-                   VALUES (?, ?, ?, ?, ?)''',
-                (client_id, sequence, int(bool(from_operator)), body, int(ts)),
+                '''INSERT OR IGNORE INTO chat_messages
+                       (client_id, sequence, conversation, from_operator, body, ts,
+                        service_id, service_metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (client_id, chosen, int(conversation), int(bool(from_operator)), body,
+                 int(ts), service_id, service_blob),
             )
             cursor.execute(
-                'DELETE FROM client_chat_messages WHERE client_id = ? AND sequence <= ?',
-                (client_id, sequence - max(0, int(keep_per_client))),
+                '''DELETE FROM chat_messages
+                   WHERE client_id = ? AND sequence NOT IN (
+                       SELECT sequence FROM chat_messages WHERE client_id = ?
+                       ORDER BY sequence DESC LIMIT ?)''',
+                (client_id, client_id, max(0, int(keep_per_client))),
             )
-            return sequence
+            cursor.execute(
+                '''DELETE FROM chat_conversations
+                   WHERE client_id = ?
+                     AND number < (SELECT MAX(number) FROM chat_conversations WHERE client_id = ?)
+                     AND NOT EXISTS (SELECT 1 FROM chat_messages m
+                                     WHERE m.client_id = chat_conversations.client_id
+                                       AND m.conversation = chat_conversations.number)''',
+                (client_id, client_id),
+            )
+            return chosen
         return self._transaction(work)
 
-    def get_client_chat_messages(self, client_id: str, after_sequence: int = 0,
-                                 limit: int = 200) -> List[dict]:
-        """The messages of one client's thread with a sequence over ``after_sequence``.
+    def get_chat_latest(self, client_id: str) -> int:
+        """The last sequence of the messages of ``client_id``; 0 if it has none."""
+        row = self._execute(
+            'SELECT MAX(sequence) FROM chat_messages WHERE client_id = ?', (client_id,),
+        ).fetchone()
+        return int(row[0] or 0)
 
-        In order of sequence, at most ``limit``. With more than ``limit`` after the
-        cursor, these are the *first* ones after it, so a reader that moves its cursor
-        to the last sequence it got reads the whole thread, page by page.
+    def get_chat_messages_after(self, client_id: str, after_sequence: int = 0,
+                                limit: int = 200) -> List[dict]:
+        """The messages of ``client_id`` with a sequence over ``after_sequence``, in order.
+
+        All its conversations together, the first ``limit`` after the cursor (not the
+        newest ones), so a reader that moves its cursor to the last sequence that it got
+        reads everything. ``service_metadata`` is the serialized Metadata, for the wire.
         """
-        result = self._execute('''
-            SELECT sequence, from_operator, body, ts
-            FROM client_chat_messages
-            WHERE client_id = ? AND sequence > ?
-            ORDER BY sequence ASC
-            LIMIT ?
-        ''', (client_id, max(0, int(after_sequence)), max(0, int(limit))))
+        result = self._execute(
+            '''SELECT sequence, conversation, from_operator, body, ts, service_id,
+                      service_metadata
+               FROM chat_messages
+               WHERE client_id = ? AND sequence > ?
+               ORDER BY sequence ASC
+               LIMIT ?''',
+            (client_id, int(after_sequence), max(0, int(limit))),
+        )
+        return [
+            {
+                'sequence': int(row['sequence']),
+                'conversation': int(row['conversation']),
+                'from_operator': bool(row['from_operator']),
+                'body': row['body'],
+                'ts': int(row['ts']),
+                'service': _chat_service(row),
+                'service_metadata': row['service_metadata'],
+            }
+            for row in result.fetchall()
+        ]
+
+    def get_conversation_messages(self, client_id: str, conversation: int,
+                                  limit: int = 200) -> List[dict]:
+        """The newest ``limit`` messages of one conversation, oldest first."""
+        result = self._execute(
+            '''SELECT sequence, from_operator, body, ts, service_id, service_metadata
+               FROM chat_messages
+               WHERE client_id = ? AND conversation = ?
+               ORDER BY sequence DESC
+               LIMIT ?''',
+            (client_id, int(conversation), max(0, int(limit))),
+        )
         return [
             {
                 'sequence': int(row['sequence']),
                 'from_operator': bool(row['from_operator']),
                 'body': row['body'],
                 'ts': int(row['ts']),
-            }
-            for row in result.fetchall()
-        ]
-
-    def get_client_chat_latest(self, client_id: str) -> int:
-        """The last sequence of the thread of ``client_id``; 0 if it has no message."""
-        row = self._execute(
-            'SELECT MAX(sequence) FROM client_chat_messages WHERE client_id = ?',
-            (client_id,),
-        ).fetchone()
-        return int(row[0] or 0)
-
-    def list_client_chat_threads(self) -> List[dict]:
-        """One row per client with a thread, the most recently active first.
-
-        ``client_id``, ``messages`` (how many are stored), ``latest`` (last sequence),
-        ``last_ts``, and ``last_from_operator`` (False means the client wrote last, so
-        the thread waits for an answer).
-        """
-        result = self._execute('''
-            SELECT m.client_id AS client_id,
-                   (SELECT COUNT(*) FROM client_chat_messages c
-                    WHERE c.client_id = m.client_id) AS messages,
-                   m.sequence AS latest, m.ts AS last_ts,
-                   m.from_operator AS last_from_operator
-            FROM client_chat_messages m
-            WHERE m.sequence = (SELECT MAX(sequence) FROM client_chat_messages
-                                WHERE client_id = m.client_id)
-            ORDER BY m.ts DESC, m.client_id
-        ''')
-        return [
-            {
-                'client_id': row['client_id'],
-                'messages': int(row['messages']),
-                'latest': int(row['latest']),
-                'last_ts': int(row['last_ts']),
-                'last_from_operator': bool(row['last_from_operator']),
-            }
-            for row in result.fetchall()
-        ]
-
-    def get_chat_messages(self, peer_id: str, limit: int = 100) -> List[dict]:
-        """The stored conversation with ``peer_id``, oldest first, capped at ``limit``.
-
-        Every message with this peer, threaded or not -- the flat view. See
-        :meth:`get_conversation_messages` for one thread alone.
-        """
-        result = self._execute('''
-            SELECT from_us, body, ts, received_at, conversation_id, service_id, service_metadata
-            FROM peer_chat_messages
-            WHERE peer_id = ?
-            ORDER BY id DESC
-            LIMIT ?
-        ''', (peer_id, max(0, int(limit))))
-        return [
-            {
-                'from_us': bool(row['from_us']),
-                'body': row['body'],
-                'ts': int(row['ts']),
-                'received_at': row['received_at'],
-                'conversation_id': row['conversation_id'],
                 'service': _chat_service(row),
             }
             for row in reversed(result.fetchall())
         ]
 
-    def get_conversation_messages(self, conversation_id: str, limit: int = 200) -> List[dict]:
-        """Every message in one thread, oldest first, capped at ``limit``."""
-        result = self._execute('''
-            SELECT from_us, body, ts, received_at, service_id, service_metadata
-            FROM peer_chat_messages
-            WHERE conversation_id = ?
-            ORDER BY id DESC
-            LIMIT ?
-        ''', (conversation_id, max(0, int(limit))))
-        return [
-            {
-                'from_us': bool(row['from_us']),
-                'body': row['body'],
-                'ts': int(row['ts']),
-                'received_at': row['received_at'],
-                'service': _chat_service(row),
-            }
-            for row in reversed(result.fetchall())
-        ]
-
-    def create_conversation(self, conversation_id: str, peer_id: str, opened_by_us: bool,
-                            topic: str = "") -> bool:
-        """Open a new thread, or silently do nothing if ``conversation_id`` exists.
-
-        The silent no-op (``INSERT OR IGNORE``) is what lets
-        :func:`chat.receive_chat_message` call this unconditionally on every
-        message: the first message of a peer-opened thread creates the row, and
-        every one after it is the same statement finding nothing to do.
-        """
-        if not self.peer_exists(peer_id=peer_id):
-            logger.LOGGER(f'Cannot open a conversation: peer {peer_id} does not exist')
-            return False
+    def close_chat_conversation(self, client_id: str, number: int) -> bool:
+        """Mark a conversation closed. Local bookkeeping: nothing travels to the other side."""
         try:
-            self._execute('''
-                INSERT OR IGNORE INTO peer_chat_conversations
-                    (id, peer_id, opened_by_us, topic)
-                VALUES (?, ?, ?, ?)
-            ''', (conversation_id, peer_id, int(bool(opened_by_us)), topic or None))
+            self._execute(
+                '''UPDATE chat_conversations SET closed_at = CURRENT_TIMESTAMP
+                   WHERE client_id = ? AND number = ? AND closed_at IS NULL''',
+                (client_id, int(number)),
+            )
             return True
         except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to open conversation {conversation_id}: {e}')
+            logger.LOGGER(f'Failed to close conversation {client_id}#{number}: {e}')
             return False
 
-    def close_conversation(self, conversation_id: str) -> bool:
-        """Mark a thread closed. Local bookkeeping only -- nothing travels to the peer."""
+    def reopen_chat_conversation(self, client_id: str, number: int) -> bool:
+        """Undo :meth:`close_chat_conversation`. Also local only."""
         try:
-            self._execute('''
-                UPDATE peer_chat_conversations
-                SET closed_at = CURRENT_TIMESTAMP
-                WHERE id = ? AND closed_at IS NULL
-            ''', (conversation_id,))
+            self._execute(
+                'UPDATE chat_conversations SET closed_at = NULL WHERE client_id = ? AND number = ?',
+                (client_id, int(number)),
+            )
             return True
         except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to close conversation {conversation_id}: {e}')
+            logger.LOGGER(f'Failed to reopen conversation {client_id}#{number}: {e}')
             return False
 
-    def reopen_conversation(self, conversation_id: str) -> bool:
-        """Undo :meth:`close_conversation`. Also local-only, same as closing."""
-        try:
-            self._execute('''
-                UPDATE peer_chat_conversations
-                SET closed_at = NULL
-                WHERE id = ?
-            ''', (conversation_id,))
-            return True
-        except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to reopen conversation {conversation_id}: {e}')
-            return False
-
-    def conversation_exists(self, conversation_id: str) -> bool:
-        result = self._execute('''
-            SELECT 1 FROM peer_chat_conversations WHERE id = ?
-        ''', (conversation_id,))
-        return result.fetchone() is not None
-
-    def get_conversation(self, conversation_id: str) -> Optional[dict]:
-        """One thread's own row (who opened it, its topic, when it opened/closed)."""
-        result = self._execute('''
-            SELECT id, peer_id, opened_by_us, topic, opened_at, closed_at
-            FROM peer_chat_conversations
-            WHERE id = ?
-        ''', (conversation_id,))
-        row = result.fetchone()
-        if row is None:
-            return None
+    def _thread_row(self, row) -> dict:
         return {
-            'id': row['id'],
+            'client_id': row['client_id'],
+            'number': int(row['number']),
+            'ref': row['ref'],
             'peer_id': row['peer_id'],
             'opened_by_us': bool(row['opened_by_us']),
             'topic': row['topic'],
             'opened_at': row['opened_at'],
             'closed_at': row['closed_at'],
+            'messages': int(row['messages']),
+            'latest': int(row['latest']),
+            'last_ts': int(row['last_ts']),
+            'last_from_operator': bool(row['last_from_operator']),
         }
 
-    def list_conversations(self, peer_id: Optional[str] = None,
-                           opened_by_us: Optional[bool] = None,
-                           include_closed: bool = True) -> List[dict]:
-        """Threads, most recently opened first -- the two TUI pages read this.
+    def get_chat_thread_row(self, client_id: str, number: int) -> Optional[dict]:
+        """One conversation as the view `chat_threads` shows it, or None."""
+        row = self._execute(
+            'SELECT * FROM chat_threads WHERE client_id = ? AND number = ?',
+            (client_id, int(number)),
+        ).fetchone()
+        return None if row is None else self._thread_row(row)
 
-        ``opened_by_us=True`` is "what's open, per peer" (issue #431); ``False`` is
-        the reverse page, conversations opened *by our clients* -- peers who
-        reached out to us. ``peer_id`` narrows to one peer's threads on either page;
-        left unset, every peer's.
+    def list_chat_threads(self, peer_id: Optional[str] = None,
+                          opened_by_us: Optional[bool] = None,
+                          include_closed: bool = True) -> List[dict]:
+        """The conversations, the most recently active first.
+
+        ``opened_by_us=True`` is the mirrors (this node is the client), ``False`` the
+        conversations of the clients of this node. ``peer_id`` narrows to one peer.
         """
         clauses = []
         params: list = []
@@ -3949,21 +3880,21 @@ class SQLConnection(metaclass=Singleton):
         if not include_closed:
             clauses.append('closed_at IS NULL')
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
-        result = self._execute(f'''
-            SELECT id, peer_id, opened_by_us, topic, opened_at, closed_at
-            FROM peer_chat_conversations
-            {where}
-            ORDER BY opened_at DESC
-        ''', tuple(params))
+        result = self._execute(
+            f'''SELECT * FROM chat_threads {where}
+                ORDER BY last_ts DESC, opened_at DESC, client_id, number DESC''',
+            tuple(params),
+        )
+        return [self._thread_row(row) for row in result.fetchall()]
+
+    def get_mirrored_clients(self) -> List[dict]:
+        """The ``(client_id, remote_peer_id)`` pairs that have a mirror here."""
+        result = self._execute(
+            '''SELECT DISTINCT client_id, remote_peer_id FROM chat_conversations
+               WHERE remote_peer_id IS NOT NULL'''
+        )
         return [
-            {
-                'id': row['id'],
-                'peer_id': row['peer_id'],
-                'opened_by_us': bool(row['opened_by_us']),
-                'topic': row['topic'],
-                'opened_at': row['opened_at'],
-                'closed_at': row['closed_at'],
-            }
+            {'client_id': row['client_id'], 'peer_id': row['remote_peer_id']}
             for row in result.fetchall()
         ]
 
