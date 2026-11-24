@@ -529,8 +529,42 @@ if __name__ == '__main__':
                         print("Error: --receipt requires a file path", flush=True)
                         sys.exit(1)
 
+                # What the client pays at the start: an amount (--initial-mu), or a time
+                # that the node turns into an amount from its own quote (--for).
+                from src.commands.execute import parse_duration
+                initial_mu = None
+                if "--initial-mu" in args:
+                    from src.utils.monetary import parse_to_mu
+                    try:
+                        mu_index = args.index("--initial-mu")
+                        initial_mu = parse_to_mu(args[mu_index + 1])
+                        args = args[:mu_index] + args[mu_index + 2:]
+                    except IndexError:
+                        print("Error: --initial-mu requires an amount", flush=True)
+                        sys.exit(1)
+                    except ValueError as e:
+                        print(f"Error: --initial-mu: {e}", flush=True)
+                        sys.exit(1)
+
+                lifetime_seconds = None
+                if "--for" in args:
+                    try:
+                        for_index = args.index("--for")
+                        lifetime_seconds = parse_duration(args[for_index + 1])
+                        args = args[:for_index] + args[for_index + 2:]
+                    except IndexError:
+                        print("Error: --for requires a time, such as 30m, 6h or 2d", flush=True)
+                        sys.exit(1)
+                    except ValueError as e:
+                        print(f"Error: --for: {e}", flush=True)
+                        sys.exit(1)
+
+                if initial_mu is not None and lifetime_seconds is not None:
+                    print("Error: use either --initial-mu or --for, not both", flush=True)
+                    sys.exit(1)
+
                 if len(args) != 1:
-                    print("Usage: nodo execute [--name instance-name] [-e key value] [--no-input] [--receipt file] <service id|service tag|'.celaut' file path>", flush=True)
+                    print("Usage: nodo execute [--name instance-name] [-e key value] [--no-input] [--receipt file] [--initial-mu amount | --for time] <service id|service tag|'.celaut' file path>", flush=True)
                     sys.exit(1)
 
                 try:
@@ -547,6 +581,8 @@ if __name__ == '__main__':
                     ask_envs=sys.stdin.isatty() and not no_input,
                     receipt_path=receipt_path,
                     show_closing=True,
+                    initial_mu=initial_mu,
+                    lifetime_seconds=lifetime_seconds,
                 )
 
             case "force_execution":

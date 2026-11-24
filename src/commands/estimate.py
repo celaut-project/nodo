@@ -99,6 +99,22 @@ def suggested_initial_mu(estimated_cost, periods=None) -> int:
         price_bound.of_quote(estimated_cost), periods)
 
 
+def periods_for_seconds(estimated_cost, seconds: int) -> int:
+    """The maintenance periods of the quote that cover ``seconds`` (rounded up, one at least)."""
+    loop_seconds = int(estimated_cost.maintenance_seconds_loop or 0)
+    if loop_seconds <= 0:
+        return 1
+    return max(1, math.ceil(int(seconds) / loop_seconds))
+
+
+def initial_mu_for_seconds(estimated_cost, seconds: int) -> int:
+    """The ``initial_mu`` that funds ``seconds`` of life at the quote of this node: its
+    ``suggested_initial_mu`` for that many periods. The price bound of the quote is in it,
+    so a rise of the price inside the bound is covered.
+    """
+    return suggested_initial_mu(estimated_cost, periods_for_seconds(estimated_cost, seconds))
+
+
 def estimate(service: str) -> None:
     service = resolve_service_hash(service)
     if not service:

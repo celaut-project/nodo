@@ -343,7 +343,7 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  ```bash
  nodo execute 1234567890abcdef
  nodo execute -e workers 8 -e timeout 20 my_service_tag
- # signature: execute [--name <instance-name>] [-e key value]... [--no-input] <service id | tag | '.celaut.bee' path>
+ # signature: execute [--name <instance-name>] [-e key value]... [--no-input] [--initial-mu <amount> | --for <time>] <service id | tag | '.celaut.bee' path>
  ```
  `execute` asks only for the vars the service declares in its container. A
  `${VAR}` in a network is an open key, not a request: give it with `-e` if you

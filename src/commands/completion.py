@@ -84,7 +84,7 @@ SECOND_ARG_PATH_COMMANDS = ["export"]
 # Flags of each command, offered when the word being typed starts with "-".
 # Keep this in sync with the flags that nodo.py parses for each command.
 COMMAND_FLAGS = {
-    "execute": ["--name", "-e", "--no-input", "--receipt"],
+    "execute": ["--name", "-e", "--no-input", "--receipt", "--initial-mu", "--for"],
     "force_execution": ["--name", "-e", "--no-input", "--initial-mu", "--initial-mu-from-estimate"],
     "get": ["--now"],
     "export": ["--raw"],

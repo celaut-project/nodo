@@ -23,7 +23,7 @@ from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved,
 from src.utils.instance_names import inject_instance_name
 from src.utils.registry_errors import ServiceRegistryError
 from src.utils import service_envs
-from src.utils.utils import load_service_from_disk
+from src.utils.utils import load_service_from_disk, to_amount
 
 env_manager = ConfigManager()
 
@@ -75,6 +75,7 @@ def generator(
     client_funding_mu: int = DEV_CLIENT_FUNDING_MU,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
+    initial_mu: int | None = None,
 ) -> Generator[Any, None, None]:
     try:
         client_id = get_execute_client(amount_mu=client_funding_mu)
@@ -87,7 +88,11 @@ def generator(
         # No initial_mu: the node uses the builds plus a balance that it fills from the
         # requested resources, for deposits.DEFAULT_INITIAL_PERIODS periods, in its own MU.
         # The client pays that amount, and the node takes the build out of it (#563).
+        # With initial_mu (`--initial-mu`, `--for`): that amount is what the client pays,
+        # the build of this node included, in the MU of this node.
         config = celaut_pb2.Configuration()
+        if initial_mu:
+            config.initial_mu.CopyFrom(to_amount(initial_mu))
         if envs:
             keyvalue.update(config.environment_variables, {
                 k: v.encode() for k, v in envs.items()
@@ -203,6 +208,36 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
     finally:
         if channel is not None:
             channel.close()
+
+
+_DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def parse_duration(text: str) -> int:
+    """Seconds of a time such as ``90m``, ``6h``, ``2d`` or ``1h30m``. ``ValueError`` if not.
+
+    A unit (``s``, ``m``, ``h``, ``d``) is required on every part: ``30`` alone is refused,
+    so that nobody has to guess whether it is minutes or seconds.
+    """
+    import re
+    text = (text or "").strip().lower()
+    if not re.fullmatch(r"(\d+[smhd])+", text):
+        raise ValueError(f"'{text}' is not a time; use a number and a unit, such as 30m, 6h, 2d or 1h30m")
+    total = sum(int(n) * _DURATION_UNITS[u] for n, u in re.findall(r"(\d+)([smhd])", text))
+    if total <= 0:
+        raise ValueError("the time must be more than zero")
+    return total
+
+
+def format_duration(seconds: int) -> str:
+    """``parse_duration`` backwards: 5400 is ``1h30m``."""
+    seconds = int(seconds)
+    parts = []
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60), ("s", 1)):
+        n, seconds = divmod(seconds, size)
+        if n:
+            parts.append(f"{n}{unit}")
+    return "".join(parts) or "0s"
 
 
 #: `execute --remote` is gone (#437): the address `execute` hands back is only
@@ -372,6 +407,8 @@ def execute(
     ask_envs: bool = False,
     receipt_path: str | None = None,
     show_closing: bool = False,
+    initial_mu: int | None = None,
+    lifetime_seconds: int | None = None,
 ):
     """Launch ``service`` through this node's gateway.
 
@@ -386,7 +423,23 @@ def execute(
     (:func:`complete_envs`), asking for the missing ones when ``ask_envs`` is set. Both
     are off by default so a programmatic caller (``core_services.runtime``) launches
     exactly as before; ``nodo execute`` turns them on.
+
+    ``initial_mu`` is what the client pays at the start, in MU (``--initial-mu``).
+    ``lifetime_seconds`` (``--for``) asks this node for its quote and funds the start for
+    that time: the ``initial_mu`` is the one that ``nodo estimate`` suggests for that many
+    maintenance periods. It is a budget, not a promise of a life: the node can stop the
+    instance for a cause that is not the balance. The two do not go together.
     """
+    if initial_mu is not None and lifetime_seconds is not None:
+        print("❌ Use either --initial-mu or --for, not both.")
+        return
+    if initial_mu is not None and initial_mu <= 0:
+        print("❌ The initial MU must be more than zero.")
+        return
+    if lifetime_seconds is not None and lifetime_seconds <= 0:
+        print("❌ The time of --for must be more than zero.")
+        return
+
     sink = open(os.devnull, "w") if silent else None
 
     try:
@@ -411,6 +464,22 @@ def execute(
             if envs is None:
                 return
 
+        if lifetime_seconds is not None:
+            # The same quote and the same funding as `nodo estimate`, for that time.
+            from src.commands.estimate import fetch_quote, initial_mu_for_seconds, periods_for_seconds
+            from src.utils.monetary import format_mu
+
+            quote = fetch_quote(service, announce=False)
+            if quote is None:
+                return
+            initial_mu = initial_mu_for_seconds(quote, lifetime_seconds)
+            print(
+                f"Initial MU for {format_duration(lifetime_seconds)} "
+                f"({periods_for_seconds(quote, lifetime_seconds)} maintenance periods): "
+                f"{format_mu(initial_mu)}",
+                flush=True,
+            )
+
         # What this node does at closing time, before the launch (#344). Never a reason
         # to stop the launch.
         if show_closing and not silent:
@@ -423,6 +492,7 @@ def execute(
                 _hash=service,
                 envs=envs,
                 instance_name=instance_name,
+                initial_mu=initial_mu,
             ),
             success_message="🚀 Service launched successfully!\n",
         )

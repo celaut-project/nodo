@@ -42,17 +42,21 @@ Every command an agent needs is non-interactive and most have a `--json` form; s
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--name <instance-name>] [-e key value] [--no-input] [--receipt <file>] <service id | service tag | '.celaut.bee' file path>`**  
+- **execute `[--name <instance-name>] [-e key value] [--no-input] [--receipt <file>] [--initial-mu <amount> | --for <time>] <service id | service tag | '.celaut.bee' file path>`**  
   Launches a service instance. The address it prints is reachable from this host only; use `nodo tunnel` to reach the instance from elsewhere. Use `--name` to assign a human-readable instance name. Use `-e` to add service environment variables.  
   `execute` compares the `-e` values with the env vars that the service declares (see `nodo service_envs`). The node does not say which vars the service needs, and the service may not work without all of them, so none is forced.  
   - In a terminal, `execute` asks one by one for each var that was not given with `-e`. Press Enter to leave a var unset.  
   - Without a terminal, or with `--no-input`, `execute` does not ask. It reports the missing vars and starts the instance without them.  
   `execute` never prints the values, only the names.  
   Use `--receipt <file>` to keep the signed start receipt of the instance (one JSON line, appended). Check it with `nodo receipt verify <file> --token <instance>` (see [Execution receipts](EXECUTION_RECEIPTS.md)).  
+  Use `--initial-mu <amount>` to set what you pay at the start, in the display unit (MU by default). The build of this node is taken out of it, as in `force_execution`. Without it, the node funds the start with the builds plus `deposits.DEFAULT_INITIAL_PERIODS` periods of maintenance.  
+  Use `--for <time>` (`30m`, `6h`, `2d`, `1h30m`; a unit is required) to say how long you want the instance to live. `execute` asks this node for its quote, takes the maintenance periods that cover that time (rounded up), and funds the start with the amount that `nodo estimate` suggests for them: the `cost` plus the funding sum of those periods, at the price bound of the quote. It prints the amount before the launch. The quote is that of this node, also when the service is delegated to a peer. This is a budget, not a promise of a long life: the node can stop the instance for another cause, such as the closing time. The two flags do not go together.  
   Before the launch, `execute` asks the node for its quote and prints what the node does at closing time: the next close of its activity window (in local time, with the time left) and the action (`refuse`, `stop` or `hibernate`). This is not a promise of a long life: the node can stop for a cause that is not in its schedule. If the quote cannot be read, `execute` prints nothing and launches as before.  
   **Example:**  
   `nodo execute 1234567890abcdef`
   `nodo execute -e workers 8 -e timeout 20 1234567890abcdef`
+  `nodo execute --for 6h 1234567890abcdef`
+  `nodo execute --initial-mu 50M 1234567890abcdef`
   `nodo execute --no-input -e BLOCK_ID 9a3f… my_service_tag`
 
 - **statement `[<account>]` `[--from SEQ]` `[--limit N]` `[--kind KIND]` `[--json]`**  
@@ -1390,7 +1394,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `remove <service>` | drop a service from the registry (root) |
 | `integrity [<service>] [--fix]` | check stored blocks against their hashes |
 | `estimate <service>` | what an execution would cost |
-| `execute [--name n] [-e k v] <service>` | run a service |
+| `execute [--name n] [-e k v] [--initial-mu amount \| --for time] <service>` | run a service |
 | `instances [<search>] [--grouped] [--json]` | what is running |
 | `observe <instance> [--save <path>]` | live metrics and network capture (streams; Ctrl+C) |
 | `tunnel <instance> <slot> [...] [--detach] [--json]` | reach an instance's port from here (until stopped; `--detach`: in the background) |
