@@ -37,14 +37,33 @@ nodes can want different behavior, the rule is a formal.
 yes, it is a formal, not a field and not an enum value. Memory, CPU, a benchmark, a
 price, a signature scheme: each one is one case of an open set.
 
+Some things pass both tests: two nodes cannot work together if they disagree on them,
+and a new case can appear (a signature scheme, a hash algorithm, a transport, a
+payment protocol). So there are three classes, not two:
+
+1. A constant of the contract.
+2. A formal on which two nodes must agree to do one thing together.
+3. A formal that a node can ignore (for example a benchmark that it did not measure).
+
+For the second class, the contract holds a place for the formal, never the thing. Two
+nodes then agree by the exact bytes of that formal. They work together for that thing
+only when the bytes are equal, or when one of them finds an implementation (rule 1.6).
+
 **Rule 1.5. The elemental test.** Some concepts are not cases of an open set. They
 are part of what the contract describes, and the contract cannot describe its basic
-objects without them. An instance is a process that runs on a defined container. So
-"there is a process" and "there is no process" (hibernated) are elemental: no other
-state of the same kind can appear. Keep an elemental concept in the contract, once.
-Its variations (the causes, the costs, what the node keeps, what wakes it) are
-formals. Ask: "Is this a new kind of thing, or a new way to do a thing that the
-contract already has?" Only the first can be a candidate for the contract.
+objects without them. A concept is elemental only if you can write it as one
+statement about the basic objects of the contract, and its negation, with no third
+case. An instance is a process that runs on a defined container, so "the instance has
+a process" and "the instance has no process" (hibernated) are elemental.
+
+Keep an elemental concept in the contract, once. A value of the contract for an
+elemental concept says only that statement. If the value also says what the node
+does, when, or at what cost, that part is a formal. For example, the three outcomes
+of a running instance when the window of a node closes (keep the process, lose it,
+end) are elemental, but "refuse new children until the window opens" or "wake it when
+the window opens" are behaviors, so they are formals. Ask: "Is this a new kind of
+thing, or a new way to do a thing that the contract already has?" Only the first can
+be a candidate for the contract.
 
 **Rule 1.6. An unknown formal is a question, not an end.** A node does not need to
 know every formal. The `tags`, the `prose` and the `formal` bytes of an unknown entry
@@ -53,7 +72,7 @@ service and use it. So the network adapts by itself: a node learns a new formal 
 it meets it, with no change to the contract and no new release of the node.
 
 Example: a node speaks only one signature scheme. It meets a peer with another scheme
-(`Peer.signature_scheme`). It cannot verify the peer by itself. But the scheme is a
+(the scheme of the signature of its `Peer`). It cannot verify the peer by itself. But the scheme is a
 formal, so the node can look for a celaut service that verifies signatures of that
 scheme, run it, and verify the peer. If the scheme were a field or an enum value, the
 node could do nothing: the contract would have to change first.
@@ -64,9 +83,37 @@ Consequences:
   person, and the exact bytes as the search key for a node.
 - A thing that a service can do for a node (verify, convert, measure, transport) is
   a good candidate for a formal: the network can supply it.
-- The trust moves to the service that the node runs. The node selects that service
-  by its content hash, as it selects any other service. The contract does not add a
-  trust rule for this.
+- The trust moves to the binding "this service implements this formal". A node uses
+  a service for a formal that it does not know only when a party that the node
+  already trusts binds the exact bytes of the formal to the content hash of the
+  service: its operator, or publishers above its reputation threshold. A binding from
+  a party that gains from the answer is not valid: the peer whose signature is
+  verified, or the author of the service that is run. Without a trusted binding, the
+  old answer stays: a node never accepts a signature that nobody verified.
+- The rule has a limit. A service can verify, convert or measure, because these are
+  functions with an input and an output. A service cannot enforce a policy inside
+  the hypervisor of the node.
+
+**Rule 1.7. The contract is complete; an implementation is a subset.** The contract
+can define more than one node implements. A node that does not implement a part of
+the contract does not announce it, or refuses with the cause (rule 3.7). What the
+contract defines and a node does not implement is not a defect of that node. So a
+design can close the contract now and leave the work of the node for later. Do not
+make the node do more work only because the contract allows it.
+
+**Rule 1.8. Variants, not versions.** Nobody owns the numbering of the contract.
+Independent variants of it can exist, and they cannot agree in advance to never
+reuse a field number. So the defence against a wrong reading is not a discipline of
+field numbers. It is this:
+
+- Between two nodes, each address announces the schema of its messages (the layer
+  `celaut-gateway`), and two nodes compare it field by field before they talk.
+- A node that reads a message checks that it makes sense, and refuses a field number
+  that it does not know in a requirement (rule 3.6).
+
+A message that does not come directly from the node that wrote it (a service that a
+third node forwards, or a service in a file) has no announced schema. That risk is
+known, and `protos/PENDING.md` records it.
 
 ## 2. The shape of a formal
 
@@ -90,31 +137,66 @@ the formal. "Release this memory when the instance hibernates" is a behavior: it
 in a policy attached to the entry, never in the formal. If a behavior goes in the
 formal, one thing gets two formals, and two nodes no longer compare equal bytes.
 
+**Rule 2.5. A wire schema is compared item by item.** One kind of formal is not
+compared by exact bytes: the description of a wire schema (the layers of an address).
+It is compared item by item. Two descriptions are compatible when they agree on each
+item that both have. Only items that can grow by addition (a field number, an RPC) go
+into such a formal. A rule that must be equal on both sides is a formal of its own,
+compared by exact bytes, so that one changed rule does not block the whole layer.
+
+**Rule 2.6. A formal that replaces another names it.** The new formal names the old
+one by its id, and says that a list with both is not valid. This is necessary because
+some formals hold their values (for example `values=never,on_tunnel`): a new value is
+a new formal, and without this rule one list could hold the old and the new one.
+
 ## 3. Lists
 
-**Rule 3.1. Every list has the same rules.** No two entries with the same formal
-(or the same key). The sender sorts by formal bytes. The order has no meaning. An
-entry with an empty formal is not valid. These rules make the encoding canonical, so
-that a signature and a hash have one answer.
+**Rule 3.1. Lists of formals have the same rules.** Every list of entries that a
+formal identifies (`Policy`, `Quantity`, `Rate`, `Limit`) has these rules: no two
+entries with the same formal (with the same scope, where the entry has one); the
+sender sorts by formal bytes; the order has no meaning; an entry with an empty formal
+is not valid. Any other list states its own rules: if its order has a meaning, and if
+it can repeat an entry. In a message that has an id or a signature, a reader refuses
+a list of formals that is not sorted or that has a repeated formal. Otherwise one
+message could have two ids.
 
-**Rule 3.2. The position decides what an unknown formal does, not the type.**
-- In a requirement or a limit, a node refuses an unknown formal. An old node never
-  opens what an author closed (fail closed).
-- In an announcement, a node keeps an unknown formal and does not use it. A node
-  never refuses a peer because the peer knows more (fail open).
+**Rule 3.2. The position decides what an unknown formal does, not the type.** The
+position depends on who is bound:
+
+- An entry is in a **requirement** for a reader when the entry binds that reader: the
+  reader must do what it says, or the reader accepts what it says. A reader refuses
+  an entry that it does not know. An old node never opens what an author closed (fail
+  closed).
+- An entry is in an **announcement** for a reader when the entry only informs that
+  reader. A reader keeps an entry that it does not know, and does not use it. A node
+  never refuses a peer because the peer knows more (fail open). A report and an
+  answer are announcements.
 - In both positions, a node can first look for a service that knows the formal
   (rule 1.6). It refuses or ignores only if it finds none, or does not want to look.
 
-Every list states which of the two positions it is in.
+The contract states the position of each list for each reader. No type states it.
 
-The rule applies to every party, not only to the node that runs a service. A caller
-that gets an offer is in a requirement position: if the offer has a formal that the
-caller does not know (for example what the node does when its window closes), the
-caller does not accept the offer.
+The rule applies to every party, not only to the node that runs a service. An offer
+shows this. Its terms are in two lists, because the caller acts in two ways with no
+need to read the formal (rule 3.4):
+
+- A **condition** binds the caller (for example what the node does with the instance
+  when its window closes). A caller that does not know a condition does not accept
+  the offer.
+- A **promise** binds the node (for example a bound on the growth of the price). A
+  caller that does not know a promise ignores it. A promise never reduces what the
+  caller gets.
+
+The test: if the caller is better off when the term is absent, it is a condition. If
+the caller is equal or worse off when it is absent, it is a promise.
 
 **Rule 3.3. One comparison rule.** For quantities: more is better. A thing that is
 better when it is less is written as its inverse (a latency becomes a rate). Do not
-add a direction flag per entry.
+add a direction flag per entry. A `Quantity` is only for a thing that a node compares
+with "greater than or equal". A resource is also a thing that adds: the sum of the
+values of the instances stays within the capacity. Any other requirement (an exact
+value, a relative weight, a feature that is present or not) is a `Policy`, or it is
+not in the contract.
 
 **Rule 3.4. Two lists only when the node acts differently.** Make two lists (or two
 messages) only if a node must treat the entries differently with no need to read the
@@ -132,6 +214,17 @@ can be about an action and not a resource. So each role is its own list, each fa
 in one place, and a formal that is about another formal names it by its id (rule 6.3).
 A reader that wants "everything about one thing" joins the lists by the id. That view
 is for the reader, not for the contract.
+
+**Rule 3.6. An unknown field number follows rule 3.2.** Protobuf has its own unknown
+thing: a field number. In a requirement, the reader refuses: a node does not run a
+service that has a field that it does not know. In an announcement, the reader keeps
+the field, and the signature covers it (rule 6.2). A node that only stores or
+forwards a message keeps all its bytes.
+
+**Rule 3.7. A refusal names its cause.** When a node refuses because it does not know
+a formal, the answer gives the bytes of that formal: in a field of the answer, or in
+the details of the error status. Without this, the caller cannot try another node or
+use rule 1.6. Apply it to every refusal where the cause is a formal.
 
 ## 4. Fields
 
@@ -152,21 +245,32 @@ is complete by logic (for example yes/no, or the two ends of a stream). If someo
 can add a value later, the set is a formal.
 
 **Rule 4.5. Delete, do not deprecate, while in alpha.** A field with no use is
-removed. In alpha there is no compatibility to keep, so do not keep debt for it.
-After the contract is frozen, a change is a new formal, never a new field.
+removed. In alpha there is no compatibility to keep, so do not keep debt for it: a
+removed field leaves no `reserved` line, and the field numbers of each message stay
+compact (1 to n). After the contract is frozen, a new field is permitted only in an
+announcement that is signed over its bytes (rule 7.4).
 
 **Rule 4.6. A field does not fix what a formal defines.** If a formal defines a
 thing, no field and no comment of the contract can fix a property of that thing: its
 size, its encoding, its unit. For example, a public key "as 64 hexadecimal
 characters" fixes a size that only the signature scheme can define. A scheme with
-larger keys then breaks the contract.
+larger keys then breaks the contract. The contract says only "the bytes that the
+scheme defines". If the keys of a scheme are too large, the scheme (not the contract)
+can define its public key as a digest of the full key.
+
+**Rule 4.7. One message, one meaning.** Two RPCs do not share a message if a field has
+a meaning in only one of them. A refusal is a status code or an explicit field, never
+a special value of a field with another meaning (for example a token "REFUSED").
 
 ## 5. Text in the contract
 
-**Rule 5.1. The contract does not name a member of an open set.** If a comment in
-`celaut.proto` names a specific resource, benchmark, price, policy value or
-behavior ("memory", "CPU", "hibernate"), the rule in that comment probably belongs to
-a formal. Search the comments for such names when you review a change.
+**Rule 5.1. The contract does not name a member of an open set.** A comment and a
+field name of the contract do not name a member of an open set (a resource, a
+benchmark, a price, a policy value, a behavior, an algorithm). A comment can give a
+member only after the words "for example", and the sentence must stay true when the
+example is removed. A catalog of formals (their names and their bytes) is in the
+formal files (`protos/formals/`), never in the comments of the contract. Search the
+comments and the field names for such names when you review a change.
 
 **Rule 5.2. One word, one meaning.** Do not use one word for two things (for example
 "volatility" of a price and "volatility" of a score). Do not use two words for one
@@ -180,15 +284,30 @@ when it compares (at each placement). The contract states the honest form.
 
 **Rule 6.1. Exact numbers only.** Signed or hashed data has no floating-point
 values. A ratio is two integers, or a quotient that the reader calculates, not a
-fixed-point scale that the contract chooses.
+fixed-point scale that the contract chooses. A signed or hashed message has no
+`float`, `double` or signed integer field. A time, a period or a port is an unsigned
+integer.
 
-**Rule 6.2. Everything signed is canonical.** A message that is signed or hashed
-follows the list rules (3.1) and `docs/CANONICAL_ENCODING.md`. A change to such a
-message changes the signatures and the ids. Record each such change.
+**Rule 6.2. A signature covers bytes, not a message.** A node signs the exact bytes
+of a serialized message, in one envelope (`Signed`) for every signed message. A reader
+verifies the bytes as they came, and never serializes a message again to verify it.
+So a field that the reader does not know is covered by the signature, and a reader
+can verify and forward it. A signature never covers a text that a node builds from
+the fields by hand: each such text is one more format that two nodes must share. Only
+a message that has an id (a `Service`, a `Filesystem`) needs a canonical encoding
+(`docs/CANONICAL_ENCODING.md`).
 
 **Rule 6.3. Text names a formal by its id.** Where a formal must appear in text
-(JSON, logs, a CLI, a key in a configuration), use one fixed id of its bytes, never
-its tags.
+(JSON, logs, a CLI, a key in a configuration), use the id of its bytes, never its
+tags. The id is `<type>:<digest>`, both in lowercase hexadecimal. The type is the
+digest of the empty input, as in `Metadata.HashTag.Hash`. A short form is only for a
+display.
+
+**Rule 6.4. The contract never fixes a hash algorithm.** A field that holds a hash
+says its type (`Metadata.HashTag.Hash`: the type and the value). A comment that tells
+how a hash is calculated says "with the algorithm of its type", and never names an
+algorithm except as an example. An implementation selects its algorithm (nodo uses
+blake2b-256); that is a choice of the implementation, not of the contract.
 
 ## 7. Extension points
 
@@ -206,6 +325,13 @@ an answer for unknown entries.
 policy in one place, it must not be an enum value or a magic value in another place.
 One concept has one form in the whole contract.
 
+**Rule 7.4. Check the requirements before the freeze.** Rules 4.5 and 7.2 together
+make a trap: a place that has no list at the freeze can never get one. So, before the
+freeze, check each message that holds a requirement. It must have a list of
+`Policy`, or it must be a message that the node refuses when it has an unknown field
+(rule 3.6). After the freeze, a new field is permitted only in an announcement that
+is signed over its bytes. A new field is never permitted in a requirement.
+
 ## 8. The process
 
 Follow these steps for each change:
@@ -220,8 +346,10 @@ Follow these steps for each change:
 5. **Write the best argument against the proposal.** If the argument is good, change
    the proposal. A proposal that has no counter-argument is not examined enough.
 6. **Count.** Compare the contract before and after: fields, messages, enum values,
-   and the names of specific things in comments. A good change removes at least as
-   much as it adds, or it moves content from the contract to the formals.
+   the names of specific things in comments, and the keys of the layer formals that
+   must be equal on both sides (they are part of the contract in practice: if one
+   changes, old and new nodes stop to talk). A good change removes at least as much
+   as it adds, or it moves content from the contract to the formals.
 7. **Record what is open** in `protos/PENDING.md`. A question that is not closed does
    not go into the proto as a decision.
 
@@ -246,3 +374,13 @@ Follow these steps for each change:
   not use (rule 3.5).
 - A variation of an elemental concept made into a second concept: two states for one
   "no process" (rule 1.5).
+- An enum value or a field of an elemental concept that also says what the node
+  does, when, or at what cost (rule 1.5).
+- A signature over a text that a node builds from the fields by hand (rule 6.2).
+- A hash algorithm named in a comment or a field name (rule 6.4).
+- A `float` or a signed integer in a signed or hashed message (rule 6.1).
+- A refusal that gives only a text for a person, when its cause is a formal (rule
+  3.7).
+- A requirement with no list of `Policy` and no refusal of unknown fields (rule 7.4).
+- A term of an offer that can hurt the caller in the list that the caller can ignore
+  (rule 3.2).
