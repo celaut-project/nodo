@@ -24,6 +24,10 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`facts/guest-kernel.descriptor`](facts/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:26509ebd9c5e14da0697ed1ed31f3986da202024645516a2d9c722e198b0c69e` |
 | [`facts/pci-model.descriptor`](facts/pci-model.descriptor) | pci-model, pci | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1` |
 | [`facts/usb-model.descriptor`](facts/usb-model.descriptor) | usb-model, usb | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5` |
+| [`networks/all-addresses.descriptor`](networks/all-addresses.descriptor) | all-addresses, *, internet | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:54993b26f2e16a140f25aa6b364a8f3fc8e0f1640b858e1e1d903f91d269d634` |
+| [`networks/celaut-instances.descriptor`](networks/celaut-instances.descriptor) | celaut-instances | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a82825a2cd5e7acf69279d824ebaf835f408ecf442b39fdf35dcbda19519f3bf` |
+| [`networks/host-name.descriptor`](networks/host-name.descriptor) | host-name, domain, dns | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6236bd35a58a755b506c50942fb49c83868712c8fe5cef9472a9d391b0075590` |
+| [`networks/proof-of-work.descriptor`](networks/proof-of-work.descriptor) | proof-of-work, pow | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ac37fb1f604bd95a4fc3f6a4195188cf1053d89681b04b27050b60f6d80907ec` |
 | [`policies/api_slot/access.descriptor`](policies/api_slot/access.descriptor) | access | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5344aac7355624c44adb896f24d835327efdb5fe6b0826a14a0b570b496cd37e` |
 | [`policies/api_slot/tunnel_auth.descriptor`](policies/api_slot/tunnel_auth.descriptor) | tunnel_auth | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0f8206ffef0314db0229f0cb367686a9631b8f85cfd62eb2b82932432df78043` |
 | [`policies/api_slot/wake.descriptor`](policies/api_slot/wake.descriptor) | wake | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2ff042caf1404c444e8aa8d48961e797cd061c176bee27fd33b7351c9a4eaa9a` |
@@ -167,10 +171,6 @@ must know.
 
 | Name | Value | Today | Notes |
 | --- | --- | --- | --- |
-| `all-addresses` | empty | tag `*` (`src/utils/network_policy.py:106`) | |
-| `host-name` | the name and its ports | a lowercase tag with a dot; the formal key `port`, default ports 80 and 443 (`src/manager/networks.py:51-100,528`) | IPv4 only today. |
-| `celaut-instances` | the keys of the domain | any other tag; the formal is free `key=value` lines, compared by bytes (`networks.py:912`) | |
-| `proof-of-work` | the chain and the keys `pow.block_id`, `pow.min_cumulative_difficulty`, `pow.min_height`, `pow.max_tip_age_s` | tag `pow:<chain>`, formal `pow.*` (`src/manager/pow_networks.py:74-94`) | One descriptor, the chain in the value. Only Ergo resolves. |
 | (ledger with no addresses) | | tag `bitcoin` (`networks.py:149`) | It resolves to no peers: check if it is still necessary. |
 
 ### `dependency_sources/`

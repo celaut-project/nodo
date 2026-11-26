@@ -1,0 +1,20 @@
+tags: host-name, domain, dns
+
+A kind of network: one host name and its ports. The instance can connect to the IPv4
+addresses of the name, on these ports only.
+
+The value is key=value lines, sorted by key, separated by a newline. The key host is
+required: a lowercase DNS name with at least one ".". The key port is optional: a port
+from 1 to 65535. With no port, the ports are 80 and 443. Another key is not valid.
+Example: host=api.example.com and port=8443, one on each line.
+
+The node finds the members at each start: it resolves the A records of the name with
+its own resolver. It does not use IPv6. The node is bound.
+
+=== formal
+class=domain
+ipv6=not used
+members=the IPv4 addresses of the A records of host, resolved by the node at the start, on the ports
+name=host-name
+port.default=80 and 443
+value=key=value lines sorted by key: host (required, a lowercase DNS name with at least one '.'), port (optional, 1 to 65535); no other key

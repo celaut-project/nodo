@@ -1,0 +1,23 @@
+tags: proof-of-work, pow
+
+A kind of network: the nodes of one proof-of-work blockchain that are on one chain. A
+member is a node of the chain, as it reports its own state. The node does not verify
+the proof of work.
+
+The value is key=value lines, sorted by key, separated by a newline. The required keys
+are pow.chain (the name of the chain, for example ergo), pow.block_id (a block, in
+lowercase hexadecimal) and pow.min_cumulative_difficulty (the work since the genesis
+block, base 10). The optional keys are pow.min_height (base 10) and pow.max_tip_age_s
+(seconds, base 10). Another key is not valid.
+
+A member reports that its main chain contains pow.block_id, that its cumulative
+difficulty is at least pow.min_cumulative_difficulty, that its height is at least
+pow.min_height, and that its last block is not older than pow.max_tip_age_s. A node
+that cannot resolve the chain refuses. The node is bound.
+
+=== formal
+check=what each node reports about its own chain; the proof of work is not verified
+class=domain
+members=the nodes of the chain pow.chain whose main chain contains pow.block_id, with a cumulative difficulty of at least pow.min_cumulative_difficulty, a height of at least pow.min_height and a last block not older than pow.max_tip_age_s
+name=proof-of-work
+value=key=value lines sorted by key: pow.chain, pow.block_id (lowercase hexadecimal), pow.min_cumulative_difficulty (base 10) are required; pow.min_height (base 10) and pow.max_tip_age_s (seconds, base 10) are optional; no other key
