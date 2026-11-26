@@ -654,7 +654,7 @@ That is a policy on the **filesystem itself** — a sibling of `branch`, distinc
 the per-entry `ItemBranch.xattrs` — and only on the one `Container.filesystem` points
 at. A nested `Filesystem` (a subdirectory) is not separately mounted, so it can have no
 policy: a node refuses a service that has one there, and the packer does not write one.
-The definition of the setting is [`policies/read_mode.formal`](policies/read_mode.formal).
+The definition of the setting is [`protos/formals/policies/read_mode.formal`](../protos/formals/policies/read_mode.formal).
 Absent means `"rw"`, so a service that does not use it gets no `read_mode` policy;
 any value other than `"rw"` or `"ro"` is refused rather than resolved to a default.
 A service with `read_only_filesystem: true` gets a new service id: services packed
@@ -731,7 +731,7 @@ node would refuse.
 The packer always writes the policy `entry_metadata` (empty value) on the root
 `Filesystem`, because it always writes the seven keys `mode`, `uid`, `gid`, `mtime_ns`,
 `device.major`, `device.minor` and `device.is_block` in `ItemBranch.xattrs` of every
-entry. The definition is [`policies/entry_metadata.formal`](policies/entry_metadata.formal).
+entry. The definition is [`protos/formals/policies/entry_metadata.formal`](../protos/formals/policies/entry_metadata.formal).
 Without the policy a node reads no key and refuses a tree where an entry carries one of
 them. `read_mode: "ro"` needs the policy and all the keys on every entry. Every repacked
 service gets a new service id, also a service that does not use `read_only_filesystem`:

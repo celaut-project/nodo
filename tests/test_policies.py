@@ -27,7 +27,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
 Filesystem = celaut.Service.Container.Filesystem if IMPORT_ERROR is None else None
-DOCS = os.path.join(os.path.dirname(__file__), "..", "docs", "policies")
+DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "formals", "policies")
 
 
 def _policy(formal, value=b"", tags=()):

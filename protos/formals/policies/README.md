@@ -51,7 +51,7 @@ Declares a shared directory. The value is `key=value` lines, sorted by key, UTF-
 by a newline, with no empty or repeated key. Keys: `role` (required: `shared`, `guest` or
 `network`), `access` (`ro` or `rw`, default `rw`), `tag`, `env`, and `network` (only with
 `role=network`). Another key makes the value not valid. The rules of a share are in
-[SHARED_FILESYSTEMS.md](../SHARED_FILESYSTEMS.md).
+[SHARED_FILESYSTEMS.md](../../../docs/SHARED_FILESYSTEMS.md).
 
 Example value of a read-only guest: `access=ro`, `env=DATASET`, `role=guest`,
 `tag=photos`, one for each line.
@@ -64,12 +64,12 @@ other value is not valid. The keys are `mode`, `uid`, `gid`, `mtime_ns`, `device
 the keys or none. An entry with none gets the default of the node. `read_mode=ro` needs
 this setting and all the keys on every entry. A node that finds one of the keys in a tree
 without the setting does not run the service: the service must be packed again. The packer
-always writes this setting. See [PACKING.md](../PACKING.md#entry_metadata--per-entry-metadata).
+always writes this setting. See [PACKING.md](../../../docs/PACKING.md#entry_metadata--per-entry-metadata).
 
 ### `read_mode`
 
 Declares if the root filesystem is writable: `ro` or `rw`. With no policy, it is writable.
-See [PACKING.md](../PACKING.md#read_mode--a-read-only-rootfs).
+See [PACKING.md](../../../docs/PACKING.md#read_mode--a-read-only-rootfs).
 
 ### Settings of a slot
 
@@ -86,4 +86,4 @@ A node refuses a service that has `wake=on_tunnel` or `tunnel_auth=address` on a
 `access=direct`. The node ignores these settings in `ConfigurationFile.gateway`. A packer
 writes them from `policies` in a slot of `api` in `service.json`:
 `{"port": 8333, "policies": {"tunnel_auth": "address", "wake": "on_tunnel"}}`. How the tunnel
-uses them is in [TUNNELING.md](../TUNNELING.md).
+uses them is in [TUNNELING.md](../../../docs/TUNNELING.md).

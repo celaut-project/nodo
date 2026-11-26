@@ -98,8 +98,11 @@ and the others below are the names of its proposals.
 - `NoticeDeclaration` is an `Init` policy (P9).
 - `ResourceAvailability.unknown_formals`, and the formals that a node does not know in
   the error details of `StartService` and `GetServiceEstimatedCost` (P10, REASON 3.7).
-- The formal files go in `protos/formals/<class>/`, with a `class=` line, the exact
-  bytes of the file (no final newline) and a generated index of ids (P3, Q4).
+- The formal files go in `protos/formals/<class>/` (P3, Q4). Done for the files that
+  existed: `protos/formals/policies/` and `protos/formals/payment_protocols/`. Still to
+  do (open question 9): a `class=` line in each formal, the exact bytes of the file (no
+  final newline), and a generated index of ids. The `class=` line changes the bytes of
+  the formals of today.
 
 ## Open questions
 
@@ -173,7 +176,6 @@ receipt to the party that asked for the wake. `InstanceState` is also the answer
 - Limits: the network limits of today, and a "global" formal for each.
 - Terms: the price bound, the maximum scarcity multiplier, the schedule and what the
   node does at its close, the grace period of a hibernated instance.
-- Policies: move `docs/policies/*.formal` to `protos/formals/policies/`.
 
 ## Implementation stages
 

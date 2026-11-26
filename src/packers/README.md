@@ -113,7 +113,7 @@
   written twice in one object is a packing error (JSON alone would silently keep the last).
   See [`protos/README.md`](../../protos/README.md).
 - `read_only_filesystem` (boolean, optional, default `false`) is serialized to
-  the `read_mode` policy (value `ro`, `formal` in `docs/policies/read_mode.formal`) in
+  the `read_mode` policy (value `ro`, `formal` in `protos/formals/policies/read_mode.formal`) in
   `container.filesystem.policies` — the policy list on the **filesystem itself**, not on
   one of its entries, and only on the root tree that
   `container.filesystem` points at. A nested `Filesystem` (a subdirectory, reached via

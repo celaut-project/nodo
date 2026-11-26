@@ -17,7 +17,7 @@ packer cannot write what a node refuses. The rules, all fail-closed:
 * in one list two policies do not have the same ``formal``. A sender sorts the list by
   ``formal``; the order does not change the meaning, so a reader does not require it.
 
-The ``formal`` bytes of each setting are in this file and in ``docs/policies/``. A test
+The ``formal`` bytes of each setting are in this file and in ``protos/formals/policies/``. A test
 pins them to each other. A published ``formal`` never changes: a new meaning is a new
 ``formal``, therefore a new setting.
 """
@@ -289,7 +289,7 @@ def make(name: str, value: bytes) -> celaut.Policy:
         if setting.name == name:
             return celaut.Policy(
                 tags=[name],
-                prose=f"The setting '{name}'. Its definition is docs/policies/{name}.formal.",
+                prose=f"The setting '{name}'. Its definition is protos/formals/policies/{name}.formal.",
                 formal=setting.formal,
                 value=value,
             )

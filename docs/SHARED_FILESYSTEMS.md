@@ -28,8 +28,8 @@ about parent shares, unless they say otherwise.
 The `share` policy (#670) on a directory, in
 `Container.Filesystem.ItemBranch.policies`. A policy is a setting that a node
 identifies by the exact bytes of its `formal`
-([`docs/policies/share.formal`](policies/share.formal)); see
-[policies/README.md](policies/README.md). A parent share does not involve
+([`protos/formals/policies/share.formal`](../protos/formals/policies/share.formal)); see
+[protos/formals/policies/README.md](../protos/formals/policies/README.md). A parent share does not involve
 `Service.Network`; a network share does.
 
 The value of the policy is `key=value` lines, sorted by key, joined by a newline:
