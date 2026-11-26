@@ -12,9 +12,10 @@ PROTO_DIR="${ROOT_DIR}/protos"
 # contract/buffer.proto is compiled for the Rust TUI (src/commands/tui/build.rs)
 # and is kept on disk so celaut.proto's `import "buffer.proto";` resolves here,
 # but it is deliberately NOT passed to --python_out / --grpc_python_out below:
-# bee-rpc-over-grpc-py vendors its own compiled buffer_pb2, and protos/buffer_pb2.py
-# is a hand-written shim that aliases to it (see that file). Generating a second,
-# independent buffer_pb2.py here would make Python's protobuf descriptor pool
+# bee-rpc-over-grpc-py vendors its own compiled buffer_pb2, and the generated
+# celaut_pb2.py must import that one. protoc writes `import buffer_pb2`, so the step
+# after the generation changes it to `from bee_rpc import buffer_pb2`. Generating a
+# second, independent buffer_pb2.py here would make Python's protobuf descriptor pool
 # reject one of the two with "duplicate file name buffer.proto" as soon as both
 # got imported into the same process.
 # protos/celaut_doc.binpb is celaut.proto's descriptor with its comments
@@ -63,6 +64,10 @@ else
     --python_out="${PROTO_DIR}" \
     "${PROTO_DIR}/invite.proto"
 fi
+
+# Import the buffer_pb2 of bee-rpc, not a local one (see the comment at the top).
+sed -i 's/^import buffer_pb2 as buffer__pb2$/from bee_rpc import buffer_pb2 as buffer__pb2/' \
+  "${PROTO_DIR}/celaut_pb2.py"
 
 # The node's protobuf runtime is pinned to 4.23.3 by bee-rpc, so the gencode has to
 # stay in the 4.x line. A protoc from the 5.x line onwards emits a

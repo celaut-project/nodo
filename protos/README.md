@@ -141,9 +141,9 @@ vendored upstream by the `bee-rpc-over-grpc-py` dependency (pinned in
 `bash/requirements.txt`), which ships its own compiled `bee_rpc.buffer_pb2`.
 `contract/buffer.proto` stays on disk here only because `celaut.proto`'s
 `import "buffer.proto";` and the Rust TUI build need a local file to read — but
-at Python runtime there is exactly one compiled `buffer_pb2` (`bee_rpc`'s);
-`protos/buffer_pb2.py` is a hand-written shim that aliases to it (see that
-file's header). Keep `contract/buffer.proto` byte-for-byte in sync with
+at Python runtime there is exactly one compiled `buffer_pb2` (`bee_rpc`'s):
+`bash/generate_protos.sh` changes the import of the generated `celaut_pb2.py` to
+`from bee_rpc import buffer_pb2`. Keep `contract/buffer.proto` byte-for-byte in sync with
 `bee-rpc-over-grpc-py`'s own `src/bee_rpc/buffer.proto` whenever that pin is
 bumped — if the two drift, Rust and Python nodes end up assuming different
 wire shapes for the same message.
@@ -155,11 +155,11 @@ wire shapes for the same message.
 1. `grpc_tools.protoc` (if available)
 2. Native `protoc` (fallback for generating `*_pb2.py`)
 
-It only compiles `celaut.proto` and `pack.proto` to Python — never
-`buffer.proto` (see the shim note above). `buffer.proto` is still passed via
-`-I` so `celaut.proto`'s import resolves. Generate with `grpcio-tools==1.56.0`
-(protoc 23.1): the committed `celaut_pb2.py` is that output with the `buffer_pb2`
-import pointed at `bee_rpc`.
+It compiles `celaut.proto`, `pack.proto` and `invite.proto` to Python — never
+`buffer.proto` (see the note above). `contract/` is passed via `-I` so the import of
+`buffer.proto` in `celaut.proto` resolves. Generate with `grpcio-tools==1.56.0`
+(protoc 23.1): the script then points the `buffer_pb2` import of `celaut_pb2.py` at
+`bee_rpc`.
 
 ## Comments are protocol text
 
