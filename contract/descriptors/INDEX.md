@@ -29,6 +29,10 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`policies/api_slot/wake.descriptor`](policies/api_slot/wake.descriptor) | wake | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2ff042caf1404c444e8aa8d48961e797cd061c176bee27fd33b7351c9a4eaa9a` |
 | [`policies/container_init/guest-kernel.descriptor`](policies/container_init/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9c03c66a3776b9ce1260b15aca7f0525ea6542092800cd4a23e07eda60cbeb97` |
 | [`policies/container_init/notice.descriptor`](policies/container_init/notice.descriptor) | notice, stop notice, hibernate notice | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616` |
+| [`policies/device/attach.descriptor`](policies/device/attach.descriptor) | attach | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:37bd67cf07e11ef75135706f4b55e6f9542686d54611cdd2ad76b797673c6262` |
+| [`policies/device/bitstream.descriptor`](policies/device/bitstream.descriptor) | bitstream, fpga | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:fee77e45f7230ffa64d15d4819410335c2a33b48d751bf5f9364beaa1f2ff949` |
+| [`policies/device/detach-notice.descriptor`](policies/device/detach-notice.descriptor) | detach-notice | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:4cdee552858ae5b85f0b500384c7cd61232ec766dcbffbd91b170ed9350993fc` |
+| [`policies/device/link.descriptor`](policies/device/link.descriptor) | link | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:09d1ed910e580504bb708fe728db67dd8695c2d1c9a50ea21e45e2ebcde9f872` |
 | [`policies/filesystem_entry/share.descriptor`](policies/filesystem_entry/share.descriptor) | share | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1801e283b3be7286cc3445a2e128c3d921f75bddf1825e330c7b7553c45b9de2` |
 | [`policies/filesystem_root/entry_metadata.descriptor`](policies/filesystem_root/entry_metadata.descriptor) | entry_metadata | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3c06eea2a8fe2d1476af508118965a67971d8e178f87caded980e6d78107eb42` |
 | [`policies/filesystem_root/read_mode.descriptor`](policies/filesystem_root/read_mode.descriptor) | read_mode | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e36826fd30068ee263c73edeb8f698c5c4761771801f707d1f6abb6642a503ec` |
@@ -91,15 +95,6 @@ The six settings that nodo has today have their files (part 1). They need the li
 | --- | --- | --- | --- |
 | `template` | the keys of the domain that the node fills at a start | a grammar inside the values of the network formal: `${VAR}`, the full value only (`src/manager/network_templates.py:68,191`) | Absent: the value of the domain is fixed. |
 | `share` | the id of a network share | the filesystem setting `share` with `role=network`; id = sha256 of length-prefixed fields (`src/utils/shared_filesystems.py:397-433`) | The formal fixes the id that `ShareLocationRequest.share_id` carries. |
-
-### `policies/device/`
-
-| Name | Value | Today | Notes |
-| --- | --- | --- | --- |
-| `attach` | the ordered list of the accepted modes (at the start, on request) | old enum `Attach` in the pb2 only | Absent: at the start. |
-| `detach-notice` | seconds | New | |
-| `link` | the positions of the other entries | New | For example NVLink. |
-| `bitstream` | a path in the filesystem | New | For an FPGA. |
 
 ### `policies/configuration/`
 

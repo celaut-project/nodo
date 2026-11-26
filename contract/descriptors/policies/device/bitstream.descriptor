@@ -1,0 +1,18 @@
+tags: bitstream, fpga
+
+A setting of a device: a bitstream that the node loads into the device (for example an
+FPGA) before it gives the device to the instance.
+
+The value is the path of the file in the filesystem of the service: the segments
+separated by "/", with no "/" at the start. Example: opt/fpga/design.bit.
+
+With no setting, the node loads nothing. The node is bound: it refuses the start if it
+cannot load the file.
+
+=== formal
+class=setting
+default=absent: the node loads nothing
+name=bitstream
+place=service.container.devices.policies
+rule=the node loads the bytes of the file into the device before it gives the device to the instance
+value=a path of a file in the filesystem of the service, segments separated by '/', no '/' at the start
