@@ -9,14 +9,14 @@ ROOT = df.ROOT
 # REASON rule 6.4: these files came before the rules of the formal. Their bytes are on
 # the wire, so they have no class= and no name= line until the code follows the contract.
 LEGACY = {
-    "payment_protocols/bitcoin-p2wpkh.descriptor",
-    "payment_protocols/ergo-p2pk.descriptor",
-    "policies/access.descriptor",
-    "policies/entry_metadata.descriptor",
-    "policies/read_mode.descriptor",
-    "policies/share.descriptor",
-    "policies/tunnel_auth.descriptor",
-    "policies/wake.descriptor",
+    "contracts/payment/bitcoin-p2wpkh.descriptor",
+    "contracts/payment/ergo-p2pk.descriptor",
+    "policies/api_slot/access.descriptor",
+    "policies/api_slot/tunnel_auth.descriptor",
+    "policies/api_slot/wake.descriptor",
+    "policies/filesystem_entry/share.descriptor",
+    "policies/filesystem_root/entry_metadata.descriptor",
+    "policies/filesystem_root/read_mode.descriptor",
 }
 KEY = re.compile(r"^[a-z0-9_.-]+$")
 ID = re.compile(r"\b[0-9a-f]{64}:[0-9a-f]{64}\b")
@@ -69,7 +69,14 @@ class FormalRulesTests(unittest.TestCase):
                     keys.append(key.encode())
                 self.assertEqual(keys, sorted(set(keys)))
 
-    def test_a_new_file_has_its_class_and_its_name_in_its_path(self):
+    def test_each_file_is_in_a_folder_of_its_class(self):
+        for rel in df.files():
+            folder = os.path.dirname(rel)
+            with self.subTest(rel):
+                self.assertIn(folder, df.folders(), f"{folder} has no {df.FOLDER_RULES}")
+                self.assertIsNotNone(df.folder_class(folder), f"{folder} gives no class")
+
+    def test_a_new_file_has_its_class_and_its_name(self):
         for rel in df.files():
             if rel in LEGACY:
                 continue
@@ -77,9 +84,21 @@ class FormalRulesTests(unittest.TestCase):
                 pairs = dict(
                     line.split("=", 1) for line in _lines(df.read(os.path.join(ROOT, rel)).formal)
                 )
-                self.assertIn("class", pairs)
-                self.assertIn("name", pairs)
-                self.assertEqual(rel, f"{pairs['class']}/{pairs['name']}{df.SUFFIX}")
+                self.assertEqual(pairs.get("class"), df.folder_class(os.path.dirname(rel)))
+                self.assertEqual(os.path.basename(rel), f"{pairs.get('name')}{df.SUFFIX}")
+
+    def test_the_legacy_files_exist(self):
+        self.assertLessEqual(LEGACY, set(df.files()))
+
+    def test_each_folder_gives_a_known_class_or_is_a_group(self):
+        classes = set(re.findall(r"^\| `([a-z-]+)` \|", open(
+            os.path.join(ROOT, "REASON.md"), encoding="utf-8").read(), re.MULTILINE))
+        self.assertTrue(classes)
+        for folder in df.folders():
+            cls = df.folder_class(folder)
+            if cls is not None:
+                with self.subTest(folder):
+                    self.assertIn(cls, classes)
 
     def test_two_files_have_different_formals(self):
         seen = {}
@@ -102,7 +121,7 @@ class IndexTests(unittest.TestCase):
     def test_the_index_is_current(self):
         with open(os.path.join(ROOT, df.INDEX), encoding="utf-8") as f:
             self.assertEqual(
-                f.read(), df.render_index(),
+                df.generated_part(f.read()), df.render_generated(),
                 "run: python -m src.utils.descriptor_file",
             )
 

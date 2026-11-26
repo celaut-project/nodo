@@ -333,62 +333,22 @@ question 8 (see "Hashes and names").
 
 ### 7. The core descriptors to write
 
-The rules are done: `protos/descriptors/REASON.md` (the file, the formal with its
-`class=` and `name=` lines, the classes, the value, the ids and the process). The files
-of `policies/` and `payment_protocols/` keep their bytes, with no `class=` and no
-`name=` line, until the code follows the contract (stage 7): their bytes are on the
-wire today. This list is the work for the agents that write the descriptors.
+The rules are done: `protos/descriptors/REASON.md`, and one `REASON.md` for each folder
+(one folder for each use of a descriptor in the contract). The list of the
+descriptors that nodo needs, with where nodo implements each one today, is the second
+part of `protos/descriptors/INDEX.md`. It is the work for the agents that write the
+descriptors.
 
-Descriptors that exist today only in the code of nodo, with no file:
+The files of `policies/` and `contracts/payment/` keep their bytes, with no `class=`
+and no `name=` line, until the code follows the contract (stage 7): their bytes are on
+the wire today.
 
-- The signature scheme (one descriptor, P4).
-- The ledgers (Ergo, Bitcoin).
-- The transports and the layers of an address (tcp, tls, http2, grpc, bee-rpc). The
-  layer `celaut-gateway` is a wire schema (REASON 2.5): split its rules that must be
-  equal into formals of their own.
-- The templates of the proof-of-work networks.
-- The architectures (today the packer writes only tags, against REASON 2.2).
+Decisions that the list leaves open:
 
-New descriptors of the redesign:
-
-- Resources: memory, disk, CPU (thousandths of a core), device memory.
-- Benchmarks: the current keys as means (`int_ops_per_sec`, `flt_ops_per_sec`,
-  `sha256_hashes_per_sec`, the memory bandwidth for each working set), and the
-  percentiles to support.
-- Rates: the kept state of a hibernated instance, and one for each old key
-  (`ram_mu_per_gib_second`, `cpu_mu_per_vcpu_second`, `disk_mu_per_gib_second`,
-  `net_mu_per_gib`, `build_mu`, `tunnel_open_mu`, `connection_open_mu`,
-  `modify_resources_mu`, `statement_query_mu`, `statement_row_mu`).
-- Limits: the network limits of today, and a "global" formal for each.
-- Terms: the price bound, the maximum scarcity multiplier, the schedule and what the
-  node does at its close, the grace period of a hibernated instance.
-- Policies: the notice channel (`NoticeDeclaration`, P9), the way to continue after a
-  hibernation (Q1.2), the ways to attach a device (P6), and the RPCs of the node that
-  a service uses (`node_protocol_stack`, S6.5).
-- Sources of a dependency (`Dependency.sources`): a file in the filesystem of the
-  service, and a registry.
-- Kinds of network (`Network.domain`): all addresses, a host name with its ports, a
-  domain of celaut instances, and a proof-of-work network for each chain (Ergo,
-  Bitcoin). The current `pow.` keys and `port=` go into the values.
-- Settings of a network: the `${VAR}` template, with its syntax and the check of the
-  filled value (today a value is a placeholder in full or has none, and has no new
-  line).
-- The id of a network share, in the formal of the share setting.
-- Devices: the architectures of devices (GPU families by compute capability, the USB
-  video class, ...), the model fact (one formal for each PCI or USB vendor and
-  device pair, made from one template text), the stable id fact, the facts of place
-  and of links, the setting of the guest kernel, the selection of a device by the
-  caller, the notice before a detach, the links between entries, the bitstream of an
-  FPGA, the device benchmarks, the rate of a device for each model, and a promise to
-  wipe a device between two clients.
-- Low priority: the API of a verifier of signatures, only for a node that verifies
-  a peer through a service (REASON 1.7). A client that uses a registry gets the API
-  from the objective.
-- The schemas (`Service.schema`, `Signed.Body.context`): the format of a schema (today
-  `src/identity/protocol_schema.py`, plus the name of each field), and one schema for
-  `Service` and for each signed type. The layer `celaut-gateway` uses the same format,
-  also with the names of the fields: without them, two variants that add one field
-  number with the same type have the same schema.
+- The format of a schema (`protos/descriptors/schemas/`), before any schema file.
+- `config-file`: a setting of `Init`, or a part of the architecture.
+- The Ergo reputation ledger: are the R4 type ids a part of the ledger, or values?
+- The ledger tag `bitcoin` as a network with no addresses: is it still necessary?
 
 ## Implementation stages
 

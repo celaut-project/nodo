@@ -106,9 +106,9 @@ class IdentifiedByFormalTests(unittest.TestCase):
 
     def test_the_formal_bytes_are_the_ones_published_in_docs(self):
         for name, formal in (
-            ("share", policies.SHARE_FORMAL),
-            ("read_mode", policies.READ_MODE_FORMAL),
-            ("entry_metadata", policies.ENTRY_METADATA_FORMAL),
+            ("filesystem_entry/share", policies.SHARE_FORMAL),
+            ("filesystem_root/read_mode", policies.READ_MODE_FORMAL),
+            ("filesystem_root/entry_metadata", policies.ENTRY_METADATA_FORMAL),
         ):
             path = os.path.join(DOCS, f"{name}.descriptor")
             self.assertEqual(descriptor_file.read(path).formal, formal, name)

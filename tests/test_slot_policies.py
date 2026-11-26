@@ -13,7 +13,7 @@ try:
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
-DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "descriptors", "policies")
+DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "descriptors", "policies", "api_slot")
 
 
 def _slot(port=8333, **settings):

@@ -32,9 +32,13 @@ is in a commit of the branch `dev`.
 
 ## 2. The file
 
-**Rule 2.1. The path.** A file is `protos/descriptors/<class>/<name>.descriptor`. The
-class and the name are the values of the lines `class=` and `name=` of its formal (rule
-3.3). The class folder has a `README.md` that lists its descriptors.
+**Rule 2.1. The path.** A file is `protos/descriptors/<folder>/<name>.descriptor`. The
+name is the value of the line `name=` of its formal (rule 3.3). The folders follow the
+uses: one folder for one place of `celaut.proto`, or for a group of places that take
+the same descriptors (section 4). Each folder has a `REASON.md` that says what the
+group is for, the places, the position of the list for each reader, the form of the
+value, and what nodo does with it. A folder that holds descriptors gives its class in
+a line `Class: `<class>`.`. A folder that only holds folders has no such line.
 
 **Rule 2.2. The format.** UTF-8, with LF line ends only. The parts, in this order:
 
@@ -119,11 +123,49 @@ valid (REASON 2.6). Give it a new name, for example with `-v2` at the end.
 of the configuration of nodo, no name of this project. A formal is for all
 implementations.
 
-## 4. The classes
+## 4. The classes and the folders
 
 The class says in which places of the contract the descriptor is valid. The contract
 says, for each place, if the list is a requirement or an announcement (REASON 3.2). A
 node refuses a descriptor in a place of another class.
+
+The folders, by use:
+
+| Folder | Class | Places |
+| --- | --- | --- |
+| `architectures/` | architecture | `Container.architecture`, `Peer.resources` |
+| `architectures/devices/` | architecture | `Device.architecture`, `Peer.devices` |
+| `quantities/resources/` | resource | every list of resources |
+| `quantities/benchmarks/` | benchmark | every list of benchmarks |
+| `policies/container_init/` | setting | `Container.Init.policies` |
+| `policies/filesystem_root/` | setting | `Container.Filesystem.policies` of the root filesystem |
+| `policies/filesystem_entry/` | setting | `Container.Filesystem.ItemBranch.policies` |
+| `policies/api_slot/` | setting | `Service.Api.Slot.policies` |
+| `policies/network/` | setting | `Service.Network.policies` |
+| `policies/device/` | setting | `Device.policies` |
+| `policies/configuration/` | setting | `Configuration.policies` |
+| `facts/` | fact | `ArchitectureResources.facts`, `StartReceipt.facts` |
+| `terms/conditions/` | condition | `conditions` of `EstimatedCost` and `Peer` |
+| `terms/promises/` | promise | `promises` of `EstimatedCost` and `Peer` |
+| `prices/node/` | rate | `Peer.rates` |
+| `prices/service/` | rate | `Service.Api.Slot.rates` |
+| `limits/` | limit | `Peer.limits` |
+| `networks/` | domain | `Service.Network.domain` |
+| `dependency_sources/` | source | `Workload.Dependency.sources` |
+| `protocols/address/` | layer | `Layer.protocol`, `Service.Network.protocol_stack` |
+| `protocols/node_gateway/` | layer | `Container.node_protocol_stack` |
+| `contracts/payment/` | payment-protocol | `Contract.protocol` |
+| `ledgers/` | ledger | `Contract.ledger` |
+| `signatures/schemes/` | signature-scheme | `Signed.Body.scheme` |
+| `schemas/` | schema | `Service.schema`, `Signed.Body.context` |
+| `environment_formats/` | format | `DescriptorKeyValue.value` of `Container.environment_variables` |
+| `proof_of_work/` | proof-of-work | `PoWRequired.descriptor` |
+
+To add a folder, add a row here and write its `REASON.md`. A folder is a use, not a
+kind of thing: the memory as a resource and the price of the memory are in two
+folders.
+
+What the formal of each class must give:
 
 | Class | Entry | Places in `celaut.proto` | The formal must give |
 | --- | --- | --- | --- |
@@ -147,6 +189,7 @@ node refuses a descriptor in a place of another class.
 | `proof-of-work` | `Descriptor` | `PoWRequired.descriptor` | the rule of the work, and the unit of the difficulty |
 
 To add a class, add a row here first. A class is a kind of place, not a kind of thing.
+The test reads the classes from the first column of this table.
 
 **Rule 4.1. A resource adds, a benchmark compares.** A resource is consumed: the node
 adds the values of its instances and keeps the sum within its capacity. A benchmark is
@@ -188,20 +231,27 @@ names the member changes.
 with the type as the digest of the empty input (REASON 6.3). Nodo uses blake2b-256.
 Another algorithm gives another id for the same bytes, and both are valid.
 
-**Rule 6.2. The index.** `INDEX.md` lists each file with its tags and its id. Do not edit
-it. After a change, run:
+**Rule 6.2. The index.** `INDEX.md` has two parts. The first part lists each file with
+its tags and its id: it is generated, between two marker lines, so do not edit it.
+After a change, run:
 
 ```
 python -m src.utils.descriptor_file
 ```
 
+The second part is the list of the descriptors that nodo needs and that have no file
+yet, by folder, with where nodo implements each one today. When you write one, remove
+it from that list.
+
 **Rule 6.3. The tests.** `tests/test_descriptor_files.py` checks that each file follows
-sections 2 and 3, that `INDEX.md` is current, and that each reference (rule 3.7) names
-a formal of this folder. When the code of nodo uses a descriptor, the code reads the
+sections 2 and 3, that it is in a folder with a `REASON.md` and a class, that its
+`class=` line is the class of its folder, that the generated part of `INDEX.md` is
+current, and that each reference (rule 3.7) names a formal of `protos/descriptors/`. When the code of nodo uses a descriptor, the code reads the
 file, or holds the same bytes and a test pins them to the file.
 
-**Rule 6.4. The descriptors before this file.** The files of `policies/` and
-`payment_protocols/` have no `class=` and no `name=` line. Their bytes are on the wire
+**Rule 6.4. The descriptors before this file.** The eight files of
+`policies/filesystem_root/`, `policies/filesystem_entry/`, `policies/api_slot/` and
+`contracts/payment/` have no `class=` and no `name=` line. Their bytes are on the wire
 and in the databases of the nodes that run today, so they stay as they are. They get
 the two lines when the code follows the new contract (stage 7 of `protos/PENDING.md`).
 The test knows them by their paths.
@@ -214,16 +264,17 @@ Do these steps for each new descriptor:
    stop: a new place is a change to the contract (`protos/REASON.md`, section 8).
 2. Read the comment of that place. Find if the list is a requirement or an
    announcement for each reader, and what an absent entry means.
-3. Select the class (section 4). Check rule 4.1 or rule 4.2 if they apply.
-4. Look in `INDEX.md` and in the folder of the class for a descriptor of the same thing.
-   Use it if it exists. Do not make a second formal for one thing.
+3. Select the folder and its class (section 4). Read the `REASON.md` of the folder.
+   Check rule 4.1 or rule 4.2 if they apply.
+4. Look in `INDEX.md` and in the folder for a descriptor of the same thing. Use it if
+   it exists. Do not make a second formal for one thing.
 5. Write the formal (section 3): `class`, `name`, the unit, the form of the value, the
    default, the references by id. Ask: can a second implementer get the same behavior
    from it?
 6. Write the tags and the prose. In the prose, say what the thing is, the form of the
    value with an example, what an absent entry means, and who is bound.
-7. Save the file at `<class>/<name>.descriptor`. Add a row to the `README.md` of the
-   class.
+7. Save the file at `<folder>/<name>.descriptor`. Remove the item from the second part
+   of `INDEX.md`.
 8. Run `python -m src.utils.descriptor_file`, then the tests.
 
 ## 8. Signs that a descriptor is wrong

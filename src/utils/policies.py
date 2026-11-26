@@ -289,7 +289,7 @@ def make(name: str, value: bytes) -> celaut.Policy:
         if setting.name == name:
             return celaut.Policy(
                 tags=[name],
-                prose=f"The setting '{name}'. Its definition is protos/descriptors/policies/{name}.descriptor.",
+                prose=f"The setting '{name}'. Its definition is in protos/descriptors/policies/.",
                 formal=setting.formal,
                 value=value,
             )

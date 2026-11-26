@@ -188,7 +188,7 @@ the service never meant to expose.
 
 A third party that does not hold the instance token can open a tunnel to a slot that the
 author of the service opened to it (#669). The author sets three policies on the slot. They
-are described in [`protos/descriptors/policies/README.md`](../protos/descriptors/policies/README.md#settings-of-a-slot).
+are described in [`protos/descriptors/policies/api_slot/REASON.md`](../protos/descriptors/policies/api_slot/REASON.md).
 
 | Policy | Values (default first) | Meaning |
 | ------ | ---------------------- | ------- |
