@@ -17,6 +17,12 @@ LEGACY = {
     "policies/filesystem_entry/share.descriptor",
     "policies/filesystem_root/entry_metadata.descriptor",
     "policies/filesystem_root/read_mode.descriptor",
+    # The formals that the code builds today (#693): the files copy their bytes.
+    "protocols/address/grpc.descriptor",
+    "protocols/address/http2.descriptor",
+    "protocols/address/tcp.descriptor",
+    "protocols/address/tls.descriptor",
+    "protocols/address/tor-onion-v3.descriptor",
 }
 KEY = re.compile(r"^[a-z0-9_.-]+$")
 ID = re.compile(r"\b[0-9a-f]{64}:[0-9a-f]{64}\b")

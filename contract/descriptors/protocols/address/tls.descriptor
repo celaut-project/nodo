@@ -1,0 +1,31 @@
+tags: tls
+
+This layer is TLS 1.3, as RFC 8446 specifies. Do not use a lower version.
+
+The server sends one self-signed X.509 certificate. The client does not send a certificate. The certificate contains a P-256 public key. The certificate is its own certificate authority (CA:TRUE). There is no other certificate authority and no trust store.
+
+The certificate gives the name "celaut-node". This name gives no data about the node. The client sends this name in the TLS handshake. The client and the server use ALPN, and the only protocol name is "h2".
+
+The certificate contains one extension that is not critical. The formal field gives the OID of this extension. The value of the extension is ASCII text with two parts. A colon is between the two parts. The first part is the identity public key of the node. The second part is a signature. Both parts are in lowercase hexadecimal.
+
+The node makes the signature with its identity key, in the scheme that Peer.signature_scheme gives. The signed data is the ASCII text "CELAUT", followed by the SubjectPublicKeyInfo of the certificate. The SubjectPublicKeyInfo is in DER, written in lowercase hexadecimal.
+
+To open a connection, do these steps:
+1. Open a TLS connection. Get the certificate of the server. Do not examine a certificate chain or a name.
+2. Find the extension. Make sure that the signature is correct for the public key in the extension. If it is not correct, close the connection.
+3. Make sure that this public key is the identity of the node that you want.
+4. Open the connection again. Accept only the same certificate, byte for byte.
+
+=== formal
+alpn=h2
+certificate=self-signed,p-256,ca:true
+client_auth=none
+host_key_critical=false
+host_key_extension=ascii:<identity_public_key_hex>:<signature_hex>
+host_key_oid=2.25.276125094420857322236898758448456352855
+host_key_signature_scheme=Peer.signature_scheme
+host_key_signed=CELAUT<subject_public_key_info_der_hex>
+min_version=1.3
+server_name=celaut-node
+spec=RFC8446
+verification=read-certificate,verify-extension,pin-exact-certificate

@@ -66,6 +66,14 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`prices/node/statement-row.descriptor`](prices/node/statement-row.descriptor) | statement-row, statement_row_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a4cbe4a4a3cb20d20b16fb2959552f012bbfcfe18384f5b3692ff95043eba66d` |
 | [`prices/node/tunnel-open.descriptor`](prices/node/tunnel-open.descriptor) | tunnel-open, tunnel_open_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a36a4346db273c99fd7123fbf7b4dcfddd82e8a4aa07ad8471b44d325e9a4185` |
 | [`prices/service/call.descriptor`](prices/service/call.descriptor) | call, mu_per_call | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b9000d73c97bcb624709b4622dc70cf9289af193f83159705e013708152f229f` |
+| [`protocols/address/ergo-p2p.descriptor`](protocols/address/ergo-p2p.descriptor) | ergo-p2p | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2f1778bc0e2c778894af5dbc32e1ffd5ded17bf4187f4ffa11015cd2e405f030` |
+| [`protocols/address/ergo-rest.descriptor`](protocols/address/ergo-rest.descriptor) | ergo-rest | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:d31451f5766e271e17e1585945a667a428a36eb21e3eb0c406c65e4be0514648` |
+| [`protocols/address/grpc.descriptor`](protocols/address/grpc.descriptor) | grpc | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a318d9e22dfecbf06a11a00c08eb43b0a65ec886b50f0f5d83599bf891e0acf3` |
+| [`protocols/address/http2.descriptor`](protocols/address/http2.descriptor) | http2 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:01575edd0b23255b9c1efa1727ba4fb635c150a14b4ab0576f739f87631c8acb` |
+| [`protocols/address/tcp.descriptor`](protocols/address/tcp.descriptor) | tcp | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:db518cc9d8ba091449934c4a67fa56ae72c2823720e25355c092e25b823694ce` |
+| [`protocols/address/tls.descriptor`](protocols/address/tls.descriptor) | tls | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:26ff6acdac9b95a18c334e65e676eb5c0fc1ba3c312d33c2bfafecc2c8aac5fe` |
+| [`protocols/address/tor-onion-v3.descriptor`](protocols/address/tor-onion-v3.descriptor) | tor-onion-v3 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:81e06cee256629ffc232dc568d8b67da2ee1d207538c2054bd5257a5ec803484` |
+| [`protocols/address/udp.descriptor`](protocols/address/udp.descriptor) | udp | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:296c06ccd189ac66e62d6c53ef0648b49ec3c86153fb60870d326cf04f5e4584` |
 | [`quantities/benchmarks/float-ops.descriptor`](quantities/benchmarks/float-ops.descriptor) | float-ops, flt_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1188efaabf8d5930cc17fffcfcdcf91018894628a9b7ab28dd49822e372c4756` |
 | [`quantities/benchmarks/int-ops.descriptor`](quantities/benchmarks/int-ops.descriptor) | int-ops, int_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7c5ddc260dce1a6e46def9a0bd8f2a6a3f8d8891fc7efa968b27bd9d61f5dcdb` |
 | [`quantities/benchmarks/memory-bandwidth-1gib.descriptor`](quantities/benchmarks/memory-bandwidth-1gib.descriptor) | memory-bandwidth-1gib, mem_bandwidth_1gib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:06d94bc381a2f084b59fd7710589d7df319283e1fdf3a503ee523fb2bebda01e` |
@@ -177,16 +185,9 @@ wire today).
 
 | Name | Today | Notes |
 | --- | --- | --- |
-| `tcp` | `transport_stack.py:136-152` | |
-| `udp` | tag only (`src/routing/registry.py:43`, `src/virtualizers/firewall.py:15-25`) | No formal yet. |
-| `tor-onion-v3` | `transport_stack.py:117-133` | |
-| `tls` | `transport_stack.py:159-206` | |
-| `http2` | `transport_stack.py:213-223` | |
-| `grpc` | `transport_stack.py:230-259` | |
 | `bee-rpc` | `transport_stack.py:266-351` | Its keys hold the schema of `buffer.Buffer`. |
 | `celaut-gateway` | `transport_stack.py:418-720` | A wire schema (REASON 2.5): split each rule that two nodes must agree on (hash types, signature formats, receipts, proof of work, schemas) into a formal of its own. |
 | `celaut-observe`, `celaut-chat` | Today Chat and Observe are RPCs inside the gateway layer | Each one is a branch of the tree with its own formal (REASON 2.8). |
-| `ergo-p2p`, `ergo-rest` | tags only, on the members of a proof-of-work network | |
 
 ### `protocols/node_gateway/`
 

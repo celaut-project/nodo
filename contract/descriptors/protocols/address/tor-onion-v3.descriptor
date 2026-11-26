@@ -1,0 +1,8 @@
+tags: tor-onion-v3
+
+The transport is a TCP stream over a Tor v3 onion service, as rend-spec-v3 specifies. The address gives a .onion host name and a virtual port.
+
+=== formal
+kind=stream
+port=per-address
+spec=rend-spec-v3

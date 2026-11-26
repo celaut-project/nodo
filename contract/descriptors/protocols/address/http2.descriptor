@@ -1,0 +1,7 @@
+tags: http2
+
+This layer is HTTP/2, as RFC 9113 specifies. The client selects HTTP/2 with ALPN "h2" in the TLS handshake. Do not use HTTP/1.1 or an HTTP upgrade.
+
+=== formal
+negotiation=tls-alpn:h2
+spec=RFC9113

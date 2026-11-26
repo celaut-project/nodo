@@ -1,0 +1,20 @@
+tags: grpc
+
+This layer is gRPC over HTTP/2, as the gRPC document "PROTOCOL-HTTP2" specifies.
+
+Each call uses the path "/<package>.<service>/<method>". The celaut-gateway layer gives the service and its methods. The content type is "application/grpc". The messages are not compressed. The calls send no custom metadata.
+
+All methods use a bidirectional stream. Each gRPC message in the two streams is one buffer.Buffer. The bee-rpc layer gives the meaning of these messages.
+
+A status that is not OK tells that the server refused the call or that the call failed. The status details are text for a person. A program must not parse them.
+
+=== formal
+call=bidirectional-stream
+content_type=application/grpc
+error=status-not-ok
+error_details=human-readable
+message=buffer.Buffer
+message_encoding=identity
+metadata=none
+path=/<package>.<service>/<method>
+spec=grpc/PROTOCOL-HTTP2

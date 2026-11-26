@@ -1,0 +1,16 @@
+tags: ergo-p2p
+
+A layer: the peer-to-peer protocol of the Ergo reference node, on TCP. A member of a
+proof-of-work network of Ergo gives it on one address.
+
+The network magic of the handshake selects the chain. The port of the address selects
+the layer: nothing in TCP selects it.
+
+A layer has no value.
+
+=== formal
+class=layer
+name=ergo-p2p
+selected_by=the port of the address
+spec=the peer-to-peer protocol of the Ergo reference node (ergoplatform/ergo)
+transport=tcp
