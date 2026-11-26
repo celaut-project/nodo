@@ -214,8 +214,13 @@ and the others below are the names of its proposals.
 
 ### Devices
 
-- The architecture of a device is the device only: one model of chip (open question
-  5, REASON 2.4). The guest kernel is a requirement of the service, not a property of
+- The architecture of a device is what the software of the service programs against,
+  as for the architecture of the container (open question 5, REASON 2.4, 7.3). Its
+  formal fixes the granularity: a family of GPUs with one compute capability, a USB
+  video class camera, one model of robot arm or of FPGA. With "one model of chip", a
+  CUDA service for four GPUs had to be four services, and a service for any UVC
+  camera fifty. A model that the software does not need is a fact of the device.
+- The guest kernel is a requirement of the service, not a property of
   the device, so it is a setting in `Container.Init.policies`. Its value gives the
   hashes of the kernel, one for each hash type. An alias of a kernel ABI is a reading
   of the node (REASON 2.5), not a new identity. With no kernel setting, the service
@@ -230,15 +235,40 @@ and the others below are the names of its proposals.
   how the node implements the architecture.
 - An architecture is never empty, in `Container` and in `Device`. An empty
   architecture does not mean the native architecture of the node.
-- One entry of `Peer.devices` is one physical device. A device that can boot more
-  than one kernel is not counted two times.
-- The formal of the chip is the scope of the rate of the device (`Rate.scope`). A
-  node does not take the chip from the text of a tag.
+- One `Device` is one device as the guest sees it: a physical device, or a part of
+  one (a virtual function, a partition of a GPU). One entry of `Peer.devices` is one
+  such device, as the node is configured now. A device that can boot more than one
+  kernel is not counted two times.
+- `ArchitectureResources.facts` (an announcement) gives the facts of a device: its
+  model, a stable id, where it is, the devices that it is linked to. A rate of a
+  device can use the model as its scope (`Rate.scope`). A node does not take the
+  model from the text of a tag.
+- `Device` or `Network`: the bus does not decide (PCI, USB, a bus of a board or a
+  network of the node). A `Device` is a thing of the node that the node gives to one
+  instance at a time, takes back and charges for: a camera on a private segment that
+  the node opens only to the instance is a `Device`, and its `guest_address` is an
+  address in the network of the instance. A thing that the instance reaches and
+  whose access the node does not control (a camera on the internet, or on the LAN of
+  the node when the node does not announce it) is a `Network`. A device that many
+  instances share is a service that holds the device and gives an API (REASON 1.6).
+- A situated device (a camera that looks at one place, a robot arm in one lab, an
+  HSM with its keys, a disk with data) is selected by the caller, not by the service:
+  the service has an id and stays generic. The caller gives, in
+  `Configuration.policies`, the stable id of the device for an entry. At the wake,
+  the node gives the same device again, or the instance stays hibernated and the
+  answer says why.
+- Before the node detaches a device by its own decision (a hibernation or a stop that
+  the instance did not ask for), it gives the notice that the settings of the device
+  ask for (for example, a robot arm must stop in a safe position). A node that cannot
+  give that notice refuses the service.
+- If a device fails or the node loses it, the node detaches it and stops its charge.
+  `DeviceChange.Attach` accepts any entry that has no device now, so an entry that
+  the node attaches at the start can come back without a hibernation.
 - The setting of the attach mode has, as its value, the ordered list of the modes that
   the service accepts. `Peer` does not announce the modes: `GetResourceAvailability`
   gives the answer.
-- The kernel and the chips that a start attaches are `StartReceipt.facts`. The chips
-  are one formal whose value is the list (a list of `Policy` has no repeated formal).
+- The kernel and the models of the devices that a start attaches are
+  `StartReceipt.facts`. The models are one formal whose value is the list (a list of `Policy` has no repeated formal).
 - A node that cannot grow a device (for example `at_init` less than `at_most` under
   VFIO) refuses and names the formal. A device benchmark that the node did not
   measure does not meet a requirement: the node refuses.
@@ -247,13 +277,14 @@ and the others below are the names of its proposals.
   can repeat an entry. The order of `Peer.devices` has no meaning.
 - `DeviceChange.attach` names the entry of `Container.devices` by its position, with
   the resources that the instance asks for. It is no longer an
-  `ArchitectureResources`: two entries with the same chip and other settings were
-  ambiguous, and its field of benchmarks had no meaning there (REASON 3.5).
+  `ArchitectureResources`: two entries with the same architecture and other settings
+  were ambiguous, and its field of benchmarks had no meaning there (REASON 3.5).
   `AttachedDevice.entry` gives the entry that a device fills.
 - `DeviceChange.resize` changes the resources of a device that the instance has.
   Before, `Device.resources.at_most` had no RPC that used it. A node that cannot
-  resize (VFIO) refuses and names the formal (REASON 1.7: partitions of a GPU can
-  change their size).
+  resize (VFIO) refuses and names the formal. Today MIG partitions and virtual
+  functions do not change their size while they run, so `resize` is for the future
+  (REASON 1.7).
 - A hibernated instance has no devices. At the wake, the node attaches again the
   entries that it attaches at the start, with the resources that they had, maybe on
   other physical devices and with new ids. The new process asks again for the
@@ -261,8 +292,9 @@ and the others below are the names of its proposals.
   runs.
 - A partial service of a workload can declare devices.
 - What PR #649 (VFIO, attach at the start only) must change when the code follows:
-  tags `pci:<vendor>:<device>+<alg>:<hash>` become a chip formal plus the kernel
-  setting; the price and the receipt read the chip formal; an unmeasured benchmark
+  tags `pci:<vendor>:<device>+<alg>:<hash>` become an architecture formal (the family
+  that the software needs), a model fact, and the kernel setting; the price and the
+  receipt read the model fact; an unmeasured benchmark
   refuses; the receipt fields of its proto diff become `facts`. Its release on
   hibernation and its new selection on wake already follow the default of
   `Device.policies`.
@@ -332,9 +364,13 @@ New formals of the redesign:
   filled value (today a value is a placeholder in full or has none, and has no new
   line).
 - The id of a network share, in the formal of the share setting.
-- Devices: the chip formal (one formal for each PCI vendor and device pair, made from
-  one template text), the setting of the guest kernel, the facts of the kernel and of
-  the chips, the device benchmarks, and the rate of a device for each chip.
+- Devices: the architectures of devices (GPU families by compute capability, the USB
+  video class, ...), the model fact (one formal for each PCI or USB vendor and
+  device pair, made from one template text), the stable id fact, the facts of place
+  and of links, the setting of the guest kernel, the selection of a device by the
+  caller, the notice before a detach, the links between entries, the bitstream of an
+  FPGA, the device benchmarks, the rate of a device for each model, and a promise to
+  wipe a device between two clients.
 - The schemas (`Service.schema`, `Signed.Body.context`): the format of a schema (today
   `src/identity/protocol_schema.py`, plus the name of each field), and one schema for
   `Service` and for each signed type. The layer `celaut-gateway` uses the same format,

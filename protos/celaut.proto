@@ -250,10 +250,10 @@ message Service {
             // The full or a partial specification of the service. The resources of the
             // workload are in service.container.resources: at_init for the start,
             // at_most for the limit, and benchmarks for the minimum scores. A partial
-            // service can have only the resources, the architecture and the devices. The service is
-            // complete only if its hash, with the algorithm of a type in the hash field,
-            // is equal to the value of that type. A reader that knows none of these
-            // types reads the service as partial.
+            // service can have only the resources, the architecture and the devices.
+            // The service is complete only if its hash, with the algorithm of a type in
+            // the hash field, is equal to the value of that type. A reader that knows
+            // none of these types reads the service as partial.
             Service service = 2;
             // Where a party can get the full service: a list of Policy in an
             // announcement. The formal of each entry defines a kind of source, and the
@@ -388,7 +388,7 @@ message Service {
         // The environment variables that the service declares, each with its format. A
         // caller gives the values in Configuration.environment_variables.
         repeated DescriptorKeyValue environment_variables = 6;
-        // The devices that the node attaches directly to the instance. Repeat the entry
+        // The devices that the node gives to the instance (see Device). Repeat the entry
         // for each device that the service needs, so the list can have two equal
         // entries. The order of the list has a meaning: the position of an entry, from
         // 0, is its number (DeviceChange.Attach.entry, AttachedDevice.entry). A reader
@@ -464,11 +464,19 @@ message Service {
 // resources. Its resources keep their values: they are what the node gives to the
 // instance when it wakes. Where the node keeps the state is its own decision.
 //
-// A hibernated instance has no devices: the node detaches all of them. When the
+// A hibernated instance has no devices: the node detaches all of them. Before the node
+// detaches a device by its own decision (a hibernation or a stop that the instance did
+// not ask for), it gives the notice that the settings of the device ask for. When the
 // instance wakes, the node attaches again the entries of Container.devices that it
-// attaches at the start, with the resources that they had. They can be other physical
-// devices, with new ids. The node does not attach again a device of an entry with a
-// setting to attach on request: the new process asks for it.
+// attaches at the start, with the resources that they had. They can be other devices,
+// with new ids, but not for an entry where the caller selected a device
+// (Configuration.policies): the node gives that same device again, or the instance
+// stays hibernated and the answer says why. The node does not attach again a device of
+// an entry with a setting to attach on request: the new process asks for it.
+//
+// If a device fails or the node loses it, the node detaches it and stops its charge.
+// InstanceState no longer shows it. The instance can ask for the entry again
+// (DeviceChange.Attach).
 //
 // To wake an instance is to start a new process on the state that the node kept. By
 // default, the new process starts from the entrypoint of the service. A service that
@@ -582,7 +590,9 @@ message Configuration {
     optional Amount initial_mu = 2;
     // Settings of the start, from the caller: a list of Policy in a requirement. A node
     // that does not know a setting, or does not understand its value, refuses the start.
-    // For example: the name that the caller gives to the instance.
+    // For example: the name that the caller gives to the instance, or the device that
+    // the node gives for an entry of Container.devices, by the stable id that the node
+    // announces (ArchitectureResources.facts).
     repeated Policy policies = 3;
     // The offer that the caller accepts for this start: the Signed EstimatedCost of the
     // same node, as the node sent it. If the offer is valid for this start, the node
@@ -824,23 +834,36 @@ message EstimatedCost {
 // its benchmarks, since the same "1.0 core" is native silicon under one virtualizer and
 // software emulation under another (#448).
 
-// A device that the node attaches directly to the instance. One Device is one physical
-// device. A service that needs two devices has two Device entries.
+// A device of the node that the node gives to one instance at a time: the node gives
+// the access and takes it back, and it charges for the device. The way from the device
+// to the guest does not matter: PCI, USB, a bus of a board, or a network of the node
+// (for example a camera on a private segment that the node opens only to the
+// instance). A thing that the instance reaches through a network, and whose access the
+// node does not control (for example a camera on the internet), is not a Device: the
+// service declares it as a Network. One Device is one device as the guest sees it: a
+// physical device, or a part of one (for example a virtual function or a partition of
+// a GPU). A service that needs two devices has two Device entries.
 message Device {
-    // The architecture of the device: the device only, for example one model of chip.
-    // What the service needs to drive the device (for example the guest kernel) is
-    // not part of it: it is a setting of the start, in Container.Init.policies. A
-    // device of a node matches the entry when the two architectures have the same
-    // formal. The formal of the architecture is also the scope of the rate of the
-    // device (Rate.scope). A service that must run on more than one architecture is a set of
-    // services, one for each architecture. A Device with no architecture is not valid.
+    // The architecture of the device: what the software of the service programs
+    // against, as for the architecture of the container. Its formal fixes the
+    // granularity: for example a family of GPUs with one compute capability, a USB
+    // video class camera, or one model of robot arm. A model that the software does not
+    // need is not part of it: it is a fact of the device (ArchitectureResources.facts),
+    // and a rate of a device can use it as its scope (Rate.scope). What the service
+    // needs to drive the device (for example the guest kernel) is not part of it
+    // either: it is a setting of the start, in Container.Init.policies. A device of a
+    // node matches the entry when the two architectures have the same formal. A
+    // service that must run on more than one architecture is a set of services, one
+    // for each architecture. A Device with no architecture is not valid.
     Descriptor architecture = 1;
     // The resources that the service needs from the device, with the same meaning as in
     // Container.resources, but with formals of devices. A node refuses a formal that
     // its definition does not allow for a device.
     Service.Container.Resources resources = 2;
-    // Settings of the device: a list of Policy in a requirement, for example when the
-    // node attaches the device. With no setting, the node attaches the device before
+    // Settings of the device: a list of Policy in a requirement. For example: when the
+    // node attaches the device, the notice that the service needs before the node
+    // detaches it, or the other entries of Container.devices that the device must be
+    // linked to, by their positions. With no setting, the node attaches the device before
     // the instance starts, and the instance has it until it stops or hibernates. A node
     // that does not know a setting refuses to start the service.
     repeated Policy policies = 3;
@@ -858,6 +881,11 @@ message ArchitectureResources {
     // The scores, as Quantity with formals of benchmarks. If the node did not measure a
     // score, the score is absent, never 0.
     repeated Quantity benchmarks = 3;
+    // Other facts of the machine or of the device: a list of Policy in an
+    // announcement. For example: the model, a stable id that a caller can select
+    // (Configuration.policies), where the device is, or the devices that it is linked
+    // to. A reader keeps a fact that it does not know.
+    repeated Policy facts = 4;
 }
 
 // The answer of GetResourceAvailability.
@@ -1112,7 +1140,7 @@ message StartReceipt {
     // attest them.
     repeated Quantity reserved = 6;
     // Other facts of the start that the node attests: a list of Policy in an
-    // announcement. For example: the guest kernel that the instance boots, and the chip
+    // announcement. For example: the guest kernel that the instance boots, and the model
     // of each device that the node attached. A reader keeps a fact that it does not know.
     repeated Policy facts = 7;
 }
@@ -1327,12 +1355,13 @@ message Peer {
     // request that does not fit. Before a caller asks for a cost or for availability,
     // it can skip a node whose entry does not fit the request.
     repeated ArchitectureResources resources = 6;
-    // The devices that the node can attach directly to an instance. One entry is one
-    // device, with its architecture. The node repeats an entry for each device that it
-    // has, so this list can have two entries with the same architecture. The order of
-    // the list has no meaning. The values are a limit of capacity, not the free capacity now. GetResourceAvailability gives the
-    // real answer. This list is not Peer.resources: a reader does not read a device
-    // architecture as a main architecture.
+    // The devices that the node can give to an instance (see Device). One entry is one
+    // device as the guest sees it, as the node is configured now: a physical device or
+    // a part of one. The node repeats an entry for each device that it has, so this
+    // list can have two entries with the same architecture. The order of the list has
+    // no meaning. The values are a limit of capacity, not the free capacity now.
+    // GetResourceAvailability gives the real answer. This list is not Peer.resources:
+    // a reader does not read a device architecture as a main architecture.
     repeated ArchitectureResources devices = 7;
 
     // How the node behaves. The two lists have the meaning of the lists of
@@ -1444,7 +1473,7 @@ message AttachedDevice {
     // attaches the device. It stays the same until the node detaches the device. An id
     // is not valid for another instance.
     string id = 1;
-    // The architecture and the resources of the device.
+    // The architecture, the resources and the facts of the device that the node gave.
     ArchitectureResources device = 2;
     // The address of the device in the guest, in the form that the architecture of the
     // device defines. The service finds the device with it.
@@ -1458,9 +1487,9 @@ message AttachedDevice {
 message DeviceChange {
     // A device to attach.
     message Attach {
-        // The position of the entry in Container.devices. The entry must have a
-        // setting to attach the device on request, and the instance must not have a
-        // device for that entry now.
+        // The position of the entry in Container.devices. The instance must not have
+        // a device for that entry now: the entry has a setting to attach the device on
+        // request, or its device failed.
         uint32 entry = 1;
         // The resources that the instance asks for, as a list of Quantity with only
         // formals of resources of the device. A resource that is not in the list has
