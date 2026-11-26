@@ -13,6 +13,8 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 
 | File | Tags | Id |
 | --- | --- | --- |
+| [`architectures/linux-amd64.descriptor`](architectures/linux-amd64.descriptor) | linux-amd64, linux/amd64, amd64, x86_64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7286c85c05460ba06509cc64b218a4d7470162983032d151fd47dbdb6cbef5d5` |
+| [`architectures/linux-arm64.descriptor`](architectures/linux-arm64.descriptor) | linux-arm64, linux/arm64, arm64, aarch64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:4d9137888704b0247a31c3705a875d4a70a54b80845bfc7332a7b39a58f93355` |
 | [`contracts/payment/bitcoin-p2wpkh.descriptor`](contracts/payment/bitcoin-p2wpkh.descriptor) | bitcoin-p2wpkh | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5495a6f5fc350871eb78b8251ca0b45addf48d385d96176911ba5da6c07cc35e` |
 | [`contracts/payment/ergo-p2pk.descriptor`](contracts/payment/ergo-p2pk.descriptor) | ergo-p2pk | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0e8ccfee22f3d3494097be8757c5fea6e1ca299d304823e8f79c391181dd88a6` |
 | [`policies/api_slot/access.descriptor`](policies/api_slot/access.descriptor) | access | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5344aac7355624c44adb896f24d835327efdb5fe6b0826a14a0b570b496cd37e` |
@@ -35,13 +37,6 @@ names it: a tag, a key of the configuration, a key of `service.json`, or a forma
 the code builds with `component_formal` and that has no file yet. "New" is a thing that
 nodo does not implement yet. The column "Name" is a proposal. When you write a file,
 remove its row here.
-
-### `architectures/`
-
-| Name | Today | Notes |
-| --- | --- | --- |
-| `linux-amd64` | tag `linux/amd64`, aliases `amd64`, `x86_64` (`src/utils/arch_guard.py:36,61`). Runs under Cloud Hypervisor/KVM when native, QEMU when foreign (`src/utils/architectures.py:64-123`). Announced with tags only (`src/utils/cost_functions/architecture_resources.py:100`). No formal. | The formal says that it boots a guest kernel, and which setting of `policies/container_init/` selects it. |
-| `linux-arm64` | tag `linux/arm64`, aliases `arm64`, `arm_64`, `aarch64`. As above. | As above. |
 
 ### `architectures/devices/`
 
