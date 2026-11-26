@@ -1,356 +1,88 @@
 # Pending: the redesign of celaut.proto
 
-This file records a redesign of `celaut.proto` that is not complete. It has the
-decisions that the proto already shows, and the questions that are still open. The
-code (Python, Rust TUI), the generated `*_pb2.py` files, the tests and `compat.json`
-do not follow the proto yet. Remove this file when the last open question is closed
-and the code follows the proto.
+This file records what is still to do for the redesign of `celaut.proto`. The proto is
+the reference for what is decided: its comments give each rule, and `protos/REASON.md`
+gives the reasons. The history of each decision is in git. The code (Python, Rust TUI),
+the generated `*_pb2.py` files, the tests and `compat.json` do not follow the proto
+yet. Remove this file when the code follows the proto.
 
-`protos/REASON.md` has the rules that the decisions follow. `protos/FABLE_PROPOSITION/`
-has an independent analysis of the contract (`ANALYSIS.md`); the codes P1, R3.6, Q1.1
-and the others below are the names of its proposals.
+## 1. Decisions that are still open
 
-## Decided
+- **The format of a schema** (`protos/descriptors/schemas/`). Today
+  `src/identity/protocol_schema.py` gives `schema.<name>=<num>:<cardinality>:<type>,...`
+  with no names of fields. A schema must also give the name of each field: without
+  them, two variants that add one field number with the same type have the same
+  schema. Decide the format before any schema file. The layer `celaut-gateway` uses
+  the same format.
+- **`config-file`.** The proto removed `Container.config_declaration`, and the node
+  always writes `/__config__`. Decide if a setting of `Init` is necessary, or if the
+  path is a part of the architecture.
+- **The Ergo reputation ledger.** Its formal holds the R4 type ids of the
+  configuration of the node (`src/utils/ledger_descriptors.py:184-224`). Decide if the
+  ids are a part of the ledger, or values.
+- **The ledger tag `bitcoin` as a network with no addresses**
+  (`src/manager/networks.py:149`). Decide if it is still necessary.
 
-### Quantities and resources
+## 2. The descriptors to write
 
-- `Quantity` (`tags`, `prose`, `formal`, `optional uint64 value`) replaces the typed
-  fields of `Sysresources` and the `benchmark` key-value list. `Sysresources` and
-  `Uint64KeyValue` are removed.
-- Two classes of formal: **resource** (consumed: reserved, added, enforced, charged)
-  and **benchmark** (measured: compared one by one, never added). A node refuses a
-  formal in a list of the wrong class.
-- One comparison rule: greater than or equal. A `Quantity` is only for such a thing.
-  An exact value, a relative weight or a feature is a `Policy` (REASON 3.3). The old
-  block I/O weight is removed: no node used it.
-- `Container.Resources` has `at_init`, `at_most` (resources) and `benchmarks`
-  (minimum scores). The stability of a score is a formal of a percentile.
-- `Peer.rates` is a list of `Rate`, `Peer.limits` is a list of `Limit`. Their `scope`
-  is bytes, compared exactly. `Slot.mu_per_call` becomes `Slot.rates` (what a
-  service charges its callers; a node does not read it).
-- The contract never names one resource (Q7). A node that cannot change a resource
-  of a running instance refuses the request and names the formal of the resource.
-- CPU is one formal, in thousandths of a core, total (Q5). The old rule "use the score
-  of the smallest larger working set" is removed: a node that did not measure a
-  working set refuses, or measures it.
-- Benchmarks over time (Q6): a node measures at its start and then at a period that
-  the operator sets, and announces a percentile only with enough measures. At a wake
-  below a minimum, the instance stays hibernated. Low priority for nodo (REASON 1.7).
+The rules are in `protos/descriptors/REASON.md` and in the `REASON.md` of each folder.
+The list of the descriptors that nodo needs, with where nodo implements each one
+today, is the second part of `protos/descriptors/INDEX.md`. It is the work for the
+agents that write the descriptors.
 
-### Hibernation
+## 3. Facts of nodo today that the implementation must change
 
-- Hibernation is elemental (REASON 1.5): an instance has a process, or it has none.
-  "Suspended" and "hibernated" are one state. The proto describes it once, in the
-  comment "The life of an instance".
-- A hibernated instance keeps its identity and its filesystem. The node reserves none
-  of its resources. Its resources keep their values for the wake.
-- `ModifyServiceSystemResourcesInput.hibernated` asks for the state. No value of a
-  resource hibernates or wakes an instance.
-- The default way to continue is a new process from the entrypoint (Q1.2). A service
-  that needs another way declares an `Init` policy.
-- How long a node keeps a hibernated instance that cannot pay is a promise of the
-  offer (Q1.1). With no such promise, the caller assumes none.
-- A wake starts a process, so it has a "start" receipt (Q1.3), with the same salt
-  for the environment as the first start. `BalanceStatement.receipts` gives the
-  start receipts of the processes in the range of the statement, so the party that
-  pays gets also the receipt of a wake that nobody asked for. The movement of each
-  start and wake names its receipt by id.
-- A node that cannot hibernate an instance refuses and gives the reason (Q1.4). The
-  network-share rule is a limit of nodo, not of the contract.
-- The rate of the kept state is a `Rate` whose formal defines its base (Q1.5).
+The inventory of the code (November 2026) found these. Each one is a change of the
+code, not of the contract.
 
-### Signatures and compatibility
+- **Formal bytes.** Outside the layers of an address, the ledgers, the signature
+  scheme and the proof of work, the code has formal bytes only for the six settings of
+  `src/utils/policies.py`. The architectures, the resources, the benchmarks, the
+  rates, the terms, the networks and the facts are tags, keys of `service.json` or
+  keys of the configuration.
+- **The eight descriptor files of today** (`policies/` and `contracts/payment/`) need
+  the lines `class=` and `name=`. Their bytes are on the wire today, so this change
+  goes with the code. `policies.make` must then read the tags and the prose from the
+  file, not make them.
+- **`scarcity_max_multiplier` is sent in `Peer.rates`.** It is a promise, not a
+  price.
+- **The announced rates are truncated.** The configuration is in MU for each hour,
+  the announcement is in MU for each second (`hour // 3600`), and the charge uses the
+  price for each hour. Select units for the rate formals that give exact integers.
+- **`Peer.limits` is never written.** nodo enforces its limits with keys of its
+  configuration only. A caller cannot know them.
+- **The facts `kernel` and `devices` of the start receipt are always empty**
+  (`src/gateway/launcher/local_execution/local_execution.py:614`).
+- **`node_protocol_stack`.** The node checks only the tag `celaut-gateway`
+  (`src/virtualizers/microvm/rootfs.py:445-459`). The subset check is a TODO there.
+  The packer writes the full gateway stack when `service.json` has `uses_gateway`.
+- **Architectures** are matched by tag (`src/virtualizers/architecture.py:45-65`),
+  and the configuration flag `TRUST_METADATA_ARCHITECTURE` reads tags from `Metadata`,
+  which the proto removed.
+- **Benchmarks** are one run at the start of the node, with no statistic. The rule
+  "use the score of the next larger working set" is removed: a node that did not
+  measure a working set refuses, or measures it. A node measures again at a period
+  that the operator sets, and announces a percentile only with enough measures (low
+  priority, REASON 1.7).
+- **CPU** is two numbers today (`cpu_quota`, `cpu_period`). The formal is one
+  integer: thousandths of a core.
+- **PR #649** (devices with VFIO, attach at the start only). Its tags
+  `pci:<vendor>:<device>+<alg>:<hash>` become an architecture formal (the family that
+  the software needs), a model fact, and the setting of the guest kernel. The price
+  and the receipt read the model fact. A device benchmark that the node did not
+  measure refuses. The receipt fields of its proto diff become `facts`.
+- **`TunnelRequest.slot`** is still a decimal text: it is not signed.
 
-- **`Signed` envelope (P1).** A node signs the exact bytes of a serialized message:
-  `Signed { Body { context, signer, scheme, content }, signature }`. It replaces the
-  signature fields of the signed messages and the digest keys of the layer formal.
-  REASON 6.2.
-- The signer (public key) is the bytes that the scheme defines, with no length in
-  the contract (Q9.2). The id of a peer is the lowercase hexadecimal of those bytes.
-- The signature scheme is one descriptor with one formal (P4).
-- No `float` and no signed integer in signed or hashed messages; times, periods and
-  ports are unsigned (R6.1, P10).
-- A field that holds a hash is a `Hash`; the contract never names a
-  hash algorithm (X-HASH, REASON 6.4). Nodo keeps blake2b-256.
-- A node refuses a service with a field number that it does not know (R3.6).
-- No field-number discipline across variants (R4.7 is not adopted; REASON 1.8).
-- No `reserved` lines; the field numbers of each message are compact (REASON 4.5).
-- `Container.node_protocol_stack` declares only the RPCs of the node that the service
-  uses, so the id of a service does not change with each release of nodo (S6.5,
-  issue #648).
-- An address is a tree of layers (REASON 2.7): `Uri.layers` and `Slot.layers` replace
-  the transport and the linear stack. A requirement (`Network.protocol_stack`,
-  `Container.node_protocol_stack`) stays a path. Layers are compared by exact bytes by
-  default; a new version is a sibling. A party can read two formals and accept a
-  subset; nodo does it only to judge `node_protocol_stack` against its own gateway
-  layer (REASON 2.5). This replaces R2.5 of the analysis (item by item).
-- Chat and Observe left `celaut.proto` (P8, REASON 2.8). They are normal gRPC services
-  in `protos/extensions/chat.proto` (`celaut.chat.Chat`: `Send`, `GetThread`) and
-  `protos/extensions/observe.proto` (`celaut.observe.Observe`: `Watch`), each a branch
-  of the gRPC layer of the address. `GetThread` now carries the `Client` in its
-  request, because there are no bee-rpc indices.
-- `compat.json` stays as it is: it only keeps nodo, the superapp and the library on
-  the same version. Nodes compare the layer formal, not `compat.json`.
+## 4. Known state of the branch
 
-### Shape of the contract
+- `celaut_pb2.py` is not generated from the new proto, so the code builds the old
+  messages.
+- `tests/identity/test_protocol_doc.py` fails: `celaut_doc.binpb` is not generated
+  from the new proto.
+- Ten other tests fail on this branch for reasons outside this work (install, help,
+  pricing, observe, update manifest).
 
-- Offers and the Peer have two lists of terms: `conditions` (bind the caller; a
-  caller refuses an unknown one) and `promises` (bind the node; a caller ignores an
-  unknown one). The pricing fields of `EstimatedCost`, `OnClose`, `closes_at` and
-  `ActivityWindow` become terms (P2, REASON 3.2). The maximum scarcity multiplier is a
-  promise (Q2).
-- No catalogs of formals in the comments of the proto (P3).
-- One `Descriptor` replaces the eight copies of (tags, prose, formal) (P4). An entry
-  with a value holds a `Descriptor` and the value: `Policy`, `Quantity`, `Rate`,
-  `Limit` and `PoWRequired`. `ResourceAvailability.unknown_formals` and the error
-  details of a refusal give the `Descriptor`, so its tags and prose help the search.
-- Removed: `Metadata.format`, `Metadata.reputation_proofs`,
-  `Container.config_declaration` (the node writes `/__config__`). Kept:
-  `Api.payment_contracts` (P5).
-- `Policy` lists on `Network`, `Configuration` and `Device`; `facts` on the start
-  receipt (P6).
-- Merged: `Ack`, `Uri`, `TunnelRequest`, `InstanceState`, and a partial `Container`
-  for `GetResourceAvailability` (P7).
-- `NoticeDeclaration` is an `Init` policy (P9).
-- `ResourceAvailability.unknown_formals`, and the formals that a node does not know in
-  the error details of `StartService` and `GetServiceEstimatedCost` (P10, REASON 3.7).
-- The descriptor files go in `protos/descriptors/<class>/<name>.descriptor` (P3, Q4).
-  A file is one `Descriptor`: a `tags:` line, the prose, and the formal after the line
-  `=== formal`. Only the formal is the identity. `protos/descriptors/REASON.md` has the
-  rules to write one, `src/utils/descriptor_file.py` reads them and writes
-  `INDEX.md`, and `tests/test_descriptor_files.py` checks them.
-
-### Dependencies
-
-- `Dependency.is_completed` is removed (open question 1). The hash field names the
-  service of a workload. The service field is complete only if its hash, with the
-  algorithm of a type in the hash field, is equal to the value of that type. A flag
-  could say "complete" for a service with another hash. A dependency with no hash
-  names no service, so the packer must write the hash of a full service.
-- `Dependency.on_filesystem` becomes `Dependency.sources`: a list of `Policy` in an
-  announcement. Where a party gets a service (the filesystem of the parent, a
-  registry, the network) is an open set, so each kind of source is a formal. A node
-  that does not know a source ignores it.
-- Known cost: the sources are in the id of the parent. If the location of a child
-  changes, the parent gets a new id. A source does not change which service the hash
-  names.
-
-### Networks
-
-- `Service.Network` is `{ Policy domain, protocol_stack, policies }` (open question
-  2, X-NET). The formal of the domain is the kind of network: what a member is, how a
-  node finds the members, and which addresses the instance can reach. The value of
-  the domain gives its parameters (a host name and its ports, the identity of a shared
-  database, the block of a chain). Today the node knows four kinds: all addresses
-  (the tag `*`), host names, domains of celaut instances (the Postgres of
-  `copa-ai/personal-nutrition`), and proof-of-work networks.
-- Two domains are the same only if the formals and the values have the same bytes,
-  after the node applies the settings of the network. A node never compares by tag
-  (REASON 2.2). Nodo can read a value to accept more keys (REASON 2.5).
-- The `${VAR}` template is a setting in `Network.policies`. The node fills the value
-  from `Configuration.environment_variables` at the start. The id of the service keeps
-  the template. `ResolveNetwork` refuses a network with a setting that changes the
-  value at a start.
-- `NetworkResolution` holds the `Network` as the service declares it, and not its
-  tags. The instance finds its network by the bytes.
-- `ShareLocationRequest.share_id` is the id that the formal of the share setting
-  defines. The contract does not fix the hash `H("network", tag, ...)`.
-- Known cost: two services that do not agree on the bytes of a domain do not meet.
-  A common tag is no longer enough.
-
-### Receipts
-
-- `ExecutionReceipt` is split (open question 3, X-REC, REASON 4.2): `StartReceipt`
-  for each process, and `TunnelCheckpoint` for each part of a `ServiceTunnel` stream.
-  Each receipt has only the fields of its kind. `Signed.Body.context` gives the type,
-  so the fields `kind` and `plane` are removed. A "close" is a checkpoint with
-  `close` set.
-- The two directions of a stream are each an `EventChain` (events, bytes, head).
-- The checkpoint of the Observe stream is `ObserveCheckpoint` in
-  `protos/extensions/observe.proto` (REASON 2.8). `coverage`, `capture_mode` and
-  `degraded_reason` go there: a tunnel always sees all its bytes.
-- The session is bytes, not hexadecimal text. The slot of a checkpoint is the internal
-  port as `uint32` (R6.1). `TunnelRequest.slot` is still a decimal text: it is not
-  signed.
-- Known residual: `coverage` and `capture_mode` of the Observe extension are texts of
-  a closed list. The extension is optional, so they do not touch the contract.
-
-### Schemas
-
-- A message whose bytes can reach a reader that did not get them from the writer
-  holds its schema (open question 4, REASON 1.8). The schema is a `Descriptor`: its
-  formal gives the structure of the type and of the messages that it contains, with
-  the name of each field.
-- Only two places: `Service.schema` (field 1, the same number in every variant) and
-  `Signed.Body.context` (a `Descriptor`, no longer the name of the type). `Service` is
-  the only message whose id is a hash of its bytes. Every other message that a third
-  party reads is signed (`Peer`, `ReputationProof`, receipts, statements, offers,
-  checkpoints, chat entries, and the evidence that holds them).
-- Why: a hash names bytes, not a meaning. Without a schema, a publisher can say that
-  a service id that another publisher judged means something else.
-- The schema is a formal like the others (REASON 2.2): a new meaning is a new schema.
-  A comment does not change the schema, so it does not change the ids. A change to the
-  structure of `Service` or of a message that it contains changes the id of every
-  service.
-- Rejected: the full descriptor of the file with its comments (up to 142 KB, and its
-  bytes depend on the version of `protoc`), and a schema in every message.
-
-### Hashes and names
-
-- `Metadata` is removed, with `HashTag` and `AttrHashTag` (open question 8). `Hash`
-  (type and value) is a message of the first level, for every hash of the contract:
-  services, accounts, instances, chains of events, executions.
-- `Hash` has no `Descriptor`, and the hash algorithms have no formal files. The type
-  (the digest of the empty input) identifies the algorithm, and a node can check it.
-  Rejected: a descriptor in each hash (one role in each place, REASON 3.5, and its
-  cost in each chain and each id).
-- A service travels as its hashes or as the full `Service`. `StartService`,
-  `GetService` and the shared service of the chat use a list of `Hash`.
-- `AttrHashTag` had no reader: only the packer wrote the hash of the filesystem, and
-  the only reader looked for the architecture, which the packer never wrote. It named
-  the parts by field number from outside the hashed bytes, so a change of a field
-  number broke it with no error.
-- The names of a service (`HashTag.tag`) are not in the contract. Nothing signed or
-  hashed them, so a peer could give any name to any service. A name is a local label
-  of the node and of the CLI (from `service.json`). A text for a reader is in
-  `Service.prose`, which the id covers.
-
-### Devices
-
-- The architecture of a device is what the software of the service programs against,
-  as for the architecture of the container (open question 5, REASON 2.4, 7.3). Its
-  formal fixes the granularity: a family of GPUs with one compute capability, a USB
-  video class camera, one model of robot arm or of FPGA. With "one model of chip", a
-  CUDA service for four GPUs had to be four services, and a service for any UVC
-  camera fifty. A model that the software does not need is a fact of the device.
-- The guest kernel is a requirement of the service, not a property of
-  the device, so it is a setting in `Container.Init.policies`. Its value gives the
-  hashes of the kernel, one for each hash type. An alias of a kernel ABI is a reading
-  of the node (REASON 2.5), not a new identity. With no kernel setting, the service
-  has no preference and the node selects the kernel.
-- The kernel is not in the bytes of `Container.architecture`. The architecture is the
-  key of `Peer.resources` (capacity and benchmarks), and the kernel changes neither
-  (REASON 3.5). It is a choice applied to one machine for each instance, not a
-  property of the machine (REASON 2.4). The formal of an architecture can say that it
-  boots a guest kernel, and which setting selects it.
-- The initramfs is not a setting of the service. It is the boot mechanism of the node
-  (its `/init` mounts the filesystem and starts the entry point), so it is a part of
-  how the node implements the architecture.
-- An architecture is never empty, in `Container` and in `Device`. An empty
-  architecture does not mean the native architecture of the node.
-- One `Device` is one device as the guest sees it: a physical device, or a part of
-  one (a virtual function, a partition of a GPU). One entry of `Peer.devices` is one
-  such device, as the node is configured now. A device that can boot more than one
-  kernel is not counted two times.
-- `ArchitectureResources.facts` (an announcement) gives the facts of a device: its
-  model, a stable id, where it is, the devices that it is linked to. A rate of a
-  device can use the model as its scope (`Rate.scope`). A node does not take the
-  model from the text of a tag.
-- `Device` or `Network`: the bus does not decide (PCI, USB, a bus of a board or a
-  network of the node). A `Device` is a thing of the node that the node gives to one
-  instance at a time, takes back and charges for: a camera on a private segment that
-  the node opens only to the instance is a `Device`, and its `guest_address` is an
-  address in the network of the instance. A thing that the instance reaches and
-  whose access the node does not control (a camera on the internet, or on the LAN of
-  the node when the node does not announce it) is a `Network`. A device that many
-  instances share is a service that holds the device and gives an API (REASON 1.6).
-- A situated device (a camera that looks at one place, a robot arm in one lab, an
-  HSM with its keys, a disk with data) is selected by the caller, not by the service:
-  the service has an id and stays generic. The caller gives, in
-  `Configuration.policies`, the stable id of the device for an entry. At the wake,
-  the node gives the same device again, or the instance stays hibernated and the
-  answer says why.
-- Before the node detaches a device by its own decision (a hibernation or a stop that
-  the instance did not ask for), it gives the notice that the settings of the device
-  ask for (for example, a robot arm must stop in a safe position). A node that cannot
-  give that notice refuses the service.
-- If a device fails or the node loses it, the node detaches it and stops its charge.
-  `DeviceChange.Attach` accepts any entry that has no device now, so an entry that
-  the node attaches at the start can come back without a hibernation.
-- The setting of the attach mode has, as its value, the ordered list of the modes that
-  the service accepts. `Peer` does not announce the modes: `GetResourceAvailability`
-  gives the answer.
-- The kernel and the models of the devices that a start attaches are
-  `StartReceipt.facts`. The models are one formal whose value is the list (a list of `Policy` has no repeated formal).
-- A node that cannot grow a device (for example `at_init` less than `at_most` under
-  VFIO) refuses and names the formal. A device benchmark that the node did not
-  measure does not meet a requirement: the node refuses.
-- `Container.devices` is in the id of the service, so its order is fixed: the
-  position of an entry is its number, and a reader does not sort the list. The list
-  can repeat an entry. The order of `Peer.devices` has no meaning.
-- `DeviceChange.attach` names the entry of `Container.devices` by its position, with
-  the resources that the instance asks for. It is no longer an
-  `ArchitectureResources`: two entries with the same architecture and other settings
-  were ambiguous, and its field of benchmarks had no meaning there (REASON 3.5).
-  `AttachedDevice.entry` gives the entry that a device fills.
-- `DeviceChange.resize` changes the resources of a device that the instance has.
-  Before, `Device.resources.at_most` had no RPC that used it. A node that cannot
-  resize (VFIO) refuses and names the formal. Today MIG partitions and virtual
-  functions do not change their size while they run, so `resize` is for the future
-  (REASON 1.7).
-- A hibernated instance has no devices. At the wake, the node attaches again the
-  entries that it attaches at the start, with the resources that they had, maybe on
-  other physical devices and with new ids. The new process asks again for the
-  devices that it attaches on request. A `DeviceChange` is only for an instance that
-  runs.
-- A partial service of a workload can declare devices.
-- What PR #649 (VFIO, attach at the start only) must change when the code follows:
-  tags `pci:<vendor>:<device>+<alg>:<hash>` become an architecture formal (the family
-  that the software needs), a model fact, and the kernel setting; the price and the
-  receipt read the model fact; an unmeasured benchmark
-  refuses; the receipt fields of its proto diff become `facts`. Its release on
-  hibernation and its new selection on wake already follow the default of
-  `Device.policies`.
-
-### Bindings
-
-- The binding "this service implements this formal" is not in the contract (open
-  question 6, REASON 1.3, 1.6). Each party selects where it finds bindings: the list
-  of its operator, or a registry of objectives (`celaut-project/registry`: an
-  objective is a strict definition with tag, prose and formal, a coverage binds a
-  service to it, and benchmarks and results measure the service). The usual flow is
-  on the client: it reads the registry, selects a service, and asks a node to run it
-  by its hash.
-- A node does not need to know the types of opinions of a registry.
-  `ReputationOpinion` is an announcement: a reader uses the types that it knows and
-  keeps the others.
-- REASON 1.6 no longer excludes the binding of "the author of the service": the
-  contract has no author of a service, so a node cannot check it. The defence is the
-  reputation at risk and the measured results. The node that runs the service is also
-  in the chain of trust.
-- Rejected: a binding as a `ReputationOpinion` of a celaut type that nodes read (Q9.4).
-  It put in the contract a mechanism on which two nodes do not need to agree.
-- Note for the registry: to go from an unknown formal to its objective by exact
-  bytes (REASON 2.2), and not by tags, the formal of an objective must hold the exact
-  bytes of the celaut formal, or its id `<type>:<digest>`.
-
-## Open questions
-
-Each question keeps its number when it closes. Closed: question 1 (see
-"Dependencies"), question 2 (see "Networks"), question 3 (see "Receipts"), question 4
-(see "Schemas"), question 5 (see "Devices"), question 6 (see "Bindings") and
-question 8 (see "Hashes and names").
-
-### 7. The core descriptors to write
-
-The rules are done: `protos/descriptors/REASON.md`, and one `REASON.md` for each folder
-(one folder for each use of a descriptor in the contract). The list of the
-descriptors that nodo needs, with where nodo implements each one today, is the second
-part of `protos/descriptors/INDEX.md`. It is the work for the agents that write the
-descriptors.
-
-The files of `policies/` and `contracts/payment/` keep their bytes, with no `class=`
-and no `name=` line, until the code follows the contract (stage 7): their bytes are on
-the wire today.
-
-Decisions that the list leaves open:
-
-- The format of a schema (`protos/descriptors/schemas/`), before any schema file.
-- `config-file`: a setting of `Init`, or a part of the architecture.
-- The Ergo reputation ledger: are the R4 type ids a part of the ledger, or values?
-- The ledger tag `bitcoin` as a network with no addresses: is it still necessary?
-
-## Implementation stages
+## 5. Implementation stages
 
 The contract is complete before nodo implements all of it (REASON 1.7).
 
@@ -362,4 +94,5 @@ The contract is complete before nodo implements all of it (REASON 1.7).
 4. Terms: pricing, schedule, receipts, balance movements.
 5. Resources: cgroups and the virtual machine from the formals.
 6. Placement: availability, benchmarks, devices.
-7. CLI, TUI, docs, `compat.json`.
+7. CLI, TUI, docs, `compat.json`, and the `class=` and `name=` lines of the eight
+   descriptor files of today.
