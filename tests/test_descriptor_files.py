@@ -25,6 +25,7 @@ LEGACY = {
     "protocols/address/tcp.descriptor",
     "protocols/address/tls.descriptor",
     "protocols/address/tor-onion-v3.descriptor",
+    "signatures/schemes/ed25519.descriptor",
 }
 KEY = re.compile(r"^[a-z0-9_.-]+$")
 ID = re.compile(r"\b[0-9a-f]{64}:[0-9a-f]{64}\b")

@@ -86,6 +86,7 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`quantities/resources/device-memory.descriptor`](quantities/resources/device-memory.descriptor) | device-memory, vram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ee9cad6566f696f7f73602862c74af5ae19c2c88e2ffa58c6030c0609100ad01` |
 | [`quantities/resources/disk.descriptor`](quantities/resources/disk.descriptor) | disk, disk space, root filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926` |
 | [`quantities/resources/memory.descriptor`](quantities/resources/memory.descriptor) | memory, ram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db` |
+| [`signatures/schemes/ed25519.descriptor`](signatures/schemes/ed25519.descriptor) | ed25519 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:77465d8964bef14c447c879b0b8b55a44de49cb18db46c42148d724f2c349f38` |
 | [`terms/conditions/on-close.descriptor`](terms/conditions/on-close.descriptor) | on-close, on_close | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6b2cfd979e5375b7998de99a7bf8f1564f0ca7d9c04fd6fb6f57525275d5be35` |
 | [`terms/conditions/scarcity-curve.descriptor`](terms/conditions/scarcity-curve.descriptor) | scarcity-curve, scarcity_curve | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:c11e404b8a315e6f4f6804ad877e75c77f00605837af63dfb361e3d3f388e459` |
 | [`terms/conditions/schedule.descriptor`](terms/conditions/schedule.descriptor) | schedule, activity window | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:59fdea41af046224bef39a2059df76f3779e44ba74aab00a623a3aea347207e1` |
@@ -208,16 +209,6 @@ wire today).
 | Name | Today | Notes |
 | --- | --- | --- |
 | `ergo-mainnet` (reputation) | `ledger_descriptors.py:184-224` | The formal holds the R4 type ids of the configuration. Decide if these ids are a part of the ledger or values. |
-
-### `signatures/schemes/`
-
-| Name | Today | Notes |
-| --- | --- | --- |
-| `ed25519` | `SIGNATURE_SCHEME_COMPONENTS` (`src/identity/node_identity.py:212-239`) | The scheme of the identity of a node. |
-
-Low priority: the API of a verifier of signatures, only for a node that verifies a peer
-through a service (REASON 1.7). A client that uses a registry gets the API from the
-objective.
 
 ### `schemas/`
 

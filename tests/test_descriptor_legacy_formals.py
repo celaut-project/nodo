@@ -12,6 +12,7 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from src.identity import transport_stack
+    from src.identity.node_identity import SIGNATURE_SCHEME_COMPONENTS
     from src.utils import descriptor_file, ledger_descriptors
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -52,6 +53,14 @@ class LedgerFormalTests(unittest.TestCase):
                 ledger = build()
                 self.assertEqual(list(ledger.tags), [name], "the configuration is not mainnet")
                 self.assertEqual(_formal(f"ledgers/{name}.descriptor"), ledger.formal)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"imports unavailable: {IMPORT_ERROR}")
+class SignatureSchemeFormalTests(unittest.TestCase):
+    def test_the_ed25519_file_holds_the_formal_of_the_code(self):
+        (component,) = SIGNATURE_SCHEME_COMPONENTS
+        self.assertEqual(list(component.tags), ["ed25519"])
+        self.assertEqual(_formal("signatures/schemes/ed25519.descriptor"), component.formal)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,19 @@
+tags: ed25519
+
+EdDSA over edwards25519, as specified in RFC 8032 (PureEdDSA, no context, no pre-hash). Private key: 32 uniformly random bytes. Public key: the 32-byte compressed encoding of the corresponding curve point, lowercase hex. Signature: the 64 bytes R || S of RFC 8032 section 5.1.6, lowercase hex, verified by the procedure in section 5.1.7. Message: the payload bytes, signed as given -- the algorithm hashes internally, so nothing pre-hashes them here.
+
+=== formal
+algorithm=eddsa
+context=none
+curve=edwards25519
+message=as-given
+prehash=none
+private_key_bytes=32
+public_key_bytes=32
+public_key_encoding=hex-lowercase
+signature_bytes=64
+signature_encoding=hex-lowercase
+signature_layout=R||S
+spec=RFC8032
+variant=pure
+verification=RFC8032-5.1.7
