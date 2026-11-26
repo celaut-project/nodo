@@ -53,6 +53,9 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`quantities/resources/device-memory.descriptor`](quantities/resources/device-memory.descriptor) | device-memory, vram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ee9cad6566f696f7f73602862c74af5ae19c2c88e2ffa58c6030c0609100ad01` |
 | [`quantities/resources/disk.descriptor`](quantities/resources/disk.descriptor) | disk, disk space, root filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926` |
 | [`quantities/resources/memory.descriptor`](quantities/resources/memory.descriptor) | memory, ram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db` |
+| [`terms/conditions/on-close.descriptor`](terms/conditions/on-close.descriptor) | on-close, on_close | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6b2cfd979e5375b7998de99a7bf8f1564f0ca7d9c04fd6fb6f57525275d5be35` |
+| [`terms/conditions/scarcity-curve.descriptor`](terms/conditions/scarcity-curve.descriptor) | scarcity-curve, scarcity_curve | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:c11e404b8a315e6f4f6804ad877e75c77f00605837af63dfb361e3d3f388e459` |
+| [`terms/conditions/schedule.descriptor`](terms/conditions/schedule.descriptor) | schedule, activity window | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:59fdea41af046224bef39a2059df76f3779e44ba74aab00a623a3aea347207e1` |
 | [`terms/promises/device-wipe.descriptor`](terms/promises/device-wipe.descriptor) | device-wipe | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9e4de3477eab7c62295794b22d97b678c40a23d7d4fb1441757b3609daa58a4c` |
 | [`terms/promises/free-below-load.descriptor`](terms/promises/free-below-load.descriptor) | free-below-load, free_while_scarcity_below | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e3a9428148156c40ac7bbf8069d054e1177ae2d9b9367528ced037d58eca014e` |
 | [`terms/promises/hibernated-grace.descriptor`](terms/promises/hibernated-grace.descriptor) | hibernated-grace, suspended_grace | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dfa1da8c7762bd9609019641f679bf96e2a90f046ee217d37bd9b58c8a973de2` |
@@ -110,14 +113,6 @@ The six settings that nodo has today have their files (part 1). They need the li
 | Name | Value | Today | Notes |
 | --- | --- | --- | --- |
 | `share` | the id of a network share | the filesystem setting `share` with `role=network`; id = sha256 of length-prefixed fields (`src/utils/shared_filesystems.py:397-433`) | The formal fixes the id that `ShareLocationRequest.share_id` carries. |
-
-### `terms/conditions/`
-
-| Name | Value | Today | Notes |
-| --- | --- | --- | --- |
-| `schedule` | the spans of activity, in minutes of UTC | `activity_window.WINDOWS` (`src/utils/activity_window.py:108`), old `Peer.activity_window` and offer `closes_at` | |
-| `on-close` | what the node does at the close: refuse, stop or hibernate | `activity_window.ON_CLOSE`, old offer field `on_close` (`src/utils/on_close.py:9-13`) | |
-| `scarcity-curve` | how the price grows with the load | `pricing.SCARCITY_CURVE` (`src/utils/monetary.py:416`), not announced, a float | It is not exact: write it as integers. |
 
 ### `prices/node/`
 

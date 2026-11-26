@@ -1,0 +1,18 @@
+tags: schedule, activity window
+
+A condition of the node: the spans of the day in which it takes new work. Outside the
+spans, the node is closed.
+
+The value is the spans, separated by commas and sorted by their bytes. A span is
+<start>-<end>, in minutes from 00:00 UTC, each from 0 to 1439, in base 10. A span with
+start after end goes past midnight. Example: 480-1020,1320-120. The value is not
+empty.
+
+With no condition, the node is always open. The caller is bound: it accepts that the
+node can close.
+
+=== formal
+class=condition
+name=schedule
+rule=the node takes new work only inside a span
+value=the spans <start>-<end>, minutes from 00:00 UTC, 0 to 1439, base 10, sorted, separated by commas; start after end goes past midnight; not empty

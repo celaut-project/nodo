@@ -1,0 +1,17 @@
+tags: on-close, on_close
+
+A condition of the node: what it does with a running instance when its schedule
+(0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:59fdea41af046224bef39a2059df76f3779e44ba74aab00a623a3aea347207e1) closes.
+
+The value is refuse, stop or hibernate. With refuse, the instance runs, and the node
+refuses new work. With stop, the node stops the instance. With hibernate, the node
+hibernates the instance, and wakes it when the schedule opens.
+
+With no condition, the value is refuse. The caller is bound.
+
+=== formal
+class=condition
+default=refuse
+name=on-close
+schedule=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:59fdea41af046224bef39a2059df76f3779e44ba74aab00a623a3aea347207e1
+values=hibernate,refuse,stop
