@@ -17,6 +17,13 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`architectures/linux-arm64.descriptor`](architectures/linux-arm64.descriptor) | linux-arm64, linux/arm64, arm64, aarch64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:4d9137888704b0247a31c3705a875d4a70a54b80845bfc7332a7b39a58f93355` |
 | [`contracts/payment/bitcoin-p2wpkh.descriptor`](contracts/payment/bitcoin-p2wpkh.descriptor) | bitcoin-p2wpkh | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5495a6f5fc350871eb78b8251ca0b45addf48d385d96176911ba5da6c07cc35e` |
 | [`contracts/payment/ergo-p2pk.descriptor`](contracts/payment/ergo-p2pk.descriptor) | ergo-p2pk | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0e8ccfee22f3d3494097be8757c5fea6e1ca299d304823e8f79c391181dd88a6` |
+| [`facts/device-id.descriptor`](facts/device-id.descriptor) | device-id | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6ce6c432403ebc0b978b7a38df1f7bc3b89229a42af71656dbfb8c7b26a70617` |
+| [`facts/device-links.descriptor`](facts/device-links.descriptor) | device-links, nvlink | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:513329b19e532424e1702f2197e1bb43f94e230165db90b209e47c01a64f821d` |
+| [`facts/device-models.descriptor`](facts/device-models.descriptor) | device-models | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ebd1ea752be8e0274e2857ed673f61d1cf3504e25e0251f230341d5d38e26024` |
+| [`facts/device-place.descriptor`](facts/device-place.descriptor) | device-place, location | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:10026c1cb62e5e15d214e6efee25adbede6a0c4cdd7d0ffea3e8ee5a0ccdeb73` |
+| [`facts/guest-kernel.descriptor`](facts/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:26509ebd9c5e14da0697ed1ed31f3986da202024645516a2d9c722e198b0c69e` |
+| [`facts/pci-model.descriptor`](facts/pci-model.descriptor) | pci-model, pci | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1` |
+| [`facts/usb-model.descriptor`](facts/usb-model.descriptor) | usb-model, usb | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5` |
 | [`policies/api_slot/access.descriptor`](policies/api_slot/access.descriptor) | access | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5344aac7355624c44adb896f24d835327efdb5fe6b0826a14a0b570b496cd37e` |
 | [`policies/api_slot/tunnel_auth.descriptor`](policies/api_slot/tunnel_auth.descriptor) | tunnel_auth | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0f8206ffef0314db0229f0cb367686a9631b8f85cfd62eb2b82932432df78043` |
 | [`policies/api_slot/wake.descriptor`](policies/api_slot/wake.descriptor) | wake | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2ff042caf1404c444e8aa8d48961e797cd061c176bee27fd33b7351c9a4eaa9a` |
@@ -100,17 +107,6 @@ The six settings that nodo has today have their files (part 1). They need the li
 | --- | --- | --- | --- |
 | `instance-name` | lowercase `[a-z0-9]+(-[a-z0-9]+)*`, 63 characters at most | the reserved environment variable `__nodo_instance_name` (`src/utils/instance_names.py:8-10,81-109`) | |
 | `device-selection` | the position of an entry and the stable id of a device | New | |
-
-### `facts/`
-
-| Name | Value | Today | Notes |
-| --- | --- | --- | --- |
-| `guest-kernel` | the hash of the kernel that the instance boots | field `kernel` of the old start receipt, always empty (`src/identity/execution_receipt.py:390-431`, `src/gateway/launcher/local_execution/local_execution.py:614`) | |
-| `device-models` | the list of the models of the attached devices | field `devices` of the old start receipt, always empty | One fact whose value is the list. |
-| `pci-model`, `usb-model` | `vendor:device` | New | In `Peer.devices`, and the scope of the rate of a device. |
-| `device-id` | a stable id that the node selects | New | |
-| `device-place` | a text for a person | New | |
-| `device-links` | the stable ids of the linked devices | New | |
 
 ### `terms/conditions/`
 

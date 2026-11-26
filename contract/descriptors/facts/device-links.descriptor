@@ -1,0 +1,16 @@
+tags: device-links, nvlink
+
+A fact of a device: the devices of the node that have a direct link to this device,
+which does not go through the host (for example NVLink between two GPUs).
+
+The value is the stable ids (the fact device-id, 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6ce6c432403ebc0b978b7a38df1f7bc3b89229a42af71656dbfb8c7b26a70617) of the
+linked devices, sorted by their bytes and separated by commas. Example: gpu-1,gpu-2.
+
+An absent fact: the node attests no link. The node is bound: it attests the fact.
+
+=== formal
+class=fact
+link=a direct link between the two devices that does not go through the memory of the host
+name=device-links
+place=ArchitectureResources.facts
+value=the values of the fact 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6ce6c432403ebc0b978b7a38df1f7bc3b89229a42af71656dbfb8c7b26a70617 of the devices with a direct link to this device, sorted, separated by commas
