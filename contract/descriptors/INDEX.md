@@ -25,6 +25,12 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`policies/filesystem_entry/share.descriptor`](policies/filesystem_entry/share.descriptor) | share | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1801e283b3be7286cc3445a2e128c3d921f75bddf1825e330c7b7553c45b9de2` |
 | [`policies/filesystem_root/entry_metadata.descriptor`](policies/filesystem_root/entry_metadata.descriptor) | entry_metadata | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3c06eea2a8fe2d1476af508118965a67971d8e178f87caded980e6d78107eb42` |
 | [`policies/filesystem_root/read_mode.descriptor`](policies/filesystem_root/read_mode.descriptor) | read_mode | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e36826fd30068ee263c73edeb8f698c5c4761771801f707d1f6abb6642a503ec` |
+| [`quantities/benchmarks/float-ops.descriptor`](quantities/benchmarks/float-ops.descriptor) | float-ops, flt_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1188efaabf8d5930cc17fffcfcdcf91018894628a9b7ab28dd49822e372c4756` |
+| [`quantities/benchmarks/int-ops.descriptor`](quantities/benchmarks/int-ops.descriptor) | int-ops, int_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7c5ddc260dce1a6e46def9a0bd8f2a6a3f8d8891fc7efa968b27bd9d61f5dcdb` |
+| [`quantities/benchmarks/memory-bandwidth-1gib.descriptor`](quantities/benchmarks/memory-bandwidth-1gib.descriptor) | memory-bandwidth-1gib, mem_bandwidth_1gib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:06d94bc381a2f084b59fd7710589d7df319283e1fdf3a503ee523fb2bebda01e` |
+| [`quantities/benchmarks/memory-bandwidth-256mib.descriptor`](quantities/benchmarks/memory-bandwidth-256mib.descriptor) | memory-bandwidth-256mib, mem_bandwidth_256mib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:48aec407dc2777f1ffe50a4337f4183e2202a8289ad6eb4ef2a0bd5734195723` |
+| [`quantities/benchmarks/memory-bandwidth-64mib.descriptor`](quantities/benchmarks/memory-bandwidth-64mib.descriptor) | memory-bandwidth-64mib, mem_bandwidth_64mib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:746a045bebda93d63b2a105bf220056461ce9c9da1fb048bf3c28644bbaed710` |
+| [`quantities/benchmarks/sha256-hashes.descriptor`](quantities/benchmarks/sha256-hashes.descriptor) | sha256-hashes, sha256_hashes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:c94022a0c3cb3b961ea1312f1e2c65b37058a949dc0b020f0151598442608a04` |
 | [`quantities/resources/cpu.descriptor`](quantities/resources/cpu.descriptor) | cpu, vcpu, cores | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722` |
 | [`quantities/resources/device-memory.descriptor`](quantities/resources/device-memory.descriptor) | device-memory, vram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ee9cad6566f696f7f73602862c74af5ae19c2c88e2ffa58c6030c0609100ad01` |
 | [`quantities/resources/disk.descriptor`](quantities/resources/disk.descriptor) | disk, disk space, root filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926` |
@@ -58,10 +64,6 @@ remove its row here.
 
 | Name | Value / unit | Today | Notes |
 | --- | --- | --- | --- |
-| `int-ops` | operations per second of one core | key `int_ops_per_sec` (`src/utils/benchmark.py:65-70`) | Today one run at the start of the node, with no statistic (`src/core_services/benchmark.py`). The formal must give `stat` and `method`. |
-| `float-ops` | operations per second of one core | key `flt_ops_per_sec` | As above. |
-| `sha256-hashes` | hashes per second of one core | key `sha256_hashes_per_sec` | As above. |
-| `memory-bandwidth-64mib`, `-256mib`, `-1gib` | bytes per second, for a working set | keys `mem_bandwidth_<size>_bytes_per_sec` (`benchmark.py:46`) | One descriptor for each working set. Today a service can ask any size and the node compares with the next larger size: a formal cannot do that, so the service asks one of the three. |
 | the percentiles to support | | New | For a score that must be stable. |
 
 ### `policies/container_init/`

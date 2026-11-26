@@ -1,0 +1,28 @@
+tags: sha256-hashes, sha256_hashes_per_sec
+
+A score of one core: SHA-256 digests of 64-byte inputs per second.
+
+The value is an integer, in hash per second. Example: 120000. More is
+better. The node measures it with one process, so it is what one core does, in a guest
+of the architecture of the announcement. The method is fixed: busybox 1.37.0 from the
+image that the formal names by its digest, and the loop that the formal gives. A
+faster method (for example a compiled program) is another benchmark.
+
+The statistic is one run of at least 2 seconds. It is not a mean of runs and not a
+percentile. A score that must be stable is another benchmark.
+
+In an announcement, an absent score is not measured, never 0. In a requirement
+(Resources.benchmarks), the node compares its score with "greater than or equal" at
+each placement. A node that did not measure the score refuses.
+
+=== formal
+class=benchmark
+clock=/proc/uptime of the guest, in hundredths of a second
+method=busybox sha256sum of 256 copies of one 64-byte file (64 ASCII zeros) in each call; read the clock after each call; stop at the first read at or after 200 hundredths of a second
+name=sha256-hashes
+place=the benchmarks of a container or of an architecture
+process=one process: the score is what one core does
+score=floor(digests*100/elapsed hundredths of a second)
+stat=one run on an idle guest: the rate over one window of at least 2 seconds; no mean of runs and no percentile
+tools=busybox 1.37.0, the image index busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e, in a guest of the architecture
+unit=hash/second
