@@ -212,6 +212,12 @@ wire today).
 | --- | --- | --- |
 | `ergo-mainnet` (reputation) | `ledger_descriptors.py:184-224` | The formal holds the R4 type ids of the configuration. Decide if these ids are a part of the ledger or values. |
 
+### `signatures/schemes/`
+
+Low priority: the API of a verifier of signatures, only for a node that verifies a peer
+through a service (REASON 1.7). A client that uses a registry gets the API from the
+objective.
+
 ### `schemas/`
 
 | Name | Today | Notes |
@@ -220,3 +226,8 @@ wire today).
 | `service` | New | For `Service.schema`. |
 | `peer`, `estimated-cost`, `start-receipt`, `tunnel-checkpoint`, `balance-statement`, `reputation-proof`, `client`, `observe-checkpoint` | Today each signed type has a text prefix (`celaut-price-offer:`, `celaut-execution-receipt:`, ...; `node_identity.py:63-91`) | One for each signed type, for `Signed.Body.context`. |
 | chat entry, ledger attestation | prefixes `celaut-chat-signature:`, `celaut-ledger-attestation:` | The new contract has no type for them yet. |
+
+### `proof_of_work/`
+
+The proof of work of `ReputationProof.pow_nonce` (`src/reputation_system/offchain_proof.py:139-221`) has no
+descriptor: its rule is a part of the gateway layer.
