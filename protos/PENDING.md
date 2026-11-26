@@ -165,6 +165,32 @@ receipt to the party that asked for the wake. `InstanceState` is also the answer
 
 ### 9. The core formals to write
 
+Part 1 is done: the formal files that existed are in `protos/formals/policies/` and
+`protos/formals/payment_protocols/`, with no change to their bytes. Part 2 is this
+list. Each formal goes in `protos/formals/<class>/`, and a test pins its bytes to the
+bytes in the code of nodo.
+
+The format, for all the formals:
+
+- A `class=` line (resource, benchmark, rate, limit, policy, condition, promise,
+  ...), so that "a formal in a list of the wrong class" can be checked from the
+  bytes. This line changes the bytes of the formals of today.
+- The exact bytes are the bytes of the file, with no newline at the end.
+- A generated index with the id of each file (`<type>:<digest>`, REASON 6.3).
+- No path and no name of this implementation in a formal.
+
+Formals that exist today only in the code of nodo, with no file:
+
+- The signature scheme (one descriptor, P4).
+- The ledgers (Ergo, Bitcoin).
+- The transports and the layers of an address (tcp, tls, http2, grpc, bee-rpc). The
+  layer `celaut-gateway` is a wire schema (REASON 2.5): split its rules that must be
+  equal into formals of their own.
+- The templates of the proof-of-work networks.
+- The architectures (today the packer writes only tags, against REASON 2.2).
+
+New formals of the redesign:
+
 - Resources: memory, disk, CPU (thousandths of a core), device memory.
 - Benchmarks: the current keys as means (`int_ops_per_sec`, `flt_ops_per_sec`,
   `sha256_hashes_per_sec`, the memory bandwidth for each working set), and the
@@ -176,6 +202,9 @@ receipt to the party that asked for the wake. `InstanceState` is also the answer
 - Limits: the network limits of today, and a "global" formal for each.
 - Terms: the price bound, the maximum scarcity multiplier, the schedule and what the
   node does at its close, the grace period of a hibernated instance.
+- Policies: the notice channel (`NoticeDeclaration`, P9), the way to continue after a
+  hibernation (Q1.2), the ways to attach a device (P6), and the RPCs of the node that
+  a service uses (`node_protocol_stack`, S6.5).
 
 ## Implementation stages
 
