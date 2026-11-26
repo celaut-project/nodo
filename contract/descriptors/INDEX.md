@@ -25,6 +25,8 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`facts/guest-kernel.descriptor`](facts/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:26509ebd9c5e14da0697ed1ed31f3986da202024645516a2d9c722e198b0c69e` |
 | [`facts/pci-model.descriptor`](facts/pci-model.descriptor) | pci-model, pci | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1` |
 | [`facts/usb-model.descriptor`](facts/usb-model.descriptor) | usb-model, usb | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5` |
+| [`ledgers/bitcoin-mainnet.descriptor`](ledgers/bitcoin-mainnet.descriptor) | bitcoin-mainnet | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:42c3dae582a538b4e29e9c246d11a88dd1d4097995c66a2e9622517c163424ba` |
+| [`ledgers/ergo-mainnet.descriptor`](ledgers/ergo-mainnet.descriptor) | ergo-mainnet | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:003ec055b8a277e480cb04389b4a5c54eb7bf4e4596ce89959515d1707d98b7f` |
 | [`limits/calls.descriptor`](limits/calls.descriptor) | calls, rate limit | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0da197270dfadba911df7395d04d3a247aa94e5d6914adce75f6ace09df4bc18` |
 | [`limits/chat-message-bytes.descriptor`](limits/chat-message-bytes.descriptor) | chat-message-bytes | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:02686ebd00a87e05830928cb9449c3c99201e5394a376c018e4def5c7f621d6c` |
 | [`limits/chat-stored.descriptor`](limits/chat-stored.descriptor) | chat-stored | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0435e5bb354a0536291faf1eef1c81a436726c2c071c0c86dbe09905bdb8333e` |
@@ -205,9 +207,7 @@ wire today).
 
 | Name | Today | Notes |
 | --- | --- | --- |
-| `ergo-mainnet` (payment) | `src/utils/ledger_descriptors.py:123-155` | The formal depends on the configuration (`GENESIS_BLOCK_ID`): one file for each network. |
 | `ergo-mainnet` (reputation) | `ledger_descriptors.py:184-224` | The formal holds the R4 type ids of the configuration. Decide if these ids are a part of the ledger or values. |
-| `bitcoin-mainnet` | `ledger_descriptors.py:285-320` | As above. |
 
 ### `signatures/schemes/`
 

@@ -18,6 +18,8 @@ LEGACY = {
     "policies/filesystem_root/entry_metadata.descriptor",
     "policies/filesystem_root/read_mode.descriptor",
     # The formals that the code builds today (#693): the files copy their bytes.
+    "ledgers/bitcoin-mainnet.descriptor",
+    "ledgers/ergo-mainnet.descriptor",
     "protocols/address/grpc.descriptor",
     "protocols/address/http2.descriptor",
     "protocols/address/tcp.descriptor",

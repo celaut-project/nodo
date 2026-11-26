@@ -1,0 +1,12 @@
+tags: bitcoin-mainnet
+
+This ledger is Bitcoin mainnet. Bitcoin is a proof-of-work blockchain with a UTXO model. The only asset is BTC. One BTC is 10^8 satoshi.
+
+=== formal
+asset.native=BTC
+asset.native.base_unit=satoshi
+asset.native.decimals=8
+chain=bitcoin
+consensus=sha256d-pow
+model=utxo
+network=mainnet

@@ -12,7 +12,7 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from src.identity import transport_stack
-    from src.utils import descriptor_file
+    from src.utils import descriptor_file, ledger_descriptors
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
@@ -37,6 +37,21 @@ class LayerFormalTests(unittest.TestCase):
                 tags, _, formal = build()
                 self.assertEqual(list(tags), [name])
                 self.assertEqual(_formal(f"protocols/address/{name}.descriptor"), formal)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"imports unavailable: {IMPORT_ERROR}")
+class LedgerFormalTests(unittest.TestCase):
+    """The formal of a ledger depends on the configuration: the files are of mainnet."""
+
+    def test_the_ledger_files_hold_the_mainnet_formals_of_the_code(self):
+        for name, build in (
+            ("ergo-mainnet", ledger_descriptors.ergo_payment_ledger),
+            ("bitcoin-mainnet", ledger_descriptors.bitcoin_payment_ledger),
+        ):
+            with self.subTest(name):
+                ledger = build()
+                self.assertEqual(list(ledger.tags), [name], "the configuration is not mainnet")
+                self.assertEqual(_formal(f"ledgers/{name}.descriptor"), ledger.formal)
 
 
 if __name__ == "__main__":
