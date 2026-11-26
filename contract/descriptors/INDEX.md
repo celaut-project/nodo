@@ -18,6 +18,7 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`contracts/payment/bitcoin-p2wpkh.descriptor`](contracts/payment/bitcoin-p2wpkh.descriptor) | bitcoin-p2wpkh | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5495a6f5fc350871eb78b8251ca0b45addf48d385d96176911ba5da6c07cc35e` |
 | [`contracts/payment/ergo-p2pk.descriptor`](contracts/payment/ergo-p2pk.descriptor) | ergo-p2pk | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0e8ccfee22f3d3494097be8757c5fea6e1ca299d304823e8f79c391181dd88a6` |
 | [`dependency_sources/service-file.descriptor`](dependency_sources/service-file.descriptor) | service-file, on_filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b941f5b9e824d666cf2a3b50aa25139bfb8ba108796e8cde0f2b4d4a60cb6c0a` |
+| [`environment_formats/any.descriptor`](environment_formats/any.descriptor) | any, text | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:839fdff7feb387de47e5a5f6457da58dc0c882690f0f9f2d8ce77211aa40ef21` |
 | [`facts/device-id.descriptor`](facts/device-id.descriptor) | device-id | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6ce6c432403ebc0b978b7a38df1f7bc3b89229a42af71656dbfb8c7b26a70617` |
 | [`facts/device-links.descriptor`](facts/device-links.descriptor) | device-links, nvlink | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:513329b19e532424e1702f2197e1bb43f94e230165db90b209e47c01a64f821d` |
 | [`facts/device-models.descriptor`](facts/device-models.descriptor) | device-models | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ebd1ea752be8e0274e2857ed673f61d1cf3504e25e0251f230341d5d38e26024` |
@@ -218,12 +219,6 @@ wire today).
 | `service` | New | For `Service.schema`. |
 | `peer`, `estimated-cost`, `start-receipt`, `tunnel-checkpoint`, `balance-statement`, `reputation-proof`, `client`, `observe-checkpoint` | Today each signed type has a text prefix (`celaut-price-offer:`, `celaut-execution-receipt:`, ...; `node_identity.py:63-91`) | One for each signed type, for `Signed.Body.context`. |
 | chat entry, ledger attestation | prefixes `celaut-chat-signature:`, `celaut-ledger-attestation:` | The new contract has no type for them yet. |
-
-### `environment_formats/`
-
-| Name | Today | Notes |
-| --- | --- | --- |
-| `text` (any value) | the packer writes an empty format for each name of `service.json` `envs` (`zip_with_dockerfile.py:897-904`); no format is checked | The node checks only the name and the value for Linux (`src/utils/guest_env.py:30-59`). Start with one format. |
 
 ### `proof_of_work/`
 
