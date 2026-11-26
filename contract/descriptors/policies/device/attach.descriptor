@@ -15,5 +15,7 @@ class=setting
 default=start
 name=attach
 place=service.container.devices.policies
+request=the node attaches the device when the instance asks with DeviceChange.Attach, and detaches it when the instance asks
+start=the node attaches the device before the instance starts; the instance has it until it stops or hibernates
 value=the accepted modes, in the order of preference, separated by commas, with no repeat
 values=request,start
