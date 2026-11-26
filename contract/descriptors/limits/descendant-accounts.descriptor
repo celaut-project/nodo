@@ -1,0 +1,17 @@
+tags: descendant-accounts
+
+A limit of the node: the most accounts of descendants below one account.
+
+The value is an integer in accounts. Example: 200. The node refuses a start that makes more descendants.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=descendant-accounts
+per=one account
+rule=The node refuses a start that makes more descendants.
+scope=none
+unit=accounts

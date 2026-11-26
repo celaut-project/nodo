@@ -1,0 +1,17 @@
+tags: chat-stored
+
+A limit of the node: the most messages of celaut-chat that the node keeps for one client.
+
+The value is an integer in messages. Example: 200. Above the limit, the node deletes the oldest messages of the client.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=chat-stored
+per=one client
+rule=Above the limit, the node deletes the oldest messages of the client.
+scope=none
+unit=messages

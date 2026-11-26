@@ -24,6 +24,16 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`facts/guest-kernel.descriptor`](facts/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:26509ebd9c5e14da0697ed1ed31f3986da202024645516a2d9c722e198b0c69e` |
 | [`facts/pci-model.descriptor`](facts/pci-model.descriptor) | pci-model, pci | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1` |
 | [`facts/usb-model.descriptor`](facts/usb-model.descriptor) | usb-model, usb | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5` |
+| [`limits/calls.descriptor`](limits/calls.descriptor) | calls, rate limit | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0da197270dfadba911df7395d04d3a247aa94e5d6914adce75f6ace09df4bc18` |
+| [`limits/chat-message-bytes.descriptor`](limits/chat-message-bytes.descriptor) | chat-message-bytes | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:02686ebd00a87e05830928cb9449c3c99201e5394a376c018e4def5c7f621d6c` |
+| [`limits/chat-stored.descriptor`](limits/chat-stored.descriptor) | chat-stored | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0435e5bb354a0536291faf1eef1c81a436726c2c071c0c86dbe09905bdb8333e` |
+| [`limits/descendant-accounts.descriptor`](limits/descendant-accounts.descriptor) | descendant-accounts | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:25fd2a3f0b23859c30a9627c19788514eb1c906ea70ee896a03d401f2c898e27` |
+| [`limits/descendant-depth.descriptor`](limits/descendant-depth.descriptor) | descendant-depth | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:34a33a460345fbbb09d3bb6a31e678fe479f65e83df2593ddbd808d210315ccd` |
+| [`limits/hibernated-disk.descriptor`](limits/hibernated-disk.descriptor) | hibernated-disk | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:56ec0ebd47ed41ddc8f19e50b5ab837537cb89d7105ebe2b9ebdfe8a895cad72` |
+| [`limits/hibernated-instances.descriptor`](limits/hibernated-instances.descriptor) | hibernated-instances | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:02e7f0260d53fb4739d7e5ad70d6b3cdd1f1f7a3fafdc146ef7ff30616bb3226` |
+| [`limits/network-bytes-per-day.descriptor`](limits/network-bytes-per-day.descriptor) | network-bytes-per-day | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:eb78d4e07fec6e2b729131c39b0db18c03ec902bdfee30f6a30f07225330e2e7` |
+| [`limits/network-rate.descriptor`](limits/network-rate.descriptor) | network-rate | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6605388849e23542b2bdf73e242867726082ef81a36cb3b40e6be3d683b9169d` |
+| [`limits/recursion-hops.descriptor`](limits/recursion-hops.descriptor) | recursion-hops | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6311094659448485673bdaae357c2648a48de03300fdcb9832cec3f70cd79817` |
 | [`networks/all-addresses.descriptor`](networks/all-addresses.descriptor) | all-addresses, *, internet | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:54993b26f2e16a140f25aa6b364a8f3fc8e0f1640b858e1e1d903f91d269d634` |
 | [`networks/celaut-instances.descriptor`](networks/celaut-instances.descriptor) | celaut-instances | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a82825a2cd5e7acf69279d824ebaf835f408ecf442b39fdf35dcbda19519f3bf` |
 | [`networks/host-name.descriptor`](networks/host-name.descriptor) | host-name, domain, dns | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6236bd35a58a755b506c50942fb49c83868712c8fe5cef9472a9d391b0075590` |
@@ -144,13 +154,7 @@ must know.
 
 | Name | Per | Today |
 | --- | --- | --- |
-| `calls` | one client, for a window | `communication.CLIENT_RATE_LIMIT_WINDOW_SECONDS`, `MAX_CALLS`, `QUARANTINE_SECONDS` (`src/gateway/client_gate.py:72-80`) |
 | `reputation-pull`, `reputation-push` | one client, and all | `reputation.PULL_*`, `PUSH_*`, `MAX_OFFCHAIN_*_PER_RESPONSE` |
-| `chat-message-bytes`, `chat-stored` | one client | `chat.MAX_MESSAGE_BYTES`, `MAX_STORED_MESSAGES_PER_CLIENT` |
-| `hibernated-instances`, `hibernated-disk` | one parent | `instances.MAX_SUSPENDED_PER_FATHER`, `MAX_SUSPENDED_DISK_GIB_PER_FATHER` |
-| `descendant-depth`, `descendant-accounts` | one account | `ledger.MAX_DESCENDANT_DEPTH`, `MAX_DESCENDANT_ACCOUNTS` |
-| `recursion-hops` | one request | `network.RECURSION_MAX_HOPS` |
-| `network-bytes-per-day`, `network-rate` | all | `host_limits.MAX_NET_GIB_PER_DAY`, `MAX_NET_MIB_PER_SECOND` (`src/utils/host_limits.py:361-384`) |
 
 ### `networks/`
 

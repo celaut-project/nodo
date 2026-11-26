@@ -1,0 +1,17 @@
+tags: descendant-depth
+
+A limit of the node: the most levels of descendants below one account.
+
+The value is an integer in levels. Example: 8. The node refuses a start that makes a deeper descendant.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=descendant-depth
+per=one account
+rule=The node refuses a start that makes a deeper descendant.
+scope=none
+unit=levels

@@ -1,0 +1,17 @@
+tags: hibernated-instances
+
+A limit of the node: the most hibernated instances of one parent.
+
+The value is an integer in instances. Example: 10. Above the limit, the node stops a hibernated instance and does not keep its state.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=hibernated-instances
+per=one parent: the client or the instance that started the instances
+rule=Above the limit, the node stops a hibernated instance and does not keep its state.
+scope=none
+unit=instances
