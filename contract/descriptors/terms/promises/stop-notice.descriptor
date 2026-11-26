@@ -1,0 +1,17 @@
+tags: stop-notice, stop_grace
+
+A promise of the node: the seconds between the notice and a stop or a hibernation that
+the instance did not ask for.
+
+The value is seconds, in base 10. Example: 15. The node sends the notice of the setting
+notice (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616) at least this many seconds before it
+stops or hibernates the instance. It applies only to a service with that setting.
+
+With no promise, the node can stop the instance with no wait. The node is bound.
+
+=== formal
+class=promise
+name=stop-notice
+notice=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616
+rule=the node sends the notice at least value seconds before each stop or hibernation that the instance did not ask for
+value=seconds, base 10

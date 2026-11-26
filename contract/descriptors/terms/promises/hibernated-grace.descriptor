@@ -1,0 +1,15 @@
+tags: hibernated-grace, suspended_grace
+
+A promise of the node: how long it keeps a hibernated instance that cannot pay, before
+it stops the instance and deletes its state.
+
+The value is seconds, in base 10. Example: 604800 (7 days). A deposit in this time can
+wake the instance.
+
+With no promise, the node can stop the instance at once. The node is bound.
+
+=== formal
+class=promise
+name=hibernated-grace
+rule=the node keeps the state of a hibernated instance that cannot pay for at least value seconds before it stops the instance
+value=seconds, base 10

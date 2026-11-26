@@ -1,0 +1,22 @@
+tags: price-bound, price_bounded, price_volatility
+
+A promise of the node: a bound on the growth of the price of an instance, counted from
+its launch.
+
+The value is key=value lines, sorted by key: num and den (the growth v as num/den, num
+of 0 or more, den of 1 or more) and period (T, seconds, 0 or more). Example: den=10,
+num=1 and period=86400, one on each line. In the period k of the instance (k = floor(
+seconds since the launch / T) + 1; k = 1 when T is 0), the price of each resource is
+at most floor(P * (num+den)^k / den^k), where P is its price at the launch. It is also
+never more than the promise scarcity-max allows. A fall of the price is not limited.
+
+With no promise, the price can grow with no bound. The node is bound.
+
+=== formal
+cap=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:8eef8c73033b29b971c667ba741bb553533507bd05b35b2048e464c2d834fbc9
+class=promise
+name=price-bound
+period_index=k = floor(seconds since the launch / period) + 1; k = 1 when period is 0
+resources=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db
+rule=in the period k, the price of each resource in resources is at most floor(P*(num+den)^k/den^k), where P is its price at the launch of the instance
+value=key=value lines sorted by key: den (1 or more), num (0 or more), period (seconds, 0 or more), base 10

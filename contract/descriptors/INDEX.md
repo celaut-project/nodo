@@ -53,6 +53,15 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`quantities/resources/device-memory.descriptor`](quantities/resources/device-memory.descriptor) | device-memory, vram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ee9cad6566f696f7f73602862c74af5ae19c2c88e2ffa58c6030c0609100ad01` |
 | [`quantities/resources/disk.descriptor`](quantities/resources/disk.descriptor) | disk, disk space, root filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926` |
 | [`quantities/resources/memory.descriptor`](quantities/resources/memory.descriptor) | memory, ram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db` |
+| [`terms/promises/device-wipe.descriptor`](terms/promises/device-wipe.descriptor) | device-wipe | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9e4de3477eab7c62295794b22d97b678c40a23d7d4fb1441757b3609daa58a4c` |
+| [`terms/promises/free-below-load.descriptor`](terms/promises/free-below-load.descriptor) | free-below-load, free_while_scarcity_below | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e3a9428148156c40ac7bbf8069d054e1177ae2d9b9367528ced037d58eca014e` |
+| [`terms/promises/hibernated-grace.descriptor`](terms/promises/hibernated-grace.descriptor) | hibernated-grace, suspended_grace | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dfa1da8c7762bd9609019641f679bf96e2a90f046ee217d37bd9b58c8a973de2` |
+| [`terms/promises/launch-load.descriptor`](terms/promises/launch-load.descriptor) | launch-load, launch_scarcity | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b8dde838c0f4b9c90af0bbd8fb616c98cfc91fdcca316b4c9e9ff4f315096ec6` |
+| [`terms/promises/new-client-credit.descriptor`](terms/promises/new-client-credit.descriptor) | new-client-credit, credit_mu_per_new_client | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:509d959c70450993a38022926e64fb2ad273d4a2fe6c0d9953d57ecb7d102ce8` |
+| [`terms/promises/price-bound.descriptor`](terms/promises/price-bound.descriptor) | price-bound, price_bounded, price_volatility | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:638680bb4c49655e93dec1fd28bae77c1975c40f32b8448e97f6135afafab0f3` |
+| [`terms/promises/scarcity-max.descriptor`](terms/promises/scarcity-max.descriptor) | scarcity-max, scarcity_max_multiplier | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:8eef8c73033b29b971c667ba741bb553533507bd05b35b2048e464c2d834fbc9` |
+| [`terms/promises/statement-retention.descriptor`](terms/promises/statement-retention.descriptor) | statement-retention, retention_days | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:351ab928fc9775f3ac367921288a8bfe60b21e40718c3a7d9f4ac656833f0582` |
+| [`terms/promises/stop-notice.descriptor`](terms/promises/stop-notice.descriptor) | stop-notice, stop_grace | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:46ae720fdcffb1ba426d102fc06cecb7d6678958d6d079b290dfbb10d10558bf` |
 
 <!-- END GENERATED -->
 
@@ -109,20 +118,6 @@ The six settings that nodo has today have their files (part 1). They need the li
 | `schedule` | the spans of activity, in minutes of UTC | `activity_window.WINDOWS` (`src/utils/activity_window.py:108`), old `Peer.activity_window` and offer `closes_at` | |
 | `on-close` | what the node does at the close: refuse, stop or hibernate | `activity_window.ON_CLOSE`, old offer field `on_close` (`src/utils/on_close.py:9-13`) | |
 | `scarcity-curve` | how the price grows with the load | `pricing.SCARCITY_CURVE` (`src/utils/monetary.py:416`), not announced, a float | It is not exact: write it as integers. |
-
-### `terms/promises/`
-
-| Name | Value | Today | Notes |
-| --- | --- | --- | --- |
-| `scarcity-max` | the most that the multiplier can be | `pricing.SCARCITY_MAX_MULTIPLIER` (`monetary.py:411`), sent today as a key of `Peer.rates` | It is a term, not a price. |
-| `price-bound` | the growth bound v for each period T | old offer fields `price_bounded`, `price_volatility`, `volatility_period_seconds` (`src/utils/price_bound.py:171`) | A ratio is two integers. |
-| `launch-load` | the load at which the price was computed | old offer field `launch_scarcity`, in ppm (`src/utils/signed_offer.py:29-47`) | |
-| `hibernated-grace` | seconds that the node keeps a hibernated instance that cannot pay | `instances.SUSPENDED_GRACE_SECONDS`, not announced (`src/utils/dead_instances.py:91`) | Q1.1. |
-| `stop-notice` | seconds between the notice and the stop | `instances.STOP_GRACE_SECONDS` (`notice.py:493`) | |
-| `free-below-load` | the load under which the node does not charge | `free_tier.FREE_WHILE_SCARCITY_BELOW`, not announced (`monetary.py:334`) | |
-| `new-client-credit` | MU | `free_tier.CREDIT_MU_PER_NEW_CLIENT` (`manager.py:904`) | |
-| `statement-retention` | days | `ledger.RETENTION_DAYS`, old `BalanceStatement.retention_days` | |
-| `device-wipe` | none | New | The node wipes a device between two clients. |
 
 ### `prices/node/`
 
