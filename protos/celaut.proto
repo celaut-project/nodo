@@ -234,20 +234,18 @@ message Service {
         message Slot {
             // The port inside the container.
             uint32 port = 1;
-            // The transport of the port.
-            Descriptor transport = 2;
-            // The protocols on the transport, bottom to top. The order has a meaning.
-            repeated Descriptor protocol_stack = 3;
+            // What the port speaks: a tree of layers, as in Uri.layers.
+            repeated Layer layers = 2;
             // The settings of the slot: a list of Policy in a requirement. A node that
             // does not know a setting, or does not understand its value, does not run
             // the service. A slot that does not set a setting has the default that the
             // formal of that setting gives.
-            repeated Policy policies = 4;
+            repeated Policy policies = 3;
             // What the service charges a caller for the use of the slot. The formal of
             // each rate says what is charged, for example each call, each byte or a
             // subscription. The scope is the name of a method. This list is for the
             // callers of the service: a node does not read it and does not charge it.
-            repeated Rate rates = 5;
+            repeated Rate rates = 4;
         }
 
         // The ports of the service.
@@ -391,9 +389,11 @@ message Service {
         Init init = 3;
         // The resources of one instance.
         optional Resources resources = 4;
-        // What the service uses of the node: the protocols that it speaks to the gateway
-        // of the node, bottom to top. The service declares only the RPCs of the gateway
-        // that it uses, as a small formal. It does not declare the full layer of the
+        // What the service uses of the node: a path, the protocols that it speaks to the
+        // gateway of the node, bottom to top. The node finds it in the tree of its own
+        // address (see Layer). The service declares only the RPCs of the gateway that it
+        // uses, as a small formal. Here the node reads the formals: it accepts the
+        // gateway layer of the path if it is a subset of its own gateway layer. It does not declare the full layer of the
         // node, so the id of a service does not change with each release of a node. An
         // empty list declares that the service uses no RPC of the node: it does not
         // change its own resources and does not start dependencies. A node that does not
@@ -490,8 +490,44 @@ message Service {
 // pay is a promise of the offer (EstimatedCost.promises). With no such promise, the
 // caller assumes none: the node can stop the instance.
 
-// One address: of a node, or of a port of an instance. It gives its transport and its
-// protocols, so each address describes itself.
+// One protocol that an address speaks, and the protocols that it carries. The layers of
+// an address make a tree. Its roots are the transports of the port (for example tcp and
+// udp on the same port number). Under a layer are the protocols that it can carry.
+//
+// A layer has more than one child only if its protocol can tell them apart (for
+// example TLS by ALPN, or gRPC by the path of the service). The formal of each child
+// includes the value by which its parent selects it.
+//
+// For example, the gRPC layer of a node has these children: the bee-rpc layer, with the
+// layer celaut-gateway over it, and normal gRPC services of optional protocols (for
+// example celaut-chat and celaut-observe, in protos/extensions/).
+//
+// By default, a party compares two layers by the exact bytes of their formal. A
+// published layer never changes. A new version of a protocol, or a variant of it, is a
+// new formal: a node announces it as a sibling of the old one, and keeps the old one
+// while its callers need it. A caller looks for its own path, from a root and from child
+// to child, with a compatible layer at each step. If no path of the tree matches its
+// path, the caller does not call the address.
+//
+// A party can also read two formals and decide that they are compatible, for example
+// when one is a subset of the other. That is a decision of that party, not of the
+// contract, and that party carries its risk. Two nodes compare their layers by the exact
+// bytes, and a node uses the sibling layers for its versions.
+//
+// The children of a layer follow the rules of a list of formals: no two with the same
+// formal, sorted by formal. A reader can refuse a tree that is deeper or larger than its
+// own limit.
+message Layer {
+    // The protocol of this layer.
+    Descriptor protocol = 1;
+    // The protocols that this layer carries. Empty for the top of a path.
+    repeated Layer above = 2;
+}
+
+// One address: of a node, or of a port of an instance. It gives what it speaks, so each
+// address describes itself. One address is one point of the network: an ip and a port.
+// An address does not repeat itself to announce more protocols: they are branches of
+// its tree.
 message Uri {
     // The IP address or the host name.
     string ip = 1;
@@ -500,13 +536,10 @@ message Uri {
     // The unix time, in seconds, after which the address can become incorrect. 0 means
     // no estimate.
     uint64 expiry_unix_timestamp = 3;
-    // The transport of the address.
-    Descriptor transport = 4;
-    // The protocols on the transport, bottom to top. The order has a meaning. A reader
-    // compares them layer by layer, and does not call an address that speaks other
-    // protocols. In an address of an instance the list can be empty: Service.Api gives
-    // the protocols of the port.
-    repeated Descriptor protocol_stack = 5;
+    // What the address speaks: the roots of its tree of layers, one for each transport.
+    // In an address of an instance the list can be empty: Service.Api gives what the
+    // port speaks.
+    repeated Layer layers = 4;
 }
 
 // A running instance of a service, as a caller can reach it.
@@ -1043,7 +1076,8 @@ message BalanceStatement {
 //     the same envs_salt as the first one, so that its envs_digest can be compared. It
 //     names the service, the environment variables, the amount of the start (0 for a
 //     wake) and what the node reserved. BalanceStatement.receipts gives all of them.
-//   * "checkpoint": a ServiceTunnel or Observe stream gives it from time to time. It
+//   * "checkpoint": a ServiceTunnel stream, or a stream of the optional protocol celaut-observe
+//     (protos/extensions/observe.proto), gives it from time to time. It
 //     gives the counters and the hash chains of the stream up to that point.
 //   * "close": the last checkpoint of a stream. The node sends it when the stream
 //     stops normally. A caller that cancels the stream gets no close, so a stream with
@@ -1092,7 +1126,7 @@ message ExecutionReceipt {
 
     // Only in "checkpoint" and "close": the stream and what went through it.
     // Only in "checkpoint" and "close". The stream: "tunnel" (ServiceTunnel) or
-    // "observe" (Observe).
+    // "observe" (the optional protocol celaut-observe).
     string plane = 9;
     // Only in "checkpoint" and "close". A random identifier of the stream, in
     // lowercase hexadecimal, that the node selects when the stream starts.
@@ -1103,7 +1137,7 @@ message ExecutionReceipt {
     // for the first, and one more for each next checkpoint.
     uint64 seq = 12;
     // Only in "checkpoint" and "close". The events into the instance: for a tunnel,
-    // the messages from the caller that the node sent to the service; for Observe,
+    // the messages from the caller that the node sent to the service; for celaut-observe,
     // the packets with direction "IN".
     uint64 in_events = 13;
     // The bytes of these events.
@@ -1112,7 +1146,7 @@ message ExecutionReceipt {
     // celaut-gateway layer gives how to calculate it.
     Metadata.HashTag.Hash in_head = 15;
     // The events out of the instance: for a tunnel, the messages from the service that
-    // the node sent to the caller; for Observe, the packets with direction "OUT".
+    // the node sent to the caller; for celaut-observe, the packets with direction "OUT".
     uint64 out_events = 16;
     // The bytes of these events.
     uint64 out_bytes = 17;
@@ -1130,10 +1164,10 @@ message ExecutionReceipt {
     // "counters-only" (only counts and lengths).
     string coverage = 20;
 
-    // Only for Observe: how the capture was made.
-    // Only for Observe. The capture mode of the session: "pcap" or "conntrack".
+    // Only for celaut-observe: how the capture was made.
+    // Only for celaut-observe. The capture mode of the session: "pcap" or "conntrack".
     string capture_mode = 21;
-    // Only for Observe. Why the capture is not full. Empty when it is full.
+    // Only for celaut-observe. Why the capture is not full. Empty when it is full.
     string degraded_reason = 22;
 }
 
@@ -1203,7 +1237,7 @@ message ReputationProof {
 // The answer of StartService.
 message ServiceInstance {
     // The instance token. It is the credential for StopService, ModifyDeposit,
-    // GetMetrics, ServiceTunnel and Observe.
+    // GetMetrics, ServiceTunnel and the optional protocol celaut-observe.
     string token = 1;
     // The addresses of the instance.
     Instance instance = 2;
@@ -1355,104 +1389,6 @@ message PoWRequired {
     uint32 difficulty = 5;
 }
 
-// Chat and Observe are still under discussion (see protos/PENDING.md). They can move to
-// protocols of their own.
-
-// Chat. A conversation is always opened by a client against a node, and it lives on
-// that node. It has the name client_id#conversation_id, where client_id is the client_id
-// that the node gave to the client and conversation_id is a number that the node gives:
-// 1 for the first conversation of that client, then 2, 3, and so on. The number is never
-// reused. The name is unique in the node, so both sides use it. The operator of a node
-// that wants to talk to the operator of another node is a client of that node (the
-// client_id that it holds there), the same as any other client. If the client is bound
-// to a peer, the node groups its conversations with that peer; the conversations do not
-// change when the binding is made.
-//
-// Each message of a client has a sequence in the node: 1, 2, 3, ..., over all the
-// conversations of that client. It never changes and it grows by 1. A reader that has
-// the messages up to one sequence asks for the ones after it with GetChatThread.
-
-// A text message of a client to the operator of a node (Chat).
-message ChatMessage {
-    // The client_id of the sender on the node that receives the message.
-    string client_id = 1;
-    // The conversation of the message. 0 opens a new conversation: the node gives it the
-    // next number and returns it in ChatAck. Any other value is a conversation of this
-    // client that the node already has.
-    uint64 conversation_id = 2;
-    // A label of the conversation, for a reader of the list of conversations. Optional.
-    // The node keeps it only if conversation_id is 0.
-    optional string topic = 3;
-    // The text of the message.
-    string body = 4;
-    // The Metadata of a service that the sender shares. Optional. The body also names
-    // the service, for a reader that does not know this field.
-    optional Metadata service = 5;
-}
-
-// One message of a conversation, as the node keeps it. The node that keeps the
-// conversation signs each entry that it stores (Signed): the entries of the client too,
-// so the entry is a receipt that the node got the message, and the entries of the
-// operator. An entry that is not in a Signed with a valid signature is not valid. The
-// signature binds the node and nobody else: it does not prove that the client wrote the
-// text.
-message ChatEntry {
-    // The position of the message in the messages of the client. The first message has
-    // sequence 1. The node gives the sequence; it never changes and it grows by 1.
-    uint64 sequence = 1;
-    // The conversation of the message.
-    uint64 conversation_id = 2;
-    // The time that the node stored the message, in unix seconds.
-    uint64 ts = 3;
-    // True if the operator of the node wrote the message, false if the client did.
-    bool from_operator = 4;
-    // The text of the message.
-    string body = 5;
-    // The Metadata of a service that the writer shares. Optional.
-    optional Metadata service = 6;
-    // The hash of the entry before this one in the same conversation, with the
-    // algorithm of its type. The first entry of a conversation has the hash that the
-    // celaut-gateway layer gives for the start of a conversation. The layer also gives
-    // how to calculate the hash of an entry. So a node cannot remove or add a message
-    // in the middle of a conversation without a break in the chain that a reader can
-    // see. Its type is the type of client_ref.
-    Metadata.HashTag.Hash prev_hash = 7;
-    // The client of the conversation, as a hash: the hash, with the algorithm of its
-    // type, of "celaut-chat-client:" followed by the client_id. Never the client_id
-    // itself, so that a signed conversation can be shown to others.
-    Metadata.HashTag.Hash client_ref = 8;
-}
-
-// The request of GetChatThread.
-message ChatThreadRequest {
-    // Send only the messages with a sequence more than this. 0 sends the messages from
-    // the first one (up to the limit of the node).
-    uint64 after_sequence = 1;
-}
-
-// The answer of GetChatThread.
-message ChatThread {
-    // The messages of all the conversations of the client, in order of sequence. Each
-    // one is a Signed ChatEntry of the node.
-    repeated Signed entries = 1;
-    // The sequence of the last message of the client, also if entries is empty or the
-    // node cut it. 0 if the client has no message. A reader compares it with the last
-    // sequence that it has to know whether there is something new.
-    uint64 latest = 2;
-}
-
-// The answer of Chat.
-message ChatAck {
-    // True if the node stored the message.
-    bool stored = 1;
-    // Why the node did not store the message. Empty if stored is true.
-    string reason = 2;
-    // The message as the node stored it, as a Signed ChatEntry of the node: its
-    // conversation (the number that the node gave if the message opened one), its
-    // sequence and its time. The client keeps it as the receipt of the node. Not set if
-    // stored is false.
-    optional Signed entry = 3;
-}
 
 // See docs/RECURSION_GUARD.md (issue #456).
 
@@ -1597,140 +1533,6 @@ message ModifyDepositInput {
     string service_token = 2;
 }
 
-// The request of Observe.
-message ObserveRequest {
-    // The instance token of a local instance of the node.
-    string instance_id = 1;
-    // True to also get one event for each packet. Without it, the stream has only the
-    // session, the metrics and the notices.
-    bool include_packets = 2;
-    // True to also get the checkpoints of the execution receipt, as events of kind
-    // "receipt". The hash chains cover the packet events of this stream.
-    bool include_receipts = 3;
-}
-
-// src/commands/observe.py makes these events (metrics_record, serialize_event).
-
-// One live event of an observed instance.
-message ObserveEvent {
-    // The time of the event, as HH:MM:SS in the local time of the node. Empty in the
-    // notice that tells why the observation did not start.
-    string time = 1;
-    // The kind of the event: "session", "metrics", "packet", "notice" or "receipt". It
-    // names the field of the oneof that the event sets.
-    string kind = 2;
-
-    // How the node observes the instance. It is the first event and it occurs one time,
-    // if the observation starts.
-    message Session {
-        // The instance token.
-        string instance_id = 1;
-        // The name of the service of the instance.
-        string tag = 2;
-        // How the node captures the traffic: "pcap" (all packets) or "conntrack" (only
-        // connections).
-        string capture_mode = 3;
-        // Why the capture is not full. Empty when the capture is "pcap".
-        string degraded_reason = 4;
-        // The libpcap LINKTYPE of the packets: 1 for Ethernet, 101 for raw IP. Only for
-        // "pcap".
-        int32 link_type = 5;
-        // The capture snap length, in bytes.
-        uint32 snaplen = 6;
-        // The balance of the instance at the start, as Amount.n. Empty if unknown.
-        string balance = 7;
-    }
-
-    // One sample of the resources that the instance uses.
-    message Metrics {
-        // True if the instance runs.
-        bool alive = 1;
-        // The CPU use, in percent.
-        optional double cpu_percent = 2;
-        // The highest CPU use since the start of this observation, in percent.
-        optional double cpu_peak_percent = 3;
-        // The memory use, in bytes.
-        optional uint64 mem_bytes = 4;
-        // The highest memory use since the start of this observation, in bytes.
-        optional uint64 mem_peak_bytes = 5;
-        // All the bytes that the instance read from its disks.
-        optional uint64 disk_read_bytes = 6;
-        // All the bytes that the instance wrote to its disks.
-        optional uint64 disk_write_bytes = 7;
-        // All the bytes that the instance sent. The name uses the view of the host
-        // interface: rx is what the host receives from the instance.
-        optional uint64 net_rx_bytes = 8;
-        // All the bytes that the instance received.
-        optional uint64 net_tx_bytes = 9;
-        // All the packets that the instance sent.
-        optional uint64 net_rx_packets = 10;
-        // All the packets that the instance received.
-        optional uint64 net_tx_packets = 11;
-        // The balance of the instance now, as Amount.n. Empty if unknown.
-        string balance = 12;
-    }
-
-    // One connection event or packet of the instance.
-    message Packet {
-        // "OUT" if the instance is the source, "IN" if it is the destination. With
-        // "conntrack", this is the source and the destination of the first packet of the
-        // connection.
-        string direction = 1;
-        // The transport, for example "tcp", "udp" or "icmp".
-        string transport = 2;
-        // The transport in capital letters, for display.
-        string protocol = 3;
-        // The TCP flags. Only with "pcap" and TCP.
-        string tcp_flags = 4;
-        // The source, as ip:port. The port is "None" if the transport has no port.
-        string src = 5;
-        // The destination, as ip:port. The port is "None" if the transport has no port.
-        string dst = 6;
-        // The length of the captured frame, in bytes. Only with "pcap".
-        optional uint32 frame_len = 7;
-        // What the other side is: "instance" or "external".
-        string peer_kind = 8;
-        // The instance token of the other side, if it is an instance.
-        string peer_instance_id = 9;
-        // The first tag of the service of the other side and the first three characters
-        // of its service id, for display. Empty if the other side is external.
-        string peer_tag = 10;
-        // How the other side relates to this instance: "parent", "child" or "peer".
-        string peer_relationship = 11;
-        // The host of the other side, if it is external.
-        string peer_host = 12;
-        // How the node got the event: "pcap" or "conntrack".
-        string source = 13;
-        // The captured frame, without a change. Only with "pcap" and include_packets.
-        bytes raw_frame = 14;
-        // The receive time of the frame, in unix seconds. Only with raw_frame.
-        optional double frame_timestamp = 15;
-    }
-
-    // A message about the observation, for example why the observation is not full, or
-    // that the instance stopped.
-    message Notice {
-        // The text of the notice.
-        string message = 1;
-        // True if the observation is not full.
-        bool degraded = 2;
-    }
-
-    oneof payload {
-        // The session. Only when kind is "session".
-        Session session = 3;
-        // A metrics sample. Only when kind is "metrics".
-        Metrics metrics = 4;
-        // A packet. Only when kind is "packet".
-        Packet packet = 5;
-        // A notice. Only when kind is "notice".
-        Notice notice = 6;
-        // A checkpoint of the execution receipt, as a Signed ExecutionReceipt. Only when
-        // kind is "receipt", and only if the request has include_receipts.
-        Signed receipt = 7;
-    }
-}
-
 // -----------------------
 // GATEWAY SERVICE DEFINITION
 // -----------------------
@@ -1747,7 +1549,6 @@ message ObserveEvent {
 //     client. Then the Client must be that parent. If the parent is another instance or
 //     a node, the token is the only credential and the Client is not read. The Client
 //     shares the rate limit of the client RPCs.
-//   * client-in-message: Chat, with the client_id in the ChatMessage.
 //   * local-address: ModifyServiceSystemResources, only for a local instance.
 //   * none: GenerateClient, which can answer with a PoWRequired.
 // A node refuses a request with a status code. A message that a node signs travels as a
@@ -1883,17 +1684,4 @@ service Gateway {
     // slot allows it. In this mode there are no receipts, and every failure is
     // UNAVAILABLE, with one text.
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Takes an ObserveRequest and returns a stream of ObserveEvent. If the observation
-    // starts, the first event is a session event. If not, the stream has only one
-    // notice that tells why. The stream stops when the instance stops.
-    rpc Observe(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Sends a ChatMessage to the operator of the node, in a conversation of the client
-    // (conversation_id 0 opens one). The node returns a ChatAck. The client_id is enough;
-    // a binding to a peer is optional.
-    rpc Chat(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Takes a Client (index 2) and a ChatThreadRequest (index 1). Returns the ChatThread
-    // of that client: the messages that it sent with Chat and the answers of the
-    // operator, in all its conversations. It is free. A node gives only the thread of
-    // the client in the request.
-    rpc GetChatThread(stream buffer.Buffer) returns (stream buffer.Buffer) {}
 }

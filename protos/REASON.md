@@ -106,8 +106,9 @@ Independent variants of it can exist, and they cannot agree in advance to never
 reuse a field number. So the defence against a wrong reading is not a discipline of
 field numbers. It is this:
 
-- Between two nodes, each address announces the schema of its messages (the layer
-  `celaut-gateway`), and two nodes compare it field by field before they talk.
+- Between two nodes, each address announces its layers, and the layer
+  `celaut-gateway` includes the schema of its messages. Two nodes compare the layers
+  before they talk (rule 2.5).
 - A node that reads a message checks that it makes sense, and refuses a field number
   that it does not know in a requirement (rule 3.6).
 
@@ -137,17 +138,39 @@ the formal. "Release this memory when the instance hibernates" is a behavior: it
 in a policy attached to the entry, never in the formal. If a behavior goes in the
 formal, one thing gets two formals, and two nodes no longer compare equal bytes.
 
-**Rule 2.5. A wire schema is compared item by item.** One kind of formal is not
-compared by exact bytes: the description of a wire schema (the layers of an address).
-It is compared item by item. Two descriptions are compatible when they agree on each
-item that both have. Only items that can grow by addition (a field number, an RPC) go
-into such a formal. A rule that must be equal on both sides is a formal of its own,
-compared by exact bytes, so that one changed rule does not block the whole layer.
+**Rule 2.5. Exact bytes by default; reading is a decision of each party.** By
+default, a party compares two formals by their exact bytes, and does not look inside
+them. A party can also read two formals and decide that they are compatible (for
+example when one is a subset of the other). That is a decision of that party, never an
+obligation of the contract, and that party carries its risk. Nodo compares the layers
+of a peer by exact bytes, and reads them only where it judges a requirement of a
+service (for example: is the gateway layer that a service declares a subset of its
+own?).
+
+A formal does not grow by an edit. A new version or a variant of a formal is a new
+formal. Where two parties must keep to talk during a change (the layers of an
+address), the new formal is a sibling of the old one, and both are announced while the
+old one has users (rule 2.7).
 
 **Rule 2.6. A formal that replaces another names it.** The new formal names the old
 one by its id, and says that a list with both is not valid. This is necessary because
 some formals hold their values (for example `values=never,on_tunnel`): a new value is
 a new formal, and without this rule one list could hold the old and the new one.
+
+**Rule 2.7. An address is a tree.** One address is one point of the network: an ip and
+a port. What it speaks is a tree of layers. The roots are the transports of the port.
+A layer has more than one child only if the layers up to it can tell the children
+apart (for example TLS by ALPN, gRPC by the path of the service), and the formal of
+each child includes the value that selects it. An address never repeats itself to
+announce more protocols. A requirement (what a party needs) is a path, and a party
+looks for its path in the tree of the other party.
+
+**Rule 2.8. An optional protocol has its own file and its own branch.** `celaut.proto`
+holds only what two nodes need to work together (rule 1.3). A protocol that a node can
+leave out goes in its own `.proto` file (`protos/extensions/`), with its own service,
+as one more branch of the tree of the same address, with its own formal. A conflict in
+it then does not touch the other branches. A protocol that a celaut service implements
+(and not the node) goes through `ServiceTunnel`.
 
 ## 3. Lists
 
@@ -247,8 +270,8 @@ can add a value later, the set is a formal.
 **Rule 4.5. Delete, do not deprecate, while in alpha.** A field with no use is
 removed. In alpha there is no compatibility to keep, so do not keep debt for it: a
 removed field leaves no `reserved` line, and the field numbers of each message stay
-compact (1 to n). After the contract is frozen, a new field is permitted only in an
-announcement that is signed over its bytes (rule 7.4).
+compact (1 to n). After the contract is frozen, the contract does not change (rule
+7.4).
 
 **Rule 4.6. A field does not fix what a formal defines.** If a formal defines a
 thing, no field and no comment of the contract can fix a property of that thing: its
@@ -325,12 +348,21 @@ an answer for unknown entries.
 policy in one place, it must not be an enum value or a magic value in another place.
 One concept has one form in the whole contract.
 
-**Rule 7.4. Check the requirements before the freeze.** Rules 4.5 and 7.2 together
-make a trap: a place that has no list at the freeze can never get one. So, before the
-freeze, check each message that holds a requirement. It must have a list of
+**Rule 7.4. Check the extension points before the freeze.** Rules 4.5 and 7.2 together
+make a trap: a place that has no way to grow at the freeze can never get one. So,
+before the freeze, check each message that holds a requirement: it must have a list of
 `Policy`, or it must be a message that the node refuses when it has an unknown field
-(rule 3.6). After the freeze, a new field is permitted only in an announcement that
-is signed over its bytes. A new field is never permitted in a requirement.
+(rule 3.6). Check also each kind of change that is known to come (for example new
+transports and new protocols on one port: rule 2.7). Here a known kind of change is
+enough reason for an extension point; rule 7.2 forbids only an extension point for a
+change that nobody expects. After the freeze, `celaut.proto` does not change: a change
+is a new formal, or a new branch of a tree.
+
+**Rule 7.5. The contract does not save bytes.** The contract does not use
+dictionaries, references or other tricks to make a message smaller (for example a
+layer by the id of a descriptor in place of the descriptor). The same bytes can repeat.
+To compress or to remove repeated bytes in storage or on the wire is the work of a
+layer above (for example the blocks of bee-rpc, which are not part of the protobuf).
 
 ## 8. The process
 
@@ -384,3 +416,6 @@ Follow these steps for each change:
 - A requirement with no list of `Policy` and no refusal of unknown fields (rule 7.4).
 - A term of an offer that can hurt the caller in the list that the caller can ignore
   (rule 3.2).
+- One address announced more than one time to give more protocols (rule 2.7).
+- An optional protocol in `celaut.proto` (rule 2.8).
+- A field or a reference whose only purpose is to make a message smaller (rule 7.5).

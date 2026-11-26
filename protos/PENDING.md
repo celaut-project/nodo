@@ -78,8 +78,17 @@ and the others below are the names of its proposals.
 - `Container.node_protocol_stack` declares only the RPCs of the node that the service
   uses, so the id of a service does not change with each release of nodo (S6.5,
   issue #648).
-- The layer formal: schema items compared item by item; rules that must be equal are
-  formals of their own (R2.5).
+- An address is a tree of layers (REASON 2.7): `Uri.layers` and `Slot.layers` replace
+  the transport and the linear stack. A requirement (`Network.protocol_stack`,
+  `Container.node_protocol_stack`) stays a path. Layers are compared by exact bytes by
+  default; a new version is a sibling. A party can read two formals and accept a
+  subset; nodo does it only to judge `node_protocol_stack` against its own gateway
+  layer (REASON 2.5). This replaces R2.5 of the analysis (item by item).
+- Chat and Observe left `celaut.proto` (P8, REASON 2.8). They are normal gRPC services
+  in `protos/extensions/chat.proto` (`celaut.chat.Chat`: `Send`, `GetThread`) and
+  `protos/extensions/observe.proto` (`celaut.observe.Observe`: `Watch`), each a branch
+  of the gRPC layer of the address. `GetThread` now carries the `Client` in its
+  request, because there are no bee-rpc indices.
 - `compat.json` stays as it is: it only keeps nodo, the superapp and the library on
   the same version. Nodes compare the layer formal, not `compat.json`.
 
@@ -104,7 +113,7 @@ and the others below are the names of its proposals.
   the error details of `StartService` and `GetServiceEstimatedCost` (P10, REASON 3.7).
 - The formal files go in `protos/formals/<class>/` (P3, Q4). Done for the files that
   existed: `protos/formals/policies/` and `protos/formals/payment_protocols/`. Still to
-  do (open question 8): a `class=` line in each formal, the exact bytes of the file (no
+  do (open question 7): a `class=` line in each formal, the exact bytes of the file (no
   final newline), and a generated index of ids. The `class=` line changes the bytes of
   the formals of today.
 
@@ -117,20 +126,7 @@ filesystem of the service, so the node does not need to hold it. `is_completed` 
 next to it. Where a service gets a dependency from (its own filesystem, a registry,
 the network) is an open set, so it can be a formal. Decide the form of both fields.
 
-### 2. Chat and Observe outside the core (P8)
-
-Two nodes work together without them. Two options:
-
-- **A generic extension RPC** of the gateway. Its first message is a descriptor with
-  the formal of the sub-protocol, and the stream continues in that sub-protocol. One
-  extension point for every optional protocol, with no new RPC in the contract.
-- **A second gRPC service** on the same port, announced as another `Uri` with
-  another top layer. Check that the comparison of stacks accepts it (two stacks are
-  compatible only if they have the same number of layers).
-
-Also: a signed chat entry then becomes a `Signed`, like the other signed messages.
-
-### 3. Network (X-NET)
+### 2. Network (X-NET)
 
 A network is not only DNS: there are also peer-to-peer and proof-of-work networks
 (for example the network that the Laravel instances of `copa-ai/personal-nutrition`
@@ -138,30 +134,30 @@ use to reach Postgres). Today the data (a host name) is in the tags, and the ide
 is by tag (against REASON 2.2). A possible form: a descriptor of the kind of network
 plus its value. Read that project before a proposal.
 
-### 4. Split of ExecutionReceipt (X-REC)
+### 3. Split of ExecutionReceipt (X-REC)
 
 16 of its 27 fields say "only in ...". A split into a start receipt and a checkpoint
 follows REASON 4.2. Not done, to keep the risk low.
 
-### 5. Messages that do not come from their writer (REASON 1.8)
+### 4. Messages that do not come from their writer (REASON 1.8)
 
 Between two nodes, the layer formal tells the schema of each message. Two cases have
 no announced schema: a service that a third node forwards (compatibility of schemas is
 not transitive) and a service in a file. Known residual risk. No change for now.
 
-### 6. Devices against PR #649 (P6)
+### 5. Devices against PR #649 (P6)
 
 `Device.policies` replaces the enum `Attach`, and `Peer.devices` changes. Check it
 against the draft pull request #649 before the code follows.
 
-### 7. The binding "this service implements this formal" (REASON 1.6)
+### 6. The binding "this service implements this formal" (REASON 1.6)
 
 The trust rule is decided. The mechanism (how a service declares the formal that it
 implements, how a node finds it, one API for each kind of function) is a future idea,
 not necessarily through `GetReputationProofs` (Q9.4 not adopted). Who vouches for the
 first verifier is also open.
 
-### 8. The core formals to write
+### 7. The core formals to write
 
 Part 1 is done: the formal files that existed are in `protos/formals/policies/` and
 `protos/formals/payment_protocols/`, with no change to their bytes. Part 2 is this
@@ -211,7 +207,9 @@ The contract is complete before nodo implements all of it (REASON 1.7).
 1. Proto (draft done), and the core formals in `protos/formals/`.
 2. The `Signed` envelope in nodo, the TUI and the Peer on the ledger. Remove the
    digest keys from the layer formal.
-3. Terms: pricing, schedule, receipts, balance movements.
-4. Resources: cgroups and the virtual machine from the formals.
-5. Placement: availability, benchmarks, devices.
-6. CLI, TUI, docs, `compat.json`.
+3. The tree of layers: announce it, find a path in it by exact bytes, and the subset
+   check of `node_protocol_stack`. Move Chat and Observe to their own gRPC services.
+4. Terms: pricing, schedule, receipts, balance movements.
+5. Resources: cgroups and the virtual machine from the formals.
+6. Placement: availability, benchmarks, devices.
+7. CLI, TUI, docs, `compat.json`.
