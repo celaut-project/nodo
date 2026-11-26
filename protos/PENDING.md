@@ -218,7 +218,18 @@ and the others below are the names of its proposals.
   5, REASON 2.4). The guest kernel is a requirement of the service, not a property of
   the device, so it is a setting in `Container.Init.policies`. Its value gives the
   hashes of the kernel, one for each hash type. An alias of a kernel ABI is a reading
-  of the node (REASON 2.5), not a new identity.
+  of the node (REASON 2.5), not a new identity. With no kernel setting, the service
+  has no preference and the node selects the kernel.
+- The kernel is not in the bytes of `Container.architecture`. The architecture is the
+  key of `Peer.resources` (capacity and benchmarks), and the kernel changes neither
+  (REASON 3.5). It is a choice applied to one machine for each instance, not a
+  property of the machine (REASON 2.4). The formal of an architecture can say that it
+  boots a guest kernel, and which setting selects it.
+- The initramfs is not a setting of the service. It is the boot mechanism of the node
+  (its `/init` mounts the filesystem and starts the entry point), so it is a part of
+  how the node implements the architecture.
+- An architecture is never empty, in `Container` and in `Device`. An empty
+  architecture does not mean the native architecture of the node.
 - One entry of `Peer.devices` is one physical device. A device that can boot more
   than one kernel is not counted two times.
 - The formal of the chip is the scope of the rate of the device (`Rate.scope`). A
@@ -231,6 +242,24 @@ and the others below are the names of its proposals.
 - A node that cannot grow a device (for example `at_init` less than `at_most` under
   VFIO) refuses and names the formal. A device benchmark that the node did not
   measure does not meet a requirement: the node refuses.
+- `Container.devices` is in the id of the service, so its order is fixed: the
+  position of an entry is its number, and a reader does not sort the list. The list
+  can repeat an entry. The order of `Peer.devices` has no meaning.
+- `DeviceChange.attach` names the entry of `Container.devices` by its position, with
+  the resources that the instance asks for. It is no longer an
+  `ArchitectureResources`: two entries with the same chip and other settings were
+  ambiguous, and its field of benchmarks had no meaning there (REASON 3.5).
+  `AttachedDevice.entry` gives the entry that a device fills.
+- `DeviceChange.resize` changes the resources of a device that the instance has.
+  Before, `Device.resources.at_most` had no RPC that used it. A node that cannot
+  resize (VFIO) refuses and names the formal (REASON 1.7: partitions of a GPU can
+  change their size).
+- A hibernated instance has no devices. At the wake, the node attaches again the
+  entries that it attaches at the start, with the resources that they had, maybe on
+  other physical devices and with new ids. The new process asks again for the
+  devices that it attaches on request. A `DeviceChange` is only for an instance that
+  runs.
+- A partial service of a workload can declare devices.
 - What PR #649 (VFIO, attach at the start only) must change when the code follows:
   tags `pci:<vendor>:<device>+<alg>:<hash>` become a chip formal plus the kernel
   setting; the price and the receipt read the chip formal; an unmeasured benchmark

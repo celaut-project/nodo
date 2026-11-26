@@ -250,7 +250,7 @@ message Service {
             // The full or a partial specification of the service. The resources of the
             // workload are in service.container.resources: at_init for the start,
             // at_most for the limit, and benchmarks for the minimum scores. A partial
-            // service can have only the resources and the architecture. The service is
+            // service can have only the resources, the architecture and the devices. The service is
             // complete only if its hash, with the algorithm of a type in the hash field,
             // is equal to the value of that type. A reader that knows none of these
             // types reads the service as partial.
@@ -304,7 +304,7 @@ message Service {
                 string name = 1;
                 oneof item {
                     // The content of a file, or a buffer.Block that points to the
-                    // content. Empty for a device.
+                    // content. Empty for a device file.
                     bytes file = 2;
                     // A symbolic link.
                     Link link = 3;
@@ -336,7 +336,8 @@ message Service {
             // how the node starts a process of the service, how it continues one on a
             // state that it kept, where the service reads the notices of the node, and
             // the guest kernel that the instance boots. The guest kernel is one setting
-            // for the instance and all its devices.
+            // for the instance and all its devices. With no guest kernel setting, the
+            // service has no preference, and the node selects the kernel.
             repeated Policy policies = 2;
         }
 
@@ -363,7 +364,9 @@ message Service {
             repeated Quantity benchmarks = 3;
         }
 
-        // The architecture that the container needs.
+        // The architecture that the container needs. A container with no architecture
+        // is not valid: an empty architecture never means the native architecture of
+        // the node.
         Descriptor architecture = 1;
         // The filesystem of the container: a serialized Filesystem, or a buffer.Block
         // that points to it.
@@ -386,8 +389,11 @@ message Service {
         // caller gives the values in Configuration.environment_variables.
         repeated DescriptorKeyValue environment_variables = 6;
         // The devices that the node attaches directly to the instance. Repeat the entry
-        // for each device that the service needs. A node that has no free device for an
-        // entry refuses to start the service.
+        // for each device that the service needs, so the list can have two equal
+        // entries. The order of the list has a meaning: the position of an entry, from
+        // 0, is its number (DeviceChange.Attach.entry, AttachedDevice.entry). A reader
+        // does not sort the list. A node that has no free device for an entry that it
+        // attaches at the start refuses to start the service.
         repeated Device devices = 7;
     }
 
@@ -457,6 +463,12 @@ message Service {
 // as the process left it. It has no process, and the node reserves none of its
 // resources. Its resources keep their values: they are what the node gives to the
 // instance when it wakes. Where the node keeps the state is its own decision.
+//
+// A hibernated instance has no devices: the node detaches all of them. When the
+// instance wakes, the node attaches again the entries of Container.devices that it
+// attaches at the start, with the resources that they had. They can be other physical
+// devices, with new ids. The node does not attach again a device of an entry with a
+// setting to attach on request: the new process asks for it.
 //
 // To wake an instance is to start a new process on the state that the node kept. By
 // default, the new process starts from the entrypoint of the service. A service that
@@ -821,8 +833,7 @@ message Device {
     // device of a node matches the entry when the two architectures have the same
     // formal. The formal of the architecture is also the scope of the rate of the
     // device (Rate.scope). A service that must run on more than one architecture is a set of
-    // services, one for each architecture. A Device with no architecture is not valid:
-    // here an empty architecture does not mean the native architecture.
+    // services, one for each architecture. A Device with no architecture is not valid.
     Descriptor architecture = 1;
     // The resources that the service needs from the device, with the same meaning as in
     // Container.resources, but with formals of devices. A node refuses a formal that
@@ -838,8 +849,7 @@ message Device {
 // The resources and the scores of one architecture, as a node announces or reports
 // them. In Peer.resources and Peer.devices: the most that the node supports for that
 // architecture, and the scores that it measured. In AttachedDevice: what the node gave
-// to the instance. In DeviceChange: the most that the instance can grow to. Each list
-// follows the rules of a list of Quantity.
+// to the instance. Each list follows the rules of a list of Quantity.
 message ArchitectureResources {
     // The architecture.
     Descriptor architecture = 1;
@@ -1319,8 +1329,8 @@ message Peer {
     repeated ArchitectureResources resources = 6;
     // The devices that the node can attach directly to an instance. One entry is one
     // device, with its architecture. The node repeats an entry for each device that it
-    // has, so this list can have two entries with the same architecture. The values are
-    // a limit of capacity, not the free capacity now. GetResourceAvailability gives the
+    // has, so this list can have two entries with the same architecture. The order of
+    // the list has no meaning. The values are a limit of capacity, not the free capacity now. GetResourceAvailability gives the
     // real answer. This list is not Peer.resources: a reader does not read a device
     // architecture as a main architecture.
     repeated ArchitectureResources devices = 7;
@@ -1439,17 +1449,45 @@ message AttachedDevice {
     // The address of the device in the guest, in the form that the architecture of the
     // device defines. The service finds the device with it.
     string guest_address = 3;
+    // The position of the entry of Container.devices that this device fills.
+    uint32 entry = 4;
 }
 
 // A change of the devices of an instance. The node never changes a device that the
 // change does not name.
 message DeviceChange {
-    // Devices to attach. One entry is one new device. The resources are the most that
-    // the instance can grow to, as in ArchitectureResources. It has no benchmarks.
-    repeated ArchitectureResources attach = 1;
-    // The ids (AttachedDevice.id) of the devices to detach. The service must have
-    // released each device in the guest before it asks. An unknown id is an error.
+    // A device to attach.
+    message Attach {
+        // The position of the entry in Container.devices. The entry must have a
+        // setting to attach the device on request, and the instance must not have a
+        // device for that entry now.
+        uint32 entry = 1;
+        // The resources that the instance asks for, as a list of Quantity with only
+        // formals of resources of the device. A resource that is not in the list has
+        // its value in at_init of the entry. Each value must not be more than at_most
+        // of the entry.
+        repeated Quantity resources = 2;
+    }
+
+    // A new value for the resources of a device that the instance has now.
+    message Resize {
+        // The id of the device (AttachedDevice.id). An unknown id is an error.
+        string id = 1;
+        // The resources that the instance asks for, as in Attach.resources. A resource
+        // that is not in the list keeps the value of the device.
+        repeated Quantity resources = 2;
+    }
+
+    // The devices to attach. One entry is one new device.
+    repeated Attach attach = 1;
+    // The ids (AttachedDevice.id) of the devices to detach. Only a device of an entry
+    // with a setting to attach on request. The service must have released each device
+    // in the guest before it asks. An unknown id is an error.
     repeated string detach = 2;
+    // The devices to resize. Any device that the instance has, also one that the node
+    // attached at the start. A node that cannot change a resource of a device refuses,
+    // and its reason names the formal of that resource.
+    repeated Resize resize = 3;
 }
 
 // The state of an instance now: the answer of GetMetrics and of
@@ -1488,10 +1526,11 @@ message ModifyServiceSystemResourcesInput {
     // is not set, the node changes the local instance that sends the request, which it
     // finds by the address of the caller.
     string service_token = 2;
-    // A change of the devices of the instance. It is only for the entries of
-    // Container.devices that have a setting to attach the device on request. If it is
-    // not set, the instance keeps all its devices. A node that cannot attach a device
-    // after the start refuses a request that sets this field, and never ignores it.
+    // A change of the devices of the instance. If it is not set, the devices do not
+    // change. A node that cannot do a part of the change refuses the request, and
+    // never ignores a part. The change is only for an instance that runs: the node
+    // refuses it for a hibernated instance, also in a request that wakes it. The new
+    // process asks after the wake.
     DeviceChange devices = 3;
     // The state that the instance asks for. True: the node hibernates the instance.
     // False: the node wakes it. Absent: the state does not change. A request can set
@@ -1630,7 +1669,7 @@ service Gateway {
     // Takes a Service.Container, complete or partial: the architecture, the resources,
     // the devices and the settings of one instance. Returns a ResourceAvailability that
     // tells if the node can run it now. The container does not need to be that of a
-    // known service. An empty architecture is the native architecture of the node.
+    // known service. The architecture is necessary, also in a partial container.
     rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes a content hash. Returns the hashes and the Service, at the StartService
     // indices, so the caller can send them to StartService without a
