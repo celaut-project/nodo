@@ -266,22 +266,26 @@ message Service {
     message Workload {
         // The service of the workload.
         message Dependency {
-            // Known content hashes of the service.
+            // Known content hashes of the service, one for each hash type. They name
+            // the service of the workload. A dependency with no hash names no service:
+            // the workload accepts any service that agrees with the service field.
             repeated Metadata.HashTag.Hash hash = 1;
             // The full or a partial specification of the service. The resources of the
             // workload are in service.container.resources: at_init for the start,
             // at_most for the limit, and benchmarks for the minimum scores. A partial
-            // service can have only the resources and the architecture.
+            // service can have only the resources and the architecture. The service is
+            // complete only if its hash, with the algorithm of a type in the hash field,
+            // is equal to the value of that type. A reader that knows none of these
+            // types reads the service as partial.
             Service service = 2;
-            // True if the service field is complete, so a reader can calculate its
-            // hashes and compare them with the hash field.
-            bool is_completed = 3;
-            // True if the full service is in the filesystem of this service, for
-            // example as a file that it sends later to StartService.
-            bool on_filesystem = 4;
+            // Where a party can get the full service: a list of Policy in an
+            // announcement. The formal of each entry defines a kind of source, and the
+            // value gives the location. For example: a file in the filesystem of this
+            // service, or a registry. A node that does not know a source ignores it,
+            // and it can get the service from a source that is not in the list. A
+            // source never changes the service that the hash field names.
+            repeated Policy sources = 3;
         }
-
-        // on_filesystem is still under discussion (see protos/PENDING.md).
 
         // The number of instances that run at the same time.
         uint32 count = 1;

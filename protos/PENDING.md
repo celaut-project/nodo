@@ -117,14 +117,25 @@ and the others below are the names of its proposals.
   final newline), and a generated index of ids. The `class=` line changes the bytes of
   the formals of today.
 
+### Dependencies
+
+- `Dependency.is_completed` is removed (open question 1). The hash field names the
+  service of a workload. The service field is complete only if its hash, with the
+  algorithm of a type in the hash field, is equal to the value of that type. A flag
+  could say "complete" for a service with another hash. A dependency with no hash
+  names no service, so the packer must write the hash of a full service.
+- `Dependency.on_filesystem` becomes `Dependency.sources`: a list of `Policy` in an
+  announcement. Where a party gets a service (the filesystem of the parent, a
+  registry, the network) is an open set, so each kind of source is a formal. A node
+  that does not know a source ignores it.
+- Known cost: the sources are in the id of the parent. If the location of a child
+  changes, the parent gets a new id. A source does not change which service the hash
+  names.
+
 ## Open questions
 
-### 1. How a service gets its dependency (P5)
-
-`Dependency.on_filesystem` says that the full specification of a dependency is in the
-filesystem of the service, so the node does not need to hold it. `is_completed` is
-next to it. Where a service gets a dependency from (its own filesystem, a registry,
-the network) is an open set, so it can be a formal. Decide the form of both fields.
+Each question keeps its number when it closes. Question 1 (the dependency of a
+service) is closed: see "Dependencies".
 
 ### 2. Network (X-NET)
 
@@ -199,6 +210,8 @@ New formals of the redesign:
 - Policies: the notice channel (`NoticeDeclaration`, P9), the way to continue after a
   hibernation (Q1.2), the ways to attach a device (P6), and the RPCs of the node that
   a service uses (`node_protocol_stack`, S6.5).
+- Sources of a dependency (`Dependency.sources`): a file in the filesystem of the
+  service, and a registry.
 
 ## Implementation stages
 
