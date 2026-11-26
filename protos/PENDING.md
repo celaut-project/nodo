@@ -299,19 +299,34 @@ and the others below are the names of its proposals.
   hibernation and its new selection on wake already follow the default of
   `Device.policies`.
 
+### Bindings
+
+- The binding "this service implements this formal" is not in the contract (open
+  question 6, REASON 1.3, 1.6). Each party selects where it finds bindings: the list
+  of its operator, or a registry of objectives (`celaut-project/registry`: an
+  objective is a strict definition with tag, prose and formal, a coverage binds a
+  service to it, and benchmarks and results measure the service). The usual flow is
+  on the client: it reads the registry, selects a service, and asks a node to run it
+  by its hash.
+- A node does not need to know the types of opinions of a registry.
+  `ReputationOpinion` is an announcement: a reader uses the types that it knows and
+  keeps the others.
+- REASON 1.6 no longer excludes the binding of "the author of the service": the
+  contract has no author of a service, so a node cannot check it. The defence is the
+  reputation at risk and the measured results. The node that runs the service is also
+  in the chain of trust.
+- Rejected: a binding as a `ReputationOpinion` of a celaut type that nodes read (Q9.4).
+  It put in the contract a mechanism on which two nodes do not need to agree.
+- Note for the registry: to go from an unknown formal to its objective by exact
+  bytes (REASON 2.2), and not by tags, the formal of an objective must hold the exact
+  bytes of the celaut formal, or its id `<type>:<digest>`.
+
 ## Open questions
 
 Each question keeps its number when it closes. Closed: question 1 (see
 "Dependencies"), question 2 (see "Networks"), question 3 (see "Receipts"), question 4
-(see "Schemas"), question 5 (see "Devices") and question 8 (see "Hashes and
-names").
-
-### 6. The binding "this service implements this formal" (REASON 1.6)
-
-The trust rule is decided. The mechanism (how a service declares the formal that it
-implements, how a node finds it, one API for each kind of function) is a future idea,
-not necessarily through `GetReputationProofs` (Q9.4 not adopted). Who vouches for the
-first verifier is also open.
+(see "Schemas"), question 5 (see "Devices"), question 6 (see "Bindings") and
+question 8 (see "Hashes and names").
 
 ### 7. The core formals to write
 
@@ -371,6 +386,9 @@ New formals of the redesign:
   caller, the notice before a detach, the links between entries, the bitstream of an
   FPGA, the device benchmarks, the rate of a device for each model, and a promise to
   wipe a device between two clients.
+- Low priority: the API of a verifier of signatures, only for a node that verifies
+  a peer through a service (REASON 1.7). A client that uses a registry gets the API
+  from the objective.
 - The schemas (`Service.schema`, `Signed.Body.context`): the format of a schema (today
   `src/identity/protocol_schema.py`, plus the name of each field), and one schema for
   `Service` and for each signed type. The layer `celaut-gateway` uses the same format,

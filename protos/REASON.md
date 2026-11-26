@@ -83,13 +83,28 @@ Consequences:
   person, and the exact bytes as the search key for a node.
 - A thing that a service can do for a node (verify, convert, measure, transport) is
   a good candidate for a formal: the network can supply it.
-- The trust moves to the binding "this service implements this formal". A node uses
-  a service for a formal that it does not know only when a party that the node
-  already trusts binds the exact bytes of the formal to the content hash of the
-  service: its operator, or publishers above its reputation threshold. A binding from
-  a party that gains from the answer is not valid: the peer whose signature is
-  verified, or the author of the service that is run. Without a trusted binding, the
-  old answer stays: a node never accepts a signature that nobody verified.
+- The trust moves to the binding "this service implements this formal". A party
+  (a client or a node) uses a service for a formal that it does not know only when
+  it trusts a binding of the exact bytes of the formal to the content hash of the
+  service. Without a trusted binding, the old answer stays: a node never accepts a
+  signature that nobody verified.
+- The binding is not in the contract: two nodes work together with no agreement on
+  how each one finds a service (rule 1.3). Each party selects its sources. For
+  example: the list of its operator, or a registry of objectives, where a coverage
+  binds a service to an objective and benchmarks and results measure it. The usual
+  flow is on the client: it reads the registry, selects one service, and asks a node
+  to run it by its hash. A node needs a source of its own only when it must use a
+  service itself (for example, to verify a peer with an unknown signature scheme).
+- The contract gives only what the search needs: the exact bytes of the formal as
+  the key, a refusal that names the formal (rule 3.7), and a service id that also
+  covers the schema of the service (rule 1.8), so that nobody can read a binding with
+  another meaning.
+- The contract does not know the author of a service: a service is a hash, and
+  nobody signs it. So the defence is not a rule about who publishes. It is the
+  reputation that each publisher puts at risk, and the results that others measure.
+  A party that gains from the answer can publish with another identity.
+- The node that runs the service is also in the chain of trust: it can lie about the
+  answer. A party runs the service on itself, or on a node that it trusts.
 - The rule has a limit. A service can verify, convert or measure, because these are
   functions with an input and an output. A service cannot enforce a policy inside
   the hypervisor of the node.

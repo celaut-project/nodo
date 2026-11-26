@@ -82,8 +82,9 @@ message BytesKeyValue {
 // - An announcement only informs the reader. The reader keeps the entry and does not use
 //   it.
 // Before a reader refuses or ignores an entry, it can look for a service that implements
-// the formal. It uses such a service only if a party that it already trusts says that
-// the service implements that formal.
+// the formal. It uses such a service only if it trusts the binding of that service to
+// that formal. Where the reader finds the binding is its own decision, not a part of
+// this contract.
 message Policy {
     // Names, for a reader. A node does not use them to identify the entry.
     repeated string tags = 1;
@@ -1204,7 +1205,10 @@ message FaultEvidence {
 // reputation proof on a ledger.
 message ReputationOpinion {
     // What kind of object the opinion is about, as R4 on the ledger. A node is the
-    // CELAUT_NODE_TYPE_NFT_ID that the celaut-gateway layer gives.
+    // CELAUT_NODE_TYPE_NFT_ID that the celaut-gateway layer gives. The opinions are an
+    // announcement: a reader uses only the types that it knows, and keeps the others.
+    // For example, the types of a registry of objectives (objective, coverage,
+    // benchmark, result) are for the clients, and a node does not need to know them.
     string type = 1;
     // The object of the opinion, as R5 on the ledger. For a node, its peer_id.
     string object = 2;
