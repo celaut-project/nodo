@@ -8,13 +8,13 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from protos import celaut_pb2
-    from src.utils import ledger_descriptors
+    from src.utils import descriptor_file, ledger_descriptors
     from src.utils.contract_xattrs import set_script, set_token_id
     from src.utils.payment_protocol import protocol_hash, protocol_id
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
-DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "formals", "payment_protocols")
+DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "descriptors", "payment_protocols")
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"imports unavailable: {IMPORT_ERROR}")
@@ -24,8 +24,8 @@ class PaymentProtocolTests(unittest.TestCase):
             ("ergo-p2pk", ledger_descriptors.ergo_payment_protocol()),
             ("bitcoin-p2wpkh", ledger_descriptors.bitcoin_payment_protocol()),
         ):
-            with open(os.path.join(DOCS, f"{name}.formal"), "rb") as f:
-                self.assertEqual(f.read(), protocol_id(protocol), name)
+            path = os.path.join(DOCS, f"{name}.descriptor")
+            self.assertEqual(descriptor_file.read(path).formal, protocol_id(protocol), name)
 
     def test_the_hash_is_the_hash_of_the_formal(self):
         protocol = ledger_descriptors.ergo_payment_protocol()

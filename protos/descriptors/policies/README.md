@@ -20,7 +20,7 @@ read-only root filesystem. It is the message `celaut.Policy` (`tags`, `prose`, `
 - A published `formal` never changes. A new meaning is a new `formal`, therefore a new
   setting.
 - The keys of the `xattrs` of an entry (mode, uid, gid, mtime, device) are defined by the
-  setting [`entry_metadata`](entry_metadata.formal) of the root filesystem. Without that
+  setting [`entry_metadata`](entry_metadata.descriptor) of the root filesystem. Without that
   setting, a node reads none of them, and it refuses a tree where an entry carries one of
   the keys. A node reads no other setting from `xattrs`.
 
@@ -32,18 +32,18 @@ list exists now so that a setting defined later is safe on old nodes.
 
 ## Settings
 
-The `formal` of each setting is the file with the same name here, and is the exact bytes
-of the field. The code of the node holds the same bytes, and a test pins them to these
-files.
+Each setting is the descriptor file with the same name here. The bytes after its line
+`=== formal` are the exact bytes of the field `formal` (see [REASON.md](../REASON.md)).
+The code of the node holds the same bytes, and a test pins them to these files.
 
 | Setting | `formal` | Place | Value |
 | --- | --- | --- | --- |
-| `share` | [`share.formal`](share.formal) | a directory entry | `key=value` lines, sorted by key |
-| `read_mode` | [`read_mode.formal`](read_mode.formal) | the root filesystem | `ro` or `rw` |
-| `entry_metadata` | [`entry_metadata.formal`](entry_metadata.formal) | the root filesystem | empty |
-| `access` | [`access.formal`](access.formal) | a slot of the API | `direct`, `tunnel` or `any` |
-| `tunnel_auth` | [`tunnel_auth.formal`](tunnel_auth.formal) | a slot of the API | `token` or `address` |
-| `wake` | [`wake.formal`](wake.formal) | a slot of the API | `never` or `on_tunnel` |
+| `share` | [`share.descriptor`](share.descriptor) | a directory entry | `key=value` lines, sorted by key |
+| `read_mode` | [`read_mode.descriptor`](read_mode.descriptor) | the root filesystem | `ro` or `rw` |
+| `entry_metadata` | [`entry_metadata.descriptor`](entry_metadata.descriptor) | the root filesystem | empty |
+| `access` | [`access.descriptor`](access.descriptor) | a slot of the API | `direct`, `tunnel` or `any` |
+| `tunnel_auth` | [`tunnel_auth.descriptor`](tunnel_auth.descriptor) | a slot of the API | `token` or `address` |
+| `wake` | [`wake.descriptor`](wake.descriptor) | a slot of the API | `never` or `on_tunnel` |
 
 ### `share`
 

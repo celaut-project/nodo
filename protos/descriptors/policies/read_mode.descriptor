@@ -1,0 +1,11 @@
+tags: read_mode
+
+A setting of the root filesystem: is it writable? The value is ro or rw. With no
+setting, the root filesystem is writable. The value ro needs the setting entry_metadata
+and all its keys on every entry.
+
+=== formal
+default=rw
+place=filesystem.root
+setting=read_mode
+values=ro,rw

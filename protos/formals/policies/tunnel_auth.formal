@@ -1,4 +1,0 @@
-default=token
-place=api.slot
-setting=tunnel_auth
-values=address,token

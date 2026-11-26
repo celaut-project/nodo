@@ -100,7 +100,10 @@ and the others below are the names of its proposals.
   `ActivityWindow` become terms (P2, REASON 3.2). The maximum scarcity multiplier is a
   promise (Q2).
 - No catalogs of formals in the comments of the proto (P3).
-- One `Descriptor` replaces the eight copies of (tags, prose, formal) (P4).
+- One `Descriptor` replaces the eight copies of (tags, prose, formal) (P4). An entry
+  with a value holds a `Descriptor` and the value: `Policy`, `Quantity`, `Rate`,
+  `Limit` and `PoWRequired`. `ResourceAvailability.unknown_formals` and the error
+  details of a refusal give the `Descriptor`, so its tags and prose help the search.
 - Removed: `Metadata.format`, `Metadata.reputation_proofs`,
   `Container.config_declaration` (the node writes `/__config__`). Kept:
   `Api.payment_contracts` (P5).
@@ -111,11 +114,11 @@ and the others below are the names of its proposals.
 - `NoticeDeclaration` is an `Init` policy (P9).
 - `ResourceAvailability.unknown_formals`, and the formals that a node does not know in
   the error details of `StartService` and `GetServiceEstimatedCost` (P10, REASON 3.7).
-- The formal files go in `protos/formals/<class>/` (P3, Q4). Done for the files that
-  existed: `protos/formals/policies/` and `protos/formals/payment_protocols/`. Still to
-  do (open question 7): a `class=` line in each formal, the exact bytes of the file (no
-  final newline), and a generated index of ids. The `class=` line changes the bytes of
-  the formals of today.
+- The descriptor files go in `protos/descriptors/<class>/<name>.descriptor` (P3, Q4).
+  A file is one `Descriptor`: a `tags:` line, the prose, and the formal after the line
+  `=== formal`. Only the formal is the identity. `protos/descriptors/REASON.md` has the
+  rules to write one, `src/utils/descriptor_file.py` reads them and writes
+  `INDEX.md`, and `tests/test_descriptor_files.py` checks them.
 
 ### Dependencies
 
@@ -328,23 +331,15 @@ Each question keeps its number when it closes. Closed: question 1 (see
 (see "Schemas"), question 5 (see "Devices"), question 6 (see "Bindings") and
 question 8 (see "Hashes and names").
 
-### 7. The core formals to write
+### 7. The core descriptors to write
 
-Part 1 is done: the formal files that existed are in `protos/formals/policies/` and
-`protos/formals/payment_protocols/`, with no change to their bytes. Part 2 is this
-list. Each formal goes in `protos/formals/<class>/`, and a test pins its bytes to the
-bytes in the code of nodo.
+The rules are done: `protos/descriptors/REASON.md` (the file, the formal with its
+`class=` and `name=` lines, the classes, the value, the ids and the process). The files
+of `policies/` and `payment_protocols/` keep their bytes, with no `class=` and no
+`name=` line, until the code follows the contract (stage 7): their bytes are on the
+wire today. This list is the work for the agents that write the descriptors.
 
-The format, for all the formals:
-
-- A `class=` line (resource, benchmark, rate, limit, policy, condition, promise,
-  ...), so that "a formal in a list of the wrong class" can be checked from the
-  bytes. This line changes the bytes of the formals of today.
-- The exact bytes are the bytes of the file, with no newline at the end.
-- A generated index with the id of each file (`<type>:<digest>`, REASON 6.3).
-- No path and no name of this implementation in a formal.
-
-Formals that exist today only in the code of nodo, with no file:
+Descriptors that exist today only in the code of nodo, with no file:
 
 - The signature scheme (one descriptor, P4).
 - The ledgers (Ergo, Bitcoin).
@@ -354,7 +349,7 @@ Formals that exist today only in the code of nodo, with no file:
 - The templates of the proof-of-work networks.
 - The architectures (today the packer writes only tags, against REASON 2.2).
 
-New formals of the redesign:
+New descriptors of the redesign:
 
 - Resources: memory, disk, CPU (thousandths of a core), device memory.
 - Benchmarks: the current keys as means (`int_ops_per_sec`, `flt_ops_per_sec`,
@@ -399,7 +394,7 @@ New formals of the redesign:
 
 The contract is complete before nodo implements all of it (REASON 1.7).
 
-1. Proto (draft done), and the core formals in `protos/formals/`.
+1. Proto (draft done), and the core descriptors in `protos/descriptors/`.
 2. The `Signed` envelope in nodo, the TUI and the Peer on the ledger. Remove the
    digest keys from the layer formal.
 3. The tree of layers: announce it, find a path in it by exact bytes, and the subset

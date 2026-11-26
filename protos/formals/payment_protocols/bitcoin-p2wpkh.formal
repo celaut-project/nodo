@@ -1,9 +1,0 @@
-payment.accepted=the transaction is confirmed; the payee selects how many confirmations
-payment.deposit_token=an OP_RETURN output of the same transaction; its data is the UTF-8 deposit token, at most 80 bytes
-payment.kind=p2wpkh: pay-to-witness-public-key-hash
-payment.output=one output to payment.xattr.script with at least the amount, in satoshi
-payment.rate.unit=ContractRate.mu_per_unit is MU per satoshi
-payment.xattr.address=informative; payment.xattr.script decides
-payment.xattr.required=script, token_id
-payment.xattr.script=scriptPubKey bytes that receive the payment
-payment.xattr.token_id=BTC

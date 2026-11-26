@@ -1,4 +1,0 @@
-default=rw
-place=filesystem.root
-setting=read_mode
-values=ro,rw

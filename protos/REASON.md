@@ -149,10 +149,13 @@ what they mean. Do not add a schema to other messages.
 
 ## 2. The shape of a formal
 
-**Rule 2.1. One shape.** A formal entry has `tags` (for a reader), `prose` (for an
-implementer) and `formal` (the bytes that nodes compare), plus a value when the entry
-needs one. `Policy` and `Quantity` have this shape. Use this shape again before you
-make a new one.
+**Rule 2.1. One shape.** A thing that a formal defines is a `Descriptor`: `tags` (for
+a reader), `prose` (for an implementer) and `formal` (the bytes that nodes compare). An
+entry that also needs a value holds a `Descriptor` and the value, never a copy of its
+three fields: `Policy`, `Quantity`, `Rate` and `Limit` have this shape. The value (and a
+scope) is of each use, so it is never in the descriptor. Use this shape again before
+you make a new one. The descriptor files and their rules are in `protos/descriptors/`
+(`protos/descriptors/REASON.md`).
 
 **Rule 2.2. Identity is the exact bytes.** Nodes identify an entry only by the bytes
 of its `formal`. Tags and prose never identify it. A published formal never changes.
@@ -206,8 +209,8 @@ it then does not touch the other branches. A protocol that a celaut service impl
 ## 3. Lists
 
 **Rule 3.1. Lists of formals have the same rules.** Every list of entries that a
-formal identifies (`Policy`, `Quantity`, `Rate`, `Limit`) has these rules: no two
-entries with the same formal (with the same scope, where the entry has one); the
+formal identifies (`Policy`, `Quantity`, `Rate`, `Limit`: the formal of their
+descriptor) has these rules: no two entries with the same formal (with the same scope, where the entry has one); the
 sender sorts by formal bytes; the order has no meaning; an entry with an empty formal
 is not valid. Any other list states its own rules: if its order has a meaning, and if
 it can repeat an entry. In a message that has an id or a signature, a reader refuses
@@ -276,8 +279,9 @@ the field, and the signature covers it (rule 6.2). A node that only stores or
 forwards a message keeps all its bytes.
 
 **Rule 3.7. A refusal names its cause.** When a node refuses because it does not know
-a formal, the answer gives the bytes of that formal: in a field of the answer, or in
-the details of the error status. Without this, the caller cannot try another node or
+a formal, the answer gives the descriptor of that formal, as the request gave it: in
+a field of the answer, or in the details of the error status. Its tags and its prose
+help the caller to look. Without this, the caller cannot try another node or
 use rule 1.6. Apply it to every refusal where the cause is a formal.
 
 ## 4. Fields
@@ -323,7 +327,7 @@ field name of the contract do not name a member of an open set (a resource, a
 benchmark, a price, a policy value, a behavior, an algorithm). A comment can give a
 member only after the words "for example", and the sentence must stay true when the
 example is removed. A catalog of formals (their names and their bytes) is in the
-formal files (`protos/formals/`), never in the comments of the contract. Search the
+descriptor files (`protos/descriptors/`), never in the comments of the contract. Search the
 comments and the field names for such names when you review a change.
 
 **Rule 5.2. One word, one meaning.** Do not use one word for two things (for example

@@ -1,0 +1,14 @@
+tags: access
+
+A setting of a slot of the API: how a third party reaches the slot. The value is
+direct, tunnel or any. The default is any.
+
+The node enforces it in the tunnel only. A direct connection does not go through the
+node, so for it the value tunnel is a declaration for the callers. A node refuses a
+service that has wake=on_tunnel or tunnel_auth=address on a slot with access=direct.
+
+=== formal
+default=any
+place=api.slot
+setting=access
+values=any,direct,tunnel

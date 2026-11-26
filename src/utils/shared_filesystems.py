@@ -19,7 +19,7 @@ The invariant, normatively:
 Sharing is expressed through the ``share`` policy (#670) on directories in
 ``Container.Filesystem.ItemBranch.policies`` -- an execution-environment concern,
 never a ``Service.Network``. The value of the policy holds these keys (see
-``src/utils/policies.py`` and ``protos/formals/policies/share.formal``):
+``src/utils/policies.py`` and ``protos/descriptors/policies/share.descriptor``):
 
 * ``role=shared`` — exported to the child instances this instance launches.
 * ``role=guest``  — inherited from the parent instance that launched this one.

@@ -1,0 +1,18 @@
+tags: share
+
+A setting of a directory entry: the directory is a shared directory.
+
+The value is key=value lines, sorted by key, in UTF-8, joined by a newline, with no
+empty or repeated key. The keys are role (required: shared, guest or network), access
+(ro or rw, the default is rw), tag, env, and network (only with role=network). Another
+key makes the value not valid.
+
+Example value of a read-only guest: access=ro, env=DATASET, role=guest, tag=photos,
+one for each line.
+
+=== formal
+access.default=rw
+keys=access,env,network,role,tag
+place=filesystem.directory
+role.values=guest,network,shared
+setting=share

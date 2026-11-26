@@ -66,14 +66,14 @@ message BytesKeyValue {
 }
 
 // An entry that a formal defines, with a value: a setting of a service, a condition or a
-// promise of an offer, a fact that a node attests. It has the parts of a Descriptor,
-// plus the value. The formal defines what the entry means, the form of its value, the
-// places where it is valid, and what an absent entry means. Nodes compare an entry by
-// the exact bytes of its formal, and never by its tags or its prose. In one list, two
-// entries do not have the same formal, and a sender sorts the list by formal (bytes,
-// ascending). The order does not change the meaning. A reader refuses a list with a repeated formal. An entry
-// with an empty formal is not valid. A value has exact numbers only: a ratio is two
-// integers.
+// promise of an offer, a fact that a node attests. It is a Descriptor plus the value.
+// The formal of the entry is the formal of its descriptor. The formal defines what the
+// entry means, the form of its value, the places where it is valid, and what an absent
+// entry means. Nodes compare an entry by the exact bytes of its formal, and never by its
+// tags or its prose. In one list, two entries do not have the same formal, and a sender
+// sorts the list by formal (bytes, ascending). The order does not change the meaning. A
+// reader refuses a list with a repeated formal. An entry with an empty formal is not
+// valid. A value has exact numbers only: a ratio is two integers.
 //
 // The place of a list decides what a reader does with a formal that it does not know, or
 // with a value that it does not understand. Each list says which of the two it is:
@@ -86,15 +86,10 @@ message BytesKeyValue {
 // that formal. Where the reader finds the binding is its own decision, not a part of
 // this contract.
 message Policy {
-    // Names, for a reader. A node does not use them to identify the entry.
-    repeated string tags = 1;
-    // The text, for an implementer. A node does not use it to identify the entry.
-    string prose = 2;
-    // The definition of the entry. It is what nodes compare. It is not empty. A
-    // published formal never changes: a new meaning is a new formal.
-    bytes formal = 3;
+    // What the entry is. Its formal is what nodes compare, and it is not empty.
+    Descriptor descriptor = 1;
     // The value of the entry. Its form is defined by the formal.
-    bytes value = 4;
+    bytes value = 2;
 }
 
 // One entry of a list of key-value entries, with a Descriptor value. The list follows
@@ -648,10 +643,11 @@ message ConfigurationFile {
 // does not change when a new thing appears. (protos/REASON.md has the rules to reason
 // about this contract.)
 
-// A quantity of a thing that a node measures, gives or asks for. It has the same form as
-// a Policy (tags, prose, formal), plus a number. The formal defines what the quantity
-// is: the thing, its unit, if it is per core or total, and how a node measures it. The
-// formal files are in protos/formals/resources/ and in protos/formals/benchmarks/.
+// A quantity of a thing that a node measures, gives or asks for. It is a Descriptor plus
+// a number, as a Policy is a Descriptor plus a value. The formal of the quantity is the
+// formal of its descriptor. The formal defines what the quantity is: the thing, its
+// unit, if it is per core or total, and how a node measures it. The descriptor files
+// are in protos/descriptors/ (protos/descriptors/REASON.md).
 //
 // There are two classes of formal, and the class is part of the definition of the
 // formal. A list that holds quantities says which class it takes:
@@ -683,16 +679,11 @@ message ConfigurationFile {
 //   does not use it. A node never refuses a peer because the peer measures a thing that
 //   the node does not know.
 message Quantity {
-    // Names, for a reader. A node does not use them to identify the quantity.
-    repeated string tags = 1;
-    // The text, for an implementer. A node does not use it to identify the quantity.
-    string prose = 2;
-    // The definition of the quantity. It is what nodes compare. It is not empty. A
-    // published formal never changes: a new meaning is a new formal.
-    bytes formal = 3;
+    // What the quantity is. Its formal is what nodes compare, and it is not empty.
+    Descriptor descriptor = 1;
     // The number, in the unit that the formal defines. It has explicit presence, so a
     // value 0 is still written.
-    optional uint64 value = 4;
+    optional uint64 value = 2;
 }
 
 // What a party charges for one thing: a node for a resource that it reserves or an
@@ -703,19 +694,15 @@ message Quantity {
 // not use it. In one list, two rates do not have the same formal and scope. A sender
 // sorts the list by formal, then by scope (bytes, ascending).
 message Rate {
-    // Names, for a reader.
-    repeated string tags = 1;
-    // The text, for an implementer.
-    string prose = 2;
-    // The definition of the thing that is priced and its unit. It is what nodes compare.
-    bytes formal = 3;
+    // The thing that is priced and its unit. Its formal is what nodes compare.
+    Descriptor descriptor = 1;
     // The price, in MU, in the unit of the formal.
-    Amount value = 4;
+    Amount value = 2;
     // Where the rate applies, for a formal that has a scope. The formal defines the
     // bytes of the scope and what they name. Nodes compare a scope by its exact bytes.
     // An empty scope is the general rate. A rate with a scope replaces the general rate
     // for that scope.
-    bytes scope = 5;
+    bytes scope = 3;
 }
 
 // What a node limits: a supply that is not the capacity of the node. The formal names
@@ -725,16 +712,12 @@ message Rate {
 // instance. In one list, two limits do not have the same formal and scope. A sender
 // sorts the list as a list of Rate.
 message Limit {
-    // Names, for a reader.
-    repeated string tags = 1;
-    // The text, for an implementer.
-    string prose = 2;
-    // The definition of the limit and its unit. It is what nodes compare.
-    bytes formal = 3;
+    // The limit and its unit. Its formal is what nodes compare.
+    Descriptor descriptor = 1;
     // The number, in the unit of the formal.
-    optional uint64 value = 4;
+    optional uint64 value = 2;
     // Where the limit applies, as in Rate.scope. An empty scope is the general limit.
-    bytes scope = 5;
+    bytes scope = 3;
 }
 
 // -----------------------
@@ -899,10 +882,11 @@ message ResourceAvailability {
     // knows it: for example the next time at which the node takes new work. 0 if the
     // node gives no time.
     uint64 opens_at = 3;
-    // The formals of the request that the node does not know. Empty if the node knows
-    // all of them. A caller can then ask a node that knows them, or look for a service
-    // that implements them.
-    repeated bytes unknown_formals = 4;
+    // The descriptors of the request whose formals the node does not know, as the
+    // request gave them, so the tags and the prose help the caller to look. Empty if
+    // the node knows all of them. A caller can then ask a node that knows them, or look
+    // for a service that implements them.
+    repeated Descriptor unknown_formals = 4;
 }
 
 // The request of LocateShare.
@@ -1399,17 +1383,14 @@ message Client {
 // The answer of GenerateClient when the node needs a proof of work before it gives a
 // new client.
 message PoWRequired {
-    // Names of the proof of work.
-    repeated string tags = 1;
-    // A text that explains the proof of work to a reader.
-    string prose = 2;
-    // The rule of the proof of work, as a text that a program can read.
-    bytes formal = 3;
+    // The proof of work. Its formal is the rule of the work, as a text that a program
+    // can read.
+    Descriptor descriptor = 1;
     // The challenge. Send it back without a change, with the solution.
-    string challenge = 4;
+    string challenge = 2;
     // The difficulty of the work, as a number in the unit that the formal defines. It is
     // a copy for the caller: the node uses the difficulty in the challenge.
-    uint32 difficulty = 5;
+    uint32 difficulty = 3;
 }
 
 
@@ -1613,8 +1594,9 @@ service Gateway {
     // signed start receipt. The node can start the service on a peer and give the
     // addresses of that instance. If the node does not have the service and the caller
     // does not send it, the node refuses with an error. When the node refuses because it
-    // does not know a formal, the error status carries the bytes of each formal that it
-    // does not know in its details. The celaut-gateway layer defines the exact form.
+    // does not know a formal, the error status carries the descriptor of each formal
+    // that it does not know in its details. The celaut-gateway layer defines the exact
+    // form.
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Stops an instance. The TokenMessage gives the instance token. If the parent of
     // the instance is a client, the request must also have that Client. The node gives
@@ -1695,9 +1677,9 @@ service Gateway {
     // of this node to run the service. It starts nothing. A node that cannot run the
     // service now refuses with the reason. If the node does not have the service and
     // the caller does not send it, the node refuses with an error. When the node refuses
-    // because it does not know a formal, the error status carries the bytes of each
-    // formal that it does not know in its details. The celaut-gateway layer defines the
-    // exact form. The node ignores a RecursionGuard here.
+    // because it does not know a formal, the error status carries the descriptor of
+    // each formal that it does not know in its details. The celaut-gateway layer defines
+    // the exact form. The node ignores a RecursionGuard here.
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes a Service.Container, complete or partial: the architecture, the resources,
     // the devices and the settings of one instance. Returns a ResourceAvailability that

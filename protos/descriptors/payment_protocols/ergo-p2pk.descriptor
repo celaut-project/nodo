@@ -1,0 +1,25 @@
+tags: ergo-p2pk
+
+A payment contract on Ergo: pay-to-public-key, proveDlog(decodePoint()).
+
+ContractRate.mu_per_unit gives the MU for one base unit of the asset: one nanoERG, or
+the smallest unit of a token. The script attribute is the ErgoTree that receives the
+payment. The token_id attribute is "ERG" or the id of the token. The script and
+token_id attributes are required. The address attribute is only for a person: the
+script attribute decides.
+
+To pay, make one box that the script attribute locks. The box must contain the amount
+or more: nanoERG for ERG, base units for a token. Put the deposit token in register
+R4, as Coll[Byte] of its UTF-8 bytes. The payee accepts the payment when this box
+exists and is not spent. The box can be in a block or in the mempool.
+
+=== formal
+payment.accepted=that box exists and is unspent, in a block or in the mempool
+payment.deposit_token=R4 of that box: Coll[Byte], UTF-8 of the deposit token
+payment.kind=p2pk: proveDlog(decodePoint())
+payment.output=one box to payment.xattr.script with at least the amount: nanoERG for ERG, base units for a token
+payment.rate.unit=ContractRate.mu_per_unit is MU per base unit of the asset: one nanoERG, or one base unit of a token
+payment.xattr.address=informative; payment.xattr.script decides
+payment.xattr.required=script, token_id
+payment.xattr.script=ErgoTree bytes (propositionBytes) that receive the payment
+payment.xattr.token_id=ERG, or the EIP-4 token id of the asset

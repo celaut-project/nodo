@@ -31,13 +31,15 @@ network. A ledger can have more than one kind.
 
 ## Protocols
 
-The file of each protocol is the exact bytes of its `formal`, without payee parameters.
-The code of the node holds the same bytes, and a test pins them to these files.
+Each protocol is the descriptor file with its tag here. The bytes after its line
+`=== formal` are the exact bytes of its `formal`, without payee parameters (see
+[REASON.md](../REASON.md)). The code of the node holds the same bytes, and a test pins
+them to these files.
 
 | Protocol | Tag | `formal` | Ledger |
 | --- | --- | --- | --- |
-| Ergo pay-to-public-key | `ergo-p2pk` | [`ergo-p2pk.formal`](ergo-p2pk.formal) | Ergo |
-| Bitcoin p2wpkh | `bitcoin-p2wpkh` | [`bitcoin-p2wpkh.formal`](bitcoin-p2wpkh.formal) | Bitcoin |
+| Ergo pay-to-public-key | `ergo-p2pk` | [`ergo-p2pk.descriptor`](ergo-p2pk.descriptor) | Ergo |
+| Bitcoin p2wpkh | `bitcoin-p2wpkh` | [`bitcoin-p2wpkh.descriptor`](bitcoin-p2wpkh.descriptor) | Bitcoin |
 
 The Bitcoin protocol also has two payee parameters on the wire: `payment.min_confirmations`
 and `payment.too_early` (see [#626](https://github.com/celaut-project/nodo/issues/626)).

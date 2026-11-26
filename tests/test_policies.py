@@ -14,7 +14,7 @@ try:
     load_example_config()
 
     from protos import celaut_pb2 as celaut
-    from src.utils import keyvalue, policies
+    from src.utils import descriptor_file, keyvalue, policies
     from src.utils import shared_filesystems as sf
     from src.utils.filesystem_xattrs import (
         assert_complete_filesystem_metadata,
@@ -27,7 +27,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
 Filesystem = celaut.Service.Container.Filesystem if IMPORT_ERROR is None else None
-DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "formals", "policies")
+DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "descriptors", "policies")
 
 
 def _policy(formal, value=b"", tags=()):
@@ -110,8 +110,8 @@ class IdentifiedByFormalTests(unittest.TestCase):
             ("read_mode", policies.READ_MODE_FORMAL),
             ("entry_metadata", policies.ENTRY_METADATA_FORMAL),
         ):
-            with open(os.path.join(DOCS, f"{name}.formal"), "rb") as f:
-                self.assertEqual(f.read(), formal, name)
+            path = os.path.join(DOCS, f"{name}.descriptor")
+            self.assertEqual(descriptor_file.read(path).formal, formal, name)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"imports unavailable: {IMPORT_ERROR}")

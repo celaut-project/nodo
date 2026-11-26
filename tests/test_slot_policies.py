@@ -8,12 +8,12 @@ try:
     load_example_config()
 
     from protos import celaut_pb2 as celaut
-    from src.utils import policies
+    from src.utils import descriptor_file, policies
     from src.utils import shared_filesystems as sf
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
-DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "formals", "policies")
+DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "descriptors", "policies")
 
 
 def _slot(port=8333, **settings):
@@ -38,8 +38,8 @@ class SlotSettingsTests(unittest.TestCase):
             ("tunnel_auth", policies.TUNNEL_AUTH_FORMAL),
             ("wake", policies.WAKE_FORMAL),
         ):
-            with open(os.path.join(DOCS, f"{name}.formal"), "rb") as f:
-                self.assertEqual(f.read(), formal, name)
+            path = os.path.join(DOCS, f"{name}.descriptor")
+            self.assertEqual(descriptor_file.read(path).formal, formal, name)
 
     def test_a_slot_without_policies_has_the_defaults(self):
         self.assertEqual(

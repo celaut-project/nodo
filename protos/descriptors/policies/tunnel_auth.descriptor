@@ -1,0 +1,11 @@
+tags: tunnel_auth
+
+A setting of a slot of the API: how the tunnel finds the instance. The value is token
+or address. The default is token. With address, the caller gives the address of the
+instance that it knows, with no token.
+
+=== formal
+default=token
+place=api.slot
+setting=tunnel_auth
+values=address,token

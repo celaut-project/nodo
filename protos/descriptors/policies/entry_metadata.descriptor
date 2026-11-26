@@ -1,0 +1,17 @@
+tags: entry_metadata
+
+A setting of the root filesystem: the tree carries metadata in the xattrs of each
+entry. The value is empty: any other value is not valid.
+
+The keys are mode, uid, gid, mtime_ns, device.major, device.minor and device.is_block,
+as base-10 integers in UTF-8 text. An entry has all the keys or none. An entry with
+none gets the default of the node. A node that finds one of the keys in a tree without
+this setting does not run the service.
+
+=== formal
+encoding=base-10 integers as UTF-8 text
+entry=all keys or none
+keys=device.is_block,device.major,device.minor,gid,mode,mtime_ns,uid
+nondevice=device.is_block, device.major and device.minor are 0
+place=filesystem.root
+setting=entry_metadata

@@ -1,4 +1,0 @@
-default=any
-place=api.slot
-setting=access
-values=any,direct,tunnel

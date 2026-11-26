@@ -1,0 +1,10 @@
+tags: wake
+
+A setting of a slot of the API: does a tunnel connection wake a hibernated instance?
+The value is never or on_tunnel. The default is never.
+
+=== formal
+default=never
+place=api.slot
+setting=wake
+values=never,on_tunnel

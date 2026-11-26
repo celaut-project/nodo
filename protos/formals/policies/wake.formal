@@ -1,4 +1,0 @@
-default=never
-place=api.slot
-setting=wake
-values=never,on_tunnel
