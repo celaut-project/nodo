@@ -1,0 +1,21 @@
+tags: blake2b-trailing-zeros, blake2b
+
+A proof of work: find a solution so that the BLAKE2b-512 hash of the challenge and the
+solution ends with d zero characters in lowercase hexadecimal, where d is the
+difficulty.
+
+The input of the hash is the UTF-8 of the challenge, then the UTF-8 of the solution,
+with nothing between. The hash is BLAKE2b with a 64-byte digest, no key, no salt and no
+personalization. Its lowercase hexadecimal has 128 characters. The difficulty is the
+number of characters, from 0 to 64. Each character is 4 bits of work.
+
+The node asks for it in PoWRequired. The caller does the work.
+
+=== formal
+class=proof-of-work
+difficulty=d, the number of hexadecimal characters, 0 to 64
+hash=BLAKE2b, 64-byte digest, no key, no salt, no personalization
+input=UTF-8 of the challenge, then UTF-8 of the solution, with nothing between
+name=blake2b-trailing-zeros
+rule=the lowercase hexadecimal of the hash ends with d characters '0'
+unit=hexadecimal character (4 bits)

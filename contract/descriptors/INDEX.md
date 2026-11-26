@@ -69,6 +69,7 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`prices/node/statement-row.descriptor`](prices/node/statement-row.descriptor) | statement-row, statement_row_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a4cbe4a4a3cb20d20b16fb2959552f012bbfcfe18384f5b3692ff95043eba66d` |
 | [`prices/node/tunnel-open.descriptor`](prices/node/tunnel-open.descriptor) | tunnel-open, tunnel_open_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a36a4346db273c99fd7123fbf7b4dcfddd82e8a4aa07ad8471b44d325e9a4185` |
 | [`prices/service/call.descriptor`](prices/service/call.descriptor) | call, mu_per_call | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b9000d73c97bcb624709b4622dc70cf9289af193f83159705e013708152f229f` |
+| [`proof_of_work/blake2b-trailing-zeros.descriptor`](proof_of_work/blake2b-trailing-zeros.descriptor) | blake2b-trailing-zeros, blake2b | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3c624c2dd31cdaecdbfb8824de75935dc896cdeb066620ee38dca9b8874710ba` |
 | [`protocols/address/ergo-p2p.descriptor`](protocols/address/ergo-p2p.descriptor) | ergo-p2p | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2f1778bc0e2c778894af5dbc32e1ffd5ded17bf4187f4ffa11015cd2e405f030` |
 | [`protocols/address/ergo-rest.descriptor`](protocols/address/ergo-rest.descriptor) | ergo-rest | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:d31451f5766e271e17e1585945a667a428a36eb21e3eb0c406c65e4be0514648` |
 | [`protocols/address/grpc.descriptor`](protocols/address/grpc.descriptor) | grpc | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a318d9e22dfecbf06a11a00c08eb43b0a65ec886b50f0f5d83599bf891e0acf3` |
@@ -219,12 +220,3 @@ wire today).
 | `service` | New | For `Service.schema`. |
 | `peer`, `estimated-cost`, `start-receipt`, `tunnel-checkpoint`, `balance-statement`, `reputation-proof`, `client`, `observe-checkpoint` | Today each signed type has a text prefix (`celaut-price-offer:`, `celaut-execution-receipt:`, ...; `node_identity.py:63-91`) | One for each signed type, for `Signed.Body.context`. |
 | chat entry, ledger attestation | prefixes `celaut-chat-signature:`, `celaut-ledger-attestation:` | The new contract has no type for them yet. |
-
-### `proof_of_work/`
-
-| Name | Today | Notes |
-| --- | --- | --- |
-| `blake2b-trailing-zeros` | `src/gateway/client_pow.py:47-73`: tags `blake2b`, a formal in pseudo-code: the hex of blake2b-512 of challenge and solution ends with d zeros, d at most 64 | Rewrite the formal as `key=value` lines. |
-
-The proof of work of `ReputationProof.pow_nonce` (`src/reputation_system/offchain_proof.py:139-221`) has no
-descriptor: its rule is a part of the gateway layer.
