@@ -1,8 +1,8 @@
 tags: descendant-depth
 
-A limit of the node: the most levels of descendants below one account.
+A limit of the node: the most levels below one account that the node looks through to find a descendant by its instance_ref.
 
-The value is an integer in levels. Example: 8. The node refuses a start that makes a deeper descendant.
+The value is an integer in levels. Example: 8. The node does not find a descendant deeper than the value: it answers as for an account that is not below.
 
 The limit has no scope.
 
@@ -11,7 +11,7 @@ An absent limit is not a promise of no limit. The node is bound.
 === formal
 class=limit
 name=descendant-depth
-per=one account
-rule=The node refuses a start that makes a deeper descendant.
+per=one lookup of a descendant by its instance_ref (GetBalanceStatement, ServiceTunnel)
+rule=The node does not find a descendant deeper than the value: it answers as for an account that is not below.
 scope=none
 unit=levels

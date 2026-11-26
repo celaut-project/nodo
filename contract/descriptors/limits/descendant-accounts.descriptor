@@ -1,8 +1,8 @@
 tags: descendant-accounts
 
-A limit of the node: the most accounts of descendants below one account.
+A limit of the node: the most accounts below one account that the node looks at to find a descendant by its instance_ref.
 
-The value is an integer in accounts. Example: 200. The node refuses a start that makes more descendants.
+The value is an integer in accounts. Example: 200. The node stops the lookup after the value: it answers as for an account that is not below.
 
 The limit has no scope.
 
@@ -11,7 +11,7 @@ An absent limit is not a promise of no limit. The node is bound.
 === formal
 class=limit
 name=descendant-accounts
-per=one account
-rule=The node refuses a start that makes more descendants.
+per=one lookup of a descendant by its instance_ref (GetBalanceStatement, ServiceTunnel)
+rule=The node stops the lookup after the value: it answers as for an account that is not below.
 scope=none
 unit=accounts
