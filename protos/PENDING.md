@@ -155,15 +155,27 @@ and the others below are the names of its proposals.
 - Known cost: two services that do not agree on the bytes of a domain do not meet.
   A common tag is no longer enough.
 
+### Receipts
+
+- `ExecutionReceipt` is split (open question 3, X-REC, REASON 4.2): `StartReceipt`
+  for each process, and `TunnelCheckpoint` for each part of a `ServiceTunnel` stream.
+  Each receipt has only the fields of its kind. `Signed.Body.context` gives the type,
+  so the fields `kind` and `plane` are removed. A "close" is a checkpoint with
+  `close` set.
+- The two directions of a stream are each an `EventChain` (events, bytes, head).
+- The checkpoint of the Observe stream is `ObserveCheckpoint` in
+  `protos/extensions/observe.proto` (REASON 2.8). `coverage`, `capture_mode` and
+  `degraded_reason` go there: a tunnel always sees all its bytes.
+- The session is bytes, not hexadecimal text. The slot of a checkpoint is the internal
+  port as `uint32` (R6.1). `TunnelRequest.slot` is still a decimal text: it is not
+  signed.
+- Known residual: `coverage` and `capture_mode` of the Observe extension are texts of
+  a closed list. The extension is optional, so they do not touch the contract.
+
 ## Open questions
 
 Each question keeps its number when it closes. Closed: question 1 (see
-"Dependencies") and question 2 (see "Networks").
-
-### 3. Split of ExecutionReceipt (X-REC)
-
-16 of its 27 fields say "only in ...". A split into a start receipt and a checkpoint
-follows REASON 4.2. Not done, to keep the risk low.
+"Dependencies"), question 2 (see "Networks") and question 3 (see "Receipts").
 
 ### 4. Messages that do not come from their writer (REASON 1.8)
 

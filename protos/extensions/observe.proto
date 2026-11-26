@@ -24,8 +24,8 @@ message ObserveRequest {
     // True to also get one event for each packet. Without it, the stream has only the
     // session, the metrics and the notices.
     bool include_packets = 2;
-    // True to also get the checkpoints of the execution receipt, as events of kind
-    // "receipt". The hash chains cover the packet events of this stream.
+    // True to also get the checkpoints of the stream, as events of kind "receipt". The
+    // hash chains cover the packet events of this stream.
     bool include_receipts = 3;
 }
 
@@ -145,10 +145,41 @@ message ObserveEvent {
         Packet packet = 5;
         // A notice. Only when kind is "notice".
         Notice notice = 6;
-        // A checkpoint of the execution receipt, as a Signed ExecutionReceipt. Only when
-        // kind is "receipt", and only if the request has include_receipts.
+        // A checkpoint of the stream, as a Signed ObserveCheckpoint. Only when kind is
+        // "receipt", and only if the request has include_receipts.
         Signed receipt = 7;
     }
+}
+
+// What a node attests about an Observe stream, up to a point: an execution receipt, as
+// celaut.TunnelCheckpoint is for a tunnel. The node signs it (Signed) and sends it from
+// time to time when the request has include_receipts. The fields that have the same
+// name as in TunnelCheckpoint have the same meaning.
+message ObserveCheckpoint {
+    // When the node signed, in unix seconds, on the clock of the node.
+    uint64 ts = 1;
+    // The name of the execution, as in the receipts of celaut.proto.
+    Metadata.HashTag.Hash execution_name = 2;
+    // A random identifier of the stream, that the node selects when the stream starts.
+    bytes session = 3;
+    // The number of the checkpoint in the stream: 1 for the first, and one more for each
+    // next checkpoint.
+    uint64 seq = 4;
+    // True for the last checkpoint of the stream. The node sends it when the stream stops
+    // normally.
+    bool close = 5;
+    // The packets with direction "IN".
+    EventChain into_instance = 6;
+    // The packets with direction "OUT".
+    EventChain from_instance = 7;
+    // What the node can see of the traffic of the instance: "instance-tap" (the packets
+    // that the capture got, with the bytes that it holds: the capture cuts a long frame
+    // and can drop packets under load) or "counters-only" (only counts and lengths).
+    string coverage = 8;
+    // The capture mode of the session, as in Session.capture_mode.
+    string capture_mode = 9;
+    // Why the capture is not full, as in Session.degraded_reason. Empty when it is full.
+    string degraded_reason = 10;
 }
 
 // The observation of an instance. The instance token in the ObserveRequest is the

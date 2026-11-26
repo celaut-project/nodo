@@ -477,8 +477,8 @@ message Service {
 // that does not know that policy refuses the service. The node places the instance
 // again: it checks its capacity and the benchmarks of the service. If it cannot, the
 // instance stays hibernated, and the answer says why. A wake starts a new process, so
-// it has a "start" execution receipt. The statement of the account of the instance
-// gives it (BalanceStatement.receipts), also for a wake that no caller asked for.
+// it has a StartReceipt. The statement of the account of the instance gives it
+// (BalanceStatement.receipts), also for a wake that no caller asked for.
 //
 // An instance hibernates when its parent asks (ModifyServiceSystemResources), when its
 // balance cannot pay the next maintenance period, or when a condition of the offer
@@ -755,8 +755,8 @@ message TunnelRequest {
     // The internal port, as a decimal number. It must be one of the
     // Instance.uri_slot.internal_port values of the instance of the tunnel.
     string slot = 3;
-    // True to also get the checkpoints of the execution receipt, as Signed
-    // ExecutionReceipt. For a descendant, they name the execution by the instance_ref.
+    // True to also get the checkpoints of the stream, as Signed TunnelCheckpoint. For a
+    // descendant, they name the execution by the instance_ref.
     bool receipts = 4;
     // How many nodes the tunnel can still go into, with the receiver. A node that relays
     // to the next node sends one less. A node that must first find which of its peers
@@ -976,7 +976,7 @@ message BalanceMovement {
     // "starts_seq", the seq of the child_start whose child it names, "service_id", the
     // value of the content hash of the service of the child, and "service_id_type", the
     // type of that hash, both in lowercase hexadecimal (absent in old rows). For a
-    // start: "execution_name", the value of the name that the execution receipts of the
+    // start: "execution_name", the value of the name that the receipts of the
     // instance carry, in lowercase hexadecimal, and "receipt", the id of its start
     // receipt (in BalanceStatement.receipts). For a tunnel: "open" or "bytes",
     // "execution_name", and "session", the
@@ -1062,115 +1062,99 @@ message BalanceStatement {
     uint32 retention_days = 13;
     // The start receipts of the processes whose movements are in this statement: the
     // start of the instance and each wake, as the node signed them (a Signed
-    // ExecutionReceipt of kind "start"). The movement of each start and each wake names
+    // StartReceipt). The movement of each start and each wake names
     // its receipt in its detail. It is the way to get the receipt of a process that no
     // caller asked for, for example a wake by a deposit or by the activity window of the
     // node. Empty if no process started in the movements of this statement.
     repeated Signed receipts = 14;
 }
 
-// An execution receipt (docs/EXECUTION_RECEIPTS.md): a statement that the node signs
-// about one execution that it runs. It gives a client evidence against the node. It is
-// never evidence for the node. The celaut-gateway layer gives the exact text that the
-// node signs and how to calculate each hash. A receipt is one of three kinds:
-//   * "start": the node signs one for each new process of the instance. The answer
-//     of StartService gives the first one. Each wake of the instance has one more, with
-//     the same envs_salt as the first one, so that its envs_digest can be compared. It
-//     names the service, the environment variables, the amount of the start (0 for a
-//     wake) and what the node reserved. BalanceStatement.receipts gives all of them.
-//   * "checkpoint": a ServiceTunnel stream, or a stream of the optional protocol celaut-observe
-//     (protos/extensions/observe.proto), gives it from time to time. It
-//     gives the counters and the hash chains of the stream up to that point.
-//   * "close": the last checkpoint of a stream. The node sends it when the stream
-//     stops normally. A caller that cancels the stream gets no close, so a stream with
-//     no close is not by itself proof of a fault.
-// A field that the kind does not use is empty or zero, and the signature covers it too.
-message ExecutionReceipt {
-    // "start", "checkpoint" or "close".
-    string kind = 1;
+// The execution receipts (docs/EXECUTION_RECEIPTS.md) are statements that a node signs
+// (Signed) about one execution that it runs. They give a client evidence against the
+// node. They are never evidence for the node. The celaut-gateway layer gives how to
+// calculate each hash. There are two receipts: StartReceipt for each process, and
+// TunnelCheckpoint for each part of a ServiceTunnel stream. An optional protocol can
+// define its own checkpoint (for example protos/extensions/observe.proto).
+//
+// The name of an execution is in each receipt: the hash, with the algorithm of its type,
+// of the UTF-8 bytes of the instance token followed by the bytes of the signer
+// (Signed.Body.signer). The client, who has the token, can calculate it. A receipt never
+// contains the token. In a tunnel to a descendant, the name is the hash, with the
+// algorithm of its type, of the UTF-8 bytes of "celaut-execution-ref:" and the lowercase
+// hexadecimal of the value of the instance_ref, followed by the bytes of the signer: the
+// caller has the instance_ref and not the token.
+
+// What a node attests about a new process of an instance. The node signs one for each
+// process: the answer of StartService gives the first one. Each wake of the instance has
+// one more, with the same envs_salt as the first one, so that its envs_digest can be
+// compared. BalanceStatement.receipts gives all of them.
+message StartReceipt {
     // When the node signed, in unix seconds, on the clock of the node.
-    uint64 ts = 2;
+    uint64 ts = 1;
+    // The name of the execution.
+    Metadata.HashTag.Hash execution_name = 2;
+    // The service of the instance, as the content hash with which the registry of the
+    // node keeps it.
+    Metadata.HashTag.Hash service_id = 3;
+    // The hash, with the algorithm of its type, of the salt of the start
+    // (ServiceInstance.envs_salt) followed by the UTF-8 of the canonical text of the
+    // environment variables that the service got. The celaut-gateway layer gives the
+    // canonical text.
+    Metadata.HashTag.Hash envs_digest = 4;
+    // The Configuration.initial_mu of the start, in MU: what the node charged the caller,
+    // the build included. It is the amount of the "start" movement of the instance in its
+    // balance statement. 0 for a wake.
+    Amount initial_mu = 5;
+    // What the node reserved for the process: the resolved figures, with the floors of
+    // the node applied, and not what the manifest declared. They are what the maintenance
+    // charge prices. A list of Quantity, with only formals of resources. Empty in a start
+    // that the node gave to a peer: the executor reserved them and this node does not
+    // attest them.
+    repeated Quantity reserved = 6;
+    // Other facts of the start that the node attests: a list of Policy in an
+    // announcement. For example: the guest kernel that the instance boots, and the chip
+    // of each device that the node attached. A reader keeps a fact that it does not know.
+    repeated Policy facts = 7;
+}
 
-    // The execution.
-    // The name of the execution: the hash, with the algorithm of its type, of the UTF-8
-    // bytes of the instance token followed by the bytes of the signer
-    // (Signed.Body.signer). The client, who has the token, can calculate it. A receipt
-    // never contains the token. In a tunnel to a descendant, the name is the hash, with
-    // the algorithm of its type, of the UTF-8 bytes of "celaut-execution-ref:" and the
-    // lowercase hexadecimal of the value of the instance_ref, followed by the bytes of
-    // the signer: the caller has the instance_ref and not the token.
-    Metadata.HashTag.Hash execution_name = 3;
-
-    // Only in "start": the service, the environment, the funding and what the node reserved.
-    // Only in "start". The service of the instance, as the content hash with which the
-    // registry of the node keeps it.
-    Metadata.HashTag.Hash service_id = 4;
-    // Only in "start". The hash, with the algorithm of its type, of the salt of the
-    // start (ServiceInstance.envs_salt) followed by the UTF-8 of the canonical text of
-    // the environment variables that the service got. The celaut-gateway layer gives
-    // the canonical text.
-    Metadata.HashTag.Hash envs_digest = 5;
-    // Only in "start". The Configuration.initial_mu of the start, in MU: what the node
-    // charged the caller, the build included. It is the amount of the "start" movement
-    // of the instance in its balance statement.
-    Amount initial_mu = 6;
-    // Only in "start". What the node reserved for the instance at the start: the
-    // resolved figures, with the floors of the node applied, and not what the manifest
-    // declared. They are what the maintenance charge prices. A list of Quantity, with
-    // only formals of resources. Empty in a start that the node gave to a peer: the
-    // executor reserved them and this node does not attest them.
-    repeated Quantity reserved = 7;
-    // Only in "start". Other facts of the start that the node attests: a list of Policy
-    // in an announcement. For example: the guest kernel that the instance boots, and
-    // the chip of each device that the node attached. A reader keeps a fact that it
-    // does not know.
-    repeated Policy facts = 8;
-
-    // Only in "checkpoint" and "close": the stream and what went through it.
-    // Only in "checkpoint" and "close". The stream: "tunnel" (ServiceTunnel) or
-    // "observe" (the optional protocol celaut-observe).
-    string plane = 9;
-    // Only in "checkpoint" and "close". A random identifier of the stream, in
-    // lowercase hexadecimal, that the node selects when the stream starts.
-    string session = 10;
-    // Only in "checkpoint" and "close" of a tunnel. The slot of the tunnel.
-    string slot = 11;
-    // Only in "checkpoint" and "close". The number of the checkpoint in the stream: 1
-    // for the first, and one more for each next checkpoint.
-    uint64 seq = 12;
-    // Only in "checkpoint" and "close". The events into the instance: for a tunnel,
-    // the messages from the caller that the node sent to the service; for celaut-observe,
-    // the packets with direction "IN".
-    uint64 in_events = 13;
+// The events of one direction of a stream, up to a checkpoint.
+message EventChain {
+    // The number of events.
+    uint64 events = 1;
     // The bytes of these events.
-    uint64 in_bytes = 14;
-    // The hash chain of these events, with the algorithm of its type. The
-    // celaut-gateway layer gives how to calculate it.
-    Metadata.HashTag.Hash in_head = 15;
-    // The events out of the instance: for a tunnel, the messages from the service that
-    // the node sent to the caller; for celaut-observe, the packets with direction "OUT".
-    uint64 out_events = 16;
-    // The bytes of these events.
-    uint64 out_bytes = 17;
-    // The hash chain of these events, with the algorithm of its type.
-    Metadata.HashTag.Hash out_head = 18;
-    // Only for a tunnel, and always there. What the node charged the instance for this
-    // tunnel up to the checkpoint, in MU: the charge to open it and the traffic it
-    // billed. It is the sum of the "tunnel" movements of this session in the balance
-    // statement. The chains cover only the messages that the meter accepted.
-    Amount mu_charged = 19;
-    // Only in "checkpoint" and "close". What the node can see of the traffic of the
-    // instance: "client-tunnel" (all the bytes of this tunnel, and nothing else),
-    // "instance-tap" (the packets of the instance that the capture got, with the bytes
-    // that it holds: the capture cuts a long frame and can drop packets under load) or
-    // "counters-only" (only counts and lengths).
-    string coverage = 20;
+    uint64 bytes = 2;
+    // The hash chain of these events, with the algorithm of its type. The layer of the
+    // stream gives how to calculate it.
+    Metadata.HashTag.Hash head = 3;
+}
 
-    // Only for celaut-observe: how the capture was made.
-    // Only for celaut-observe. The capture mode of the session: "pcap" or "conntrack".
-    string capture_mode = 21;
-    // Only for celaut-observe. Why the capture is not full. Empty when it is full.
-    string degraded_reason = 22;
+// What a node attests about a ServiceTunnel stream, up to a point. The node sends one
+// from time to time when the TunnelRequest asks for receipts. The chains cover all the
+// messages of the tunnel that the meter accepted, and nothing else.
+message TunnelCheckpoint {
+    // When the node signed, in unix seconds, on the clock of the node.
+    uint64 ts = 1;
+    // The name of the execution.
+    Metadata.HashTag.Hash execution_name = 2;
+    // A random identifier of the stream, that the node selects when the stream starts.
+    bytes session = 3;
+    // The internal port of the slot of the tunnel.
+    uint32 slot = 4;
+    // The number of the checkpoint in the stream: 1 for the first, and one more for each
+    // next checkpoint.
+    uint64 seq = 5;
+    // True for the last checkpoint of the stream. The node sends it when the stream stops
+    // normally. A caller that cancels the stream gets no last checkpoint, so a stream
+    // with no last checkpoint is not by itself proof of a fault.
+    bool close = 6;
+    // The messages from the caller that the node sent to the service.
+    EventChain into_instance = 7;
+    // The messages from the service that the node sent to the caller.
+    EventChain from_instance = 8;
+    // What the node charged the instance for this tunnel up to the checkpoint, in MU: the
+    // charge to open it and the traffic it billed. It is the sum of the "tunnel"
+    // movements of this session in the balance statement.
+    Amount mu_charged = 9;
 }
 
 // Signed messages of one node that show a fault of that node. A receiver checks them
@@ -1244,11 +1228,11 @@ message ServiceInstance {
     // The addresses of the instance.
     Instance instance = 2;
     // 16 random bytes that the node selects for each start: the salt of
-    // ExecutionReceipt.envs_digest. No signature covers it: the holder of the receipt
+    // StartReceipt.envs_digest. No signature covers it: the holder of the receipt
     // can show the digest to others and keep the values secret. A verifier refuses a
     // salt of another length.
     bytes envs_salt = 3;
-    // The start receipt of the instance: a Signed ExecutionReceipt of the node that
+    // The start receipt of the instance: a Signed StartReceipt of the node that
     // answers. When the node gave the start to a peer, it signs the receipt as the
     // executor, with the token that the caller got.
     Signed receipt = 4;
@@ -1678,8 +1662,8 @@ service Gateway {
     // when the stream of the caller stops, the node closes the write side of the
     // connection to the service. For a slot with a datagram transport, each message is
     // one datagram. The node takes the traffic cost from the balance of the instance. If
-    // the request has receipts, the node also sends Signed checkpoints of the execution
-    // receipt, and a "close" checkpoint when the stream stops normally. The node refuses
+    // the request has receipts, the node also sends Signed TunnelCheckpoint messages,
+    // and a last one when the stream stops normally. The node refuses
     // with a status code: PERMISSION_DENIED when no chain below the token links the
     // descendant, RESOURCE_EXHAUSTED when the instance cannot pay or the node has no
     // traffic allowance left, UNAVAILABLE when the instance does not answer or is not
