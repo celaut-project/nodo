@@ -27,6 +27,8 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`policies/api_slot/access.descriptor`](policies/api_slot/access.descriptor) | access | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5344aac7355624c44adb896f24d835327efdb5fe6b0826a14a0b570b496cd37e` |
 | [`policies/api_slot/tunnel_auth.descriptor`](policies/api_slot/tunnel_auth.descriptor) | tunnel_auth | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0f8206ffef0314db0229f0cb367686a9631b8f85cfd62eb2b82932432df78043` |
 | [`policies/api_slot/wake.descriptor`](policies/api_slot/wake.descriptor) | wake | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2ff042caf1404c444e8aa8d48961e797cd061c176bee27fd33b7351c9a4eaa9a` |
+| [`policies/configuration/device-selection.descriptor`](policies/configuration/device-selection.descriptor) | device-selection | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:84ca8ca8b4c4122d49fcc0681890e899e74388745443aa138f028b316cfa0733` |
+| [`policies/configuration/instance-name.descriptor`](policies/configuration/instance-name.descriptor) | instance-name | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:667a8101b6e3ee7b61efe110e8cc299cff9b1d3b8dfcd71577b7e6881e22ae49` |
 | [`policies/container_init/guest-kernel.descriptor`](policies/container_init/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9c03c66a3776b9ce1260b15aca7f0525ea6542092800cd4a23e07eda60cbeb97` |
 | [`policies/container_init/notice.descriptor`](policies/container_init/notice.descriptor) | notice, stop notice, hibernate notice | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616` |
 | [`policies/device/attach.descriptor`](policies/device/attach.descriptor) | attach | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:37bd67cf07e11ef75135706f4b55e6f9542686d54611cdd2ad76b797673c6262` |
@@ -95,13 +97,6 @@ The six settings that nodo has today have their files (part 1). They need the li
 | --- | --- | --- | --- |
 | `template` | the keys of the domain that the node fills at a start | a grammar inside the values of the network formal: `${VAR}`, the full value only (`src/manager/network_templates.py:68,191`) | Absent: the value of the domain is fixed. |
 | `share` | the id of a network share | the filesystem setting `share` with `role=network`; id = sha256 of length-prefixed fields (`src/utils/shared_filesystems.py:397-433`) | The formal fixes the id that `ShareLocationRequest.share_id` carries. |
-
-### `policies/configuration/`
-
-| Name | Value | Today | Notes |
-| --- | --- | --- | --- |
-| `instance-name` | lowercase `[a-z0-9]+(-[a-z0-9]+)*`, 63 characters at most | the reserved environment variable `__nodo_instance_name` (`src/utils/instance_names.py:8-10,81-109`) | |
-| `device-selection` | the position of an entry and the stable id of a device | New | |
 
 ### `terms/conditions/`
 

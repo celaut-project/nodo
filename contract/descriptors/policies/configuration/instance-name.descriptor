@@ -1,0 +1,18 @@
+tags: instance-name
+
+A setting of a start, from the caller: the name that the caller gives to the instance.
+The node shows it to its operator and to the caller. It is not an id: two instances can
+have the same name.
+
+The value is lowercase ASCII letters and digits in groups separated by one "-", 1 to 63
+characters. Example: brisk-falcon.
+
+With no setting, the node selects a name. The node is bound: it refuses a value that
+does not have this form.
+
+=== formal
+class=setting
+default=absent: the node selects a name
+name=instance-name
+place=configuration
+value=[a-z0-9]+(-[a-z0-9]+)*, 1 to 63 characters
