@@ -43,6 +43,17 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`policies/filesystem_root/entry_metadata.descriptor`](policies/filesystem_root/entry_metadata.descriptor) | entry_metadata | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3c06eea2a8fe2d1476af508118965a67971d8e178f87caded980e6d78107eb42` |
 | [`policies/filesystem_root/read_mode.descriptor`](policies/filesystem_root/read_mode.descriptor) | read_mode | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e36826fd30068ee263c73edeb8f698c5c4761771801f707d1f6abb6642a503ec` |
 | [`policies/network/template.descriptor`](policies/network/template.descriptor) | template | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1a9e77d2c08be6569abad3ab22ee37a13703d8a2ed44891d6a3850b157198333` |
+| [`prices/node/build.descriptor`](prices/node/build.descriptor) | build, build_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1c87e45cc18f22209bce096e9fa1f3f2a4d42097c39dc3033494bad3d25c64eb` |
+| [`prices/node/cpu-time.descriptor`](prices/node/cpu-time.descriptor) | cpu-time, cpu_mu_per_vcpu_hour | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:854e2b606d2fd8be6f254c48ef2346ab856bbf291093dce362be21694a8197eb` |
+| [`prices/node/device-time.descriptor`](prices/node/device-time.descriptor) | device-time | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:12b7a755c0b492cf854eedd03fd532541067f8c5922e96ab3c1bdc8172cd3463` |
+| [`prices/node/disk-time.descriptor`](prices/node/disk-time.descriptor) | disk-time, disk_mu_per_gib_hour | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1e4c4ac3fa129ef84904cf54c8ad8f32decaa638077401d61a4edf1f78366a8a` |
+| [`prices/node/kept-state.descriptor`](prices/node/kept-state.descriptor) | kept-state, hibernated disk | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:c2eb9478fbac0c1a644d108b997181c8ac62ca80ee04556b6d4f19113513bc30` |
+| [`prices/node/memory-time.descriptor`](prices/node/memory-time.descriptor) | memory-time, ram_mu_per_gib_hour | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:56a9e602597b6cd64f0540b2f81e50a33c8fc58d2c88923310661b7aeb23612d` |
+| [`prices/node/modify-resources.descriptor`](prices/node/modify-resources.descriptor) | modify-resources, modify_resources_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2ad7ac2b7c7e9edca157a6dac6ecae2fac0245e08697be40a054ab29ad0b3606` |
+| [`prices/node/network-bytes.descriptor`](prices/node/network-bytes.descriptor) | network-bytes, net_mu_per_gib | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b33cf84a75cb195b769347a58745d53d20ac442ae2a311dfa3971274f669659f` |
+| [`prices/node/statement-query.descriptor`](prices/node/statement-query.descriptor) | statement-query, statement_query_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:cab5714d8ac109135a43c40224e8091ec2042e15b932447a652955d1c1ad9c49` |
+| [`prices/node/statement-row.descriptor`](prices/node/statement-row.descriptor) | statement-row, statement_row_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a4cbe4a4a3cb20d20b16fb2959552f012bbfcfe18384f5b3692ff95043eba66d` |
+| [`prices/node/tunnel-open.descriptor`](prices/node/tunnel-open.descriptor) | tunnel-open, tunnel_open_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a36a4346db273c99fd7123fbf7b4dcfddd82e8a4aa07ad8471b44d325e9a4185` |
 | [`quantities/benchmarks/float-ops.descriptor`](quantities/benchmarks/float-ops.descriptor) | float-ops, flt_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1188efaabf8d5930cc17fffcfcdcf91018894628a9b7ab28dd49822e372c4756` |
 | [`quantities/benchmarks/int-ops.descriptor`](quantities/benchmarks/int-ops.descriptor) | int-ops, int_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7c5ddc260dce1a6e46def9a0bd8f2a6a3f8d8891fc7efa968b27bd9d61f5dcdb` |
 | [`quantities/benchmarks/memory-bandwidth-1gib.descriptor`](quantities/benchmarks/memory-bandwidth-1gib.descriptor) | memory-bandwidth-1gib, mem_bandwidth_1gib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:06d94bc381a2f084b59fd7710589d7df319283e1fdf3a503ee523fb2bebda01e` |
@@ -122,17 +133,6 @@ formal. The configuration is in MU for each hour, and the announcement for each 
 
 | Name | Of / base | Today |
 | --- | --- | --- |
-| `memory-time` | `memory`, one GiB for one second | `ram_mu_per_gib_second`; also `ram_mu_per_gib_second:<arch>` (the scope is the architecture) |
-| `cpu-time` | `cpu`, one core for one second | `cpu_mu_per_vcpu_second` |
-| `disk-time` | `disk`, one GiB for one second | `disk_mu_per_gib_second` |
-| `network-bytes` | one GiB of relayed traffic | `net_mu_per_gib` |
-| `build` | one build | `build_mu` |
-| `tunnel-open` | one `ServiceTunnel` | `tunnel_open_mu` |
-| `modify-resources` | one `ModifyServiceSystemResources` | `modify_resources_mu` |
-| `statement-query` | one `GetBalanceStatement` | `statement_query_mu` |
-| `statement-row` | one movement in a statement | `statement_row_mu` |
-| `kept-state` | the kept state of a hibernated instance | No key: the disk rate on `disk_space` (`src/manager/maintain.py:917-940`) |
-| `device-time` | one device for one second, scope = the model fact | New |
 | `connection-open` | one connection | New: listed before, but no code |
 
 ### `prices/service/`

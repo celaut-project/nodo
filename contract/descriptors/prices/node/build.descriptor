@@ -1,0 +1,15 @@
+tags: build, build_mu
+
+A rate of the node: the price of one build of a service that the node does not have built.
+
+The value is MU for one. Example: 1000000. The node takes it from the balance that
+pays for the action.
+
+The rate has no scope. A reader that does not know the rate ignores it.
+
+=== formal
+base=one
+class=rate
+name=build
+of=the build of the container of a service that the node did not build before; 0 for a service that it has built
+scope=none

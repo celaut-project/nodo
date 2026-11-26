@@ -1,0 +1,18 @@
+tags: network-bytes, net_mu_per_gib
+
+A rate of the node: the price of the traffic that the node relays for an instance
+through ServiceTunnel, for each GiB.
+
+The value is MU for one GiB (2^30 bytes). Example: 50000. The bytes of the two
+directions add. The node charges in proportion, and rounds each charge down to a whole
+MU.
+
+The rate has no scope. A reader that does not know the rate ignores it.
+
+=== formal
+base=1073741824 bytes
+class=rate
+name=network-bytes
+of=the bytes that the node relays through ServiceTunnel for an instance, the two directions added
+rounding=the node computes each charge in proportion and rounds it down to a whole MU
+scope=none
