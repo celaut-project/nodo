@@ -474,7 +474,8 @@ message Service {
 // that does not know that policy refuses the service. The node places the instance
 // again: it checks its capacity and the benchmarks of the service. If it cannot, the
 // instance stays hibernated, and the answer says why. A wake starts a new process, so
-// it has a "start" execution receipt.
+// it has a "start" execution receipt. The statement of the account of the instance
+// gives it (BalanceStatement.receipts), also for a wake that no caller asked for.
 //
 // An instance hibernates when its parent asks (ModifyServiceSystemResources), when its
 // balance cannot pay the next maintenance period, or when a condition of the offer
@@ -941,14 +942,17 @@ message BalanceMovement {
     // value of the content hash of the service of the child, and "service_id_type", the
     // type of that hash, both in lowercase hexadecimal (absent in old rows). For a
     // start: "execution_name", the value of the name that the execution receipts of the
-    // instance carry, in lowercase hexadecimal. For a tunnel: "open" or "bytes",
+    // instance carry, in lowercase hexadecimal, and "receipt", the id of its start
+    // receipt (in BalanceStatement.receipts). For a tunnel: "open" or "bytes",
     // "execution_name", and "session", the
     // receipt stream of the tunnel when the caller asked for receipts. For a stop:
     // "reason", the death reason of the instance, and "leftover", the MU that the
     // refund took out of the account. A movement that a party asked for has "actor":
     // "operator" (the operator of the node), "client" or "instance". For a top_up or a withdrawal, the
     // actor is the father of the instance. A movement that hibernates or wakes an instance
-    // has "action": "hibernate" or "wake". A movement with no "actor" is one that the node wrote
+    // has "action": "hibernate" or "wake". A wake also has "receipt", the id of the start
+    // receipt of its new process. The id of a receipt is the hash of the bytes of its
+    // Signed, as "<type>:<value>", both in lowercase hexadecimal. A movement with no "actor" is one that the node wrote
     // by its own rule.
     string detail = 7;
     // The hash of the movement before this one. For the first movement, the genesis
@@ -1021,6 +1025,13 @@ message BalanceStatement {
     // lives, and of a dead account with anything alive below it, are never deleted. A
     // reader treats 0 as at least ledger.MIN_PEER_RETENTION_DAYS.
     uint32 retention_days = 13;
+    // The start receipts of the processes whose movements are in this statement: the
+    // start of the instance and each wake, as the node signed them (a Signed
+    // ExecutionReceipt of kind "start"). The movement of each start and each wake names
+    // its receipt in its detail. It is the way to get the receipt of a process that no
+    // caller asked for, for example a wake by a deposit or by the activity window of the
+    // node. Empty if no process started in the movements of this statement.
+    repeated Signed receipts = 14;
 }
 
 // An execution receipt (docs/EXECUTION_RECEIPTS.md): a statement that the node signs
@@ -1028,8 +1039,10 @@ message BalanceStatement {
 // never evidence for the node. The celaut-gateway layer gives the exact text that the
 // node signs and how to calculate each hash. A receipt is one of three kinds:
 //   * "start": the node signs one for each new process of the instance. The answer
-//     of StartService gives the first one. Each wake of the instance has one more. It
-//     names the service, the environment variables and the amount of the start.
+//     of StartService gives the first one. Each wake of the instance has one more, with
+//     the same envs_salt as the first one, so that its envs_digest can be compared. It
+//     names the service, the environment variables, the amount of the start (0 for a
+//     wake) and what the node reserved. BalanceStatement.receipts gives all of them.
 //   * "checkpoint": a ServiceTunnel or Observe stream gives it from time to time. It
 //     gives the counters and the hash chains of the stream up to that point.
 //   * "close": the last checkpoint of a stream. The node sends it when the stream

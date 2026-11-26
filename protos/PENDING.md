@@ -50,7 +50,11 @@ and the others below are the names of its proposals.
   that needs another way declares an `Init` policy.
 - How long a node keeps a hibernated instance that cannot pay is a promise of the
   offer (Q1.1). With no such promise, the caller assumes none.
-- A wake starts a process, so it has a "start" receipt (Q1.3).
+- A wake starts a process, so it has a "start" receipt (Q1.3), with the same salt
+  for the environment as the first start. `BalanceStatement.receipts` gives the
+  start receipts of the processes in the range of the statement, so the party that
+  pays gets also the receipt of a wake that nobody asked for. The movement of each
+  start and wake names its receipt by id.
 - A node that cannot hibernate an instance refuses and gives the reason (Q1.4). The
   network-share rule is a limit of nodo, not of the contract.
 - The rate of the kept state is a `Rate` whose formal defines its base (Q1.5).
@@ -100,7 +104,7 @@ and the others below are the names of its proposals.
   the error details of `StartService` and `GetServiceEstimatedCost` (P10, REASON 3.7).
 - The formal files go in `protos/formals/<class>/` (P3, Q4). Done for the files that
   existed: `protos/formals/policies/` and `protos/formals/payment_protocols/`. Still to
-  do (open question 9): a `class=` line in each formal, the exact bytes of the file (no
+  do (open question 8): a `class=` line in each formal, the exact bytes of the file (no
   final newline), and a generated index of ids. The `class=` line changes the bytes of
   the formals of today.
 
@@ -157,13 +161,7 @@ implements, how a node finds it, one API for each kind of function) is a future 
 not necessarily through `GetReputationProofs` (Q9.4 not adopted). Who vouches for the
 first verifier is also open.
 
-### 8. The receipt of a wake
-
-A wake starts a new process, so it has a "start" receipt (Q1.3). No field gives that
-receipt to the party that asked for the wake. `InstanceState` is also the answer of
-`GetMetrics`, where a receipt has no meaning (REASON 4.2). Decide where it goes.
-
-### 9. The core formals to write
+### 8. The core formals to write
 
 Part 1 is done: the formal files that existed are in `protos/formals/policies/` and
 `protos/formals/payment_protocols/`, with no change to their bytes. Part 2 is this
