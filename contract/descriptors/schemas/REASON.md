@@ -18,5 +18,5 @@ structure of a type, or of a message that it contains, is a new schema.
 
 ## Notes
 
-The format of a schema is still to decide (`protos/PENDING.md`, section 1). The gateway
+The format of a schema is still to decide (`contract/PENDING.md`, section 1). The gateway
 layer of a node uses the same format.

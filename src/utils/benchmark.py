@@ -7,7 +7,7 @@ to an amount of it **per core, per second** -- so it composes with the quota ("2
 each at least 500k int ops/s") instead of competing with it.
 
 The same keyed field means two things depending on where it sits (see its comment in
-`protos/celaut.proto`): in `resources.at_init` of a service, the minimum it requires; in
+`contract/celaut.proto`): in `resources.at_init` of a service, the minimum it requires; in
 a `Peer`'s announced `ArchitectureResources`, what that node measured. This module holds
 the vocabulary, the `service.json` parser, this node's own scores (`config.yaml`,
 `benchmark.BY_ARCH`) and the comparison of a requirement against a score.

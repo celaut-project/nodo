@@ -20,7 +20,7 @@ instance starts.
 ## What exists now
 
 - `Service.Container.environment_variables` is `repeated DataFormatKeyValue`
-  (`protos/celaut.proto`). Each variable has a name and a `DataFormat`.
+  (`contract/celaut.proto`). Each variable has a name and a `DataFormat`.
 - `DataFormat` has three fields: `tags` (names, for a reader), `prose` (a text for a
   reader) and `formal` (the format "in a form that a program can read").
 - The packer writes the names from `envs` in `service.json`. It sets an **empty**

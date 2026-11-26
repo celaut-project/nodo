@@ -104,7 +104,7 @@ recommendation.
   node delegates, the next node sees *it* as the client: `delegate_execution` sends
   `get_client_id_on_other_peer(peer)`, the delegating node's own account at that peer.
 - **The guard, as plain bytes.** `RecursionGuard{token, remaining_hops}` is not signed
-  by anyone (`protos/celaut.proto`). A receiver can check that it is well formed
+  by anyone (`contract/celaut.proto`). A receiver can check that it is well formed
   (`validate_token`) and that it is not already holding the same token
   (`Registry.add`). It cannot check where the token came from, or whether the hop
   count was honestly decremented.

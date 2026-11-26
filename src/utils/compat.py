@@ -3,7 +3,7 @@
 ``nodo update`` pulls new code only when nothing the installed node was built on has
 changed. Three things qualify (the third is two entries, the database and ``storage/``):
 
-* ``celaut_proto``: the hash of ``protos/celaut.proto``, the protocol. ``pack.proto`` and
+* ``celaut_proto``: the hash of ``contract/celaut.proto``, the protocol. ``pack.proto`` and
   ``buffer.proto`` are not part of it.
 * ``config_keys``: the key paths of ``config.example.yaml``. Values and comments change
   freely; a key added or removed means the operator's ``config.yaml`` may need a migration.
@@ -34,12 +34,12 @@ import yaml
 STORAGE_FORMAT = 1
 
 MANIFEST_FILE = "compat.json"
-PROTO_FILE = os.path.join("protos", "celaut.proto")
+PROTO_FILE = os.path.join("contract", "celaut.proto")
 CONFIG_EXAMPLE_FILE = "config.example.yaml"
 
 # What a manifest compares by, and what the operator is told when each one differs.
 ITEMS = {
-    "celaut_proto": "protos/celaut.proto (the protocol)",
+    "celaut_proto": "contract/celaut.proto (the protocol)",
     "config_keys": "the keys of config.example.yaml (the config.yaml schema)",
     "database": "the database schema",
     "storage_format": "the layout of storage/",

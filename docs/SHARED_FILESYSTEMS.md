@@ -28,8 +28,8 @@ about parent shares, unless they say otherwise.
 The `share` policy (#670) on a directory, in
 `Container.Filesystem.ItemBranch.policies`. A policy is a setting that a node
 identifies by the exact bytes of its `formal`
-([`protos/descriptors/policies/filesystem_entry/share.descriptor`](../protos/descriptors/policies/filesystem_entry/share.descriptor)); see
-[protos/descriptors/policies/REASON.md](../protos/descriptors/policies/REASON.md). A parent share does not involve
+([`contract/descriptors/policies/filesystem_entry/share.descriptor`](../contract/descriptors/policies/filesystem_entry/share.descriptor)); see
+[contract/descriptors/policies/REASON.md](../contract/descriptors/policies/REASON.md). A parent share does not involve
 `Service.Network`; a network share does.
 
 The value of the policy is `key=value` lines, sorted by key, joined by a newline:

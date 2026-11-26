@@ -1,4 +1,4 @@
-"""Read a descriptor file of ``protos/descriptors/`` (see ``protos/descriptors/REASON.md``).
+"""Read a descriptor file of ``contract/descriptors/`` (see ``contract/descriptors/REASON.md``).
 
 A descriptor file holds one ``celaut.Descriptor``: a ``tags:`` line, the prose, and the
 formal after the line ``=== formal``. The formal is the bytes after that line, up to the
@@ -8,7 +8,7 @@ descriptor: a change to the tags or to the prose does not change its id.
 Each folder holds the descriptors of one use: one place, or a group of places, of
 ``celaut.proto``. The ``REASON.md`` of a folder gives its class in a line ``Class: `x```.
 
-Run this module to write the generated part of ``protos/descriptors/INDEX.md``:
+Run this module to write the generated part of ``contract/descriptors/INDEX.md``:
 ``python -m src.utils.descriptor_file``.
 """
 import hashlib
@@ -19,7 +19,7 @@ from typing import List, NamedTuple, Optional, Tuple
 SUFFIX = ".descriptor"
 TAGS_PREFIX = b"tags:"
 MARKER = b"\n=== formal\n"
-ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "protos", "descriptors")
+ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "contract", "descriptors")
 INDEX = "INDEX.md"
 FOLDER_RULES = "REASON.md"
 CLASS_LINE = re.compile(r"^Class: `([a-z-]+)`\.?$", re.MULTILINE)

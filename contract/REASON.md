@@ -154,8 +154,8 @@ a reader), `prose` (for an implementer) and `formal` (the bytes that nodes compa
 entry that also needs a value holds a `Descriptor` and the value, never a copy of its
 three fields: `Policy`, `Quantity`, `Rate` and `Limit` have this shape. The value (and a
 scope) is of each use, so it is never in the descriptor. Use this shape again before
-you make a new one. The descriptor files and their rules are in `protos/descriptors/`
-(`protos/descriptors/REASON.md`).
+you make a new one. The descriptor files and their rules are in `contract/descriptors/`
+(`contract/descriptors/REASON.md`).
 
 **Rule 2.2. Identity is the exact bytes.** Nodes identify an entry only by the bytes
 of its `formal`. Tags and prose never identify it. A published formal never changes.
@@ -201,7 +201,7 @@ looks for its path in the tree of the other party.
 
 **Rule 2.8. An optional protocol has its own file and its own branch.** `celaut.proto`
 holds only what two nodes need to work together (rule 1.3). A protocol that a node can
-leave out goes in its own `.proto` file (`protos/extensions/`), with its own service,
+leave out goes in its own `.proto` file (`contract/extensions/`), with its own service,
 as one more branch of the tree of the same address, with its own formal. A conflict in
 it then does not touch the other branches. A protocol that a celaut service implements
 (and not the node) goes through `ServiceTunnel`.
@@ -327,7 +327,7 @@ field name of the contract do not name a member of an open set (a resource, a
 benchmark, a price, a policy value, a behavior, an algorithm). A comment can give a
 member only after the words "for example", and the sentence must stay true when the
 example is removed. A catalog of formals (their names and their bytes) is in the
-descriptor files (`protos/descriptors/`), never in the comments of the contract. Search the
+descriptor files (`contract/descriptors/`), never in the comments of the contract. Search the
 comments and the field names for such names when you review a change.
 
 **Rule 5.2. One word, one meaning.** Do not use one word for two things (for example
@@ -417,7 +417,7 @@ Follow these steps for each change:
    must be equal on both sides (they are part of the contract in practice: if one
    changes, old and new nodes stop to talk). A good change removes at least as much
    as it adds, or it moves content from the contract to the formals.
-7. **Record what is open** in `protos/PENDING.md`. A question that is not closed does
+7. **Record what is open** in `contract/PENDING.md`. A question that is not closed does
    not go into the proto as a decision.
 
 ## 9. Signs that a design is wrong

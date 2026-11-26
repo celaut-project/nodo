@@ -14,7 +14,7 @@ try:
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
-DOCS = os.path.join(os.path.dirname(__file__), "..", "protos", "descriptors", "contracts", "payment")
+DOCS = os.path.join(os.path.dirname(__file__), "..", "contract", "descriptors", "contracts", "payment")
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"imports unavailable: {IMPORT_ERROR}")

@@ -1,4 +1,4 @@
-"""The descriptor files of protos/descriptors/ follow protos/descriptors/REASON.md."""
+"""The descriptor files of contract/descriptors/ follow contract/descriptors/REASON.md."""
 import os
 import re
 import unittest

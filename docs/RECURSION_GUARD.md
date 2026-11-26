@@ -4,7 +4,7 @@ A node asked to run a service may delegate it, and the peer it delegates to may 
 again. Without a limit, that is how a request comes back to a node already working on it
 (A → B → A), and how one call fans out into many. The **recursion guard** is the limit
 for StartService. It rides along with the request as a `RecursionGuard` message
-([`protos/celaut.proto`](../protos/celaut.proto)) and is held by
+([`contract/celaut.proto`](../contract/celaut.proto)) and is held by
 `RecursionGuard` in [`src/utils/tools/recursion_guard.py`](../src/utils/tools/recursion_guard.py).
 
 Issue [#456](https://github.com/celaut-project/nodo/issues/456) added the hop budget to it

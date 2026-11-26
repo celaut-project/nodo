@@ -2,7 +2,7 @@
 
 Design note. It records an idea for the future. The node does **not** charge or limit
 the access to a DNS network today. Only the announcement exists in the protocol, in
-`Peer.rates` and `Peer.limits` (`protos/celaut.proto`).
+`Peer.rates` and `Peer.limits` (`contract/celaut.proto`).
 
 ## The problem
 

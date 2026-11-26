@@ -1,5 +1,12 @@
 # CELAUT Protos Hard Cutover Migration
 
+This folder is the Python package of nodo: the code generated from the contract
+(`celaut_pb2.py`, `celaut_pb2_grpc.py`, `celaut_doc.binpb`), the bee-rpc indices of the
+gateway (`gateway_bee.py`), and the formats of nodo only (`pack.proto`, `invite.proto`).
+The specification is in `contract/`: `celaut.proto`, its extensions, the descriptors and
+the rules (`contract/README.md`). The notes below are about the migration of the old
+schema.
+
 Status: **implemented in protobuf schema** and adapted in the main Python consumers.
 
 ## Current schema
@@ -8,7 +15,7 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
   - `ledger = 1`
   - `protocol = 2` (`Contract.Protocol`: `tags`, `prose`, `formal`): the kind of payment
     contract. Its `formal` defines the keys of `xattrs`. It replaces the xattr
-    `contract_type` (#671). See `protos/descriptors/contracts/payment`.
+    `contract_type` (#671). See `contract/descriptors/contracts/payment`.
   - `xattrs = 3` (`script`, `address`, `token_id`, and on a reputation proof
     `owner_public_key` and `owner_signature`)
 - `Service.Container`
@@ -118,24 +125,25 @@ packer turns it into the sorted entry list. The Peer JSON published on-chain
 
 ## Schema files
 
-- `protos/celaut.proto`
+- `contract/celaut.proto`
+- `contract/buffer.proto`
 - `protos/pack.proto`
-- `protos/buffer.proto`
+- `protos/invite.proto`
 
 These are the only copies. The Rust TUI used to vendor its own `celaut.proto` and
 `buffer.proto` under `src/commands/tui/protos/`; that copy drifted until
 `Service.Api.slot` was field 4 there and field 1 here — incompatible on the wire,
 while this file claimed they were identical. `src/commands/tui/build.rs` now compiles
-this directory directly, so there is nothing left to keep in sync.
+`contract/` directly, so there is nothing left to keep in sync.
 
-`protos/buffer.proto` is a second exception, of a different kind: it is also
+`contract/buffer.proto` is a second exception, of a different kind: it is also
 vendored upstream by the `bee-rpc-over-grpc-py` dependency (pinned in
 `bash/requirements.txt`), which ships its own compiled `bee_rpc.buffer_pb2`.
-`protos/buffer.proto` stays on disk here only because `celaut.proto`'s
+`contract/buffer.proto` stays on disk here only because `celaut.proto`'s
 `import "buffer.proto";` and the Rust TUI build need a local file to read — but
 at Python runtime there is exactly one compiled `buffer_pb2` (`bee_rpc`'s);
 `protos/buffer_pb2.py` is a hand-written shim that aliases to it (see that
-file's header). Keep `protos/buffer.proto` byte-for-byte in sync with
+file's header). Keep `contract/buffer.proto` byte-for-byte in sync with
 `bee-rpc-over-grpc-py`'s own `src/bee_rpc/buffer.proto` whenever that pin is
 bumped — if the two drift, Rust and Python nodes end up assuming different
 wire shapes for the same message.
@@ -168,7 +176,7 @@ comments, this command is sufficient, with any version of `grpcio-tools`:
 
 ```
 python3 -m grpc_tools.protoc -Iprotos --include_source_info \
-  --descriptor_set_out=protos/celaut_doc.binpb protos/celaut.proto \
+  --descriptor_set_out=protos/celaut_doc.binpb contract/celaut.proto \
   --experimental_allow_proto3_optional
 ```
 

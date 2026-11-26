@@ -713,7 +713,7 @@ These are intended for development or advanced maintenance environments:
 - **update `[--check]` `[--force]`**  
   Updates Nodo from git (requires superuser privileges), only when the incoming version
   is compatible with the installed one. It fetches, then compares `compat.json` at `HEAD`
-  with the one at `origin/<branch>`: `protos/celaut.proto`, the keys of
+  with the one at `origin/<branch>`: `contract/celaut.proto`, the keys of
   `config.example.yaml`, the database schema and the layout of `storage/` must all be
   unchanged. If one differs it prints which and exits non-zero with nothing changed; you
   then update by hand (migrate the configuration, tell your peers about protocol changes).

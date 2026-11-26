@@ -506,7 +506,7 @@ message Service {
 //
 // For example, the gRPC layer of a node has these children: the bee-rpc layer, with the
 // layer celaut-gateway over it, and normal gRPC services of optional protocols (for
-// example celaut-chat and celaut-observe, in protos/extensions/).
+// example celaut-chat and celaut-observe, in contract/extensions/).
 //
 // By default, a party compares two layers by the exact bytes of their formal. A
 // published layer never changes. A new version of a protocol, or a variant of it, is a
@@ -640,14 +640,14 @@ message ConfigurationFile {
 // definitions (policies, resources, benchmarks, rates, limits, architectures, APIs,
 // protocols), that nodes can share, negotiate or ignore. A formal is a set of bytes that
 // a document defines. A new thing is a new formal, never a new field, so this contract
-// does not change when a new thing appears. (protos/REASON.md has the rules to reason
+// does not change when a new thing appears. (contract/REASON.md has the rules to reason
 // about this contract.)
 
 // A quantity of a thing that a node measures, gives or asks for. It is a Descriptor plus
 // a number, as a Policy is a Descriptor plus a value. The formal of the quantity is the
 // formal of its descriptor. The formal defines what the quantity is: the thing, its
 // unit, if it is per core or total, and how a node measures it. The descriptor files
-// are in protos/descriptors/ (protos/descriptors/REASON.md).
+// are in contract/descriptors/ (contract/descriptors/REASON.md).
 //
 // There are two classes of formal, and the class is part of the definition of the
 // formal. A list that holds quantities says which class it takes:
@@ -1087,7 +1087,7 @@ message BalanceStatement {
 // node. They are never evidence for the node. The celaut-gateway layer gives how to
 // calculate each hash. There are two receipts: StartReceipt for each process, and
 // TunnelCheckpoint for each part of a ServiceTunnel stream. An optional protocol can
-// define its own checkpoint (for example protos/extensions/observe.proto).
+// define its own checkpoint (for example contract/extensions/observe.proto).
 //
 // The name of an execution is in each receipt: the hash, with the algorithm of its type,
 // of the UTF-8 bytes of the instance token followed by the bytes of the signer

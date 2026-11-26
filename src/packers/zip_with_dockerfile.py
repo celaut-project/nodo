@@ -368,7 +368,7 @@ class ZipContainerPacker:
 
         Optional. Only ``at_init`` holds one: ``benchmark`` is a floor, and a floor is
         what ``at_init`` says, so that is the half admission reads (see
-        Sysresources.benchmark in protos/celaut.proto). Under ``at_most`` it would carry
+        Sysresources.benchmark in contract/celaut.proto). Under ``at_most`` it would carry
         no meaning, so it is refused rather than packed into the service's hash to be
         ignored by every node -- and so is the field's old name.
         """

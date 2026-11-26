@@ -490,7 +490,7 @@ The payment system implements these fields:
 - `ledger`: The ledger, with the tag `"ergo-mainnet"` (or `"ergo-<genesis>"`, as above)
 - `protocol`: The payment protocol, with the tag `"ergo-p2pk"`. Its `formal` defines the
   keys of `xattrs` and the way to pay. Nodes compare it byte for byte
-  ([payment_protocols](../protos/descriptors/contracts/payment/REASON.md)).
+  ([payment_protocols](../contract/descriptors/contracts/payment/REASON.md)).
 - `script`: the raw **ErgoTree / propositionBytes** of the wallet's P2PK payment box
 - `token_id`: which asset this method settles in — the reserved symbol `"ERG"` for
   native-ERG payments, or a token's 64-hex id. This is the third dimension of a payment

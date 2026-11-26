@@ -1,14 +1,14 @@
 # Pending: the redesign of celaut.proto
 
 This file records what is still to do for the redesign of `celaut.proto`. The proto is
-the reference for what is decided: its comments give each rule, and `protos/REASON.md`
+the reference for what is decided: its comments give each rule, and `contract/REASON.md`
 gives the reasons. The history of each decision is in git. The code (Python, Rust TUI),
 the generated `*_pb2.py` files, the tests and `compat.json` do not follow the proto
 yet. Remove this file when the code follows the proto.
 
 ## 1. Decisions that are still open
 
-- **The format of a schema** (`protos/descriptors/schemas/`). Today
+- **The format of a schema** (`contract/descriptors/schemas/`). Today
   `src/identity/protocol_schema.py` gives `schema.<name>=<num>:<cardinality>:<type>,...`
   with no names of fields. A schema must also give the name of each field: without
   them, two variants that add one field number with the same type have the same
@@ -25,9 +25,9 @@ yet. Remove this file when the code follows the proto.
 
 ## 2. The descriptors to write
 
-The rules are in `protos/descriptors/REASON.md` and in the `REASON.md` of each folder.
+The rules are in `contract/descriptors/REASON.md` and in the `REASON.md` of each folder.
 The list of the descriptors that nodo needs, with where nodo implements each one
-today, is the second part of `protos/descriptors/INDEX.md`. It is the work for the
+today, is the second part of `contract/descriptors/INDEX.md`. It is the work for the
 agents that write the descriptors.
 
 ## 3. Facts of nodo today that the implementation must change
@@ -86,7 +86,7 @@ code, not of the contract.
 
 The contract is complete before nodo implements all of it (REASON 1.7).
 
-1. Proto (draft done), and the core descriptors in `protos/descriptors/`.
+1. Proto (draft done), and the core descriptors in `contract/descriptors/`.
 2. The `Signed` envelope in nodo, the TUI and the Peer on the ledger. Remove the
    digest keys from the layer formal.
 3. The tree of layers: announce it, find a path in it by exact bytes, and the subset

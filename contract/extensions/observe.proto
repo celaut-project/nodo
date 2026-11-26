@@ -5,7 +5,7 @@ import "celaut.proto";
 
 // An optional protocol of a node: a live stream of what an instance does, for the owner
 // of the instance. Two nodes work together without it, so it is not in celaut.proto
-// (protos/REASON.md). It is a normal gRPC service, with no bee-rpc. A node that serves it
+// (contract/REASON.md). It is a normal gRPC service, with no bee-rpc. A node that serves it
 // announces it as one more branch of the gRPC layer of its address (see celaut.Layer),
 // with its own formal: the layer celaut-observe. A node that does not serve it does not
 // announce that branch.

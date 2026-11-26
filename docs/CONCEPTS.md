@@ -10,7 +10,7 @@ input format, [`CONFIG.md`](CONFIG.md) for configuration,
 [`ERGO.md`](ERGO.md) for prices and settlement, [`REPUTATION.md`](REPUTATION.md) for how
 a peer is scored. The paradigm itself is defined in
 [celaut-project/paradigm](https://github.com/celaut-project/paradigm); the wire
-contract quoted throughout is [`celaut.proto`](../protos/celaut.proto).
+contract quoted throughout is [`celaut.proto`](../contract/celaut.proto).
 
 ## Celaut
 

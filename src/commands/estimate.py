@@ -153,7 +153,7 @@ def _period_text(seconds: int) -> str:
 def price_bound_lines(estimated_cost, hours=FUNDING_HOURS, default_periods=None):
     """The price bound of a quote and what a client sends to fund it (#636).
 
-    The funding is the formula of ``EstimatedCost.cost`` in protos/celaut.proto:
+    The funding is the formula of ``EstimatedCost.cost`` in contract/celaut.proto:
     ``cost`` plus, for each maintenance period ``i`` from 1 to ``N``,
     ``init_maintenance_cost`` times ``(1 + price_volatility)^k(i)``
     (``price_bound.funding_sum_mu``). One line for the ``N`` of each of ``hours``, and

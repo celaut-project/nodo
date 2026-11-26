@@ -131,7 +131,7 @@ instances use `ServiceTunnel` (`src/gateway/launcher/delegate_execution/delegate
 `local_execution.py:367-415` chooses the address of an instance in this order:
 `EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE`, the VM address, the node address on the
 subnet of the father, then `network.PUBLIC_IP`. If the list is empty, the caller uses
-`ServiceTunnel` (`protos/celaut.proto:466-469`).
+`ServiceTunnel` (`contract/celaut.proto:466-469`).
 
 `ServiceTunnel` carries UDP datagrams inside the gRPC stream
 (`src/tunneling/tunnel_client.py`, `serve_udp`). UDP slots work over Tor through the

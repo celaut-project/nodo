@@ -1,7 +1,7 @@
 # How to write a descriptor
 
 This file has the rules to write the descriptors that `celaut.proto` uses. It is for a
-person or an agent that must add a descriptor for nodo. Read `protos/REASON.md` first:
+person or an agent that must add a descriptor for nodo. Read `contract/REASON.md` first:
 it has the rules of the contract. This file applies them to the files of this folder.
 
 ## 1. What a descriptor is
@@ -32,7 +32,7 @@ is in a commit of the branch `dev`.
 
 ## 2. The file
 
-**Rule 2.1. The path.** A file is `protos/descriptors/<folder>/<name>.descriptor`. The
+**Rule 2.1. The path.** A file is `contract/descriptors/<folder>/<name>.descriptor`. The
 name is the value of the line `name=` of its formal (rule 3.3). The folders follow the
 uses: one folder for one place of `celaut.proto`, or for a group of places that take
 the same descriptors (section 4). Each folder has a `REASON.md` that says what the
@@ -246,14 +246,14 @@ it from that list.
 **Rule 6.3. The tests.** `tests/test_descriptor_files.py` checks that each file follows
 sections 2 and 3, that it is in a folder with a `REASON.md` and a class, that its
 `class=` line is the class of its folder, that the generated part of `INDEX.md` is
-current, and that each reference (rule 3.7) names a formal of `protos/descriptors/`. When the code of nodo uses a descriptor, the code reads the
+current, and that each reference (rule 3.7) names a formal of `contract/descriptors/`. When the code of nodo uses a descriptor, the code reads the
 file, or holds the same bytes and a test pins them to the file.
 
 **Rule 6.4. The descriptors before this file.** The eight files of
 `policies/filesystem_root/`, `policies/filesystem_entry/`, `policies/api_slot/` and
 `contracts/payment/` have no `class=` and no `name=` line. Their bytes are on the wire
 and in the databases of the nodes that run today, so they stay as they are. They get
-the two lines when the code follows the new contract (stage 7 of `protos/PENDING.md`).
+the two lines when the code follows the new contract (stage 7 of `contract/PENDING.md`).
 The test knows them by their paths.
 
 ## 7. The process
@@ -261,7 +261,7 @@ The test knows them by their paths.
 Do these steps for each new descriptor:
 
 1. Find the place in `celaut.proto` where the descriptor goes. If there is no place,
-   stop: a new place is a change to the contract (`protos/REASON.md`, section 8).
+   stop: a new place is a change to the contract (`contract/REASON.md`, section 8).
 2. Read the comment of that place. Find if the list is a requirement or an
    announcement for each reader, and what an absent entry means.
 3. Select the folder and its class (section 4). Read the `REASON.md` of the folder.

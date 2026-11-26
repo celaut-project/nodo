@@ -1,11 +1,11 @@
 use std::fs;
 
-// The TUI compiles the repository's ONE canonical proto, at ../../../protos. It used
+// The TUI compiles the repository's ONE canonical proto, at ../../../contract. It used
 // to keep its own copy under tui/protos, which silently drifted: `Service.Api.slot`
 // ended up as field 4 here and field 1 in the canonical schema, so the two spoke
 // incompatible wire formats while `protos/README.md` declared them identical. A
 // second copy of a wire contract has no way to stay honest; there is now only one.
-const PROTO_DIR: &str = "../../../protos";
+const PROTO_DIR: &str = "../../../contract";
 
 fn main() {
     // Tells cargo to rerun the build script if the .proto files change.

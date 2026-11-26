@@ -3,9 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# contract/ holds the specification (celaut.proto, its extensions, buffer.proto from
+# bee-rpc). protos/ is the Python package of nodo: the generated code goes there, with the
+# formats of nodo only (pack.proto, invite.proto).
+CONTRACT_DIR="${ROOT_DIR}/contract"
 PROTO_DIR="${ROOT_DIR}/protos"
 
-# protos/buffer.proto is compiled for the Rust TUI (src/commands/tui/build.rs)
+# contract/buffer.proto is compiled for the Rust TUI (src/commands/tui/build.rs)
 # and is kept on disk so celaut.proto's `import "buffer.proto";` resolves here,
 # but it is deliberately NOT passed to --python_out / --grpc_python_out below:
 # bee-rpc-over-grpc-py vendors its own compiled buffer_pb2, and protos/buffer_pb2.py
@@ -19,16 +23,17 @@ PROTO_DIR="${ROOT_DIR}/protos"
 # (src/identity/protocol_doc.py), so the comments are the only copy of that text.
 if python3 -c "import grpc_tools.protoc" >/dev/null 2>&1; then
   python3 -m grpc_tools.protoc \
-    -I"${PROTO_DIR}" \
+    -I"${CONTRACT_DIR}" \
     --python_out="${PROTO_DIR}" \
     --grpc_python_out="${PROTO_DIR}" \
     --include_source_info \
     --descriptor_set_out="${PROTO_DIR}/celaut_doc.binpb" \
-    "${PROTO_DIR}/celaut.proto" \
+    "${CONTRACT_DIR}/celaut.proto" \
     --experimental_allow_proto3_optional
 
   python3 -m grpc_tools.protoc \
     -I"${PROTO_DIR}" \
+    -I"${CONTRACT_DIR}" \
     --python_out="${PROTO_DIR}" \
     "${PROTO_DIR}/pack.proto" \
     --experimental_allow_proto3_optional
@@ -39,15 +44,16 @@ if python3 -c "import grpc_tools.protoc" >/dev/null 2>&1; then
     "${PROTO_DIR}/invite.proto"
 else
   protoc \
-    -I"${PROTO_DIR}" \
+    -I"${CONTRACT_DIR}" \
     --python_out="${PROTO_DIR}" \
     --include_source_info \
     --descriptor_set_out="${PROTO_DIR}/celaut_doc.binpb" \
-    "${PROTO_DIR}/celaut.proto" \
+    "${CONTRACT_DIR}/celaut.proto" \
     --experimental_allow_proto3_optional
 
   protoc \
     -I"${PROTO_DIR}" \
+    -I"${CONTRACT_DIR}" \
     --python_out="${PROTO_DIR}" \
     "${PROTO_DIR}/pack.proto" \
     --experimental_allow_proto3_optional

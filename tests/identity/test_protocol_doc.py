@@ -22,7 +22,7 @@ try:
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
-PROTO_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "protos")
+PROTO_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "contract")
 
 
 def _without_source_info(file):
