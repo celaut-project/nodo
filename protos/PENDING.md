@@ -70,7 +70,7 @@ and the others below are the names of its proposals.
 - The signature scheme is one descriptor with one formal (P4).
 - No `float` and no signed integer in signed or hashed messages; times, periods and
   ports are unsigned (R6.1, P10).
-- A field that holds a hash is a `Metadata.HashTag.Hash`; the contract never names a
+- A field that holds a hash is a `Hash`; the contract never names a
   hash algorithm (X-HASH, REASON 6.4). Nodo keeps blake2b-256.
 - A node refuses a service with a field number that it does not know (R3.6).
 - No field-number discipline across variants (R4.7 is not adopted; REASON 1.8).
@@ -192,11 +192,27 @@ and the others below are the names of its proposals.
 - Rejected: the full descriptor of the file with its comments (up to 142 KB, and its
   bytes depend on the version of `protoc`), and a schema in every message.
 
+### Hashes and names
+
+- `Metadata` is removed, with `HashTag` and `AttrHashTag` (open question 8). `Hash`
+  (type and value) is a message of the first level, for every hash of the contract:
+  services, accounts, instances, chains of events, executions.
+- A service travels as its hashes or as the full `Service`. `StartService`,
+  `GetService` and the shared service of the chat use a list of `Hash`.
+- `AttrHashTag` had no reader: only the packer wrote the hash of the filesystem, and
+  the only reader looked for the architecture, which the packer never wrote. It named
+  the parts by field number from outside the hashed bytes, so a change of a field
+  number broke it with no error.
+- The names of a service (`HashTag.tag`) are not in the contract. Nothing signed or
+  hashed them, so a peer could give any name to any service. A name is a local label
+  of the node and of the CLI (from `service.json`). A text for a reader is in
+  `Service.prose`, which the id covers.
+
 ## Open questions
 
 Each question keeps its number when it closes. Closed: question 1 (see
-"Dependencies"), question 2 (see "Networks"), question 3 (see "Receipts") and question
-4 (see "Schemas").
+"Dependencies"), question 2 (see "Networks"), question 3 (see "Receipts"), question 4
+(see "Schemas") and question 8 (see "Hashes and names").
 
 ### 5. Devices against PR #649 (P6)
 
@@ -266,15 +282,6 @@ New formals of the redesign:
   `Service` and for each signed type. The layer `celaut-gateway` uses the same format,
   also with the names of the fields: without them, two variants that add one field
   number with the same type have the same schema.
-
-### 8. Remove `Metadata.HashTag.AttrHashTag`
-
-`AttrHashTag` gives the hashes and the names of the parts of a service (for example
-the container and its filesystem), by the field number of each part. Only the packer
-writes it (`src/packers/zip_with_dockerfile.py:909`), and only
-`src/virtualizers/architecture.py:30` reads it, to get the tags of the architecture.
-A part of a service is not referenced by its own id in the contract. Decide if it can
-be removed. Found in open question 4.
 
 ## Implementation stages
 

@@ -14,7 +14,7 @@ import "celaut.proto";
 // HOW TO READ THIS FILE
 // The comments follow the rules of the comments of celaut.proto. Each message here is
 // read with the definitions of celaut.proto: a name that is not defined here (for
-// example Signed, Client or Metadata) is the message of the package celaut.
+// example Signed, Client or Hash) is the message of the package celaut.
 // -----------------------
 
 // The request of Observe.
@@ -159,7 +159,7 @@ message ObserveCheckpoint {
     // When the node signed, in unix seconds, on the clock of the node.
     uint64 ts = 1;
     // The name of the execution, as in the receipts of celaut.proto.
-    Metadata.HashTag.Hash execution_name = 2;
+    Hash execution_name = 2;
     // A random identifier of the stream, that the node selects when the stream starts.
     bytes session = 3;
     // The number of the checkpoint in the stream: 1 for the first, and one more for each

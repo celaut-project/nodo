@@ -339,11 +339,11 @@ a message that has an id (a `Service`, a `Filesystem`) needs a canonical encodin
 **Rule 6.3. Text names a formal by its id.** Where a formal must appear in text
 (JSON, logs, a CLI, a key in a configuration), use the id of its bytes, never its
 tags. The id is `<type>:<digest>`, both in lowercase hexadecimal. The type is the
-digest of the empty input, as in `Metadata.HashTag.Hash`. A short form is only for a
+digest of the empty input, as in `Hash`. A short form is only for a
 display.
 
 **Rule 6.4. The contract never fixes a hash algorithm.** A field that holds a hash
-says its type (`Metadata.HashTag.Hash`: the type and the value). A comment that tells
+says its type (`Hash`: the type and the value). A comment that tells
 how a hash is calculated says "with the algorithm of its type", and never names an
 algorithm except as an example. An implementation selects its algorithm (nodo uses
 blake2b-256); that is a choice of the implementation, not of the contract.

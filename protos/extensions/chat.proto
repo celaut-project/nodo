@@ -14,7 +14,7 @@ import "celaut.proto";
 // HOW TO READ THIS FILE
 // The comments follow the rules of the comments of celaut.proto. Each message here is
 // read with the definitions of celaut.proto: a name that is not defined here (for
-// example Signed, Client or Metadata) is the message of the package celaut.
+// example Signed, Client or Hash) is the message of the package celaut.
 // -----------------------
 
 // Chat. A conversation is always opened by a client against a node, and it lives on
@@ -44,9 +44,10 @@ message ChatMessage {
     optional string topic = 3;
     // The text of the message.
     string body = 4;
-    // The Metadata of a service that the sender shares. Optional. The body also names
-    // the service, for a reader that does not know this field.
-    optional Metadata service = 5;
+    // The content hashes of a service that the sender shares, one for each hash type.
+    // Optional. The body also names the service, for a reader that does not know this
+    // field.
+    repeated Hash service = 5;
 }
 
 // One message of a conversation, as the node keeps it. The node that keeps the
@@ -67,19 +68,20 @@ message ChatEntry {
     bool from_operator = 4;
     // The text of the message.
     string body = 5;
-    // The Metadata of a service that the writer shares. Optional.
-    optional Metadata service = 6;
+    // The content hashes of a service that the writer shares, one for each hash type.
+    // Optional.
+    repeated Hash service = 6;
     // The hash of the entry before this one in the same conversation, with the
     // algorithm of its type. The first entry of a conversation has the hash that the
     // celaut-chat layer gives for the start of a conversation. The layer also gives
     // how to calculate the hash of an entry. So a node cannot remove or add a message
     // in the middle of a conversation without a break in the chain that a reader can
     // see. Its type is the type of client_ref.
-    Metadata.HashTag.Hash prev_hash = 7;
+    Hash prev_hash = 7;
     // The client of the conversation, as a hash: the hash, with the algorithm of its
     // type, of "celaut-chat-client:" followed by the client_id. Never the client_id
     // itself, so that a signed conversation can be shown to others.
-    Metadata.HashTag.Hash client_ref = 8;
+    Hash client_ref = 8;
 }
 
 // The request of GetThread.

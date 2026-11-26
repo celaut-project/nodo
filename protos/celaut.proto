@@ -179,38 +179,14 @@ message ContractRate {
     Amount mu_per_unit = 2;
 }
 
-// What identifies and describes a service: its content hashes, its names and the
-// reputation proofs about it.
-message Metadata {
-    // The hashes and the names of an object: a service or a part of a service.
-    message HashTag {
-        // One hash of an object.
-        message Hash {
-            // The type of the hash: the digest of an empty input with that algorithm and
-            // output length. The value has the same length.
-            bytes type = 1;
-            // The digest of the object.
-            bytes value = 2;
-        }
-        // The hashes and the names of one part of a service.
-        message AttrHashTag {
-            // The field number of the part in the message that contains it. At the top
-            // level, a field number of Service.
-            uint32 key = 1;
-            // The hashes and the names of the part. A HashTag can contain more
-            // AttrHashTag entries for the parts of the part.
-            repeated HashTag value = 2;
-        }
-        // The hashes of the object, one for each hash type.
-        repeated Hash hash = 1;
-        // Names of the object for a person. The first name is the main name.
-        repeated string tag = 2;
-        // The hashes and the names of the parts of the service, for example the
-        // container and its filesystem.
-        repeated AttrHashTag attr_hashtag = 3;
-    }
-    // The hashes and the names of the service.
-    optional HashTag hashtag = 1;
+// One hash of an object: a service, an account, a chain of events, an execution. The
+// type says the algorithm, so the contract never names one.
+message Hash {
+    // The type of the hash: the digest of an empty input with that algorithm and output
+    // length. The value has the same length.
+    bytes type = 1;
+    // The digest of the object.
+    bytes value = 2;
 }
 
 // -----------------------
@@ -270,7 +246,7 @@ message Service {
             // Known content hashes of the service, one for each hash type. They name
             // the service of the workload. A dependency with no hash names no service:
             // the workload accepts any service that agrees with the service field.
-            repeated Metadata.HashTag.Hash hash = 1;
+            repeated Hash hash = 1;
             // The full or a partial specification of the service. The resources of the
             // workload are in service.container.resources: at_init for the start,
             // at_most for the limit, and benchmarks for the minimum scores. A partial
@@ -760,7 +736,7 @@ message TunnelRequest {
     string token = 1;
     // The descendant, by its instance_ref (BalanceMovement.instance_ref). Absent for the
     // instance of token.
-    Metadata.HashTag.Hash instance_ref = 2;
+    Hash instance_ref = 2;
     // The internal port, as a decimal number. It must be one of the
     // Instance.uri_slot.internal_port values of the instance of the tunnel.
     string slot = 3;
@@ -941,7 +917,7 @@ message BalanceStatementRequest {
     // that has stopped. The instance_ref of the account that token names is also
     // accepted: it reads that account, also when the instance stopped. A statement that
     // another node wrote comes with relayed set.
-    Metadata.HashTag.Hash instance_ref = 4;
+    Hash instance_ref = 4;
     // How many nodes the read can still go into, with the receiver. It is used only
     // with instance_ref. A node that asks one peer for a descendant sends one less. A
     // node that asks more peers shares one less between them, in equal parts. A
@@ -977,7 +953,7 @@ message BalanceMovement {
     // the account that was read. It is a hash of the token, never the token: the hash,
     // with the algorithm of its type, of "celaut-ledger-instance:" followed by the
     // token. A token is a credential, and a statement can be shown to others.
-    Metadata.HashTag.Hash instance_ref = 6;
+    Hash instance_ref = 6;
     // The cause of the movement, as JSON with sorted keys and no spaces. Empty if there
     // is none. For a maintenance period: "seconds", and the resources that the node
     // priced, each with the id of its formal as the key. For a refund of a charge that
@@ -1009,7 +985,7 @@ message BalanceMovement {
     // hexadecimal of their values (an absent instance_ref is empty), the amounts are
     // decimal integers, and hex() is the lowercase hexadecimal of the UTF-8. All the
     // hashes of one account have the type of BalanceStatement.account_ref.
-    Metadata.HashTag.Hash prev_hash = 8;
+    Hash prev_hash = 8;
 }
 
 // The answer of GetBalanceStatement. The node signs it (Signed). A statement that is not
@@ -1026,19 +1002,19 @@ message BalanceStatement {
     // The account, as a hash: the hash, with the algorithm of its type, of
     // "celaut-ledger-account:" followed by the client_id or the instance token. Never
     // the credential itself, so that a statement can be shown to others.
-    Metadata.HashTag.Hash account_ref = 3;
+    Hash account_ref = 3;
     // In the answer to a read with instance_ref: the service of the instance that the
     // statement is about, as its content hash. The caller can then know which service
     // each descendant runs. Absent when the node does not know it, and in the answer to
     // a read without instance_ref.
-    Metadata.HashTag.Hash service_id = 4;
+    Hash service_id = 4;
     // In the answer to a read with instance_ref: the instance_ref of the request. The
     // node signs that the statement is the account of that descendant, so it cannot say
     // later that the statement was of another account. A reader refuses an answer to a
     // read with instance_ref that does not have the same instance_ref. A node that
     // relays sets the instance_ref that its own caller asked for. Absent in the answer
     // to a read without instance_ref.
-    Metadata.HashTag.Hash instance_ref = 5;
+    Hash instance_ref = 5;
 
     // The range that the request asked for.
     // The first movement that the request asked for. 0 means none given.
@@ -1059,7 +1035,7 @@ message BalanceStatement {
     // balance after that movement. 0 for an account with no movement.
     uint64 head_seq = 10;
     // The hash of the last movement. For an account with no movement, its genesis hash.
-    Metadata.HashTag.Hash head_hash = 11;
+    Hash head_hash = 11;
     // The first movement that the node still holds. Older ones were deleted when they
     // passed its retention, and the first movement it holds hangs from the hash of a
     // movement that it no longer has.
@@ -1101,15 +1077,15 @@ message StartReceipt {
     // When the node signed, in unix seconds, on the clock of the node.
     uint64 ts = 1;
     // The name of the execution.
-    Metadata.HashTag.Hash execution_name = 2;
+    Hash execution_name = 2;
     // The service of the instance, as the content hash with which the registry of the
     // node keeps it.
-    Metadata.HashTag.Hash service_id = 3;
+    Hash service_id = 3;
     // The hash, with the algorithm of its type, of the salt of the start
     // (ServiceInstance.envs_salt) followed by the UTF-8 of the canonical text of the
     // environment variables that the service got. The celaut-gateway layer gives the
     // canonical text.
-    Metadata.HashTag.Hash envs_digest = 4;
+    Hash envs_digest = 4;
     // The Configuration.initial_mu of the start, in MU: what the node charged the caller,
     // the build included. It is the amount of the "start" movement of the instance in its
     // balance statement. 0 for a wake.
@@ -1134,7 +1110,7 @@ message EventChain {
     uint64 bytes = 2;
     // The hash chain of these events, with the algorithm of its type. The layer of the
     // stream gives how to calculate it.
-    Metadata.HashTag.Hash head = 3;
+    Hash head = 3;
 }
 
 // What a node attests about a ServiceTunnel stream, up to a point. The node sends one
@@ -1144,7 +1120,7 @@ message TunnelCheckpoint {
     // When the node signed, in unix seconds, on the clock of the node.
     uint64 ts = 1;
     // The name of the execution.
-    Metadata.HashTag.Hash execution_name = 2;
+    Hash execution_name = 2;
     // A random identifier of the stream, that the node selects when the stream starts.
     bytes session = 3;
     // The internal port of the slot of the tunnel.
@@ -1553,8 +1529,8 @@ message ModifyDepositInput {
 // A node refuses a request with a status code. A message that a node signs travels as a
 // Signed.
 service Gateway {
-    // Starts a service. The caller sends a Client and the service as content hashes, as
-    // Metadata or as the full Service. It can also send a Configuration and a
+    // Starts a service. The caller sends a Client and the service as content hashes or
+    // as the full Service. It can also send a Configuration and a
     // RecursionGuard, and a StartReference that makes the request idempotent. The node
     // returns a ServiceInstance with the addresses of the instance, its token and a
     // signed start receipt. The node can start the service on a peer and give the
@@ -1651,8 +1627,8 @@ service Gateway {
     // tells if the node can run it now. The container does not need to be that of a
     // known service. An empty architecture is the native architecture of the node.
     rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-    // Takes a content hash. Returns the hashes, the Metadata and the Service, at the
-    // StartService indices, so the caller can send them to StartService without a
+    // Takes a content hash. Returns the hashes and the Service, at the StartService
+    // indices, so the caller can send them to StartService without a
     // change.
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes an instance token. Returns the InstanceState.
