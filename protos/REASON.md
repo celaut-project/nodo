@@ -111,10 +111,26 @@ field numbers. It is this:
   before they talk (rule 2.5).
 - A node that reads a message checks that it makes sense, and refuses a field number
   that it does not know in a requirement (rule 3.6).
+- A message that can reach a reader by another way (by its id, in a file, from a third
+  node, as evidence) holds its schema, as a `Descriptor`. A reader compares the
+  formal of that schema with its own schema before it reads the message.
 
-A message that does not come directly from the node that wrote it (a service that a
-third node forwards, or a service in a file) has no announced schema. That risk is
-known, and `protos/PENDING.md` records it.
+Only two places hold a schema. A `Service` holds it in its field 1: it is the only
+message whose id is a hash of its bytes, so its id covers what the bytes mean. Every
+other message that a third party reads is signed, so `Signed.Body.context` holds the
+schema of the content, and the signature covers it. A message that goes directly
+between two parties needs no schema: the layers of the address give it.
+
+The schema is a formal like any other (rule 2.2). Its bytes give the structure of the
+type and of the messages that it contains, with the name of each field. A published
+schema never changes its meaning: a new meaning is a new schema. The place of the
+schema is the one thing that all variants keep, as all of them keep the place of the
+formal of a `Policy`. A message is not read in a schema of its own choice: the reader
+first finds the schema in that fixed place.
+
+**Test.** A message needs a schema only if its bytes can reach a reader that did not
+get them from its writer through an announced layer, and that reader decides from
+what they mean. Do not add a schema to other messages.
 
 ## 2. The shape of a formal
 
@@ -419,3 +435,5 @@ Follow these steps for each change:
 - One address announced more than one time to give more protocols (rule 2.7).
 - An optional protocol in `celaut.proto` (rule 2.8).
 - A field or a reference whose only purpose is to make a message smaller (rule 7.5).
+- A message that a third party reads, or that has an id, with no schema (rule 1.8). A
+  schema in a message that goes only between two parties.

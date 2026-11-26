@@ -172,16 +172,31 @@ and the others below are the names of its proposals.
 - Known residual: `coverage` and `capture_mode` of the Observe extension are texts of
   a closed list. The extension is optional, so they do not touch the contract.
 
+### Schemas
+
+- A message whose bytes can reach a reader that did not get them from the writer
+  holds its schema (open question 4, REASON 1.8). The schema is a `Descriptor`: its
+  formal gives the structure of the type and of the messages that it contains, with
+  the name of each field.
+- Only two places: `Service.schema` (field 1, the same number in every variant) and
+  `Signed.Body.context` (a `Descriptor`, no longer the name of the type). `Service` is
+  the only message whose id is a hash of its bytes. Every other message that a third
+  party reads is signed (`Peer`, `ReputationProof`, receipts, statements, offers,
+  checkpoints, chat entries, and the evidence that holds them).
+- Why: a hash names bytes, not a meaning. Without a schema, a publisher can say that
+  a service id that another publisher judged means something else.
+- The schema is a formal like the others (REASON 2.2): a new meaning is a new schema.
+  A comment does not change the schema, so it does not change the ids. A change to the
+  structure of `Service` or of a message that it contains changes the id of every
+  service.
+- Rejected: the full descriptor of the file with its comments (up to 142 KB, and its
+  bytes depend on the version of `protoc`), and a schema in every message.
+
 ## Open questions
 
 Each question keeps its number when it closes. Closed: question 1 (see
-"Dependencies"), question 2 (see "Networks") and question 3 (see "Receipts").
-
-### 4. Messages that do not come from their writer (REASON 1.8)
-
-Between two nodes, the layer formal tells the schema of each message. Two cases have
-no announced schema: a service that a third node forwards (compatibility of schemas is
-not transitive) and a service in a file. Known residual risk. No change for now.
+"Dependencies"), question 2 (see "Networks"), question 3 (see "Receipts") and question
+4 (see "Schemas").
 
 ### 5. Devices against PR #649 (P6)
 
@@ -246,6 +261,20 @@ New formals of the redesign:
   filled value (today a value is a placeholder in full or has none, and has no new
   line).
 - The id of a network share, in the formal of the share setting.
+- The schemas (`Service.schema`, `Signed.Body.context`): the format of a schema (today
+  `src/identity/protocol_schema.py`, plus the name of each field), and one schema for
+  `Service` and for each signed type. The layer `celaut-gateway` uses the same format,
+  also with the names of the fields: without them, two variants that add one field
+  number with the same type have the same schema.
+
+### 8. Remove `Metadata.HashTag.AttrHashTag`
+
+`AttrHashTag` gives the hashes and the names of the parts of a service (for example
+the container and its filesystem), by the field number of each part. Only the packer
+writes it (`src/packers/zip_with_dockerfile.py:909`), and only
+`src/virtualizers/architecture.py:30` reads it, to get the tags of the architecture.
+A part of a service is not referenced by its own id in the contract. Decide if it can
+be removed. Found in open question 4.
 
 ## Implementation stages
 

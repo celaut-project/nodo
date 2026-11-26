@@ -220,7 +220,8 @@ message Metadata {
 
 // The specification of a service: its container, its API, its networks and the
 // workloads that it can start. The hash of the serialized Service is the id of the
-// service.
+// service. The Service holds its own schema (field 1), so the id covers what the bytes
+// mean and not only the bytes. Field 1 is the schema in every variant of this contract.
 //
 // A Service is a requirement. A node that runs a service refuses a service with a field
 // number that it does not know, at any level of the message. A node that only stores or
@@ -440,22 +441,30 @@ message Service {
         repeated Policy policies = 3;
     }
 
+    // The schema of this message: a requirement. Its formal is the schema of the
+    // contract for Service and for the messages that it contains. Its tags give the
+    // full name of the type, for example "celaut.Service". A reader reads this field
+    // first. It reads the other fields only if it knows the formal, or if it reads the
+    // formal and decides that the two schemas agree. Otherwise it does not run the
+    // service and gives the formal in the error. The formal is not empty. A Service that
+    // a Dependency holds has its own schema too.
+    Descriptor schema = 1;
     // A text that explains the service to a reader.
-    string prose = 1;
+    string prose = 2;
     // The container of the service.
-    Container container = 2;
+    Container container = 3;
     // The interface of the service.
-    Api api = 3;
+    Api api = 4;
     // The domains where the instances of the service find their peers.
-    repeated Network network = 4;
+    repeated Network network = 5;
     // The load that the service can ask for later, while it runs. Each clause must fit
     // on the node or on a peer that it knows. If not, the node can refuse to start the
     // service. It is in the admission only. It has no cost.
-    repeated Clause possible_environment_workload = 5;
+    repeated Clause possible_environment_workload = 6;
     // The load that the service needs to start. It is in the admission, as
     // possible_environment_workload, and in the cost: EstimatedCost.cost includes the
     // builds of these children. Each child gets its balance in its own start.
-    repeated Clause initial_environment_workload = 6;
+    repeated Clause initial_environment_workload = 7;
 }
 
 // The life of an instance.
@@ -1260,10 +1269,14 @@ message ServiceInstance {
 message Signed {
     // What the party signed.
     message Body {
-        // The full name of the type of the content, for example "celaut.Peer". It keeps
-        // a signature for one use from another use. A reader refuses a context that is
-        // not the type that the place needs.
-        string context = 1;
+        // The schema of the content. Its formal is the schema of the contract for the
+        // type of the content and for the messages that it contains. Its tags give the
+        // full name of the type, for example "celaut.Peer". It keeps a signature for one
+        // use from another use, and the signature covers what the content means. A
+        // reader refuses a context that is not the type that the place needs. It reads
+        // the content only if it knows the formal, or if it reads the formal and decides
+        // that the two schemas agree. The formal is not empty.
+        Descriptor context = 1;
         // The public key of the signer, as the bytes that the scheme defines. This
         // contract gives it no length and no encoding. Its lowercase hexadecimal is the
         // id of the signer: for a node, its peer_id. A scheme with very large keys can
@@ -1275,7 +1288,7 @@ message Signed {
         // or algorithm is one scheme with one formal. A reader refuses a scheme with an
         // empty formal.
         Descriptor scheme = 3;
-        // The serialized message of the type that context names.
+        // The serialized message of the type that context gives.
         bytes content = 4;
     }
     // A serialized Body: the exact bytes that the signer signed. A reader verifies the
