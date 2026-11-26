@@ -132,18 +132,33 @@ and the others below are the names of its proposals.
   changes, the parent gets a new id. A source does not change which service the hash
   names.
 
+### Networks
+
+- `Service.Network` is `{ Policy domain, protocol_stack, policies }` (open question
+  2, X-NET). The formal of the domain is the kind of network: what a member is, how a
+  node finds the members, and which addresses the instance can reach. The value of
+  the domain gives its parameters (a host name and its ports, the identity of a shared
+  database, the block of a chain). Today the node knows four kinds: all addresses
+  (the tag `*`), host names, domains of celaut instances (the Postgres of
+  `copa-ai/personal-nutrition`), and proof-of-work networks.
+- Two domains are the same only if the formals and the values have the same bytes,
+  after the node applies the settings of the network. A node never compares by tag
+  (REASON 2.2). Nodo can read a value to accept more keys (REASON 2.5).
+- The `${VAR}` template is a setting in `Network.policies`. The node fills the value
+  from `Configuration.environment_variables` at the start. The id of the service keeps
+  the template. `ResolveNetwork` refuses a network with a setting that changes the
+  value at a start.
+- `NetworkResolution` holds the `Network` as the service declares it, and not its
+  tags. The instance finds its network by the bytes.
+- `ShareLocationRequest.share_id` is the id that the formal of the share setting
+  defines. The contract does not fix the hash `H("network", tag, ...)`.
+- Known cost: two services that do not agree on the bytes of a domain do not meet.
+  A common tag is no longer enough.
+
 ## Open questions
 
-Each question keeps its number when it closes. Question 1 (the dependency of a
-service) is closed: see "Dependencies".
-
-### 2. Network (X-NET)
-
-A network is not only DNS: there are also peer-to-peer and proof-of-work networks
-(for example the network that the Laravel instances of `copa-ai/personal-nutrition`
-use to reach Postgres). Today the data (a host name) is in the tags, and the identity
-is by tag (against REASON 2.2). A possible form: a descriptor of the kind of network
-plus its value. Read that project before a proposal.
+Each question keeps its number when it closes. Closed: question 1 (see
+"Dependencies") and question 2 (see "Networks").
 
 ### 3. Split of ExecutionReceipt (X-REC)
 
@@ -212,6 +227,13 @@ New formals of the redesign:
   a service uses (`node_protocol_stack`, S6.5).
 - Sources of a dependency (`Dependency.sources`): a file in the filesystem of the
   service, and a registry.
+- Kinds of network (`Network.domain`): all addresses, a host name with its ports, a
+  domain of celaut instances, and a proof-of-work network for each chain (Ergo,
+  Bitcoin). The current `pow.` keys and `port=` go into the values.
+- Settings of a network: the `${VAR}` template, with its syntax and the check of the
+  filled value (today a value is a placeholder in full or has none, and has no new
+  line).
+- The id of a network share, in the formal of the share setting.
 
 ## Implementation stages
 

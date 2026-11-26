@@ -416,29 +416,28 @@ message Service {
     // execution-environment concern expressed through the policies of Container.Filesystem
     // (the setting "share").
 
-    // The form of Network is still under discussion (see protos/PENDING.md): its tags
-    // are data, and the firewall, the resolver and the pricing use them.
-
     // A logical domain where the instances of the service find their peers. It gives
-    // which peers the service wants (tags, prose, formal) and which protocols these
-    // peers must speak (protocol_stack).
+    // which peers the service wants (domain) and which protocols these peers must speak
+    // (protocol_stack).
     message Network {
-        // Names of the domain. Each tag names the same destination. Here a reader
-        // compares by tag when one of the two domains has no formal: one common tag is
-        // sufficient.
-        repeated string tags = 1;
-        // A text that explains the domain to a reader.
-        string prose = 2;
-        // The parameters of the domain. The kind of the domain defines their form. If
-        // two domains both have a formal field, they are the same only if the two fields
-        // have the same bytes. A node that does not understand the formal does not
-        // resolve the domain.
-        bytes formal = 3;
+        // The domain: a requirement. Its formal defines a kind of domain: what a member
+        // is, how a node finds the members, and which addresses the instance can reach.
+        // Its value gives the parameters of the domain, in the form that the formal
+        // defines. For example: a host name and its ports, or the identity of a database
+        // that instances share. Two domains are the same only if their formals have the
+        // same bytes and their values have the same bytes, after the node applies the
+        // settings of the network. The tags and the prose are for a reader: a node never
+        // compares two domains by them. A node that does not know the formal does not run
+        // the service.
+        Policy domain = 1;
         // The protocols that the peers in the domain must speak.
-        repeated Descriptor protocol_stack = 4;
-        // Settings of the domain: a list of Policy in a requirement. A node that does
-        // not know a setting does not run the service.
-        repeated Policy policies = 5;
+        repeated Descriptor protocol_stack = 2;
+        // Settings of the network: a list of Policy in a requirement. A node that does not
+        // know a setting does not run the service. A setting can change the value of the
+        // domain at the start of an instance, for example with the values of
+        // Configuration.environment_variables. The id of the service keeps the value as
+        // the service declares it.
+        repeated Policy policies = 3;
     }
 
     // A text that explains the service to a reader.
@@ -601,12 +600,11 @@ message Configuration {
 message ConfigurationFile {
     // The peers of one network of the service.
     message NetworkResolution {
-        // The tags of the network, the same as in Service.Network.
-        repeated string tags = 1;
+        // The network, with the same bytes as in the Service of the instance.
+        Service.Network network = 1;
         // The peers in the network that the instance can reach, each with only the
-        // ports that match the network. The node lets the instance connect only to these
-        // peers. For the tag "*", the list is empty and the instance can connect to all
-        // addresses.
+        // ports that match the network. The node lets the instance connect to these
+        // peers, and to the other addresses that the formal of the domain allows.
         repeated Instance peer_instances = 2;
     }
     // The gateway of the node, as the instance can reach it. The instance asks the
@@ -880,8 +878,8 @@ message ResourceAvailability {
 
 // The request of LocateShare.
 message ShareLocationRequest {
-    // The id of a network share: hex of H("network", tag, formal, name, share_env,
-    // value). See docs/SHARED_FILESYSTEMS.md.
+    // The id of a network share, as the formal of the setting that declares the share
+    // defines it.
     string share_id = 1;
 }
 
@@ -1603,8 +1601,12 @@ service Gateway {
     // that the node can find. The node does not ask other nodes. This is what the node
     // believes, not a proof: the caller must make sure that each address is correct.
     // The node refuses a network that it does not allow, and a network that it cannot
-    // resolve. For a local instance, the request must agree with a network that its
-    // service declares. The node then also lets that instance connect to the addresses.
+    // resolve. The request is a network as an instance uses it: the node refuses a
+    // network with a setting that changes the value of its domain at a start. If the node
+    // does not know the formal of the domain, the error gives it. For a local instance,
+    // the request must agree with a network that its service declares, after the node
+    // applies the settings of that network. The node then also lets that instance
+    // connect to the addresses.
     rpc ResolveNetwork(stream buffer.Buffer) returns (stream buffer.Buffer) {}
     // Takes a ShareLocationRequest with the id of a network share. Returns a
     // ShareLocation that tells if the node holds that share now. The node does not ask
