@@ -197,6 +197,10 @@ and the others below are the names of its proposals.
 - `Metadata` is removed, with `HashTag` and `AttrHashTag` (open question 8). `Hash`
   (type and value) is a message of the first level, for every hash of the contract:
   services, accounts, instances, chains of events, executions.
+- `Hash` has no `Descriptor`, and the hash algorithms have no formal files. The type
+  (the digest of the empty input) identifies the algorithm, and a node can check it.
+  Rejected: a descriptor in each hash (one role in each place, REASON 3.5, and its
+  cost in each chain and each id).
 - A service travels as its hashes or as the full `Service`. `StartService`,
   `GetService` and the shared service of the chat use a list of `Hash`.
 - `AttrHashTag` had no reader: only the packer wrote the hash of the filesystem, and
@@ -208,16 +212,38 @@ and the others below are the names of its proposals.
   of the node and of the CLI (from `service.json`). A text for a reader is in
   `Service.prose`, which the id covers.
 
+### Devices
+
+- The architecture of a device is the device only: one model of chip (open question
+  5, REASON 2.4). The guest kernel is a requirement of the service, not a property of
+  the device, so it is a setting in `Container.Init.policies`. Its value gives the
+  hashes of the kernel, one for each hash type. An alias of a kernel ABI is a reading
+  of the node (REASON 2.5), not a new identity.
+- One entry of `Peer.devices` is one physical device. A device that can boot more
+  than one kernel is not counted two times.
+- The formal of the chip is the scope of the rate of the device (`Rate.scope`). A
+  node does not take the chip from the text of a tag.
+- The setting of the attach mode has, as its value, the ordered list of the modes that
+  the service accepts. `Peer` does not announce the modes: `GetResourceAvailability`
+  gives the answer.
+- The kernel and the chips that a start attaches are `StartReceipt.facts`. The chips
+  are one formal whose value is the list (a list of `Policy` has no repeated formal).
+- A node that cannot grow a device (for example `at_init` less than `at_most` under
+  VFIO) refuses and names the formal. A device benchmark that the node did not
+  measure does not meet a requirement: the node refuses.
+- What PR #649 (VFIO, attach at the start only) must change when the code follows:
+  tags `pci:<vendor>:<device>+<alg>:<hash>` become a chip formal plus the kernel
+  setting; the price and the receipt read the chip formal; an unmeasured benchmark
+  refuses; the receipt fields of its proto diff become `facts`. Its release on
+  hibernation and its new selection on wake already follow the default of
+  `Device.policies`.
+
 ## Open questions
 
 Each question keeps its number when it closes. Closed: question 1 (see
 "Dependencies"), question 2 (see "Networks"), question 3 (see "Receipts"), question 4
-(see "Schemas") and question 8 (see "Hashes and names").
-
-### 5. Devices against PR #649 (P6)
-
-`Device.policies` replaces the enum `Attach`, and `Peer.devices` changes. Check it
-against the draft pull request #649 before the code follows.
+(see "Schemas"), question 5 (see "Devices") and question 8 (see "Hashes and
+names").
 
 ### 6. The binding "this service implements this formal" (REASON 1.6)
 
@@ -277,6 +303,9 @@ New formals of the redesign:
   filled value (today a value is a placeholder in full or has none, and has no new
   line).
 - The id of a network share, in the formal of the share setting.
+- Devices: the chip formal (one formal for each PCI vendor and device pair, made from
+  one template text), the setting of the guest kernel, the facts of the kernel and of
+  the chips, the device benchmarks, and the rate of a device for each chip.
 - The schemas (`Service.schema`, `Signed.Body.context`): the format of a schema (today
   `src/identity/protocol_schema.py`, plus the name of each field), and one schema for
   `Service` and for each signed type. The layer `celaut-gateway` uses the same format,

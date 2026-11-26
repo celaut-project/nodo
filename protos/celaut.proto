@@ -334,7 +334,9 @@ message Service {
             // Settings of the start: a list of Policy in a requirement. A node that does
             // not know a policy does not run the service. The settings of this place say
             // how the node starts a process of the service, how it continues one on a
-            // state that it kept, and where the service reads the notices of the node.
+            // state that it kept, where the service reads the notices of the node, and
+            // the guest kernel that the instance boots. The guest kernel is one setting
+            // for the instance and all its devices.
             repeated Policy policies = 2;
         }
 
@@ -605,7 +607,7 @@ message ConfigurationFile {
     // Quantity, with only formals of resources.
     repeated Quantity initial_resources = 4;
     // The devices that the node attached to the instance at the start, each with its id
-    // and its PCI address in the guest. Empty if the instance has no devices. A device
+    // and its address in the guest. Empty if the instance has no devices. A device
     // that the node attaches after the start is not here: the answer of
     // ModifyServiceSystemResources gives it.
     repeated AttachedDevice devices = 5;
@@ -813,9 +815,12 @@ message EstimatedCost {
 // A device that the node attaches directly to the instance. One Device is one physical
 // device. A service that needs two devices has two Device entries.
 message Device {
-    // The architecture of the device: the device, and what the service needs to drive
-    // it. A device of a node matches the entry when the two architectures have the same
-    // formal. A service that must run on more than one architecture is a set of
+    // The architecture of the device: the device only, for example one model of chip.
+    // What the service needs to drive the device (for example the guest kernel) is
+    // not part of it: it is a setting of the start, in Container.Init.policies. A
+    // device of a node matches the entry when the two architectures have the same
+    // formal. The formal of the architecture is also the scope of the rate of the
+    // device (Rate.scope). A service that must run on more than one architecture is a set of
     // services, one for each architecture. A Device with no architecture is not valid:
     // here an empty architecture does not mean the native architecture.
     Descriptor architecture = 1;
