@@ -25,6 +25,10 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`policies/filesystem_entry/share.descriptor`](policies/filesystem_entry/share.descriptor) | share | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1801e283b3be7286cc3445a2e128c3d921f75bddf1825e330c7b7553c45b9de2` |
 | [`policies/filesystem_root/entry_metadata.descriptor`](policies/filesystem_root/entry_metadata.descriptor) | entry_metadata | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3c06eea2a8fe2d1476af508118965a67971d8e178f87caded980e6d78107eb42` |
 | [`policies/filesystem_root/read_mode.descriptor`](policies/filesystem_root/read_mode.descriptor) | read_mode | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e36826fd30068ee263c73edeb8f698c5c4761771801f707d1f6abb6642a503ec` |
+| [`quantities/resources/cpu.descriptor`](quantities/resources/cpu.descriptor) | cpu, vcpu, cores | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722` |
+| [`quantities/resources/device-memory.descriptor`](quantities/resources/device-memory.descriptor) | device-memory, vram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ee9cad6566f696f7f73602862c74af5ae19c2c88e2ffa58c6030c0609100ad01` |
+| [`quantities/resources/disk.descriptor`](quantities/resources/disk.descriptor) | disk, disk space, root filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926` |
+| [`quantities/resources/memory.descriptor`](quantities/resources/memory.descriptor) | memory, ram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db` |
 
 <!-- END GENERATED -->
 
@@ -48,10 +52,6 @@ remove its row here.
 
 | Name | Value / unit | Today | Notes |
 | --- | --- | --- | --- |
-| `memory` | bytes | `mem_limit` of `Sysresources`; floor 128 MiB, default 256 MiB (`src/virtualizers/microvm/limits.py:44-48,149`); hotplug works | |
-| `disk` | bytes | `disk_space`; the size of the root filesystem (`limits.py:352-515`); no hotplug (`src/virtualizers/ch/hotplug.py:126`) | |
-| `cpu` | thousandths of a core | `cpu_quota` / `cpu_period` in µs, as vCPUs = ceil(quota/period) (`limits.py:278-314`) | The unit changes: two numbers become one integer. |
-| `device-memory` | bytes | New | For `Device.resources`. |
 | (`blkio_weight`) | weight | packed, not enforced (`hotplug.py:107`) | Do not write it: nodo does not enforce it. |
 
 ### `quantities/benchmarks/`

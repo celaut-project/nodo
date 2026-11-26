@@ -1,0 +1,20 @@
+tags: disk, disk space, root filesystem
+
+The disk of one instance: the size of the block device that holds its root filesystem.
+It includes the files of the service and the free space for writes. It is a total, not
+the free space.
+
+The value is in bytes. Example: 1073741824 (1 GiB). With the setting read_mode=ro, the
+device holds only the files of the service, and the value is the most that they can
+use.
+
+An absent value says nothing (it is not 0). Valid in the resources of a container. The
+node reserves the value and charges for it. The processes cannot write more than the
+device holds.
+
+=== formal
+class=resource
+measure=the size of the block device that holds the root filesystem of the instance: the files of the service and the free space for writes, as a total
+name=disk
+place=the resources of a container
+unit=byte

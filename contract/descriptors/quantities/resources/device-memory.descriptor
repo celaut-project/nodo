@@ -1,0 +1,17 @@
+tags: device-memory, vram
+
+The memory of one device that the instance can use: for example the memory of a GPU.
+It is a total for the device, not for the instance.
+
+The value is in bytes. Example: 25769803776 (24 GiB).
+
+An absent value says nothing (it is not 0). Valid only in the resources of a device
+(Device.resources, DeviceChange, AttachedDevice). A node refuses it in the resources
+of a container. The node reserves the value on the device and enforces it.
+
+=== formal
+class=resource
+measure=the memory of one device that the instance can use at one time, as a total for the device
+name=device-memory
+place=the resources of a device
+unit=byte
