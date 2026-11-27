@@ -19,9 +19,9 @@ that runs AArch64 can announce this architecture, with the one of its page size.
 Who is bound: the node that runs the service. An architecture has no value.
 
 === formal
-abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7a9c7e5876a3093bfabecba8c6c9ad27bd0dc7bd0e856cbd8cb51b83fac22635
+abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:083aba63310970df80c746d7e626cc7e9275fe5a880ae1e9e54da65a55f521b2
 class=architecture
-isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:82c32bd596dca9d4d9cd908655f55f5f51b27693e997da6321aaac2627c8ffb8
+isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:cc71d5ea3cf371762ecd300d4fd07d81f1b02c4759237179520f686579366784
 kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host
 kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390
 name=linux-arm64-any-page

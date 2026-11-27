@@ -1,0 +1,12 @@
+tags: linux-kernel-image-x86-64, bzimage
+
+The kernel image that a virtual machine of x86-64 boots: a bzImage file of Linux, loaded
+as the boot protocol of Linux 6.12 says. The node can give it an initial RAM disk.
+
+=== formal
+boot=the virtual machine loads and starts the file in 64-bit mode, as the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:56abcf25ee655f7698ebda6a79e5dd507b98222f4463ec8920a7293243480fcf gives
+class=concept
+file=a bzImage file of Linux, with the header that the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:56abcf25ee655f7698ebda6a79e5dd507b98222f4463ec8920a7293243480fcf gives
+initial_ram_disk=a file in the form of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:150c1da53572ebdeac3d2c69cba82acb72681406a610704674d21c38a3afdbd8, given as the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:56abcf25ee655f7698ebda6a79e5dd507b98222f4463ec8920a7293243480fcf says
+name=linux-kernel-image-x86-64
+variant=x86-64, the boot protocol of Linux 6.12

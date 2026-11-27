@@ -1,0 +1,11 @@
+tags: core, virtual cpu
+
+A core of a processor: the part that executes one sequence of instructions at a time. A
+virtual CPU is a core of a virtual machine. The unit of the CPU (thousandths of a core)
+and the score of one process count in cores.
+
+=== formal
+class=concept
+core=a part of a processor that executes one sequence of instructions at a time, with its own registers; the instructions are those of the instruction set of the architecture
+name=core
+virtual=a virtual CPU is a core of a virtual machine (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b3469e385a533a222a75a1aeafb1a94b2795a9f689e302f034283e1d8cdceb38); the host gives it time on its own cores

@@ -6,6 +6,7 @@ descriptor, which the maker of the device sets.
 === formal
 class=concept
 name=usb-device-id
-product=the 16-bit number at bytes 10 and 11 of the device descriptor (idProduct), little-endian
-text=<vendor>:<product>, each as 4 digits of base 16, with the letters a to f in lowercase
-vendor=the 16-bit number at bytes 8 and 9 of the device descriptor (idVendor), little-endian
+product=the 16-bit number at bytes 10 and 11 of the device descriptor (idProduct), byte 10 with the 8 bits of lowest value
+spec=the device descriptor of section 9.6.1 (table 9-8) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:df7aa17857def18540ddc43303dd5a34d6fe02516cae9527f7735b55c145154a
+text=<vendor>:<product>, each as 4 characters of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895: the digits 0 to 9 and the letters a to f, base 16
+vendor=the 16-bit number at bytes 8 and 9 of the device descriptor (idVendor), byte 8 with the 8 bits of lowest value

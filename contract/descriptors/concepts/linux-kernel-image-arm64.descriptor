@@ -1,0 +1,13 @@
+tags: linux-kernel-image-arm64, image
+
+The kernel image that a virtual machine of AArch64 boots: an Image file of Linux,
+started as part 4 of the booting document of Linux 6.12 says. The node can give it an
+initial RAM disk.
+
+=== formal
+boot=the virtual machine starts the file as parts 1 to 4 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:831edc9280c0fac8dacb932b51db5c29107a6edaf0daa55abb195b55305a4b16 give
+class=concept
+file=an Image file of Linux, with the header of 64 bytes of part 4 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:831edc9280c0fac8dacb932b51db5c29107a6edaf0daa55abb195b55305a4b16
+initial_ram_disk=a file in the form of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:150c1da53572ebdeac3d2c69cba82acb72681406a610704674d21c38a3afdbd8, given as part 2 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:831edc9280c0fac8dacb932b51db5c29107a6edaf0daa55abb195b55305a4b16 says
+name=linux-kernel-image-arm64
+variant=AArch64, the booting rules of Linux 6.12

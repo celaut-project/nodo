@@ -1,0 +1,13 @@
+tags: utf-8
+
+The encoding of text: UTF-8. A character is 1 to 4 bytes. The characters 0 to 127 are
+one byte each, with the value of the character, and are the characters of ASCII. Text in
+a value of a formal is in this encoding when the formal names this concept. The
+characters above 127 are only encoded here: their meaning is not in this concept.
+
+=== formal
+characters=the characters 0 to 127 are the characters of section 2 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:c9e88ed9883dd55c81bb8a9ba3cb7ba61ba4878f02bccf5dbb4c376e92e97e9a; for example the digits 0 to 9 are the bytes 48 to 57, the letters a to z are the bytes 97 to 122, the space is the byte 32, the newline is the byte 10
+class=concept
+encoding=each character is 1 to 4 bytes, as section 3 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7f15b4d98ed9a91162f221517844fc0d10e3edf5dc72a42c6f2172b91ffd6bc4 gives; the bytes 192, 193 and 245 to 255 never occur
+name=utf-8
+variant=UTF-8 with no byte order mark
