@@ -206,6 +206,30 @@ as one more branch of the tree of the same address, with its own formal. A confl
 it then does not touch the other branches. A protocol that a celaut service implements
 (and not the node) goes through `ServiceTunnel`.
 
+**Rule 2.9. A descriptor holds what its formal names.** A formal names other formals
+by their ids (rule 6.3). `Descriptor.uses` holds them: one `Descriptor` for each id, in
+the order of the first occurrence of the id in the formal, each with its own `uses`. So
+each `Descriptor` is complete alone, in every message. A reader needs no network, no
+catalog and no other part of the message to read it. The order lets a reader match an
+entry to its id by the position, with no hash algorithm.
+
+- `uses` is not the identity (rule 2.2). But it is in the bytes of a `Service`, so the id
+  of the service covers it.
+- A reader checks that `uses` has one entry for each id, and that the digest of each
+  formal, with the algorithm of the type of the id, is the id. If not, it refuses the
+  descriptor (rule 3.7).
+- A document is a descriptor whose formal is the exact bytes of the document. A
+  document has no `uses`.
+- One descriptor can repeat in the `uses` of many others. This is correct (rule 7.5).
+
+**The test of the probe.** Put the bytes of a service in a probe, and send the probe
+into deep space. A reader finds it. That reader knows only ASD-STE100, `celaut.proto`
+and the encoding of protobuf, and has no network. Can the reader read each formal, and
+build a machine that runs the service? A term that only a person of our world knows
+("NVIDIA", "x86-64", "the behavior of Linux") fails the test. Its meaning must be in the
+bytes: in a descriptor or in a document in `uses`. To identify a thing is not enough: a
+test that a machine passes does not tell how to build that machine.
+
 ## 3. Lists
 
 **Rule 3.1. Lists of formals have the same rules.** Every list of entries that a
@@ -454,5 +478,7 @@ Follow these steps for each change:
 - One address announced more than one time to give more protocols (rule 2.7).
 - An optional protocol in `celaut.proto` (rule 2.8).
 - A field or a reference whose only purpose is to make a message smaller (rule 7.5).
+- An id in a formal with no entry in `uses`, or a term whose meaning is only in the
+  world of the writer: a name of a brand, of a product, of a program (rule 2.9).
 - A message that a third party reads, or that has an id, with no schema (rule 1.8). A
   schema in a message that goes only between two parties.

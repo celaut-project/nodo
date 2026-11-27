@@ -1,11 +1,17 @@
 tags: linux-6.12-arm64-syscall-abis
 
-The file arch/arm64/kernel/Makefile.syscalls of the source of Linux, at the release 6.12 (the tag v6.12 of the
-repository of Linus Torvalds). The license of the file is GPL-2.0, so the repository
-keeps a copy: contract/documents/linux-6.12-arch-arm64-kernel-Makefile.syscalls.
+The file arch/arm64/kernel/Makefile.syscalls of the source of Linux, at the release 6.12
+(the tag v6.12 of the repository of Linus Torvalds). The formal is the exact bytes of
+the file.
+
+License notice: the authors of Linux hold the copyright of this file. Its license is
+GPL-2.0, as its first line says.
 
 === formal
-bytes=148
-class=document
-digest=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:4257487cc31b94c834b2a0853520e43f14017904a93139d9794fae66aad6f13f
-name=linux-6.12-arm64-syscall-abis
+# SPDX-License-Identifier: GPL-2.0
+
+syscall_abis_32 +=
+syscall_abis_64 += renameat rlimit memfd_secret
+
+syscalltbl = arch/arm64/tools/syscall_%.tbl
+

@@ -1,11 +1,13 @@
 # Documents
 
-An external document that a formal needs: a specification (an RFC, a manual of an
+A document that a formal needs: a specification (an RFC, a manual of an
 instruction set, an ABI), a file of the source of a program, a program. The document
 gives the meaning of a technical name that the base of rule 3.11 of `../REASON.md` does
 not have.
 
 Class: `document`.
+
+A document has no `class=` line: the class is of the folder.
 
 ## Places
 
@@ -19,11 +21,16 @@ None.
 
 ## The formal must give
 
-- `digest`: the id `<type>:<digest>` of the exact bytes of the document. The type is
-  the digest of the empty input (rule 3.9 of `../REASON.md`).
-- `bytes`: the number of bytes of the document.
+The exact bytes of the document, and nothing more (rule 3.13 of `../REASON.md`). The
+formal has no `class=` and no `name=` line. The id of the document is the digest of
+these bytes. The file name is the first tag.
 
-Only these bytes identify the document. Its public name (for example "RFC 768"), its
-version and where to get it go in the prose. If the document changes (a new version, a
-correction), it is a new descriptor. Get the document, compute its digest, and check
-the digest before you write the file.
+The public name of the document (for example "RFC 768"), its version and where it
+comes from go in the tags and the prose. A document can have any license. The prose
+ends with its license notice: a paragraph that starts with `License notice:` and gives
+who holds the copyright and the license, as the document gives them. The document goes
+on the wire, in `Descriptor.uses`: each node and each operator decides from the notice
+if it can keep or send it. If the document changes (a new version, a correction), it is
+a new file. Copy the bytes with
+no change: a document that ends with a newline keeps it, and the file then ends with
+two newlines.

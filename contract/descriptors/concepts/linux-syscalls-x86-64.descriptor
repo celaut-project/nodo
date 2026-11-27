@@ -6,7 +6,7 @@ Linux does not remove or change a system call that processes use.
 
 === formal
 behavior=the behavior of each call is the behavior of Linux 6.12 or of a later version of Linux
-calls=the rows of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:512b78ae748d2c7cac8a7429479e219f489fe85a1ecacf7eaadb857652514d95 whose second column is common or 64; the first column is the number of the call, the third column is its name
+calls=the rows of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:da80dd0e7e4809297615e93a242849a073bc3b47fdcc404dd44223d0b8ecb044 whose second column is common or 64; the first column is the number of the call, the third column is its name
 class=concept
 name=linux-syscalls-x86-64
 variant=Linux 6.12, 64-bit processes; the calls for x32 are not a part of it

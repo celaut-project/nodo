@@ -16,7 +16,12 @@ contract.
 
 - `tags`: names, for a reader;
 - `prose`: the text, for an implementer;
-- `formal`: the bytes that nodes compare.
+- `formal`: the bytes that nodes compare;
+- `uses`: the descriptors that the formal names by their ids (REASON 2.9).
+
+The file holds the first three. It does not hold `uses`: a writer builds it from the
+ids of the formal, with the files of this folder (`uses` in
+`src/utils/descriptor_file.py`).
 
 Every entry of the contract holds a `Descriptor`: a `Policy`, a `Quantity`, a `Rate` and
 a `Limit` are a `Descriptor` plus a value (REASON 2.1). The value (and the scope of a
@@ -46,9 +51,10 @@ a line `Class: `<class>`.`. A folder that only holds folders has no such line.
    tags. The first tag is the name.
 2. The prose: all the lines after the first line and before the marker line. The
    empty lines at its start and at its end are not a part of it.
-3. The marker line: `=== formal`, alone on its line. The file has it one time.
+3. The marker line: the first line `=== formal`, alone on its line.
 4. The formal: all the bytes after the marker line, up to the end of the file,
-   without the last newline. The file ends with exactly one newline.
+   without the last newline. The file ends with a newline. The formal of a document
+   (rule 3.13) can hold any byte, also newlines at its end and the marker line.
 
 Example:
 
@@ -69,14 +75,15 @@ unit=byte
 the reader do not agree, report it.
 
 **Rule 2.3. The prose goes on the wire.** A writer copies the tags and the prose of the
-file into the `Descriptor` that it sends. They are also in the bytes of a `Service` that
-holds the descriptor, so a change to the prose changes the id of a service packed
-after the change. A writer can send a short prose or none: a reader finds the full text
-by the id of the formal (rule 6.1).
+file into the `Descriptor` that it sends, and adds the `uses`. They are also in the bytes
+of a `Service` that holds the descriptor, so a change to the prose changes the id of a
+service packed after the change. Send the full prose: the reader of the test of the
+probe (rule 3.11) has no other text.
 
 ## 3. The formal
 
-**Rule 3.1. The form.** The formal is lines of `key=value`:
+**Rule 3.1. The form.** The formal is lines of `key=value` (except the formal of a
+document, rule 3.13):
 
 - one line for each key, with no repeated key;
 - the lines sorted by the bytes of the key, ascending;
@@ -89,7 +96,7 @@ by the id of the formal (rule 6.1).
 **Rule 3.2. A list in a value** is items separated by `,` with no space. Sort the items
 by their bytes, unless the formal says that the order has a meaning.
 
-**Rule 3.3. Two keys are always necessary.**
+**Rule 3.3. Two keys are always necessary** (except in a document, rule 3.13).
 
 - `class=`: the class of the descriptor (section 4). It is a property of the thing
   (REASON 2.4): the memory as a resource and the price of the memory are two things.
@@ -133,37 +140,53 @@ writes it in another way (for example the digest of a container image).
 of the configuration of nodo, no name of this project. A formal is for all
 implementations.
 
-**Rule 3.11. Each term of a formal resolves to a base.** A formal is for a reader that
-knows only ASD-STE100 and `celaut.proto`. Each term of a formal is one of these four:
+**Rule 3.11. Each term of a formal resolves to a base.** A formal is for the reader of
+the test of the probe (REASON 2.9): a reader that knows only ASD-STE100, `celaut.proto`
+and the encoding of protobuf, and has no network. Each term of a formal is one of these
+three:
 
 1. a word of ASD-STE100 with its approved meaning, or a name that `celaut.proto`
    defines (a message, a field, an RPC): the reader of a descriptor reads the
    contract first;
 2. a number with a unit of the base: bit, byte (8 bits) or second. Write a larger unit
    as a multiple (1073741824 bytes, 3600 seconds);
-3. the id of another descriptor;
-4. a document: the id of a descriptor of `documents/`, which names the exact bytes of
-   the document by their hash, with the part of it that applies (for example a
-   section).
+3. the id of another descriptor. A document is a descriptor (rule 3.13): its id is the
+   digest of the bytes of the document. Give the part of the document that applies
+   (for example a section).
 
 A technical name that is none of these (for example "x86-64-v1", "UDP", "virtio
-console") becomes a descriptor or a document. The test: **can a reader that knows only
-ASD-STE100 and `celaut.proto` find the meaning of each term of the formal, by following
-the ids and by reading the documents?** If not, the formal is not complete (rule 3.4):
-two implementers can read the same bytes in two ways, and nothing finds it.
+console") becomes a descriptor or a document. The test: **can that reader find the
+meaning of each term of the formal in `uses`, and build a machine that does what the
+formal says?** If not, the formal is not complete (rule 3.4): two implementers can read
+the same bytes in two ways, and nothing finds it. A test that a machine passes (for
+example bits of CPUID) identifies the machine, but does not tell how to build it: the
+formal also names the document that defines the thing.
 
 **Rule 3.12. A concept or a document.** Make a descriptor of `concepts/` for a term only
 when the term has variants (so the variant is one leaf, and a change of it is a change
 of one id), or when more than one descriptor uses it. For any other term, name the
 document directly. A document is named only by the hash of its exact bytes. Its public
-name (for example "RFC 768") and where to get it go in the prose of its descriptor,
-never in the formal.
+name (for example "RFC 768") and its version go in its tags and its prose, and its
+license notice goes in its prose (rule 3.13).
 
 The descriptors make a graph: a formal names its parts by their ids, and the parts can
 be shared. It is not the tree of the layers of an address (REASON 2.7). In that tree,
 the children of a layer are alternatives. In a formal, the parts are all true together.
 Nodes still compare only the bytes of the formal that is in the place of the contract;
 its parts change its bytes, because their ids are in it.
+
+**Rule 3.13. A document is a descriptor whose formal is the document.** The formal is
+the exact bytes of the document: a specification, a file of the source of a program, a
+program. It is not `key=value` lines, and it has no `class=` and no `name=` line. The
+reader knows that it is a document from the formal that names it ("the rows of the
+document <id>"). A document has no `uses`: its bytes are not read as a formal. If a
+document needs another document, the formal that names the first one also names the
+second one.
+
+Any document can be a document, with any license. The prose of a document gives its
+license notice: who holds the copyright, and the license, as the document gives them.
+The contract does not decide if a party can keep or send a document: each node and each
+operator decides it from the notice.
 
 ## 4. The classes and the folders
 
@@ -232,7 +255,7 @@ What the formal of each class must give:
 | `format` | `Descriptor` | `DescriptorKeyValue.value` (environment variables) | the form of the bytes |
 | `proof-of-work` | `Descriptor` | `PoWRequired.descriptor` | the rule of the work, and the unit of the difficulty |
 | `concept` | (none) | no place: only in another formal | what the term is, in terms of the base (rule 3.11), and its variant |
-| `document` | (none) | no place: only in another formal | `digest`: the id `<type>:<digest>` of the exact bytes of the document; `bytes`: their number |
+| `document` | (none) | no place: only in another formal | the exact bytes of the document (rule 3.13) |
 
 To add a class, add a row here first. A class is a kind of place, not a kind of thing.
 The test reads the classes from the first column of this table.
@@ -292,7 +315,8 @@ it from that list.
 **Rule 6.3. The tests.** `tests/test_descriptor_files.py` checks that each file follows
 sections 2 and 3, that it is in a folder with a `REASON.md` and a class, that its
 `class=` line is the class of its folder, that the generated part of `INDEX.md` is
-current, and that each reference (rule 3.7) names a formal of `contract/descriptors/`. When the code of nodo uses a descriptor, the code reads the
+current, and that each id in a formal is the digest of a formal of
+`contract/descriptors/`, so that `uses` can hold it (REASON 2.9). When the code of nodo uses a descriptor, the code reads the
 file, or holds the same bytes and a test pins them to the file.
 
 **Rule 6.4. The legacy descriptors.** A formal that nodo sends today (on the wire, or in
@@ -336,4 +360,7 @@ Do these steps for each new descriptor:
 - A term that is not a word of ASD-STE100, a name of `celaut.proto`, a number with a
   unit of the base, or an id (rule 3.11).
 - A formal that only nodo can read: its meaning is in the code, not in the text.
+- A term that names a thing of our world (a brand, a product, a program, "the
+  behavior of Linux") with no document in `uses` that defines it (rule 3.11).
+- An id of bytes that no file of this folder holds: `uses` cannot hold them.
 - A descriptor for each member of a group, in a place that has a value.

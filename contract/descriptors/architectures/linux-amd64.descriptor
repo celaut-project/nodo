@@ -17,7 +17,7 @@ size is another architecture.
 Who is bound: the node that runs the service. An architecture has no value.
 
 === formal
-abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9693e9ba4371d5235c01fa67d5436632e0c4e04e2f158f3e965f198d8922dffd
+abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:40113cbe5d003b739e0a89028da065ae0df02a0dd79fe46bf552c16a872a3cb0
 class=architecture
 isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3e2c7446847b54830d81095ae3e2243a5da80c05556252bc25044a84837993b5
 kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host

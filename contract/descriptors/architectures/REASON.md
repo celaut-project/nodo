@@ -49,3 +49,9 @@ allow.
   `policies/container_init/` selects it. The kernel is not a part of the architecture.
 - The benchmarks differ for each architecture, so the node announces them for each.
 - Devices have their own folder: `devices/`.
+- The test of the probe (rule 3.11 of `../REASON.md`) applies: from the formal and its
+  `uses`, a reader with no network must be able to build a machine that runs the
+  software. So the concept of the instruction set names the document that defines
+  each instruction, and the concept of the system calls names the document that
+  defines the behavior of each call. Tests that a machine passes (bits of CPUID, of
+  AT_HWCAP) identify it, but do not define it.

@@ -23,3 +23,9 @@ What the term is, with only the terms of the base (rule 3.11 of `../REASON.md`):
 of ASD-STE100, names of `celaut.proto`, numbers with a unit of the base, and the ids of
 other descriptors and documents. Give the variant in the formal (for example the level
 "v1" of an instruction set), so that two variants have two formals.
+
+A concept must pass the test of the probe (rule 3.11 of `../REASON.md`): a reader with
+no network must be able to build what the concept names. A test that a machine passes
+(for example the bits that CPUID reports) identifies a machine, but does not define it.
+So the concept also names the document that defines the thing (for example the manual
+of an instruction set), by its id.

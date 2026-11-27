@@ -40,6 +40,16 @@ message Descriptor {
     string prose = 2;
     // The definition. It is what nodes compare.
     bytes formal = 3;
+    // The descriptors that the formal names by their ids: one for each id, in the order
+    // of the first occurrence of the id in the formal, each with its own uses. So a
+    // descriptor is complete alone, in every message: a reader needs no network, no
+    // catalog and no other part of the message to read it. The formal of a document is
+    // the bytes of the document, and a document has no uses. The uses are not a part of
+    // the identity: the id of a descriptor is still the digest of its formal. A reader
+    // checks that there is one entry for each id, and that the digest of each formal,
+    // with the algorithm of the type of its id, is the id. If not, the reader refuses the
+    // descriptor. One descriptor can be in the uses of many others, also in one message.
+    repeated Descriptor uses = 4;
 }
 
 // Ordered key/value entries, one message per value type.

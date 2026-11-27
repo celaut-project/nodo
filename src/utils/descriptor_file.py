@@ -1,9 +1,13 @@
 """Read a descriptor file of ``contract/descriptors/`` (see ``contract/descriptors/REASON.md``).
 
 A descriptor file holds one ``celaut.Descriptor``: a ``tags:`` line, the prose, and the
-formal after the line ``=== formal``. The formal is the bytes after that line, up to the
-end of the file, without the last newline. Only these bytes are the identity of the
-descriptor: a change to the tags or to the prose does not change its id.
+formal after the first line ``=== formal``. The formal is the bytes after that line, up to
+the end of the file, without the last newline. Only these bytes are the identity of the
+descriptor: a change to the tags or to the prose does not change its id. The file does not
+hold ``Descriptor.uses``: ``uses`` gives the files that a writer puts in it.
+
+The formal of a document (folder ``documents/``) is the exact bytes of the document. It
+is not ``key=value`` lines, and it can hold any byte.
 
 Each folder holds the descriptors of one use: one place, or a group of places, of
 ``celaut.proto``. The ``REASON.md`` of a folder gives its class in a line ``Class: `x```.
@@ -40,16 +44,16 @@ class DescriptorFile(NamedTuple):
 
 def parse(data: bytes) -> DescriptorFile:
     """The tags, the prose and the formal of the bytes of a descriptor file."""
-    if b"\r" in data:
-        raise DescriptorFileError("the file has a carriage return: use LF only")
-    if not data.endswith(b"\n") or data.endswith(b"\n\n"):
-        raise DescriptorFileError("the file must end with exactly one newline")
+    if not data.endswith(b"\n"):
+        raise DescriptorFileError("the file must end with a newline")
     if not data.startswith(TAGS_PREFIX):
         raise DescriptorFileError("the first line must start with 'tags:'")
-    if data.count(MARKER) != 1:
-        raise DescriptorFileError("the file must have exactly one line '=== formal'")
-    head, formal = data.split(MARKER)
+    if MARKER not in data:
+        raise DescriptorFileError("the file has no line '=== formal'")
+    head, formal = data.split(MARKER, 1)
     formal = formal[:-1]
+    if b"\r" in head:
+        raise DescriptorFileError("the tags or the prose have a carriage return: use LF only")
     if not formal:
         raise DescriptorFileError("the formal is empty")
     try:
@@ -70,6 +74,57 @@ def read(path: str) -> DescriptorFile:
 def hash_type() -> str:
     """The type of the hash of an id: the digest of the empty input (REASON 6.3)."""
     return hashlib.blake2b(b"", digest_size=32).hexdigest()
+
+
+def _blake2b_256(data: bytes) -> str:
+    return hashlib.blake2b(data, digest_size=32).hexdigest()
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+# The algorithms that this module can check, by their type.
+ALGORITHMS = {f(b""): f for f in (_blake2b_256, _sha256)}
+ID = re.compile(rb"\b([0-9a-f]{64}):([0-9a-f]{64})\b")
+DOCUMENTS = "documents"
+
+
+def is_document(rel: str) -> bool:
+    """True if the file at ``rel`` is a document: its formal is the bytes of the document."""
+    return rel.split(os.sep)[0] == DOCUMENTS
+
+
+def references(formal: bytes) -> List[str]:
+    """The ids in a formal of ``key=value`` lines, in the order of their first occurrence.
+
+    ``Descriptor.uses`` holds one descriptor for each of them, in this order (REASON 2.9).
+    Do not use it on a document: its bytes are not a formal of ``key=value`` lines.
+    """
+    out: List[str] = []
+    for m in ID.finditer(formal):
+        fid = m.group(0).decode()
+        if fid not in out:
+            out.append(fid)
+    return out
+
+
+def uses(formal: bytes, root: str = ROOT) -> List[str]:
+    """The files whose formals are the references of ``formal``, in the order of ``uses``.
+
+    It raises ``KeyError`` for an id that no file of ``root`` has, or whose type is not an
+    algorithm of ``ALGORITHMS``.
+    """
+    formals = {rel: read(os.path.join(root, rel)).formal for rel in files(root)}
+    out = []
+    for fid in references(formal):
+        typ, digest = fid.split(":")
+        algorithm = ALGORITHMS.get(typ)
+        found = [rel for rel, f in formals.items() if algorithm and algorithm(f) == digest]
+        if not found:
+            raise KeyError(fid)
+        out.append(found[0])
+    return out
 
 
 def formal_id(formal: bytes) -> str:

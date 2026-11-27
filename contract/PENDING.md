@@ -25,12 +25,40 @@ yet. Remove this file when the code follows the proto.
 - **The ledger tag `bitcoin` as a network with no addresses**
   (`src/manager/networks.py:149`). Decide if it is still necessary.
 
+- **How the reader of the test of the probe reads a document** (REASON 2.9, rule 3.13
+  of `contract/descriptors/REASON.md`). The reader finds the document in `uses` by its
+  position. But a document names other documents by their public names (for example
+  "IEEE 754"), and uses terms that it does not define. Two proposals: (a) the formal
+  that names a document also gives a glossary, which joins each name and term of the
+  part that it uses to an id; (b) the base of the reader of a document is the language
+  of the document (for example English), not only ASD-STE100. Also, the formal must
+  say how to read the part that applies, not only where it is.
+
 ## 2. The descriptors to write
 
 The rules are in `contract/descriptors/REASON.md` and in the `REASON.md` of each folder.
 The list of the descriptors that nodo needs, with where nodo implements each one
 today, is the second part of `contract/descriptors/INDEX.md`. It is the work for the
 agents that write the descriptors.
+
+These descriptors do not pass the test of the probe yet (REASON 2.9, rule 3.11 of
+`contract/descriptors/REASON.md`). Each one needs a document, with its license notice
+(rule 3.13):
+
+- **The instruction sets** (`concepts/x86-64-v1`, `concepts/armv8.0-a`). The bits of
+  CPUID and of AT_HWCAP identify a processor, but do not define its instructions. The
+  manuals of the makers define them.
+- **The behavior of the system calls** (`concepts/linux-syscalls-x86-64`,
+  `concepts/linux-syscalls-aarch64`). The line `behavior=` names "the behavior of Linux
+  6.12". The source of Linux (GPL-2.0) can be a document, but it is large: find the
+  smallest document that defines the behavior.
+- **The tool of the benchmarks** (the six files of `quantities/benchmarks/`, the set
+  `NOT_IN_USES` of `tests/test_descriptor_files.py`). They name a container image of
+  busybox by the digest of its image index, and no file holds those bytes. Name a
+  static binary of busybox (GPL-2.0) as a document.
+- **The identity of a PCI or a USB model** (`concepts/pci-function-id`,
+  `concepts/usb-device-id`). "Configuration space" and "device descriptor" are terms of
+  the specifications of PCI-SIG and USB-IF.
 
 ## 3. Facts of nodo today that the implementation must change
 
@@ -79,6 +107,10 @@ code, not of the contract.
   measure refuses. The receipt fields of its proto diff become `facts`. The PR writes
   the formals of `architectures/devices/` for the families that it can attach and
   test: one for each member (for example one for each CUDA compute capability).
+- **`Descriptor.uses`.** The code sends no `uses` and does not check them. A writer must
+  build them from the ids of the formal (`uses` of `src/utils/descriptor_file.py`
+  gives the files), and a reader must refuse a descriptor whose `uses` do not match its
+  formal (REASON 2.9).
 - **`TunnelRequest.slot`** is still a decimal text: it is not signed.
 - **The proof of work of `GenerateClient`** sends a line of pseudo-code as its formal
   (`src/gateway/client_pow.py:52`). It must send the formal of

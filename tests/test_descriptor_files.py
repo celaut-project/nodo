@@ -29,8 +29,17 @@ LEGACY = {
     "protocols/address/tor-onion-v3.descriptor",
     "signatures/schemes/ed25519.descriptor",
 }
+# The formals that do not pass the test of the probe yet (contract/PENDING.md, section 3):
+# they name a container image by its digest, and no file holds the bytes of the image.
+NOT_IN_USES = {
+    "quantities/benchmarks/float-ops.descriptor",
+    "quantities/benchmarks/int-ops.descriptor",
+    "quantities/benchmarks/memory-bandwidth-1gib.descriptor",
+    "quantities/benchmarks/memory-bandwidth-256mib.descriptor",
+    "quantities/benchmarks/memory-bandwidth-64mib.descriptor",
+    "quantities/benchmarks/sha256-hashes.descriptor",
+}
 KEY = re.compile(r"^[A-Za-z0-9_.+-]+$")
-ID = re.compile(r"\b[0-9a-f]{64}:[0-9a-f]{64}\b")
 
 
 def _lines(formal: bytes):
@@ -48,9 +57,7 @@ class FileFormatTests(unittest.TestCase):
     def test_the_reader_refuses_a_file_without_one_marker(self):
         for data in (
             b"tags: a\n\nprose\n",
-            b"tags: a\n\n=== formal\nx=1\n\n=== formal\ny=2\n",
             b"tags: a\n\n=== formal\nx=1",
-            b"tags: a\n\n=== formal\nx=1\n\n",
             b"prose\n\n=== formal\nx=1\n",
             b"tags: a\r\n\n=== formal\nx=1\n",
             b"tags: a\n\n=== formal\n\n",
@@ -65,12 +72,19 @@ class FileFormatTests(unittest.TestCase):
         self.assertEqual(d.prose, "The memory.")
         self.assertEqual(d.formal, b"class=resource\nname=memory")
 
+    def test_the_formal_of_a_document_can_hold_any_byte(self):
+        d = df.parse(b"tags: a\n\nA file.\n\n=== formal\nline\r\n\n=== formal\n\x00\n\n")
+        self.assertEqual(d.formal, b"line\r\n\n=== formal\n\x00\n")
+
 
 class FormalRulesTests(unittest.TestCase):
 
     def test_the_lines_are_sorted_keys_with_no_repeat(self):
         for rel in df.files():
+            if df.is_document(rel):
+                continue
             with self.subTest(rel):
+                self.assertNotIn(b"\r", df.read(os.path.join(ROOT, rel)).formal)
                 lines = _lines(df.read(os.path.join(ROOT, rel)).formal)
                 keys = []
                 for line in lines:
@@ -89,7 +103,7 @@ class FormalRulesTests(unittest.TestCase):
 
     def test_a_new_file_has_its_class_and_its_name(self):
         for rel in df.files():
-            if rel in LEGACY:
+            if rel in LEGACY or df.is_document(rel):
                 continue
             with self.subTest(rel):
                 pairs = dict(
@@ -118,22 +132,24 @@ class FormalRulesTests(unittest.TestCase):
             self.assertNotIn(formal, seen, f"{rel} has the formal of {seen.get(formal)}")
             seen[formal] = rel
 
-    def test_a_reference_names_a_formal_of_this_folder(self):
-        # Only an id of the type of the index is a reference to a descriptor. Another id
-        # (for example the digest of a container image) names other bytes.
-        ids = {fid for _, _, fid in df.index_rows()}
+    def test_each_reference_resolves_to_a_file(self):
+        # REASON 2.9: Descriptor.uses holds the formal of each id in the formal. So each id
+        # must be the digest of a formal of this folder, with the algorithm of its type.
         for rel in df.files():
-            formal = df.read(os.path.join(ROOT, rel)).formal.decode("utf-8")
-            # The digest of a document names the bytes of the document, not a descriptor.
-            formal = "\n".join(
-                line for line in formal.split("\n")
-                if not (rel.startswith("documents/") and line.startswith("digest="))
-            )
-            for ref in ID.findall(formal):
-                if not ref.startswith(df.hash_type() + ":"):
-                    continue
-                with self.subTest(rel=rel, ref=ref):
-                    self.assertIn(ref, ids)
+            if df.is_document(rel) or rel in NOT_IN_USES:
+                continue
+            with self.subTest(rel):
+                df.uses(df.read(os.path.join(ROOT, rel)).formal)
+
+    def test_the_exceptions_still_fail(self):
+        for rel in NOT_IN_USES:
+            with self.subTest(rel):
+                with self.assertRaises(KeyError):
+                    df.uses(df.read(os.path.join(ROOT, rel)).formal)
+
+    def test_uses_follows_the_first_occurrence(self):
+        a, b = df.formal_id(b"a"), df.formal_id(b"b")
+        self.assertEqual(df.references(f"x={b} {a}\ny={a}".encode()), [b, a])
 
 
 class IndexTests(unittest.TestCase):
