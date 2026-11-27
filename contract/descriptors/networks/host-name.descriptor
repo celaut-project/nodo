@@ -13,8 +13,8 @@ its own resolver. It does not use IPv6. The node is bound.
 
 === formal
 class=domain
-ipv6=not used
-members=the IPv4 addresses of the A records of host, resolved by the node at the start, on the ports
+ipv6=not used: the node does not use the addresses of 128 bits (the AAAA records)
+members=the addresses of 32 bits (the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5efb1730c69ebce4f33d2d940d1e3e03f2fe3910fc0a49739f8c478c7f550bb7) of the A records (section 3.4.1 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f17c0393548b0632774637f18e10e7a92084f5403915b61ad03648fa14f2e25c) of host, which the node resolves at the start, on the ports
 name=host-name
 port.default=80 and 443
-value=key=value lines sorted by key: host (required, a lowercase DNS name with at least one '.'), port (optional, 1 to 65535); no other key
+value=key=value lines sorted by key: host (required: a domain name of section 3.1 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f0baa0620a4d5e430122c810a80d1884c7beca0146ae836e0ce9212282439bfe, with the letters in lowercase and at least one '.'), port (optional: a port of section 3.1 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f8a0a6609035df7f645e13152b1a325cfb13c31a7983d53a47b33dd827d8708c, 1 to 65535, base 10); no other key
