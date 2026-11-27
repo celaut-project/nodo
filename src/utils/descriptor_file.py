@@ -14,12 +14,14 @@ Each folder holds the descriptors of one use: one place, or a group of places, o
 
 Run this module to write the generated part of ``contract/descriptors/INDEX.md``:
 ``python -m src.utils.descriptor_file``. With ``--cascade``, it first replaces the old
-id of each formal that changed since ``HEAD`` with its new id, in all the files.
+id of each formal that changed since ``HEAD`` with its new id, in all the files. With
+``--stats``, it prints the sizes of the descriptors and of their closures in ``uses``, and
+writes nothing.
 """
 import hashlib
 import os
 import re
-from typing import List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 SUFFIX = ".descriptor"
 TAGS_PREFIX = b"tags:"
@@ -109,21 +111,47 @@ def references(formal: bytes) -> List[str]:
     return out
 
 
+_DIGESTS: Dict[Tuple[str, str], Tuple[Tuple[int, int], Dict[str, str]]] = {}
+
+
+def _digests(root: str, rel: str) -> Dict[str, str]:
+    """The digest of the formal of the file ``rel``, for each type of ``ALGORITHMS``.
+
+    A document can be large, so each file is hashed one time, and again only when its
+    size or its time of change is different.
+    """
+    path = os.path.join(root, rel)
+    st = os.stat(path)
+    key, stamp = (os.path.abspath(root), rel), (st.st_size, st.st_mtime_ns)
+    cached = _DIGESTS.get(key)
+    if cached is None or cached[0] != stamp:
+        formal = read(path).formal
+        cached = (stamp, {typ: f(formal) for typ, f in ALGORITHMS.items()})
+        _DIGESTS[key] = cached
+    return cached[1]
+
+
+def resolve(fid: str, root: str = ROOT) -> Optional[str]:
+    """The file whose formal has the id ``fid``, or None."""
+    typ, digest = fid.split(":")
+    for rel in files(root):
+        if _digests(root, rel).get(typ) == digest:
+            return rel
+    return None
+
+
 def uses(formal: bytes, root: str = ROOT) -> List[str]:
     """The files whose formals are the references of ``formal``, in the order of ``uses``.
 
     It raises ``KeyError`` for an id that no file of ``root`` has, or whose type is not an
     algorithm of ``ALGORITHMS``.
     """
-    formals = {rel: read(os.path.join(root, rel)).formal for rel in files(root)}
     out = []
     for fid in references(formal):
-        typ, digest = fid.split(":")
-        algorithm = ALGORITHMS.get(typ)
-        found = [rel for rel, f in formals.items() if algorithm and algorithm(f) == digest]
-        if not found:
+        rel = resolve(fid, root)
+        if rel is None:
             raise KeyError(fid)
-        out.append(found[0])
+        out.append(rel)
     return out
 
 
@@ -242,9 +270,138 @@ def _repo_root(path: str) -> str:
     return done.stdout.strip()
 
 
+# The set of a typical service (issue #695): its architecture, then the resources and the
+# settings that most services hold. ``stats`` gives it one time for each architecture.
+TYPICAL_SERVICE = (
+    "quantities/resources/memory.descriptor",
+    "quantities/resources/cpu.descriptor",
+    "quantities/resources/disk.descriptor",
+    "policies/filesystem_root/entry_metadata.descriptor",
+    "policies/api_slot/access.descriptor",
+    "policies/container_init/notice.descriptor",
+    "networks/host-name.descriptor",
+)
+TYPICAL_ARCHITECTURES = ("architectures/linux-amd64.descriptor", "architectures/linux-arm64.descriptor")
+
+
+class _Closure(NamedTuple):
+    tree: int  # the descriptors in uses, at all depths, with each repeat
+    tree_bytes: int  # their bytes, with each repeat: the size on the wire
+    tree_document_bytes: int
+    graph: frozenset  # the descriptors in uses, at all depths, each one time
+    missing: frozenset  # the ids that no file holds
+
+
+def descriptor_bytes(d: DescriptorFile) -> int:
+    """The bytes of a descriptor: its tags, its prose and its formal (no protobuf headers)."""
+    return sum(len(t.encode("utf-8")) for t in d.tags) + len(d.prose.encode("utf-8")) + len(d.formal)
+
+
+def _closures(root: str = ROOT):
+    sizes, children, missing = {}, {}, {}
+    for rel in files(root):
+        d = read(os.path.join(root, rel))
+        sizes[rel] = descriptor_bytes(d)
+        children[rel], missing[rel] = [], set()
+        if is_document(rel):
+            continue
+        for fid in references(d.formal):
+            found = resolve(fid, root)
+            if found is None:
+                missing[rel].add(fid)
+            else:
+                children[rel].append(found)
+    memo: Dict[str, _Closure] = {}
+
+    def closure(rel: str) -> _Closure:
+        if rel not in memo:
+            tree = tree_bytes = doc_bytes = 0
+            graph, lost = set(), set(missing[rel])
+            for child in children[rel]:
+                sub = closure(child)
+                tree += 1 + sub.tree
+                tree_bytes += sizes[child] + sub.tree_bytes
+                doc_bytes += (sizes[child] if is_document(child) else 0) + sub.tree_document_bytes
+                graph |= {child} | sub.graph
+                lost |= sub.missing
+            memo[rel] = _Closure(tree, tree_bytes, doc_bytes, frozenset(graph), frozenset(lost))
+        return memo[rel]
+
+    return sizes, {rel: closure(rel) for rel in sizes}
+
+
+def stats(root: str = ROOT) -> str:
+    """The sizes of the descriptors and of their closures in ``Descriptor.uses`` (issue #695).
+
+    All the numbers are bytes of tags, prose and formal, with no protobuf headers. The tree
+    counts a descriptor one time for each place where ``uses`` holds it (the size on the
+    wire); the graph counts each descriptor one time.
+    """
+    sizes, closures = _closures(root)
+    out = []
+
+    def graph_bytes(graph):
+        return sum(sizes[r] for r in graph)
+
+    def doc_bytes(graph):
+        return sum(sizes[r] for r in graph if is_document(r))
+
+    out.append("== 1. Each descriptor")
+    out.append("file | formal | descriptor | closure tree/graph/documents | tree bytes | graph bytes"
+               " | document bytes (graph) | ids with no file")
+    for rel, c in closures.items():
+        formal = len(read(os.path.join(root, rel)).formal)
+        docs = sum(1 for r in c.graph if is_document(r))
+        out.append(f"{rel} | {formal} | {sizes[rel]} | {c.tree}/{len(c.graph)}/{docs} | {c.tree_bytes}"
+                   f" | {graph_bytes(c.graph)} | {doc_bytes(c.graph)} | {len(c.missing)}")
+
+    out.append("")
+    out.append("== 2. A typical service (the architecture + " + ", ".join(
+        os.path.basename(r)[:-len(SUFFIX)] for r in TYPICAL_SERVICE) + ")")
+    out.append("architecture | descriptors | own bytes | tree bytes (wire) | graph bytes"
+               " | document bytes (graph) | documents | ids with no file")
+    for arch in TYPICAL_ARCHITECTURES:
+        roots = [r for r in (arch,) + TYPICAL_SERVICE if r in closures]
+        own = sum(sizes[r] for r in roots)
+        tree = own + sum(closures[r].tree_bytes for r in roots)
+        graph = set(roots).union(*(closures[r].graph for r in roots))
+        lost = set().union(*(closures[r].missing for r in roots))
+        docs = [r for r in graph if is_document(r)]
+        out.append(f"{os.path.basename(arch)[:-len(SUFFIX)]} | {len(graph)} | {own} | {tree}"
+                   f" | {graph_bytes(graph)} | {doc_bytes(graph)} | {len(docs)} | {len(lost)}")
+
+    out.append("")
+    out.append("== 3a. The 10 largest descriptors by the bytes of their tree (own + closure)")
+    ranked = sorted(closures, key=lambda r: (-(sizes[r] + closures[r].tree_bytes), r))
+    for rel in ranked[:10]:
+        out.append(f"{rel} | {sizes[rel] + closures[rel].tree_bytes}")
+    out.append("")
+    out.append("== 3b. The 10 largest documents")
+    for rel in sorted((r for r in sizes if is_document(r)), key=lambda r: (-sizes[r], r))[:10]:
+        out.append(f"{rel} | {sizes[rel]}")
+
+    out.append("")
+    out.append("== 4. Tree / graph (descriptors with a closure)")
+    with_uses = [r for r, c in closures.items() if c.graph]
+    total_tree = sum(closures[r].tree_bytes for r in with_uses)
+    total_graph = sum(graph_bytes(closures[r].graph) for r in with_uses)
+    if with_uses:
+        worst = max(with_uses, key=lambda r: (closures[r].tree_bytes / graph_bytes(closures[r].graph), r))
+        out.append(f"all | {total_tree} / {total_graph} = {total_tree / total_graph:.3f}")
+        out.append(f"worst | {worst} | {closures[worst].tree_bytes} / "
+                   f"{graph_bytes(closures[worst].graph)} = "
+                   f"{closures[worst].tree_bytes / graph_bytes(closures[worst].graph):.3f}")
+    else:
+        out.append("no descriptor has a closure")
+    return "\n".join(out)
+
+
 def main() -> None:
     import sys
 
+    if "--stats" in sys.argv:
+        print(stats())
+        return
     if "--cascade" in sys.argv:
         for rel in cascade():
             print(f"updated {rel}")
