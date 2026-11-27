@@ -16,10 +16,10 @@ A layer has no value.
 calls=GET /blocks/at/{height}, GET /blocks/lastHeaders/1, GET /blocks/{id}/header, GET /info
 class=layer
 name=ergo-rest
-response.blocks_at=a JSON list of block ids, hexadecimal
-response.header=a JSON object with height (integer); status 404 if the node does not have the block
-response.info=a JSON object with genesisBlockId (hexadecimal), fullBlocksScore (base-10 integer, exact) and fullHeight (integer)
-response.last_headers=a JSON list; the first entry has timestamp (unix time in milliseconds)
+response.blocks_at=a JSON array (section 5 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f09a6cffec194529f501fb332784d4dd49e50b1f06443691f01a92bcdb191594) of block ids, as strings of the digits 0 to 9 and the letters a to f, base 16
+response.header=a JSON object (section 4 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f09a6cffec194529f501fb332784d4dd49e50b1f06443691f01a92bcdb191594) with height (a number); the status code 404 (section 15.5.5 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9a549a66fe1f6d129e79b532abb623bb875349c85b88c6de515323709853fc9d) if the node does not have the block
+response.info=a JSON object with genesisBlockId (base 16), fullBlocksScore (a base-10 integer, exact) and fullHeight (a number)
+response.last_headers=a JSON array; the first entry has timestamp: the number of milliseconds since 00:00:00 of 1 January 1970 in the time of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:76016d6a59ad50c6aed0620ea7d772e9f3ec634a40cac7a94785b23768dae900, with no leap seconds
 selected_by=the port of the address
-spec=the REST API of the Ergo reference node (ergoplatform/ergo), HTTP/1.1, JSON, no TLS
-transport=tcp
+spec=the calls of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ddaadd465ce8ee9a86714931579fe4e1f74077c2283df294e77dc4cfda9d5612, over HTTP/1.1 (the messages of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:fd890170d531f2a81eef01cfce1cf1e69f61735aed6330f5c79532782e64afdf, the methods and the status codes of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9a549a66fe1f6d129e79b532abb623bb875349c85b88c6de515323709853fc9d), with bodies in JSON (the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f09a6cffec194529f501fb332784d4dd49e50b1f06443691f01a92bcdb191594), and no TLS
+transport=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:db518cc9d8ba091449934c4a67fa56ae72c2823720e25355c092e25b823694ce

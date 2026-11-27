@@ -11,7 +11,7 @@ on it.
 
 === formal
 class=layer
-kind=datagram
+kind=datagram: each message is one datagram of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:083a6588f875a29386e5aedfe5dd111ff4288a7d520cca210f12d577815074b1
 name=udp
 port=per-address
-spec=RFC768
+spec=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:083a6588f875a29386e5aedfe5dd111ff4288a7d520cca210f12d577815074b1
