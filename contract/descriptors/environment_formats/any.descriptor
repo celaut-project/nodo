@@ -11,4 +11,4 @@ identifier. A node refuses a value with a NUL byte.
 === formal
 class=format
 name=any
-value=any bytes with no NUL byte; no other check
+value=any bytes with no byte of the value 0; no other check
