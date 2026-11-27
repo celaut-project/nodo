@@ -1,0 +1,219 @@
+tags: celaut-gateway
+
+This layer is the gateway of a node: the celaut.Gateway service of celaut.proto,
+carried by the layers grpc and bee-rpc.
+
+The formal gives the RPCs of the gateway with their indices and their authentication
+(rpc.* keys), the schema of each message (schema.* keys), the hash types, and the form
+of each signed payload and of each digest. It is the formal that nodo sends today, with
+the messages of the contract before the redesign. The redesign splits it into small
+formals, one for each rule that two nodes must agree on (contract/PENDING.md).
+
+The full prose of this layer comes from the comments of celaut.proto
+(src/identity/protocol_doc.py). It is not copied here.
+
+=== formal
+amount=Amount.n: signed decimal integer string, in the MU of the receiving node
+amount.negative=ModifyDepositInput.difference: a withdrawal from the instance
+auth.client=Client at index 2 beside the payload at 1, any order; a local instance of the node needs none
+auth.kinds=client,client-in-message,token,token+client,local-address,none
+auth.token+client=instance token in the payload at 1; Client at index 2, needed only when the parent of the instance is a client, and then it must be that parent
+chat.entry.client_ref=blake2b-256 hex of UTF-8 of celaut-chat-client:client_id
+chat.entry.from_operator=1 when from_operator is true, else 0
+chat.entry.genesis=blake2b-256 hex of UTF-8 of celaut-chat-genesis:client_ref#conversation_id, the prev_hash of the first entry of a conversation
+chat.entry.hash=blake2b-256 hex of UTF-8 of celaut-chat-entry:client_ref|sequence|conversation_id|ts|from_operator|hex(body)|service|prev_hash
+chat.entry.service='/'.join(hex(hash.type)~hex(hash.value) of each hash)~'/'.join(hex(tag) of each tag); empty when there is no service
+chat.entry.signature=Peer.signature_scheme over UTF-8 of payload, lowercase hex
+chat.entry.signature.payload=celaut-chat-signature:<public_key_hex>|<entry_hash>
+client_binding.payload=celaut-client-binding:<public_key_hex>|<client_id>
+client_binding.signature=Peer.signature_scheme, lowercase hex
+client_id=32 lowercase hex characters
+fault_evidence.digest=blake2b-256 hex of UTF-8 of reason|accused|statement digest of each statement|receipt digest of each receipt
+fault_evidence.reasons=statement_inconsistent,killed_with_mu,statement_contradicts_receipt,maintenance_overcharged,instance_hibernated_unannounced,instance_stopped_unannounced
+hash.type=the algorithm's digest of the empty input
+introduce_peer.refused=REFUSED
+keyvalue=producer: sorted by key (UTF-8 bytes), one entry per key, no empty key; reader: last entry wins
+ledger_attestation.payload=celaut-ledger-attestation:<public_key_hex>
+ledger_attestation.signature=the scheme of the proof's ledger; xattrs owner_public_key, owner_signature
+offer.digest=blake2b-256 hex of UTF-8 of hex(cost.n)|hex(init_maintenance_cost.n)|hex(max_maintenance_cost.n)|maintenance_seconds_loop|launch_scarcity|price_bounded|price_volatility|volatility_period_seconds|valid_until|closes_at|on_close
+offer.digest.hex=lowercase hex of UTF-8; numbers decimal; price_bounded 1 or 0; on_close the number of the enum
+offer.digest.launch_scarcity='key=value' for each key, sorted by key, joined by ';'; empty when there is none
+offer.digest.price_volatility=the 4 bytes of the float, big-endian, in lowercase hex
+offer.signature=Peer.signature_scheme over UTF-8 of payload, lowercase hex
+offer.signature.payload=celaut-price-offer:<public_key_hex>|<offer_digest>
+peer.digest=blake2b-256 hex of UTF-8 of scheme|uris|contracts|rates|limits|resources|devices|activity_window
+peer.digest.activity_window='-' when absent, else 'w:'+on_close number+':'+','.join(sorted(start_minute-end_minute))
+peer.digest.contract_message=hex(ledger.formal)~','.join(sorted(ledger.tags))~ledger.prose~hex(protocol.formal)~','.join(sorted(protocol.tags))~protocol.prose~';'.join(key=hex(value) by key)
+peer.digest.contracts='/'.join(sorted(contract_message~mu_per_unit.n))
+peer.digest.devices='/'.join(sorted(protocol(architecture)~at_init~at_most~','.join(sorted(attach numbers))))
+peer.digest.limits=';'.join(key=value by key)
+peer.digest.protocol=hex(formal)~','.join(sorted(tags))~prose
+peer.digest.rates=';'.join(key=amount.n by key)
+peer.digest.resources='/'.join(sorted(protocol(architecture)~sysresources or '-'))
+peer.digest.scheme=';'.join(sorted(protocol(component)))
+peer.digest.sysresources=','.join(name=value or name= for blkio_weight,cpu_period,cpu_quota,mem_limit,disk_space)~';'.join(sorted(key=value or key=))
+peer.digest.uri=ip~port~expiry~protocol(transport)~';'.join(sorted(protocol(stack)))
+peer.digest.uris='/'.join(sorted(uri))
+peer.signature=Peer.signature_scheme over UTF-8 of payload, lowercase hex
+peer.signature.payload=<public_key_hex>|<ts>|<content_digest>
+peer.ts=unix seconds; accepted only if greater than the last accepted ts for that public key
+peer.uri.expiry=unix seconds; 0 means no estimate
+pow.challenge=opaque; the caller sends it back unchanged
+pow.retry=same client_id
+pow.solution=blake2b-512 hex of UTF-8(challenge)||UTF-8(solution) ends with difficulty '0'
+receipt.chain=blake2b-256 hex of UTF-8 of prev|seq|direction|length|blake2b-256 hex of payload; seq from 1; direction in or out; genesis 64 zeros; a tunnel records only the messages that its meter accepted
+receipt.coverage=client-tunnel,instance-tap,counters-only
+receipt.digest=blake2b-256 hex of UTF-8 of hex(kind)|peer_id|scheme|ts|execution_name|hex(service_id.type)~hex(service_id.value)|envs_digest|hex(initial_mu.n)|cpu_period|cpu_quota|mem_limit|disk_space|kernel|hex(devices)|hex(plane)|session|hex(slot)|seq|in_events|in_bytes|in_head|out_events|out_bytes|out_head|hex(mu_charged.n)|hex(coverage)|hex(capture_mode)|hex(degraded_reason)
+receipt.digest.devices=the chips sorted, each in lowercase hex of UTF-8, joined by '/'; empty when there is none
+receipt.digest.hex=lowercase hex of UTF-8; empty for an empty text; numbers decimal; an unused field empty or 0
+receipt.digest.scheme=blake2b-256 hex of UTF-8 of peer.digest.scheme of signature_scheme
+receipt.envs_digest=blake2b-256 hex of envs_salt || UTF-8 of '/'.join(origin~hex(name)~hex(value) sorted by UTF-8 of name); origin client or node; envs_salt exactly 16 bytes
+receipt.execution_name=blake2b-256 hex of UTF-8(instance token) || the 32 raw bytes of the public key
+receipt.execution_name.ref=in a DescendantTunnel stream: blake2b-256 hex of UTF-8(celaut-execution-ref:instance_ref) || the 32 raw bytes of the public key
+receipt.kinds=start,checkpoint,close
+receipt.ledger=detail.execution_name on start and tunnel movements; detail.session on tunnel movements of a receipt stream
+receipt.signature=Peer.signature_scheme over UTF-8 of payload, lowercase hex
+receipt.signature.payload=celaut-execution-receipt:<public_key_hex>|<receipt_digest>
+receipt.tunnel=TokenMessage.receipts: ExecutionReceipt at index 2; a close when the stream stops normally
+recursion_guard.token=opaque; the caller sends it again on a delegation
+reputation_proof.amount=the score of the publisher for the object, as the absolute value; 0 for a fault report
+reputation_proof.digest=blake2b-256 hex of UTF-8 of base|pow_nonce, where base is the blake2b-256 hex of UTF-8 of publisher|scheme|ts|'/'.join(opinion)|'/'.join(sorted(contract_message of each ledger_proofs))
+reputation_proof.digest.opinion=hex(type)~hex(object)~amount~1 or 0~hex(content)~evidence digest or empty
+reputation_proof.digest.scheme=peer.digest.scheme of signature_scheme
+reputation_proof.fault_content=UTF-8 JSON with the keys reason, account_ref and seq
+reputation_proof.signature=Peer.signature_scheme over UTF-8 of payload, lowercase hex
+reputation_proof.signature.payload=celaut-reputation-proof:<public_key_hex>|<proof_digest>
+reputation_proof.ts=unix seconds; accepted only if greater than the last accepted ts for that publisher
+rpc.AssociateClient=in:1=celaut.Client;out:1=celaut.AssociateClientOutput;auth:client
+rpc.Chat=in:1=celaut.ChatMessage;out:1=celaut.ChatAck;auth:client-in-message
+rpc.GenerateClient=in:1=celaut.Client;out:1=celaut.Client,2=celaut.PoWRequired;auth:none
+rpc.GenerateDepositToken=in:1=celaut.Client;out:1=celaut.TokenMessage;auth:client
+rpc.GetBalanceStatement=in:1=celaut.BalanceStatementRequest,2=celaut.Client;out:1=celaut.BalanceStatement;auth:client
+rpc.GetChatThread=in:1=celaut.ChatThreadRequest,2=celaut.Client;out:1=celaut.ChatThread;auth:client
+rpc.GetClientMetrics=in:1=celaut.Client;out:1=celaut.Metrics;auth:client
+rpc.GetMetrics=in:1=celaut.TokenMessage;out:1=celaut.Metrics;auth:token
+rpc.GetPeerInfo=in:1=celaut.Client;out:1=celaut.Peer;auth:client
+rpc.GetReputationProofs=in:1=celaut.Client;out:1=celaut.ReputationProof;auth:client
+rpc.GetResourceAvailability=in:1=celaut.ResourceAvailabilityRequest,2=celaut.Client;out:1=celaut.ResourceAvailability;auth:client
+rpc.GetService=in:1=celaut.Metadata.HashTag.Hash,2=celaut.Client;out:4=celaut.Metadata.HashTag.Hash,5=celaut.Metadata,6=celaut.Service;auth:client
+rpc.GetServiceEstimatedCost=in:1=celaut.Client,2=celaut.RecursionGuard,3=celaut.Configuration,4=celaut.Metadata.HashTag.Hash,5=celaut.Metadata,6=celaut.Service,7=celaut.StartReference;out:1=celaut.EstimatedCost;auth:client
+rpc.IntroducePeer=in:1=celaut.Peer,2=celaut.Client;out:1=celaut.RecursionGuard;auth:client
+rpc.ListPeers=in:1=celaut.Client;out:1=celaut.Peer;auth:client
+rpc.LocateShare=in:1=celaut.ShareLocationRequest,2=celaut.Client;out:1=celaut.ShareLocation;auth:client
+rpc.ModifyDeposit=in:1=celaut.ModifyDepositInput,2=celaut.Client;out:1=celaut.ModifyDepositOutput;auth:token+client
+rpc.ModifyServiceSystemResources=in:1=celaut.ModifyServiceSystemResourcesInput,2=celaut.Client;out:1=celaut.ModifyServiceSystemResourcesOutput;auth:token+client
+rpc.Observe=in:1=celaut.ObserveRequest;out:1=celaut.ObserveEvent;auth:token
+rpc.Payable=in:1=celaut.Payment,2=celaut.Client;out:1=buffer.Empty;auth:client
+rpc.PushReputationProof=in:1=celaut.ReputationProof,2=celaut.Client;out:1=celaut.ReputationProofAck;auth:client
+rpc.ResolveNetwork=in:1=celaut.Service.Network,2=celaut.Client;out:1=celaut.ConfigurationFile.NetworkResolution;auth:client
+rpc.ServiceTunnel=in:0=bytes,1=celaut.TokenMessage,2=celaut.DescendantTunnel,3=celaut.Instance.Uri;out:0=bytes,2=celaut.ExecutionReceipt;auth:token
+rpc.StartService=in:1=celaut.Client,2=celaut.RecursionGuard,3=celaut.Configuration,4=celaut.Metadata.HashTag.Hash,5=celaut.Metadata,6=celaut.Service,7=celaut.StartReference;out:1=celaut.ServiceInstance;auth:client
+rpc.StopService=in:1=celaut.TokenMessage,2=celaut.Client;out:1=celaut.Refund;auth:token+client
+schema.celaut.ActivityWindow=1:repeated:celaut.ActivityWindow.Span,2:singular:celaut.OnClose
+schema.celaut.ActivityWindow.Span=1:singular:int32,2:singular:int32
+schema.celaut.Amount=1:singular:string
+schema.celaut.AmountKeyValue=1:singular:string,2:optional:celaut.Amount
+schema.celaut.ArchitectureResources=1:optional:celaut.Service.Container.Architecture,2:optional:celaut.Sysresources
+schema.celaut.AssociateClientOutput=1:singular:bool,2:singular:string
+schema.celaut.AttachedDevice=1:singular:string,2:optional:celaut.ArchitectureResources,3:singular:string
+schema.celaut.BalanceMovement=1:singular:uint64,2:singular:int64,3:optional:celaut.Amount,4:optional:celaut.Amount,5:singular:string,6:singular:string,7:singular:string,8:singular:string
+schema.celaut.BalanceStatement=1:singular:int64,2:singular:string,3:singular:bool,4:singular:string,5:singular:string,6:singular:string,7:singular:uint64,8:singular:uint64,9:repeated:celaut.BalanceMovement,10:optional:celaut.Amount,11:singular:uint64,12:singular:string,13:singular:uint64,14:singular:uint32
+schema.celaut.BalanceStatementRequest=1:singular:string,2:singular:uint64,3:singular:uint64,4:singular:string,5:optional:uint32
+schema.celaut.BytesKeyValue=1:singular:string,2:optional:bytes
+schema.celaut.ChatAck=1:singular:bool,2:singular:string,3:optional:celaut.ChatEntry
+schema.celaut.ChatEntry=1:singular:uint64,2:singular:uint64,3:singular:int64,4:singular:bool,5:singular:string,6:optional:celaut.Metadata,7:singular:string,8:singular:string
+schema.celaut.ChatMessage=1:singular:string,2:singular:uint64,3:optional:string,4:singular:string,5:optional:celaut.Metadata
+schema.celaut.ChatThread=1:repeated:celaut.ChatEntry,2:singular:uint64
+schema.celaut.ChatThreadRequest=1:singular:uint64
+schema.celaut.Client=1:singular:string,2:optional:string,3:optional:string,4:optional:string,5:optional:string
+schema.celaut.Configuration=1:repeated:celaut.BytesKeyValue,2:optional:celaut.Amount,3:optional:celaut.EstimatedCost
+schema.celaut.ConfigurationFile=1:optional:celaut.Instance,2:optional:celaut.Configuration,3:repeated:celaut.ConfigurationFile.NetworkResolution,4:optional:celaut.Sysresources,5:repeated:celaut.AttachedDevice
+schema.celaut.ConfigurationFile.NetworkResolution=1:repeated:string,2:repeated:celaut.Instance
+schema.celaut.Contract=1:optional:celaut.Contract.Ledger,2:optional:celaut.Contract.Protocol,3:repeated:celaut.BytesKeyValue
+schema.celaut.Contract.Ledger=1:repeated:string,2:singular:string,3:singular:bytes
+schema.celaut.Contract.Protocol=1:repeated:string,2:singular:string,3:singular:bytes
+schema.celaut.ContractRate=1:optional:celaut.Contract,2:optional:celaut.Amount
+schema.celaut.DataFormat=1:repeated:string,2:singular:string,3:singular:bytes
+schema.celaut.DataFormatKeyValue=1:singular:string,2:optional:celaut.DataFormat
+schema.celaut.DescendantTunnel=1:singular:string,2:singular:string,3:singular:string,4:singular:bool,5:optional:uint32
+schema.celaut.Device=1:optional:celaut.Service.Container.Architecture,2:optional:celaut.Service.Container.Resources,3:repeated:celaut.Device.Attach
+schema.celaut.DeviceChange=1:repeated:celaut.ArchitectureResources,2:repeated:string
+schema.celaut.EstimatedCost=1:optional:celaut.Amount,2:optional:celaut.Amount,3:optional:celaut.Amount,4:singular:int32,5:repeated:celaut.Uint64KeyValue,6:singular:bool,7:singular:float,8:singular:int32,9:singular:int64,10:singular:int64,11:singular:celaut.OnClose,12:singular:string
+schema.celaut.ExecutionReceipt=1:singular:string,2:singular:string,3:optional:celaut.Peer.SignatureScheme,4:singular:int64,5:singular:string,6:singular:string,7:optional:celaut.Metadata.HashTag.Hash,8:singular:string,9:singular:bytes,10:optional:celaut.Amount,11:singular:uint64,12:singular:uint64,13:singular:uint64,14:singular:uint64,15:singular:string,16:repeated:string,17:singular:string,18:singular:string,19:singular:string,20:singular:uint64,21:singular:uint64,22:singular:uint64,23:singular:string,24:singular:uint64,25:singular:uint64,26:singular:string,27:optional:celaut.Amount,28:singular:string,29:singular:string,30:singular:string
+schema.celaut.FaultEvidence=1:singular:string,2:singular:string,3:repeated:celaut.BalanceStatement,4:repeated:celaut.ExecutionReceipt
+schema.celaut.Instance=1:optional:celaut.Service.Api,2:repeated:celaut.Instance.Uri_Slot
+schema.celaut.Instance.Uri=1:singular:string,2:singular:int32
+schema.celaut.Instance.Uri_Slot=1:singular:int32,2:repeated:celaut.Instance.Uri
+schema.celaut.Metadata=1:optional:celaut.Metadata.HashTag,2:optional:celaut.DataFormat,3:repeated:celaut.Contract
+schema.celaut.Metadata.HashTag=1:repeated:celaut.Metadata.HashTag.Hash,2:repeated:string,3:repeated:celaut.Metadata.HashTag.AttrHashTag
+schema.celaut.Metadata.HashTag.AttrHashTag=1:singular:int32,2:repeated:celaut.Metadata.HashTag
+schema.celaut.Metadata.HashTag.Hash=1:singular:bytes,2:singular:bytes
+schema.celaut.Metrics=1:optional:celaut.Amount,2:singular:bool
+schema.celaut.ModifyDepositInput=1:optional:celaut.Amount,2:singular:string
+schema.celaut.ModifyDepositOutput=1:singular:bool,2:singular:string
+schema.celaut.ModifyServiceSystemResourcesInput=1:optional:celaut.Sysresources,2:optional:celaut.Sysresources,3:singular:string,4:optional:celaut.DeviceChange
+schema.celaut.ModifyServiceSystemResourcesOutput=1:optional:celaut.Sysresources,2:optional:celaut.Amount,3:repeated:celaut.AttachedDevice
+schema.celaut.ObserveEvent=1:singular:string,2:singular:string,10:oneof.10:celaut.ObserveEvent.Session,11:oneof.10:celaut.ObserveEvent.Metrics,12:oneof.10:celaut.ObserveEvent.Packet,13:oneof.10:celaut.ObserveEvent.Notice,14:oneof.10:celaut.ExecutionReceipt
+schema.celaut.ObserveEvent.Metrics=1:singular:bool,2:optional:double,3:optional:double,4:optional:uint64,5:optional:uint64,6:optional:uint64,7:optional:uint64,8:optional:uint64,9:optional:uint64,10:optional:uint64,11:optional:uint64,12:singular:string
+schema.celaut.ObserveEvent.Notice=1:singular:string,2:singular:bool
+schema.celaut.ObserveEvent.Packet=1:singular:string,2:singular:string,3:singular:string,4:singular:string,5:singular:string,6:singular:string,7:optional:uint32,8:singular:string,9:singular:string,10:singular:string,11:singular:string,12:singular:string,13:singular:string,14:singular:bytes,15:optional:double
+schema.celaut.ObserveEvent.Session=1:singular:string,2:singular:string,3:singular:string,4:singular:string,5:singular:int32,6:singular:uint32,7:singular:string
+schema.celaut.ObserveRequest=1:singular:string,2:singular:bool,3:singular:bool
+schema.celaut.Payment=1:singular:string,2:optional:celaut.Contract,3:optional:celaut.Amount
+schema.celaut.Peer=1:singular:string,2:optional:celaut.Peer.SignatureScheme,3:singular:int64,4:singular:string,5:repeated:celaut.Peer.Uri,6:repeated:celaut.ContractRate,7:repeated:celaut.AmountKeyValue,8:repeated:celaut.Uint64KeyValue,9:repeated:celaut.ArchitectureResources,10:repeated:celaut.Device,11:optional:celaut.ActivityWindow
+schema.celaut.Peer.SignatureScheme=1:repeated:celaut.Peer.SignatureScheme.Protocol
+schema.celaut.Peer.SignatureScheme.Protocol=1:repeated:string,2:singular:string,3:singular:bytes
+schema.celaut.Peer.Uri=1:singular:string,2:singular:int32,3:singular:int64,4:optional:celaut.Peer.Uri.Protocol,5:repeated:celaut.Peer.Uri.Protocol
+schema.celaut.Peer.Uri.Protocol=1:repeated:string,2:singular:string,3:singular:bytes
+schema.celaut.PoWRequired=1:repeated:string,2:singular:string,3:singular:bytes,4:singular:string,5:singular:int32
+schema.celaut.Policy=1:repeated:string,2:singular:string,3:singular:bytes,4:singular:bytes
+schema.celaut.RecursionGuard=1:singular:string,2:optional:uint32
+schema.celaut.Refund=1:optional:celaut.Amount
+schema.celaut.ReputationOpinion=1:singular:string,2:singular:string,3:singular:uint64,4:singular:bool,5:singular:bytes,6:optional:celaut.FaultEvidence
+schema.celaut.ReputationProof=1:singular:string,2:optional:celaut.Peer.SignatureScheme,3:singular:int64,4:singular:uint64,5:singular:string,6:repeated:celaut.ReputationOpinion,7:repeated:celaut.Contract
+schema.celaut.ReputationProofAck=1:singular:bool,2:singular:string
+schema.celaut.ResourceAvailability=1:singular:bool,2:singular:string,3:singular:int64
+schema.celaut.ResourceAvailabilityRequest=1:optional:celaut.ArchitectureResources,2:repeated:celaut.Device
+schema.celaut.Service=1:singular:string,2:optional:celaut.Service.Container,3:optional:celaut.Service.Api,4:repeated:celaut.Service.Network,5:repeated:celaut.Service.Clause,6:repeated:celaut.Service.Clause
+schema.celaut.Service.Api=1:repeated:celaut.Service.Api.Slot,2:repeated:celaut.ContractRate
+schema.celaut.Service.Api.Protocol=1:repeated:string,2:singular:string,3:singular:bytes
+schema.celaut.Service.Api.Slot=1:singular:int32,2:optional:celaut.Service.Api.Protocol,3:repeated:celaut.Service.Api.Protocol,4:repeated:celaut.AmountKeyValue,5:repeated:celaut.Policy
+schema.celaut.Service.Clause=1:repeated:celaut.Service.Group
+schema.celaut.Service.Container=1:optional:celaut.Service.Container.Architecture,2:singular:bytes,3:optional:celaut.Service.Container.Init,4:optional:celaut.Service.Container.Resources,5:optional:celaut.Service.Container.ConfigDeclaration,6:repeated:celaut.Service.Api.Protocol,7:repeated:celaut.DataFormatKeyValue,8:optional:celaut.Service.Container.NoticeDeclaration,9:repeated:celaut.Device
+schema.celaut.Service.Container.Architecture=1:repeated:string,2:singular:string,3:singular:bytes
+schema.celaut.Service.Container.ConfigDeclaration=1:repeated:string,2:optional:celaut.DataFormat
+schema.celaut.Service.Container.Filesystem=1:repeated:celaut.Service.Container.Filesystem.ItemBranch,2:repeated:celaut.Policy
+schema.celaut.Service.Container.Filesystem.ItemBranch=1:singular:string,2:oneof.2:bytes,3:oneof.2:celaut.Service.Container.Filesystem.ItemBranch.Link,4:oneof.2:celaut.Service.Container.Filesystem,5:repeated:celaut.BytesKeyValue,6:repeated:celaut.Policy
+schema.celaut.Service.Container.Filesystem.ItemBranch.Link=1:singular:string,2:singular:string
+schema.celaut.Service.Container.Init=1:repeated:string,2:repeated:celaut.Policy
+schema.celaut.Service.Container.NoticeDeclaration=1:repeated:string,2:optional:celaut.Service.Api.Protocol,3:optional:celaut.DataFormat
+schema.celaut.Service.Container.Resources=1:optional:celaut.Sysresources,2:optional:celaut.Sysresources
+schema.celaut.Service.Group=1:repeated:celaut.Service.Workload
+schema.celaut.Service.Network=1:repeated:string,2:singular:string,3:singular:bytes,4:repeated:celaut.Service.Api.Protocol
+schema.celaut.Service.Workload=1:singular:uint32,2:optional:celaut.Service.Workload.Dependency
+schema.celaut.Service.Workload.Dependency=1:repeated:celaut.Metadata.HashTag.Hash,2:optional:celaut.Service,3:singular:bool,4:singular:bool
+schema.celaut.ServiceInstance=1:singular:string,2:optional:celaut.Instance,3:optional:celaut.ExecutionReceipt
+schema.celaut.ShareLocation=1:singular:bool
+schema.celaut.ShareLocationRequest=1:singular:string
+schema.celaut.StartReference=1:singular:bytes
+schema.celaut.Sysresources=1:optional:uint64,2:optional:uint64,3:optional:uint64,4:optional:uint64,5:optional:uint64,99:repeated:celaut.Uint64KeyValue
+schema.celaut.TokenMessage=1:singular:string,2:optional:string,3:singular:bool
+schema.celaut.Uint64KeyValue=1:singular:string,2:optional:uint64
+service=celaut.Gateway
+service_id=Metadata.HashTag.Hash entries, each with its hash.type; the receiver reads the one type it keys its registry by
+service_id.hash_types=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8,46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f,a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a,e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+statement.account_ref=blake2b-256 hex of UTF-8 of celaut-ledger-account:client_id or instance token
+statement.digest=blake2b-256 hex of UTF-8 of ts|relayed|account_ref|hex(service_id)|hex(instance_ref)|from_seq|to_seq|movements|hex(balance.n)|head_seq|head_hash|oldest_seq|retention_days
+statement.digest.hex=lowercase hex of UTF-8; empty for an empty text
+statement.digest.instance_ref=hex(instance_ref); empty when instance_ref is empty
+statement.digest.movements='/'.join(hash of each movement in seq order)
+statement.digest.relayed=1 when relayed is true, else 0
+statement.digest.service_id=hex(service_id); empty when service_id is empty
+statement.genesis=blake2b-256 hex of UTF-8 of celaut-balance-genesis:account_ref
+statement.instance_ref=blake2b-256 hex of UTF-8 of celaut-ledger-instance:token
+statement.movement.hash=blake2b-256 hex of UTF-8 of celaut-balance-movement:prev_hash|seq~ts~hex(amount.n)~hex(balance_after.n)~hex(kind)~instance_ref~hex(detail)
+statement.signature=Peer.signature_scheme over UTF-8 of payload, lowercase hex
+statement.signature.payload=celaut-balance-statement:<public_key_hex>|<statement_digest>
+statement.start.quote=detail.quote of movement 1 of kind start: init_maintenance_cost,max_maintenance_cost,maintenance_seconds_loop,price_bounded,price_volatility,volatility_period_seconds,on_close,closes_at and base (mem_limit,disk_space,cpu_period,cpu_quota)
+tunnel.end=end of the caller's stream half-closes the service connection
+tunnel.slot=decimal internal port

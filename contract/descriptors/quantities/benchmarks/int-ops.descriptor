@@ -24,5 +24,5 @@ place=the benchmarks of a container or of an architecture
 process=one process: the score is what one core does
 score=floor(steps*100/elapsed hundredths of a second)
 stat=one run on an idle guest: the rate over one window of at least 2 seconds; no mean of runs and no percentile
-tools=busybox 1.37.0, the image index busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e, in a guest of the architecture
+tools=busybox 1.37.0, the image index of busybox:1.37.0 whose digest is the id e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e, in a guest of the architecture
 unit=operation/second

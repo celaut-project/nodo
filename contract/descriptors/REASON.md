@@ -80,7 +80,9 @@ by the id of the formal (rule 6.1).
 
 - one line for each key, with no repeated key;
 - the lines sorted by the bytes of the key, ascending;
-- a key is lowercase ASCII letters, digits, `_`, `-` and `.`;
+- a key is ASCII letters, digits, `_`, `-`, `.` and `+`; keys are compared by their bytes,
+  so `a` and `A` are two keys (a key can hold a name of the contract, such as
+  `schema.buffer.Buffer`);
 - no space around `=`; the value is the rest of the line, and it can contain `=`;
 - no empty line, and no newline at the end.
 
@@ -119,7 +121,15 @@ formal changes too: it is a new descriptor.
 `replaces=<id of the old formal>`, and its formal says that a list with both is not
 valid (REASON 2.6). Give it a new name, for example with `-v2` at the end.
 
-**Rule 3.9. No implementation in a formal.** No path of nodo, no name of a module, no key
+**Rule 3.9. A hash algorithm is always named by its type.** The type is the digest of
+the empty input, in lowercase hexadecimal (REASON 6.3, 6.4), for example
+`hash.type=e3b0c442...b855` for SHA-256. Never name a hash algorithm by a name such as
+"SHA-256" or "BLAKE2b", in the formal or in an id. A variant with another digest size,
+a key, a salt or a personalization has another empty digest, so the type also fixes the
+variant. A digest in a formal is an id, `<type>:<digest>`, also when another format
+writes it in another way (for example the digest of a container image).
+
+**Rule 3.10. No implementation in a formal.** No path of nodo, no name of a module, no key
 of the configuration of nodo, no name of this project. A formal is for all
 implementations.
 
@@ -249,12 +259,14 @@ sections 2 and 3, that it is in a folder with a `REASON.md` and a class, that it
 current, and that each reference (rule 3.7) names a formal of `contract/descriptors/`. When the code of nodo uses a descriptor, the code reads the
 file, or holds the same bytes and a test pins them to the file.
 
-**Rule 6.4. The descriptors before this file.** The eight files of
-`policies/filesystem_root/`, `policies/filesystem_entry/`, `policies/api_slot/` and
-`contracts/payment/` have no `class=` and no `name=` line. Their bytes are on the wire
-and in the databases of the nodes that run today, so they stay as they are. They get
-the two lines when the code follows the new contract (stage 7 of `contract/PENDING.md`).
-The test knows them by their paths.
+**Rule 6.4. The legacy descriptors.** A formal that nodo sends today (on the wire, or in
+the databases of the nodes that run today) is copied byte for byte, with no `class=`
+and no `name=` line: the settings of `policies/filesystem_root/`,
+`policies/filesystem_entry/` and `policies/api_slot/`, the payment protocols, the layers
+of an address, the ledgers and the signature scheme. They get the two lines when the
+code follows the new contract (stage 7 of `contract/PENDING.md`). The test knows them by
+their paths (the set `LEGACY`), and `tests/test_descriptor_legacy_formals.py` pins each
+one to the bytes that the code builds.
 
 ## 7. The process
 
@@ -284,5 +296,6 @@ Do these steps for each new descriptor:
 - A behavior in the formal of a property.
 - A name or a path of nodo in the formal.
 - A reference to another descriptor by its name or its tags, not by its id.
+- A hash algorithm named by a name, not by the digest of the empty input.
 - A formal that only nodo can read: its meaning is in the code, not in the text.
 - A descriptor for each member of a group, in a place that has a value.

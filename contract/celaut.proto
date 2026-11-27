@@ -435,7 +435,10 @@ message Service {
     Container container = 3;
     // The interface of the service.
     Api api = 4;
-    // The domains where the instances of the service find their peers.
+    // The domains where the instances of the service find their peers. The order of the
+    // list has a meaning: the position of an entry, from 0, is its number, and a setting
+    // of the service names a network by it (for example a directory that the members of
+    // a network share). A reader does not sort the list.
     repeated Network network = 5;
     // The load that the service can ask for later, while it runs. Each clause must fit
     // on the node or on a peer that it knows. If not, the node can refuse to start the

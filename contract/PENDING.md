@@ -13,7 +13,9 @@ yet. Remove this file when the code follows the proto.
   with no names of fields. A schema must also give the name of each field: without
   them, two variants that add one field number with the same type have the same
   schema. Decide the format before any schema file. The layer `celaut-gateway` uses
-  the same format.
+  the same format. The name of a message has capital letters: rule 3.1 of
+  `contract/descriptors/REASON.md` allows them in a key, so a schema line can keep
+  the name in its key.
 - **`config-file`.** The proto removed `Container.config_declaration`, and the node
   always writes `/__config__`. Decide if a setting of `Init` is necessary, or if the
   path is a part of the architecture.
@@ -40,10 +42,11 @@ code, not of the contract.
   `src/utils/policies.py`. The architectures, the resources, the benchmarks, the
   rates, the terms, the networks and the facts are tags, keys of `service.json` or
   keys of the configuration.
-- **The eight descriptor files of today** (`policies/` and `contracts/payment/`) need
-  the lines `class=` and `name=`. Their bytes are on the wire today, so this change
-  goes with the code. `policies.make` must then read the tags and the prose from the
-  file, not make them.
+- **The legacy descriptor files** (the `LEGACY` set of
+  `tests/test_descriptor_files.py`: settings, payment protocols, layers of an address,
+  ledgers, the signature scheme) need the lines `class=` and `name=`. Their bytes are
+  on the wire today, so this change goes with the code. The code must then read the
+  tags and the prose from the files (for example `policies.make`), not make them.
 - **`scarcity_max_multiplier` is sent in `Peer.rates`.** It is a promise, not a
   price.
 - **The announced rates are truncated.** The configuration is in MU for each hour,
@@ -58,7 +61,10 @@ code, not of the contract.
   The packer writes the full gateway stack when `service.json` has `uses_gateway`.
 - **Architectures** are matched by tag (`src/virtualizers/architecture.py:45-65`),
   and the configuration flag `TRUST_METADATA_ARCHITECTURE` reads tags from `Metadata`,
-  which the proto removed.
+  which the proto removed. The node must announce each architecture that it can run,
+  also the more general ones (for example `linux-arm64` and `linux-arm64-any-page`),
+  and the packer must write the most general one that the binaries meet
+  (`contract/descriptors/architectures/REASON.md`).
 - **Benchmarks** are one run at the start of the node, with no statistic. The rule
   "use the score of the next larger working set" is removed: a node that did not
   measure a working set refuses, or measures it. A node measures again at a period
@@ -70,8 +76,23 @@ code, not of the contract.
   `pci:<vendor>:<device>+<alg>:<hash>` become an architecture formal (the family that
   the software needs), a model fact, and the setting of the guest kernel. The price
   and the receipt read the model fact. A device benchmark that the node did not
-  measure refuses. The receipt fields of its proto diff become `facts`.
+  measure refuses. The receipt fields of its proto diff become `facts`. The PR writes
+  the formals of `architectures/devices/` for the families that it can attach and
+  test: one for each member (for example one for each CUDA compute capability).
 - **`TunnelRequest.slot`** is still a decimal text: it is not signed.
+- **The proof of work of `GenerateClient`** sends a line of pseudo-code as its formal
+  (`src/gateway/client_pow.py:52`). It must send the formal of
+  `proof_of_work/blake2b-trailing-zeros.descriptor`.
+- **A network share** names its network by its tag, and its id is sha256 over the tag
+  (`src/utils/shared_filesystems.py:397-433`). The code follows `share-v2` (second part
+  of `INDEX.md`): the position of the network in `Service.network`, and an id over
+  the bytes of the domain, with the hash that the formal names by its type.
+- **The packer writes the setting `notice` by default** (`src/utils/notice.py:120`).
+  It must write it only when the author asks for it: a setting fails closed, and a
+  service works with no notice.
+- **A proof-of-work network keeps the `pow.*` keys that it does not know**, and does
+  not enforce them (`src/manager/pow_networks.py`). It must refuse them, as the formal
+  `networks/proof-of-work` says.
 
 ## 4. Known state of the branch
 
@@ -94,5 +115,5 @@ The contract is complete before nodo implements all of it (REASON 1.7).
 4. Terms: pricing, schedule, receipts, balance movements.
 5. Resources: cgroups and the virtual machine from the formals.
 6. Placement: availability, benchmarks, devices.
-7. CLI, TUI, docs, `compat.json`, and the `class=` and `name=` lines of the eight
-   descriptor files of today.
+7. CLI, TUI, docs, `compat.json`, and the `class=` and `name=` lines of the legacy
+   descriptor files.

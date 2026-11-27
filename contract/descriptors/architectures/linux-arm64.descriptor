@@ -9,8 +9,11 @@ extension (for example SVE) can fail. Another level is another architecture, wit
 another formal. The node can run the guest natively or with an emulator: the
 benchmarks of the node show the difference.
 
-The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9c03c66a3776b9ce1260b15aca7f0525ea6542092800cd4a23e07eda60cbeb97).
+The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390).
 With no such setting, the node selects the kernel.
+
+The kernel uses pages of 4096 bytes, and the software can depend on it. Another page
+size is another architecture.
 
 Who is bound: the node that runs the service. An architecture has no value.
 
@@ -19,5 +22,6 @@ abi=the Linux system call interface of AArch64, LP64, little-endian
 class=architecture
 isa=Armv8.0-A: only the instructions of the base AArch64 architecture
 kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host
-kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9c03c66a3776b9ce1260b15aca7f0525ea6542092800cd4a23e07eda60cbeb97
+kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390
 name=linux-arm64
+page=4096 bytes: the kernel uses pages of 4096 bytes, and the software can depend on it

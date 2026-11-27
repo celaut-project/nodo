@@ -3,16 +3,23 @@ tags: ergo-rest
 A layer: the REST API of the Ergo reference node, over HTTP/1.1 with no TLS, on TCP. A
 member of a proof-of-work network of Ergo gives it on one address.
 
-The calls that a node uses are GET /info, GET /blocks/at/{height} and
-GET /blocks/{id}/header. The answers are JSON, as the Ergo reference node gives them.
+The calls that a node uses are GET /info, GET /blocks/{id}/header,
+GET /blocks/at/{height} and GET /blocks/lastHeaders/1. The answers are JSON, as the
+Ergo reference node gives them. The formal gives the fields that a node reads from each
+answer. The formal fixes no version of the API: if a new version changes one of these
+fields, that is a new formal.
 The port of the address selects the layer: nothing in TCP selects it.
 
 A layer has no value.
 
 === formal
-calls=GET /info, GET /blocks/at/{height}, GET /blocks/{id}/header
+calls=GET /blocks/at/{height}, GET /blocks/lastHeaders/1, GET /blocks/{id}/header, GET /info
 class=layer
 name=ergo-rest
+response.blocks_at=a JSON list of block ids, hexadecimal
+response.header=a JSON object with height (integer); status 404 if the node does not have the block
+response.info=a JSON object with genesisBlockId (hexadecimal), fullBlocksScore (base-10 integer, exact) and fullHeight (integer)
+response.last_headers=a JSON list; the first entry has timestamp (unix time in milliseconds)
 selected_by=the port of the address
 spec=the REST API of the Ergo reference node (ergoplatform/ergo), HTTP/1.1, JSON, no TLS
 transport=tcp

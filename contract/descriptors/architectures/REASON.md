@@ -19,6 +19,30 @@ None: an architecture is a `Descriptor`. Two architectures are one only if their
 formals are equal. A family (for example x86_64 at two levels of instruction set) is
 one descriptor for each member (rule 5.3 of `../REASON.md`).
 
+## Which architecture a service declares, and which ones a node announces
+
+Two architectures match only when their formals are equal. So the compatibility is
+in the announcement, not in the match:
+
+- A service declares the most general architecture that its binaries need: for
+  example `linux-arm64-any-page` for software that reads the page size when it runs,
+  and `linux-arm64` (pages of 4096 bytes) for software that depends on 4096.
+- A node announces each architecture that it can run in `Peer.resources`, also the
+  more general ones: a node of AArch64 with pages of 4096 bytes announces
+  `linux-arm64` and `linux-arm64-any-page`. The node reads the formals once, when it
+  makes its announcement (REASON 2.5), and not at each match.
+- A service with builds for some of the variants only (for example pages of 4096 and
+  65536 bytes, but not 16384) is one service for each architecture (see
+  `Container.architecture`). The services differ only in their architecture, so they
+  share their filesystem.
+- Do not write a formal for a combination of variants ("4096 or 65536"): the number
+  of combinations grows with no limit.
+
+The page size is a part of the architecture: the software sees it (`sysconf`, the
+alignment of `mmap` and of the segments of a binary). The setting `guest-kernel`
+cannot change it: a node refuses a kernel whose page size the architecture does not
+allow.
+
 ## Notes
 
 - The formal can say that the architecture boots a guest kernel, and which setting of

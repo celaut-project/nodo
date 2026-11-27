@@ -20,6 +20,8 @@ LEGACY = {
     # The formals that the code builds today (#693): the files copy their bytes.
     "ledgers/bitcoin-mainnet.descriptor",
     "ledgers/ergo-mainnet.descriptor",
+    "protocols/address/bee-rpc.descriptor",
+    "protocols/address/celaut-gateway.descriptor",
     "protocols/address/grpc.descriptor",
     "protocols/address/http2.descriptor",
     "protocols/address/tcp.descriptor",
@@ -27,7 +29,7 @@ LEGACY = {
     "protocols/address/tor-onion-v3.descriptor",
     "signatures/schemes/ed25519.descriptor",
 }
-KEY = re.compile(r"^[a-z0-9_.-]+$")
+KEY = re.compile(r"^[A-Za-z0-9_.+-]+$")
 ID = re.compile(r"\b[0-9a-f]{64}:[0-9a-f]{64}\b")
 
 
@@ -117,10 +119,14 @@ class FormalRulesTests(unittest.TestCase):
             seen[formal] = rel
 
     def test_a_reference_names_a_formal_of_this_folder(self):
+        # Only an id of the type of the index is a reference to a descriptor. Another id
+        # (for example the digest of a container image) names other bytes.
         ids = {fid for _, _, fid in df.index_rows()}
         for rel in df.files():
             formal = df.read(os.path.join(ROOT, rel)).formal.decode("utf-8")
             for ref in ID.findall(formal):
+                if not ref.startswith(df.hash_type() + ":"):
+                    continue
                 with self.subTest(rel=rel, ref=ref):
                     self.assertIn(ref, ids)
 

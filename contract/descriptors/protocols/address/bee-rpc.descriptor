@@ -1,0 +1,45 @@
+tags: bee-rpc
+
+This layer is bee-rpc. It carries objects of any size in a stream of buffer.Buffer messages. The formal field gives the schema of buffer.Buffer.
+
+OBJECTS. One stream carries one or more objects. An object starts at a Buffer and stops at the first Buffer with separator set to true. The bytes of the object are the chunk fields of these Buffers, in sequence. A receiver must accept a chunk of any size. The first Buffer of an object can contain a head. The index of the head tells the type of the object. The celaut-gateway layer gives the types of each method. Index 0 is always raw bytes. If an object has no head, its index is 1. If the method has no index 1, its index is 0. An object with no bytes is not an object. The receiver ignores it, but buffer.Empty is an exception. Thus, if you send a message with all fields at their default values, the receiver does not get it.
+
+SIGNAL. A Buffer with signal set to true tells the other side to stop its stream. The next such Buffer tells it to continue. A Buffer that contains only a signal is not part of an object.
+
+BLOCKS. A sender can send a part of an object as a block. A Buffer with a block field starts the block. Then the bytes of the block follow as chunks. Then a Buffer with the same block field stops the block. The sender always sends this last Buffer. Two blocks must not overlap. A block can contain blocks. The sender sends a block inside a block in the same way, between the Buffers that start and stop the outer block. The nesting must not be deeper than the value that the formal field gives. The object is all the chunks and all the block bytes, in sequence. Each hash in a block field gives its type. The type of a hash algorithm is the digest of an empty input with that algorithm. The identifier of a block is the hash of its bytes. The formal field gives the hash type that the receiver uses to find blocks. Each block field must contain a hash of this type. The field previous_lengths_position gives the positions of the length varints that contain the block. The positions are in the bytes of the block that contains it, or in the bytes of the object if no block contains it. The receiver calculates the hash of the bytes of each block. If the hash is not the identifier, the receiver does not keep the block.
+
+SKIP. A receiver that already has a block can tell this to the sender. It sends a Buffer with the skip field and an empty chunk, in the opposite direction. The skip field gives the hash of the block. The sender can then stop the bytes of that block. The sender must still send the Buffer that stops the block.
+
+The sender selects the size of each chunk. The sender also selects if it uses blocks, signal or skip. These are not part of the protocol. Senders do not set the partitions field of the head, and receivers ignore it.
+
+=== formal
+block.content=the block's bytes as chunks; a block inside it is framed the same way, nested
+block.end=Buffer.block with the same hashes; always sent
+block.hash.required_type=a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a
+block.hash.type=the algorithm's digest of the empty input
+block.hash.type_on_wire=always present on every hash
+block.id=hash of the block's expanded bytes
+block.nesting.max=32
+block.object=chunks and block contents concatenated in order are the serialized object
+block.overlap=forbidden
+block.previous_lengths_position=offsets, in the expanded content of the enclosing block or object, of the length varints that enclose the block
+block.start=Buffer.block naming the block
+block.verify=the receiver stores a block only if its expanded bytes hash to its id
+empty_object=absent, except buffer.Empty
+head.index=selects the type of the object it starts; per method in celaut-gateway
+head.index.0=raw bytes, never a message
+head.partitions=unused: senders do not set it, receivers ignore it
+headless_object=index 1, or index 0 when the method has no index 1
+object=concat(chunk) from first buffer to separator=true
+objects_per_stream=many
+schema.buffer.Buffer=1:optional:bytes,2:optional:bool,3:optional:bool,4:optional:buffer.Buffer.Head,5:optional:buffer.Buffer.Block,6:optional:buffer.Buffer.Block
+schema.buffer.Buffer.Block=1:repeated:buffer.Buffer.Block.Hash,2:repeated:uint64
+schema.buffer.Buffer.Block.Hash=1:singular:bytes,2:singular:bytes
+schema.buffer.Buffer.Head=1:singular:int32,2:repeated:buffer.Buffer.Head.Partition
+schema.buffer.Buffer.Head.Partition=1:map:map<int32,buffer.Buffer.Head.Partition>
+schema.buffer.Empty=
+signal=each signal=true toggles: first pauses the peer's sending, next resumes it
+signal_only_buffer=carries no object
+skip=receiver to sender: Buffer.skip names a block the receiver holds
+skip.carrier=Buffer{skip, chunk=empty}
+skip.sender=may stop the block's content; still sends block.end

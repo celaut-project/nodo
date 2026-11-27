@@ -26,6 +26,9 @@ def _formal(rel):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"imports unavailable: {IMPORT_ERROR}")
 class LayerFormalTests(unittest.TestCase):
+    """The formal of bee-rpc names the hash type of the configuration: the files are of
+    the example configuration."""
+
     def test_the_layer_files_hold_the_formals_of_the_code(self):
         for name, build in (
             ("tcp", lambda: transport_stack.transport_component("tcp")),
@@ -33,6 +36,8 @@ class LayerFormalTests(unittest.TestCase):
             ("tls", transport_stack.tls_component),
             ("http2", transport_stack.http2_component),
             ("grpc", transport_stack.grpc_component),
+            ("bee-rpc", transport_stack.bee_rpc_component),
+            ("celaut-gateway", transport_stack.gateway_component),
         ):
             with self.subTest(name):
                 tags, _, formal = build()

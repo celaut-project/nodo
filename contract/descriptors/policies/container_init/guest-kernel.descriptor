@@ -14,11 +14,16 @@ boots a kernel only if the hash of its bytes, with the algorithm of one of the t
 is equal to the digest of that type. A node that does not have such a kernel refuses
 the service. The node is bound.
 
+The page size of the kernel must be one that the architecture of the container allows.
+The node refuses a kernel with another page size: the software of the service can
+depend on it.
+
 === formal
 class=setting
 default=absent: the node selects the kernel
 hashed=the bytes of the kernel image file that the virtual machine loads, without an initial RAM disk
 match=the node boots a kernel only if its hash with the algorithm of one type in the value is equal to the digest of that type
 name=guest-kernel
+page=the page size of the kernel is one that the architecture of the container allows; the node refuses a kernel with another page size
 place=service.container.init
 value=the ids <type>:<digest> of the kernel image, one for each hash type, lowercase hexadecimal, sorted, separated by commas

@@ -13,8 +13,9 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 
 | File | Tags | Id |
 | --- | --- | --- |
-| [`architectures/linux-amd64.descriptor`](architectures/linux-amd64.descriptor) | linux-amd64, linux/amd64, amd64, x86_64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7286c85c05460ba06509cc64b218a4d7470162983032d151fd47dbdb6cbef5d5` |
-| [`architectures/linux-arm64.descriptor`](architectures/linux-arm64.descriptor) | linux-arm64, linux/arm64, arm64, aarch64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:4d9137888704b0247a31c3705a875d4a70a54b80845bfc7332a7b39a58f93355` |
+| [`architectures/linux-amd64.descriptor`](architectures/linux-amd64.descriptor) | linux-amd64, linux/amd64, amd64, x86_64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e9f992eeb5c35f619f16c558de568cadfc3a6ef725527b8768af025cbefe6c2d` |
+| [`architectures/linux-arm64-any-page.descriptor`](architectures/linux-arm64-any-page.descriptor) | linux-arm64-any-page, linux/arm64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:d6cd693ca11b56e6d62316a5604381a51b5520ae0caa716760495e1de24cee2e` |
+| [`architectures/linux-arm64.descriptor`](architectures/linux-arm64.descriptor) | linux-arm64, linux/arm64, arm64, aarch64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:48fee3080ea5aea106d1b999c4c0a401857f34be88899587f0e59c72a4b54934` |
 | [`contracts/payment/bitcoin-p2wpkh.descriptor`](contracts/payment/bitcoin-p2wpkh.descriptor) | bitcoin-p2wpkh | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5495a6f5fc350871eb78b8251ca0b45addf48d385d96176911ba5da6c07cc35e` |
 | [`contracts/payment/ergo-p2pk.descriptor`](contracts/payment/ergo-p2pk.descriptor) | ergo-p2pk | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0e8ccfee22f3d3494097be8757c5fea6e1ca299d304823e8f79c391181dd88a6` |
 | [`dependency_sources/service-file.descriptor`](dependency_sources/service-file.descriptor) | service-file, on_filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b941f5b9e824d666cf2a3b50aa25139bfb8ba108796e8cde0f2b4d4a60cb6c0a` |
@@ -23,7 +24,7 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`facts/device-links.descriptor`](facts/device-links.descriptor) | device-links, nvlink | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:513329b19e532424e1702f2197e1bb43f94e230165db90b209e47c01a64f821d` |
 | [`facts/device-models.descriptor`](facts/device-models.descriptor) | device-models | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ebd1ea752be8e0274e2857ed673f61d1cf3504e25e0251f230341d5d38e26024` |
 | [`facts/device-place.descriptor`](facts/device-place.descriptor) | device-place, location | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:10026c1cb62e5e15d214e6efee25adbede6a0c4cdd7d0ffea3e8ee5a0ccdeb73` |
-| [`facts/guest-kernel.descriptor`](facts/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:26509ebd9c5e14da0697ed1ed31f3986da202024645516a2d9c722e198b0c69e` |
+| [`facts/guest-kernel.descriptor`](facts/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7c35a53bbc7fc46d07eebb7a5f82638c509dd90309cb30fe41e5368c52712376` |
 | [`facts/pci-model.descriptor`](facts/pci-model.descriptor) | pci-model, pci | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1` |
 | [`facts/usb-model.descriptor`](facts/usb-model.descriptor) | usb-model, usb | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5` |
 | [`ledgers/bitcoin-mainnet.descriptor`](ledgers/bitcoin-mainnet.descriptor) | bitcoin-mainnet | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:42c3dae582a538b4e29e9c246d11a88dd1d4097995c66a2e9622517c163424ba` |
@@ -47,7 +48,7 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`policies/api_slot/wake.descriptor`](policies/api_slot/wake.descriptor) | wake | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2ff042caf1404c444e8aa8d48961e797cd061c176bee27fd33b7351c9a4eaa9a` |
 | [`policies/configuration/device-selection.descriptor`](policies/configuration/device-selection.descriptor) | device-selection | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:84ca8ca8b4c4122d49fcc0681890e899e74388745443aa138f028b316cfa0733` |
 | [`policies/configuration/instance-name.descriptor`](policies/configuration/instance-name.descriptor) | instance-name | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:667a8101b6e3ee7b61efe110e8cc299cff9b1d3b8dfcd71577b7e6881e22ae49` |
-| [`policies/container_init/guest-kernel.descriptor`](policies/container_init/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9c03c66a3776b9ce1260b15aca7f0525ea6542092800cd4a23e07eda60cbeb97` |
+| [`policies/container_init/guest-kernel.descriptor`](policies/container_init/guest-kernel.descriptor) | guest-kernel, kernel | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390` |
 | [`policies/container_init/notice.descriptor`](policies/container_init/notice.descriptor) | notice, stop notice, hibernate notice | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616` |
 | [`policies/device/attach.descriptor`](policies/device/attach.descriptor) | attach | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:75c8d0f3f707a640af0dde55be7300843afd674434b8a91b9eff9c58cf858252` |
 | [`policies/device/bitstream.descriptor`](policies/device/bitstream.descriptor) | bitstream, fpga | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:fee77e45f7230ffa64d15d4819410335c2a33b48d751bf5f9364beaa1f2ff949` |
@@ -69,21 +70,23 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 | [`prices/node/statement-row.descriptor`](prices/node/statement-row.descriptor) | statement-row, statement_row_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a4cbe4a4a3cb20d20b16fb2959552f012bbfcfe18384f5b3692ff95043eba66d` |
 | [`prices/node/tunnel-open.descriptor`](prices/node/tunnel-open.descriptor) | tunnel-open, tunnel_open_mu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a36a4346db273c99fd7123fbf7b4dcfddd82e8a4aa07ad8471b44d325e9a4185` |
 | [`prices/service/call.descriptor`](prices/service/call.descriptor) | call, mu_per_call | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b9000d73c97bcb624709b4622dc70cf9289af193f83159705e013708152f229f` |
-| [`proof_of_work/blake2b-trailing-zeros.descriptor`](proof_of_work/blake2b-trailing-zeros.descriptor) | blake2b-trailing-zeros, blake2b | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3c624c2dd31cdaecdbfb8824de75935dc896cdeb066620ee38dca9b8874710ba` |
+| [`proof_of_work/blake2b-trailing-zeros.descriptor`](proof_of_work/blake2b-trailing-zeros.descriptor) | blake2b-trailing-zeros, blake2b | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ddadba5e7a58319c90723b600b33fff948b6c3ffd1984aab868024c0e1879632` |
+| [`protocols/address/bee-rpc.descriptor`](protocols/address/bee-rpc.descriptor) | bee-rpc | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:98887b0edfb8fbc26c4e0ebdca0cf873d7a2e744700ac3939c1b05873c507057` |
+| [`protocols/address/celaut-gateway.descriptor`](protocols/address/celaut-gateway.descriptor) | celaut-gateway | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:c805382e6dfbcb2642882c69e03d2249f08b8259616dd51bd5cb46504ce112cf` |
 | [`protocols/address/ergo-p2p.descriptor`](protocols/address/ergo-p2p.descriptor) | ergo-p2p | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2f1778bc0e2c778894af5dbc32e1ffd5ded17bf4187f4ffa11015cd2e405f030` |
-| [`protocols/address/ergo-rest.descriptor`](protocols/address/ergo-rest.descriptor) | ergo-rest | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:d31451f5766e271e17e1585945a667a428a36eb21e3eb0c406c65e4be0514648` |
+| [`protocols/address/ergo-rest.descriptor`](protocols/address/ergo-rest.descriptor) | ergo-rest | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:cba94914a638667c02a40344607fdcd203fd16c3148aad5c30429bd3e8d316e5` |
 | [`protocols/address/grpc.descriptor`](protocols/address/grpc.descriptor) | grpc | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a318d9e22dfecbf06a11a00c08eb43b0a65ec886b50f0f5d83599bf891e0acf3` |
 | [`protocols/address/http2.descriptor`](protocols/address/http2.descriptor) | http2 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:01575edd0b23255b9c1efa1727ba4fb635c150a14b4ab0576f739f87631c8acb` |
 | [`protocols/address/tcp.descriptor`](protocols/address/tcp.descriptor) | tcp | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:db518cc9d8ba091449934c4a67fa56ae72c2823720e25355c092e25b823694ce` |
 | [`protocols/address/tls.descriptor`](protocols/address/tls.descriptor) | tls | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:26ff6acdac9b95a18c334e65e676eb5c0fc1ba3c312d33c2bfafecc2c8aac5fe` |
 | [`protocols/address/tor-onion-v3.descriptor`](protocols/address/tor-onion-v3.descriptor) | tor-onion-v3 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:81e06cee256629ffc232dc568d8b67da2ee1d207538c2054bd5257a5ec803484` |
 | [`protocols/address/udp.descriptor`](protocols/address/udp.descriptor) | udp | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:296c06ccd189ac66e62d6c53ef0648b49ec3c86153fb60870d326cf04f5e4584` |
-| [`quantities/benchmarks/float-ops.descriptor`](quantities/benchmarks/float-ops.descriptor) | float-ops, flt_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1188efaabf8d5930cc17fffcfcdcf91018894628a9b7ab28dd49822e372c4756` |
-| [`quantities/benchmarks/int-ops.descriptor`](quantities/benchmarks/int-ops.descriptor) | int-ops, int_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7c5ddc260dce1a6e46def9a0bd8f2a6a3f8d8891fc7efa968b27bd9d61f5dcdb` |
-| [`quantities/benchmarks/memory-bandwidth-1gib.descriptor`](quantities/benchmarks/memory-bandwidth-1gib.descriptor) | memory-bandwidth-1gib, mem_bandwidth_1gib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:06d94bc381a2f084b59fd7710589d7df319283e1fdf3a503ee523fb2bebda01e` |
-| [`quantities/benchmarks/memory-bandwidth-256mib.descriptor`](quantities/benchmarks/memory-bandwidth-256mib.descriptor) | memory-bandwidth-256mib, mem_bandwidth_256mib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:48aec407dc2777f1ffe50a4337f4183e2202a8289ad6eb4ef2a0bd5734195723` |
-| [`quantities/benchmarks/memory-bandwidth-64mib.descriptor`](quantities/benchmarks/memory-bandwidth-64mib.descriptor) | memory-bandwidth-64mib, mem_bandwidth_64mib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:746a045bebda93d63b2a105bf220056461ce9c9da1fb048bf3c28644bbaed710` |
-| [`quantities/benchmarks/sha256-hashes.descriptor`](quantities/benchmarks/sha256-hashes.descriptor) | sha256-hashes, sha256_hashes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:c94022a0c3cb3b961ea1312f1e2c65b37058a949dc0b020f0151598442608a04` |
+| [`quantities/benchmarks/float-ops.descriptor`](quantities/benchmarks/float-ops.descriptor) | float-ops, flt_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbd7b4d1a356561cf95443b9ccb853f7ff91c64dbf2a3b0ff018522ae855996b` |
+| [`quantities/benchmarks/int-ops.descriptor`](quantities/benchmarks/int-ops.descriptor) | int-ops, int_ops_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2739f2cc9d954ee58e28c2c1bf1cf1b7ffa992e021b81714f007ffecc0e0e37c` |
+| [`quantities/benchmarks/memory-bandwidth-1gib.descriptor`](quantities/benchmarks/memory-bandwidth-1gib.descriptor) | memory-bandwidth-1gib, mem_bandwidth_1gib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ac1520c46d26b19d3f401ceedc8dd6142cd57613c1e6de643c28ef0562762701` |
+| [`quantities/benchmarks/memory-bandwidth-256mib.descriptor`](quantities/benchmarks/memory-bandwidth-256mib.descriptor) | memory-bandwidth-256mib, mem_bandwidth_256mib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:a32e64f812356332ba8e8449ba075d476089760bfc4e9d634df5dcc45dea5394` |
+| [`quantities/benchmarks/memory-bandwidth-64mib.descriptor`](quantities/benchmarks/memory-bandwidth-64mib.descriptor) | memory-bandwidth-64mib, mem_bandwidth_64mib_bytes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:055df939cbc03a38dc7951f035adf564f3e7d36cf36478b35a24c2ed6e488613` |
+| [`quantities/benchmarks/sha256-hashes.descriptor`](quantities/benchmarks/sha256-hashes.descriptor) | sha256-hashes, sha256_hashes_per_sec | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:17e6e95ebecbb33b4da84432296860a113c4eb6ad8a756c9419ac8325529b510` |
 | [`quantities/resources/cpu.descriptor`](quantities/resources/cpu.descriptor) | cpu, vcpu, cores | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722` |
 | [`quantities/resources/device-memory.descriptor`](quantities/resources/device-memory.descriptor) | device-memory, vram | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ee9cad6566f696f7f73602862c74af5ae19c2c88e2ffa58c6030c0609100ad01` |
 | [`quantities/resources/disk.descriptor`](quantities/resources/disk.descriptor) | disk, disk space, root filesystem | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926` |
@@ -118,7 +121,7 @@ remove its row here.
 
 | Name | Today | Notes |
 | --- | --- | --- |
-| a family of GPUs, one for each compute capability | New. PR #649 (not merged) uses tags `pci:<vendor>:<device>+<alg>:<hash>`. `GetResourceAvailability` refuses every device (`src/gateway/iterables/resource_availability_iterable.py:52-66`). | One descriptor for each member of the family. |
+| a family of GPUs, one for each compute capability | New. PR #649 (not merged) uses tags `pci:<vendor>:<device>+<alg>:<hash>`. `GetResourceAvailability` refuses every device (`src/gateway/iterables/resource_availability_iterable.py:52-66`). | One descriptor for each member of the family (for example one for each CUDA compute capability, or each ROCm `gfx` target). PR #649 writes the families that it can attach and test. |
 
 ### `quantities/resources/`
 
@@ -144,11 +147,11 @@ remove its row here.
 The six settings that nodo has today have their files (part 1). They need the lines
 `class=` and `name=` at stage 7 (`REASON.md`, rule 6.4).
 
-### `policies/network/`
+### `policies/filesystem_entry/`
 
 | Name | Value | Today | Notes |
 | --- | --- | --- | --- |
-| `share` | the id of a network share | the filesystem setting `share` with `role=network`; id = sha256 of length-prefixed fields (`src/utils/shared_filesystems.py:397-433`) | The formal fixes the id that `ShareLocationRequest.share_id` carries. |
+| `share-v2` | as `share`, but with `role=network` the key `network` gives the position of the network in `Service.network` | `share` names the network by its tag, and its id is sha256 of length-prefixed fields with the tag (`src/utils/shared_filesystems.py:397-433`) | It replaces `share` (`replaces=`). The formal fixes the id that `ShareLocationRequest.share_id` carries: `<type>:<digest>` of a hash whose type the formal gives (rule 3.9), over the length-prefixed fields "network", the formal of the domain, the value of the domain after the settings of the network, the name, the env and its value. The id does not use the position: two services put one network in two positions. The setting stays on the directory. With the code, at stage 7. |
 
 ### `prices/node/`
 
@@ -168,7 +171,7 @@ must know.
 
 | Name | Per | Today |
 | --- | --- | --- |
-| `reputation-pull`, `reputation-push` | one client, and all | `reputation.PULL_*`, `PUSH_*`, `MAX_OFFCHAIN_*_PER_RESPONSE` |
+| `reputation-pull-calls`, `reputation-pull-bytes`, `reputation-push-calls`, `reputation-push-bytes` (one client); `reputation-pull-calls-all`, `reputation-push-calls-all` (all); `reputation-proofs-per-answer` | in the formal, as in `calls` | `reputation.PULL_*`, `PUSH_*`, `MAX_OFFCHAIN_*_PER_RESPONSE`. Follow `calls`: the formal gives what is counted and `per`; the scope is the window in seconds (empty for `reputation-proofs-per-answer`). Low priority. |
 
 ### `networks/`
 
@@ -190,8 +193,7 @@ wire today).
 
 | Name | Today | Notes |
 | --- | --- | --- |
-| `bee-rpc` | `transport_stack.py:266-351` | Its keys hold the schema of `buffer.Buffer`. |
-| `celaut-gateway` | `transport_stack.py:418-720` | A wire schema (REASON 2.5): split each rule that two nodes must agree on (hash types, signature formats, receipts, proof of work, schemas) into a formal of its own. |
+| the split of `celaut-gateway` | The file `celaut-gateway.descriptor` is the formal that nodo sends today (`transport_stack.py:418-720`). | A wire schema (REASON 2.5): split each rule that two nodes must agree on (hash types, signature formats, receipts, proof of work, schemas) into a formal of its own. It depends on the format of a schema. |
 | `celaut-observe`, `celaut-chat` | Today Chat and Observe are RPCs inside the gateway layer | Each one is a branch of the tree with its own formal (REASON 2.8). |
 
 ### `protocols/node_gateway/`
