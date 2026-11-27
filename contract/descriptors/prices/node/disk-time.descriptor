@@ -18,4 +18,4 @@ class=rate
 name=disk-time
 of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:bd02506000ba59631e803c5346f375a4c5d1a2d61254fa3e7cec9383e3627e14
 rounding=the node computes each charge in proportion and rounds it down to a whole MU
-scope=the id <type>:<digest> of the formal of an architecture, as ASCII; the rate applies to the instances of that architecture; empty: the general rate
+scope=the id <type>:<digest> of the formal of an architecture, in the characters of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895; the rate applies to the instances of that architecture; empty: the general rate
