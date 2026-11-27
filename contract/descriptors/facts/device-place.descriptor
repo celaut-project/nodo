@@ -1,0 +1,15 @@
+tags: device-place, location
+
+A fact of a device: where the device is, as a text for a person. For example the room,
+the rack or the slot.
+
+The value is UTF-8 text, one line, 256 bytes or less. Example: rack 3, slot 2. A
+program does not read a meaning from it.
+
+An absent fact: the node gives no place. The node is bound: it attests the fact.
+
+=== formal
+class=fact
+name=device-place
+place=ArchitectureResources.facts
+value=UTF-8 text for a person, one line, at most 256 bytes; no meaning for a program

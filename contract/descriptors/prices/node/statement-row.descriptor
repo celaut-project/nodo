@@ -1,0 +1,15 @@
+tags: statement-row, statement_row_mu
+
+A rate of the node: the price of one movement in an answer of GetBalanceStatement.
+
+The value is MU for one. Example: 1. The node takes it from the balance that
+pays for the action.
+
+The rate has no scope. A reader that does not know the rate ignores it.
+
+=== formal
+base=one
+class=rate
+name=statement-row
+of=one movement in a GetBalanceStatement answer, charged to the caller with the query
+scope=none

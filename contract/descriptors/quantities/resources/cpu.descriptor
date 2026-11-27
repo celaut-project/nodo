@@ -1,0 +1,20 @@
+tags: cpu, vcpu, cores
+
+The CPU time of one instance, in thousandths of one core.
+
+The value is an integer. Example: 1500 is one and a half cores. In each period of
+100 milliseconds, the processes of the instance use at most value/1000 times
+100 milliseconds of CPU time, summed over all their virtual CPUs. The guest has
+ceil(value/1000) virtual CPUs, and at least one.
+
+An absent value says nothing (it is not 0). Valid in the resources of a container. The
+node reserves the value, keeps the sum of its instances within its capacity, enforces
+it, and charges for it.
+
+=== formal
+class=resource
+measure=the CPU time that the processes of the instance can use: in each period of 100 ms, at most value/1000 times 100 ms, summed over all the virtual CPUs of the guest
+name=cpu
+place=the resources of a container
+unit=core/1000
+vcpus=the guest has ceil(value/1000) virtual CPUs, and at least 1

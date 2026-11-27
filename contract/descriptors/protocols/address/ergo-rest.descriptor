@@ -1,0 +1,18 @@
+tags: ergo-rest
+
+A layer: the REST API of the Ergo reference node, over HTTP/1.1 with no TLS, on TCP. A
+member of a proof-of-work network of Ergo gives it on one address.
+
+The calls that a node uses are GET /info, GET /blocks/at/{height} and
+GET /blocks/{id}/header. The answers are JSON, as the Ergo reference node gives them.
+The port of the address selects the layer: nothing in TCP selects it.
+
+A layer has no value.
+
+=== formal
+calls=GET /info, GET /blocks/at/{height}, GET /blocks/{id}/header
+class=layer
+name=ergo-rest
+selected_by=the port of the address
+spec=the REST API of the Ergo reference node (ergoplatform/ergo), HTTP/1.1, JSON, no TLS
+transport=tcp

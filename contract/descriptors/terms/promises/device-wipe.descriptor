@@ -1,0 +1,16 @@
+tags: device-wipe
+
+A promise of the node: before it gives a device to an instance, it clears the device.
+No data that an earlier instance wrote to the memory or to the state of the device stays
+readable.
+
+The value is empty. Any other value is not valid.
+
+With no promise, the caller assumes that data of an earlier instance can stay on the
+device. The node is bound.
+
+=== formal
+class=promise
+name=device-wipe
+rule=before the node gives a device to an instance, no data that an earlier instance wrote to the memory or the state of the device is readable
+value=empty

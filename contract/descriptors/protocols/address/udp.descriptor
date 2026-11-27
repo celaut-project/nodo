@@ -1,0 +1,17 @@
+tags: udp
+
+A transport layer: UDP, as RFC 768 specifies. Each address gives one IP address and one
+port. Each message is one datagram.
+
+The port is not a part of the protocol: each node selects its own port, and the address
+gives it. A layer above UDP selects nothing in it: the port selects the protocol.
+
+A layer has no value. A reader that does not know the layer does not call the address
+on it.
+
+=== formal
+class=layer
+kind=datagram
+name=udp
+port=per-address
+spec=RFC768

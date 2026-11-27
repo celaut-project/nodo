@@ -1,0 +1,19 @@
+tags: celaut-instances
+
+A kind of network: the instances of celaut services that declare the same network. The
+service author selects the keys of the value, to name the domain.
+
+The value is key=value lines, sorted by key, separated by a newline, with no repeated
+key. The node does not read the keys. Example: app=chat-room and room=main.
+
+Two instances are in the same network only if their networks have equal domains (the
+formal and the value, after the settings of the network). The node finds the members
+in its own instances and in the instances of the peers that it knows. A member gives
+the ports of its API whose layers match Service.Network.protocol_stack. The node is
+bound.
+
+=== formal
+class=domain
+members=the instances, of this node and of the peers that it knows, whose service declares a network with an equal domain after its settings; on the ports of their API whose layers match the protocol stack of the network
+name=celaut-instances
+value=key=value lines sorted by key, with no repeated key; the node compares the bytes and does not read the keys

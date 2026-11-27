@@ -1,0 +1,14 @@
+tags: any, text
+
+A format of an environment variable: any value. The caller gives any bytes with no NUL
+byte. A node and a caller check no other thing: not UTF-8, not a length.
+
+Example: the value 8080, or a JSON text.
+
+A node gives the variable to the process of the service only if its name is a C
+identifier. A node refuses a value with a NUL byte.
+
+=== formal
+class=format
+name=any
+value=any bytes with no NUL byte; no other check

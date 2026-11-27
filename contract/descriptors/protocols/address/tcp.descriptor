@@ -1,0 +1,7 @@
+tags: tcp
+
+The transport is TCP, as RFC 9293 specifies. Each address gives one IP address and one port. The port is not part of the protocol. Each node selects its own port, and the address gives it.
+
+=== formal
+port=per-address
+spec=RFC9293

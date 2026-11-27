@@ -1,0 +1,23 @@
+tags: scarcity-curve, scarcity_curve
+
+A condition of the node: how the price of a resource grows with its load. The node can
+charge more than its rate when a resource is scarce.
+
+The value is key=value lines, sorted by key: num and den, both 1 or more, in base 10.
+The exponent e is num/den. Example: den=1 and num=2. For a load L in millionths, the
+shape S is the largest integer s with s^den * 1000000^num <= L^num * 1000000^den:
+it is L^e in millionths, exact, with no floating point. The multiplier, in basis points, is
+floor(10000 + (M - 1) * 10000 * S / 1000000), where M is the value of the promise
+scarcity-max. With e = 1, the price grows in a straight line with the load.
+
+With no condition, the price does not change with the load. The caller is bound.
+
+=== formal
+class=condition
+load=for each resource in resources: the part of the capacity of the node that is in use, in millionths, as the node measures it
+max=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:8eef8c73033b29b971c667ba741bb553533507bd05b35b2048e464c2d834fbc9
+multiplier=floor(10000 + (M-1)*10000*S/1000000) basis points, where M is the value of the promise scarcity-max
+name=scarcity-curve
+resources=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db
+shape=S is the largest integer s with s^den*1000000^num <= L^num*1000000^den; L is the load in millionths
+value=key=value lines sorted by key: den (1 or more), num (1 or more), base 10; the exponent is num/den

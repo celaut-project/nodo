@@ -1,0 +1,21 @@
+tags: memory-time, ram_mu_per_gib_hour
+
+A rate of the node: the price of the memory of an instance that runs, for each GiB and each hour.
+
+The value is MU for one GiB (2^30 bytes) for one hour. Example: 1000000. The node charges in proportion to
+the amount and to the time, and rounds each charge down to a whole MU. A condition or a
+promise of the node can change the price with the load.
+
+The scope is the id of the formal of an architecture, as text: the rate applies to the
+instances of that architecture. An empty scope is the general rate.
+
+A reader that does not know the rate ignores it. The offer is the authority for one
+instance.
+
+=== formal
+base=1073741824 bytes of the resource for 3600 seconds
+class=rate
+name=memory-time
+of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db
+rounding=the node computes each charge in proportion and rounds it down to a whole MU
+scope=the id <type>:<digest> of the formal of an architecture, as ASCII; the rate applies to the instances of that architecture; empty: the general rate

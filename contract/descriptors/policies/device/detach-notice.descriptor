@@ -1,0 +1,20 @@
+tags: detach-notice
+
+A setting of a device: the notice, in seconds, that the service needs before the node
+detaches the device by its own decision (a stop or a hibernation that the instance did
+not ask for).
+
+The value is an integer in base 10. Example: 30. The node sends the notice of the
+setting notice (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616) at least this many seconds
+before it detaches the device. The service must have that setting.
+
+With no setting, the service asks for no minimum. The node is bound.
+
+=== formal
+class=setting
+default=absent: no minimum
+name=detach-notice
+notice=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616
+place=service.container.devices.policies
+rule=the node sends the notice at least value seconds before it detaches the device by its own decision
+value=seconds, base 10

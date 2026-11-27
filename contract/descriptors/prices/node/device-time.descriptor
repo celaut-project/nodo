@@ -1,0 +1,20 @@
+tags: device-time
+
+A rate of the node: the price of one device that is attached to an instance, for each
+hour.
+
+The value is MU for one device for one hour. Example: 5000000. The node charges in
+proportion to the time, and rounds each charge down to a whole MU.
+
+The scope selects the devices: the id of the formal of a model fact (for example
+pci-model, 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1), then "=", then the value of that fact, as UTF-8.
+Example: <id of pci-model>=10de:2330. An empty scope is the general rate. A reader that
+does not know the rate ignores it.
+
+=== formal
+base=one device for 3600 seconds
+class=rate
+name=device-time
+of=one device attached to an instance
+rounding=the node computes each charge in proportion and rounds it down to a whole MU
+scope=<id of the formal of a fact of the device>=<value of that fact>, UTF-8; empty: the general rate

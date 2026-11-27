@@ -1,0 +1,20 @@
+tags: device-models
+
+A fact of a start: the model of each device that the node attached to the instance at
+this start.
+
+The value is key=value lines, sorted by the bytes of the key, separated by a newline.
+The key is the position of the entry of Container.devices, in base 10. The value is the
+model: "pci:" and the value of the fact pci-model (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1), or "usb:"
+and the value of the fact usb-model (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5). Example:
+0=pci:10de:2330. An entry with no device at the start has no line.
+
+An absent fact: the node attests no model. The node is bound: it signs the receipt.
+
+=== formal
+class=fact
+name=device-models
+pci=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1
+place=StartReceipt.facts
+usb=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5
+value=key=value lines sorted by key; the key is the position of the entry of Container.devices in base 10; the value is pci:<value of the fact pci-model> or usb:<value of the fact usb-model>

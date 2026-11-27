@@ -1,0 +1,18 @@
+tags: service-file, on_filesystem
+
+A source of a dependency: a file in the filesystem of the service that declares the
+dependency. The file holds the bytes of the Service of the dependency: the bytes whose
+hash is the hash of the dependency.
+
+The value is the path of the file: the segments separated by "/", with no "/" at the
+start, as UTF-8. Example: deps/worker.service.
+
+A node that does not know this source ignores it. A party that reads the file checks
+its hash before it uses it. The source does not change the service that the hashes
+name.
+
+=== formal
+class=source
+content=the serialized Service of the dependency; its hash is the hash of the dependency
+name=service-file
+value=a path in the filesystem of the service that declares the dependency, segments separated by '/', no '/' at the start, UTF-8

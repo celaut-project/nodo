@@ -1,0 +1,16 @@
+tags: statement-retention, retention_days
+
+A promise of the node: how long it keeps the movements of a dead account, in days,
+after the last movement of the account.
+
+The value is days, in base 10. Example: 30. The value 0 means for ever. The node never
+deletes the movements of an account that lives, or of a dead account with an account
+alive below it.
+
+With no promise, the caller assumes nothing. The node is bound.
+
+=== formal
+class=promise
+name=statement-retention
+rule=the node keeps the movements of a dead account for at least value days after its last movement
+value=days, base 10; 0 is for ever

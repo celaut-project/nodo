@@ -1,0 +1,17 @@
+tags: chat-message-bytes
+
+A limit of the node: the largest message that a client can send with celaut-chat.
+
+The value is an integer in bytes. Example: 4096. The node refuses a message with more bytes.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=chat-message-bytes
+per=one client
+rule=The node refuses a message with more bytes.
+scope=none
+unit=bytes

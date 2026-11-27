@@ -1,0 +1,32 @@
+tags: notice, stop notice, hibernate notice
+
+A setting of the start of the service: the service reads the notices of the node on
+the first virtio console of the guest. A notice tells the service that the node will
+stop or hibernate the instance soon, so that the service can save its work.
+
+The value is empty. Any other value is not valid.
+
+The node writes one line for each notice to the console /dev/hvc0. A line is ASCII
+text, 128 bytes or less, with a newline at its end: a verb, one space, and a unix time
+in seconds. The verbs are STOP and HIBERNATE. Example: "STOP 1795713400". At that
+time the node stops or hibernates the instance, also if the service is not ready. The
+service ignores a line with a verb that it does not know. The node can write other
+bytes to the console: the service ignores a line that does not have this form.
+
+With no setting, the node sends no notice.
+The node is bound: it sends the notice for each stop or hibernation that the instance
+did not ask for. A node that cannot write to the console of the guest refuses the
+service.
+
+=== formal
+channel=the first virtio console of the guest, at the path /dev/hvc0
+class=setting
+default=absent: the node sends no notice
+line=ASCII; <verb> <space> <unix time in seconds as a base-10 integer> <newline>; at most 128 bytes with the newline
+name=notice
+place=service.container.init
+time=the node stops or hibernates the instance at this time, whether the service is ready or not
+value=empty
+verb.unknown=the service ignores the line
+verbs=HIBERNATE,STOP
+when=before each stop and each hibernation that the instance did not ask for

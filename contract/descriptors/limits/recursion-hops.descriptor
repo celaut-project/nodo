@@ -1,0 +1,17 @@
+tags: recursion-hops
+
+A limit of the node: the most nodes that one request can go into, with the receiver.
+
+The value is an integer in nodes. Example: 16. A larger remaining_hops in a request becomes the value. An absent remaining_hops is the value.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=recursion-hops
+per=one request: RecursionGuard.remaining_hops, TunnelRequest.remaining_hops, BalanceStatementRequest.remaining_hops
+rule=A larger remaining_hops in a request becomes the value. An absent remaining_hops is the value.
+scope=none
+unit=nodes

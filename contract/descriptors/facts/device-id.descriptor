@@ -1,0 +1,17 @@
+tags: device-id
+
+A fact of a device: a stable id that the node selects for the device. A caller uses it
+to ask for this device (the setting device-selection of Configuration.policies).
+
+The value is 1 to 64 bytes of printable ASCII, with no space, no comma and no "=".
+Example: gpu-0. The id is unique among the devices of the node, and it stays the same
+when the node restarts.
+
+An absent fact: the node gives no stable id, and a caller cannot select the device.
+The node is bound: it attests the fact.
+
+=== formal
+class=fact
+name=device-id
+place=ArchitectureResources.facts
+value=1 to 64 bytes of printable ASCII (0x21-0x7e), without ',' and '='; unique among the devices of the node; the same after a restart of the node

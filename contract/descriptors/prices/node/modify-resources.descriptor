@@ -1,0 +1,15 @@
+tags: modify-resources, modify_resources_mu
+
+A rate of the node: the price of one call of ModifyServiceSystemResources that the node does.
+
+The value is MU for one. Example: 1000. The node takes it from the balance that
+pays for the action.
+
+The rate has no scope. A reader that does not know the rate ignores it.
+
+=== formal
+base=one
+class=rate
+name=modify-resources
+of=one ModifyServiceSystemResources request that the node accepts, charged to the instance that changes
+scope=none

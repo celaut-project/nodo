@@ -1,0 +1,14 @@
+tags: pci-model, pci
+
+A fact of a device on PCI: its model, as the PCI vendor id and device id.
+
+The value is the two ids as 4 lowercase hexadecimal digits each, separated by ":".
+Example: 10de:2330. A rate of a device can use this fact as its scope.
+
+An absent fact: the node gives no PCI model. The node is bound: it attests the fact.
+
+=== formal
+class=fact
+name=pci-model
+place=ArchitectureResources.facts
+value=<vendor>:<device>, the PCI vendor id and device id, 4 lowercase hexadecimal digits each

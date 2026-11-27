@@ -1,0 +1,14 @@
+tags: usb-model, usb
+
+A fact of a device on USB: its model, as the USB vendor id and product id.
+
+The value is the two ids as 4 lowercase hexadecimal digits each, separated by ":".
+Example: 046d:0825. A rate of a device can use this fact as its scope.
+
+An absent fact: the node gives no USB model. The node is bound: it attests the fact.
+
+=== formal
+class=fact
+name=usb-model
+place=ArchitectureResources.facts
+value=<vendor>:<product>, the USB idVendor and idProduct, 4 lowercase hexadecimal digits each

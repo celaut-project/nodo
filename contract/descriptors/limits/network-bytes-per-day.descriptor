@@ -1,0 +1,17 @@
+tags: network-bytes-per-day
+
+A limit of the node: the most bytes that the node relays through ServiceTunnel in one day, for all the clients together.
+
+The value is an integer in bytes. Example: 107374182400. The day is the calendar day of the node, in its local time zone. When the node has no bytes left, it refuses the traffic with RESOURCE_EXHAUSTED.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=network-bytes-per-day
+per=all the clients of the node together
+rule=The day is the calendar day of the node, in its local time zone. When the node has no bytes left, it refuses the traffic with RESOURCE_EXHAUSTED.
+scope=none
+unit=bytes

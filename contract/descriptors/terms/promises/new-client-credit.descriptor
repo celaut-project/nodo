@@ -1,0 +1,14 @@
+tags: new-client-credit, credit_mu_per_new_client
+
+A promise of the node: the MU that it gives to a new client, one time, when
+GenerateClient gives the client. The balance statement shows it as a credit movement.
+
+The value is an amount of MU, as a decimal integer of 0 or more. Example: 4950000.
+
+With no promise, the caller assumes no credit. The node is bound.
+
+=== formal
+class=promise
+name=new-client-credit
+rule=the node credits the value to each new client one time, when it gives the client
+value=MU, a decimal integer of 0 or more

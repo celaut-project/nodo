@@ -1,0 +1,21 @@
+tags: cpu-time, cpu_mu_per_vcpu_hour
+
+A rate of the node: the price of the CPU of an instance that runs, for each core and each hour.
+
+The value is MU for one core for one hour. Example: 2000000. The node charges in proportion to
+the amount and to the time, and rounds each charge down to a whole MU. A condition or a
+promise of the node can change the price with the load.
+
+The scope is the id of the formal of an architecture, as text: the rate applies to the
+instances of that architecture. An empty scope is the general rate.
+
+A reader that does not know the rate ignores it. The offer is the authority for one
+instance.
+
+=== formal
+base=1000 units of the resource (one core) for 3600 seconds
+class=rate
+name=cpu-time
+of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722
+rounding=the node computes each charge in proportion and rounds it down to a whole MU
+scope=the id <type>:<digest> of the formal of an architecture, as ASCII; the rate applies to the instances of that architecture; empty: the general rate

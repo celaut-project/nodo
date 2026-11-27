@@ -1,0 +1,15 @@
+tags: all-addresses, *, internet
+
+A kind of network: all the addresses that the node can reach. The instance can connect
+to any IP address and any port. The node gives no list of members.
+
+The value is empty. Any other value is not valid.
+
+A node that does not let instances reach all addresses refuses the service. The node
+is bound.
+
+=== formal
+class=domain
+members=none listed; the instance can connect to any address that the node can reach, on any port
+name=all-addresses
+value=empty

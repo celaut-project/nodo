@@ -1,0 +1,20 @@
+tags: memory, ram
+
+The memory of one instance: the RAM of the guest that the processes of the instance
+can use at one time. It is a total for the instance, not per core.
+
+The value is in bytes. Example: 268435456 (256 MiB). The memory that the guest kernel
+uses for itself is not in the value: the node adds it when it boots the guest. Swap
+space is not memory.
+
+An absent value says nothing (it is not 0). Valid in the resources of a container. The
+node reserves the value, adds it to the memory of its other instances, keeps the sum
+within its capacity, and charges for it. The node can give more than the value (for
+example a floor); StartReceipt.reserved gives what it gave.
+
+=== formal
+class=resource
+measure=the RAM of the guest that the processes of the instance can use at one time, as a total for the instance, not per core; the memory that the guest kernel uses for itself is not counted; swap space is not counted
+name=memory
+place=the resources of a container
+unit=byte

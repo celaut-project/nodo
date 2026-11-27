@@ -1,0 +1,24 @@
+tags: guest-kernel, kernel
+
+A setting of the start of the service: the guest kernel that the instance boots. It is
+one setting for the instance and all its devices.
+
+The value is the ids of the kernel image, one for each hash type, separated by commas
+and sorted by their bytes. An id is <type>:<digest> in lowercase hexadecimal, where the
+type is the digest of the empty input (REASON 6.3). The hash is of the bytes of the
+kernel image file that the virtual machine loads. It is not the hash of an initial RAM
+disk. Example, with one hash type: 0e57...a8:5c1f...9d.
+
+With no setting, the service has no preference: the node selects the kernel. A node
+boots a kernel only if the hash of its bytes, with the algorithm of one of the types,
+is equal to the digest of that type. A node that does not have such a kernel refuses
+the service. The node is bound.
+
+=== formal
+class=setting
+default=absent: the node selects the kernel
+hashed=the bytes of the kernel image file that the virtual machine loads, without an initial RAM disk
+match=the node boots a kernel only if its hash with the algorithm of one type in the value is equal to the digest of that type
+name=guest-kernel
+place=service.container.init
+value=the ids <type>:<digest> of the kernel image, one for each hash type, lowercase hexadecimal, sorted, separated by commas

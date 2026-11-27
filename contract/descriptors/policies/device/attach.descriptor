@@ -1,0 +1,21 @@
+tags: attach
+
+A setting of a device: when the node attaches the device.
+
+The value is the modes that the service accepts, in the order that it prefers,
+separated by commas. The modes are start (the node attaches the device before the
+instance starts) and request (the instance asks for it with DeviceChange.Attach).
+Example: request,start. The order has a meaning. A repeated mode is not valid.
+
+With no setting, the mode is start. The node is bound: it uses the first mode of the
+list that it supports, or refuses the service.
+
+=== formal
+class=setting
+default=start
+name=attach
+place=service.container.devices.policies
+request=the node attaches the device when the instance asks with DeviceChange.Attach, and detaches it when the instance asks
+start=the node attaches the device before the instance starts; the instance has it until it stops or hibernates
+value=the accepted modes, in the order of preference, separated by commas, with no repeat
+values=request,start

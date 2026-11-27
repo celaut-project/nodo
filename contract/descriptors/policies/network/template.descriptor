@@ -1,0 +1,26 @@
+tags: template
+
+A setting of a network: some values of the domain are templates that the node fills at
+each start from the environment variables of the start.
+
+The value is the keys of the domain that are templates, sorted by their bytes and
+separated by commas. Example: pow.block_id. The domain must have a value of key=value
+lines. The value of each key in the list is exactly ${NAME}, where NAME matches
+[A-Za-z_][A-Za-z0-9_]*. At a start, the node puts the value of the variable NAME of
+Configuration.environment_variables in its place. The value of a variable must be UTF-8
+with no newline. If a variable is absent, the node does not resolve the network at the
+start, and the network is not in the configuration file. The service can resolve it
+later with ResolveNetwork.
+
+With no setting, the value of the domain is fixed: the node changes nothing. The node
+is bound.
+
+=== formal
+class=setting
+default=absent: the value of the domain is fixed
+fill=at each start the node puts the UTF-8 value of the variable NAME of Configuration.environment_variables in its place; a value with a newline is not valid
+missing=if a variable is absent, the node does not resolve the network at the start
+name=template
+place=service.network
+template=the value of each such key is exactly ${NAME}, NAME matches [A-Za-z_][A-Za-z0-9_]*
+value=the keys of the value of the domain that are templates, sorted, separated by commas

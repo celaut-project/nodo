@@ -1,0 +1,17 @@
+tags: network-rate
+
+A limit of the node: the most bytes for each second that the node relays through ServiceTunnel, for all the clients together.
+
+The value is an integer in bytes/second. Example: 104857600. The node slows the traffic to stay at or below the value.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=network-rate
+per=all the clients of the node together
+rule=The node slows the traffic to stay at or below the value.
+scope=none
+unit=bytes/second

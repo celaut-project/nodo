@@ -1,0 +1,17 @@
+tags: hibernated-disk
+
+A limit of the node: the most disk that the hibernated instances of one parent that cannot pay hold together.
+
+The value is an integer in bytes. Example: 21474836480. Above the limit, the node stops the oldest hibernated instances that cannot pay, and deletes their state.
+
+The limit has no scope.
+
+An absent limit is not a promise of no limit. The node is bound.
+
+=== formal
+class=limit
+name=hibernated-disk
+per=one parent: the client or the instance that started the instances
+rule=Above the limit, the node stops the oldest hibernated instances that cannot pay, and deletes their state.
+scope=none
+unit=bytes

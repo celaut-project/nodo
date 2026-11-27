@@ -1,0 +1,19 @@
+tags: device-selection
+
+A setting of a start, from the caller: the device that the node gives for an entry of
+Container.devices.
+
+The value is key=value lines, sorted by the bytes of the key, separated by a newline.
+The key is the position of the entry in base 10. The value is the stable id of a device
+of the node (the fact device-id, 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6ce6c432403ebc0b978b7a38df1f7bc3b89229a42af71656dbfb8c7b26a70617). Example: 0=gpu-1.
+
+With no setting, the node selects the devices. The node is bound: it gives that device,
+or it refuses the start. When the instance wakes, the node gives the same device, or
+the instance stays hibernated.
+
+=== formal
+class=setting
+default=absent: the node selects the devices
+name=device-selection
+place=configuration
+value=key=value lines sorted by key; the key is the position of an entry of Container.devices in base 10; the value is the value of the fact 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6ce6c432403ebc0b978b7a38df1f7bc3b89229a42af71656dbfb8c7b26a70617 of a device of the node

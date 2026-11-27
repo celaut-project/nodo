@@ -1,0 +1,14 @@
+tags: ergo-mainnet
+
+This ledger is Ergo mainnet. Ergo is a proof-of-work blockchain (Autolykos) with an extended UTXO model. ErgoTree scripts lock the boxes. The native asset is ERG. One ERG is 10^9 nanoERG. A token is an EIP-4 token. Its id is 64 hexadecimal characters. Compare ids without case.
+
+=== formal
+asset.native=ERG
+asset.native.base_unit=nanoERG
+asset.native.decimals=9
+asset.token=EIP-4 token id, 64 hex characters, compared without case
+chain=ergo
+consensus=autolykos2
+model=eutxo
+network=mainnet
+script=ErgoTree

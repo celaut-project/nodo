@@ -1,0 +1,17 @@
+tags: call, mu_per_call
+
+A rate of a service: the price of one call to a method of the slot. The service
+charges it to the caller, not the node.
+
+The value is MU for one call. Example: 10. A call is one request of the protocol of
+the slot (for example one gRPC call).
+
+The scope is the name of the method, as UTF-8, as the protocol of the slot names it.
+An empty scope is the general rate for each call. The node does not read this rate.
+
+=== formal
+base=one call
+class=rate
+name=call
+of=one call: one request of the protocol of the slot
+scope=the name of the method, UTF-8, as the protocol of the slot names it; empty: every call

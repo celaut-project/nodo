@@ -1,0 +1,23 @@
+tags: linux-arm64, linux/arm64, arm64, aarch64
+
+A Linux virtual machine on AArch64, 64-bit, little-endian. The software of the service
+runs as Linux processes in a guest with its own kernel. It does not share the kernel of
+the host.
+
+The node guarantees only the instructions of Armv8.0-A. Software that needs a later
+extension (for example SVE) can fail. Another level is another architecture, with
+another formal. The node can run the guest natively or with an emulator: the
+benchmarks of the node show the difference.
+
+The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9c03c66a3776b9ce1260b15aca7f0525ea6542092800cd4a23e07eda60cbeb97).
+With no such setting, the node selects the kernel.
+
+Who is bound: the node that runs the service. An architecture has no value.
+
+=== formal
+abi=the Linux system call interface of AArch64, LP64, little-endian
+class=architecture
+isa=Armv8.0-A: only the instructions of the base AArch64 architecture
+kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host
+kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9c03c66a3776b9ce1260b15aca7f0525ea6542092800cd4a23e07eda60cbeb97
+name=linux-arm64

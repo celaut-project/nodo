@@ -1,0 +1,15 @@
+tags: statement-query, statement_query_mu
+
+A rate of the node: the price of one answer of GetBalanceStatement.
+
+The value is MU for one. Example: 100. The node takes it from the balance that
+pays for the action.
+
+The rate has no scope. A reader that does not know the rate ignores it.
+
+=== formal
+base=one
+class=rate
+name=statement-query
+of=one GetBalanceStatement answer, charged to the caller before the node answers
+scope=none

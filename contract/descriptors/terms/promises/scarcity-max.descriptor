@@ -1,0 +1,18 @@
+tags: scarcity-max, scarcity_max_multiplier
+
+A promise of the node: the most that the price of a resource can be, as a multiple of
+its rate. When a resource is scarce, the node can charge more than its rate, but never
+more than this multiple.
+
+The value is an integer of 1 or more, in base 10. Example: 3. The value 1 means that
+the node never charges more than its rates. It applies to the rates of the resources
+cpu, disk and memory.
+
+With no promise, the caller assumes no limit. The node is bound.
+
+=== formal
+class=promise
+name=scarcity-max
+resources=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db
+rule=the price of each resource in resources is never more than value times its rate
+value=an integer of 1 or more, base 10
