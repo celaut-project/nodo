@@ -15,4 +15,4 @@ default=absent: the node loads nothing
 name=bitstream
 place=service.container.devices.policies
 rule=the node loads the bytes of the file into the device before it gives the device to the instance
-value=a path of a file in the filesystem of the service, segments separated by '/', no '/' at the start
+value=a relative pathname (definition 3.311 (Relative Pathname) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) of a file in the filesystem of the service: its components are separated by '/' (the byte 47), with no '/' at the start
