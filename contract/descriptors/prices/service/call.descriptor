@@ -14,4 +14,4 @@ base=one call
 class=rate
 name=call
 of=one call: one request of the protocol of the slot
-scope=the name of the method, UTF-8, as the protocol of the slot names it; empty: every call
+scope=the name of the method, as text of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895, as the protocol of the slot names it; empty: every call
