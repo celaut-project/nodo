@@ -2,11 +2,12 @@ tags: memory-bandwidth-256mib, mem_bandwidth_256mib_bytes_per_sec
 
 A score of one core: bytes of memory copied per second through a buffer of 268435456 bytes (the working set).
 
-The value is an integer, in byte per second. Example: 8000000000. More is
-better. The node measures it with one process, so it is what one core does, in a guest
-of the architecture of the announcement. The method is fixed: busybox 1.37.0 from the
-image that the formal names by its digest, and the loop that the formal gives. A
-faster method (for example a compiled program) is another benchmark.
+The value is an integer, in byte per second. Example: 8000000000. More is better. The
+node measures it with one process, so it is what one core does, in a guest of the
+architecture of the announcement. The method is fixed: the static program BusyBox 1.37.0
+that the formal names as a document for the instruction set of the guest, and the loop
+that the formal gives. A faster method (for example a compiled program) is another
+benchmark.
 
 The statistic is one run of at least 2 seconds. It is not a mean of runs and not a
 percentile. A score that must be stable is another benchmark.
@@ -17,13 +18,13 @@ each placement. A node that did not measure the score refuses.
 
 === formal
 class=benchmark
-clock=/proc/uptime of the guest, in hundredths of a second
-method=busybox dd if=/dev/zero of=/dev/null bs=268435456, timed for count=c and for count=2c, with c=1, 2, 4, ...; stop when the second run takes at least 100 hundredths of a second more than the first
+clock=the first number of the file /proc/uptime of the guest (the page proc_uptime(5) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0547755fe776075c828d11f43fd868af1338cc669c8f0b4ac8a72dddcea42698), in hundredths of a second
+method=the dd of the tool: dd if=/dev/zero of=/dev/null bs=268435456 (the files of the page null(4) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0547755fe776075c828d11f43fd868af1338cc669c8f0b4ac8a72dddcea42698), timed for count=c and for count=2c, with c=1, 2, 4, ...; stop when the second run takes at least 100 hundredths of a second more than the first
 name=memory-bandwidth-256mib
 place=the benchmarks of a container or of an architecture
-process=one process: the score is what one core does
+process=one process (definition 3.279 (Process) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9): the score is what one core (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:74b75cc69cfa93ec7b96b07316fee2be3fe54afb24972ecd74002523e374c29a) does
 score=floor((bytes of the second run - bytes of the first run)*100/(hundredths of the second run - hundredths of the first run)), with the byte counts that dd reports
 stat=one run on an idle guest: the rate over one window of at least 2 seconds; no mean of runs and no percentile
-tools=busybox 1.37.0, the image index of busybox:1.37.0 whose digest is the id e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e, in a guest of the architecture
+tools=the static program BusyBox 1.37.0, with its applets awk, ash, dd and sha256sum, for the instruction set of the architecture: the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:d4206562a06c19d044c16876f9da490211093cfa1816959ea4ec2c77459e33c1 for the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:bacad9da2c43fb7a1edf0a3bd79143d019a754e3992591d3353fc058b9a03ab7, the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6e44a4c142a0a543cd5e75dc52649178c83a4048542d32c73cb9b240d81733d2 for the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:cc71d5ea3cf371762ecd300d4fd07d81f1b02c4759237179520f686579366784; the source of both is the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:acc624a0fc8771fb3195112fff9dcb741781d414ac3fcf823aaa244757198abc; it runs in a guest (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b3469e385a533a222a75a1aeafb1a94b2795a9f689e302f034283e1d8cdceb38) of the architecture; for another instruction set the benchmark is not defined
 unit=byte/second
 working_set=268435456 bytes
