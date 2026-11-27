@@ -235,14 +235,23 @@ def cascade(base: str = "HEAD", root: str = ROOT) -> List[str]:
         done = subprocess.run(["git", "show", f"{base}:{path}"], capture_output=True)
         return formal_id(parse(done.stdout).formal) if done.returncode == 0 else None
 
-    old = {rel: old_id(rel) for rel in files(root)}
+    # Each id that a file had: at ``base``, and after each step. A formal can change two
+    # times in one run (its own change, then a new id of a formal that it names), and a
+    # file can hold the id of any of these versions.
+    past = {}
+    for rel in files(root):
+        past[rel] = {formal_id(read(os.path.join(root, rel)).formal)}
+        fid = old_id(rel)
+        if fid:
+            past[rel].add(fid)
     changed: List[str] = []
     while True:
         mapping = {}
         for rel in files(root):
             new = formal_id(read(os.path.join(root, rel)).formal)
-            if old.get(rel) and old[rel] != new:
-                mapping[old[rel].encode()] = new.encode()
+            past.setdefault(rel, set()).add(new)
+            for fid in past[rel] - {new}:
+                mapping[fid.encode()] = new.encode()
         step = False
         for rel in files(root):
             path = os.path.join(root, rel)
