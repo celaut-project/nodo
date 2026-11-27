@@ -15,4 +15,4 @@ class=setting
 default=absent: the node selects a name
 name=instance-name
 place=configuration
-value=[a-z0-9]+(-[a-z0-9]+)*, 1 to 63 characters
+value=1 to 63 characters of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895: one or more groups of the letters a to z and the digits 0 to 9, with one '-' between two groups; no '-' at the start or at the end, and no two '-' together
