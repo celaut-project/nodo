@@ -18,9 +18,9 @@ is bound.
 === formal
 class=setting
 default=absent: the value of the domain is fixed
-fill=at each start the node puts the UTF-8 value of the variable NAME of Configuration.environment_variables in its place; a value with a newline is not valid
+fill=at each start the node puts the value of the variable NAME of Configuration.environment_variables in its place, as text of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895; a value with a newline (the byte 10) is not valid
 missing=if a variable is absent, the node does not resolve the network at the start
 name=template
 place=service.network
-template=the value of each such key is exactly ${NAME}, NAME matches [A-Za-z_][A-Za-z0-9_]*
+template=the value of each such key is exactly ${NAME}: the characters '$' and '{', then NAME, then '}'; NAME is one or more of the letters A to Z and a to z, the digits 0 to 9 and '_', and does not start with a digit
 value=the keys of the value of the domain that are templates, sorted, separated by commas
