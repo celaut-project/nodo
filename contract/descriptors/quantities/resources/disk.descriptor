@@ -14,7 +14,7 @@ device holds.
 
 === formal
 class=resource
-measure=the size of the block device that holds the root filesystem of the instance: the files of the service and the free space for writes, as a total
+measure=the size of the block device (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7969ba1ce70da693124cc3523c3837bb5cbcc58bf2c4f0e21d72aad5070c8aca) that holds the root filesystem of the instance (the file system, definition 3.153 (File System) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9, of its root directory, definition 3.316 (Root Directory) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9): the files of the service and the free space for writes, as a total
 name=disk
 place=the resources of a container
 unit=byte

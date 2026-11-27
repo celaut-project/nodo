@@ -16,7 +16,7 @@ instance.
 base=1073741824 bytes of the resource disk of a hibernated instance for 3600 seconds
 class=rate
 name=kept-state
-of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:80ad9800a8342caa9ea8bbba4b3ce8031ad59482aea81cc908568af13d6e7926
+of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:bd02506000ba59631e803c5346f375a4c5d1a2d61254fa3e7cec9383e3627e14
 rounding=the node computes each charge in proportion and rounds it down to a whole MU
 scope=the id <type>:<digest> of the formal of an architecture, as ASCII; the rate applies to the instances of that architecture; empty: the general rate
 state=the disk of the hibernated instance, at its value in the resources of the instance
