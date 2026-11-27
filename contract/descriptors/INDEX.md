@@ -13,9 +13,9 @@ algorithm that nodo uses. Another algorithm gives other ids for the same bytes.
 
 | File | Tags | Id |
 | --- | --- | --- |
-| [`architectures/linux-amd64.descriptor`](architectures/linux-amd64.descriptor) | linux-amd64, linux/amd64, amd64, x86_64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:12701ca0629a58c87621e5deeaa6cb533863d4733354eeb6c54d8f7075a7d85e` |
-| [`architectures/linux-arm64-any-page.descriptor`](architectures/linux-arm64-any-page.descriptor) | linux-arm64-any-page, linux/arm64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:1be3c0c09f350814fd13ec81e1da552d12a40795d469dc80437dc38ed8b67d26` |
-| [`architectures/linux-arm64.descriptor`](architectures/linux-arm64.descriptor) | linux-arm64, linux/arm64, arm64, aarch64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:be6a3ef1ef50adec9501853129c6a75f3a81665c41a9c65ac90e6a217d9cb0d2` |
+| [`architectures/linux-amd64.descriptor`](architectures/linux-amd64.descriptor) | linux-amd64, linux/amd64, amd64, x86_64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5f2d2c0b95cdb4eebf62d148fd8a77d883736c8faa4435c1383451a2d3317404` |
+| [`architectures/linux-arm64-any-page.descriptor`](architectures/linux-arm64-any-page.descriptor) | linux-arm64-any-page, linux/arm64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:8d075cc95254b4da5f6a6c44aecb8e7e89e7be442829e9290a65fd722d12af58` |
+| [`architectures/linux-arm64.descriptor`](architectures/linux-arm64.descriptor) | linux-arm64, linux/arm64, arm64, aarch64 | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:2eaac983dad6b7a25b15fa2df04586680c21aa583e5d82b9cce2122b6b812577` |
 | [`concepts/armv8.0-a.descriptor`](concepts/armv8.0-a.descriptor) | armv8.0-a, aarch64-baseline | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:cc71d5ea3cf371762ecd300d4fd07d81f1b02c4759237179520f686579366784` |
 | [`concepts/block-device.descriptor`](concepts/block-device.descriptor) | block-device, disk | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7969ba1ce70da693124cc3523c3837bb5cbcc58bf2c4f0e21d72aad5070c8aca` |
 | [`concepts/core.descriptor`](concepts/core.descriptor) | core, virtual cpu | `0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:74b75cc69cfa93ec7b96b07316fee2be3fe54afb24972ecd74002523e374c29a` |
