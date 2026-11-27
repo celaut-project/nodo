@@ -8,7 +8,7 @@ The node guarantees only the instructions of the baseline level of x86-64
 fail. Another level is another architecture, with another formal. The node can run the
 guest natively or with an emulator: the benchmarks of the node show the difference.
 
-The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390).
+The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794).
 With no such setting, the node selects the kernel.
 
 The kernel uses pages of 4096 bytes, and the software can depend on it. Another page
@@ -21,7 +21,7 @@ abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e194b9acc02
 class=architecture
 isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:bacad9da2c43fb7a1edf0a3bd79143d019a754e3992591d3353fc058b9a03ab7
 kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host
-kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390
+kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794
 name=linux-amd64
 page=4096 bytes: the kernel uses pages of 4096 bytes, and the software can depend on it
 process=64-bit, little-endian
