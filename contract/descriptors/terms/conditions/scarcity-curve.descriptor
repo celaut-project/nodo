@@ -16,7 +16,7 @@ With no condition, the price does not change with the load. The caller is bound.
 class=condition
 load=for each resource in resources: the part of the capacity of the node that is in use, in millionths, as the node measures it
 max=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6696f94db21d675fbfe2ba3b321265fa1a326d6426aabc234361381cefab7e15
-multiplier=floor(10000 + (M-1)*10000*S/1000000) basis points, where M is the value of the promise scarcity-max
+multiplier=floor(10000 + (M-1)*10000*S/1000000), in units of 1/10000, where M is the value of the promise of the line max
 name=scarcity-curve
 resources=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b40a7b0ac46be148fe6db636cde59c8a53bb5f172a97c6eaafd246b1b6e034fd,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:bd02506000ba59631e803c5346f375a4c5d1a2d61254fa3e7cec9383e3627e14,0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:93ff9c541ec5a949d10c752c3a12857edafd2acadfe636db698b18d0681a0263
 shape=S is the largest integer s with s^den*1000000^num <= L^num*1000000^den; L is the load in millionths

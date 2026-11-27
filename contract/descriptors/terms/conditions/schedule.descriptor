@@ -15,4 +15,4 @@ node can close.
 class=condition
 name=schedule
 rule=the node takes new work only inside a span
-value=the spans <start>-<end>, minutes from 00:00 UTC, 0 to 1439, base 10, sorted, separated by commas; start after end goes past midnight; not empty
+value=the spans <start>-<end>, each a number of minutes (of 60 seconds) after 00:00:00 of the day in the time of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:76016d6a59ad50c6aed0620ea7d772e9f3ec634a40cac7a94785b23768dae900, 0 to 1439, base 10, sorted, separated by commas; a start after its end goes past 00:00:00; not empty
