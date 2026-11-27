@@ -1,0 +1,11 @@
+tags: linux-6.12-syscall-table
+
+The file scripts/syscall.tbl of the source of Linux, at the release 6.12 (the tag v6.12 of the
+repository of Linus Torvalds). The license of the file is GPL-2.0, so the repository
+keeps a copy: contract/documents/linux-6.12-scripts-syscall.tbl.
+
+=== formal
+bytes=17237
+class=document
+digest=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5fa3539f5ba4aabbb4945bbebd6a8d19234e91e10804b7b63ee6a6998b180246
+name=linux-6.12-syscall-table

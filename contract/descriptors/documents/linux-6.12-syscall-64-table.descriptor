@@ -1,0 +1,11 @@
+tags: linux-6.12-syscall-64-table
+
+The file arch/x86/entry/syscalls/syscall_64.tbl of the source of Linux, at the release 6.12 (the tag v6.12 of the
+repository of Linus Torvalds). The license of the file is GPL-2.0, so the repository
+keeps a copy: contract/documents/linux-6.12-arch-x86-entry-syscalls-syscall_64.tbl.
+
+=== formal
+bytes=15472
+class=document
+digest=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:da80dd0e7e4809297615e93a242849a073bc3b47fdcc404dd44223d0b8ecb044
+name=linux-6.12-syscall-64-table

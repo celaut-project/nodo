@@ -11,4 +11,4 @@ An absent fact: the node gives no PCI model. The node is bound: it attests the f
 class=fact
 name=pci-model
 place=ArchitectureResources.facts
-value=<vendor>:<device>, the PCI vendor id and device id, 4 lowercase hexadecimal digits each
+value=the text of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:59ebc8f20dd7197562e96627df82788110e19aad218542cf1da9cea46c2fb7b6 of the device

@@ -133,6 +133,38 @@ writes it in another way (for example the digest of a container image).
 of the configuration of nodo, no name of this project. A formal is for all
 implementations.
 
+**Rule 3.11. Each term of a formal resolves to a base.** A formal is for a reader that
+knows only ASD-STE100 and `celaut.proto`. Each term of a formal is one of these four:
+
+1. a word of ASD-STE100 with its approved meaning, or a name that `celaut.proto`
+   defines (a message, a field, an RPC): the reader of a descriptor reads the
+   contract first;
+2. a number with a unit of the base: bit, byte (8 bits) or second. Write a larger unit
+   as a multiple (1073741824 bytes, 3600 seconds);
+3. the id of another descriptor;
+4. a document: the id of a descriptor of `documents/`, which names the exact bytes of
+   the document by their hash, with the part of it that applies (for example a
+   section).
+
+A technical name that is none of these (for example "x86-64-v1", "UDP", "virtio
+console") becomes a descriptor or a document. The test: **can a reader that knows only
+ASD-STE100 and `celaut.proto` find the meaning of each term of the formal, by following
+the ids and by reading the documents?** If not, the formal is not complete (rule 3.4):
+two implementers can read the same bytes in two ways, and nothing finds it.
+
+**Rule 3.12. A concept or a document.** Make a descriptor of `concepts/` for a term only
+when the term has variants (so the variant is one leaf, and a change of it is a change
+of one id), or when more than one descriptor uses it. For any other term, name the
+document directly. A document is named only by the hash of its exact bytes. Its public
+name (for example "RFC 768") and where to get it go in the prose of its descriptor,
+never in the formal.
+
+The descriptors make a graph: a formal names its parts by their ids, and the parts can
+be shared. It is not the tree of the layers of an address (REASON 2.7). In that tree,
+the children of a layer are alternatives. In a formal, the parts are all true together.
+Nodes still compare only the bytes of the formal that is in the place of the contract;
+its parts change its bytes, because their ids are in it.
+
 ## 4. The classes and the folders
 
 The class says in which places of the contract the descriptor is valid. The contract
@@ -170,6 +202,8 @@ The folders, by use:
 | `schemas/` | schema | `Service.schema`, `Signed.Body.context` |
 | `environment_formats/` | format | `DescriptorKeyValue.value` of `Container.environment_variables` |
 | `proof_of_work/` | proof-of-work | `PoWRequired.descriptor` |
+| `concepts/` | concept | no place: only in the formal of another descriptor, by its id |
+| `documents/` | document | no place: only in the formal of another descriptor, by its id |
 
 To add a folder, add a row here and write its `REASON.md`. A folder is a use, not a
 kind of thing: the memory as a resource and the price of the memory are in two
@@ -197,6 +231,8 @@ What the formal of each class must give:
 | `payment-protocol` | `Descriptor` | `Contract.protocol` | the keys of `Contract.xattrs`, and the way to pay |
 | `format` | `Descriptor` | `DescriptorKeyValue.value` (environment variables) | the form of the bytes |
 | `proof-of-work` | `Descriptor` | `PoWRequired.descriptor` | the rule of the work, and the unit of the difficulty |
+| `concept` | (none) | no place: only in another formal | what the term is, in terms of the base (rule 3.11), and its variant |
+| `document` | (none) | no place: only in another formal | `digest`: the id `<type>:<digest>` of the exact bytes of the document; `bytes`: their number |
 
 To add a class, add a row here first. A class is a kind of place, not a kind of thing.
 The test reads the classes from the first column of this table.
@@ -297,5 +333,7 @@ Do these steps for each new descriptor:
 - A name or a path of nodo in the formal.
 - A reference to another descriptor by its name or its tags, not by its id.
 - A hash algorithm named by a name, not by the digest of the empty input.
+- A term that is not a word of ASD-STE100, a name of `celaut.proto`, a number with a
+  unit of the base, or an id (rule 3.11).
 - A formal that only nodo can read: its meaning is in the code, not in the text.
 - A descriptor for each member of a group, in a place that has a value.

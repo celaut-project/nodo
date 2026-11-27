@@ -1,16 +1,21 @@
 tags: ergo-p2p
 
-A layer: the peer-to-peer protocol of the Ergo reference node, on TCP. A member of a
-proof-of-work network of Ergo gives it on one address.
+A layer: the peer-to-peer protocol of the main network of Ergo, on TCP. A member of a
+proof-of-work network of Ergo gives it on one address. Each message starts with the 4
+magic bytes of the network, a code and a length; a message with data also has a
+checksum of the data. The formal gives this frame. A node does not read the codes or
+the data: it only lets an instance connect to the address. Another network of Ergo (for
+example its test network) has other magic bytes, so it is another layer.
 
-The network magic of the handshake selects the chain. The port of the address selects
-the layer: nothing in TCP selects it.
-
-A layer has no value.
-
+The port of the address selects the layer: nothing in TCP selects it. A layer has no
+value.
 === formal
+checksum=the first 4 bytes of the hash of the data
 class=layer
+hash.type=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8
+magic=the 4 bytes 1, 0, 2, 4 (the main network of Ergo)
+message=the 4 bytes of magic, then 1 byte of code, then the length of the data as a 4-byte signed integer, big-endian, 0 or more; if the length is more than 0: 4 bytes of checksum, then the data
 name=ergo-p2p
 selected_by=the port of the address
-spec=the peer-to-peer protocol of the Ergo reference node (ergoplatform/ergo)
-transport=tcp
+transport=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:db518cc9d8ba091449934c4a67fa56ae72c2823720e25355c092e25b823694ce
+use=a node does not read the codes or the data: it only lets an instance connect to the address

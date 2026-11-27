@@ -5,8 +5,8 @@ this start.
 
 The value is key=value lines, sorted by the bytes of the key, separated by a newline.
 The key is the position of the entry of Container.devices, in base 10. The value is the
-model: "pci:" and the value of the fact pci-model (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1), or "usb:"
-and the value of the fact usb-model (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5). Example:
+model: "pci:" and the value of the fact pci-model (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f77f111c3a3c9e36622b21845ab2e344fafb2b47f10ae9854b4d58649b751c28), or "usb:"
+and the value of the fact usb-model (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6b38cb3e87ee63d8deccfce3697c027de52b25510646aade607aeb09a201bb11). Example:
 0=pci:10de:2330. An entry with no device at the start has no line.
 
 An absent fact: the node attests no model. The node is bound: it signs the receipt.
@@ -14,7 +14,7 @@ An absent fact: the node attests no model. The node is bound: it signs the recei
 === formal
 class=fact
 name=device-models
-pci=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5d2ce65a6fa1e2a557a53196d610878b547bc1bc87ab8e63a7cabf5fd85caff1
+pci=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f77f111c3a3c9e36622b21845ab2e344fafb2b47f10ae9854b4d58649b751c28
 place=StartReceipt.facts
-usb=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:00fec13f609faabea95d819413049d3f2a92abfe46e4fc5298a66b5400d498f5
+usb=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6b38cb3e87ee63d8deccfce3697c027de52b25510646aade607aeb09a201bb11
 value=key=value lines sorted by key; the key is the position of the entry of Container.devices in base 10; the value is pci:<value of the fact pci-model> or usb:<value of the fact usb-model>

@@ -9,7 +9,8 @@ Each folder holds the descriptors of one use: one place, or a group of places, o
 ``celaut.proto``. The ``REASON.md`` of a folder gives its class in a line ``Class: `x```.
 
 Run this module to write the generated part of ``contract/descriptors/INDEX.md``:
-``python -m src.utils.descriptor_file``.
+``python -m src.utils.descriptor_file``. With ``--cascade``, it first replaces the old
+id of each formal that changed since ``HEAD`` with its new id, in all the files.
 """
 import hashlib
 import os
@@ -136,7 +137,62 @@ def generated_part(text: str) -> str:
     return text[start:end + len(END)]
 
 
+def cascade(base: str = "HEAD", root: str = ROOT) -> List[str]:
+    """Replace the old id of each changed formal with its new id, in all the files.
+
+    A formal names another by its id (REASON 3.7), so a change of one formal changes the
+    id that other formals hold, and so their ids too. This compares each file with its
+    version at the git revision ``base`` and repeats until nothing changes. It returns the
+    files that it changed.
+    """
+    import subprocess
+
+    def old_id(rel):
+        path = os.path.relpath(os.path.join(root, rel), _repo_root(root))
+        done = subprocess.run(["git", "show", f"{base}:{path}"], capture_output=True)
+        return formal_id(parse(done.stdout).formal) if done.returncode == 0 else None
+
+    old = {rel: old_id(rel) for rel in files(root)}
+    changed: List[str] = []
+    while True:
+        mapping = {}
+        for rel in files(root):
+            new = formal_id(read(os.path.join(root, rel)).formal)
+            if old.get(rel) and old[rel] != new:
+                mapping[old[rel].encode()] = new.encode()
+        step = False
+        for rel in files(root):
+            path = os.path.join(root, rel)
+            with open(path, "rb") as f:
+                data = f.read()
+            new_data = data
+            for before, after in mapping.items():
+                new_data = new_data.replace(before, after)
+            if new_data != data:
+                with open(path, "wb") as f:
+                    f.write(new_data)
+                step = True
+                if rel not in changed:
+                    changed.append(rel)
+        if not step:
+            return changed
+
+
+def _repo_root(path: str) -> str:
+    import subprocess
+
+    done = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+    )
+    return done.stdout.strip()
+
+
 def main() -> None:
+    import sys
+
+    if "--cascade" in sys.argv:
+        for rel in cascade():
+            print(f"updated {rel}")
     path = os.path.join(ROOT, INDEX)
     with open(path, encoding="utf-8") as f:
         text = f.read()

@@ -1,0 +1,14 @@
+tags: armv8.0-a, aarch64-baseline
+
+The baseline of the A64 instruction set of AArch64: the instructions that every
+AArch64 processor of version 8.0 executes, with the floating-point and the Advanced SIMD
+instructions. Linux tells a process which features it has in the hardware
+capabilities of the auxiliary vector (AT_HWCAP). A software that needs a later version
+or an optional feature (for example LSE atomics or SVE) needs another concept.
+
+=== formal
+class=concept
+hwcap=the value of AT_HWCAP (type 16 of the auxiliary vector) has bit 0 (floating point) and bit 1 (Advanced SIMD) set to 1
+name=armv8.0-a
+rule=the software uses no instruction that a bit of AT_HWCAP or AT_HWCAP2 other than bits 0 and 1 gives, and no instruction of a version after 8.0
+variant=8.0, with floating point and Advanced SIMD

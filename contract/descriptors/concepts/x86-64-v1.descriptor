@@ -1,0 +1,15 @@
+tags: x86-64-v1
+
+The baseline level of the x86-64 instruction set: the instructions that every x86-64
+processor executes. A processor has this level when the CPUID instruction reports all
+the features of the formal, and the operating system enables FXSAVE and FXRSTOR. A
+software that needs a later level (for example AVX2) needs another concept.
+
+=== formal
+class=concept
+cpuid.0x80000001.edx=bits 11 and 29 are 1 (SYSCALL, 64-bit mode)
+cpuid.1.edx=bits 0, 8, 15, 23, 24, 25 and 26 are 1 (x87 floating point, CMPXCHG8B, CMOV, MMX, FXSAVE, SSE, SSE2)
+cr4=bit 9 is 1 (the operating system supports FXSAVE and SSE)
+name=x86-64-v1
+rule=the software uses no instruction that a feature outside this list gives
+variant=v1

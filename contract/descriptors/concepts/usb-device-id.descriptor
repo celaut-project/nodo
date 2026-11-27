@@ -1,0 +1,11 @@
+tags: usb-device-id, usb-id
+
+The identity of the model of a USB device: two 16-bit numbers of its device
+descriptor, which the maker of the device sets.
+
+=== formal
+class=concept
+name=usb-device-id
+product=the 16-bit number at bytes 10 and 11 of the device descriptor (idProduct), little-endian
+text=<vendor>:<product>, each as 4 digits of base 16, with the letters a to f in lowercase
+vendor=the 16-bit number at bytes 8 and 9 of the device descriptor (idVendor), little-endian

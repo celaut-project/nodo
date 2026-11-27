@@ -11,4 +11,4 @@ An absent fact: the node gives no USB model. The node is bound: it attests the f
 class=fact
 name=usb-model
 place=ArchitectureResources.facts
-value=<vendor>:<product>, the USB idVendor and idProduct, 4 lowercase hexadecimal digits each
+value=the text of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f8a11f572ff7635a856e6878006ef639f9af88d3ef67948be520472db5e6a486 of the device

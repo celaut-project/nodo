@@ -124,6 +124,11 @@ class FormalRulesTests(unittest.TestCase):
         ids = {fid for _, _, fid in df.index_rows()}
         for rel in df.files():
             formal = df.read(os.path.join(ROOT, rel)).formal.decode("utf-8")
+            # The digest of a document names the bytes of the document, not a descriptor.
+            formal = "\n".join(
+                line for line in formal.split("\n")
+                if not (rel.startswith("documents/") and line.startswith("digest="))
+            )
             for ref in ID.findall(formal):
                 if not ref.startswith(df.hash_type() + ":"):
                     continue

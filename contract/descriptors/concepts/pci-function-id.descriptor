@@ -1,0 +1,12 @@
+tags: pci-function-id, pci-id
+
+The identity of the model of a PCI device: two 16-bit numbers in the configuration
+space of a PCI function, which the maker of the device sets. A PCI Express device has
+the same two numbers at the same places.
+
+=== formal
+class=concept
+device=the 16-bit number at bytes 2 and 3 of the configuration space of the function, little-endian
+name=pci-function-id
+text=<vendor>:<device>, each as 4 digits of base 16, with the letters a to f in lowercase
+vendor=the 16-bit number at bytes 0 and 1 of the configuration space of the function, little-endian

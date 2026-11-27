@@ -1,0 +1,12 @@
+tags: linux-syscalls-aarch64
+
+The system calls that a process of an AArch64 guest can use, and their numbers: the
+calls of Linux 6.12 for 64-bit processes on AArch64. A kernel of a later version also
+gives them: Linux does not remove or change a system call that processes use.
+
+=== formal
+behavior=the behavior of each call is the behavior of Linux 6.12 or of a later version of Linux
+calls=the rows of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dc13c9f6f2612c9faf638829c35561e4da50202523cd79ce72035cd1ce46a614 whose second column is common, 64, renameat, rlimit or memfd_secret (the list of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:64a5cffeb837f417f0e12b3947c213621b09db458aeaf0c82489bfc230c866e1); the first column is the number of the call, the third column is its name
+class=concept
+name=linux-syscalls-aarch64
+variant=Linux 6.12, 64-bit processes

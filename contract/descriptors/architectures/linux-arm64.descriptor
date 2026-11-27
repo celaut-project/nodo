@@ -18,10 +18,11 @@ size is another architecture.
 Who is bound: the node that runs the service. An architecture has no value.
 
 === formal
-abi=the Linux system call interface of AArch64, LP64, little-endian
+abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ea8bab3d47153cefeb043a208736f514d159bdbc04d1ffbbd3f0060d410fc691
 class=architecture
-isa=Armv8.0-A: only the instructions of the base AArch64 architecture
+isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:82c32bd596dca9d4d9cd908655f55f5f51b27693e997da6321aaac2627c8ffb8
 kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host
 kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390
 name=linux-arm64
 page=4096 bytes: the kernel uses pages of 4096 bytes, and the software can depend on it
+process=64-bit, little-endian
