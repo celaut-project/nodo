@@ -14,4 +14,4 @@ The node is bound: it attests the fact.
 class=fact
 name=device-id
 place=ArchitectureResources.facts
-value=1 to 64 bytes of printable ASCII (0x21-0x7e), without ',' and '='; unique among the devices of the node; the same after a restart of the node
+value=1 to 64 bytes, each with a value from 33 to 126, and none with the value 44 (',') or 61 ('='); unique among the devices of the node; the same after a restart of the node

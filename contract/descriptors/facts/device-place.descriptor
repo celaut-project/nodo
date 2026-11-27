@@ -12,4 +12,4 @@ An absent fact: the node gives no place. The node is bound: it attests the fact.
 class=fact
 name=device-place
 place=ArchitectureResources.facts
-value=UTF-8 text for a person, one line, at most 256 bytes; no meaning for a program
+value=text of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895 for a person, one line (no byte 10), at most 256 bytes; no meaning for a program

@@ -5,7 +5,7 @@ a direct link to (for example NVLink between two GPUs).
 
 The value is the positions of the other entries in base 10, sorted as integers and
 separated by commas. Example: 1,2. The node gives devices whose fact device-links
-(0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:513329b19e532424e1702f2197e1bb43f94e230165db90b209e47c01a64f821d) names each other.
+(0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5ba935ab15e64df333ee2e9482c71a79bd922e2b3a37d7eb86d11aa68838ff56) names each other.
 
 With no setting, the device needs no link. The node is bound: it refuses the start if
 it has no such devices.
@@ -13,7 +13,7 @@ it has no such devices.
 === formal
 class=setting
 default=absent: no link
-link=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:513329b19e532424e1702f2197e1bb43f94e230165db90b209e47c01a64f821d
+link=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5ba935ab15e64df333ee2e9482c71a79bd922e2b3a37d7eb86d11aa68838ff56
 name=link
 place=service.container.devices.policies
 value=the positions of other entries of Container.devices, base 10, sorted as integers, separated by commas

@@ -12,4 +12,4 @@ An absent fact: the node attests no kernel. The node is bound: it signs the rece
 class=fact
 name=guest-kernel
 place=StartReceipt.facts
-value=the ids of the kernel image that the instance boots, in the form of the value of the setting 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794
+value=the ids of the kernel image that the instance boots, as the line hashed of the setting 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794 defines it, in the form of the value of that setting
