@@ -1,0 +1,10 @@
+tags: ram, memory
+
+RAM: the memory that the processors read and write by address, with their instructions,
+with no file and no device between. Its bytes are lost when the machine stops.
+
+=== formal
+class=concept
+lost=the bytes are lost when the machine stops
+name=ram
+ram=the memory that the cores of a machine read and write by address with their instructions of load and store, with no file and no device between them

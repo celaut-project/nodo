@@ -9,7 +9,7 @@ extension (for example SVE) can fail. Another level is another architecture, wit
 another formal. The node can run the guest natively or with an emulator: the
 benchmarks of the node show the difference.
 
-The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390).
+The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794).
 With no such setting, the node selects the kernel.
 
 The software reads the page size when it runs, and its segments are aligned for the
@@ -19,11 +19,11 @@ that runs AArch64 can announce this architecture, with the one of its page size.
 Who is bound: the node that runs the service. An architecture has no value.
 
 === formal
-abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:7a9c7e5876a3093bfabecba8c6c9ad27bd0dc7bd0e856cbd8cb51b83fac22635
+abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:083aba63310970df80c746d7e626cc7e9275fe5a880ae1e9e54da65a55f521b2
 class=architecture
-isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:82c32bd596dca9d4d9cd908655f55f5f51b27693e997da6321aaac2627c8ffb8
-kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host
-kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390
+isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:cc71d5ea3cf371762ecd300d4fd07d81f1b02c4759237179520f686579366784
+kernel=the node starts a virtual machine (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b3469e385a533a222a75a1aeafb1a94b2795a9f689e302f034283e1d8cdceb38) for each instance, and boots in it a kernel image of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3e307510f99ae9b6edf94a3bd23feab531b4a2fd40cb2877bfc57f1c64fb3f7a; the processes of the instance do not share the kernel of the host
+kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794
 name=linux-arm64-any-page
-page=any of 4096, 16384 or 65536 bytes: the software reads the page size when it runs, and does not depend on it
-process=64-bit, little-endian
+page=any of 4096, 16384 or 65536 bytes: the software reads the page size (definition 3.249 (Page Size) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) when it runs, and does not depend on it
+process=64-bit: the addresses and the general registers of a process have 64 bits; little-endian: in a number of more than one byte, the byte at the lowest address holds the 8 bits of lowest value

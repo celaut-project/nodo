@@ -13,9 +13,9 @@ A reader that does not know the rate ignores it. The offer is the authority for 
 instance.
 
 === formal
-base=1000 units of the resource (one core) for 3600 seconds
+base=1000 units of the resource (one core: the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:74b75cc69cfa93ec7b96b07316fee2be3fe54afb24972ecd74002523e374c29a) for 3600 seconds
 class=rate
 name=cpu-time
-of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:330d3be7de50d6ce7e00e5fc13c69dea20d6f55fa8df64d5e3f1676a58a02722
+of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b40a7b0ac46be148fe6db636cde59c8a53bb5f172a97c6eaafd246b1b6e034fd
 rounding=the node computes each charge in proportion and rounds it down to a whole MU
-scope=the id <type>:<digest> of the formal of an architecture, as ASCII; the rate applies to the instances of that architecture; empty: the general rate
+scope=the id <type>:<digest> of the formal of an architecture, in the characters of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895; the rate applies to the instances of that architecture; empty: the general rate

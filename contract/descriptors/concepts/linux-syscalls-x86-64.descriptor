@@ -1,11 +1,12 @@
 tags: linux-syscalls-x86-64
 
-The system calls that a process of an x86-64 guest can use, and their numbers: the
-calls of Linux 6.12 for 64-bit processes. A kernel of a later version also gives them:
-Linux does not remove or change a system call that processes use.
+The system calls that a process of an x86-64 guest can use, and their numbers: the calls
+of Linux 6.12 for 64-bit processes. A kernel of a later version also gives them: Linux
+does not remove or change a system call that processes use. The manual pages of Linux
+define the behavior of each call.
 
 === formal
-behavior=the behavior of each call is the behavior of Linux 6.12 or of a later version of Linux
+behavior=the behavior of each call is the one that the page of the call in section 2 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0547755fe776075c828d11f43fd868af1338cc669c8f0b4ac8a72dddcea42698 gives for Linux 6.12 or a later version of Linux, on x86-64; the page syscall(2) of that document gives how a process calls it
 calls=the rows of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:da80dd0e7e4809297615e93a242849a073bc3b47fdcc404dd44223d0b8ecb044 whose second column is common or 64; the first column is the number of the call, the third column is its name
 class=concept
 name=linux-syscalls-x86-64

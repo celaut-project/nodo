@@ -1,0 +1,12 @@
+tags: block-device, disk
+
+A block device: a device that holds a fixed number of blocks of bytes, and reads and
+writes a full block by its number. The guest sees it as a block special file, and can
+hold a file system on it.
+
+=== formal
+class=concept
+device=a device that holds a fixed number of blocks, each of the same number of bytes; it reads and writes a full block by its number, and keeps the bytes when the machine stops
+guest=in the guest it is a block special file (definition 3.50 (Block Special File) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9); a file system (definition 3.153 (File System) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) can be on it
+name=block-device
+size=the size is the number of blocks times the bytes of a block

@@ -15,4 +15,4 @@ name.
 class=source
 content=the serialized Service of the dependency; its hash is the hash of the dependency
 name=service-file
-value=a path in the filesystem of the service that declares the dependency, segments separated by '/', no '/' at the start, UTF-8
+value=a relative pathname (definition 3.311 (Relative Pathname) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) in the filesystem of the service that declares the dependency: its components are separated by '/' (the byte 47), with no '/' at the start, in the encoding of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895

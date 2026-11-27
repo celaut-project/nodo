@@ -16,6 +16,6 @@ instance.
 base=1073741824 bytes of the resource for 3600 seconds
 class=rate
 name=memory-time
-of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:dbc1dc07783ac6870cea3746ec3dbfe3632f5e7d076dccde917b46c6773656db
+of=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:93ff9c541ec5a949d10c752c3a12857edafd2acadfe636db698b18d0681a0263
 rounding=the node computes each charge in proportion and rounds it down to a whole MU
-scope=the id <type>:<digest> of the formal of an architecture, as ASCII; the rate applies to the instances of that architecture; empty: the general rate
+scope=the id <type>:<digest> of the formal of an architecture, in the characters of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895; the rate applies to the instances of that architecture; empty: the general rate

@@ -13,5 +13,5 @@ class=limit
 name=calls
 per=one client: the client_id of the caller; all the RPCs with client authentication count together
 rule=When a client passes the limit, the node refuses its calls for a time that the node selects.
-scope=the window, in seconds, base 10, as ASCII; not empty
+scope=the window, in seconds, base 10, in the characters of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895; not empty
 unit=calls

@@ -29,16 +29,10 @@ LEGACY = {
     "protocols/address/tor-onion-v3.descriptor",
     "signatures/schemes/ed25519.descriptor",
 }
-# The formals that do not pass the test of the probe yet (contract/PENDING.md, section 3):
-# they name a container image by its digest, and no file holds the bytes of the image.
-NOT_IN_USES = {
-    "quantities/benchmarks/float-ops.descriptor",
-    "quantities/benchmarks/int-ops.descriptor",
-    "quantities/benchmarks/memory-bandwidth-1gib.descriptor",
-    "quantities/benchmarks/memory-bandwidth-256mib.descriptor",
-    "quantities/benchmarks/memory-bandwidth-64mib.descriptor",
-    "quantities/benchmarks/sha256-hashes.descriptor",
-}
+# The formals that do not pass the test of the probe yet (contract/PENDING.md, section 2)
+# because an id of their formal is the digest of bytes that no file holds. None now: the
+# benchmarks name their tool as documents (#695).
+NOT_IN_USES = set()
 KEY = re.compile(r"^[A-Za-z0-9_.+-]+$")
 
 

@@ -10,6 +10,6 @@ is bound.
 
 === formal
 class=domain
-members=none listed; the instance can connect to any address that the node can reach, on any port
+members=none listed; the instance can connect to any network address (definition 3.222 (Network Address) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) that the node can reach, on any port (section 3.1 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f8a0a6609035df7f645e13152b1a325cfb13c31a7983d53a47b33dd827d8708c, and the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:083a6588f875a29386e5aedfe5dd111ff4288a7d520cca210f12d577815074b1)
 name=all-addresses
 value=empty

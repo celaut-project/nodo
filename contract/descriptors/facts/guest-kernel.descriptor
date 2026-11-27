@@ -3,7 +3,7 @@ tags: guest-kernel, kernel
 A fact of a start: the guest kernel that the instance boots.
 
 The value has the form of the value of the setting guest-kernel
-(0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390): the ids <type>:<digest> of the bytes
+(0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794): the ids <type>:<digest> of the bytes
 of the kernel image, one for each hash type, sorted, separated by commas.
 
 An absent fact: the node attests no kernel. The node is bound: it signs the receipt.
@@ -12,4 +12,4 @@ An absent fact: the node attests no kernel. The node is bound: it signs the rece
 class=fact
 name=guest-kernel
 place=StartReceipt.facts
-value=the ids of the kernel image that the instance boots, in the form of the value of the setting 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390
+value=the ids of the kernel image that the instance boots, as the line hashed of the setting 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794 defines it, in the form of the value of that setting

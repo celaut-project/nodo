@@ -14,7 +14,7 @@ example a floor); StartReceipt.reserved gives what it gave.
 
 === formal
 class=resource
-measure=the RAM of the guest that the processes of the instance can use at one time, as a total for the instance, not per core; the memory that the guest kernel uses for itself is not counted; swap space is not counted
+measure=the RAM (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ad835e4d9e4461e67c03111368b7dc30aea7eea0e100f00b0cffb04e80a60a36) of the guest (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b3469e385a533a222a75a1aeafb1a94b2795a9f689e302f034283e1d8cdceb38) that the processes of the instance can use at one time, as a total for the instance, not per core; the memory that the kernel of the guest uses for itself is not counted; swap space (memory that the kernel keeps on a block device or in a file when the RAM is full) is not counted
 name=memory
 place=the resources of a container
 unit=byte

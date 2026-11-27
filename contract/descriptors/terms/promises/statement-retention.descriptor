@@ -13,4 +13,4 @@ With no promise, the caller assumes nothing. The node is bound.
 class=promise
 name=statement-retention
 rule=the node keeps the movements of a dead account for at least value days after its last movement
-value=days, base 10; 0 is for ever
+value=a number of days of 86400 seconds, base 10; 0 is for ever

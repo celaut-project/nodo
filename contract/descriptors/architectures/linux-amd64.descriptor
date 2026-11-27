@@ -8,7 +8,7 @@ The node guarantees only the instructions of the baseline level of x86-64
 fail. Another level is another architecture, with another formal. The node can run the
 guest natively or with an emulator: the benchmarks of the node show the difference.
 
-The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390).
+The setting guest-kernel of Container.Init selects the kernel (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794).
 With no such setting, the node selects the kernel.
 
 The kernel uses pages of 4096 bytes, and the software can depend on it. Another page
@@ -17,11 +17,11 @@ size is another architecture.
 Who is bound: the node that runs the service. An architecture has no value.
 
 === formal
-abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:40113cbe5d003b739e0a89028da065ae0df02a0dd79fe46bf552c16a872a3cb0
+abi=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:e194b9acc027487b1d1cb37ce86f0b5e9fb6c9ec7a74d0ed6d192b4811f68a3c
 class=architecture
-isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:3e2c7446847b54830d81095ae3e2243a5da80c05556252bc25044a84837993b5
-kernel=the node boots a Linux guest kernel in a virtual machine for each instance; the processes of the instance do not share the kernel of the host
-kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:68a47f3f2dd263abcf8c26232666aa913f308276005bcb842ccdce3c4f030390
+isa=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:bacad9da2c43fb7a1edf0a3bd79143d019a754e3992591d3353fc058b9a03ab7
+kernel=the node starts a virtual machine (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b3469e385a533a222a75a1aeafb1a94b2795a9f689e302f034283e1d8cdceb38) for each instance, and boots in it a kernel image of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:61f23d11250c67409e545c0873505891cd4f3c1dbe6ece3a16f697fc27015e64; the processes of the instance do not share the kernel of the host
+kernel.setting=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7d296919847535b01e49905681583dfe9df33650e39d4cf9d09705bd4f3c794
 name=linux-amd64
-page=4096 bytes: the kernel uses pages of 4096 bytes, and the software can depend on it
-process=64-bit, little-endian
+page=4096 bytes: the kernel uses pages (definition 3.248 (Page) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) of 4096 bytes, and the software can depend on it
+process=64-bit: the addresses and the general registers of a process have 64 bits; little-endian: in a number of more than one byte, the byte at the lowest address holds the 8 bits of lowest value

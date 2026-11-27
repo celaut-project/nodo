@@ -1,14 +1,17 @@
 tags: armv8.0-a, aarch64-baseline
 
-The baseline of the A64 instruction set of AArch64: the instructions that every
-AArch64 processor of version 8.0 executes, with the floating-point and the Advanced SIMD
-instructions. Linux tells a process which features it has in the hardware
-capabilities of the auxiliary vector (AT_HWCAP). A software that needs a later version
-or an optional feature (for example LSE atomics or SVE) needs another concept.
+The baseline of the A64 instruction set of AArch64: the instructions that every AArch64
+processor of version 8.0 executes, with the floating-point and the Advanced SIMD
+instructions. Linux tells a process which features it has in the hardware capabilities
+of the auxiliary vector (AT_HWCAP). A software that needs a later version or an optional
+feature (for example LSE atomics or SVE) needs another concept. The manual of the maker,
+at its last issue for version 8.0, defines each instruction: the formal names the parts
+that apply.
 
 === formal
 class=concept
-hwcap=the value of AT_HWCAP (type 16 of the auxiliary vector) has bit 0 (floating point) and bit 1 (Advanced SIMD) set to 1
+hwcap=the value of AT_HWCAP (the type 16 of the auxiliary vector: the page getauxval(3) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0547755fe776075c828d11f43fd868af1338cc669c8f0b4ac8a72dddcea42698) has bit 0 (HWCAP_FP) and bit 1 (HWCAP_ASIMD) set to 1, as the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ab5616fcbaaf062b98ae731c1b8811c024621663499614dcdf6e85fe05c97f54 gives them
+manual=the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:48262ad73a0a6a11a1b38f11c56558f2282a37ddab6a68cdca64025a01186996: part B (the AArch64 state at EL0) and part C (the A64 instruction set)
 name=armv8.0-a
 rule=the software uses no instruction that a bit of AT_HWCAP or AT_HWCAP2 other than bits 0 and 1 gives, and no instruction of a version after 8.0
 variant=8.0, with floating point and Advanced SIMD

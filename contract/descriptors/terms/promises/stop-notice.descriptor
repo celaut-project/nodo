@@ -4,7 +4,7 @@ A promise of the node: the seconds between the notice and a stop or a hibernatio
 the instance did not ask for.
 
 The value is seconds, in base 10. Example: 15. The node sends the notice of the setting
-notice (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616) at least this many seconds before it
+notice (0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7bb973c68c1d1101fb628905ad68ed46453bf1c94c374628655cba7391bd3a3) at least this many seconds before it
 stops or hibernates the instance. It applies only to a service with that setting.
 
 With no promise, the node can stop the instance with no wait. The node is bound.
@@ -12,6 +12,6 @@ With no promise, the node can stop the instance with no wait. The node is bound.
 === formal
 class=promise
 name=stop-notice
-notice=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:6770fd4cbdc1ea323f0a26a2eaca3c3ad0631a94a6c8596d76b497416c746616
+notice=0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:f7bb973c68c1d1101fb628905ad68ed46453bf1c94c374628655cba7391bd3a3
 rule=the node sends the notice at least value seconds before each stop or hibernation that the instance did not ask for
 value=seconds, base 10

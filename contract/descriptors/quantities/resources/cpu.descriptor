@@ -13,8 +13,8 @@ it, and charges for it.
 
 === formal
 class=resource
-measure=the CPU time that the processes of the instance can use: in each period of 100 ms, at most value/1000 times 100 ms, summed over all the virtual CPUs of the guest
+measure=the CPU time (definition 3.90 (CPU Time (Execution Time)) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) that the processes of the instance can use: in each period of 0.1 second, at most value/1000 times 0.1 second, summed over all the virtual CPUs of the guest
 name=cpu
 place=the resources of a container
 unit=core/1000
-vcpus=the guest has ceil(value/1000) virtual CPUs, and at least 1
+vcpus=the guest has ceil(value/1000) virtual CPUs (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:74b75cc69cfa93ec7b96b07316fee2be3fe54afb24972ecd74002523e374c29a), and at least 1

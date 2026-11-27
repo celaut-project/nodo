@@ -1,0 +1,13 @@
+tags: virtual-machine, guest
+
+A virtual machine: a machine that the host makes from a part of its processors, its
+memory and its devices, for each instance. The software in it (the guest) runs as on a
+physical machine of the architecture. A reader can build it as a physical machine, or as
+a program that executes the instructions of the instruction set of the architecture.
+
+=== formal
+class=concept
+guest=the guest is the software that runs in the virtual machine: its kernel and its processes
+isolation=the guest cannot read or write the memory or the devices of the host or of another virtual machine; the host can stop the virtual machine at any time
+machine=the virtual machine has cores that execute the instruction set of the architecture of the container, RAM (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:ad835e4d9e4461e67c03111368b7dc30aea7eea0e100f00b0cffb04e80a60a36), and the devices that the formals of the instance give; the guest sees them as a physical machine
+name=virtual-machine

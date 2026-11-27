@@ -19,13 +19,13 @@ did not ask for. A node that cannot write to the console of the guest refuses th
 service.
 
 === formal
-channel=the first virtio console of the guest, at the path /dev/hvc0
+channel=the port 0 of the first console device (section 5.3 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:9d8cb1d5c69354bcad0748d3e7f16adb0fb533f70cd5db412e5134410c01beb5) of the virtual machine (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b3469e385a533a222a75a1aeafb1a94b2795a9f689e302f034283e1d8cdceb38); in the guest it is the character special file (definition 3.62 (Character Special File) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) /dev/hvc0, with the major number 229 and the minor number 0 (the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:94a1742f92c7a0c425a9ec8977b4edd0889d54c339f1cdc72e338e1cab54dbae)
 class=setting
 default=absent: the node sends no notice
-line=ASCII; <verb> <space> <unix time in seconds as a base-10 integer> <newline>; at most 128 bytes with the newline
+line=characters of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895 with the values 32 to 126, in this order: <verb>, a space (the byte 32), <time>, a newline (the byte 10); at most 128 bytes with the newline
 name=notice
 place=service.container.init
-time=the node stops or hibernates the instance at this time, whether the service is ready or not
+time=<time> is the number of seconds since 00:00:00 of 1 January 1970 in the time of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:76016d6a59ad50c6aed0620ea7d772e9f3ec634a40cac7a94785b23768dae900, with no leap seconds, base 10; the node stops or hibernates the instance at this time, whether the service is ready or not
 value=empty
 verb.unknown=the service ignores the line
 verbs=HIBERNATE,STOP

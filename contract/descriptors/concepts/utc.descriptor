@@ -1,0 +1,11 @@
+tags: utc, coordinated universal time
+
+The time scale UTC: its seconds are the seconds of atomic time, and a leap second keeps
+it near the rotation of the Earth. A time of day in a formal (for example 00:00:00) is
+in this scale when the formal names this concept.
+
+=== formal
+class=concept
+day=a day has 86400 seconds; a day that ends with a positive leap second has 86401, a day that ends with a negative leap second has 86399
+name=utc
+scale=the time scale UTC of part C of Annex 1 of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:0bc8dd8897206669265b2d791131aaea18096f21080a1a9a7e9a84e005652595

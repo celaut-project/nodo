@@ -12,6 +12,6 @@ An absent limit is not a promise of no limit. The node is bound.
 class=limit
 name=network-bytes-per-day
 per=all the clients of the node together
-rule=The day is the calendar day of the node, in its local time zone. When the node has no bytes left, it refuses the traffic with RESOURCE_EXHAUSTED.
+rule=The day starts at 00:00:00 of the local time of the node: the time of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:76016d6a59ad50c6aed0620ea7d772e9f3ec634a40cac7a94785b23768dae900 plus the offset of the time zone that the host of the node uses. When the node has no bytes left, it refuses the traffic with the status RESOURCE_EXHAUSTED (the number 8) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:601d79f95bb7809d28f01f0a66f82f77d00ed850faa1b02627b0ac7a6f398345.
 scope=none
 unit=bytes

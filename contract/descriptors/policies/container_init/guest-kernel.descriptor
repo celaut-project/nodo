@@ -21,9 +21,9 @@ depend on it.
 === formal
 class=setting
 default=absent: the node selects the kernel
-hashed=the bytes of the kernel image file that the virtual machine loads, without an initial RAM disk
+hashed=the bytes of the kernel image that the virtual machine (the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:b3469e385a533a222a75a1aeafb1a94b2795a9f689e302f034283e1d8cdceb38) loads: a file of the concept that the line kernel of the architecture of the container names, without an initial RAM disk (a file of the form of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:150c1da53572ebdeac3d2c69cba82acb72681406a610704674d21c38a3afdbd8)
 match=the node boots a kernel only if its hash with the algorithm of one type in the value is equal to the digest of that type
 name=guest-kernel
-page=the page size of the kernel is one that the architecture of the container allows; the node refuses a kernel with another page size
+page=the page size (definition 3.249 (Page Size) of the document 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:5dd925be58ed836308859cb1796d9006a7ff6b32eaa1281fd0f28c4604773ed9) of the kernel is one that the architecture of the container allows; the node refuses a kernel with another page size
 place=service.container.init
-value=the ids <type>:<digest> of the kernel image, one for each hash type, lowercase hexadecimal, sorted, separated by commas
+value=the ids <type>:<digest> of the kernel image, one for each hash type, each in the digits 0 to 9 and the letters a to f, base 16, sorted, separated by commas
