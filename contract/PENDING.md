@@ -32,7 +32,10 @@ yet. Remove this file when the code follows the proto.
   that names a document also gives a glossary, which joins each name and term of the
   part that it uses to an id; (b) the base of the reader of a document is the language
   of the document (for example English), not only ASD-STE100. Also, the formal must
-  say how to read the part that applies, not only where it is.
+  say how to read the part that applies, not only where it is. And the format of the
+  file is not in the base: the documents are PDF (the manuals, the man pages, USB,
+  ITU), HTML (POSIX, virtio), a tar archive with bzip2 (the source of busybox), ELF
+  programs (busybox), YAML, Markdown and reStructuredText.
 
 ## 2. The descriptors to write
 
@@ -42,23 +45,22 @@ today, is the second part of `contract/descriptors/INDEX.md`. It is the work for
 agents that write the descriptors.
 
 These descriptors do not pass the test of the probe yet (REASON 2.9, rule 3.11 of
-`contract/descriptors/REASON.md`). Each one needs a document, with its license notice
-(rule 3.13):
+`contract/descriptors/REASON.md`):
 
-- **The instruction sets** (`concepts/x86-64-v1`, `concepts/armv8.0-a`). The bits of
-  CPUID and of AT_HWCAP identify a processor, but do not define its instructions. The
-  manuals of the makers define them.
-- **The behavior of the system calls** (`concepts/linux-syscalls-x86-64`,
-  `concepts/linux-syscalls-aarch64`). The line `behavior=` names "the behavior of Linux
-  6.12". The source of Linux (GPL-2.0) can be a document, but it is large: find the
-  smallest document that defines the behavior.
-- **The tool of the benchmarks** (the six files of `quantities/benchmarks/`, the set
-  `NOT_IN_USES` of `tests/test_descriptor_files.py`). They name a container image of
-  busybox by the digest of its image index, and no file holds those bytes. Name a
-  static binary of busybox (GPL-2.0) as a document.
-- **The identity of a PCI or a USB model** (`concepts/pci-function-id`,
-  `concepts/usb-device-id`). "Configuration space" and "device descriptor" are terms of
-  the specifications of PCI-SIG and USB-IF.
+- **The identity of a PCI model** (`concepts/pci-function-id`). "Configuration space"
+  is a term of the specifications of PCI-SIG (the PCI Local Bus Specification, the PCI
+  Express Base Specification). PCI-SIG gives them only to its members: there is no
+  public copy to make a document from.
+- **The characters above 127** (`concepts/utf-8`). The concept gives the encoding of
+  all characters (RFC 3629) and the meaning of the characters 0 to 127 (RFC 20), but not
+  the meaning of the characters above 127: that is the Unicode standard. Today only
+  text for a person (for example `facts/device-place`) can hold them.
+- **The rules of the difficulty of a chain** (`networks/proof-of-work`). The formal
+  defines block, chain, height, cumulative difficulty and main chain in words, and names
+  the chain by its ledger. The rules of the difficulty of each chain are in no document.
+  The network does not verify the proof of work, so a node does not need them.
+- **The legacy descriptors** (the set `LEGACY` of `tests/test_descriptor_files.py`) are
+  not changed: their bytes are on the wire (rule 6.4).
 
 ## 3. Facts of nodo today that the implementation must change
 
