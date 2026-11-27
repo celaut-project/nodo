@@ -13,9 +13,9 @@ The node asks for it in PoWRequired. The caller does the work.
 
 === formal
 class=proof-of-work
-difficulty=d, the number of hexadecimal characters, 0 to 64
+difficulty=d, a number of characters of the hash in base 16, 0 to 64
 hash.type=786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce
-input=UTF-8 of the challenge, then UTF-8 of the solution, with nothing between
+input=the challenge, then the solution, each as text of the concept 0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8:24801bc1176a41ff5f2aa2b94f8a3186eb42a69b5d68437e6e849c83bb443895, with nothing between
 name=blake2b-trailing-zeros
-rule=the lowercase hexadecimal of the hash ends with d characters '0'
-unit=hexadecimal character (4 bits)
+rule=the hash, in the digits 0 to 9 and the letters a to f (base 16, the most significant digit first), ends with d characters '0'
+unit=one digit of base 16 (4 bits)
