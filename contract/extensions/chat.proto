@@ -4,17 +4,16 @@ package celaut.chat;
 import "celaut.proto";
 
 // An optional protocol of a node: a text chat between a client and the operator of the
-// node. Two nodes work together without it, so it is not in celaut.proto (protos/
-// REASON.md). It is a normal gRPC service, with no bee-rpc. A node that serves it
-// announces it as one more branch of the gRPC layer of its address (see celaut.Layer),
-// with its own formal: the layer celaut-chat. A node that does not serve it does not
-// announce that branch.
+// node. It is a normal gRPC service, with no bee-rpc. A node that serves it announces it
+// as one more branch of the gRPC layer of its address (see celaut.Layer), with its own
+// formal: the layer celaut-chat. A node that does not serve it does not announce that
+// branch.
 
 // -----------------------
 // HOW TO READ THIS FILE
-// The comments follow the rules of the comments of celaut.proto. Each message here is
-// read with the definitions of celaut.proto: a name that is not defined here (for
-// example Signed, Client or Hash) is the message of the package celaut.
+// Each message here is read with the definitions of celaut.proto: a name that is not
+// defined here (for example Signed, Client or Hash) is the message of the package
+// celaut.
 // -----------------------
 
 // Chat. A conversation is always opened by a client against a node, and it lives on
@@ -45,8 +44,7 @@ message ChatMessage {
     // The text of the message.
     string body = 4;
     // The content hashes of a service that the sender shares, one for each hash type.
-    // Optional. The body also names the service, for a reader that does not know this
-    // field.
+    // Optional. The body also names the service.
     repeated Hash service = 5;
 }
 
@@ -74,13 +72,11 @@ message ChatEntry {
     // The hash of the entry before this one in the same conversation, with the
     // algorithm of its type. The first entry of a conversation has the hash that the
     // celaut-chat layer gives for the start of a conversation. The layer also gives
-    // how to calculate the hash of an entry. So a node cannot remove or add a message
-    // in the middle of a conversation without a break in the chain that a reader can
-    // see. Its type is the type of client_ref.
+    // how to calculate the hash of an entry. Its type is the type of client_ref.
     Hash prev_hash = 7;
     // The client of the conversation, as a hash: the hash, with the algorithm of its
     // type, of "celaut-chat-client:" followed by the client_id. Never the client_id
-    // itself, so that a signed conversation can be shown to others.
+    // itself.
     Hash client_ref = 8;
 }
 

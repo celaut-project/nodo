@@ -35,7 +35,10 @@ nodes can want different behavior, the rule is a formal.
 
 **Rule 1.4. The future test.** Ask: "Can a new case of this appear in the future?" If
 yes, it is a formal, not a field and not an enum value. Memory, CPU, a benchmark, a
-price, a signature scheme: each one is one case of an open set.
+price, a signature scheme: each one is one case of an open set. A kind of network domain
+is one more. So `ResolveNetwork` takes any `Service.Network`, not one kind of it: the
+formal of the domain gives the kind. A caller that must know the kind first does the
+resolution itself.
 
 Some things pass both tests: two nodes cannot work together if they disagree on them,
 and a new case can appear (a signature scheme, a hash algorithm, a transport, a
@@ -133,8 +136,10 @@ field numbers. It is this:
 Only two places hold a schema. A `Service` holds it in its field 1: it is the only
 message whose id is a hash of its bytes, so its id covers what the bytes mean. Every
 other message that a third party reads is signed, so `Signed.Body.context` holds the
-schema of the content, and the signature covers it. A message that goes directly
-between two parties needs no schema: the layers of the address give it.
+schema of the content, and the signature covers it. So the signature covers what the
+content means, and the context also keeps a signature for one use from another use. A
+message that goes directly between two parties needs no schema: the layers of the
+address give it.
 
 The schema is a formal like any other (rule 2.2). It names the type, and the source
 files that define it: the `.proto` files, with their comments, as documents in its
@@ -186,7 +191,9 @@ example when one is a subset of the other). That is a decision of that party, ne
 obligation of the contract, and that party carries its risk. Nodo compares the layers
 of a peer by exact bytes, and reads them only where it judges a requirement of a
 service (for example: is the gateway layer that a service declares a subset of its
-own?).
+own?). A service declares in `Container.node_protocol_stack` only the RPCs of the
+gateway that it uses, as a small formal, and not the full layer of the node. So the id
+of a service does not change with each release of a node.
 
 A formal does not grow by an edit. A new version or a variant of a formal is a new
 formal. Where two parties must keep to talk during a change (the layers of an
@@ -211,7 +218,9 @@ holds only what two nodes need to work together (rule 1.3). A protocol that a no
 leave out goes in its own `.proto` file (`contract/extensions/`), with its own service,
 as one more branch of the tree of the same address, with its own formal. A conflict in
 it then does not touch the other branches. A protocol that a celaut service implements
-(and not the node) goes through `ServiceTunnel`.
+(and not the node) goes through `ServiceTunnel`. `chat.proto` and `observe.proto` are
+such protocols: two nodes work together without them, so they are not in
+`celaut.proto`.
 
 **Rule 2.9. A descriptor holds what its formal names.** A formal names other formals
 by their ids (rule 6.3). `Descriptor.uses` holds them: one `Descriptor` for each id, in
@@ -278,6 +287,11 @@ need to read the formal (rule 3.4):
 The test: if the caller is better off when the term is absent, it is a condition. If
 the caller is equal or worse off when it is absent, it is a promise.
 
+The four amounts of `EstimatedCost` let a caller compare the offers of two nodes with
+no knowledge of their terms. The node writes the conditions and the promises that it
+keeps in the start movement of the instance, so that a caller can show them against
+the node.
+
 **Rule 3.3. One comparison rule.** For quantities: more is better. A thing that is
 better when it is less is written as its inverse (a latency becomes a rate). Do not
 add a direction flag per entry. A `Quantity` is only for a thing that a node compares
@@ -295,7 +309,9 @@ only a property, keep one list and put the property in the formal.
 **Rule 3.5. Group by role in the place, not by thing.** One thing can have several
 facts: an amount, a measured speed, a price. Do not put them in one object. Each place
 of the contract needs only some roles: a requirement has an amount and a minimum
-score, but no price; a request has only an amount; an announcement has all three. An
+score, but no price; a request has only an amount (`ModifyServiceSystemResourcesInput`
+has no benchmarks: a score is not a thing that an instance asks for); an announcement
+has all three. An
 object with all the roles has fields with no meaning in most places (rule 4.2). Also,
 facts do not map one to one to things: a score can be about two resources, and a price
 can be about an action and not a resource. So each role is its own list, each fact is
@@ -307,13 +323,39 @@ is for the reader, not for the contract.
 thing: a field number. In a requirement, the reader refuses: a node does not run a
 service that has a field that it does not know. In an announcement, the reader keeps
 the field, and the signature covers it (rule 6.2). A node that only stores or
-forwards a message keeps all its bytes.
+forwards a message keeps all its bytes. For a `Service`, this also keeps its id: the id
+is a hash of all its bytes.
+
+A writer can help a reader that does not know a field. For example, the body of a
+`ChatMessage` also names the service of `ChatMessage.service`, for a reader that does
+not know that field.
 
 **Rule 3.7. A refusal names its cause.** When a node refuses because it does not know
 a formal, the answer gives the descriptor of that formal, as the request gave it: in
 a field of the answer, or in the details of the error status. Its tags and its prose
 help the caller to look. Without this, the caller cannot try another node or
 use rule 1.6. Apply it to every refusal where the cause is a formal.
+
+**Rule 3.8. A list of key-value entries is a repeated message, not a map.**
+`celaut.proto` has no protobuf `map` field. It has one message for each type of value
+(`BytesKeyValue`, `DescriptorKeyValue`), in a `repeated` field. Protobuf does not fix
+the order of the entries of a map on the wire: each implementation selects it. The id
+of a service is a hash of the serialized `Service`, so two implementations, or two
+runs, could write one service as two different sets of bytes, with two ids. A repeated
+field keeps the order that it got, and the rules of the list give one order.
+
+History: on the wire, a proto3 map is the same as `repeated Entry { key = 1; value =
+2; }` at the same field number. So each field that changed from a map to a list kept
+its number and its name. It still reads the bytes that a map wrote, and a node that
+still declares the map reads it.
+
+**Rule 3.9. A node announces its capacity for each architecture.** `Peer.resources`
+has one `ArchitectureResources` for each architecture that the node runs, because the
+resources are different for each architecture. The benchmarks show it most: the same
+"1.0 core" is native silicon under one virtualizer and software emulation under
+another. A peer uses these entries to judge a `Service.Workload` of a service: the
+workload of a descendant can declare only resources, with no hash and no complete
+service, so a peer cannot ask `GetServiceEstimatedCost` about it.
 
 ## 4. Fields
 
@@ -384,7 +426,9 @@ The reason for a design, the alternatives that were refused, the history, and th
 consequences for later designs go in this file, not in a comment. A short example can
 stay in a comment if the definition is less exact without it (rule 5.1). Do not put in
 a comment a path or a module of an implementation, or the number of a rule of this
-file: they can change, and a change of a comment changes the schema.
+file: they can change, and a change of a comment changes the schema. A detached comment
+(a comment with a blank line between it and the element) is also a part of the schema:
+a note for developers goes in this file, not in a detached comment.
 
 The test: **if a sentence of a comment changes, can two parties act in two ways?** If
 yes, it is a rule and it stays. If no, it is a reason, and it goes in this file.
@@ -418,6 +462,72 @@ how a hash is calculated says "with the algorithm of its type", and never names 
 algorithm except as an example. An implementation selects its algorithm (nodo uses
 blake2b-256); that is a choice of the implementation, not of the contract.
 
+**Rule 6.5. A signed message holds a hash of a credential, never the credential.** A
+token and a client_id are credentials. A party can show a balance statement, a receipt
+or a conversation to others, for example as evidence of a fault (`FaultEvidence`). So
+where such a message names an account or an instance, it holds a hash with its own
+prefix: `BalanceStatement.account_ref`, `BalanceMovement.instance_ref`,
+`ChatEntry.client_ref`. The party that holds the credential can calculate the hash.
+
+- The name of an execution in a receipt follows the same rule. The client has the
+  token, so it can calculate the name. In a tunnel to a descendant, the caller has the
+  instance_ref and not the token, so the name comes from the instance_ref.
+- No signature covers `ServiceInstance.envs_salt`. So the holder of a start receipt can
+  show `StartReceipt.envs_digest` to others and keep the values of the environment
+  variables secret. Each wake has a receipt with the same salt as the first one, so
+  that a party can compare the digests of all the processes of an instance.
+
+**Rule 6.6. A history that a node signs is a hash chain.** The movements of an account
+(`BalanceMovement.prev_hash`) and the entries of a conversation (`ChatEntry.prev_hash`)
+make a chain: the hash of each one covers the one before it. So a movement that a
+statement showed cannot change later, and a node cannot remove or add an entry in the
+middle of a conversation without a break in the chain that a reader can see.
+
+**Rule 6.7. An amount is a decimal text in MU.** `Amount.n` is a decimal integer in a
+string, not an integer field, because a balance has no limit. MU has no value of its
+own: `ContractRate` gives the value of MU for each payment contract. So a node can get
+payments in an asset that is not ERG and keep one common scale. ERG is only the
+contract whose rate is the peg, and another ledger declares its own rate. Nodo, on
+Ergo, uses 1 MU for 1 nanoERG by default, but the operator can change that default. It
+is not a definition of MU.
+
+**Rule 6.8. The identity of a node is a key of its own, on no ledger.** The identity
+is not a wallet. A wallet key is bound to what its ledger can verify and spend, so an
+identity that is a wallet key can never be another thing. The link to a ledger is an
+owner attestation on each reputation proof (`Contract.xattrs`). It costs one
+signature, and the node can change, add or remove a wallet with no change to its name.
+
+- One signature scheme for each `Peer`, so one public key. A second key is a second
+  identity: it divides the reputation of the node, its deposits and the attribution of
+  its payments in two. Signatures across the two keys cannot join them again, because
+  a party that needs the link speaks only one of the two schemes. A key in a different
+  role (the owner of a proof, the TLS key of each process) is not a second identity: it
+  is a hierarchy with one root. A scheme that needs two keypairs (for example a hybrid
+  of a classical and a post-quantum scheme) is one scheme, with one descriptor whose
+  encoding holds both keys.
+- `Peer.payment_contracts` is a list on purpose: it is a menu, and the payer selects
+  one item from it.
+- The owner attestation (`owner_public_key`, `owner_signature`) is in the xattrs of
+  the `Contract` of a reputation proof, not in the `Peer`. The pair attributes a fact
+  on a ledger to a peer, and the name of the peer does not have to be an object on the
+  ledger. For example, a reputation proof on Ergo names its owner in R7, and R7 is the
+  spending clause of the reputation contract (`INPUTS.exists { b.propositionBytes ==
+  SELF.R7[Coll[Byte]].get }`). So R7 can hold only an Ergo proposition. If a reader
+  read R7 as the id of the peer, the identity of every celaut node would be an Ergo
+  key. With the attestation, a reader checks two links: R7 is the attested owner, and
+  that owner signed this peer_id. It is the same fact. A reader can still verify it
+  from the box of the proof alone, with no request to the node (R9 of the box holds
+  the full signed `Peer`). It applies also to the reputation system of a second
+  ledger, and no ledger has a privilege.
+- The attestation is a part of the proof, not of the `Peer`, because the owner is a
+  property of the proof. A node can hold many proofs, and they do not need to have one
+  owner. One attestation for each ledger in the announcement cannot describe two proofs
+  on one ledger from two different wallets.
+- A fault report has `ReputationOpinion.amount` 0, because the score of the same object
+  already counts the fault.
+- The signature of a `ReputationProof` covers `pow_nonce`, so a node that passes the
+  proof on cannot change it.
+
 ## 7. Extension points
 
 **Rule 7.1. An extension point is a list of formals in the correct place.** The
@@ -449,6 +559,14 @@ dictionaries, references or other tricks to make a message smaller (for example 
 layer by the id of a descriptor in place of the descriptor). The same bytes can repeat.
 To compress or to remove repeated bytes in storage or on the wire is the work of a
 layer above (for example the blocks of bee-rpc, which are not part of the protobuf).
+
+`Buffer.skip` in `buffer.proto` is a part of that layer: the receiver of a block tells
+the sender that it holds the block already. It is a field of its own so that a reader
+never confuses it with `block`, whose meaning on an inbound stream is already taken
+(the start and the end of a block). A peer built before `skip` existed reads it as an
+unknown field and ignores it. So a sender adds an empty `chunk` to the `Buffer` that
+carries `skip`: such a peer then sees a chunk of zero bytes, and not a `Buffer` with no
+field that it knows.
 
 ## 8. The process
 

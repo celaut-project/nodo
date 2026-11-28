@@ -4,23 +4,6 @@ package celaut;
 import "buffer.proto";
 
 // -----------------------
-// HOW TO COMMENT THIS FILE
-//
-// The leading comment of each message, field and RPC (the comment immediately above
-// it, with no blank line between) is its protocol description. The node puts these
-// descriptions in the prose of the celaut-gateway layer that it announces
-// (src/identity/protocol_doc.py). Write them in ASD-STE100 Simplified Technical
-// English. Say what the element is and what a sender and a receiver do with it. Do
-// not refer to files of this implementation.
-//
-// A note for developers goes in a detached comment: a comment with a blank line
-// between it and the element. The node does not announce detached comments.
-//
-// After a change to this file, run bash/generate_protos.sh. It also writes
-// protos/celaut_doc.binpb, the descriptor with these comments.
-// -----------------------
-
-// -----------------------
 // CEL•AUT MESSAGES
 // -----------------------
 
@@ -41,28 +24,15 @@ message Descriptor {
     // The definition. It is what nodes compare.
     bytes formal = 3;
     // The descriptors that the formal names by their ids: one for each id, in the order
-    // of the first occurrence of the id in the formal, each with its own uses. So a
-    // descriptor is complete alone, in every message: a reader needs no network, no
-    // catalog and no other part of the message to read it. The formal of a document is
-    // the bytes of the document, and a document has no uses. The uses are not a part of
-    // the identity: the id of a descriptor is still the digest of its formal. A reader
-    // checks that there is one entry for each id, and that the digest of each formal,
-    // with the algorithm of the type of its id, is the id. If not, the reader refuses the
-    // descriptor. One descriptor can be in the uses of many others, also in one message.
+    // of the first occurrence of the id in the formal, each with its own uses. The
+    // formal of a document is the bytes of the document, and a document has no uses.
+    // The uses are not a part of the identity: the id of a descriptor is still the digest
+    // of its formal. A reader checks that there is one entry for each id, and that the
+    // digest of each formal, with the algorithm of the type of its id, is the id. If not,
+    // the reader refuses the descriptor. One descriptor can be in the uses of many
+    // others, also in one message.
     repeated Descriptor uses = 4;
 }
-
-// Ordered key/value entries, one message per value type.
-//
-// These replace protobuf `map<string, V>` fields. A proto3 map is wire-identical to
-// `repeated Entry { key = 1; value = 2; }` at the same field number, so a field
-// converted from a map keeps its number and name and still reads bytes written before
-// the change -- and is read by nodes that still declare the map. What a map does NOT
-// give is a defined order: protobuf leaves map entry order on the wire to the
-// implementation, and a service id is a hash of the serialized specification, so two
-// implementations (or two runs) could serialize the same service to different bytes and
-// therefore different ids. A repeated field keeps the order it was given.
-// (src/utils/keyvalue.py is the one place that implements the convention below.)
 
 // One entry of a list of key-value entries, with a bytes value. In a list, a sender
 // sorts the entries by key (UTF-8 bytes, ascending), writes one entry for each key and
@@ -111,25 +81,6 @@ message DescriptorKeyValue {
     Descriptor value = 2;
 }
 
-// Why the owner attestation of a reputation proof is in xattrs (owner_public_key,
-// owner_signature) and not in the Peer:
-//
-// That pair is what attributes an on-chain fact to a peer without the peer's name
-// having to be an on-chain object. A reputation proof on Ergo names its owner in R7,
-// which is the reputation contract's spending clause (`INPUTS.exists {
-// b.propositionBytes == SELF.R7[Coll[Byte]].get }`), so R7 can hold nothing but an Ergo
-// proposition, ever. Reading it as the peer's id would therefore fix every celaut
-// node's identity as an Ergo key by construction. With the attestation a reader checks
-// two links instead -- R7 is the attested owner, and that owner signed this peer_id --
-// which is the same fact, still verifiable from the proof box alone with no round-trip
-// to the node (the box's R9 carries the whole signed Peer), and it holds for a second
-// ledger's reputation system without either being privileged.
-//
-// It belongs to the proof and not to the Peer because ownership is a property of the
-// proof: a node holds as many as it likes, and nothing says they share an owner. An
-// attestation per ledger on the announcement could not describe two proofs on the same
-// ledger published by different wallets. (src/utils/contract_xattrs.py has the keys.)
-
 // A payment contract or a reputation proof on a ledger. The ledger gives the chain and
 // its rules. The protocol gives the kind of payment contract on that ledger. The xattrs
 // give the values of this contract.
@@ -156,10 +107,6 @@ message Contract {
     repeated BytesKeyValue xattrs = 3;
 }
 
-// Why a string and not an integer: a balance has no limit. Ergo defaults to 1 MU = 1
-// nanoERG (ledgers.ergo.payments.MU_PER_NANOERG), but the operator can change that
-// default. It is not a definition.
-
 // An amount in MU, the monetary unit of the node that issues it. MU has no value of its
 // own. Each payment contract gives the value of MU (ContractRate.mu_per_unit), so a
 // reader can convert a price. Do not assume a fixed rate.
@@ -169,10 +116,6 @@ message Amount {
     // negative if the node allows debt.
     string n = 1;
 }
-
-// This is what lets a node be paid in something other than ERG without giving up a
-// common scale: ERG is simply the contract whose rate is the peg (1 MU per nanoERG by
-// default), and another ledger declares its own.
 
 // A payment contract and the value of its asset in MU.
 message ContractRate {
@@ -186,7 +129,7 @@ message ContractRate {
 }
 
 // One hash of an object: a service, an account, a chain of events, an execution. The
-// type says the algorithm, so the contract never names one.
+// type says the algorithm.
 message Hash {
     // The type of the hash: the digest of an empty input with that algorithm and output
     // length. The value has the same length.
@@ -202,13 +145,12 @@ message Hash {
 
 // The specification of a service: its container, its API, its networks and the
 // workloads that it can start. The hash of the serialized Service is the id of the
-// service. The Service holds its own schema (field 1), so the id covers what the bytes
-// mean and not only the bytes. Field 1 is the schema in every variant of this contract.
+// service. The Service holds its own schema (field 1). Field 1 is the schema in every
+// variant of this contract.
 //
 // A Service is a requirement. A node that runs a service refuses a service with a field
 // number that it does not know, at any level of the message. A node that only stores or
-// forwards a Service keeps all its bytes, also the fields that it does not know, so the
-// id of the service does not change.
+// forwards a Service keeps all its bytes, also the fields that it does not know.
 message Service {
     // The interface of the service: its ports, what each port speaks, and what the
     // service charges its callers.
@@ -385,11 +327,11 @@ message Service {
         // gateway of the node, bottom to top. The node finds it in the tree of its own
         // address (see Layer). The service declares only the RPCs of the gateway that it
         // uses, as a small formal. Here the node reads the formals: it accepts the
-        // gateway layer of the path if it is a subset of its own gateway layer. It does not declare the full layer of the
-        // node, so the id of a service does not change with each release of a node. An
-        // empty list declares that the service uses no RPC of the node: it does not
-        // change its own resources and does not start dependencies. A node that does not
-        // speak a protocol of the list does not run the service.
+        // gateway layer of the path if it is a subset of its own gateway layer. It does
+        // not declare the full layer of the node. An empty list declares that the service
+        // uses no RPC of the node: it does not change its own resources and does not
+        // start dependencies. A node that does not speak a protocol of the list does not
+        // run the service.
         repeated Descriptor node_protocol_stack = 5;
         // The environment variables that the service declares, each with its format. A
         // caller gives the values in Configuration.environment_variables.
@@ -465,8 +407,8 @@ message Service {
 //
 // An instance is a process that the node runs on the container of a service. It has
 // two states, and no other: it runs (there is a process), or it is hibernated (there
-// is no process). Both states are elemental. Other ways to stop and continue are not
-// new states: they are policies of hibernation, with their own causes and costs.
+// is no process). Other ways to stop and continue are not new states: they are
+// policies of hibernation, with their own causes and costs.
 //
 // A hibernated instance keeps its identity: its token, its addresses and ports, its
 // account and its balance. It also keeps its state: the filesystem of its container
@@ -650,18 +592,10 @@ message ConfigurationFile {
 // Resource limits, requirements and measured scores.
 // -----------------------
 
-// Two levels: this contract is static and hard to change. Above it are the formal
-// definitions (policies, resources, benchmarks, rates, limits, architectures, APIs,
-// protocols), that nodes can share, negotiate or ignore. A formal is a set of bytes that
-// a document defines. A new thing is a new formal, never a new field, so this contract
-// does not change when a new thing appears. (contract/REASON.md has the rules to reason
-// about this contract.)
-
 // A quantity of a thing that a node measures, gives or asks for. It is a Descriptor plus
 // a number, as a Policy is a Descriptor plus a value. The formal of the quantity is the
 // formal of its descriptor. The formal defines what the quantity is: the thing, its
-// unit, if it is per core or total, and how a node measures it. The descriptor files
-// are in contract/descriptors/ (contract/descriptors/REASON.md).
+// unit, if it is per core or total, and how a node measures it.
 //
 // There are two classes of formal, and the class is part of the definition of the
 // formal. A list that holds quantities says which class it takes:
@@ -774,15 +708,13 @@ message TunnelRequest {
 }
 
 // The offer of a node to run a service: the cost, and the terms that the node keeps.
-// The node that answers sets it and signs it (Signed). The four amounts let a caller
-// compare the offers of two nodes with no knowledge of their terms.
+// The node that answers sets it and signs it (Signed).
 //
 // The terms of the offer are in two lists of Policy: the conditions bind the caller,
 // and the promises bind the node. The test for a term is this: if the caller is better
 // off when the term is absent, the term is a condition. If the caller is equal or worse
 // off when the term is absent, the term is a promise. The node writes the conditions
-// and the promises of the offer that it keeps in the start movement of the instance, so
-// a caller can show them against the node.
+// and the promises of the offer that it keeps in the start movement of the instance.
 message EstimatedCost {
     // The cost that the start spends, in MU. It is the cost to build the service, plus
     // the cost to build its initial children. It does not include a balance, for the
@@ -825,12 +757,6 @@ message EstimatedCost {
     // the node. A promise that is not in the list is not made.
     repeated Policy promises = 7;
 }
-
-// Peers use this message to evaluate the Service.Workload entries of a service: a descendant workload
-// can declare only resources, with no `hash`/complete `service` to ask
-// GetServiceEstimatedCost about. Resources differ per architecture -- most visibly
-// its benchmarks, since the same "1.0 core" is native silicon under one virtualizer and
-// software emulation under another (#448).
 
 // A device of the node that the node gives to one instance at a time: the node gives
 // the access and takes it back, and it charges for the device. The way from the device
@@ -897,9 +823,7 @@ message ResourceAvailability {
     // node gives no time.
     uint64 opens_at = 3;
     // The descriptors of the request whose formals the node does not know, as the
-    // request gave them, so the tags and the prose help the caller to look. Empty if
-    // the node knows all of them. A caller can then ask a node that knows them, or look
-    // for a service that implements them.
+    // request gave them. Empty if the node knows all of them.
     repeated Descriptor unknown_formals = 4;
 }
 
@@ -937,8 +861,7 @@ message Payment {
 
 // The request of GetBalanceStatement. The caller asks for a range of movements by their
 // seq, and nothing about the range changes what the node has already signed: a movement
-// that a statement showed cannot change afterwards, because the hash of each one commits
-// to all the ones before it.
+// that a statement showed cannot change afterwards.
 message BalanceStatementRequest {
     // The instance token of a child of the caller, to read the account of that child.
     // Empty to read the account of the caller: its client_id, or the local instance
@@ -964,8 +887,8 @@ message BalanceStatementRequest {
     // with instance_ref. A node that asks one peer for a descendant sends one less. A
     // node that asks more peers shares one less between them, in equal parts. A
     // receiver that gets 0 refuses. A receiver that gets 1 answers from its own chains
-    // and asks no peer. If it is absent, the receiver uses its own maximum
-    // (network.RECURSION_MAX_HOPS). A value above that maximum becomes the maximum.
+    // and asks no peer. If it is absent, the receiver uses its own maximum. A value
+    // above that maximum becomes the maximum.
     optional uint32 remaining_hops = 5;
 }
 
@@ -994,7 +917,7 @@ message BalanceMovement {
     // a child_start, child_bound, top_up, withdrawal or refund. In a statement_query,
     // the account that was read. It is a hash of the token, never the token: the hash,
     // with the algorithm of its type, of "celaut-ledger-instance:" followed by the
-    // token. A token is a credential, and a statement can be shown to others.
+    // token.
     Hash instance_ref = 6;
     // The cause of the movement, as JSON with sorted keys and no spaces. Empty if there
     // is none. For a maintenance period: "seconds", and the resources that the node
@@ -1043,7 +966,7 @@ message BalanceStatement {
     // Which account.
     // The account, as a hash: the hash, with the algorithm of its type, of
     // "celaut-ledger-account:" followed by the client_id or the instance token. Never
-    // the credential itself, so that a statement can be shown to others.
+    // the credential itself.
     Hash account_ref = 3;
     // In the answer to a read with instance_ref: the service of the instance that the
     // statement is about, as its content hash. The caller can then know which service
@@ -1084,8 +1007,10 @@ message BalanceStatement {
     uint64 oldest_seq = 12;
     // How long the node keeps the movements of a dead account, in days, after its last
     // movement. 0 means for ever, which is the default: the movements of an account that
-    // lives, and of a dead account with anything alive below it, are never deleted. A
-    // reader treats 0 as at least ledger.MIN_PEER_RETENTION_DAYS.
+    // lives, and of a dead account with anything alive below it, are never deleted. The
+    // field says what the node does. A reader can hold the node to a time only if the
+    // node promises it, in Peer.promises. How a reader judges a gap in the movements is
+    // a decision of the reader.
     uint32 retention_days = 13;
     // The start receipts of the processes whose movements are in this statement: the
     // start of the instance and each wake, as the node signed them (a Signed
@@ -1096,25 +1021,24 @@ message BalanceStatement {
     repeated Signed receipts = 14;
 }
 
-// The execution receipts (docs/EXECUTION_RECEIPTS.md) are statements that a node signs
-// (Signed) about one execution that it runs. They give a client evidence against the
-// node. They are never evidence for the node. The celaut-gateway layer gives how to
-// calculate each hash. There are two receipts: StartReceipt for each process, and
-// TunnelCheckpoint for each part of a ServiceTunnel stream. An optional protocol can
-// define its own checkpoint (for example contract/extensions/observe.proto).
+// The execution receipts are statements that a node signs (Signed) about one execution
+// that it runs. They give a client evidence against the node. They are never evidence
+// for the node. The celaut-gateway layer gives how to calculate each hash. There are two
+// receipts: StartReceipt for each process, and TunnelCheckpoint for each part of a
+// ServiceTunnel stream. An optional protocol can define its own checkpoint (for example
+// contract/extensions/observe.proto).
 //
 // The name of an execution is in each receipt: the hash, with the algorithm of its type,
 // of the UTF-8 bytes of the instance token followed by the bytes of the signer
-// (Signed.Body.signer). The client, who has the token, can calculate it. A receipt never
-// contains the token. In a tunnel to a descendant, the name is the hash, with the
-// algorithm of its type, of the UTF-8 bytes of "celaut-execution-ref:" and the lowercase
-// hexadecimal of the value of the instance_ref, followed by the bytes of the signer: the
-// caller has the instance_ref and not the token.
+// (Signed.Body.signer). A receipt never contains the token. In a tunnel to a descendant,
+// the name is the hash, with the algorithm of its type, of the UTF-8 bytes of
+// "celaut-execution-ref:" and the lowercase hexadecimal of the value of the
+// instance_ref, followed by the bytes of the signer.
 
 // What a node attests about a new process of an instance. The node signs one for each
 // process: the answer of StartService gives the first one. Each wake of the instance has
-// one more, with the same envs_salt as the first one, so that its envs_digest can be
-// compared. BalanceStatement.receipts gives all of them.
+// one more, with the same envs_salt as the first one. BalanceStatement.receipts gives
+// all of them.
 message StartReceipt {
     // When the node signed, in unix seconds, on the clock of the node.
     uint64 ts = 1;
@@ -1211,8 +1135,7 @@ message ReputationOpinion {
     // The object of the opinion, as R5 on the ledger. For a node, its peer_id.
     string object = 2;
     // How much of its opinion the publisher puts on the object, on the scale of the
-    // reputation of the publisher. A fault report has 0: the score of the same object
-    // already counts the fault.
+    // reputation of the publisher. A fault report has 0.
     uint64 amount = 3;
     // True for an opinion for the object, false for an opinion against it, as R8 on
     // the ledger.
@@ -1236,7 +1159,7 @@ message ReputationProof {
     // The nonce of the proof of work. The work of the proof is the number of leading
     // zero bits of a hash of the signed bytes. The celaut-gateway layer gives the hash.
     // The publisher tries nonces until the hash has the zero bits that it wants. The
-    // signature covers the nonce, so a node that passes the proof on cannot change it.
+    // signature covers the nonce.
     uint64 pow_nonce = 2;
 
     // The opinions.
@@ -1258,31 +1181,14 @@ message ServiceInstance {
     // The addresses of the instance.
     Instance instance = 2;
     // 16 random bytes that the node selects for each start: the salt of
-    // StartReceipt.envs_digest. No signature covers it: the holder of the receipt
-    // can show the digest to others and keep the values secret. A verifier refuses a
-    // salt of another length.
+    // StartReceipt.envs_digest. No signature covers it. A verifier refuses a salt of
+    // another length.
     bytes envs_salt = 3;
     // The start receipt of the instance: a Signed StartReceipt of the node that
     // answers. When the node gave the start to a peer, it signs the receipt as the
     // executor, with the token that the caller got.
     Signed receipt = 4;
 }
-
-// The identity (issue #236) is a keypair of the node's own, on no ledger. It is
-// deliberately not a wallet: a wallet key is bound to what its ledger can verify and
-// spend, so an identity that *was* one could never be anything else. The link to a
-// ledger is an owner attestation on each reputation proof (Contract.xattrs), which
-// costs one signature and buys the node the right to change, add or drop a wallet
-// without changing its name.
-//
-// One scheme per Peer, and therefore one public_key: a second key is a second identity
-// -- it splits the node's reputation, its deposits and its payment attribution in two,
-// and the split cannot be healed by cross-signing the keys because whoever needs the
-// link speaks only one of the two schemes. A key in a *different role* (a proof's
-// owner, the per-process TLS key) is not a second identity: it is a hierarchy with a
-// single root. A scheme that needs two keypairs (a classical/post-quantum hybrid) is
-// ONE scheme with one descriptor whose encoding carries both. payment_contracts stays
-// repeated on purpose: a menu the payer picks one item from.
 
 // A message that a party signed, as the exact bytes that it signed. One form is for
 // every signed message of this contract: a Peer, an offer, a balance statement, an
@@ -1293,17 +1199,14 @@ message Signed {
         // The schema of the content. Its formal names the type of the content and the
         // source files of the contract that define it and the messages that it
         // contains, with their comments, as documents in its uses. Its tags give the
-        // full name of the type, for example "celaut.Peer". It keeps a signature for one
-        // use from another use, and the signature covers what the content means. A
-        // reader refuses a context that is not the type that the place needs. It reads
-        // the content only if it knows the formal, or if it reads the formal and decides
-        // that the two schemas agree. The formal is not empty.
+        // full name of the type, for example "celaut.Peer". A reader refuses a context
+        // that is not the type that the place needs. It reads the content only if it
+        // knows the formal, or if it reads the formal and decides that the two schemas
+        // agree. The formal is not empty.
         Descriptor context = 1;
         // The public key of the signer, as the bytes that the scheme defines. This
         // contract gives it no length and no encoding. Its lowercase hexadecimal is the
-        // id of the signer: for a node, its peer_id. A scheme with very large keys can
-        // define its public key as a digest of the full key, and put the full key in
-        // each signature. That is a decision of the scheme, not of this contract.
+        // id of the signer: for a node, its peer_id.
         bytes signer = 2;
         // The signature scheme: the cryptography of signer and of signature. Nodes
         // compare it by the exact bytes of its formal. A scheme with more than one key
@@ -1315,8 +1218,7 @@ message Signed {
     }
     // A serialized Body: the exact bytes that the signer signed. A reader verifies the
     // signature on these bytes as they came, and never on a second serialization of
-    // them. So the signature also covers a field that the reader does not know. A node
-    // that passes the message on sends these bytes with no change.
+    // them. A node that passes the message on sends these bytes with no change.
     bytes body = 1;
     // The signature of body, as the bytes that the scheme defines. A reader that cannot
     // verify the scheme, by itself or with a service that it trusts for that scheme,
@@ -1379,9 +1281,6 @@ message Peer {
     repeated Policy promises = 9;
 }
 
-// The proof of work fields come from issue #361; the peer binding from the "Peers and
-// clients" section of docs/CONCEPTS.md.
-
 // A client of the node: the identity of a caller. The node gives balance and limits
 // calls for each client. To bind a client to a peer, the caller also sends a Signed
 // Client that has only the client_id, signed by the identity key of that peer.
@@ -1408,9 +1307,6 @@ message PoWRequired {
     uint32 difficulty = 3;
 }
 
-
-// See docs/RECURSION_GUARD.md (issue #456).
-
 // The guard of a StartService request that a node can forward to its peers. It stops a
 // request that comes back to a node, and it limits the depth of the tree. The node
 // ignores the guard of a request from one of its local instances. That request starts
@@ -1429,7 +1325,7 @@ message RecursionGuard {
     optional uint32 remaining_hops = 2;
 }
 
-// The reference of a StartService request, chosen by the caller (#578). With it, the
+// The reference of a StartService request, chosen by the caller. With it, the
 // request is idempotent: a caller that lost the answer asks again with the same
 // reference and learns what the node did.
 //
@@ -1449,10 +1345,11 @@ message RecursionGuard {
 // A start with a reference whose call ends before the answer keeps its instance: the
 // caller can ask for it again. With no reference, the node stops that instance.
 //
-// The node keeps a reference while its instance lives, and at least
-// ledger.RETENTION_DAYS after the start ended. The child_start movement that pays the
-// start carries the reference, in hex, in detail.start_ref. A caller can then tell
-// which request caused each start that it paid for.
+// The node keeps a reference while its instance lives, and after the start ended as long
+// as it keeps the child_start movement that pays the start (see
+// BalanceStatement.retention_days). The child_start movement that pays the start carries
+// the reference, in hex, in detail.start_ref. A caller can then tell which request
+// caused each start that it paid for.
 message StartReference {
     // From 1 to 64 bytes. The node refuses a longer reference.
     bytes ref = 1;
@@ -1545,9 +1442,9 @@ message ModifyServiceSystemResourcesInput {
     // The resources that the instance asks for, as a list of Quantity with only
     // formals of resources. A resource that is not in the list keeps the value of the
     // instance. Each value must not be more than the at_most of the service. A request
-    // has no benchmarks: a score is not a thing that an instance asks for. A value
-    // never hibernates or wakes the instance: only the field hibernated does. For a
-    // hibernated instance, the resources are the ones that it gets when it wakes.
+    // has no benchmarks. A value never hibernates or wakes the instance: only the field
+    // hibernated does. For a hibernated instance, the resources are the ones that it
+    // gets when it wakes.
     repeated Quantity resources = 1;
     // The instance token. Optional. If it is set, the node changes that instance, whoever
     // sends the request, and the instance that the token names pays for the call. If the
@@ -1640,9 +1537,6 @@ service Gateway {
     // call before it reads the proof. The answer is an Ack. A node that does not accept
     // pushed proofs refuses every call.
     rpc PushReputationProof(stream buffer.Buffer) returns (stream buffer.Buffer) {}
-
-    // Any Service.Network, not one kind of it. If the caller must know the kind first,
-    // the caller does the resolution itself.
 
     // Takes a Service.Network and returns the addresses of the members of that network
     // that the node can find. The node does not ask other nodes. This is what the node

@@ -4,17 +4,16 @@ package celaut.observe;
 import "celaut.proto";
 
 // An optional protocol of a node: a live stream of what an instance does, for the owner
-// of the instance. Two nodes work together without it, so it is not in celaut.proto
-// (contract/REASON.md). It is a normal gRPC service, with no bee-rpc. A node that serves it
+// of the instance. It is a normal gRPC service, with no bee-rpc. A node that serves it
 // announces it as one more branch of the gRPC layer of its address (see celaut.Layer),
 // with its own formal: the layer celaut-observe. A node that does not serve it does not
 // announce that branch.
 
 // -----------------------
 // HOW TO READ THIS FILE
-// The comments follow the rules of the comments of celaut.proto. Each message here is
-// read with the definitions of celaut.proto: a name that is not defined here (for
-// example Signed, Client or Hash) is the message of the package celaut.
+// Each message here is read with the definitions of celaut.proto: a name that is not
+// defined here (for example Signed, Client or Hash) is the message of the package
+// celaut.
 // -----------------------
 
 // The request of Observe.
@@ -28,8 +27,6 @@ message ObserveRequest {
     // hash chains cover the packet events of this stream.
     bool include_receipts = 3;
 }
-
-// src/commands/observe.py makes these events (metrics_record, serialize_event).
 
 // One live event of an observed instance.
 message ObserveEvent {
