@@ -89,7 +89,7 @@ document, rule 3.13):
 - the lines sorted by the bytes of the key, ascending;
 - a key is ASCII letters, digits, `_`, `-`, `.` and `+`; keys are compared by their bytes,
   so `a` and `A` are two keys (a key can hold a name of the contract, such as
-  `schema.buffer.Buffer`);
+  `Service.network`);
 - no space around `=`; the value is the rest of the line, and it can contain `=`;
 - no empty line, and no newline at the end.
 
@@ -248,7 +248,7 @@ What the formal of each class must give:
 | `domain` | `Policy` | `Network.domain` | the form of the value, and how a node finds the members |
 | `architecture` | `Descriptor` | `Container.architecture`, `Device.architecture`, `ArchitectureResources.architecture` | what the software programs against |
 | `layer` | `Descriptor` | `Layer.protocol`, `Container.node_protocol_stack`, `Network.protocol_stack` | the protocol, and the value that selects it in its parent layer (REASON 2.7) |
-| `schema` | `Descriptor` | `Service.schema`, `Signed.Body.context` | the structure of the type, with the name of each field |
+| `schema` | `Descriptor` | `Service.schema`, `Signed.Body.context` | the type, the `.proto` files that define it as documents, and their language (REASON 1.8) |
 | `signature-scheme` | `Descriptor` | `Signed.Body.scheme` | the algorithm, the key form and the signature form |
 | `ledger` | `Descriptor` | `Contract.ledger` | the network, the units, and the keys of a proof |
 | `payment-protocol` | `Descriptor` | `Contract.protocol` | the keys of `Contract.xattrs`, and the way to pay |

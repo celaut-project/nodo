@@ -8,14 +8,6 @@ yet. Remove this file when the code follows the proto.
 
 ## 1. Decisions that are still open
 
-- **The format of a schema** (`contract/descriptors/schemas/`). Today
-  `src/identity/protocol_schema.py` gives `schema.<name>=<num>:<cardinality>:<type>,...`
-  with no names of fields. A schema must also give the name of each field: without
-  them, two variants that add one field number with the same type have the same
-  schema. Decide the format before any schema file. The layer `celaut-gateway` uses
-  the same format. The name of a message has capital letters: rule 3.1 of
-  `contract/descriptors/REASON.md` allows them in a key, so a schema line can keep
-  the name in its key.
 - **`config-file`.** The proto removed `Container.config_declaration`, and the node
   always writes `/__config__`. Decide if a setting of `Init` is necessary, or if the
   path is a part of the architecture.
@@ -111,6 +103,11 @@ code, not of the contract.
   build them from the ids of the formal (`uses` of `src/utils/descriptor_file.py`
   gives the files), and a reader must refuse a descriptor whose `uses` do not match its
   formal (REASON 2.9).
+- **Schemas.** `src/identity/protocol_schema.py` writes a schema as lines of
+  structure (`schema.<name>=<num>:<cardinality>:<type>,...`), and the formal of
+  `celaut-gateway` holds them. A schema names the `.proto` files as documents
+  (REASON 1.8). The lines of structure can stay only as the check of a reader that
+  decides that two schemas agree (REASON 2.5).
 - **`TunnelRequest.slot`** is still a decimal text: it is not signed.
 - **The proof of work of `GenerateClient`** sends a line of pseudo-code as its formal
   (`src/gateway/client_pow.py:52`). It must send the formal of
@@ -149,3 +146,79 @@ The contract is complete before nodo implements all of it (REASON 1.7).
 6. Placement: availability, benchmarks, devices.
 7. CLI, TUI, docs, `compat.json`, and the `class=` and `name=` lines of the legacy
    descriptor files.
+
+## 6. Work on the `.proto` files before the freeze
+
+### 6.1. Move the reasons out of the comments (REASON 5.4)
+
+**Why.** A schema names the `.proto` files as documents (REASON 1.8). Each byte of
+these files, also each byte of a comment, is in the identity of every `Service` and of
+every signed message. A comment that only explains why the design is so does not change
+what a node does, but a change to it changes the id of every service. So the comments
+must hold only rules, and the reasons must go to `contract/REASON.md`, which is in no
+schema.
+
+**When.** One time, just before the freeze of `celaut.proto`, together with the check
+of REASON 7.4. Do not do it before: until the freeze the files change, and no schema
+is published.
+
+**Files.** `contract/celaut.proto`, `contract/buffer.proto` and the files of
+`contract/extensions/`.
+
+**Steps.** For each comment, sentence by sentence:
+
+1. Classify the sentence with the test of REASON 5.4: "if this sentence changes, can
+   two parties act in two ways?"
+   - **A rule** (keep it in the comment): what the field or the message holds, its
+     form, its unit if the contract fixes one, what a reader or a node does with it
+     and when, what an absent value or an empty list means, if the place is a
+     requirement or an announcement.
+   - **An example** (keep it only if the rule is less exact without it): a sentence
+     with "for example". It must obey REASON 5.1.
+   - **A reason** (move it): why the design is so, the alternatives that were refused,
+     the history ("before the redesign", "today the code..."), a comparison with
+     another system, a consequence for later designs.
+   - **A pointer to an implementation or to a rule number** (remove it, or move it):
+     a path or a module of nodo (for example `src/utils/keyvalue.py`, `utils.py`),
+     or "rule 2.7 of REASON". A pointer to a file of the contract (for example
+     `contract/descriptors/`) can stay only if a reader needs it to apply the rule.
+2. If one sentence holds a rule and a reason, split it.
+3. Move each reason to `contract/REASON.md`: add it to the rule that it supports, or
+   write a new rule in the correct section (REASON section 8). Keep the name of the
+   field or of the message in the text, so that a reader finds it. Write it in
+   ASD-STE100.
+4. Do not change a rule. Do not change a field, a number, a name or a type. If you
+   cannot decide if a sentence is a rule or a reason, keep it in the comment: a lost
+   rule is worse than a reason that stays. List each such sentence in the PR.
+
+**Known cases.** These are examples, not the full list:
+
+- `celaut.proto`: the block "Why the owner attestation of a reputation proof is in
+  xattrs" (above the reputation messages), the block "Why a string and not an
+  integer" (above `Amount`), the long text above the key-value messages, and the
+  pointers to `src/identity/protocol_doc.py`, `src/utils/keyvalue.py` and
+  `src/utils/contract_xattrs.py`, and to `contract/REASON.md`.
+- `buffer.proto`: "See StreamControl in utils.py".
+- `extensions/observe.proto`: the pointer to `src/commands/observe.py`.
+
+To find more, search the comments for: `Why`, `because`, `so that`, `the reason`,
+`before`, `today`, `nodo`, `src/`, `.py`, `REASON`.
+
+**Check.** Only comments change, so the compiled descriptors without the source
+information must be equal, byte for byte, before and after:
+
+    python -m grpc_tools.protoc -I contract -I contract/extensions \
+        --descriptor_set_out=before.binpb contract/celaut.proto \
+        contract/extensions/observe.proto contract/extensions/chat.proto
+    # ... make the change ...
+    python -m grpc_tools.protoc -I contract -I contract/extensions \
+        --descriptor_set_out=after.binpb contract/celaut.proto \
+        contract/extensions/observe.proto contract/extensions/chat.proto
+    cmp before.binpb after.binpb
+
+Do not use `--include_source_info`: the comments are in the source information. If
+`cmp` finds a difference, a change is not only in a comment: find it and undo it.
+
+**Result.** In the PR, give for each moved text the place where it was and the rule of
+`contract/REASON.md` where it is now.
+

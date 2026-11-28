@@ -431,8 +431,9 @@ message Service {
         repeated Policy policies = 3;
     }
 
-    // The schema of this message: a requirement. Its formal is the schema of the
-    // contract for Service and for the messages that it contains. Its tags give the
+    // The schema of this message: a requirement. Its formal names the type and the
+    // source files of the contract that define Service and the messages that it
+    // contains, with their comments, as documents in its uses. Its tags give the
     // full name of the type, for example "celaut.Service". A reader reads this field
     // first. It reads the other fields only if it knows the formal, or if it reads the
     // formal and decides that the two schemas agree. Otherwise it does not run the
@@ -1289,8 +1290,9 @@ message ServiceInstance {
 message Signed {
     // What the party signed.
     message Body {
-        // The schema of the content. Its formal is the schema of the contract for the
-        // type of the content and for the messages that it contains. Its tags give the
+        // The schema of the content. Its formal names the type of the content and the
+        // source files of the contract that define it and the messages that it
+        // contains, with their comments, as documents in its uses. Its tags give the
         // full name of the type, for example "celaut.Peer". It keeps a signature for one
         // use from another use, and the signature covers what the content means. A
         // reader refuses a context that is not the type that the place needs. It reads

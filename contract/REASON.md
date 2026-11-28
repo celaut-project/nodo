@@ -136,8 +136,15 @@ other message that a third party reads is signed, so `Signed.Body.context` holds
 schema of the content, and the signature covers it. A message that goes directly
 between two parties needs no schema: the layers of the address give it.
 
-The schema is a formal like any other (rule 2.2). Its bytes give the structure of the
-type and of the messages that it contains, with the name of each field. A published
+The schema is a formal like any other (rule 2.2). It names the type, and the source
+files that define it: the `.proto` files, with their comments, as documents in its
+`uses` (rule 2.9), and the document of the language of those files. So the schema
+gives the structure of each message, the name of each field, and what each field
+means. A comment is a part of the schema. Nobody can know if two different comments
+are a correction of one meaning or two meanings: only equal bytes show that two schemas
+speak of the same thing. A reader can decide that two schemas with different bytes
+agree (rule 2.5), for example because their messages have the same fields with the
+same names. Then that reader takes the risk of a wrong meaning. A published
 schema never changes its meaning: a new meaning is a new schema. The place of the
 schema is the one thing that all variants keep, as all of them keep the place of the
 formal of a `Policy`. A message is not read in a schema of its own choice: the reader
@@ -362,6 +369,26 @@ thing.
 "for all the life" of an instance. It can say what it measured (a percentile) and
 when it compares (at each placement). The contract states the honest form.
 
+**Rule 5.4. A comment gives the rule, not the reason.** The comments of the `.proto`
+files are a part of the schema (rule 1.8): each byte of a comment is in the identity
+of every service and of every signed message. A change to a comment makes a new
+schema, and a new id for every service. So a comment gives only what two parties must
+agree on:
+
+- what the field or the message holds, and its form;
+- what a reader or a node does with it, and when;
+- what an absent value or an empty list means;
+- if the place is a requirement or an announcement (rule 3.2).
+
+The reason for a design, the alternatives that were refused, the history, and the
+consequences for later designs go in this file, not in a comment. A short example can
+stay in a comment if the definition is less exact without it (rule 5.1). Do not put in
+a comment a path or a module of an implementation, or the number of a rule of this
+file: they can change, and a change of a comment changes the schema.
+
+The test: **if a sentence of a comment changes, can two parties act in two ways?** If
+yes, it is a rule and it stays. If no, it is a reason, and it goes in this file.
+
 ## 6. Numbers, signatures and hashes
 
 **Rule 6.1. Exact numbers only.** Signed or hashed data has no floating-point
@@ -470,6 +497,8 @@ Follow these steps for each change:
 - A signature over a text that a node builds from the fields by hand (rule 6.2).
 - A hash algorithm named in a comment or a field name (rule 6.4).
 - A `float` or a signed integer in a signed or hashed message (rule 6.1).
+- A comment of a `.proto` file that explains why, gives the history, or names a path
+  of an implementation or a rule of this file (rule 5.4).
 - A refusal that gives only a text for a person, when its cause is a formal (rule
   3.7).
 - A requirement with no list of `Policy` and no refusal of unknown fields (rule 7.4).

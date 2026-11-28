@@ -29,7 +29,7 @@ LEGACY = {
     "protocols/address/tor-onion-v3.descriptor",
     "signatures/schemes/ed25519.descriptor",
 }
-# The formals that do not pass the test of the probe yet (contract/PENDING.md, section 3):
+# The formals that do not pass the test of the probe yet (contract/PENDING.md, section 2):
 # they name a container image by its digest, and no file holds the bytes of the image.
 NOT_IN_USES = {
     "quantities/benchmarks/float-ops.descriptor",

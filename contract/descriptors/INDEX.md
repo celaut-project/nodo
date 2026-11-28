@@ -202,7 +202,7 @@ wire today).
 
 | Name | Today | Notes |
 | --- | --- | --- |
-| the split of `celaut-gateway` | The file `celaut-gateway.descriptor` is the formal that nodo sends today (`transport_stack.py:418-720`). | A wire schema (REASON 2.5): split each rule that two nodes must agree on (hash types, signature formats, receipts, proof of work, schemas) into a formal of its own. It depends on the format of a schema. |
+| the split of `celaut-gateway` | The file `celaut-gateway.descriptor` is the formal that nodo sends today (`transport_stack.py:418-720`). | A wire schema (REASON 2.5): split each rule that two nodes must agree on (hash types, signature formats, receipts, proof of work, schemas) into a formal of its own. Its schemas become the documents of the source files (REASON 1.8). |
 | `celaut-observe`, `celaut-chat` | Today Chat and Observe are RPCs inside the gateway layer | Each one is a branch of the tree with its own formal (REASON 2.8). |
 
 ### `protocols/node_gateway/`
@@ -233,7 +233,7 @@ objective.
 
 | Name | Today | Notes |
 | --- | --- | --- |
-| the format of a schema | `src/identity/protocol_schema.py:109`: `schema.<name>=<num>:<cardinality>:<type>,...`, with no names of fields | To decide first: add the name of each field. |
+| the documents of the source files | `src/identity/protocol_schema.py:109` writes lines of structure (`schema.<name>=<num>:<cardinality>:<type>,...`) | Documents of `documents/`: `celaut.proto`, `buffer.proto`, the files of `extensions/`, and the specification of the language of protobuf version 3 and of its encoding. Write them when `celaut.proto` is frozen (`schemas/REASON.md`). |
 | `service` | New | For `Service.schema`. |
 | `peer`, `estimated-cost`, `start-receipt`, `tunnel-checkpoint`, `balance-statement`, `reputation-proof`, `client`, `observe-checkpoint` | Today each signed type has a text prefix (`celaut-price-offer:`, `celaut-execution-receipt:`, ...; `node_identity.py:63-91`) | One for each signed type, for `Signed.Body.context`. |
 | chat entry, ledger attestation | prefixes `celaut-chat-signature:`, `celaut-ledger-attestation:` | The new contract has no type for them yet. |
